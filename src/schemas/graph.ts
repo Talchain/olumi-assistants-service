@@ -48,3 +48,17 @@ export type GraphT = z.infer<typeof Graph>;
 export type EdgeT = z.infer<typeof Edge>;
 export type NodeT = z.infer<typeof Node>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
+
+/**
+ * Check if a graph contains any legacy string provenance (for deprecation tracking)
+ * Returns count of edges with string provenance for telemetry
+ */
+export function hasLegacyProvenance(graph: GraphT): { hasLegacy: boolean; count: number } {
+  let count = 0;
+  for (const edge of graph.edges) {
+    if (edge.provenance && typeof edge.provenance === "string") {
+      count++;
+    }
+  }
+  return { hasLegacy: count > 0, count };
+}

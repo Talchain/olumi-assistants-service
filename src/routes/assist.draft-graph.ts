@@ -9,6 +9,7 @@ import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { emit, log } from "../utils/telemetry.js";
+import { hasLegacyProvenance } from "../schemas/graph.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -28,7 +29,7 @@ type StageEvent = { stage: "DRAFTING" } | { stage: "COMPLETE"; payload: SuccessP
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
 
 type PipelineResult =
-  | { kind: "success"; payload: SuccessPayload }
+  | { kind: "success"; payload: SuccessPayload; hasLegacyProvenance?: boolean }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
 
 function buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
@@ -118,9 +119,22 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     debug: input.include_debug ? { needle_movers: docs } : undefined
   });
 
+  // Check for legacy string provenance (for deprecation tracking)
+  const legacy = hasLegacyProvenance(candidate);
+  if (legacy.hasLegacy) {
+    log.warn(
+      {
+        legacy_provenance_count: legacy.count,
+        total_edges: candidate.edges.length,
+        deprecation: true
+      },
+      "Legacy string provenance detected - will be removed in future version"
+    );
+  }
+
   emit("assist.draft.completed", { confidence, issues: issues?.length ?? 0 });
 
-  return { kind: "success", payload };
+  return { kind: "success", payload, hasLegacyProvenance: legacy.hasLegacy };
 }
 
 export default async function route(app: FastifyInstance) {
@@ -157,6 +171,16 @@ export default async function route(app: FastifyInstance) {
         }
         reply.code(result.statusCode);
         return reply.send(result.envelope);
+      }
+
+      // Add deprecation headers if legacy string provenance detected
+      if (result.hasLegacyProvenance) {
+        reply.header("X-Deprecated-Provenance-Format", "true");
+        reply.header("X-Deprecation-Sunset", "2025-12-01");
+        reply.header(
+          "X-Deprecation-Link",
+          "https://docs.olumi.ai/provenance-migration"
+        );
       }
 
       if (wantsSse) {
