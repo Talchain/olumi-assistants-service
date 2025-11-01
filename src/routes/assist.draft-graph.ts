@@ -179,7 +179,117 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   return { kind: "success", payload, hasLegacyProvenance: legacy.hasLegacy };
 }
 
+/**
+ * Handle SSE streaming response with fixture fallback
+ */
+async function handleSseResponse(
+  reply: FastifyReply,
+  input: DraftGraphInputT,
+  rawBody: unknown
+): Promise<void> {
+  reply.raw.writeHead(200, SSE_HEADERS);
+  writeStage(reply, { stage: "DRAFTING" });
+
+  try {
+    let fixtureSent = false;
+
+    // SSE with fixture fallback: show fixture if draft takes > 2.5s
+    const fixtureTimeout = setTimeout(() => {
+      if (!fixtureSent) {
+        // Show minimal fixture graph while waiting for real draft
+        const fixturePayload = DraftGraphOutput.parse({
+          graph: fixtureGraph,
+          patch: defaultPatch,
+          rationales: [],
+          confidence: 0.5,
+          clarifier_status: "complete",
+        });
+        writeStage(reply, { stage: "DRAFTING", payload: fixturePayload });
+        fixtureSent = true;
+        emit("assist.draft.fixture_shown", { timeout_ms: FIXTURE_TIMEOUT_MS });
+      }
+    }, FIXTURE_TIMEOUT_MS);
+
+    // Run pipeline
+    const result = await runDraftGraphPipeline(input, rawBody);
+    clearTimeout(fixtureTimeout);
+
+    if (fixtureSent) {
+      emit("assist.draft.fixture_replaced", { fixture_shown: true });
+    }
+
+    // Handle errors
+    if (result.kind === "error") {
+      writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
+      reply.raw.end();
+      return;
+    }
+
+    // Add deprecation headers if legacy string provenance detected
+    if (result.hasLegacyProvenance) {
+      reply.raw.setHeader("X-Deprecated-Provenance-Format", "true");
+      reply.raw.setHeader("X-Deprecation-Sunset", DEPRECATION_SUNSET);
+      reply.raw.setHeader("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
+    }
+
+    // Success
+    writeStage(reply, { stage: "COMPLETE", payload: result.payload });
+    reply.raw.end();
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error("unexpected error");
+    log.error({ err }, "SSE draft graph failure");
+    const envelope = buildError("INTERNAL", err.message || "internal");
+    writeStage(reply, { stage: "COMPLETE", payload: envelope });
+    reply.raw.end();
+  }
+}
+
+/**
+ * Handle JSON response
+ */
+async function handleJsonResponse(
+  reply: FastifyReply,
+  input: DraftGraphInputT,
+  rawBody: unknown
+): Promise<void> {
+  const result = await runDraftGraphPipeline(input, rawBody);
+
+  // Handle errors
+  if (result.kind === "error") {
+    reply.code(result.statusCode);
+    return reply.send(result.envelope);
+  }
+
+  // Add deprecation headers if legacy string provenance detected
+  if (result.hasLegacyProvenance) {
+    reply.header("X-Deprecated-Provenance-Format", "true");
+    reply.header("X-Deprecation-Sunset", DEPRECATION_SUNSET);
+    reply.header("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
+  }
+
+  // Success
+  reply.code(200);
+  return reply.send(result.payload);
+}
+
 export default async function route(app: FastifyInstance) {
+  // Dedicated SSE streaming endpoint
+  app.post("/assist/draft-graph/stream", async (req, reply) => {
+    const parsed = DraftGraphInput.safeParse(req.body);
+    if (!parsed.success) {
+      const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
+      reply.raw.writeHead(400, SSE_HEADERS);
+      writeStage(reply, { stage: "DRAFTING" });
+      writeStage(reply, { stage: "COMPLETE", payload: envelope });
+      reply.raw.end();
+      return reply;
+    }
+
+    await handleSseResponse(reply, parsed.data, req.body);
+    return reply;
+  });
+
+  // Main endpoint with backward compatibility (supports both SSE and JSON)
   app.post("/assist/draft-graph", async (req, reply) => {
     const wantsSse = req.headers.accept?.includes(EVENT_STREAM) ?? false;
 
@@ -198,86 +308,21 @@ export default async function route(app: FastifyInstance) {
     }
 
     if (wantsSse) {
-      reply.raw.writeHead(200, SSE_HEADERS);
-      writeStage(reply, { stage: "DRAFTING" });
+      await handleSseResponse(reply, parsed.data, req.body);
+      return reply;
     }
 
+    // JSON response
     try {
-      let result: PipelineResult;
-
-      if (wantsSse) {
-        // SSE with fixture fallback: show fixture if draft takes > 2.5s
-        let fixtureSent = false;
-
-        const fixtureTimeout = setTimeout(() => {
-          if (!fixtureSent) {
-            // Show minimal fixture graph while waiting for real draft
-            const fixturePayload = DraftGraphOutput.parse({
-              graph: fixtureGraph,
-              patch: defaultPatch,
-              rationales: [],
-              confidence: 0.5,
-              clarifier_status: "complete",
-            });
-            writeStage(reply, { stage: "DRAFTING", payload: fixturePayload });
-            fixtureSent = true;
-            emit("assist.draft.fixture_shown", { timeout_ms: FIXTURE_TIMEOUT_MS });
-          }
-        }, FIXTURE_TIMEOUT_MS);
-
-        // Run pipeline
-        result = await runDraftGraphPipeline(parsed.data, req.body);
-        clearTimeout(fixtureTimeout);
-
-        if (fixtureSent) {
-          emit("assist.draft.fixture_replaced", { fixture_shown: true });
-        }
-      } else {
-        // Non-SSE: regular request-response
-        result = await runDraftGraphPipeline(parsed.data, req.body);
-      }
-
-      if (result.kind === "error") {
-        if (wantsSse) {
-          writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
-          reply.raw.end();
-          return reply;
-        }
-        reply.code(result.statusCode);
-        return reply.send(result.envelope);
-      }
-
-      // Add deprecation headers if legacy string provenance detected
-      if (result.hasLegacyProvenance) {
-        reply.header("X-Deprecated-Provenance-Format", "true");
-        reply.header("X-Deprecation-Sunset", DEPRECATION_SUNSET);
-        reply.header(
-          "X-Deprecation-Link",
-          "https://docs.olumi.ai/provenance-migration"
-        );
-      }
-
-      if (wantsSse) {
-        writeStage(reply, { stage: "COMPLETE", payload: result.payload });
-        reply.raw.end();
-        return reply;
-      }
-
-      reply.code(200);
-      return reply.send(result.payload);
+      await handleJsonResponse(reply, parsed.data, req.body);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err }, "draft graph route failure");
       const envelope = buildError("INTERNAL", err.message || "internal");
-
-      if (wantsSse) {
-        writeStage(reply, { stage: "COMPLETE", payload: envelope });
-        reply.raw.end();
-        return reply;
-      }
-
       reply.code(500);
       return reply.send(envelope);
     }
+
+    return reply;
   });
 }
