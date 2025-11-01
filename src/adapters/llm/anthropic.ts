@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 
 export type DraftArgs = {
@@ -9,34 +11,55 @@ export type DraftArgs = {
   seed: number;
 };
 
-type AnthropicNode = {
-  id: string;
-  kind: string;
-  label?: string;
-  body?: string;
-};
+// Zod schemas for Anthropic response validation
+const AnthropicNode = z.object({
+  id: z.string().min(1),
+  kind: NodeKind,
+  label: z.string().optional(),
+  body: z.string().max(200).optional(),
+});
 
-type AnthropicEdge = {
-  from: string;
-  to: string;
-  weight?: number;
-  belief?: number;
-  provenance?: string;
-  provenance_source?: "document" | "metric" | "hypothesis";
-};
+const AnthropicEdge = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  weight: z.number().optional(),
+  belief: z.number().min(0).max(1).optional(),
+  provenance: z.string().min(1).optional(),
+  provenance_source: ProvenanceSource.optional(),
+});
 
-type AnthropicResponse = {
-  nodes: AnthropicNode[];
-  edges: AnthropicEdge[];
-  rationales: Array<{ target: string; why: string }>;
-};
+const AnthropicDraftResponse = z.object({
+  nodes: z.array(AnthropicNode),
+  edges: z.array(AnthropicEdge),
+  rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
+});
+
+const AnthropicOptionsResponse = z.object({
+  options: z.array(
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(3),
+      pros: z.array(z.string()).min(2).max(3),
+      cons: z.array(z.string()).min(2).max(3),
+      evidence_to_gather: z.array(z.string()).min(2).max(3),
+    })
+  ),
+});
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
-if (!apiKey) {
-  log.warn("ANTHROPIC_API_KEY not set, LLM calls will fail");
-}
 
-const client = new Anthropic({ apiKey: apiKey || "placeholder" });
+// Lazy initialization to allow testing without API key
+let client: Anthropic | null = null;
+
+function getClient(): Anthropic {
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY environment variable is required but not set");
+  }
+  if (!client) {
+    client = new Anthropic({ apiKey });
+  }
+  return client;
+}
 
 const TIMEOUT_MS = 15000;
 const MAX_NODES = 12;
@@ -151,29 +174,30 @@ function sortGraph(graph: GraphT): GraphT {
 export async function draftGraphWithAnthropic(
   args: DraftArgs
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[] }> {
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
-  }
-
   const prompt = buildPrompt(args);
 
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length }, "calling Anthropic for draft");
 
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
   try {
-    const response = await Promise.race([
-      client.messages.create({
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 4096,
         temperature: 0,
         messages: [{ role: "user", content: prompt }],
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("anthropic_timeout")), TIMEOUT_MS)
-      ),
-    ]);
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
 
     const content = response.content[0];
     if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
       throw new Error("unexpected_response_type");
     }
 
@@ -185,7 +209,16 @@ export async function draftGraphWithAnthropic(
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    const parsed = JSON.parse(jsonText) as AnthropicResponse;
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicDraftResponse.safeParse(rawJson);
+
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten() }, "Anthropic response failed schema validation");
+      throw new Error("anthropic_response_invalid_schema");
+    }
+
+    const parsed = parseResult.data;
 
     // Validate and cap node/edge counts
     if (parsed.nodes.length > MAX_NODES) {
@@ -253,10 +286,19 @@ export async function draftGraphWithAnthropic(
       rationales: parsed.rationales || [],
     };
   } catch (error) {
-    if (error instanceof Error && error.message === "anthropic_timeout") {
-      log.error("Anthropic call timed out after 15s");
-      throw error;
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic call timed out and was aborted");
+        throw new Error("anthropic_timeout");
+      }
+      if (error.message === "anthropic_response_invalid_schema") {
+        log.error("Anthropic returned response that failed schema validation");
+        throw error;
+      }
     }
+
     log.error({ error }, "Anthropic call failed");
     throw error;
   }
@@ -267,10 +309,6 @@ export async function suggestOptionsWithAnthropic(args: {
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
 }): Promise<Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>> {
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
-  }
-
   const existingContext = args.existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -293,6 +331,8 @@ Generate 3-5 distinct, actionable options. For each option provide:
 - cons: 2-3 disadvantages or risks
 - evidence_to_gather: 2-3 data points or metrics to collect
 
+IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
+
 ## Output Format (JSON)
 {
   "options": [
@@ -308,21 +348,26 @@ Generate 3-5 distinct, actionable options. For each option provide:
 
 Respond ONLY with valid JSON.`;
 
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
   try {
-    const response = await Promise.race([
-      client.messages.create({
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 2048,
-        temperature: 0.7,
+        temperature: 0.1, // Low temperature for more deterministic output
         messages: [{ role: "user", content: prompt }],
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("anthropic_timeout")), TIMEOUT_MS)
-      ),
-    ]);
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
 
     const content = response.content[0];
     if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
       throw new Error("unexpected_response_type");
     }
 
@@ -333,24 +378,57 @@ Respond ONLY with valid JSON.`;
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    const parsed = JSON.parse(jsonText) as { options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }> };
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicOptionsResponse.safeParse(rawJson);
 
-    // Ensure 3-5 options
-    if (parsed.options.length < 3) {
-      log.warn({ count: parsed.options.length }, "too few options, padding");
-      // This shouldn't happen, but add a fallback
-    }
-    if (parsed.options.length > 5) {
-      log.warn({ count: parsed.options.length }, "too many options, trimming");
-      parsed.options = parsed.options.slice(0, 5);
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten() }, "Anthropic options response failed schema validation");
+      throw new Error("anthropic_response_invalid_schema");
     }
 
-    return parsed.options;
+    let options = parseResult.data.options;
+
+    // De-duplicate against existing options (case-insensitive title match)
+    if (args.existingOptions?.length) {
+      const existingLower = new Set(args.existingOptions.map((o) => o.toLowerCase()));
+      options = options.filter((opt) => !existingLower.has(opt.title.toLowerCase()));
+    }
+
+    // De-duplicate within returned options (by ID and title)
+    const seen = new Set<string>();
+    options = options.filter((opt) => {
+      const key = `${opt.id}::${opt.title.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Ensure 3-5 options after de-duplication
+    if (options.length < 3) {
+      log.warn({ count: options.length, after_dedup: true }, "too few options after de-duplication");
+      // This shouldn't happen with good prompts, but log it
+    }
+    if (options.length > 5) {
+      log.warn({ count: options.length }, "too many options, trimming");
+      options = options.slice(0, 5);
+    }
+
+    return options;
   } catch (error) {
-    if (error instanceof Error && error.message === "anthropic_timeout") {
-      log.error("Anthropic call timed out after 15s");
-      throw error;
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic suggest-options call timed out and was aborted");
+        throw new Error("anthropic_timeout");
+      }
+      if (error.message === "anthropic_response_invalid_schema") {
+        log.error("Anthropic options response failed schema validation");
+        throw error;
+      }
     }
+
     log.error({ error }, "Anthropic suggest-options call failed");
     throw error;
   }
