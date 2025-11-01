@@ -4,7 +4,7 @@ import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } fro
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
 import { toPreview, type DocPreview } from "../services/docProcessing.js";
-import { draftGraphWithAnthropic } from "../adapters/llm/anthropic.js";
+import { draftGraphWithAnthropic, repairGraphWithAnthropic } from "../adapters/llm/anthropic.js";
 import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
@@ -100,14 +100,41 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   const first = await validateGraph(candidate);
   if (!first.ok) {
     issues = first.violations;
-    const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
-    const second = await validateGraph(repaired);
-    if (second.ok && second.normalized) {
-      candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
-      issues = second.violations;
-    } else {
-      candidate = repaired;
-      issues = second.violations ?? issues;
+
+    // LLM-guided repair: use violations as hints
+    try {
+      emit("assist.draft.repair_start", { violation_count: issues?.length ?? 0 });
+      const repairResult = await repairGraphWithAnthropic({
+        graph: candidate,
+        violations: issues || [],
+      });
+      const repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
+
+      // Re-validate repaired graph
+      const second = await validateGraph(repaired);
+      if (second.ok && second.normalized) {
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        issues = second.violations;
+        emit("assist.draft.repair_success", { repair_worked: true });
+      } else {
+        // Repair didn't fix all issues, fallback to simple repair
+        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired)));
+        issues = second.violations ?? issues;
+        emit("assist.draft.repair_partial", { repair_worked: false });
+      }
+    } catch (error) {
+      // LLM repair failed, fallback to simple repair
+      log.warn({ error }, "LLM repair failed, falling back to simple repair");
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
+      const second = await validateGraph(repaired);
+      if (second.ok && second.normalized) {
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        issues = second.violations;
+      } else {
+        candidate = repaired;
+        issues = second.violations ?? issues;
+      }
+      emit("assist.draft.repair_fallback", { fallback: "simple_repair" });
     }
   } else if (first.normalized) {
     candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));

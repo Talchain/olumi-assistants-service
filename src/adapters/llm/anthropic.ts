@@ -484,3 +484,186 @@ Respond ONLY with valid JSON.`;
     throw error;
   }
 }
+
+export type RepairArgs = {
+  graph: GraphT;
+  violations: string[];
+};
+
+function buildRepairPrompt(args: RepairArgs): string {
+  const graphJson = JSON.stringify(
+    {
+      nodes: args.graph.nodes,
+      edges: args.graph.edges,
+    },
+    null,
+    2
+  );
+
+  return `You are an expert at fixing decision graph violations.
+
+## Current Graph (INVALID)
+${graphJson}
+
+## Violations Found
+${args.violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}
+
+## Your Task
+Fix the graph to resolve ALL violations. Common fixes:
+- Remove cycles (decision graphs must be DAGs)
+- Remove isolated nodes (all nodes must be connected)
+- Ensure edge endpoints reference valid node IDs
+- Ensure belief values are between 0 and 1
+- Ensure node kinds are valid (goal, decision, option, outcome)
+- Maintain graph topology where possible
+
+## Output Format (JSON)
+{
+  "nodes": [
+    { "id": "goal_1", "kind": "goal", "label": "..." },
+    { "id": "dec_1", "kind": "decision", "label": "..." }
+  ],
+  "edges": [
+    {
+      "from": "goal_1",
+      "to": "dec_1",
+      "provenance": {
+        "source": "hypothesis",
+        "quote": "..."
+      },
+      "provenance_source": "hypothesis"
+    }
+  ],
+  "rationales": []
+}
+
+Respond ONLY with valid JSON matching this structure.`;
+}
+
+export async function repairGraphWithAnthropic(
+  args: RepairArgs
+): Promise<{ graph: GraphT; rationales: { target: string; why: string }[] }> {
+  const prompt = buildRepairPrompt(args);
+
+  log.info({ violation_count: args.violations.length }, "calling Anthropic for graph repair");
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
+  try {
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 4096,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
+
+    const content = response.content[0];
+    if (content.type !== "text") {
+      log.error({ content_type: content.type, fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
+      throw new Error("unexpected_response_type");
+    }
+
+    // Extract JSON from response
+    let jsonText = content.text.trim();
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
+    } else if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
+    }
+
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicDraftResponse.safeParse(rawJson);
+
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten(), fallback_reason: "schema_validation_failed", quality_tier: "failed" }, "Anthropic repair response failed schema validation");
+      throw new Error("anthropic_repair_invalid_schema");
+    }
+
+    const parsed = parseResult.data;
+
+    // Cap node/edge counts
+    if (parsed.nodes.length > MAX_NODES) {
+      parsed.nodes = parsed.nodes.slice(0, MAX_NODES);
+    }
+    if (parsed.edges.length > MAX_EDGES) {
+      parsed.edges = parsed.edges.slice(0, MAX_EDGES);
+    }
+
+    // Filter edges to only valid node IDs
+    const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+    const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
+    // Assign stable edge IDs
+    const edgesWithIds = assignStableEdgeIds(
+      validEdges.map((e) => ({
+        from: e.from,
+        to: e.to,
+        weight: e.weight,
+        belief: e.belief,
+        provenance: e.provenance,
+        provenance_source: e.provenance_source,
+      }))
+    );
+
+    const graph: GraphT = sortGraph({
+      version: args.graph.version || "1",
+      default_seed: args.graph.default_seed || 17,
+      nodes: parsed.nodes.map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        label: n.label,
+        body: n.body,
+      })),
+      edges: edgesWithIds,
+      meta: args.graph.meta || {
+        roots: [],
+        leaves: [],
+        suggested_positions: {},
+        source: "assistant",
+      },
+    });
+
+    return {
+      graph,
+      rationales: parsed.rationales || [],
+    };
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") {
+      log.error(
+        { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_repair_timeout", quality_tier: "failed" },
+        "Anthropic repair call timed out"
+      );
+      throw error;
+    }
+    if (error instanceof Error) {
+      if (error.message === "ANTHROPIC_API_KEY environment variable is required but not set") {
+        log.error(
+          { fallback_reason: "missing_api_key", quality_tier: "failed" },
+          "Anthropic API key not configured"
+        );
+        throw error;
+      }
+      if (error.message === "anthropic_repair_invalid_schema") {
+        log.error(
+          { fallback_reason: "schema_validation_failed", quality_tier: "failed" },
+          "Anthropic repair response failed schema validation"
+        );
+        throw error;
+      }
+    }
+
+    log.error(
+      { error, fallback_reason: "network_or_api_error", quality_tier: "failed" },
+      "Anthropic repair call failed"
+    );
+    throw error;
+  }
+}
