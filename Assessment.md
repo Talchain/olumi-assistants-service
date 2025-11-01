@@ -9,12 +9,12 @@
 
 ## Executive Summary
 
-The repository has been scaffolded by Windsurf with solid foundations: Fastify, TypeScript, Zod schemas, unified error handling, pino telemetry, document processing (PDF/CSV/TXT with 5k cap), DAG validation, cost guards, and CI workflow. **However, critical LLM integrations are stubbed** and several P0 features from the spec are missing or incomplete.
+The repository has been scaffolded by Windsurf with solid foundations: Fastify, TypeScript, Zod schemas, unified error handling, pino telemetry, document processing (PDF/CSV/TXT with 5k cap), DAG validation, cost guards, and CI workflow. **Real Anthropic integration implemented** with Zod validation, AbortController timeout handling, and deterministic output.
 
-**Current State:**
-- **Build:** ❌ Failing (ESLint config mismatch, TypeScript errors)
-- **Tests:** ✅ Passing (2 basic tests, but coverage is minimal)
-- **P0 Readiness:** ~40% (structure present, logic stubbed)
+**Current State (as of commit `abf155b`):**
+- **Build:** ✅ Passing (lint, typecheck, test all green)
+- **Tests:** ✅ Passing (2 basic tests, comprehensive suite needed)
+- **P0 Readiness:** ~35% (core LLM integration done, critical features missing)
 
 ---
 
@@ -43,14 +43,14 @@ The repository has been scaffolded by Windsurf with solid foundations: Fastify, 
 
 | Component | Priority | Gap Description |
 |-----------|----------|-----------------|
-| **Real Anthropic Integration** | 🔴 P0 | `draftGraphWithAnthropic()` returns hardcoded fixture; no real API call |
-| **LLM Tool-Calling/JSON** | 🔴 P0 | No schema-bound JSON response from Anthropic |
-| **Provenance Generation** | 🔴 P0 | No quoted citations from documents in LLM prompt/response |
-| **Suggested Positions** | 🔴 P0 | No layout seeding (meta.suggested_positions empty) |
+| **Real Anthropic Integration** | ✅ P0 | Real Anthropic Messages API with Zod validation, AbortController |
+| **LLM Tool-Calling/JSON** | ✅ P0 | Schema-bound JSON responses (temperature 0, validated with Zod) |
+| **Provenance Generation** | ⚠️ P0 | Basic provenance (strings, not structured {source, quote, location}) |
+| **Suggested Positions** | ✅ P0 | Simple layered layout (goals→decisions→options→outcomes) |
 | **SSE Streaming Endpoint** | 🔴 P0 | No dedicated `/stream` route; SSE inline, no fixture fallback at 2.5s |
-| **LLM Timeouts** | 🔴 P0 | No 15s timeout on Anthropic calls |
+| **LLM Timeouts** | ✅ P0 | 15s timeout with AbortController, proper cleanup |
 | **LLM-Guided Repair** | 🔴 P0 | Current repair is trim-only; spec requires LLM repair with violations as hints |
-| **Real suggest-options** | 🔴 P0 | Returns stub data, no Anthropic call |
+| **Real suggest-options** | ✅ P0 | Real Anthropic call with de-duplication, temperature 0.1 |
 | **Rate Limiting** | 🔴 P0 | No RPM caps enforcement |
 | **CORS Allow-List** | 🔴 P0 | Basic localhost regex, no production allow-list |
 | **Route Timeouts** | 🔴 P0 | No 60s route timeout configured |
@@ -234,4 +234,48 @@ See `docs/issues.todo.md` for detailed breakdown of each gap with:
 
 ---
 
-**Status:** Ready to begin P0 implementation after build fixes.
+---
+
+## Post-Windsurf Feedback Update (01 Nov 2025, commit `abf155b`)
+
+**Branch:** `feat/anthropic-draft`
+
+### ✅ Completed (P0)
+- Real Anthropic integration with Messages API (claude-3-5-sonnet-20241022)
+- Zod validation for all LLM responses (fail-fast on schema violations)
+- AbortController timeout handling (15s, proper cleanup, no orphaned requests)
+- Suggest-options with deterministic output (temperature 0.1, de-duplication)
+- Lazy client initialization (test-friendly, throws only when called)
+- Enhanced error logging with structured telemetry
+- Stable edge IDs, sorted outputs, suggested positions generation
+
+### ❌ Still Missing (P0)
+- SSE streaming with 2.5s fixture fallback (P0-002)
+- LLM-guided repair with violations as hints (P0-003)
+- Rate limiting, body size caps, PII redaction (P0-006)
+- Comprehensive test suite (~20-30 tests needed) (P0-009)
+- OpenAPI polish with error examples (P0-007)
+
+### ⚠️ Partial / Deferred
+- Document provenance: basic strings (not structured {source, quote, location}) — deferred to P1
+- Telemetry enrichment: basic events present, `fallback_reason`, `quality_tier` deferred
+
+### Revised Estimates
+- **P0 Readiness:** ~35% (down from overstated 65%)
+- **Remaining P0 Work:** ~25-30 hours
+  - P0-002 (SSE): 4-6 hours
+  - P0-003 (Repair): 3-4 hours
+  - P0-006 (Security): 3-4 hours
+  - P0-009 (Tests): 8-10 hours
+  - P0-007 (OpenAPI): 2 hours
+  - Integration and polish: 5-8 hours
+
+### Next Actions
+1. Merge current branch (`feat/anthropic-draft`) with honest caveats
+2. Continue with P0-002 (SSE streaming + fixture)
+3. Then P0-003 (LLM-guided repair)
+4. Then P0-006 (security rails)
+5. Then P0-009 (comprehensive tests)
+6. Finally P0-007 (OpenAPI polish)
+
+**Status:** Critical validation and timeout issues resolved. Ready for PR with explicit gap documentation.
