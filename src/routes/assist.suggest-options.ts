@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { SuggestOptionsInput, SuggestOptionsOutput, ErrorV1 } from "../schemas/assist.js";
+import { suggestOptionsWithAnthropic } from "../adapters/llm/anthropic.js";
+import { log } from "../utils/telemetry.js";
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/suggest-options", async (req, reply) => {
@@ -14,32 +16,26 @@ export default async function route(app: FastifyInstance) {
       }));
     }
 
-    const output = SuggestOptionsOutput.parse({
-      options: [
-        {
-          id: "opt_a",
-          title: "Extend free trial",
-          pros: ["Experiential value", "Low dev"],
-          cons: ["Cost exposure", "Expiry dip"],
-          evidence_to_gather: ["Trial→upgrade funnel", "Usage lift"]
-        },
-        {
-          id: "opt_b",
-          title: "In-app nudges",
-          pros: ["Low friction", "Scalable"],
-          cons: ["Banner blindness", "Copy risk"],
-          evidence_to_gather: ["CTR→upgrade", "A/B of copy"]
-        },
-        {
-          id: "opt_c",
-          title: "Customer emails",
-          pros: ["Segment control", "Rapid"],
-          cons: ["Deliverability", "Fatigue"],
-          evidence_to_gather: ["Open→upgrade", "Unsubscribe rate"]
-        }
-      ]
-    });
+    try {
+      const existingOptions = parsed.data.graph_summary?.existing_options;
+      const options = await suggestOptionsWithAnthropic({
+        goal: parsed.data.goal,
+        constraints: parsed.data.constraints,
+        existingOptions,
+      });
 
-    return reply.send(output);
+      const output = SuggestOptionsOutput.parse({ options });
+      return reply.send(output);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("unexpected error");
+      log.error({ err }, "suggest-options route failure");
+
+      reply.code(500);
+      return reply.send(ErrorV1.parse({
+        schema: "error.v1",
+        code: "INTERNAL",
+        message: err.message || "internal",
+      }));
+    }
   });
 }
