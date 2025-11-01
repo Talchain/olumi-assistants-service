@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Graph } from "./graph.js";
 
 export const DraftGraphInput = z.object({
-  brief: z.string().min(10),
+  brief: z.string().min(30).max(5000),
   attachments: z
     .array(
       z.object({
@@ -15,7 +15,7 @@ export const DraftGraphInput = z.object({
   constraints: z.record(z.any()).optional(),
   flags: z.record(z.boolean()).optional(),
   include_debug: z.boolean().optional()
-});
+}).strict();
 
 export const DraftGraphOutput = z.object({
   graph: Graph,
