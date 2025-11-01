@@ -521,10 +521,13 @@
 
 ---
 
-### SD-004: Provenance Citation Format
+### SD-004: Provenance Citation Format ⚠️ CRITICAL P0 GAP
 **Spec says:** Strict format { source, quote ≤100 chars, location }
 **Current impl:** Plain string provenance
-**Decision:** Required for P0 (may need schema update)
+**Decision:** **REQUIRED FOR P0** — Production trust depends on structured citations
+**Priority:** High (blocking production readiness)
+**Impact:** Affects UI display, provenance traceability, compliance
+**Note:** Despite being deferred in initial plan, Windsurf feedback stresses this is P0 for production trust
 
 ---
 

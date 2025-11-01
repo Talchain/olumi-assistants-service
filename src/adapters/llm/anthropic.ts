@@ -290,16 +290,25 @@ export async function draftGraphWithAnthropic(
 
     if (error instanceof Error) {
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic call timed out and was aborted");
+        log.error(
+          { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
+          "Anthropic call timed out and was aborted"
+        );
         throw new Error("anthropic_timeout");
       }
       if (error.message === "anthropic_response_invalid_schema") {
-        log.error("Anthropic returned response that failed schema validation");
+        log.error(
+          { fallback_reason: "schema_validation_failed", quality_tier: "failed" },
+          "Anthropic returned response that failed schema validation"
+        );
         throw error;
       }
     }
 
-    log.error({ error }, "Anthropic call failed");
+    log.error(
+      { error, fallback_reason: "network_or_api_error", quality_tier: "failed" },
+      "Anthropic call failed"
+    );
     throw error;
   }
 }
@@ -420,16 +429,25 @@ Respond ONLY with valid JSON.`;
 
     if (error instanceof Error) {
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic suggest-options call timed out and was aborted");
+        log.error(
+          { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
+          "Anthropic suggest-options call timed out and was aborted"
+        );
         throw new Error("anthropic_timeout");
       }
       if (error.message === "anthropic_response_invalid_schema") {
-        log.error("Anthropic options response failed schema validation");
+        log.error(
+          { fallback_reason: "schema_validation_failed", quality_tier: "failed" },
+          "Anthropic options response failed schema validation"
+        );
         throw error;
       }
     }
 
-    log.error({ error }, "Anthropic suggest-options call failed");
+    log.error(
+      { error, fallback_reason: "network_or_api_error", quality_tier: "failed" },
+      "Anthropic suggest-options call failed"
+    );
     throw error;
   }
 }
