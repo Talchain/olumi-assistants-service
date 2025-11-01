@@ -11,10 +11,10 @@
 
 The repository has been scaffolded by Windsurf with solid foundations: Fastify, TypeScript, Zod schemas, unified error handling, pino telemetry, document processing (PDF/CSV/TXT with 5k cap), DAG validation, cost guards, and CI workflow. **Real Anthropic integration implemented** with Zod validation, AbortController timeout handling, and deterministic output.
 
-**Current State (as of commit `abf155b`):**
+**Current State (as of commit `3de95e3`):**
 - **Build:** ✅ Passing (lint, typecheck, test all green)
 - **Tests:** ✅ Passing (2 basic tests, comprehensive suite needed)
-- **P0 Readiness:** ~35% (core LLM integration done, critical features missing)
+- **P0 Readiness:** ~42% (core LLM integration + structured provenance done)
 
 ---
 
@@ -45,7 +45,7 @@ The repository has been scaffolded by Windsurf with solid foundations: Fastify, 
 |-----------|----------|-----------------|
 | **Real Anthropic Integration** | ✅ P0 | Real Anthropic Messages API with Zod validation, AbortController |
 | **LLM Tool-Calling/JSON** | ✅ P0 | Schema-bound JSON responses (temperature 0, validated with Zod) |
-| **Provenance Generation** | ⚠️ P0 | Basic provenance (strings, not structured {source, quote, location}) |
+| **Provenance Generation** | ✅ P0 | Structured provenance {source, quote≤100, location?} with backward compat |
 | **Suggested Positions** | ✅ P0 | Simple layered layout (goals→decisions→options→outcomes) |
 | **SSE Streaming Endpoint** | 🔴 P0 | No dedicated `/stream` route; SSE inline, no fixture fallback at 2.5s |
 | **LLM Timeouts** | ✅ P0 | 15s timeout with AbortController, proper cleanup |
@@ -77,7 +77,7 @@ The repository has been scaffolded by Windsurf with solid foundations: Fastify, 
 1. **SSE Contract:** Spec says dedicated `/stream` endpoint; current impl uses Accept header on same route.
 2. **Fixture Fallback:** Spec says show fixture at 2.5s if slow; not implemented.
 3. **LLM Repair:** Spec says one LLM-guided retry using violations as hints; current impl is trim-only.
-4. **Provenance:** Spec requires quoted citations (source, quote ≤100 chars, location); not implemented.
+4. **Provenance:** ✅ Spec requires quoted citations (source, quote ≤100 chars, location); implemented with backward compat.
 5. **Needle-Movers:** Spec says never fabricate, only show when engine provides; current debug field is placeholder.
 
 ### Empty/Failure Paths (Missing Copy)
@@ -89,7 +89,8 @@ The repository has been scaffolded by Windsurf with solid foundations: Fastify, 
 
 ### Telemetry (Incomplete)
 - ✅ Basic events emitted: `assist.draft.stage`, `assist.draft.completed`
-- ❌ Missing: `draft_source`, `fallback_reason`, `quality_tier`, cost deltas, validate rates
+- ✅ Error context: `fallback_reason`, `quality_tier` tags on all error paths
+- ❌ Missing: `draft_source`, cost deltas, validate rates, success telemetry
 
 ---
 
@@ -257,18 +258,17 @@ See `docs/issues.todo.md` for detailed breakdown of each gap with:
 - OpenAPI polish with error examples (P0-007)
 
 ### ⚠️ Partial / Deferred
-- Document provenance: basic strings (not structured {source, quote, location}) — deferred to P1
-- Telemetry enrichment: basic events present, `fallback_reason`, `quality_tier` deferred
+- None (provenance and error telemetry completed in commit `3de95e3`)
 
 ### Revised Estimates
-- **P0 Readiness:** ~35% (down from overstated 65%)
-- **Remaining P0 Work:** ~25-30 hours
+- **P0 Readiness:** ~42% (up from 35%, provenance + error telemetry completed)
+- **Remaining P0 Work:** ~22-28 hours
   - P0-002 (SSE): 4-6 hours
   - P0-003 (Repair): 3-4 hours
   - P0-006 (Security): 3-4 hours
   - P0-009 (Tests): 8-10 hours
   - P0-007 (OpenAPI): 2 hours
-  - Integration and polish: 5-8 hours
+  - Integration and polish: 2-4 hours
 
 ### Next Actions
 1. Merge current branch (`feat/anthropic-draft`) with honest caveats
@@ -279,3 +279,43 @@ See `docs/issues.todo.md` for detailed breakdown of each gap with:
 6. Finally P0-007 (OpenAPI polish)
 
 **Status:** Critical validation and timeout issues resolved. Ready for PR with explicit gap documentation.
+
+---
+
+## Post-Round-2 Feedback Update (01 Nov 2025, commit `3de95e3`)
+
+**Branch:** `feat/anthropic-draft`
+
+### ✅ Newly Completed (P0-PROV)
+- **Structured Provenance** (elevated from P1 to P0 per Windsurf feedback)
+  - Schema: Added `StructuredProvenance` Zod schema with `{source, quote≤100, location?}`
+  - Graph schema: Edge provenance now union of `StructuredProvenance | string` for backward compatibility
+  - Document processing: Added `locationMetadata` (totalPages, totalRows, totalLines)
+  - Document processing: Added `locationHint` strings to guide LLM citation format
+  - Anthropic adapter: Updated `AnthropicEdge` schema to expect structured provenance
+  - Anthropic adapter: Updated prompt to instruct LLM on structured citations with location references
+  - Examples in prompt: hypothesis (no location), document (with "row 42")
+
+**Provenance Format:**
+- Documents: `{source: "file.pdf", quote: "exact citation", location: "page 3"}`
+- Metrics: `{source: "metric_name", quote: "value or statement"}`
+- Hypotheses: `{source: "hypothesis", quote: "statement"}`
+
+**Migration Strategy:**
+- Schema accepts both structured objects and legacy strings via union type
+- New LLM generations always produce structured format
+- Existing string provenance continues to validate
+
+### Updated P0 Status
+- **P0 Readiness:** 42% (up from 35%)
+- **Remaining Gaps:** SSE streaming, LLM repair, security rails, tests, OpenAPI polish
+- **ETA to P0 Complete:** ~22-28 hours
+
+### Files Modified
+- [src/schemas/graph.ts](src/schemas/graph.ts#L15-L19) - StructuredProvenance schema
+- [src/schemas/graph.ts](src/schemas/graph.ts#L28) - Edge provenance union type
+- [src/services/docProcessing.ts](src/services/docProcessing.ts#L10-L16) - locationMetadata
+- [src/adapters/llm/anthropic.ts](src/adapters/llm/anthropic.ts#L27) - AnthropicEdge validation
+- [src/adapters/llm/anthropic.ts](src/adapters/llm/anthropic.ts#L68-L135) - Updated prompt
+
+**Status:** Structured provenance P0 gap closed. Ready to continue with P0-002 (SSE streaming).
