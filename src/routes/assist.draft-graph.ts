@@ -10,6 +10,7 @@ import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { emit, log } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
+import { fixtureGraph } from "../utils/fixtures.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -19,12 +20,15 @@ const SSE_HEADERS = {
   "cache-control": "no-cache"
 } as const;
 
+const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
 type SuccessPayload = ReturnType<typeof DraftGraphOutput.parse>;
 type ErrorEnvelope = ReturnType<typeof ErrorV1.parse>;
 
-type StageEvent = { stage: "DRAFTING" } | { stage: "COMPLETE"; payload: SuccessPayload | ErrorEnvelope };
+type StageEvent =
+  | { stage: "DRAFTING"; payload?: SuccessPayload }
+  | { stage: "COMPLETE"; payload: SuccessPayload | ErrorEnvelope };
 
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
 
@@ -161,7 +165,39 @@ export default async function route(app: FastifyInstance) {
     }
 
     try {
-      const result = await runDraftGraphPipeline(parsed.data, req.body);
+      let result: PipelineResult;
+
+      if (wantsSse) {
+        // SSE with fixture fallback: show fixture if draft takes > 2.5s
+        let fixtureSent = false;
+
+        const fixtureTimeout = setTimeout(() => {
+          if (!fixtureSent) {
+            // Show minimal fixture graph while waiting for real draft
+            const fixturePayload = DraftGraphOutput.parse({
+              graph: fixtureGraph,
+              patch: defaultPatch,
+              rationales: [],
+              confidence: 0.5,
+              clarifier_status: "complete",
+            });
+            writeStage(reply, { stage: "DRAFTING", payload: fixturePayload });
+            fixtureSent = true;
+            emit("assist.draft.fixture_shown", { timeout_ms: FIXTURE_TIMEOUT_MS });
+          }
+        }, FIXTURE_TIMEOUT_MS);
+
+        // Run pipeline
+        result = await runDraftGraphPipeline(parsed.data, req.body);
+        clearTimeout(fixtureTimeout);
+
+        if (fixtureSent) {
+          emit("assist.draft.fixture_replaced", { fixture_shown: true });
+        }
+      } else {
+        // Non-SSE: regular request-response
+        result = await runDraftGraphPipeline(parsed.data, req.body);
+      }
 
       if (result.kind === "error") {
         if (wantsSse) {
