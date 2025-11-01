@@ -24,24 +24,36 @@ export async function toPreview(kind: string, name: string, buf: Buffer): Promis
     const data = await pdf(buf);
 
     // Add page markers for deterministic citations
-    // Estimate ~2000 chars per page (rough heuristic)
-    const CHARS_PER_PAGE = 2000;
+    // NOTE: pdf-parse concatenates all pages without boundaries
+    // We estimate page breaks based on actual page count for better accuracy
     const text = data.text;
-    const estimatedPages: string[] = [];
+    const totalPages = data.numpages;
+    const avgCharsPerPage = Math.ceil(text.length / totalPages);
 
-    for (let i = 0; i < text.length; i += CHARS_PER_PAGE) {
-      const pageNum = Math.floor(i / CHARS_PER_PAGE) + 1;
-      const chunk = text.slice(i, i + CHARS_PER_PAGE);
-      estimatedPages.push(`[PAGE ${pageNum}]\n${chunk}`);
+    // Build page-marked preview up to cap
+    let preview = "";
+    let currentPage = 1;
+
+    for (let i = 0; i < text.length && preview.length < CAP; i += avgCharsPerPage) {
+      const chunk = text.slice(i, i + avgCharsPerPage);
+      const pageText = `[PAGE ${currentPage}]\n${chunk}\n\n`;
+
+      if (preview.length + pageText.length > CAP) {
+        // Add partial page to reach cap
+        const remaining = CAP - preview.length;
+        preview += pageText.slice(0, remaining);
+        break;
+      }
+
+      preview += pageText;
+      currentPage++;
     }
-
-    const previewWithMarkers = estimatedPages.slice(0, 3).join("\n\n"); // First ~3 pages
 
     return {
       source: name,
       type: "pdf",
-      preview: cap(previewWithMarkers),
-      locationHint: "cite with page numbers (e.g., page 3)",
+      preview: preview.slice(0, CAP), // Final safety cap
+      locationHint: "cite with page numbers (NOTE: page breaks are estimated from character distribution)",
       locationMetadata: {
         totalPages: data.numpages,
       },
@@ -63,17 +75,21 @@ export async function toPreview(kind: string, name: string, buf: Buffer): Promis
     const headline = `CSV ${name}: rows=${rows.length}, cols=${cols.length}, numeric=${numericCols.join(", ")}`;
 
     // Add row numbers for deterministic citations (header is row 1, data starts at row 2)
-    const rowsWithNumbers = rows
-      .slice(0, 50) // First 50 rows
-      .map((row, idx) => `[ROW ${idx + 2}] ${JSON.stringify(row)}`)
-      .join("\n");
+    // Build preview incrementally until cap is reached - no arbitrary row limit
+    let preview = `${headline}\n[ROW 1] ${JSON.stringify(cols)}\n`;
+    let rowNum = 2;
 
-    const previewWithRows = `${headline}\n[ROW 1] ${JSON.stringify(cols)}\n${rowsWithNumbers}`;
+    for (const row of rows) {
+      const rowText = `[ROW ${rowNum}] ${JSON.stringify(row)}\n`;
+      if (preview.length + rowText.length > CAP) break;
+      preview += rowText;
+      rowNum++;
+    }
 
     return {
       source: name,
       type: "csv",
-      preview: cap(previewWithRows),
+      preview: preview.slice(0, CAP), // Final safety cap
       locationHint: "cite with row numbers when referencing data",
       locationMetadata: {
         totalRows: rows.length,
@@ -84,15 +100,21 @@ export async function toPreview(kind: string, name: string, buf: Buffer): Promis
   const lines = text.split("\n");
 
   // Add line numbers for deterministic citations
-  const linesWithNumbers = lines
-    .slice(0, 200) // First 200 lines
-    .map((line, idx) => `${idx + 1}: ${line}`)
-    .join("\n");
+  // Build preview incrementally until cap is reached - no arbitrary line limit
+  let preview = "";
+  let lineNum = 1;
+
+  for (const line of lines) {
+    const lineText = `${lineNum}: ${line}\n`;
+    if (preview.length + lineText.length > CAP) break;
+    preview += lineText;
+    lineNum++;
+  }
 
   return {
     source: name,
     type: kind as DocPreview["type"],
-    preview: cap(linesWithNumbers),
+    preview: preview.slice(0, CAP), // Final safety cap
     locationHint: "cite with line numbers if needed",
     locationMetadata: {
       totalLines: lines.length,
