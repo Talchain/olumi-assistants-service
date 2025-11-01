@@ -1,3 +1,4 @@
+import { env } from "node:process";
 import { Buffer } from "node:buffer";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
@@ -11,6 +12,7 @@ import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { emit, log } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
+import type { GraphT } from "../schemas/graph.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -21,6 +23,7 @@ const SSE_HEADERS = {
 } as const;
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
+const DEPRECATION_SUNSET = env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
 type SuccessPayload = ReturnType<typeof DraftGraphOutput.parse>;
@@ -108,7 +111,15 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         graph: candidate,
         violations: issues || [],
       });
-      const repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
+
+      // Wrap DAG operations in try/catch to guarantee fallback on malformed output
+      let repaired: GraphT;
+      try {
+        repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
+      } catch (dagError) {
+        log.warn({ error: dagError }, "Repaired graph failed DAG validation, using simple repair");
+        throw dagError; // Re-throw to trigger outer catch fallback
+      }
 
       // Re-validate repaired graph
       const second = await validateGraph(repaired);
@@ -123,7 +134,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         emit("assist.draft.repair_partial", { repair_worked: false });
       }
     } catch (error) {
-      // LLM repair failed, fallback to simple repair
+      // LLM repair failed (API error, schema validation, or DAG error), fallback to simple repair
       log.warn({ error }, "LLM repair failed, falling back to simple repair");
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
       const second = await validateGraph(repaired);
@@ -239,7 +250,7 @@ export default async function route(app: FastifyInstance) {
       // Add deprecation headers if legacy string provenance detected
       if (result.hasLegacyProvenance) {
         reply.header("X-Deprecated-Provenance-Format", "true");
-        reply.header("X-Deprecation-Sunset", "2025-12-01");
+        reply.header("X-Deprecation-Sunset", DEPRECATION_SUNSET);
         reply.header(
           "X-Deprecation-Link",
           "https://docs.olumi.ai/provenance-migration"
