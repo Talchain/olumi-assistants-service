@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 
 export type DraftArgs = {
@@ -24,7 +24,7 @@ const AnthropicEdge = z.object({
   to: z.string().min(1),
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
-  provenance: z.string().min(1).optional(),
+  provenance: StructuredProvenance.optional(),
   provenance_source: ProvenanceSource.optional(),
 });
 
@@ -68,7 +68,10 @@ const MAX_EDGES = 24;
 function buildPrompt(args: DraftArgs): string {
   const docContext = args.docs.length
     ? `\n\n## Attached Documents\n${args.docs
-        .map((d) => `**${d.source}** (${d.type}):\n${d.preview}`)
+        .map((d) => {
+          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+        })
         .join("\n\n")}`
     : "";
 
@@ -82,10 +85,12 @@ ${docContext}
 Draft a small decision graph with:
 - ≤${MAX_NODES} nodes (goal, decision, option, outcome)
 - ≤${MAX_EDGES} edges
-- Every edge with belief or weight MUST have:
-  - non-empty provenance field (short quote from document, metric name, or hypothesis statement)
+- Every edge with belief or weight MUST have structured provenance:
+  - source: document filename, metric name, or "hypothesis"
+  - quote: short citation or statement (≤100 chars)
+  - location: (optional) "page 3", "row 42", "line 15", etc. when citing documents
   - provenance_source: "document" | "metric" | "hypothesis"
-- When citing documents, use short quotes (≤100 chars) from the text above
+- When citing documents, extract exact quotes and include location references
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
 - Stable topology: goal → decision → options → outcomes
 
@@ -103,8 +108,22 @@ Draft a small decision graph with:
       "to": "out_upgrade",
       "belief": 0.7,
       "weight": 0.2,
-      "provenance": "Trial users convert at higher rates",
+      "provenance": {
+        "source": "hypothesis",
+        "quote": "Trial users convert at higher rates"
+      },
       "provenance_source": "hypothesis"
+    },
+    {
+      "from": "opt_1",
+      "to": "out_upgrade",
+      "belief": 0.8,
+      "provenance": {
+        "source": "metrics.csv",
+        "quote": "14-day trial users convert at 23% vs 8% baseline",
+        "location": "row 42"
+      },
+      "provenance_source": "document"
     }
   ],
   "rationales": [

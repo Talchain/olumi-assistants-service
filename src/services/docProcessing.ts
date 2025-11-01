@@ -6,7 +6,13 @@ export type DocPreview = {
   source: string;
   type: "pdf" | "csv" | "txt" | "md";
   preview: string;
-  locationHint?: string;
+  locationHint?: string; // Human-readable hint for LLM (e.g., "page refs required")
+  locationMetadata?: {
+    // For structured citations
+    totalPages?: number; // PDF: total pages
+    totalRows?: number; // CSV: total rows
+    totalLines?: number; // TXT/MD: total lines
+  };
 };
 
 const CAP = 5000;
@@ -20,7 +26,10 @@ export async function toPreview(kind: string, name: string, buf: Buffer): Promis
       source: name,
       type: "pdf",
       preview: cap(data.text),
-      locationHint: "page refs required by model"
+      locationHint: "cite with page numbers (e.g., page 3)",
+      locationMetadata: {
+        totalPages: data.numpages,
+      },
     };
   }
   if (kind === "csv") {
@@ -40,13 +49,22 @@ export async function toPreview(kind: string, name: string, buf: Buffer): Promis
     return {
       source: name,
       type: "csv",
-      preview: cap(`${headline}\n${text.slice(0, 3000)}`)
+      preview: cap(`${headline}\n${text.slice(0, 3000)}`),
+      locationHint: "cite with row numbers when referencing data",
+      locationMetadata: {
+        totalRows: rows.length,
+      },
     };
   }
   const text = buf.toString("utf8");
+  const lines = text.split("\n");
   return {
     source: name,
     type: kind as DocPreview["type"],
-    preview: cap(text)
+    preview: cap(text),
+    locationHint: "cite with line numbers if needed",
+    locationMetadata: {
+      totalLines: lines.length,
+    },
   };
 }
