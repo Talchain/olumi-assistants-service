@@ -48,6 +48,49 @@ await app.register(rateLimit, {
     "x-ratelimit-remaining": true,
     "x-ratelimit-reset": true,
   },
+  errorResponseBuilder: (_req, _context) => {
+    // Log rate limit hits for observability
+    app.log.warn({ event: "rate_limit_hit", max: RATE_LIMIT_MAX, window_ms: RATE_LIMIT_WINDOW_MS }, "Rate limit exceeded");
+    return {
+      schema: "error.v1",
+      code: "RATE_LIMITED",
+      message: "Rate limit exceeded",
+      details: { max: RATE_LIMIT_MAX, window_ms: RATE_LIMIT_WINDOW_MS },
+    };
+  },
+});
+
+// Error handler for body size limit and other errors
+app.setErrorHandler((error, _request, reply) => {
+  // Body size limit exceeded
+  if (error.statusCode === 413) {
+    app.log.warn({ event: "body_limit_hit", limit_bytes: BODY_LIMIT_BYTES }, "Body size limit exceeded");
+    return reply.status(413).send({
+      schema: "error.v1",
+      code: "BAD_INPUT",
+      message: "Request payload too large",
+      details: { limit_bytes: BODY_LIMIT_BYTES },
+    });
+  }
+
+  // Request timeout
+  if (error.statusCode === 408 || error.code === "ETIMEDOUT") {
+    app.log.warn({ event: "request_timeout", timeout_ms: REQUEST_TIMEOUT_MS }, "Request timeout");
+    return reply.status(408).send({
+      schema: "error.v1",
+      code: "INTERNAL",
+      message: "Request timeout",
+      details: { timeout_ms: REQUEST_TIMEOUT_MS },
+    });
+  }
+
+  // Default error handling
+  app.log.error({ error }, "Unhandled error");
+  return reply.status(error.statusCode || 500).send({
+    schema: "error.v1",
+    code: "INTERNAL",
+    message: error.message || "Internal server error",
+  });
 });
 
 app.get("/healthz", async () => ({
