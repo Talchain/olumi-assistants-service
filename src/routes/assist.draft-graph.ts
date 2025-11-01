@@ -93,9 +93,11 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     return { kind: "error", statusCode: 429, envelope: buildError("RATE_LIMITED", "cost guard exceeded") };
   }
 
+  const llmStartTime = Date.now();
   emit("assist.draft.stage", { stage: "llm_start", confidence, tokensIn });
   const { graph, rationales } = await draftGraphWithAnthropic({ brief: input.brief, docs, seed: 17 });
-  emit("assist.draft.stage", { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length });
+  const llmDuration = Date.now() - llmStartTime;
+  emit("assist.draft.stage", { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
 
   let candidate = stabiliseGraph(ensureDagAndPrune(graph));
   let issues: string[] | undefined;
@@ -174,7 +176,21 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     );
   }
 
-  emit("assist.draft.completed", { confidence, issues: issues?.length ?? 0 });
+  // Determine quality tier and fallback reason
+  const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
+  const fallbackReason = issues?.length
+    ? first.ok
+      ? null
+      : "validation_failed"
+    : null;
+
+  emit("assist.draft.completed", {
+    confidence,
+    issues: issues?.length ?? 0,
+    quality_tier: qualityTier,
+    fallback_reason: fallbackReason,
+    draft_source: "anthropic",
+  });
 
   return { kind: "success", payload, hasLegacyProvenance: legacy.hasLegacy };
 }
@@ -187,6 +203,7 @@ async function handleSseResponse(
   input: DraftGraphInputT,
   rawBody: unknown
 ): Promise<void> {
+  const streamStartTime = Date.now();
   reply.raw.writeHead(200, SSE_HEADERS);
   writeStage(reply, { stage: "DRAFTING" });
 
@@ -213,9 +230,10 @@ async function handleSseResponse(
     // Run pipeline
     const result = await runDraftGraphPipeline(input, rawBody);
     clearTimeout(fixtureTimeout);
+    const streamDuration = Date.now() - streamStartTime;
 
     if (fixtureSent) {
-      emit("assist.draft.fixture_replaced", { fixture_shown: true });
+      emit("assist.draft.fixture_replaced", { fixture_shown: true, stream_duration_ms: streamDuration });
     }
 
     // Handle errors
@@ -234,12 +252,21 @@ async function handleSseResponse(
 
     // Success
     writeStage(reply, { stage: "COMPLETE", payload: result.payload });
+    emit("assist.draft.sse_completed", {
+      stream_duration_ms: streamDuration,
+      fixture_shown: fixtureSent,
+    });
     reply.raw.end();
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error("unexpected error");
     log.error({ err }, "SSE draft graph failure");
     const envelope = buildError("INTERNAL", err.message || "internal");
     writeStage(reply, { stage: "COMPLETE", payload: envelope });
+    const streamDuration = Date.now() - streamStartTime;
+    emit("assist.draft.sse_error", {
+      stream_duration_ms: streamDuration,
+      error: err.message,
+    });
     reply.raw.end();
   }
 }

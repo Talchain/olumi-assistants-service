@@ -246,7 +246,7 @@ describe("Graph Repair Integration Tests", () => {
 
   describe("Simple repair as fallback", () => {
     it("trims nodes to max 12", async () => {
-      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const { draftGraphWithAnthropic, repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
       const { validateGraph } = await import("../../src/services/validateClient.js");
 
       const largeGraph = {
@@ -274,7 +274,7 @@ describe("Graph Repair Integration Tests", () => {
       });
 
       // LLM repair fails
-      vi.mocked(repairGraphWithAnthropic as any).mockRejectedValue(new Error("Failed"));
+      vi.mocked(repairGraphWithAnthropic).mockRejectedValue(new Error("Failed"));
 
       // Validation succeeds after simple repair
       vi.mocked(validateGraph).mockResolvedValueOnce({
@@ -306,7 +306,7 @@ describe("Graph Repair Integration Tests", () => {
     });
 
     it("trims edges to max 24 and filters invalid references", async () => {
-      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const { draftGraphWithAnthropic, repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
       const { validateGraph } = await import("../../src/services/validateClient.js");
 
       const nodes = Array.from({ length: 12 }, (_, i) => ({
@@ -342,7 +342,7 @@ describe("Graph Repair Integration Tests", () => {
       });
 
       // LLM repair fails
-      vi.mocked(repairGraphWithAnthropic as any).mockRejectedValue(new Error("Failed"));
+      vi.mocked(repairGraphWithAnthropic).mockRejectedValue(new Error("Failed"));
 
       // Validation succeeds after simple repair
       const repairedNodes = nodes.slice(0, 12);
