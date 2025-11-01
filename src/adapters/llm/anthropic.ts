@@ -88,9 +88,13 @@ Draft a small decision graph with:
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
-  - location: (optional) "page 3", "row 42", "line 15", etc. when citing documents
+  - location: extract from document markers ([PAGE N], [ROW N], line N:) when citing documents
   - provenance_source: "document" | "metric" | "hypothesis"
-- When citing documents, extract exact quotes and include location references
+- Documents include location markers:
+  - PDFs: [PAGE 1], [PAGE 2], etc. marking page boundaries
+  - CSVs: [ROW 1] for header, [ROW 2], [ROW 3], etc. for data rows
+  - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
+- When citing documents, use these markers to determine the correct location value
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
 - Stable topology: goal → decision → options → outcomes
 
@@ -122,6 +126,16 @@ Draft a small decision graph with:
         "source": "metrics.csv",
         "quote": "14-day trial users convert at 23% vs 8% baseline",
         "location": "row 42"
+      },
+      "provenance_source": "document"
+    },
+    {
+      "from": "dec_1",
+      "to": "opt_1",
+      "provenance": {
+        "source": "report.pdf",
+        "quote": "Extended trials show 15% conversion lift",
+        "location": "page 2"
       },
       "provenance_source": "document"
     }
