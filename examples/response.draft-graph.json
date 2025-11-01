@@ -1,0 +1,42 @@
+{
+  "graph": {
+    "version": "1",
+    "default_seed": 17,
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Increase Pro upgrades" },
+      { "id": "dec_1", "kind": "decision", "label": "Which levers?" },
+      { "id": "opt_1", "kind": "option", "label": "Extend trial" },
+      { "id": "out_upgrade", "kind": "outcome", "label": "Upgrade rate" }
+    ],
+    "edges": [
+      {
+        "id": "opt_1::out_upgrade::0",
+        "from": "opt_1",
+        "to": "out_upgrade",
+        "belief": 0.7,
+        "weight": 0.2,
+        "provenance": "Hypothesis based on trial effect",
+        "provenance_source": "hypothesis"
+      }
+    ],
+    "meta": {
+      "roots": ["goal_1"],
+      "leaves": ["out_upgrade"],
+      "suggested_positions": {},
+      "source": "assistant"
+    }
+  },
+  "patch": {
+    "adds": { "nodes": [], "edges": [] },
+    "updates": [],
+    "removes": []
+  },
+  "rationales": [
+    {
+      "target": "edge:opt_1::out_upgrade::0",
+      "why": "Experiential value improves conversion"
+    }
+  ],
+  "confidence": 0.7,
+  "clarifier_status": "max_rounds"
+}
