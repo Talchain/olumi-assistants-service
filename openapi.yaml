@@ -1,0 +1,685 @@
+openapi: 3.0.3
+info:
+  title: Olumi Assistants Service API
+  version: 1.0.0
+  description: |
+    AI-powered decision graph drafting service that transforms natural language briefs into structured,
+    executable decision models with provenance tracking and validation.
+
+    ## Features
+    - **Structured Provenance**: Traceable citations to source documents with locations
+    - **Streaming Support**: Server-Sent Events (SSE) for real-time progress updates
+    - **LLM-Guided Repair**: Intelligent graph validation and auto-repair
+    - **Security Rails**: Rate limiting, body size limits, request timeouts
+    - **Deprecation Signals**: Migration support for legacy provenance formats
+
+  contact:
+    name: Olumi API Support
+    url: https://docs.olumi.ai
+    email: support@olumi.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:3101
+    description: Local development
+  - url: https://api.olumi.ai
+    description: Production
+
+tags:
+  - name: Draft
+    description: Graph drafting endpoints
+  - name: Suggest
+    description: Option suggestion endpoints
+  - name: Health
+    description: Service health check
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns service health status and configuration info
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  service:
+                    type: string
+                    example: "assistants"
+                  limits_source:
+                    type: string
+                    enum: [engine, config]
+                    description: Where graph limits are sourced from
+
+  /assist/draft-graph:
+    post:
+      summary: Draft decision graph (JSON or SSE)
+      description: |
+        Generates a decision graph from a natural language brief with optional document attachments.
+
+        **Response Format:**
+        - Default (JSON): Returns complete graph immediately
+        - SSE: Include `Accept: text/event-stream` header for streaming updates
+
+        **Note:** Use `/assist/draft-graph/stream` for dedicated SSE endpoint with better caching.
+      tags:
+        - Draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftGraphInput'
+            examples:
+              basic:
+                summary: Basic brief
+                value:
+                  brief: "Should we expand to international markets or focus on domestic growth?"
+              with_attachments:
+                summary: With document attachments
+                value:
+                  brief: "Based on the attached market analysis, develop a comprehensive growth strategy"
+                  attachments:
+                    - id: "doc_1"
+                      kind: "pdf"
+                      name: "market-analysis.pdf"
+                  attachment_payloads:
+                    doc_1: "base64encodedcontent..."
+      responses:
+        '200':
+          description: Graph successfully generated
+          headers:
+            X-Deprecated-Provenance-Format:
+              description: Present if graph contains legacy string provenance
+              schema:
+                type: string
+                enum: ["true"]
+            X-Deprecation-Sunset:
+              description: Date when legacy format will be removed (if X-Deprecated-Provenance-Format present)
+              schema:
+                type: string
+                format: date
+                example: "2025-12-01"
+            X-Deprecation-Link:
+              description: Link to migration guide (if X-Deprecated-Provenance-Format present)
+              schema:
+                type: string
+                format: uri
+                example: "https://docs.olumi.ai/provenance-migration"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftGraphOutput'
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SSEStream'
+              example: |
+                event: stage
+                data: {"stage":"DRAFTING"}
+
+                event: stage
+                data: {"stage":"DRAFTING","payload":{"graph":{...},"patch":{...},"confidence":0.5}}
+
+                event: stage
+                data: {"stage":"COMPLETE","payload":{"graph":{...},"patch":{...},"confidence":0.87}}
+        '400':
+          $ref: '#/components/responses/BadInput'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /assist/draft-graph/stream:
+    post:
+      summary: Draft decision graph (SSE only)
+      description: |
+        Dedicated streaming endpoint that always returns Server-Sent Events (SSE).
+
+        **Benefits over `/assist/draft-graph` with Accept header:**
+        - Explicit URL for preflighting and caching
+        - Clearer API surface
+        - Better CDN/proxy support
+
+        **Streaming Behavior:**
+        - Initial `DRAFTING` event sent immediately
+        - Fixture graph shown after 2.5s if LLM is still processing
+        - Final `COMPLETE` event contains actual graph
+      tags:
+        - Draft
+      requestBody:
+        $ref: '#/components/requestBodies/DraftGraphRequest'
+      responses:
+        '200':
+          description: SSE stream with graph generation progress
+          headers:
+            X-Deprecated-Provenance-Format:
+              $ref: '#/components/headers/X-Deprecated-Provenance-Format'
+            X-Deprecation-Sunset:
+              $ref: '#/components/headers/X-Deprecation-Sunset'
+            X-Deprecation-Link:
+              $ref: '#/components/headers/X-Deprecation-Link'
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SSEStream'
+              examples:
+                successful_stream:
+                  summary: Successful graph generation
+                  value: |
+                    event: stage
+                    data: {"stage":"DRAFTING"}
+
+                    event: stage
+                    data: {"stage":"COMPLETE","payload":{"graph":{"version":"1","nodes":[...],"edges":[...]},"confidence":0.87}}
+
+                with_fixture:
+                  summary: Slow response with fixture fallback
+                  value: |
+                    event: stage
+                    data: {"stage":"DRAFTING"}
+
+                    event: stage
+                    data: {"stage":"DRAFTING","payload":{"graph":{"meta":{"source":"fixtures"}...},"confidence":0.5}}
+
+                    event: stage
+                    data: {"stage":"COMPLETE","payload":{"graph":{"meta":{"source":"assistant"}...},"confidence":0.92}}
+        '400':
+          description: Invalid input (SSE error format)
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SSEErrorStream'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+components:
+  schemas:
+    DraftGraphInput:
+      type: object
+      required:
+        - brief
+      properties:
+        brief:
+          type: string
+          minLength: 30
+          maxLength: 5000
+          description: Natural language description of the decision to model
+          example: "Should we migrate to microservices or keep the monolith? Consider cost, team size, and time to market."
+        attachments:
+          type: array
+          description: Optional document attachments for context
+          items:
+            $ref: '#/components/schemas/Attachment'
+        attachment_payloads:
+          type: object
+          description: Base64-encoded content for each attachment
+          additionalProperties:
+            oneOf:
+              - type: string
+                description: Base64-encoded content
+              - type: object
+                properties:
+                  data:
+                    type: string
+                  encoding:
+                    type: string
+                    default: base64
+        constraints:
+          type: object
+          description: Optional constraints (reserved for future use)
+          additionalProperties: true
+        flags:
+          type: object
+          description: Feature flags (reserved for future use)
+          additionalProperties:
+            type: boolean
+        include_debug:
+          type: boolean
+          description: Include debug information in response
+          default: false
+      additionalProperties: false
+
+    Attachment:
+      type: object
+      required:
+        - id
+        - kind
+        - name
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this attachment
+          example: "doc_1"
+        kind:
+          type: string
+          enum: [pdf, csv, txt, md]
+          description: Document type
+        name:
+          type: string
+          description: Original filename
+          example: "market-analysis.pdf"
+
+    DraftGraphOutput:
+      type: object
+      required:
+        - graph
+        - patch
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        patch:
+          $ref: '#/components/schemas/GraphPatch'
+        rationales:
+          type: array
+          description: Explanations for graph elements
+          items:
+            type: object
+            properties:
+              target:
+                type: string
+                description: Node or edge ID being explained
+              why:
+                type: string
+                maxLength: 280
+                description: Brief explanation
+              provenance_source:
+                type: string
+                description: Optional citation source
+        issues:
+          type: array
+          description: Validation warnings (if any)
+          items:
+            type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence score for the generated graph
+          example: 0.87
+        clarifier_status:
+          type: string
+          enum: [complete, max_rounds, confident]
+          description: Whether clarification questions are needed
+        debug:
+          type: object
+          description: Debug information (only if include_debug=true)
+          properties:
+            needle_movers:
+              type: array
+              description: Document preview metadata
+              items:
+                type: object
+
+    Graph:
+      type: object
+      required:
+        - version
+        - nodes
+        - edges
+      properties:
+        version:
+          type: string
+          default: "1"
+          description: Graph schema version
+        default_seed:
+          type: number
+          default: 17
+          description: Random seed for deterministic execution
+        nodes:
+          type: array
+          maxItems: 12
+          description: Graph nodes (max 12)
+          items:
+            $ref: '#/components/schemas/Node'
+        edges:
+          type: array
+          maxItems: 24
+          description: Graph edges (max 24)
+          items:
+            $ref: '#/components/schemas/Edge'
+        meta:
+          type: object
+          description: Graph metadata
+          properties:
+            roots:
+              type: array
+              items:
+                type: string
+              description: Root node IDs
+            leaves:
+              type: array
+              items:
+                type: string
+              description: Leaf node IDs
+            suggested_positions:
+              type: object
+              description: Layout hints for UI
+              additionalProperties:
+                type: object
+                properties:
+                  x:
+                    type: number
+                  y:
+                    type: number
+            source:
+              type: string
+              enum: [assistant, fixtures]
+              description: Origin of this graph
+
+    Node:
+      type: object
+      required:
+        - id
+        - kind
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: Unique node identifier
+          example: "goal_1"
+        kind:
+          type: string
+          enum: [goal, decision, option, outcome, risk, action]
+          description: Node type
+        label:
+          type: string
+          description: Human-readable label
+          example: "Increase revenue by 25%"
+        body:
+          type: string
+          maxLength: 200
+          description: Optional detailed description
+
+    Edge:
+      type: object
+      required:
+        - from
+        - to
+      properties:
+        id:
+          type: string
+          description: Optional edge identifier
+        from:
+          type: string
+          description: Source node ID
+        to:
+          type: string
+          description: Target node ID
+        weight:
+          type: number
+          description: Edge weight (impact magnitude)
+        belief:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence in this connection
+          example: 0.85
+        provenance:
+          oneOf:
+            - $ref: '#/components/schemas/StructuredProvenance'
+            - type: string
+              description: Legacy string provenance (deprecated)
+              deprecated: true
+          description: Citation for this edge
+        provenance_source:
+          type: string
+          enum: [document, metric, hypothesis, engine]
+          description: Type of provenance source
+
+    StructuredProvenance:
+      type: object
+      required:
+        - source
+        - quote
+      properties:
+        source:
+          type: string
+          minLength: 1
+          description: Source identifier (filename, metric name, or "hypothesis")
+          example: "market-analysis.pdf"
+        quote:
+          type: string
+          maxLength: 100
+          description: Short citation or statement
+          example: "Revenue grew 23% YoY"
+        location:
+          type: string
+          description: Specific location within source
+          example: "page 3"
+          examples:
+            - "page 12"
+            - "row 42"
+            - "line 156"
+
+    GraphPatch:
+      type: object
+      description: Incremental graph changes (for diff view)
+      properties:
+        adds:
+          type: object
+          properties:
+            nodes:
+              type: array
+              items:
+                $ref: '#/components/schemas/Node'
+            edges:
+              type: array
+              items:
+                $ref: '#/components/schemas/Edge'
+        updates:
+          type: array
+          items:
+            type: object
+        removes:
+          type: array
+          items:
+            type: object
+
+    ErrorV1:
+      type: object
+      required:
+        - schema
+        - code
+        - message
+      properties:
+        schema:
+          type: string
+          enum: [error.v1]
+          description: Error schema version
+        code:
+          type: string
+          enum: [BAD_INPUT, RATE_LIMITED, INTERNAL]
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error context
+          additionalProperties: true
+
+    SSEStream:
+      type: object
+      description: Server-Sent Events stream format
+      properties:
+        event:
+          type: string
+          enum: [stage]
+          description: Event type (always "stage" for graph drafting)
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/SSEDraftingEvent'
+            - $ref: '#/components/schemas/SSECompleteEvent'
+
+    SSEDraftingEvent:
+      type: object
+      required:
+        - stage
+      properties:
+        stage:
+          type: string
+          enum: [DRAFTING]
+        payload:
+          $ref: '#/components/schemas/DraftGraphOutput'
+          description: Optional fixture graph (shown after 2.5s timeout)
+
+    SSECompleteEvent:
+      type: object
+      required:
+        - stage
+        - payload
+      properties:
+        stage:
+          type: string
+          enum: [COMPLETE]
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/DraftGraphOutput'
+            - $ref: '#/components/schemas/ErrorV1'
+
+    SSEErrorStream:
+      type: object
+      properties:
+        event:
+          type: string
+          enum: [stage]
+        data:
+          type: object
+          properties:
+            stage:
+              type: string
+              enum: [COMPLETE]
+            payload:
+              $ref: '#/components/schemas/ErrorV1'
+
+  requestBodies:
+    DraftGraphRequest:
+      description: Graph drafting request
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DraftGraphInput'
+
+  responses:
+    BadInput:
+      description: Invalid input data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorV1'
+          example:
+            schema: "error.v1"
+            code: "BAD_INPUT"
+            message: "invalid input"
+            details:
+              fieldErrors:
+                brief: ["String must contain at least 30 character(s)"]
+
+    PayloadTooLarge:
+      description: Request payload exceeds 1 MB limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorV1'
+          example:
+            schema: "error.v1"
+            code: "BAD_INPUT"
+            message: "Request payload too large"
+            details:
+              limit_bytes: 1048576
+
+    RateLimited:
+      description: Rate limit exceeded (10 requests per minute per IP)
+      headers:
+        X-RateLimit-Limit:
+          description: Request limit per window
+          schema:
+            type: integer
+            example: 10
+        X-RateLimit-Remaining:
+          description: Requests remaining in current window
+          schema:
+            type: integer
+            example: 0
+        X-RateLimit-Reset:
+          description: Time when rate limit resets (Unix timestamp)
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorV1'
+          example:
+            schema: "error.v1"
+            code: "RATE_LIMITED"
+            message: "Rate limit exceeded"
+            details:
+              max: 10
+              window_ms: 60000
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorV1'
+          example:
+            schema: "error.v1"
+            code: "INTERNAL"
+            message: "internal server error"
+
+  headers:
+    X-Deprecated-Provenance-Format:
+      description: Indicates graph contains legacy string provenance
+      schema:
+        type: string
+        enum: ["true"]
+
+    X-Deprecation-Sunset:
+      description: Date when legacy provenance format will be removed
+      schema:
+        type: string
+        format: date
+        example: "2025-12-01"
+
+    X-Deprecation-Link:
+      description: Link to provenance migration guide
+      schema:
+        type: string
+        format: uri
+        example: "https://docs.olumi.ai/provenance-migration"
+
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key authentication (if enabled)
+
+security:
+  - apiKey: []
+
+x-rate-limits:
+  draft-graph:
+    limit: 10
+    window: 60s
+    per: ip
+
+x-body-limits:
+  max-size: 1MB
+
+x-timeouts:
+  request: 60s
+  connection: 60s
