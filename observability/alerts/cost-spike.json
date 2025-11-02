@@ -1,0 +1,19 @@
+{
+  "name": "Draft Graph Cost Spike > Baseline + 20%",
+  "type": "anomaly",
+  "query": "avg(last_1h):anomalies(avg:olumi.assistants.draft.cost_usd{*}, 'agile', 2, direction='above', interval=60, seasonality='hourly') > 0.2",
+  "message": "## Draft Graph Cost Anomaly Detected\n\nDraft-graph API costs have spiked above baseline + 20%.\n\n**Current:** {{value}}\n**Baseline:** {{baseline}}\n**Deviation:** +{{deviation}}%\n**Environment:** {{env.name}}\n\n**Impact:** Increased Anthropic API costs, potential budget overrun.\n\n**Possible Causes:**\n- Traffic spike\n- Increased brief complexity (more tokens)\n- Prompt cache miss rate increase\n- LLM repair loop inefficiency\n- Model change or pricing update\n\n**Actions:**\n1. Check traffic volume: `sum:olumi.assistants.draft.completed{*}.as_rate()`\n2. Review average token usage in logs\n3. Check prompt cache hit rate (should be >60%)\n4. Verify repair fallback rate hasn't increased\n5. Confirm Anthropic pricing unchanged\n\n**Cost Dashboard:** [Draft Service Metrics](https://app.datadoghq.com/dashboard/draft-service)\n\n@slack-olumi-finance @slack-olumi-alerts",
+  "tags": ["service:olumi-assistants", "team:olumi", "priority:p3", "cost-alert"],
+  "options": {
+    "thresholds": {
+      "critical": 0.2,
+      "warning": 0.1
+    },
+    "notify_no_data": false,
+    "notify_audit": true,
+    "require_full_window": false,
+    "new_group_delay": 300,
+    "include_tags": true,
+    "evaluation_delay": 300
+  }
+}

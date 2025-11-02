@@ -204,9 +204,16 @@ function sortGraph(graph: GraphT): GraphT {
   return { ...graph, nodes: sortedNodes, edges: sortedEdges };
 }
 
+export type UsageMetrics = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
 export async function draftGraphWithAnthropic(
   args: DraftArgs
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[] }> {
+): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildPrompt(args);
 
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length }, "calling Anthropic for draft");
@@ -317,6 +324,12 @@ export async function draftGraphWithAnthropic(
     return {
       graph,
       rationales: parsed.rationales || [],
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -542,7 +555,7 @@ Respond ONLY with valid JSON matching this structure.`;
 
 export async function repairGraphWithAnthropic(
   args: RepairArgs
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[] }> {
+): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildRepairPrompt(args);
 
   log.info({ violation_count: args.violations.length }, "calling Anthropic for graph repair");
@@ -634,6 +647,12 @@ export async function repairGraphWithAnthropic(
     return {
       graph,
       rationales: parsed.rationales || [],
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
     };
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "AbortError") {

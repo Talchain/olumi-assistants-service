@@ -13,6 +13,13 @@ vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn(),
 }));
 
+// Mock usage data for Anthropic API responses
+const mockUsage = {
+  input_tokens: 100,
+  output_tokens: 50,
+  cache_read_input_tokens: 0,
+};
+
 describe("Graph Repair Integration Tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -47,6 +54,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
         graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // First validation fails
@@ -76,6 +84,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(repairGraphWithAnthropic).mockResolvedValue({
         graph: repairedGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // Second validation succeeds
@@ -129,6 +138,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
         graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // First validation fails (too many nodes)
@@ -191,6 +201,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
         graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // First validation fails
@@ -212,6 +223,7 @@ describe("Graph Repair Integration Tests", () => {
           meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
         },
         rationales: [],
+        usage: mockUsage,
       });
 
       // Second validation after fallback to simple repair
@@ -266,6 +278,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
         graph: largeGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // Validation fails on initial graph
@@ -336,6 +349,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
         graph: largeGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
+        usage: mockUsage,
       });
 
       // Validation fails

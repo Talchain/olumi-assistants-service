@@ -10,6 +10,13 @@ import { loadGoldenBrief, GOLDEN_BRIEFS } from "../utils/fixtures.js";
  * Each archetype represents a class of decisions users frequently make.
  */
 
+// Mock usage data for Anthropic API responses
+const mockUsage = {
+  input_tokens: 100,
+  output_tokens: 50,
+  cache_read_input_tokens: 0,
+};
+
 // Mock Anthropic to return deterministic graphs
 vi.mock("../../src/adapters/llm/anthropic.js", () => ({
   draftGraphWithAnthropic: vi.fn().mockImplementation(({ brief }) => {
@@ -49,6 +56,7 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
           { target: "opt_buy", why: "Faster deployment, lower initial cost" },
           { target: "opt_build", why: "Custom fit, long-term control" },
         ],
+        usage: mockUsage,
       });
     }
 
@@ -87,6 +95,7 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
           { target: "opt_fulltime", why: "Long-term investment, team stability" },
           { target: "opt_contract", why: "Flexibility, faster onboarding" },
         ],
+        usage: mockUsage,
       });
     }
 
@@ -117,6 +126,7 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
         },
       },
       rationales: [],
+      usage: mockUsage,
     });
   }),
   repairGraphWithAnthropic: vi.fn(),
@@ -137,6 +147,7 @@ describe("Golden Brief Archetypes", () => {
       vi.mocked(draftGraphWithAnthropic).mockResolvedValueOnce({
         graph: fixture.expected_response.graph,
         rationales: fixture.expected_response.rationales,
+        usage: mockUsage,
       });
 
       const app = Fastify();

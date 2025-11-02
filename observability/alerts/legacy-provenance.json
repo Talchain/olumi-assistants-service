@@ -1,0 +1,19 @@
+{
+  "name": "Legacy Provenance > 20% for 7 Days",
+  "type": "metric alert",
+  "query": "avg(last_7d):avg:olumi.assistants.draft.legacy_provenance.percentage{*} > 20",
+  "message": "## Legacy String Provenance Migration Stalled\n\nLegacy string provenance usage has remained above 20% for 7 consecutive days.\n\n**Current:** {{value}}%\n**Threshold:** 20%\n**Trend:** {{trend}}\n**Environment:** {{env.name}}\n\n**Impact:** Deprecation timeline at risk - clients not migrating to structured provenance.\n\n**Migration Status:**\n- **Target:** <5% for 30 days before enforcement\n- **Current:** {{value}}%\n- **Enforcement:** Blocked until migration completes\n\n**Actions:**\n1. Identify high-usage clients: Review logs filtered by `event:assist.draft.legacy_provenance`\n2. Contact clients with migration guidance\n3. Check if structured provenance is working correctly\n4. Review deprecation timeline in `Docs/telemetry-aggregation-strategy.md`\n5. Consider extending migration window if needed\n\n**Milestones:**\n- <20%: Migration progressing (current threshold)\n- <10%: Ready for 90-day sunset warning\n- <5%: Ready for 30-day final notice\n- <2% for 60 days: Ready to enforce\n\n**Dashboard:** [Draft Service Metrics](https://app.datadoghq.com/dashboard/draft-service)\n\n@slack-olumi-product @slack-olumi-alerts",
+  "tags": ["service:olumi-assistants", "team:olumi", "priority:p3", "deprecation"],
+  "options": {
+    "thresholds": {
+      "critical": 20,
+      "warning": 10
+    },
+    "notify_no_data": false,
+    "notify_audit": true,
+    "require_full_window": true,
+    "new_group_delay": 86400,
+    "include_tags": true,
+    "evaluation_delay": 900
+  }
+}

@@ -9,7 +9,7 @@ import { draftGraphWithAnthropic, repairGraphWithAnthropic } from "../adapters/l
 import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
-import { emit, log } from "../utils/telemetry.js";
+import { emit, log, calculateCost } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
 import type { GraphT } from "../schemas/graph.js";
@@ -95,9 +95,14 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 
   const llmStartTime = Date.now();
   emit("assist.draft.stage", { stage: "llm_start", confidence, tokensIn });
-  const { graph, rationales } = await draftGraphWithAnthropic({ brief: input.brief, docs, seed: 17 });
+  const { graph, rationales, usage: draftUsage } = await draftGraphWithAnthropic({ brief: input.brief, docs, seed: 17 });
   const llmDuration = Date.now() - llmStartTime;
   emit("assist.draft.stage", { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
+
+  // Track total usage (draft + repair if needed)
+  let totalInputTokens = draftUsage.input_tokens;
+  let totalOutputTokens = draftUsage.output_tokens;
+  let totalCacheReadTokens = draftUsage.cache_read_input_tokens || 0;
 
   let candidate = stabiliseGraph(ensureDagAndPrune(graph));
   let issues: string[] | undefined;
@@ -114,6 +119,11 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         graph: candidate,
         violations: issues || [],
       });
+
+      // Accumulate repair token usage
+      totalInputTokens += repairResult.usage.input_tokens;
+      totalOutputTokens += repairResult.usage.output_tokens;
+      totalCacheReadTokens += repairResult.usage.cache_read_input_tokens || 0;
 
       // Wrap DAG operations in try/catch to guarantee fallback on malformed output
       let repaired: GraphT;
@@ -204,12 +214,19 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   // Use repair fallback reason if set; null means either no repair needed or repair succeeded
   const fallbackReason = repairFallbackReason;
 
+  // Calculate cost using actual token usage
+  const costUsd = calculateCost("claude-3-5-sonnet-20241022", totalInputTokens, totalOutputTokens);
+  // Cache hit if we read any tokens from cache
+  const promptCacheHit = totalCacheReadTokens > 0;
+
   emit("assist.draft.completed", {
     confidence,
     issues: issues?.length ?? 0,
     quality_tier: qualityTier,
     fallback_reason: fallbackReason,
     draft_source: "anthropic",
+    cost_usd: costUsd,
+    prompt_cache_hit: promptCacheHit,
   });
 
   return { kind: "success", payload, hasLegacyProvenance: legacy.hasLegacy };

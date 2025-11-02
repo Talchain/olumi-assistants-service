@@ -1,0 +1,90 @@
+name: Telemetry Event Name Validation
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  validate-event-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate telemetry event names
+        run: |
+          echo "Validating that all emit() calls use frozen event names from TelemetryEvents enum..."
+
+          # Extract all event names from emit() calls in source code (excluding test files)
+          # Pattern: emit("event.name", ...) or emit('event.name', ...)
+          EMIT_CALLS=$(grep -rn "emit(" src/ --include="*.ts" --include="*.js" | grep -oP "emit\(['\"]([^'\"]+)['\"]" | sed -E "s/emit\(['\"]([^'\"]+)['\"]/ \1 /" || true)
+
+          if [ -z "$EMIT_CALLS" ]; then
+            echo "⚠️  Warning: No emit() calls found in source code"
+            exit 0
+          fi
+
+          # Get valid event names from TelemetryEvents enum
+          VALID_EVENTS=$(node -e "
+            import('./dist/src/utils/telemetry.js').then(m => {
+              const validNames = Array.from(m.VALID_EVENT_NAMES);
+              console.log(validNames.join('\n'));
+            });
+          ")
+
+          UNKNOWN_EVENTS=""
+          while IFS= read -r event; do
+            event=$(echo "$event" | xargs) # Trim whitespace
+            if [ -n "$event" ]; then
+              if ! echo "$VALID_EVENTS" | grep -Fxq "$event"; then
+                UNKNOWN_EVENTS="$UNKNOWN_EVENTS\n  - $event"
+              fi
+            fi
+          done <<< "$EMIT_CALLS"
+
+          if [ -n "$UNKNOWN_EVENTS" ]; then
+            echo "❌ FAILED: Unknown telemetry event names detected:"
+            echo -e "$UNKNOWN_EVENTS"
+            echo ""
+            echo "All emit() calls must use event names from the frozen TelemetryEvents enum."
+            echo "Valid event names are:"
+            echo "$VALID_EVENTS" | sed 's/^/  - /'
+            echo ""
+            echo "To fix:"
+            echo "1. Use TelemetryEvents.EventName instead of hardcoded strings"
+            echo "2. If adding a new event, update src/utils/telemetry.ts:"
+            echo "   - Add to TelemetryEvents enum"
+            echo "   - Update dashboard queries"
+            echo "   - Update alert configurations"
+            echo "   - Document in observability/README.md"
+            exit 1
+          fi
+
+          echo "✅ All emit() calls use valid frozen event names"
+
+      - name: Check for event name drift in tests
+        run: |
+          echo "Checking test files for hardcoded event strings..."
+
+          # Allow test files to use event strings, but warn if they don't match
+          TEST_EMIT_CALLS=$(grep -rn "emit(" tests/ --include="*.ts" | grep -oP "emit\(['\"]([^'\"]+)['\"]" | sed -E "s/emit\(['\"]([^'\"]+)['\"]/ \1 /" || true)
+
+          if [ -n "$TEST_EMIT_CALLS" ]; then
+            echo "⚠️  Warning: Test files contain emit() calls. Ensure they use TelemetryEvents enum for consistency."
+          else
+            echo "✅ No hardcoded emit() calls in tests"
+          fi
