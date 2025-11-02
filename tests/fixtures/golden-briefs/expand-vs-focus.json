@@ -1,0 +1,113 @@
+{
+  "brief": "Should we expand into the European market or focus on growing our US presence? Current US revenue is $5M/year with 30% growth. Europe would require $2M investment.",
+  "expected_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "goal_1",
+          "kind": "goal",
+          "label": "Maximize revenue growth and market position"
+        },
+        {
+          "id": "dec_1",
+          "kind": "decision",
+          "label": "Market expansion strategy"
+        },
+        {
+          "id": "opt_expand",
+          "kind": "option",
+          "label": "Expand to European market"
+        },
+        {
+          "id": "opt_focus",
+          "kind": "option",
+          "label": "Focus on US market growth"
+        },
+        {
+          "id": "out_revenue",
+          "kind": "outcome",
+          "label": "Revenue growth potential"
+        },
+        {
+          "id": "out_market_share",
+          "kind": "outcome",
+          "label": "Market share and positioning"
+        }
+      ],
+      "edges": [
+        {
+          "from": "goal_1",
+          "to": "dec_1"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_expand"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_focus"
+        },
+        {
+          "from": "opt_expand",
+          "to": "out_revenue",
+          "weight": 3000000,
+          "belief": 0.65
+        },
+        {
+          "from": "opt_expand",
+          "to": "out_market_share",
+          "weight": 1,
+          "belief": 0.7
+        },
+        {
+          "from": "opt_focus",
+          "to": "out_revenue",
+          "weight": 2500000,
+          "belief": 0.85
+        },
+        {
+          "from": "opt_focus",
+          "to": "out_market_share",
+          "weight": 0.8,
+          "belief": 0.8
+        }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_revenue", "out_market_share"],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "patch": {
+      "adds": {
+        "nodes": [],
+        "edges": []
+      },
+      "removes": {
+        "nodes": [],
+        "edges": []
+      }
+    },
+    "rationales": [
+      {
+        "target": "opt_expand",
+        "why": "Geographic diversification with higher upside but execution risk"
+      },
+      {
+        "target": "opt_focus",
+        "why": "Capitalize on existing momentum with proven market fit and higher certainty"
+      }
+    ],
+    "confidence": 0.75,
+    "clarifier_status": "complete"
+  },
+  "metadata": {
+    "archetype": "expand-vs-focus",
+    "description": "Strategic growth decision balancing market expansion against concentration",
+    "recorded_at": "2025-11-02T21:40:00Z",
+    "llm_model": "claude-3-5-sonnet-20241022"
+  }
+}

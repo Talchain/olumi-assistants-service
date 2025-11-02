@@ -1,0 +1,113 @@
+{
+  "brief": "Should we hire 3 full-time engineers or use contractors for our 6-month project? We need strong React and Node.js skills, budget is $300k.",
+  "expected_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "goal_1",
+          "kind": "goal",
+          "label": "Build development capacity on time"
+        },
+        {
+          "id": "dec_1",
+          "kind": "decision",
+          "label": "Hire full-time vs contract"
+        },
+        {
+          "id": "opt_fulltime",
+          "kind": "option",
+          "label": "Hire 3 full-time engineers"
+        },
+        {
+          "id": "opt_contract",
+          "kind": "option",
+          "label": "Use contractors for 6 months"
+        },
+        {
+          "id": "out_capacity",
+          "kind": "outcome",
+          "label": "Team capacity and continuity"
+        },
+        {
+          "id": "out_cost",
+          "kind": "outcome",
+          "label": "Total hiring and salary cost"
+        }
+      ],
+      "edges": [
+        {
+          "from": "goal_1",
+          "to": "dec_1"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_fulltime"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_contract"
+        },
+        {
+          "from": "opt_fulltime",
+          "to": "out_capacity",
+          "weight": 1,
+          "belief": 0.9
+        },
+        {
+          "from": "opt_fulltime",
+          "to": "out_cost",
+          "weight": 270000,
+          "belief": 0.85
+        },
+        {
+          "from": "opt_contract",
+          "to": "out_capacity",
+          "weight": 0.7,
+          "belief": 0.75
+        },
+        {
+          "from": "opt_contract",
+          "to": "out_cost",
+          "weight": 180000,
+          "belief": 0.9
+        }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_capacity", "out_cost"],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "patch": {
+      "adds": {
+        "nodes": [],
+        "edges": []
+      },
+      "removes": {
+        "nodes": [],
+        "edges": []
+      }
+    },
+    "rationales": [
+      {
+        "target": "opt_fulltime",
+        "why": "Long-term investment in team stability with institutional knowledge"
+      },
+      {
+        "target": "opt_contract",
+        "why": "Flexibility and faster onboarding with lower commitment"
+      }
+    ],
+    "confidence": 0.85,
+    "clarifier_status": "complete"
+  },
+  "metadata": {
+    "archetype": "hire-vs-contract",
+    "description": "Workforce planning decision balancing cost, flexibility, and continuity",
+    "recorded_at": "2025-11-02T21:40:00Z",
+    "llm_model": "claude-3-5-sonnet-20241022"
+  }
+}

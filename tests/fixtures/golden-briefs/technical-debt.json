@@ -1,0 +1,130 @@
+{
+  "brief": "Should we spend Q1 refactoring our legacy authentication system or continue building new features? Current system has 200 known bugs, refactor would take 8 weeks.",
+  "expected_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "goal_1",
+          "kind": "goal",
+          "label": "Balance product velocity with system health"
+        },
+        {
+          "id": "dec_1",
+          "kind": "decision",
+          "label": "Technical debt prioritization"
+        },
+        {
+          "id": "opt_refactor",
+          "kind": "option",
+          "label": "Refactor authentication system"
+        },
+        {
+          "id": "opt_features",
+          "kind": "option",
+          "label": "Continue with new features"
+        },
+        {
+          "id": "out_velocity",
+          "kind": "outcome",
+          "label": "Development velocity"
+        },
+        {
+          "id": "out_stability",
+          "kind": "outcome",
+          "label": "System stability and bugs"
+        },
+        {
+          "id": "out_risk",
+          "kind": "outcome",
+          "label": "Security and compliance risk"
+        }
+      ],
+      "edges": [
+        {
+          "from": "goal_1",
+          "to": "dec_1"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_refactor"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_features"
+        },
+        {
+          "from": "opt_refactor",
+          "to": "out_velocity",
+          "weight": 0.6,
+          "belief": 0.9
+        },
+        {
+          "from": "opt_refactor",
+          "to": "out_stability",
+          "weight": 0.9,
+          "belief": 0.85
+        },
+        {
+          "from": "opt_refactor",
+          "to": "out_risk",
+          "weight": 0.3,
+          "belief": 0.9
+        },
+        {
+          "from": "opt_features",
+          "to": "out_velocity",
+          "weight": 1,
+          "belief": 0.95
+        },
+        {
+          "from": "opt_features",
+          "to": "out_stability",
+          "weight": 0.4,
+          "belief": 0.75
+        },
+        {
+          "from": "opt_features",
+          "to": "out_risk",
+          "weight": 0.8,
+          "belief": 0.7
+        }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_velocity", "out_stability", "out_risk"],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "patch": {
+      "adds": {
+        "nodes": [],
+        "edges": []
+      },
+      "removes": {
+        "nodes": [],
+        "edges": []
+      }
+    },
+    "rationales": [
+      {
+        "target": "opt_refactor",
+        "why": "Address technical debt for long-term stability and reduced security risk"
+      },
+      {
+        "target": "opt_features",
+        "why": "Maintain development momentum but accumulate additional debt and risk"
+      }
+    ],
+    "confidence": 0.8,
+    "clarifier_status": "complete"
+  },
+  "metadata": {
+    "archetype": "technical-debt",
+    "description": "Engineering prioritization decision between refactoring and feature development",
+    "recorded_at": "2025-11-02T21:40:00Z",
+    "llm_model": "claude-3-5-sonnet-20241022"
+  }
+}

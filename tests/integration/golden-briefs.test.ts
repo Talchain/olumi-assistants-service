@@ -189,8 +189,8 @@ describe("Golden Brief Archetypes", () => {
       expect(body.rationales.length).toBeGreaterThan(0);
     });
 
-    // TODO: TEST-001 - Fix mock to return archetype-specific graphs instead of default
-    // See Docs/issues/test-mock-refinement.md
+    // TODO: GOLDEN-001 - Replaced by comprehensive validation runner
+    // See tests/validation/golden-briefs-runner.test.ts for complete M5 validation
     it.skip("generates deterministic buy-vs-build decision graph", async () => {
       const app = Fastify();
       await draftRoute(app);

@@ -1,0 +1,130 @@
+{
+  "brief": "Should we migrate our database from PostgreSQL to MongoDB or stay with current setup? We have 500GB of data and serve 10M requests/day. Migration would take 3 months.",
+  "expected_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "goal_1",
+          "kind": "goal",
+          "label": "Maintain system performance and scalability"
+        },
+        {
+          "id": "dec_1",
+          "kind": "decision",
+          "label": "Database migration decision"
+        },
+        {
+          "id": "opt_migrate",
+          "kind": "option",
+          "label": "Migrate to MongoDB"
+        },
+        {
+          "id": "opt_stay",
+          "kind": "option",
+          "label": "Optimize current PostgreSQL"
+        },
+        {
+          "id": "out_performance",
+          "kind": "outcome",
+          "label": "Query performance and throughput"
+        },
+        {
+          "id": "out_risk",
+          "kind": "outcome",
+          "label": "Migration risk and downtime"
+        },
+        {
+          "id": "out_effort",
+          "kind": "outcome",
+          "label": "Engineering effort required"
+        }
+      ],
+      "edges": [
+        {
+          "from": "goal_1",
+          "to": "dec_1"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_migrate"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_stay"
+        },
+        {
+          "from": "opt_migrate",
+          "to": "out_performance",
+          "weight": 1.2,
+          "belief": 0.7
+        },
+        {
+          "from": "opt_migrate",
+          "to": "out_risk",
+          "weight": 0.8,
+          "belief": 0.85
+        },
+        {
+          "from": "opt_migrate",
+          "to": "out_effort",
+          "weight": 12,
+          "belief": 0.9
+        },
+        {
+          "from": "opt_stay",
+          "to": "out_performance",
+          "weight": 1.1,
+          "belief": 0.8
+        },
+        {
+          "from": "opt_stay",
+          "to": "out_risk",
+          "weight": 0.2,
+          "belief": 0.95
+        },
+        {
+          "from": "opt_stay",
+          "to": "out_effort",
+          "weight": 2,
+          "belief": 0.9
+        }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_performance", "out_risk", "out_effort"],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "patch": {
+      "adds": {
+        "nodes": [],
+        "edges": []
+      },
+      "removes": {
+        "nodes": [],
+        "edges": []
+      }
+    },
+    "rationales": [
+      {
+        "target": "opt_migrate",
+        "why": "Potential performance gains but significant migration risk and effort"
+      },
+      {
+        "target": "opt_stay",
+        "why": "Lower risk with incremental optimization and known system behavior"
+      }
+    ],
+    "confidence": 0.8,
+    "clarifier_status": "complete"
+  },
+  "metadata": {
+    "archetype": "migrate-vs-stay",
+    "description": "Technology migration decision weighing performance gains against risk and effort",
+    "recorded_at": "2025-11-02T21:40:00Z",
+    "llm_model": "claude-3-5-sonnet-20241022"
+  }
+}

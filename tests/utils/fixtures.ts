@@ -30,4 +30,8 @@ export async function loadGoldenBrief(name: string): Promise<GoldenBriefFixture>
  */
 export const GOLDEN_BRIEFS = {
   BUY_VS_BUILD: "buy-vs-build",
+  HIRE_VS_CONTRACT: "hire-vs-contract",
+  MIGRATE_VS_STAY: "migrate-vs-stay",
+  EXPAND_VS_FOCUS: "expand-vs-focus",
+  TECHNICAL_DEBT: "technical-debt",
 } as const;
