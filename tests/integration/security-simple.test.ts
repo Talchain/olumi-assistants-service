@@ -13,6 +13,11 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
       meta: { roots: ["test_1"], leaves: ["test_1"], suggested_positions: {}, source: "assistant" },
     },
     rationales: [],
+    usage: {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_input_tokens: 0,
+    },
   }),
   repairGraphWithAnthropic: vi.fn(),
 }));
@@ -43,9 +48,7 @@ describe("Security Tests (Simplified)", () => {
       expect(res.statusCode).toBe(413);
     });
 
-    // TODO: TEST-001 - Fix large payload mock causing unexpected behavior
-    // See Docs/issues/test-mock-refinement.md
-    it.skip("accepts requests under 1MB", async () => {
+    it("accepts requests under 1MB", async () => {
       const app = Fastify({
         logger: false,
         bodyLimit: 1024 * 1024, // 1 MB
@@ -53,8 +56,9 @@ describe("Security Tests (Simplified)", () => {
 
       await draftRoute(app);
 
-      // Create payload < 1MB but > minimum brief length
-      const validBrief = "Strategic planning with detailed analysis. ".repeat(1000);
+      // Create payload < 1MB and within brief length constraint (max 5000 chars)
+      // Test that reasonable-sized payloads are accepted
+      const validBrief = "Strategic planning with detailed analysis. ".repeat(100); // ~4500 chars
 
       const res = await app.inject({
         method: "POST",
