@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
-import type { GraphT } from "../../src/schemas/graph.js";
 import { loadGoldenBrief, GOLDEN_BRIEFS } from "../utils/fixtures.js";
 
 /**

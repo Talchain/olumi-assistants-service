@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { DraftGraphOutputT } from "../../src/schemas/assist.js";
+import type { z } from "zod";
+import { DraftGraphOutput } from "../../src/schemas/assist.js";
 
 export interface GoldenBriefFixture {
   brief: string;
-  expected_response: DraftGraphOutputT;
+  expected_response: z.infer<typeof DraftGraphOutput>;
   metadata: {
     archetype: string;
     description: string;

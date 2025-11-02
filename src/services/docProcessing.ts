@@ -17,7 +17,7 @@ export type DocPreview = {
 
 const CAP = 5000;
 
-const cap = (text: string) => text.slice(0, CAP);
+const _cap = (text: string) => text.slice(0, CAP);
 
 export async function toPreview(kind: string, name: string, buf: Buffer): Promise<DocPreview> {
   if (kind === "pdf") {

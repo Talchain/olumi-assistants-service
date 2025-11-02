@@ -1,4 +1,3 @@
-// @ts-nocheck - Type errors in skipped tests tracked under TEST-001
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
@@ -46,7 +45,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
-        graph: invalidGraph,
+        graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -54,7 +53,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: false,
         violations: ["Graph contains cycle: a -> b -> c -> a"],
-        normalized: null,
+        normalized: undefined, // Type fix - will be replaced with fixtures in M4
       });
 
       // Repaired graph is valid
@@ -75,7 +74,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(repairGraphWithAnthropic).mockResolvedValue({
-        graph: repairedGraph,
+        graph: repairedGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -83,7 +82,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: true,
         violations: [],
-        normalized: repairedGraph,
+        normalized: repairedGraph as any, // Mock data - will be replaced with fixtures in M4
       });
 
       const app = Fastify();
@@ -128,7 +127,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
-        graph: invalidGraph,
+        graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -136,7 +135,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: false,
         violations: ["Graph has 15 nodes, max is 12"],
-        normalized: null,
+        normalized: undefined, // Type fix - will be replaced with fixtures in M4
       });
 
       // LLM repair throws error
@@ -149,10 +148,10 @@ describe("Graph Repair Integration Tests", () => {
         normalized: {
           version: "1",
           default_seed: 17,
-          nodes: invalidGraph.nodes.slice(0, 12),
+          nodes: invalidGraph.nodes.slice(0, 12) as any, // Mock data - will be replaced with fixtures in M4
           edges: [],
-          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
-        },
+          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
+        } as any,
       });
 
       const app = Fastify();
@@ -190,7 +189,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
-        graph: invalidGraph,
+        graph: invalidGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -198,7 +197,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: false,
         violations: ['Edge references unknown node: "nonexistent"'],
-        normalized: null,
+        normalized: undefined, // Type fix - will be replaced with fixtures in M4
       });
 
       // LLM repair returns malformed graph that will fail DAG validation
@@ -243,7 +242,7 @@ describe("Graph Repair Integration Tests", () => {
       const body = JSON.parse(res.body);
       expect(body.graph).toBeDefined();
       // Should have cleaned up the invalid edge
-      expect(body.graph.edges.every((e) => e.from !== e.to)).toBe(true);
+      expect(body.graph.edges.every((e: any) => e.from !== e.to)).toBe(true);
     });
   });
 
@@ -265,7 +264,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
-        graph: largeGraph,
+        graph: largeGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -273,7 +272,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: false,
         violations: ["Too many nodes"],
-        normalized: null,
+        normalized: undefined, // Type fix - will be replaced with fixtures in M4
       });
 
       // LLM repair fails
@@ -286,10 +285,10 @@ describe("Graph Repair Integration Tests", () => {
         normalized: {
           version: "1",
           default_seed: 17,
-          nodes: largeGraph.nodes.slice(0, 12),
+          nodes: largeGraph.nodes.slice(0, 12) as any, // Mock data - will be replaced with fixtures in M4
           edges: [],
-          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
-        },
+          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
+        } as any,
       });
 
       const app = Fastify();
@@ -335,7 +334,7 @@ describe("Graph Repair Integration Tests", () => {
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
-        graph: largeGraph,
+        graph: largeGraph as any, // Mock data - will be replaced with fixtures in M4
         rationales: [],
       });
 
@@ -343,7 +342,7 @@ describe("Graph Repair Integration Tests", () => {
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: false,
         violations: ["Too many edges", "Invalid edge reference"],
-        normalized: null,
+        normalized: undefined, // Type fix - will be replaced with fixtures in M4
       });
 
       // LLM repair fails
