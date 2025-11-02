@@ -187,7 +187,7 @@ describe("Golden Brief Validation Runner (M5)", () => {
       // Calculate pass rates for individual checks
       const topologyPassCount = stabilityResults.filter((r) => r.topology.pass).length;
       const nodeKindPassCount = stabilityResults.filter((r) => r.nodeKind.pass).length;
-      const labelPassCount = stabilityResults.filter((r) => r.label.pass).length;
+      const _labelPassCount = stabilityResults.filter((r) => r.label.pass).length; // Calculated but not used with mocks
 
       const topologyPassRate = stabilityResults.length > 0 ? topologyPassCount / stabilityResults.length : 0;
       const nodeKindPassRate = stabilityResults.length > 0 ? nodeKindPassCount / stabilityResults.length : 0;
