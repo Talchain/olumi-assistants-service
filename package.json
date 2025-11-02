@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "openapi:validate": "swagger-cli validate openapi.yaml",
+    "openapi:generate": "openapi-typescript openapi.yaml -o src/generated/openapi.d.ts",
+    "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
@@ -23,12 +26,14 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@apidevtools/swagger-cli": "^4.0.4",
     "@types/node": "^20.14.10",
     "@types/papaparse": "^5.3.14",
     "@types/pdf-parse": "^1.1.5",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "eslint": "^8.57.1",
+    "openapi-typescript": "^7.10.1",
     "prettier": "^3.3.3",
     "tsx": "^4.15.7",
     "typescript": "^5.4.5",

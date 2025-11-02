@@ -455,12 +455,8 @@ components:
           example: "Revenue grew 23% YoY"
         location:
           type: string
-          description: Specific location within source
-          example: "page 3"
-          examples:
-            - "page 12"
-            - "row 42"
-            - "line 156"
+          description: Specific location within source (e.g., "page 12", "row 42", "line 156")
+          example: "page 12"
 
     GraphPatch:
       type: object

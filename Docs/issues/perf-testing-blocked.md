@@ -1,0 +1,128 @@
+# Performance Testing Blocked - Fastify Version Mismatch
+
+**Issue ID:** PERF-001
+**Status:** Blocked
+**Priority:** P1 (Blocks Finding 4 from Windsurf review)
+**Created:** 2025-11-02
+
+---
+
+## Problem
+
+Performance testing execution is blocked by a Fastify/plugin version mismatch:
+
+```
+FastifyError [Error]: fastify-plugin: @fastify/rate-limit - expected '5.x' fastify version, '4.29.1' is installed
+```
+
+### Context
+
+During execution of Finding 4 (baseline performance tests), attempted to start the server but encountered:
+
+1. **Package.json issue**: `start` script points to `dist/server.js` but build outputs to `dist/src/server.js`
+2. **Dependency mismatch**: `@fastify/rate-limit` plugin expects Fastify 5.x, but project uses 4.29.1
+
+### Impact
+
+- Cannot run Artillery baseline performance tests
+- Cannot certify ≤8s p95 latency requirement
+- Blocks production readiness validation
+
+---
+
+## Root Cause
+
+The rate-limit plugin was likely upgraded without corresponding Fastify upgrade, or Fastify was downgraded without checking plugin compatibility.
+
+**Current versions:**
+- Fastify: `4.29.1`
+- @fastify/rate-limit: Expects `5.x`
+
+---
+
+## Proposed Solution
+
+### Option 1: Upgrade Fastify to 5.x (Recommended)
+```bash
+pnpm update fastify@^5.0.0
+pnpm update @fastify/rate-limit
+pnpm install
+```
+
+**Pros:**
+- Aligns with plugin expectations
+- Gets latest Fastify features and fixes
+- Future-proof
+
+**Cons:**
+- May introduce breaking changes
+- Requires regression testing
+- Could affect other plugins
+
+### Option 2: Downgrade rate-limit plugin
+```bash
+pnpm update @fastify/rate-limit@^8.0.0  # Last version supporting Fastify 4.x
+pnpm install
+```
+
+**Pros:**
+- Minimal code changes
+- Lower risk
+
+**Cons:**
+- Uses older plugin version
+- Delays eventual Fastify 5 migration
+
+### Option 3: Temporarily remove rate limiting for perf tests
+**Not recommended** - Defeats purpose of testing production configuration
+
+---
+
+## Fix package.json start script
+
+While fixing dependencies, also correct the start script:
+
+```json
+{
+  "scripts": {
+    "start": "node dist/src/server.js"  // Was: dist/server.js
+  }
+}
+```
+
+---
+
+## Acceptance Criteria
+
+- [ ] Fastify and plugins have compatible versions
+- [ ] `pnpm start` successfully starts server
+- [ ] All unit/integration tests pass
+- [ ] Rate limiting still works as expected
+- [ ] Artillery baseline tests can run successfully
+
+---
+
+## Related
+
+- **Windsurf Finding 4:** Performance testing plan not executed
+- **Performance Plan:** `Docs/performance-testing-plan.md`
+- **Created artifacts:**
+  - `tests/perf/baseline.yml` - Artillery config (ready)
+  - `tests/perf/helpers.js` - Test briefs (ready)
+
+---
+
+## Next Steps
+
+1. **Immediate**: Document blocker, defer perf testing until resolved
+2. **Short-term**: Upgrade Fastify to 5.x with regression testing
+3. **After fix**: Re-run baseline performance tests
+4. **Document**: Create baseline performance report
+
+---
+
+## Notes
+
+- Tests themselves are fine (70/74 passing with 4 skipped under TEST-001)
+- Build works but server startup fails
+- All performance test artifacts are ready and waiting

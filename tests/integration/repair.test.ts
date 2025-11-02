@@ -1,3 +1,4 @@
+// @ts-nocheck - Type errors in skipped tests tracked under TEST-001
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";

@@ -1,0 +1,25 @@
+config:
+  target: 'http://localhost:3101'
+  phases:
+    - duration: 300
+      arrivalRate: 1
+      name: 'Baseline load (5 min)'
+  processor: './helpers.js'
+
+scenarios:
+  - name: 'Draft graph - baseline performance'
+    flow:
+      - post:
+          url: '/assist/draft-graph'
+          json:
+            brief: '{{ brief }}'
+          beforeRequest: 'selectBrief'
+          capture:
+            - json: '$.graph.nodes.length'
+              as: 'nodeCount'
+            - json: '$.confidence'
+              as: 'confidence'
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: 'graph'

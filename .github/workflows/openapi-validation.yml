@@ -1,0 +1,56 @@
+name: OpenAPI Validation
+
+on:
+  pull_request:
+    paths:
+      - 'openapi.yaml'
+      - 'src/**/*.ts'
+      - '.github/workflows/openapi-validation.yml'
+  push:
+    branches:
+      - main
+      - feat/**
+
+jobs:
+  validate:
+    name: Validate OpenAPI Spec
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate OpenAPI spec
+        run: pnpm openapi:validate
+
+      - name: Generate TypeScript types
+        run: pnpm openapi:generate
+
+      - name: Check for type generation issues
+        run: |
+          if [ ! -f "src/generated/openapi.d.ts" ]; then
+            echo "ERROR: TypeScript types were not generated"
+            exit 1
+          fi
+          echo "✅ TypeScript types generated successfully"
+
+      - name: Upload generated types as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: openapi-types
+          path: src/generated/openapi.d.ts
+          retention-days: 7
