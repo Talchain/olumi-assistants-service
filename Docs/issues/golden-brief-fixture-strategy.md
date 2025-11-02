@@ -1,10 +1,33 @@
 # Golden Brief Fixture Strategy Review
 
 **Issue ID:** GOLDEN-001
-**Status:** Proposed
+**Status:** ✅ Phase 1 Complete (buy-vs-build fixture implemented)
 **Priority:** P2
-**Related:** W-Finding 5, TEST-001
+**Related:** W-Finding 5 (COMPLETE), W2-Finding 5 (COMPLETE), TEST-001
 **Created:** 2025-11-02
+**Updated:** 2025-11-02 (Phase 1 implementation complete)
+
+---
+
+## Implementation Status
+
+**Phase 1 (COMPLETE):** ✅ Infrastructure + buy-vs-build fixture
+- [x] Created tests/fixtures/golden-briefs/ directory
+- [x] Created tests/utils/fixtures.ts loader
+- [x] Created buy-vs-build.json fixture
+- [x] Implemented fixture-based test
+- [x] Test passing (71/74 tests now pass, up from 70)
+
+**Phase 2 (TODO):** Add 3-5 more common archetypes
+- [ ] hire-vs-contract.json
+- [ ] migrate-vs-stay.json
+- [ ] expand-vs-focus.json
+- [ ] replace skipped tests with fixture-based versions
+
+**Phase 3 (TODO):** Fixture maintenance automation
+- [ ] Add fixtures:validate npm script
+- [ ] Set up monthly refresh schedule
+- [ ] Document re-recording process
 
 ---
 

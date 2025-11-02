@@ -109,9 +109,30 @@ While fixing dependencies, also correct the start script:
 
 - [ ] Fastify and plugins have compatible versions
 - [ ] `pnpm start` successfully starts server
-- [ ] All unit/integration tests pass
+- [ ] All unit/integration tests pass (expect 71/74, 3 skipped)
 - [ ] Rate limiting still works as expected
 - [ ] Artillery baseline tests can run successfully
+
+---
+
+## W2-Finding 2: Immediate Action Required
+
+**Status:** ⚠️ BLOCKING - Fastify upgrade is now the critical path for production readiness
+
+**Windsurf Round 2 Feedback:**
+> Performance benchmarking still blocked. PERF-001 notes the Artillery plan can't run until Fastify is upgraded to v5 because `@fastify/rate-limit@10.x` rejects 4.x. Schedule that upgrade (or swap in a v4-compatible limiter) so the ≤8 s p95 requirement can actually be validated.
+
+**Recommended Next Steps:**
+1. **Schedule Fastify 5 upgrade:** Block 1-2 days for migration
+2. **Follow migration checklist above** (lines 57-63)
+3. **Run full regression suite:** 71/74 tests should pass
+4. **Execute Artillery baseline tests:** Validate ≤8s p95 requirement
+5. **Document results:** Create baseline performance report
+
+**Timeline Estimate:**
+- Day 1: Fastify upgrade + regression testing
+- Day 2: Artillery baseline runs + results documentation
+- **Total:** 2 business days to unblock performance validation
 
 ---
 
