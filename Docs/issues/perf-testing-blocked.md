@@ -42,22 +42,35 @@ The rate-limit plugin was likely upgraded without corresponding Fastify upgrade,
 
 ## Proposed Solution
 
-### Option 1: Upgrade Fastify to 5.x (Recommended)
+### Option 1: Upgrade Fastify to 5.x (STRONGLY RECOMMENDED - W-Finding 1)
+
+**This is the preferred path forward.** Fastify 5 is stable, well-tested, and required for current plugin ecosystem compatibility.
+
 ```bash
 pnpm update fastify@^5.0.0
 pnpm update @fastify/rate-limit
+pnpm update @fastify/cors
 pnpm install
+pnpm test  # Run full test suite
 ```
 
+**Migration Checklist:**
+1. Review [Fastify v5 Migration Guide](https://fastify.dev/docs/latest/Guides/Migration-Guide-V5/)
+2. Update all @fastify/* plugins to v5-compatible versions
+3. Run full test suite (expect 70/74 passing, 4 skipped)
+4. Test server startup and basic endpoints
+5. Run Artillery baseline perf tests
+6. Document any breaking changes found
+
 **Pros:**
-- Aligns with plugin expectations
-- Gets latest Fastify features and fixes
-- Future-proof
+- Aligns with plugin expectations (BLOCKS performance testing)
+- Gets latest Fastify features and security fixes
+- Future-proof - ecosystem moving to v5
+- Required for production readiness
 
 **Cons:**
-- May introduce breaking changes
-- Requires regression testing
-- Could affect other plugins
+- Requires 1-2 days for regression testing
+- Potential breaking changes (low risk for simple routes)
 
 ### Option 2: Downgrade rate-limit plugin
 ```bash

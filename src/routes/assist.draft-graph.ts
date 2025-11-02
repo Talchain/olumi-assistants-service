@@ -178,14 +178,25 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   // Check for legacy string provenance (for deprecation tracking)
   const legacy = hasLegacyProvenance(candidate);
   if (legacy.hasLegacy) {
-    log.warn(
-      {
-        legacy_provenance_count: legacy.count,
-        total_edges: candidate.edges.length,
-        deprecation: true
-      },
-      "Legacy string provenance detected - will be removed in future version"
-    );
+    // Emit telemetry event for aggregation (always)
+    emit("assist.draft.legacy_provenance", {
+      legacy_count: legacy.count,
+      total_edges: candidate.edges.length,
+      legacy_percentage: Math.round((legacy.count / candidate.edges.length) * 100),
+    });
+
+    // Sample detailed logs (10% of occurrences) to reduce noise
+    if (Math.random() < 0.1) {
+      log.warn(
+        {
+          legacy_provenance_count: legacy.count,
+          total_edges: candidate.edges.length,
+          deprecation: true,
+          sampled: true,
+        },
+        "Legacy string provenance detected - will be removed in future version (sampled log)"
+      );
+    }
   }
 
   // Determine quality tier and fallback reason
@@ -212,11 +223,11 @@ async function handleSseResponse(
   rawBody: unknown
 ): Promise<void> {
   const streamStartTime = Date.now();
+  let fixtureSent = false;
   reply.raw.writeHead(200, SSE_HEADERS);
   writeStage(reply, { stage: "DRAFTING" });
 
   try {
-    let fixtureSent = false;
 
     // SSE with fixture fallback: show fixture if draft takes > 2.5s
     const fixtureTimeout = setTimeout(() => {
@@ -244,9 +255,17 @@ async function handleSseResponse(
       emit("assist.draft.fixture_replaced", { fixture_shown: true, stream_duration_ms: streamDuration });
     }
 
-    // Handle errors
+    // Handle pipeline errors (validation, rate limiting, etc.)
     if (result.kind === "error") {
+      const streamDuration = Date.now() - streamStartTime;
       writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
+      emit("assist.draft.sse_error", {
+        stream_duration_ms: streamDuration,
+        error: result.envelope.error.message,
+        error_code: result.envelope.error.code,
+        status_code: result.statusCode,
+        fixture_shown: fixtureSent,
+      });
       reply.raw.end();
       return;
     }
@@ -281,6 +300,9 @@ async function handleSseResponse(
     emit("assist.draft.sse_error", {
       stream_duration_ms: streamDuration,
       error: err.message,
+      error_code: "INTERNAL",
+      error_type: err.name,
+      fixture_shown: fixtureSent,
     });
     reply.raw.end();
   }

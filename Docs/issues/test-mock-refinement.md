@@ -1,17 +1,39 @@
 # Test Mock Refinement - Integration Test Failures
 
 **Issue ID:** TEST-001
-**Priority:** P1 (Post-P0)
+**Priority:** P1 (Post-P0) → **ELEVATED TO P0 per W-Finding 2**
 **Status:** Open
 **Created:** 2025-11-02
+**Updated:** 2025-11-02 (W-Finding 2 prioritization)
 **Affects:** 4 integration tests (94.6% pass rate, 70/74)
+
+---
+
+## W-Finding 2 Prioritization
+
+**From Windsurf Review:**
+> Repair integration tests are skipped under TEST-001. Until the validateGraph mock state machine is fixed, CI can't catch regressions in LLM repair flows. Prioritize unskipping those four tests or replace them with realistic fixtures.
+
+**Recommendation:** Move from "post-P0" to **P0-adjacent** - repair flow regression detection is critical for production readiness.
+
+**Action Items:**
+1. **This sprint:** Fix repair test mocks OR implement fixture-based alternatives (see GOLDEN-001)
+2. **Target:** All 74 tests passing by end of week
+3. **Fallback:** If mock refinement is too complex, use pre-recorded fixture strategy
+
+---
 
 ## Problem Summary
 
-Four integration tests are failing due to mock configuration issues with `validateGraph` and LLM adapters. These are **not blocking P0 completion** as:
-- All critical paths are tested (adversarial, golden briefs structure, security)
-- Failures are in mock setup, not production code logic
-- Unit tests and adversarial tests: 100% passing
+Four integration tests are failing due to mock configuration issues with `validateGraph` and LLM adapters. While initially deprioritized (post-P0), **W-Finding 2 elevates this to P0-adjacent** because:
+- **CI can't catch repair flow regressions** without these tests
+- Repair logic is a core value proposition
+- Current skip coverage leaves critical paths untested in integration
+
+**Previous rationale (now superseded):**
+- ~~All critical paths are tested~~ (repair paths NOT fully tested)
+- ~~Failures are in mock setup, not production code~~ (affects regression detection)
+- Unit tests passing (but don't cover full integration)
 
 ## Failing Tests
 
