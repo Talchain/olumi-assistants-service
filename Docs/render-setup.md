@@ -36,7 +36,7 @@
 |----------|--------------|---------|-------|
 | `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/) | `sk-ant-api03-...` | **Required** - Service won't start without this |
 | `ENGINE_BASE_URL` | Render dashboard | `https://plot-engine-staging.onrender.com` | URL of your PLoT engine deployment |
-| `CORS_ALLOWLIST` | Your frontend URLs | Staging: `*` (permissive)<br>Prod: `https://app.olumi.ai` | Comma-separated origins |
+| `ALLOWED_ORIGINS` | Your frontend URLs | Staging: `*` (permissive)<br>Prod: `https://app.olumi.ai` | Comma-separated origins for CORS |
 
 ### Optional (Datadog Telemetry)
 
@@ -92,7 +92,7 @@ This is normal - we'll fix it next.
    |-----|-------|------------|
    | `ANTHROPIC_API_KEY` | `sk-ant-api03-...` | Copy from [Anthropic Console](https://console.anthropic.com/settings/keys) |
    | `ENGINE_BASE_URL` | `https://plot-engine-staging.onrender.com` | From your PLoT engine staging service URL |
-   | `CORS_ALLOWLIST` | `*` | Permissive for testing (restrict in prod) |
+   | `ALLOWED_ORIGINS` | `*` | Permissive for testing (restrict in prod) |
 
 3. Click **"Save Changes"**
 
@@ -172,7 +172,7 @@ git commit -m "docs: add staging performance baseline results (M2)"
    |-----|-------|
    | `ANTHROPIC_API_KEY` | Same production key |
    | `ENGINE_BASE_URL` | `https://plot-engine.onrender.com` (prod) |
-   | `CORS_ALLOWLIST` | `https://app.olumi.ai,https://www.olumi.ai` |
+   | `ALLOWED_ORIGINS` | `https://app.olumi.ai,https://www.olumi.ai` |
 
 3. **Do NOT auto-deploy yet** - wait for M3-M5 completion
 
@@ -212,8 +212,8 @@ Access to fetch at '...' from origin '...' has been blocked by CORS policy
 ```
 
 **Fix:**
-1. Add your frontend origin to `CORS_ALLOWLIST`
-2. Example: `CORS_ALLOWLIST=https://app.olumi.ai,https://localhost:3000`
+1. Add your frontend origin to `ALLOWED_ORIGINS`
+2. Example: `ALLOWED_ORIGINS=https://app.olumi.ai,https://localhost:3000`
 3. Save → Render will redeploy
 
 ---
