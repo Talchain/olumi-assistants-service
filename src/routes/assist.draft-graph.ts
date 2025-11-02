@@ -201,7 +201,8 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 
   // Determine quality tier and fallback reason
   const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
-  const fallbackReason = repairFallbackReason || (issues?.length && !first.ok ? "validation_failed" : null);
+  // Use repair fallback reason if set; null means either no repair needed or repair succeeded
+  const fallbackReason = repairFallbackReason;
 
   emit("assist.draft.completed", {
     confidence,
@@ -261,8 +262,8 @@ async function handleSseResponse(
       writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
       emit("assist.draft.sse_error", {
         stream_duration_ms: streamDuration,
-        error: result.envelope.error.message,
-        error_code: result.envelope.error.code,
+        error: result.envelope.message,
+        error_code: result.envelope.code,
         status_code: result.statusCode,
         fixture_shown: fixtureSent,
       });
