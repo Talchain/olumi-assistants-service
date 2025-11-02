@@ -4,7 +4,7 @@ config:
     - duration: 300
       arrivalRate: 1
       name: 'Baseline load (5 min)'
-  processor: './helpers.js'
+  processor: './helpers.cjs'
 
 scenarios:
   - name: 'Draft graph - baseline performance'
