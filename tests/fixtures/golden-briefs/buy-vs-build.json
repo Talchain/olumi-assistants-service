@@ -1,0 +1,113 @@
+{
+  "brief": "Should we buy a commercial CRM system or build our own? We need to launch within 6 months with a budget of $200k.",
+  "expected_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "goal_1",
+          "kind": "goal",
+          "label": "Deliver CRM capability on time"
+        },
+        {
+          "id": "dec_1",
+          "kind": "decision",
+          "label": "Buy vs Build decision"
+        },
+        {
+          "id": "opt_buy",
+          "kind": "option",
+          "label": "Buy commercial CRM solution"
+        },
+        {
+          "id": "opt_build",
+          "kind": "option",
+          "label": "Build custom CRM solution"
+        },
+        {
+          "id": "out_cost",
+          "kind": "outcome",
+          "label": "Total cost of ownership"
+        },
+        {
+          "id": "out_time",
+          "kind": "outcome",
+          "label": "Time to market"
+        }
+      ],
+      "edges": [
+        {
+          "from": "goal_1",
+          "to": "dec_1"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_buy"
+        },
+        {
+          "from": "dec_1",
+          "to": "opt_build"
+        },
+        {
+          "from": "opt_buy",
+          "to": "out_cost",
+          "weight": 80000,
+          "belief": 0.9
+        },
+        {
+          "from": "opt_buy",
+          "to": "out_time",
+          "weight": -3,
+          "belief": 0.85
+        },
+        {
+          "from": "opt_build",
+          "to": "out_cost",
+          "weight": 120000,
+          "belief": 0.7
+        },
+        {
+          "from": "opt_build",
+          "to": "out_time",
+          "weight": 6,
+          "belief": 0.75
+        }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_cost", "out_time"],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "patch": {
+      "adds": {
+        "nodes": [],
+        "edges": []
+      },
+      "removes": {
+        "nodes": [],
+        "edges": []
+      }
+    },
+    "rationales": [
+      {
+        "target": "opt_buy",
+        "why": "Faster deployment with lower initial cost and established support"
+      },
+      {
+        "target": "opt_build",
+        "why": "Custom fit to business needs with long-term control and flexibility"
+      }
+    ],
+    "confidence": 0.85,
+    "clarifier_status": "complete"
+  },
+  "metadata": {
+    "archetype": "buy-vs-build",
+    "description": "Classic make-or-buy decision with cost and time tradeoffs",
+    "recorded_at": "2025-11-02T16:00:00Z",
+    "llm_model": "claude-3-5-sonnet-20241022"
+  }
+}

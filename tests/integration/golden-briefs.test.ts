@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
 import type { GraphT } from "../../src/schemas/graph.js";
+import { loadGoldenBrief, GOLDEN_BRIEFS } from "../utils/fixtures.js";
 
 /**
  * Golden Brief Archetype Tests
@@ -128,6 +129,56 @@ vi.mock("../../src/services/validateClient.js", () => ({
 
 describe("Golden Brief Archetypes", () => {
   describe("Archetype 1: Buy vs Build", () => {
+    // Fixture-based test (deterministic, no mock state issues)
+    it("matches buy-vs-build archetype structure (fixture-based)", async () => {
+      const fixture = await loadGoldenBrief(GOLDEN_BRIEFS.BUY_VS_BUILD);
+
+      // Mock LLM to return fixture data
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      vi.mocked(draftGraphWithAnthropic).mockResolvedValueOnce({
+        graph: fixture.expected_response.graph,
+        rationales: fixture.expected_response.rationales,
+      });
+
+      const app = Fastify();
+      await draftRoute(app);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph",
+        payload: { brief: fixture.brief },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+
+      // Validate graph structure matches archetype
+      expect(body.graph.nodes.length).toBe(6);
+      expect(body.graph.default_seed).toBe(17);
+
+      // Verify decision graph pattern: goal → decision → options → outcomes
+      const hasGoal = body.graph.nodes.some((n: any) => n.kind === "goal");
+      const hasDecision = body.graph.nodes.some((n: any) => n.kind === "decision");
+      const hasOptions = body.graph.nodes.filter((n: any) => n.kind === "option").length === 2;
+      const hasOutcomes = body.graph.nodes.some((n: any) => n.kind === "outcome");
+
+      expect(hasGoal).toBe(true);
+      expect(hasDecision).toBe(true);
+      expect(hasOptions).toBe(true);
+      expect(hasOutcomes).toBe(true);
+
+      // Verify cost/time tradeoff edges exist
+      const hasWeightedEdges = body.graph.edges.some((e: any) => e.weight !== undefined);
+      const hasBeliefScores = body.graph.edges.some((e: any) => e.belief !== undefined);
+
+      expect(hasWeightedEdges).toBe(true);
+      expect(hasBeliefScores).toBe(true);
+
+      // Verify rationales for options
+      expect(body.rationales).toBeDefined();
+      expect(body.rationales.length).toBeGreaterThan(0);
+    });
+
     // TODO: TEST-001 - Fix mock to return archetype-specific graphs instead of default
     // See Docs/issues/test-mock-refinement.md
     it.skip("generates deterministic buy-vs-build decision graph", async () => {
