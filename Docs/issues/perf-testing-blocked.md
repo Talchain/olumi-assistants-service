@@ -136,6 +136,28 @@ While fixing dependencies, also correct the start script:
 
 ---
 
+## W3-Finding 1: Detailed Execution Plan Created ✅
+
+**Status:** 🟢 READY TO EXECUTE - Comprehensive 2-day plan documented
+
+**Windsurf Round 3 Feedback:**
+> Performance validation still blocked – Artillery baseline can't run until Fastify is upgraded to 5.x (current 4.28.1 incompatible with `@fastify/rate-limit` 10.x). Without this, the ≤8 s p95 production target remains unverified.
+
+**Action Taken:** Created detailed execution plan with hour-by-hour breakdown
+
+**📋 Execution Plan:** See [Docs/fastify-5-upgrade-plan.md](../fastify-5-upgrade-plan.md)
+
+**Plan Highlights:**
+- **Day 1 (8 hours):** Dependency upgrade, testing, documentation
+- **Day 2 (6 hours):** Artillery baseline, results analysis, reports
+- **Success Criteria:** 7 specific checkpoints defined
+- **Rollback Plan:** Documented for critical issues
+- **Risk Assessment:** 5 risks identified with mitigations
+
+**Next Step:** Execute Day 1 of upgrade plan when ready
+
+---
+
 ## Related
 
 - **Windsurf Finding 4:** Performance testing plan not executed
