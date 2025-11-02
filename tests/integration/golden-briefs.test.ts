@@ -1,13 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
-import { loadGoldenBrief, GOLDEN_BRIEFS } from "../utils/fixtures.js";
+import { loadGoldenBrief, GOLDEN_BRIEFS, type GoldenBriefFixture } from "../utils/fixtures.js";
 
 /**
  * Golden Brief Archetype Tests
  *
- * These tests lock in deterministic behavior for common decision patterns.
+ * These tests lock in deterministic behaviour for common decision patterns.
  * Each archetype represents a class of decisions users frequently make.
+ *
+ * Uses pre-recorded fixtures for consistent, fast unit testing.
  */
 
 // Mock usage data for Anthropic API responses
@@ -17,13 +19,27 @@ const mockUsage = {
   cache_read_input_tokens: 0,
 };
 
-// Mock Anthropic to return deterministic graphs
+// Load fixtures for mock responses
+const fixtureMap = new Map<string, GoldenBriefFixture>();
+
+// Mock Anthropic to return fixture-based deterministic graphs
 vi.mock("../../src/adapters/llm/anthropic.js", () => ({
   draftGraphWithAnthropic: vi.fn().mockImplementation(({ brief }) => {
-    // Return deterministic graphs based on brief keywords
+    // Return deterministic graphs based on exact brief match from fixtures
+    for (const [_, fixture] of fixtureMap.entries()) {
+      if (brief === fixture.brief) {
+        return Promise.resolve({
+          graph: fixture.expected_response.graph,
+          rationales: fixture.expected_response.rationales,
+          usage: mockUsage,
+        });
+      }
+    }
+
+    // Fallback for non-fixture briefs - return generic graph
     const lowerBrief = brief.toLowerCase();
 
-    if (lowerBrief.includes("buy vs build") || lowerBrief.includes("make or buy")) {
+    if (lowerBrief.includes("buy") || lowerBrief.includes("make or buy")) {
       return Promise.resolve({
         graph: {
           version: "1",
@@ -137,18 +153,25 @@ vi.mock("../../src/services/validateClient.js", () => ({
 }));
 
 describe("Golden Brief Archetypes", () => {
+  beforeAll(async () => {
+    // Load all golden brief fixtures into map for mock lookups
+    const fixtures = await Promise.all([
+      loadGoldenBrief(GOLDEN_BRIEFS.BUY_VS_BUILD),
+      loadGoldenBrief(GOLDEN_BRIEFS.HIRE_VS_CONTRACT),
+      loadGoldenBrief(GOLDEN_BRIEFS.MIGRATE_VS_STAY),
+      loadGoldenBrief(GOLDEN_BRIEFS.EXPAND_VS_FOCUS),
+      loadGoldenBrief(GOLDEN_BRIEFS.TECHNICAL_DEBT),
+    ]);
+
+    for (const fixture of fixtures) {
+      fixtureMap.set(fixture.brief, fixture);
+    }
+  });
+
   describe("Archetype 1: Buy vs Build", () => {
     // Fixture-based test (deterministic, no mock state issues)
     it("matches buy-vs-build archetype structure (fixture-based)", async () => {
       const fixture = await loadGoldenBrief(GOLDEN_BRIEFS.BUY_VS_BUILD);
-
-      // Mock LLM to return fixture data
-      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-      vi.mocked(draftGraphWithAnthropic).mockResolvedValueOnce({
-        graph: fixture.expected_response.graph,
-        rationales: fixture.expected_response.rationales,
-        usage: mockUsage,
-      });
 
       const app = Fastify();
       await draftRoute(app);
@@ -185,53 +208,6 @@ describe("Golden Brief Archetypes", () => {
       expect(hasBeliefScores).toBe(true);
 
       // Verify rationales for options
-      expect(body.rationales).toBeDefined();
-      expect(body.rationales.length).toBeGreaterThan(0);
-    });
-
-    // TODO: GOLDEN-001 - Replaced by comprehensive validation runner
-    // See tests/validation/golden-briefs-runner.test.ts for complete M5 validation
-    it.skip("generates deterministic buy-vs-build decision graph", async () => {
-      const app = Fastify();
-      await draftRoute(app);
-
-      const res = await app.inject({
-        method: "POST",
-        url: "/assist/draft-graph",
-        payload: {
-          brief: "Should we buy a commercial CRM system or build our own? We need to launch within 6 months with a budget of $200k.",
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.body);
-
-      // Validate graph structure
-      expect(body.graph.nodes.length).toBe(6);
-      expect(body.graph.edges.length).toBeGreaterThan(0);
-
-      // Check for expected node types
-      const hasGoal = body.graph.nodes.some((n: any) => n.kind === "goal");
-      const hasDecision = body.graph.nodes.some((n: any) => n.kind === "decision");
-      const hasOptions = body.graph.nodes.filter((n: any) => n.kind === "option").length >= 2;
-      const hasOutcomes = body.graph.nodes.some((n: any) => n.kind === "outcome");
-
-      expect(hasGoal).toBe(true);
-      expect(hasDecision).toBe(true);
-      expect(hasOptions).toBe(true);
-      expect(hasOutcomes).toBe(true);
-
-      // Check for cost/time trade-off edges
-      const hasWeightedEdges = body.graph.edges.some((e: any) => e.weight !== undefined);
-      const hasBeliefScores = body.graph.edges.some((e: any) => e.belief !== undefined);
-
-      expect(hasWeightedEdges).toBe(true);
-      expect(hasBeliefScores).toBe(true);
-
-      // Verify deterministic seed
-      expect(body.graph.default_seed).toBe(17);
-
-      // Check for rationales
       expect(body.rationales).toBeDefined();
       expect(body.rationales.length).toBeGreaterThan(0);
     });

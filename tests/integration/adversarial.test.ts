@@ -2,21 +2,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
 
-// Mock Anthropic
-vi.mock("../../src/adapters/llm/anthropic.js", () => ({
-  draftGraphWithAnthropic: vi.fn().mockResolvedValue({
-    graph: {
-      version: "1",
-      default_seed: 17,
-      nodes: [{ id: "test_1", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["test_1"], leaves: ["test_1"], suggested_positions: {}, source: "assistant" },
-    },
-    rationales: [],
-  }),
-  repairGraphWithAnthropic: vi.fn(),
-}));
+/**
+ * Adversarial Input Tests
+ *
+ * These tests require LIVE_LLM=1 and ANTHROPIC_API_KEY to be set.
+ * They test the full integration path including real LLM calls.
+ *
+ * Run with: pnpm test:live
+ */
 
+// Check for required environment variables
+if (process.env.LIVE_LLM !== "1") {
+  throw new Error("Adversarial tests require LIVE_LLM=1. Run with: pnpm test:live");
+}
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  throw new Error("Adversarial tests require ANTHROPIC_API_KEY to be set. Run with: pnpm test:live");
+}
+
+// No mocks - these tests use real API calls to validate adversarial handling
 vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
 }));

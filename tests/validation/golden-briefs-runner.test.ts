@@ -5,48 +5,6 @@ import { GOLDEN_BRIEFS, loadGoldenBrief, type GoldenBriefFixture } from "../util
 import { runStabilityChecks } from "../utils/stability.js";
 import type { GraphT } from "../../src/schemas/graph.js";
 
-// Mock usage data
-const mockUsage = {
-  input_tokens: 100,
-  output_tokens: 50,
-  cache_read_input_tokens: 0,
-};
-
-// Mock Anthropic to return fixture data based on brief
-const fixtureMap = new Map<string, GoldenBriefFixture>();
-
-vi.mock("../../src/adapters/llm/anthropic.js", () => ({
-  draftGraphWithAnthropic: vi.fn().mockImplementation(({ brief }) => {
-    // Find matching fixture by brief
-    for (const [_, fixture] of fixtureMap.entries()) {
-      if (brief === fixture.brief) {
-        return Promise.resolve({
-          graph: fixture.expected_response.graph,
-          rationales: fixture.expected_response.rationales,
-          usage: mockUsage,
-        });
-      }
-    }
-    // Fallback to generic response if no fixture matches
-    return Promise.resolve({
-      graph: {
-        version: "1",
-        default_seed: 17,
-        nodes: [{ id: "goal_1", kind: "goal", label: "Generic goal" }],
-        edges: [],
-        meta: { roots: ["goal_1"], leaves: ["goal_1"], suggested_positions: {}, source: "assistant" },
-      },
-      rationales: [],
-      usage: mockUsage,
-    });
-  }),
-  repairGraphWithAnthropic: vi.fn(),
-}));
-
-vi.mock("../../src/services/validateClient.js", () => ({
-  validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
-}));
-
 /**
  * Golden Brief Validation Runner (M5)
  *
@@ -57,15 +15,31 @@ vi.mock("../../src/services/validateClient.js", () => ({
  * - After-repair validation: ≥98% success rate after one repair attempt
  * - Functional stability: Topology, node-kind, and label similarity thresholds
  *
- * These tests use pre-recorded fixtures to ensure deterministic validation
- * without requiring live LLM calls.
+ * These tests require LIVE_LLM=1 and ANTHROPIC_API_KEY to validate real LLM behavior
+ * against golden brief fixtures.
+ *
+ * Run with: pnpm test:live
  */
+
+// Check for required environment variables
+if (process.env.LIVE_LLM !== "1") {
+  throw new Error("Golden brief validation requires LIVE_LLM=1. Run with: pnpm test:live");
+}
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  throw new Error("Golden brief validation requires ANTHROPIC_API_KEY to be set. Run with: pnpm test:live");
+}
+
+// No mocks for Anthropic - these tests use real API calls to validate against golden briefs
+vi.mock("../../src/services/validateClient.js", () => ({
+  validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
+}));
 
 describe("Golden Brief Validation Runner (M5)", () => {
   let fixtures: GoldenBriefFixture[] = [];
 
   beforeAll(async () => {
-    // Load all golden brief fixtures
+    // Load all golden brief fixtures for comparison against live API results
     fixtures = await Promise.all([
       loadGoldenBrief(GOLDEN_BRIEFS.BUY_VS_BUILD),
       loadGoldenBrief(GOLDEN_BRIEFS.HIRE_VS_CONTRACT),
@@ -73,11 +47,6 @@ describe("Golden Brief Validation Runner (M5)", () => {
       loadGoldenBrief(GOLDEN_BRIEFS.EXPAND_VS_FOCUS),
       loadGoldenBrief(GOLDEN_BRIEFS.TECHNICAL_DEBT),
     ]);
-
-    // Populate fixture map for mock
-    for (const fixture of fixtures) {
-      fixtureMap.set(fixture.brief, fixture);
-    }
   });
 
   describe("First-pass validation (≥95% success)", () => {

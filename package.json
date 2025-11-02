@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "test": "vitest run",
+    "test:live": "LIVE_LLM=1 vitest run tests/integration/adversarial.test.ts tests/validation/golden-briefs-runner.test.ts",
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

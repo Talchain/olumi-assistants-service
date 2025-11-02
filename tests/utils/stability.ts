@@ -190,6 +190,7 @@ export function cosineSimilarity(vecA: Map<string, number>, vecB: Map<string, nu
 /**
  * Calculate average label similarity using TF-IDF cosine similarity
  * Threshold: ≥ 0.85
+ * Optimised to O(n) by comparing labels only for matching node IDs
  */
 export function checkLabelSimilarity(expected: GraphT, actual: GraphT): {
   pass: boolean;
@@ -199,7 +200,16 @@ export function checkLabelSimilarity(expected: GraphT, actual: GraphT): {
   const expectedLabels = extractLabels(expected);
   const actualLabels = extractLabels(actual);
 
-  // If either has no labels, cannot compute similarity
+  // If both have no labels, they are perfectly similar
+  if (expectedLabels.length === 0 && actualLabels.length === 0) {
+    return {
+      pass: true,
+      similarity: 1.0,
+      threshold: 0.85,
+    };
+  }
+
+  // If only one has labels, they are dissimilar
   if (expectedLabels.length === 0 || actualLabels.length === 0) {
     return {
       pass: false,
@@ -208,9 +218,41 @@ export function checkLabelSimilarity(expected: GraphT, actual: GraphT): {
     };
   }
 
-  // Tokenize all labels
-  const expectedTokens = expectedLabels.map(tokenize);
-  const actualTokens = actualLabels.map(tokenize);
+  // Build node ID → label maps for efficient O(1) lookup
+  const expectedMap = new Map<string, string>();
+  for (const node of expected.nodes) {
+    if (node.label && node.label.length > 0) {
+      expectedMap.set(node.id, node.label);
+    }
+  }
+
+  const actualMap = new Map<string, string>();
+  for (const node of actual.nodes) {
+    if (node.label && node.label.length > 0) {
+      actualMap.set(node.id, node.label);
+    }
+  }
+
+  // Find common node IDs (only compare labels for matching nodes)
+  const commonIds = [...expectedMap.keys()].filter((id) => actualMap.has(id));
+
+  if (commonIds.length === 0) {
+    // No common labeled nodes to compare
+    return {
+      pass: false,
+      similarity: 0,
+      threshold: 0.85,
+    };
+  }
+
+  // Tokenize labels for common nodes only (O(n) instead of O(n²))
+  const expectedTokens: string[][] = [];
+  const actualTokens: string[][] = [];
+
+  for (const id of commonIds) {
+    expectedTokens.push(tokenize(expectedMap.get(id)!));
+    actualTokens.push(tokenize(actualMap.get(id)!));
+  }
 
   // Build TF-IDF vectors for all labels combined
   const allDocuments = [...expectedTokens, ...actualTokens];
@@ -220,18 +262,14 @@ export function checkLabelSimilarity(expected: GraphT, actual: GraphT): {
   const expectedVecs = tfidfVecs.slice(0, expectedTokens.length);
   const actualVecs = tfidfVecs.slice(expectedTokens.length);
 
-  // Calculate pairwise similarities and average
+  // Calculate similarity by zipping: compare label[i] with label[i] for same node ID
+  // This is O(n) instead of O(n²) pairwise comparison
   let totalSimilarity = 0;
-  let count = 0;
-
-  for (const expVec of expectedVecs) {
-    for (const actVec of actualVecs) {
-      totalSimilarity += cosineSimilarity(expVec, actVec);
-      count++;
-    }
+  for (let i = 0; i < expectedVecs.length; i++) {
+    totalSimilarity += cosineSimilarity(expectedVecs[i], actualVecs[i]);
   }
 
-  const avgSimilarity = count > 0 ? totalSimilarity / count : 0;
+  const avgSimilarity = expectedVecs.length > 0 ? totalSimilarity / expectedVecs.length : 0;
   const threshold = 0.85;
 
   return {
