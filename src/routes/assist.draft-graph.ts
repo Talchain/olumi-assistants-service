@@ -101,6 +101,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 
   let candidate = stabiliseGraph(ensureDagAndPrune(graph));
   let issues: string[] | undefined;
+  let repairFallbackReason: string | null = null;
 
   const first = await validateGraph(candidate);
   if (!first.ok) {
@@ -120,6 +121,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
       } catch (dagError) {
         log.warn({ error: dagError }, "Repaired graph failed DAG validation, using simple repair");
+        repairFallbackReason = "dag_transform_failed";
         throw dagError; // Re-throw to trigger outer catch fallback
       }
 
@@ -133,11 +135,17 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         // Repair didn't fix all issues, fallback to simple repair
         candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired)));
         issues = second.violations ?? issues;
-        emit("assist.draft.repair_partial", { repair_worked: false });
+        repairFallbackReason = "partial_fix";
+        emit("assist.draft.repair_partial", { repair_worked: false, fallback_reason: repairFallbackReason });
       }
     } catch (error) {
       // LLM repair failed (API error, schema validation, or DAG error), fallback to simple repair
-      log.warn({ error }, "LLM repair failed, falling back to simple repair");
+      const errorType = error instanceof Error ? error.name : "unknown";
+      if (!repairFallbackReason) {
+        repairFallbackReason = errorType === "AbortError" ? "llm_timeout" : "llm_api_error";
+      }
+      log.warn({ error, fallback_reason: repairFallbackReason }, "LLM repair failed, falling back to simple repair");
+
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
@@ -147,7 +155,11 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         candidate = repaired;
         issues = second.violations ?? issues;
       }
-      emit("assist.draft.repair_fallback", { fallback: "simple_repair" });
+      emit("assist.draft.repair_fallback", {
+        fallback: "simple_repair",
+        reason: repairFallbackReason,
+        error_type: errorType,
+      });
     }
   } else if (first.normalized) {
     candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));
@@ -178,11 +190,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 
   // Determine quality tier and fallback reason
   const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
-  const fallbackReason = issues?.length
-    ? first.ok
-      ? null
-      : "validation_failed"
-    : null;
+  const fallbackReason = repairFallbackReason || (issues?.length && !first.ok ? "validation_failed" : null);
 
   emit("assist.draft.completed", {
     confidence,
@@ -250,11 +258,18 @@ async function handleSseResponse(
       reply.raw.setHeader("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
     }
 
-    // Success
+    // Success - extract quality metrics for telemetry
+    const confidence = result.payload.confidence ?? 0;
+    const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
+    const hasIssues = (result.payload.issues?.length ?? 0) > 0;
+
     writeStage(reply, { stage: "COMPLETE", payload: result.payload });
     emit("assist.draft.sse_completed", {
       stream_duration_ms: streamDuration,
       fixture_shown: fixtureSent,
+      quality_tier: qualityTier,
+      has_issues: hasIssues,
+      confidence,
     });
     reply.raw.end();
   } catch (error: unknown) {
