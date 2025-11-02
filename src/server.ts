@@ -5,11 +5,11 @@ import rateLimit from "@fastify/rate-limit";
 import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
 
-// Security configuration
-const BODY_LIMIT_BYTES = 1024 * 1024; // 1 MB
-const REQUEST_TIMEOUT_MS = 60000; // 60 seconds
-const RATE_LIMIT_MAX = 10; // requests per minute per IP
-const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+// Security configuration (read from env or use defaults)
+const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
+const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
+const RATE_LIMIT_MAX = Number(env.RATE_LIMIT_MAX) || 10; // requests per minute per IP
+const RATE_LIMIT_WINDOW_MS = Number(env.RATE_LIMIT_WINDOW_MS) || 60000; // 1 minute
 
 const app = Fastify({
   logger: true,

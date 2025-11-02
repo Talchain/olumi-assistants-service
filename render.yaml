@@ -1,0 +1,59 @@
+services:
+  # Staging environment
+  - type: web
+    name: olumi-assistants-service-staging
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 3101
+      - key: ANTHROPIC_API_KEY
+        sync: false  # Manually set in Render dashboard
+      - key: ENGINE_BASE_URL
+        sync: false  # e.g., https://plot-engine-staging.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: "*"  # Restrict in production
+      - key: BODY_LIMIT_BYTES
+        value: 1048576
+      - key: DD_AGENT_HOST
+        sync: false  # Optional: Datadog agent host
+      - key: DD_SERVICE
+        value: olumi-assistants-service-staging
+      - key: DD_ENV
+        value: staging
+
+  # Production environment
+  - type: web
+    name: olumi-assistants-service-prod
+    runtime: node
+    region: oregon
+    plan: standard  # Production needs more resources
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /healthz
+    autoDeploy: false  # Manual promotion from staging
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3101
+      - key: ANTHROPIC_API_KEY
+        sync: false  # Manually set in Render dashboard
+      - key: ENGINE_BASE_URL
+        sync: false  # e.g., https://plot-engine.onrender.com
+      - key: ALLOWED_ORIGINS
+        sync: false  # Comma-separated production origins
+      - key: BODY_LIMIT_BYTES
+        value: 1048576
+      - key: DD_AGENT_HOST
+        sync: false  # Optional: Datadog agent host
+      - key: DD_SERVICE
+        value: olumi-assistants-service
+      - key: DD_ENV
+        value: production
