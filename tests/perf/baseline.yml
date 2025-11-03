@@ -1,9 +1,9 @@
 config:
-  target: 'http://localhost:3101'
+  target: '{{ $processEnvironment.PERF_TARGET_URL || "http://localhost:3101" }}'
   phases:
-    - duration: 300
-      arrivalRate: 1
-      name: 'Baseline load (5 min)'
+    - duration: {{ $processEnvironment.PERF_DURATION_SEC || 300 }}
+      arrivalRate: {{ $processEnvironment.PERF_RPS || 1 }}
+      name: 'Baseline load'
   processor: './helpers.cjs'
 
 scenarios:
