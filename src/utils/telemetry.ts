@@ -14,6 +14,7 @@ export const TelemetryEvents = {
   DraftCompleted: "assist.draft.completed",
 
   // SSE streaming events
+  SSEStarted: "assist.draft.sse_started",
   SSECompleted: "assist.draft.sse_completed",
   SSEError: "assist.draft.sse_error",
   FixtureShown: "assist.draft.fixture_shown",
@@ -156,11 +157,22 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.SSEStarted: {
+          datadogClient.increment("draft.sse.started", 1);
+          break;
+        }
+
         case TelemetryEvents.SSECompleted: {
           if (typeof data.stream_duration_ms === "number") {
             datadogClient.histogram("draft.sse.stream_duration_ms", data.stream_duration_ms);
           }
-          datadogClient.increment("draft.sse.completed", 1);
+          if (typeof data.fixture_shown === "boolean") {
+            datadogClient.increment("draft.sse.completed", 1, {
+              fixture_shown: String(data.fixture_shown),
+            });
+          } else {
+            datadogClient.increment("draft.sse.completed", 1);
+          }
           break;
         }
 

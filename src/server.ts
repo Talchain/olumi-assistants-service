@@ -60,6 +60,65 @@ await app.register(rateLimit, {
   },
 });
 
+// Performance profiling hooks (enabled with PERF_TRACE=1)
+if (env.PERF_TRACE === "1") {
+  app.log.info("Performance tracing enabled (PERF_TRACE=1)");
+
+  // Track timing for each request phase
+  app.addHook("onRequest", async (request) => {
+    (request as any).perfTrace = {
+      start: Date.now(),
+      spans: [] as Array<{ name: string; duration: number }>,
+    };
+  });
+
+  app.addHook("preHandler", async (request) => {
+    const trace = (request as any).perfTrace;
+    if (trace) {
+      trace.preHandlerStart = Date.now();
+      const onRequestDuration = trace.preHandlerStart - trace.start;
+      trace.spans.push({ name: "onRequest", duration: onRequestDuration });
+    }
+  });
+
+  app.addHook("onSend", async (request, _reply, payload) => {
+    const trace = (request as any).perfTrace;
+    if (trace && trace.preHandlerStart) {
+      const now = Date.now();
+      const handlerDuration = now - trace.preHandlerStart;
+      trace.spans.push({ name: "handler", duration: handlerDuration });
+      trace.onSendStart = now;
+    }
+    return payload;
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    const trace = (request as any).perfTrace;
+    if (trace) {
+      const total = Date.now() - trace.start;
+
+      if (trace.onSendStart) {
+        const onSendDuration = Date.now() - trace.onSendStart;
+        trace.spans.push({ name: "onSend", duration: onSendDuration });
+      }
+
+      // Sort spans by duration (descending) and take top 3
+      const top3 = trace.spans
+        .sort((a: any, b: any) => b.duration - a.duration)
+        .slice(0, 3);
+
+      app.log.info({
+        event: "perf_trace",
+        method: request.method,
+        url: request.url,
+        status: reply.statusCode,
+        total_ms: total,
+        top_spans: top3,
+      }, `[PERF] ${request.method} ${request.url} ${total}ms`);
+    }
+  });
+}
+
 // Error handler for body size limit and other errors
 app.setErrorHandler((error, _request, reply) => {
   // Body size limit exceeded

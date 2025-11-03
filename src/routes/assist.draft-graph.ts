@@ -9,7 +9,7 @@ import { draftGraphWithAnthropic, repairGraphWithAnthropic } from "../adapters/l
 import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
-import { emit, log, calculateCost } from "../utils/telemetry.js";
+import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
 import type { GraphT } from "../schemas/graph.js";
@@ -244,6 +244,7 @@ async function handleSseResponse(
   let fixtureSent = false;
   reply.raw.writeHead(200, SSE_HEADERS);
   writeStage(reply, { stage: "DRAFTING" });
+  emit(TelemetryEvents.SSEStarted, {});
 
   try {
 
