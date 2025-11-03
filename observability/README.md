@@ -1,7 +1,7 @@
 # Observability Configuration
 
 **Purpose:** Datadog dashboards and alerts for olumi-assistants-service
-**Last Updated:** 2025-11-02
+**Last Updated:** 2025-11-03
 **Related:** M3 milestone, Docs/telemetry-aggregation-strategy.md
 
 ---
@@ -175,6 +175,7 @@ All events are defined in `src/utils/telemetry.ts` with frozen names:
 TelemetryEvents = {
   DraftStarted: "assist.draft.started",
   DraftCompleted: "assist.draft.completed",
+  SSEStarted: "assist.draft.sse_started",
   SSECompleted: "assist.draft.sse_completed",
   SSEError: "assist.draft.sse_error",
   FixtureShown: "assist.draft.fixture_shown",
@@ -204,6 +205,7 @@ All metrics use the prefix `olumi.assistants.`
 
 | Metric | Type | Tags | Description |
 |--------|------|------|-------------|
+| `draft.started` | counter | - | Draft requests initiated |
 | `draft.latency_ms` | histogram | draft_source, quality_tier, fallback_reason | Draft response time (ms) |
 | `draft.graph.nodes` | gauge | - | Number of nodes in generated graph |
 | `draft.graph.edges` | gauge | - | Number of edges in generated graph |
@@ -211,13 +213,15 @@ All metrics use the prefix `olumi.assistants.`
 | `draft.cost_usd` | histogram | draft_source | Estimated Anthropic API cost per request |
 | `draft.prompt_cache` | counter | hit (true/false) | Prompt cache hits/misses |
 | `draft.completed` | counter | quality_tier, draft_source, fallback_reason | Total drafts completed |
+| `draft.sse.started` | counter | - | SSE streams initiated |
 | `draft.sse.stream_duration_ms` | histogram | - | SSE stream duration (ms) |
-| `draft.sse.completed` | counter | - | SSE streams completed |
+| `draft.sse.completed` | counter | fixture_shown | SSE streams completed |
 | `draft.sse.errors` | counter | error_code | SSE stream errors |
 | `draft.validation.failed` | counter | - | Validation failures |
 | `draft.validation.violations` | gauge | - | Number of validation violations |
 | `draft.repair.attempted` | counter | - | Repair attempts |
 | `draft.repair.success` | counter | - | Successful repairs |
+| `draft.repair.partial` | counter | - | Partial repairs (some violations fixed) |
 | `draft.repair.fallback` | counter | reason | Repairs that fell back to simple repair |
 | `draft.legacy_provenance.occurrences` | counter | - | Legacy provenance detections |
 | `draft.legacy_provenance.percentage` | gauge | - | Percentage of edges using legacy format |
