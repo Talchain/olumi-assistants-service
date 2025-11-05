@@ -68,8 +68,17 @@ export default async function route(app: FastifyInstance) {
         cache_hit: (result.usage.cache_read_input_tokens || 0) > 0,
       });
 
+      // Deterministic ordering: BLOCKER → IMPROVEMENT → OBSERVATION, then by note
+      const levelOrder: Record<string, number> = { BLOCKER: 0, IMPROVEMENT: 1, OBSERVATION: 2 };
+      const sortedIssues = [...result.issues].sort((a, b) => {
+        const la = levelOrder[a.level] ?? 99;
+        const lb = levelOrder[b.level] ?? 99;
+        if (la !== lb) return la - lb;
+        return a.note.localeCompare(b.note);
+      });
+
       const output = CritiqueGraphOutput.parse({
-        issues: result.issues,
+        issues: sortedIssues,
         suggested_fixes: result.suggested_fixes,
         overall_quality: result.overall_quality,
       });
@@ -82,6 +91,17 @@ export default async function route(app: FastifyInstance) {
       emit("assist.critique.failed", {
         error: err.message,
       });
+
+      // Capability mapping: provider not supported -> 400 BAD_INPUT with hint
+      if (err.message && err.message.includes("_not_supported")) {
+        reply.code(400);
+        return reply.send(ErrorV1.parse({
+          schema: "error.v1",
+          code: "BAD_INPUT",
+          message: "not_supported",
+          details: { hint: "Use LLM_PROVIDER=anthropic or fixtures" },
+        }));
+      }
 
       reply.code(500);
       return reply.send(ErrorV1.parse({

@@ -73,10 +73,21 @@ export default async function route(app: FastifyInstance) {
         cache_hit: (result.usage.cache_read_input_tokens || 0) > 0,
       });
 
+      // MCQ-first deterministic ordering (choices first), then alphabetical by question
+      const questionsSorted = [...result.questions].sort((a, b) => {
+        const ac = Array.isArray(a.choices);
+        const bc = Array.isArray(b.choices);
+        if (ac !== bc) return ac ? -1 : 1;
+        return a.question.localeCompare(b.question);
+      });
+
+      // Stop rule: confidence >= 0.8 implies no further rounds
+      const shouldContinue = result.confidence >= 0.8 ? false : result.should_continue;
+
       const output = ClarifyBriefOutput.parse({
-        questions: result.questions,
+        questions: questionsSorted,
         confidence: result.confidence,
-        should_continue: result.should_continue,
+        should_continue: shouldContinue,
         round: input.round,
       });
 
@@ -89,6 +100,17 @@ export default async function route(app: FastifyInstance) {
         round: input.round,
         error: err.message,
       });
+
+      // Capability mapping: provider not supported -> 400 BAD_INPUT with hint
+      if (err.message && err.message.includes("_not_supported")) {
+        reply.code(400);
+        return reply.send(ErrorV1.parse({
+          schema: "error.v1",
+          code: "BAD_INPUT",
+          message: "not_supported",
+          details: { hint: "Use LLM_PROVIDER=anthropic or fixtures" },
+        }));
+      }
 
       reply.code(500);
       return reply.send(ErrorV1.parse({

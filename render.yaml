@@ -1,55 +1,37 @@
 services:
-  # Production service (OpenAI default, Anthropic switchable)
   - type: web
     name: olumi-assistants-service
     runtime: node
+    plan: starter
     region: oregon
-    plan: starter  # Upgrade to standard if needed
     buildCommand: pnpm install && pnpm build
     startCommand: node dist/src/server.js
     healthCheckPath: /healthz
-    autoDeploy: true  # Auto-deploy on push to main
+    autoDeploy: true
     envVars:
-      # Node environment
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3101
-
-      # LLM Provider (OpenAI default for cost-effectiveness)
       - key: LLM_PROVIDER
-        value: openai
-      - key: OPENAI_API_KEY
-        sync: false  # Set manually in Render dashboard
+        value: fixtures
       - key: ANTHROPIC_API_KEY
-        sync: false  # Optional: set if you want to switch to Anthropic
-
-      # PLoT Engine (required)
-      - key: ENGINE_BASE_URL
-        sync: false  # e.g., https://plot-engine.onrender.com
-
-      # Security: CORS allow-list (comma-separated origins)
-      - key: ALLOWED_ORIGINS
-        sync: false  # e.g., https://app.olumi.ai,https://www.olumi.ai
-
-      # Security: Rate limiting
-      - key: RATE_LIMIT_MAX
-        value: 120  # requests per window
-      - key: RATE_LIMIT_WINDOW_MS
-        value: 60000  # 1 minute
-
-      # Security: Body size limit
-      - key: BODY_LIMIT_BYTES
-        value: 1048576  # 1 MB
-
-      # Security: Redaction (enabled by default)
-      - key: REDACTION_ENABLED
-        value: 1
-
-      # Cost protection
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: COST_MAX_USD
-        value: 1.0  # Max cost per request
-
-      # Observability (Datadog disabled initially)
-      - key: DISABLE_DATADOG
-        value: 1
+        value: "1.00"
+      - key: ASSISTANTS_TIMEOUT_MS
+        value: "15000"
+      - key: ASSISTANTS_MAX_RETRIES
+        value: "1"
+      - key: SSE_MAX_MS
+        value: "120000"
+      - key: PORT
+        value: "3101"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+      - key: RATE_LIMIT_MAX
+        value: "120"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: BODY_LIMIT_BYTES
+        value: "1048576"
