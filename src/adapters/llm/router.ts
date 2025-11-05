@@ -122,6 +122,43 @@ class FixturesAdapter implements LLMAdapter {
       },
     };
   }
+
+  async clarifyBrief(args: any, _opts: any): Promise<any> {
+    return {
+      questions: [
+        {
+          question: "What is the primary goal of this decision?",
+          choices: ["Revenue growth", "Cost reduction", "Risk mitigation", "Strategic positioning"],
+          why_we_ask: "Helps prioritize decision criteria",
+          impacts_draft: "Shapes the goal node and outcome weights",
+        },
+      ],
+      confidence: 0.7,
+      should_continue: false,
+      round: args.round,
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
+
+  async critiqueGraph(_args: any, _opts: any): Promise<any> {
+    return {
+      issues: [
+        {
+          level: "OBSERVATION",
+          note: "Fixture critique - no actual analysis performed",
+        },
+      ],
+      suggested_fixes: [],
+      overall_quality: "fair",
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
 }
 
 // Adapter instances cache

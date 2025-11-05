@@ -64,6 +64,44 @@ export const SuggestOptionsOutput = z.object({
     .max(5)
 });
 
+export const ClarifyBriefInput = z.object({
+  brief: z.string().min(30).max(5000),
+  round: z.number().int().min(0).max(2).default(0),
+  previous_answers: z.array(z.object({
+    question: z.string(),
+    answer: z.string()
+  })).optional(),
+  seed: z.number().int().optional()
+}).strict();
+
+export const ClarifyBriefOutput = z.object({
+  questions: z.array(z.object({
+    question: z.string().min(10),
+    choices: z.array(z.string()).optional(),
+    why_we_ask: z.string().min(20),
+    impacts_draft: z.string().min(20)
+  })).min(1).max(5),
+  confidence: z.number().min(0).max(1),
+  should_continue: z.boolean(),
+  round: z.number().int().min(0).max(2)
+});
+
+export const CritiqueGraphInput = z.object({
+  graph: Graph,
+  brief: z.string().min(30).max(5000).optional(),
+  focus_areas: z.array(z.enum(["structure", "completeness", "feasibility", "provenance"])).optional()
+}).strict();
+
+export const CritiqueGraphOutput = z.object({
+  issues: z.array(z.object({
+    level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
+    note: z.string().min(10).max(280),
+    target: z.string().optional()
+  })),
+  suggested_fixes: z.array(z.string()).max(5).default([]),
+  overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional()
+});
+
 export const ErrorV1 = z.object({
   schema: z.literal("error.v1"),
   code: z.enum(["BAD_INPUT", "RATE_LIMITED", "INTERNAL"]),
@@ -72,3 +110,5 @@ export const ErrorV1 = z.object({
 });
 
 export type DraftGraphInputT = z.infer<typeof DraftGraphInput>;
+export type ClarifyBriefInputT = z.infer<typeof ClarifyBriefInput>;
+export type CritiqueGraphInputT = z.infer<typeof CritiqueGraphInput>;

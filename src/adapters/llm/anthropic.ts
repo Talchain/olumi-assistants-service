@@ -4,7 +4,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
 
 export type DraftArgs = {
   brief: string;
@@ -45,6 +45,31 @@ const AnthropicOptionsResponse = z.object({
       evidence_to_gather: z.array(z.string()).min(2).max(3),
     })
   ),
+});
+
+const AnthropicClarifyResponse = z.object({
+  questions: z.array(
+    z.object({
+      question: z.string().min(10),
+      choices: z.array(z.string()).optional(),
+      why_we_ask: z.string().min(20),
+      impacts_draft: z.string().min(20),
+    })
+  ).min(1).max(5),
+  confidence: z.number().min(0).max(1),
+  should_continue: z.boolean(),
+});
+
+const AnthropicCritiqueResponse = z.object({
+  issues: z.array(
+    z.object({
+      level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
+      note: z.string().min(10).max(280),
+      target: z.string().optional(),
+    })
+  ),
+  suggested_fixes: z.array(z.string()).max(5),
+  overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional(),
 });
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -688,6 +713,307 @@ export async function repairGraphWithAnthropic(
   }
 }
 
+export type ClarifyArgs = {
+  brief: string;
+  round: number;
+  previous_answers?: Array<{ question: string; answer: string }>;
+  seed?: number;
+};
+
+function buildClarifyPrompt(args: ClarifyArgs): string {
+  const previousContext = args.previous_answers?.length
+    ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
+    : "";
+
+  return `You are an expert at identifying ambiguities in decision briefs and generating clarifying questions.
+
+## Brief
+${args.brief}
+${previousContext}
+
+## Your Task
+Analyze this brief and generate 1-5 clarifying questions to refine the decision graph. Focus on:
+- Missing context about goals, constraints, or success criteria
+- Ambiguous stakeholders or decision-makers
+- Unclear timelines or resource availability
+- Missing data sources or provenance hints
+
+**MCQ-First Rule:** Prefer multiple-choice questions when possible (limit 3-5 choices). Use open-ended questions only when MCQ is impractical.
+
+For each question provide:
+- question: The question text (10+ chars)
+- choices: Array of 3-5 options (optional, omit for open-ended questions)
+- why_we_ask: Why this question matters (20+ chars)
+- impacts_draft: How the answer will affect the graph structure or content (20+ chars)
+
+Also provide:
+- confidence: Your confidence that the current brief is sufficient (0.0-1.0)
+- should_continue: Whether another clarification round would be helpful (stop if confidence ≥0.8 or no material improvement possible)
+
+## Output Format (JSON)
+{
+  "questions": [
+    {
+      "question": "Who is the primary decision-maker?",
+      "choices": ["CEO", "Board", "Product team", "Engineering team"],
+      "why_we_ask": "Determines which stakeholder perspectives to prioritize",
+      "impacts_draft": "Shapes the goal node and outcome evaluation criteria"
+    },
+    {
+      "question": "What is the timeline for this decision?",
+      "why_we_ask": "Affects feasibility of certain options",
+      "impacts_draft": "Influences which options are viable and how outcomes are measured"
+    }
+  ],
+  "confidence": 0.65,
+  "should_continue": true
+}
+
+Respond ONLY with valid JSON.`;
+}
+
+export async function clarifyBriefWithAnthropic(
+  args: ClarifyArgs
+): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
+  const prompt = buildClarifyPrompt(args);
+
+  log.info({ brief_chars: args.brief.length, round: args.round }, "calling Anthropic for clarification");
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
+  try {
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 2048,
+        temperature: args.seed ? 0 : 0.1,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
+
+    const content = response.content[0];
+    if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+      throw new Error("unexpected_response_type");
+    }
+
+    // Extract JSON from response
+    let jsonText = content.text.trim();
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
+    } else if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
+    }
+
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicClarifyResponse.safeParse(rawJson);
+
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten() }, "Anthropic clarify response failed schema validation");
+      throw new Error("anthropic_clarify_invalid_schema");
+    }
+
+    const parsed = parseResult.data;
+
+    log.info(
+      { question_count: parsed.questions.length, confidence: parsed.confidence, should_continue: parsed.should_continue },
+      "clarification complete"
+    );
+
+    return {
+      questions: parsed.questions,
+      confidence: parsed.confidence,
+      should_continue: parsed.should_continue,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic clarify call timed out");
+        throw new Error("anthropic_clarify_timeout");
+      }
+      if (error.message === "anthropic_clarify_invalid_schema") {
+        log.error({}, "Anthropic clarify response failed schema validation");
+        throw error;
+      }
+    }
+
+    log.error({ error }, "Anthropic clarify call failed");
+    throw error;
+  }
+}
+
+export type CritiqueArgs = {
+  graph: GraphT;
+  brief?: string;
+  focus_areas?: Array<"structure" | "completeness" | "feasibility" | "provenance">;
+};
+
+function buildCritiquePrompt(args: CritiqueArgs): string {
+  const graphJson = JSON.stringify(
+    {
+      nodes: args.graph.nodes,
+      edges: args.graph.edges,
+    },
+    null,
+    2
+  );
+
+  const briefContext = args.brief ? `\n\n## Original Brief\n${args.brief}` : "";
+  const focusContext = args.focus_areas?.length
+    ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
+    : "";
+
+  return `You are an expert at critiquing decision graphs for quality and feasibility.
+
+## Graph to Critique
+${graphJson}
+${briefContext}${focusContext}
+
+## Your Task
+Analyze this graph and identify issues across these dimensions:
+- **Structure**: Cycles, isolated nodes, missing connections, topology problems
+- **Completeness**: Missing nodes, incomplete options, lacking provenance
+- **Feasibility**: Unrealistic timelines, resource constraints, implementation risks
+- **Provenance**: Missing or weak provenance on beliefs/weights, citation quality
+
+For each issue provide:
+- level: Severity ("BLOCKER" | "IMPROVEMENT" | "OBSERVATION")
+  - BLOCKER: Critical issues that prevent using the graph (cycles, isolated nodes, invalid structure)
+  - IMPROVEMENT: Quality issues that reduce utility (missing provenance, weak rationales)
+  - OBSERVATION: Minor suggestions or best-practice recommendations
+- note: Description of the issue (10-280 chars)
+- target: (optional) Node or edge ID affected
+
+Also provide:
+- suggested_fixes: 0-5 actionable recommendations (brief, <100 chars each)
+- overall_quality: Assessment of graph quality ("poor" | "fair" | "good" | "excellent")
+
+**Important:** This is a non-mutating pre-flight check. Do NOT modify the graph.
+
+**Consistency:** Return issues in a stable order (BLOCKERs first, then IMPROVEMENTs, then OBSERVATIONs).
+
+## Output Format (JSON)
+{
+  "issues": [
+    {
+      "level": "BLOCKER",
+      "note": "Cycle detected between nodes dec_1 and opt_2",
+      "target": "dec_1"
+    },
+    {
+      "level": "IMPROVEMENT",
+      "note": "Edge goal_1::dec_1 lacks provenance source",
+      "target": "goal_1::dec_1::0"
+    }
+  ],
+  "suggested_fixes": [
+    "Remove edge from opt_2 to dec_1 to break cycle",
+    "Add provenance to edges with belief values"
+  ],
+  "overall_quality": "fair"
+}
+
+Respond ONLY with valid JSON.`;
+}
+
+export async function critiqueGraphWithAnthropic(
+  args: CritiqueArgs
+): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
+  const prompt = buildCritiquePrompt(args);
+
+  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length }, "calling Anthropic for critique");
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
+  try {
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 2048,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
+
+    const content = response.content[0];
+    if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+      throw new Error("unexpected_response_type");
+    }
+
+    // Extract JSON from response
+    let jsonText = content.text.trim();
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
+    } else if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
+    }
+
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicCritiqueResponse.safeParse(rawJson);
+
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten() }, "Anthropic critique response failed schema validation");
+      throw new Error("anthropic_critique_invalid_schema");
+    }
+
+    const parsed = parseResult.data;
+
+    log.info(
+      { issue_count: parsed.issues.length, quality: parsed.overall_quality },
+      "critique complete"
+    );
+
+    return {
+      issues: parsed.issues,
+      suggested_fixes: parsed.suggested_fixes,
+      overall_quality: parsed.overall_quality,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic critique call timed out");
+        throw new Error("anthropic_critique_timeout");
+      }
+      if (error.message === "anthropic_critique_invalid_schema") {
+        log.error({}, "Anthropic critique response failed schema validation");
+        throw error;
+      }
+    }
+
+    log.error({ error }, "Anthropic critique call failed");
+    throw error;
+  }
+}
+
 /**
  * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
  * This wraps the existing functions to provide a consistent interface for the router.
@@ -743,6 +1069,42 @@ export class AnthropicAdapter implements LLMAdapter {
     return {
       graph: result.graph,
       rationales: result.rationales,
+      usage: result.usage,
+    };
+  }
+
+  async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
+    const { brief, round, previous_answers, seed } = args;
+
+    const result = await clarifyBriefWithAnthropic({
+      brief,
+      round,
+      previous_answers,
+      seed,
+    });
+
+    return {
+      questions: result.questions,
+      confidence: result.confidence,
+      should_continue: result.should_continue,
+      round,
+      usage: result.usage,
+    };
+  }
+
+  async critiqueGraph(args: CritiqueGraphArgs, _opts: CallOpts): Promise<CritiqueGraphResult> {
+    const { graph, brief, focus_areas } = args;
+
+    const result = await critiqueGraphWithAnthropic({
+      graph,
+      brief,
+      focus_areas,
+    });
+
+    return {
+      issues: result.issues,
+      suggested_fixes: result.suggested_fixes,
+      overall_quality: result.overall_quality,
       usage: result.usage,
     };
   }

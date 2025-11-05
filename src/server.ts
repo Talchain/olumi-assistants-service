@@ -4,6 +4,8 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
+import clarifyRoute from "./routes/assist.clarify-brief.js";
+import critiqueRoute from "./routes/assist.critique-graph.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 
@@ -183,6 +185,8 @@ app.get("/healthz", async () => {
 
 await draftRoute(app);
 await suggestRoute(app);
+await clarifyRoute(app);
+await critiqueRoute(app);
 
 const port = Number(env.PORT || 3101);
 

@@ -436,4 +436,14 @@ export class OpenAIAdapter implements LLMAdapter {
       throw error;
     }
   }
+
+  async clarifyBrief(_args: import("./types.js").ClarifyBriefArgs, _opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
+    // TODO: Implement OpenAI clarifyBrief (currently not supported)
+    throw new Error("clarifyBrief not yet implemented for OpenAI provider");
+  }
+
+  async critiqueGraph(_args: import("./types.js").CritiqueGraphArgs, _opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
+    // TODO: Implement OpenAI critiqueGraph (currently not supported)
+    throw new Error("critiqueGraph not yet implemented for OpenAI provider");
+  }
 }

@@ -91,6 +91,70 @@ export interface RepairGraphResult {
 }
 
 /**
+ * A clarification question to refine the brief.
+ */
+export interface ClarificationQuestion {
+  question: string;
+  choices?: string[];
+  why_we_ask: string;
+  impacts_draft: string;
+}
+
+/**
+ * Arguments for clarifying a brief with follow-up questions.
+ */
+export interface ClarifyBriefArgs {
+  brief: string;
+  round: number;
+  previous_answers?: Array<{ question: string; answer: string }>;
+  seed?: number;
+}
+
+/**
+ * Result from clarifying a brief.
+ */
+export interface ClarifyBriefResult {
+  questions: ClarificationQuestion[];
+  confidence: number;
+  should_continue: boolean;
+  round: number;
+  usage: UsageMetrics;
+}
+
+/**
+ * Issue severity levels for critique.
+ */
+export type CritiqueLevel = "BLOCKER" | "IMPROVEMENT" | "OBSERVATION";
+
+/**
+ * An issue identified during graph critique.
+ */
+export interface CritiqueIssue {
+  level: CritiqueLevel;
+  note: string;
+  target?: string;
+}
+
+/**
+ * Arguments for critiquing a draft graph.
+ */
+export interface CritiqueGraphArgs {
+  graph: GraphT;
+  brief?: string;
+  focus_areas?: Array<"structure" | "completeness" | "feasibility" | "provenance">;
+}
+
+/**
+ * Result from critiquing a graph.
+ */
+export interface CritiqueGraphResult {
+  issues: CritiqueIssue[];
+  suggested_fixes: string[];
+  overall_quality?: "poor" | "fair" | "good" | "excellent";
+  usage: UsageMetrics;
+}
+
+/**
  * Call options passed to all adapter methods for request tracking and timeouts.
  */
 export interface CallOpts {
@@ -161,6 +225,26 @@ export interface LLMAdapter {
     args: DraftGraphArgs,
     opts: CallOpts
   ): AsyncIterable<DraftStreamEvent>;
+
+  /**
+   * Generate clarification questions to refine a brief (up to 3 rounds).
+   *
+   * @param args - Brief, round number, previous Q&A, seed for determinism
+   * @param opts - Request ID, timeout, abort signal
+   * @returns Questions (MCQ-first), confidence, should_continue flag
+   * @throws Error on timeout or API failure
+   */
+  clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult>;
+
+  /**
+   * Critique a draft graph for issues (non-mutating, pre-flight check).
+   *
+   * @param args - Graph, optional brief context, focus areas
+   * @param opts - Request ID, timeout, abort signal
+   * @returns Issues (BLOCKER/IMPROVEMENT/OBSERVATION), suggested fixes, quality rating
+   * @throws Error on timeout or API failure
+   */
+  critiqueGraph(args: CritiqueGraphArgs, opts: CallOpts): Promise<CritiqueGraphResult>;
 }
 
 /**
