@@ -28,6 +28,19 @@ export const TelemetryEvents = {
   RepairPartial: "assist.draft.repair_partial",
   RepairFallback: "assist.draft.repair_fallback",
 
+  // Clarifier events (v04)
+  ClarifierRoundStart: "assist.clarifier.round_start",
+  ClarifierRoundComplete: "assist.clarifier.round_complete",
+  ClarifierRoundFailed: "assist.clarifier.round_failed",
+
+  // Critique events (v04)
+  CritiqueStart: "assist.critique.start",
+  CritiqueComplete: "assist.critique.complete",
+  CritiqueFailed: "assist.critique.failed",
+
+  // Guard violations
+  GuardViolation: "assist.draft.guard_violation",
+
   // Deprecation tracking
   LegacyProvenance: "assist.draft.legacy_provenance",
 
@@ -272,6 +285,85 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.FixtureReplaced: {
           datadogClient.increment("draft.fixture.replaced", 1);
+          break;
+        }
+
+        case TelemetryEvents.ClarifierRoundComplete: {
+          // Track clarifier usage
+          datadogClient.increment("clarifier.round.completed", 1, {
+            round: String(data.round ?? "unknown"),
+            provider: String(data.provider || "unknown"),
+          });
+
+          // Latency histogram
+          if (typeof data.duration_ms === "number") {
+            datadogClient.histogram("clarifier.duration_ms", data.duration_ms, {
+              round: String(data.round ?? "unknown"),
+            });
+          }
+
+          // Cost tracking
+          if (typeof data.cost_usd === "number") {
+            datadogClient.histogram("clarifier.cost_usd", data.cost_usd, {
+              provider: String(data.provider || "unknown"),
+            });
+          }
+
+          // Confidence tracking
+          if (typeof data.confidence === "number") {
+            datadogClient.histogram("clarifier.confidence", data.confidence);
+          }
+          break;
+        }
+
+        case TelemetryEvents.ClarifierRoundFailed: {
+          datadogClient.increment("clarifier.round.failed", 1, {
+            round: String(data.round ?? "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CritiqueComplete: {
+          // Track critique usage
+          datadogClient.increment("critique.completed", 1, {
+            provider: String(data.provider || "unknown"),
+            overall_quality: String(data.overall_quality || "unknown"),
+          });
+
+          // Latency histogram
+          if (typeof data.duration_ms === "number") {
+            datadogClient.histogram("critique.duration_ms", data.duration_ms);
+          }
+
+          // Cost tracking
+          if (typeof data.cost_usd === "number") {
+            datadogClient.histogram("critique.cost_usd", data.cost_usd, {
+              provider: String(data.provider || "unknown"),
+            });
+          }
+
+          // Issue counts by severity
+          if (typeof data.blocker_count === "number") {
+            datadogClient.gauge("critique.issues.blockers", data.blocker_count);
+          }
+          if (typeof data.improvement_count === "number") {
+            datadogClient.gauge("critique.issues.improvements", data.improvement_count);
+          }
+          if (typeof data.observation_count === "number") {
+            datadogClient.gauge("critique.issues.observations", data.observation_count);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CritiqueFailed: {
+          datadogClient.increment("critique.failed", 1);
+          break;
+        }
+
+        case TelemetryEvents.GuardViolation: {
+          datadogClient.increment("draft.guard_violation", 1, {
+            violation_type: String(data.violation_type || "unknown"),
+          });
           break;
         }
 

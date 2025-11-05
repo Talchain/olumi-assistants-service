@@ -718,6 +718,7 @@ export type ClarifyArgs = {
   round: number;
   previous_answers?: Array<{ question: string; answer: string }>;
   seed?: number;
+  model?: string;
 };
 
 function buildClarifyPrompt(args: ClarifyArgs): string {
@@ -776,8 +777,9 @@ export async function clarifyBriefWithAnthropic(
   args: ClarifyArgs
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
   const prompt = buildClarifyPrompt(args);
+  const model = args.model || "claude-3-5-sonnet-20241022";
 
-  log.info({ brief_chars: args.brief.length, round: args.round }, "calling Anthropic for clarification");
+  log.info({ brief_chars: args.brief.length, round: args.round, model }, "calling Anthropic for clarification");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -786,7 +788,7 @@ export async function clarifyBriefWithAnthropic(
     const apiClient = getClient();
     const response = await apiClient.messages.create(
       {
-        model: "claude-3-5-sonnet-20241022",
+        model,
         max_tokens: 2048,
         temperature: args.seed ? 0 : 0.1,
         messages: [{ role: "user", content: prompt }],
@@ -860,6 +862,7 @@ export type CritiqueArgs = {
   graph: GraphT;
   brief?: string;
   focus_areas?: Array<"structure" | "completeness" | "feasibility" | "provenance">;
+  model?: string;
 };
 
 function buildCritiquePrompt(args: CritiqueArgs): string {
@@ -934,8 +937,9 @@ export async function critiqueGraphWithAnthropic(
   args: CritiqueArgs
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
   const prompt = buildCritiquePrompt(args);
+  const model = args.model || "claude-3-5-sonnet-20241022";
 
-  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length }, "calling Anthropic for critique");
+  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model }, "calling Anthropic for critique");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -944,7 +948,7 @@ export async function critiqueGraphWithAnthropic(
     const apiClient = getClient();
     const response = await apiClient.messages.create(
       {
-        model: "claude-3-5-sonnet-20241022",
+        model,
         max_tokens: 2048,
         temperature: 0,
         messages: [{ role: "user", content: prompt }],
@@ -979,13 +983,25 @@ export async function critiqueGraphWithAnthropic(
 
     const parsed = parseResult.data;
 
+    // Sort issues by severity for consistent ordering: BLOCKER → IMPROVEMENT → OBSERVATION
+    const severityOrder: Record<string, number> = {
+      BLOCKER: 0,
+      IMPROVEMENT: 1,
+      OBSERVATION: 2,
+    };
+    const sortedIssues = [...parsed.issues].sort((a, b) => {
+      const aOrder = severityOrder[a.level] ?? 999;
+      const bOrder = severityOrder[b.level] ?? 999;
+      return aOrder - bOrder;
+    });
+
     log.info(
-      { issue_count: parsed.issues.length, quality: parsed.overall_quality },
+      { issue_count: sortedIssues.length, quality: parsed.overall_quality },
       "critique complete"
     );
 
     return {
-      issues: parsed.issues,
+      issues: sortedIssues,
       suggested_fixes: parsed.suggested_fixes,
       overall_quality: parsed.overall_quality,
       usage: {
@@ -1081,6 +1097,7 @@ export class AnthropicAdapter implements LLMAdapter {
       round,
       previous_answers,
       seed,
+      model: this.model,
     });
 
     return {
@@ -1099,6 +1116,7 @@ export class AnthropicAdapter implements LLMAdapter {
       graph,
       brief,
       focus_areas,
+      model: this.model,
     });
 
     return {

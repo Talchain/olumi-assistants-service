@@ -438,12 +438,14 @@ export class OpenAIAdapter implements LLMAdapter {
   }
 
   async clarifyBrief(_args: import("./types.js").ClarifyBriefArgs, _opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
-    // TODO: Implement OpenAI clarifyBrief (currently not supported)
-    throw new Error("clarifyBrief not yet implemented for OpenAI provider");
+    // OpenAI provider does not yet support clarifyBrief
+    // Switch to LLM_PROVIDER=anthropic to use this feature
+    throw new Error("openai_clarify_not_supported: Clarifier endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
   }
 
   async critiqueGraph(_args: import("./types.js").CritiqueGraphArgs, _opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {
-    // TODO: Implement OpenAI critiqueGraph (currently not supported)
-    throw new Error("critiqueGraph not yet implemented for OpenAI provider");
+    // OpenAI provider does not yet support critiqueGraph
+    // Switch to LLM_PROVIDER=anthropic to use this feature
+    throw new Error("openai_critique_not_supported: Critique endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
   }
 }
