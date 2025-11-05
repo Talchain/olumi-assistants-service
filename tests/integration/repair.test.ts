@@ -2,11 +2,51 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
 
+// Set provider to anthropic so router uses AnthropicAdapter (which calls mocked functions)
+vi.stubEnv('LLM_PROVIDER', 'anthropic');
+
 // Mock Anthropic
-vi.mock("../../src/adapters/llm/anthropic.js", () => ({
-  draftGraphWithAnthropic: vi.fn(),
-  repairGraphWithAnthropic: vi.fn(),
-}));
+vi.mock("../../src/adapters/llm/anthropic.js", () => {
+  const mockUsage = {
+    input_tokens: 100,
+    output_tokens: 50,
+    cache_read_input_tokens: 0,
+  };
+
+  const draftGraphWithAnthropic = vi.fn();
+  const repairGraphWithAnthropic = vi.fn();
+
+  // Create mock AnthropicAdapter class
+  class AnthropicAdapter {
+    readonly name = 'anthropic' as const;
+    readonly model: string;
+
+    constructor(model?: string) {
+      this.model = model || 'claude-3-5-sonnet-20241022';
+    }
+
+    async draftGraph(args: any, _opts: any) {
+      return draftGraphWithAnthropic(args);
+    }
+
+    async suggestOptions(_args: any, _opts: any) {
+      return {
+        options: [],
+        usage: mockUsage,
+      };
+    }
+
+    async repairGraph(args: any, _opts: any) {
+      return repairGraphWithAnthropic(args);
+    }
+  }
+
+  return {
+    draftGraphWithAnthropic,
+    repairGraphWithAnthropic,
+    AnthropicAdapter,
+  };
+});
 
 // Mock validation
 vi.mock("../../src/services/validateClient.js", () => ({
@@ -21,8 +61,11 @@ const mockUsage = {
 };
 
 describe("Graph Repair Integration Tests", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // Reset adapter cache to ensure each test gets fresh adapters
+    const { resetAdapterCache } = await import("../../src/adapters/llm/router.js");
+    resetAdapterCache();
   });
 
   describe("LLM-guided repair flow", () => {

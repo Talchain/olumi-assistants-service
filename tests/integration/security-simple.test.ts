@@ -4,6 +4,9 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
 
+// Use fixtures provider to avoid needing API keys
+vi.stubEnv('LLM_PROVIDER', 'fixtures');
+
 // Mock Anthropic to avoid real API calls
 vi.mock("../../src/adapters/llm/anthropic.js", () => ({
   draftGraphWithAnthropic: vi.fn().mockResolvedValue({

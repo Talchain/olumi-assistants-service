@@ -5,7 +5,7 @@ import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } fro
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
 import { toPreview, type DocPreview } from "../services/docProcessing.js";
-import { draftGraphWithAnthropic, repairGraphWithAnthropic } from "../adapters/llm/anthropic.js";
+import { getAdapter } from "../adapters/llm/router.js";
 import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
@@ -13,6 +13,7 @@ import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
 import type { GraphT } from "../schemas/graph.js";
+import { validateResponse } from "../utils/responseGuards.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -24,6 +25,7 @@ const SSE_HEADERS = {
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
 const DEPRECATION_SUNSET = env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
+const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
 type SuccessPayload = ReturnType<typeof DraftGraphOutput.parse>;
@@ -36,7 +38,7 @@ type StageEvent =
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
 
 type PipelineResult =
-  | { kind: "success"; payload: SuccessPayload; hasLegacyProvenance?: boolean }
+  | { kind: "success"; payload: SuccessPayload; hasLegacyProvenance?: boolean; cost_usd: number; provider: string; model: string }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
 
 function buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
@@ -48,9 +50,22 @@ function determineClarifier(confidence: number): "complete" | "max_rounds" | "co
   return shouldClarify(confidence, 0) ? "max_rounds" : "complete";
 }
 
+/**
+ * Write SSE event following RFC 8895 multi-line semantics
+ * Each line of the data field must be prefixed with "data: "
+ */
 function writeStage(reply: FastifyReply, event: StageEvent) {
   reply.raw.write(`event: ${STAGE_EVENT}\n`);
-  reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+
+  // RFC 8895: split JSON on newlines and prefix each line with "data: "
+  const jsonStr = JSON.stringify(event);
+  const lines = jsonStr.split('\n');
+  for (const line of lines) {
+    reply.raw.write(`data: ${line}\n`);
+  }
+
+  // Blank line terminates event
+  reply.raw.write('\n');
 }
 
 async function previewAttachments(input: DraftGraphInputT, rawBody: unknown): Promise<DocPreview[]> {
@@ -85,24 +100,38 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   const confidence = calcConfidence({ goal: input.brief });
   const clarifier = determineClarifier(confidence);
 
+  // Get adapter via router (env-driven or config-based provider selection)
+  const draftAdapter = getAdapter('draft_graph');
+
+  // Cost guard: check estimated cost before making LLM call
   const promptChars = input.brief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
   const tokensIn = estimateTokens(promptChars);
   const tokensOut = estimateTokens(1200);
 
-  if (!allowedCostUSD(tokensIn, tokensOut)) {
+  if (!allowedCostUSD(tokensIn, tokensOut, draftAdapter.model)) {
     return { kind: "error", statusCode: 429, envelope: buildError("RATE_LIMITED", "cost guard exceeded") };
   }
 
   const llmStartTime = Date.now();
-  emit("assist.draft.stage", { stage: "llm_start", confidence, tokensIn });
-  const { graph, rationales, usage: draftUsage } = await draftGraphWithAnthropic({ brief: input.brief, docs, seed: 17 });
+  emit("assist.draft.stage", { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name });
+  const draftResult = await draftAdapter.draftGraph(
+    { brief: input.brief, docs, seed: 17 },
+    { requestId: `draft_${Date.now()}`, timeoutMs: 15000 }
+  );
+  const { graph, rationales, usage: draftUsage } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
   emit("assist.draft.stage", { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
 
-  // Track total usage (draft + repair if needed)
-  let totalInputTokens = draftUsage.input_tokens;
-  let totalOutputTokens = draftUsage.output_tokens;
+  // Calculate draft cost immediately (provider-specific pricing)
+  const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
+
+  // Track cache hits across draft and repair
   let totalCacheReadTokens = draftUsage.cache_read_input_tokens || 0;
+
+  // Track repair costs separately (may use different provider)
+  let repairCost = 0;
+  let repairProviderName: string | null = null;
+  let repairModelName: string | null = null;
 
   let candidate = stabiliseGraph(ensureDagAndPrune(graph));
   let issues: string[] | undefined;
@@ -115,14 +144,23 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     // LLM-guided repair: use violations as hints
     try {
       emit("assist.draft.repair_start", { violation_count: issues?.length ?? 0 });
-      const repairResult = await repairGraphWithAnthropic({
-        graph: candidate,
-        violations: issues || [],
-      });
 
-      // Accumulate repair token usage
-      totalInputTokens += repairResult.usage.input_tokens;
-      totalOutputTokens += repairResult.usage.output_tokens;
+      // Get repair adapter (may be different provider than draft)
+      const repairAdapter = getAdapter('repair_graph');
+      const repairResult = await repairAdapter.repairGraph(
+        {
+          graph: candidate,
+          violations: issues || [],
+        },
+        { requestId: `repair_${Date.now()}`, timeoutMs: 10000 }
+      );
+
+      // Calculate repair cost separately (may use different provider/pricing)
+      repairCost = calculateCost(repairAdapter.model, repairResult.usage.input_tokens, repairResult.usage.output_tokens);
+      repairProviderName = repairAdapter.name;
+      repairModelName = repairAdapter.model;
+
+      // Accumulate cache read tokens for cache hit tracking
       totalCacheReadTokens += repairResult.usage.cache_read_input_tokens || 0;
 
       // Wrap DAG operations in try/catch to guarantee fallback on malformed output
@@ -214,22 +252,43 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   // Use repair fallback reason if set; null means either no repair needed or repair succeeded
   const fallbackReason = repairFallbackReason;
 
-  // Calculate cost using actual token usage
-  const costUsd = calculateCost("claude-3-5-sonnet-20241022", totalInputTokens, totalOutputTokens);
+  // Calculate total cost (draft + repair, each priced with correct provider)
+  const totalCost = draftCost + repairCost;
   // Cache hit if we read any tokens from cache
   const promptCacheHit = totalCacheReadTokens > 0;
 
-  emit("assist.draft.completed", {
+  // Build telemetry event with per-provider cost breakdown
+  const telemetryData: Record<string, unknown> = {
     confidence,
     issues: issues?.length ?? 0,
     quality_tier: qualityTier,
     fallback_reason: fallbackReason,
-    draft_source: "anthropic",
-    cost_usd: costUsd,
+    draft_source: draftAdapter.name,
+    draft_model: draftAdapter.model,
+    draft_cost_usd: draftCost,
+    cost_usd: totalCost,
     prompt_cache_hit: promptCacheHit,
-  });
+  };
 
-  return { kind: "success", payload, hasLegacyProvenance: legacy.hasLegacy };
+  // Add repair provider info if repair was performed
+  if (repairProviderName && repairModelName) {
+    telemetryData.repair_source = repairProviderName;
+    telemetryData.repair_model = repairModelName;
+    telemetryData.repair_cost_usd = repairCost;
+    // Flag if mixed providers were used
+    telemetryData.mixed_providers = repairProviderName !== draftAdapter.name;
+  }
+
+  emit("assist.draft.completed", telemetryData);
+
+  return {
+    kind: "success",
+    payload,
+    hasLegacyProvenance: legacy.hasLegacy,
+    cost_usd: totalCost,
+    provider: draftAdapter.name,
+    model: draftAdapter.model,
+  };
 }
 
 /**
@@ -289,6 +348,23 @@ async function handleSseResponse(
       return;
     }
 
+    // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
+    const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
+    if (!guardResult.ok) {
+      const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
+      writeStage(reply, { stage: "COMPLETE", payload: guardError });
+      emit("assist.draft.guard_violation", {
+        stream_duration_ms: streamDuration,
+        violation_code: guardResult.violation.code,
+        violation_message: guardResult.violation.message,
+        provider: result.provider,
+        cost_usd: result.cost_usd,
+        fixture_shown: fixtureSent,
+      });
+      reply.raw.end();
+      return;
+    }
+
     // Add deprecation headers if legacy string provenance detected
     if (result.hasLegacyProvenance) {
       reply.raw.setHeader("X-Deprecated-Provenance-Format", "true");
@@ -296,7 +372,7 @@ async function handleSseResponse(
       reply.raw.setHeader("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
     }
 
-    // Success - extract quality metrics for telemetry
+    // Success - extract quality metrics for telemetry (with provider and cost - parity requirement)
     const confidence = result.payload.confidence ?? 0;
     const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
     const hasIssues = (result.payload.issues?.length ?? 0) > 0;
@@ -308,6 +384,9 @@ async function handleSseResponse(
       quality_tier: qualityTier,
       has_issues: hasIssues,
       confidence,
+      provider: result.provider || "unknown",  // Fallback for parity
+      cost_usd: result.cost_usd ?? 0,          // Fallback for parity
+      model: result.model,
     });
     reply.raw.end();
   } catch (error: unknown) {
@@ -341,6 +420,20 @@ async function handleJsonResponse(
   if (result.kind === "error") {
     reply.code(result.statusCode);
     return reply.send(result.envelope);
+  }
+
+  // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
+  const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
+  if (!guardResult.ok) {
+    const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
+    emit("assist.draft.guard_violation", {
+      violation_code: guardResult.violation.code,
+      violation_message: guardResult.violation.message,
+      provider: result.provider,
+      cost_usd: result.cost_usd,
+    });
+    reply.code(400);
+    return reply.send(guardError);
   }
 
   // Add deprecation headers if legacy string provenance detected

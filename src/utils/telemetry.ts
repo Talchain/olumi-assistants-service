@@ -72,26 +72,74 @@ const ANTHROPIC_PRICING = {
     input_per_1k: 0.003,   // $3 per million input tokens
     output_per_1k: 0.015,  // $15 per million output tokens
   },
-  // Add other models if used
+  "claude-3-opus-20240229": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  "claude-3-sonnet-20240229": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-3-haiku-20240307": {
+    input_per_1k: 0.00025, // $0.25 per million input tokens
+    output_per_1k: 0.00125, // $1.25 per million output tokens
+  },
+} as const;
+
+const OPENAI_PRICING = {
+  "gpt-4o": {
+    input_per_1k: 0.0025,  // $2.50 per million input tokens
+    output_per_1k: 0.01,   // $10 per million output tokens
+  },
+  "gpt-4o-mini": {
+    input_per_1k: 0.00015, // $0.15 per million input tokens
+    output_per_1k: 0.0006, // $0.60 per million output tokens
+  },
+  "gpt-4-turbo": {
+    input_per_1k: 0.01,    // $10 per million input tokens
+    output_per_1k: 0.03,   // $30 per million output tokens
+  },
+  "gpt-4": {
+    input_per_1k: 0.03,    // $30 per million input tokens
+    output_per_1k: 0.06,   // $60 per million output tokens
+  },
+  "gpt-3.5-turbo": {
+    input_per_1k: 0.0005,  // $0.50 per million input tokens
+    output_per_1k: 0.0015, // $1.50 per million output tokens
+  },
 } as const;
 
 /**
- * Calculate estimated cost for an Anthropic API call
- * @param model Model ID
+ * Calculate estimated cost for an LLM API call.
+ * Supports both Anthropic and OpenAI models.
+ *
+ * @param model Model ID (e.g., "claude-3-5-sonnet-20241022", "gpt-4o-mini")
  * @param tokensIn Input tokens
  * @param tokensOut Output tokens
- * @returns Estimated cost in USD
+ * @returns Estimated cost in USD (returns 0 for unknown models or fixtures)
  */
 export function calculateCost(model: string, tokensIn: number, tokensOut: number): number {
-  const pricing = ANTHROPIC_PRICING[model as keyof typeof ANTHROPIC_PRICING];
-  if (!pricing) {
-    log.warn({ model }, "Unknown model for cost calculation");
-    return 0;
+  // Check Anthropic pricing first
+  const anthropicPricing = ANTHROPIC_PRICING[model as keyof typeof ANTHROPIC_PRICING];
+  if (anthropicPricing) {
+    const inputCost = (tokensIn / 1000) * anthropicPricing.input_per_1k;
+    const outputCost = (tokensOut / 1000) * anthropicPricing.output_per_1k;
+    return inputCost + outputCost;
   }
 
-  const inputCost = (tokensIn / 1000) * pricing.input_per_1k;
-  const outputCost = (tokensOut / 1000) * pricing.output_per_1k;
-  return inputCost + outputCost;
+  // Check OpenAI pricing
+  const openaiPricing = OPENAI_PRICING[model as keyof typeof OPENAI_PRICING];
+  if (openaiPricing) {
+    const inputCost = (tokensIn / 1000) * openaiPricing.input_per_1k;
+    const outputCost = (tokensOut / 1000) * openaiPricing.output_per_1k;
+    return inputCost + outputCost;
+  }
+
+  // Fixtures or unknown model - return 0 (only warn if not fixtures)
+  if (model !== 'fixture-v1') {
+    log.warn({ model }, "Unknown model for cost calculation");
+  }
+  return 0;
 }
 
 /**

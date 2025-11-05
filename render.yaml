@@ -1,59 +1,55 @@
 services:
-  # Staging environment
+  # Production service (OpenAI default, Anthropic switchable)
   - type: web
-    name: olumi-assistants-service-staging
+    name: olumi-assistants-service
     runtime: node
     region: oregon
-    plan: starter
+    plan: starter  # Upgrade to standard if needed
     buildCommand: pnpm install && pnpm build
-    startCommand: pnpm start
+    startCommand: node dist/src/server.js
     healthCheckPath: /healthz
+    autoDeploy: true  # Auto-deploy on push to main
     envVars:
-      - key: NODE_ENV
-        value: staging
-      - key: PORT
-        value: 3101
-      - key: ANTHROPIC_API_KEY
-        sync: false  # Manually set in Render dashboard
-      - key: ENGINE_BASE_URL
-        sync: false  # e.g., https://plot-engine-staging.onrender.com
-      - key: ALLOWED_ORIGINS
-        value: "*"  # Restrict in production
-      - key: BODY_LIMIT_BYTES
-        value: 1048576
-      - key: DD_AGENT_HOST
-        sync: false  # Optional: Datadog agent host
-      - key: DD_SERVICE
-        value: olumi-assistants-service-staging
-      - key: DD_ENV
-        value: staging
-
-  # Production environment
-  - type: web
-    name: olumi-assistants-service-prod
-    runtime: node
-    region: oregon
-    plan: standard  # Production needs more resources
-    buildCommand: pnpm install --frozen-lockfile && pnpm build
-    startCommand: pnpm start
-    healthCheckPath: /healthz
-    autoDeploy: false  # Manual promotion from staging
-    envVars:
+      # Node environment
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3101
+
+      # LLM Provider (OpenAI default for cost-effectiveness)
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false  # Set manually in Render dashboard
       - key: ANTHROPIC_API_KEY
-        sync: false  # Manually set in Render dashboard
+        sync: false  # Optional: set if you want to switch to Anthropic
+
+      # PLoT Engine (required)
       - key: ENGINE_BASE_URL
         sync: false  # e.g., https://plot-engine.onrender.com
+
+      # Security: CORS allow-list (comma-separated origins)
       - key: ALLOWED_ORIGINS
-        sync: false  # Comma-separated production origins
+        sync: false  # e.g., https://app.olumi.ai,https://www.olumi.ai
+
+      # Security: Rate limiting
+      - key: RATE_LIMIT_MAX
+        value: 120  # requests per window
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000  # 1 minute
+
+      # Security: Body size limit
       - key: BODY_LIMIT_BYTES
-        value: 1048576
-      - key: DD_AGENT_HOST
-        sync: false  # Optional: Datadog agent host
-      - key: DD_SERVICE
-        value: olumi-assistants-service
-      - key: DD_ENV
-        value: production
+        value: 1048576  # 1 MB
+
+      # Security: Redaction (enabled by default)
+      - key: REDACTION_ENABLED
+        value: 1
+
+      # Cost protection
+      - key: COST_MAX_USD
+        value: 1.0  # Max cost per request
+
+      # Observability (Datadog disabled initially)
+      - key: DISABLE_DATADOG
+        value: 1

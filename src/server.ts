@@ -4,12 +4,28 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
+import { getAdapter } from "./adapters/llm/router.js";
+import { SERVICE_VERSION } from "./version.js";
+
+// Fail-fast: Verify LLM provider and API key configuration
+const llmProvider = env.LLM_PROVIDER || 'openai';
+if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
+  console.error('❌ FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set');
+  console.error('   Set OPENAI_API_KEY environment variable or switch to a different provider');
+  process.exit(1);
+}
+if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+  console.error('❌ FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
+  console.error('   Set ANTHROPIC_API_KEY environment variable or switch to a different provider');
+  process.exit(1);
+}
 
 // Security configuration (read from env or use defaults)
 const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
 const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
 const RATE_LIMIT_MAX = Number(env.RATE_LIMIT_MAX) || 10; // requests per minute per IP
 const RATE_LIMIT_WINDOW_MS = Number(env.RATE_LIMIT_WINDOW_MS) || 60000; // 1 minute
+const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
 const app = Fastify({
   logger: true,
@@ -152,16 +168,37 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 
-app.get("/healthz", async () => ({
-  ok: true,
-  service: "assistants",
-  limits_source: env.ENGINE_BASE_URL ? "engine" : "config"
-}));
+app.get("/healthz", async () => {
+  // Get current adapter to show provider info
+  const adapter = getAdapter();
+  return {
+    ok: true,
+    service: "assistants",
+    version: SERVICE_VERSION,
+    provider: adapter.name,
+    model: adapter.model,
+    limits_source: env.ENGINE_BASE_URL ? "engine" : "config"
+  };
+});
 
 await draftRoute(app);
 await suggestRoute(app);
 
 const port = Number(env.PORT || 3101);
+
+// Boot summary: Log configuration before starting server
+const adapter = getAdapter();
+app.log.info({
+  service: 'olumi-assistants-service',
+  version: SERVICE_VERSION,
+  provider: adapter.name,
+  model: adapter.model,
+  cost_cap_usd: COST_MAX_USD,
+  rate_limit: `${RATE_LIMIT_MAX} req/${RATE_LIMIT_WINDOW_MS}ms`,
+  body_limit_mb: (BODY_LIMIT_BYTES / 1024 / 1024).toFixed(1),
+  cors_origins: allowedOrigins.length,
+  engine_url: env.ENGINE_BASE_URL || 'not set',
+}, '🚀 Olumi Assistants Service starting');
 
 app
   .listen({ port, host: "0.0.0.0" })

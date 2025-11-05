@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import Fastify from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
 import { loadGoldenBrief, GOLDEN_BRIEFS, type GoldenBriefFixture } from "../utils/fixtures.js";
@@ -12,6 +12,9 @@ import { loadGoldenBrief, GOLDEN_BRIEFS, type GoldenBriefFixture } from "../util
  * Uses pre-recorded fixtures for consistent, fast unit testing.
  */
 
+// Set provider to anthropic so router uses AnthropicAdapter (which calls mocked functions)
+vi.stubEnv('LLM_PROVIDER', 'anthropic');
+
 // Mock usage data for Anthropic API responses
 const mockUsage = {
   input_tokens: 100,
@@ -23,8 +26,8 @@ const mockUsage = {
 const fixtureMap = new Map<string, GoldenBriefFixture>();
 
 // Mock Anthropic to return fixture-based deterministic graphs
-vi.mock("../../src/adapters/llm/anthropic.js", () => ({
-  draftGraphWithAnthropic: vi.fn().mockImplementation(({ brief }) => {
+vi.mock("../../src/adapters/llm/anthropic.js", () => {
+  const draftGraphWithAnthropic = vi.fn().mockImplementation(({ brief }) => {
     // Return deterministic graphs based on exact brief match from fixtures
     for (const [_, fixture] of fixtureMap.entries()) {
       if (brief === fixture.brief) {
@@ -144,9 +147,41 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
       rationales: [],
       usage: mockUsage,
     });
-  }),
-  repairGraphWithAnthropic: vi.fn(),
-}));
+  });
+
+  const repairGraphWithAnthropic = vi.fn();
+
+  // Create mock AnthropicAdapter class
+  class AnthropicAdapter {
+    readonly name = 'anthropic' as const;
+    readonly model: string;
+
+    constructor(model?: string) {
+      this.model = model || 'claude-3-5-sonnet-20241022';
+    }
+
+    async draftGraph(args: any, _opts: any) {
+      return draftGraphWithAnthropic(args);
+    }
+
+    async suggestOptions(_args: any, _opts: any) {
+      return {
+        options: [],
+        usage: mockUsage,
+      };
+    }
+
+    async repairGraph(args: any, _opts: any) {
+      return repairGraphWithAnthropic(args);
+    }
+  }
+
+  return {
+    draftGraphWithAnthropic,
+    repairGraphWithAnthropic,
+    AnthropicAdapter,
+  };
+});
 
 vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: null }),
@@ -166,6 +201,12 @@ describe("Golden Brief Archetypes", () => {
     for (const fixture of fixtures) {
       fixtureMap.set(fixture.brief, fixture);
     }
+  });
+
+  beforeEach(async () => {
+    // Reset adapter cache to ensure each test gets fresh adapters
+    const { resetAdapterCache } = await import("../../src/adapters/llm/router.js");
+    resetAdapterCache();
   });
 
   describe("Archetype 1: Buy vs Build", () => {

@@ -171,7 +171,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       );
 
       // Stage events are debug-only, don't need Datadog metrics
-      const debugOnlyEvents = [TelemetryEvents.Stage];
+      const debugOnlyEvents: string[] = [TelemetryEvents.Stage];
 
       for (const event of allEvents) {
         if (!debugOnlyEvents.includes(event)) {

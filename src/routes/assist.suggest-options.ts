@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { SuggestOptionsInput, SuggestOptionsOutput, ErrorV1 } from "../schemas/assist.js";
-import { suggestOptionsWithAnthropic } from "../adapters/llm/anthropic.js";
+import { getAdapter } from "../adapters/llm/router.js";
 import { log } from "../utils/telemetry.js";
 
 export default async function route(app: FastifyInstance) {
@@ -18,13 +18,22 @@ export default async function route(app: FastifyInstance) {
 
     try {
       const existingOptions = parsed.data.graph_summary?.existing_options;
-      const options = await suggestOptionsWithAnthropic({
-        goal: parsed.data.goal,
-        constraints: parsed.data.constraints,
-        existingOptions,
-      });
 
-      const output = SuggestOptionsOutput.parse({ options });
+      // Get adapter via router (env-driven or config)
+      const adapter = getAdapter('suggest_options');
+      const result = await adapter.suggestOptions(
+        {
+          goal: parsed.data.goal,
+          constraints: parsed.data.constraints,
+          existingOptions,
+        },
+        {
+          requestId: `suggest_${Date.now()}`,
+          timeoutMs: 10000, // 10s timeout for suggestions
+        }
+      );
+
+      const output = SuggestOptionsOutput.parse({ options: result.options });
       return reply.send(output);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");

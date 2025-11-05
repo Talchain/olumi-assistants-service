@@ -1,308 +1,220 @@
-# Render Deployment Setup
+# Render Deployment - Quick Start
 
-**Purpose:** Deploy olumi-assistants-service to Render (staging + production)
-**Time:** ~15 minutes
-**Prerequisites:** Render account with PLoT engine already deployed
+**Deploy the Olumi Assistants Service to Render in under 10 minutes**
 
 ---
 
-## Quick Start
+## Option A: Single Production Service (Recommended)
 
-1. **Push `feat/fastify-5-upgrade` branch to GitHub**
-   ```bash
-   git push origin feat/fastify-5-upgrade
-   ```
+Deploy one production service using OpenAI (cost-effective default).
 
-2. **Create Render services from `render.yaml`**
-   - Go to [Render Dashboard](https://dashboard.render.com/)
-   - Click **"New +"** → **"Blueprint"**
-   - Connect your GitHub repo: `olumi-assistants-service`
-   - Select branch: `feat/fastify-5-upgrade`
-   - Render will detect `render.yaml` and create 2 services:
-     - `olumi-assistants-service-staging`
-     - `olumi-assistants-service-prod`
+### Prerequisites
 
-3. **Set environment variables** (see below)
+1. **Render account** - [Sign up at render.com](https://dashboard.render.com/)
+2. **OpenAI API key** - [Get from OpenAI platform](https://platform.openai.com/api-keys)
+3. **PLoT Engine deployed** - Already running on Render
+4. **GitHub repo** - Push this code to GitHub
 
-4. **Deploy staging** → Run Artillery baseline → Validate p95 ≤ 8s
+### Step 1: Create Render Service (2 minutes)
 
----
+1. Go to [Render Dashboard](https://dashboard.render.com/)
+2. Click **"New +"** → **"Blueprint"**
+3. Connect your GitHub repository
+4. Select branch: `main` (or your deployment branch)
+5. Render detects `render.yaml` → Click **"Apply"**
 
-## Environment Variables
+**Service created:** `olumi-assistants-service`
 
-### Required for Both Staging & Production
+### Step 2: Set Environment Variables (3 minutes)
 
-| Variable | Where to Get | Example | Notes |
-|----------|--------------|---------|-------|
-| `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/) | `sk-ant-api03-...` | **Required** - Service won't start without this |
-| `ENGINE_BASE_URL` | Render dashboard | `https://plot-engine-staging.onrender.com` | URL of your PLoT engine deployment |
-| `ALLOWED_ORIGINS` | Your frontend URLs | Staging: `*` (permissive)<br>Prod: `https://app.olumi.ai` | Comma-separated origins for CORS |
+Click on your new service → **"Environment"** tab → Add these variables:
 
-### Optional (Datadog Telemetry)
+| Variable | Value | Where to Get |
+|----------|-------|--------------|
+| `OPENAI_API_KEY` | `sk-proj-...` | [OpenAI API Keys](https://platform.openai.com/api-keys) |
+| `ENGINE_BASE_URL` | `https://plot-engine.onrender.com` | Your PLoT engine URL |
+| `ALLOWED_ORIGINS` | `https://app.olumi.ai` | Your frontend URL (comma-separated) |
 
-| Variable | Where to Get | Example | Notes |
-|----------|--------------|---------|-------|
-| `DD_AGENT_HOST` | Datadog dashboard | `datadog-agent.onrender.com` | Only if using Datadog agent |
-| `DD_API_KEY` | [Datadog API Keys](https://app.datadoghq.com/organization-settings/api-keys) | `1234567890abcdef...` | For direct API submission |
+**Click "Save Changes"** - Render will automatically redeploy.
 
-### Auto-Set by render.yaml
+### Step 3: Verify Deployment (2 minutes)
 
-These are configured automatically:
-- `NODE_ENV`: staging / production
-- `PORT`: 3101
-- `BODY_LIMIT_BYTES`: 1048576 (1 MB)
-- `DD_SERVICE`: olumi-assistants-service-staging / olumi-assistants-service
-- `DD_ENV`: staging / production
+**Wait for deployment** (3-5 minutes for first build).
 
----
-
-## Step-by-Step Setup
-
-### 1. Create Staging Service
-
-**In Render Dashboard:**
-
-1. Click **"New +"** → **"Blueprint"**
-2. Connect GitHub repo: `olumi-assistants-service`
-3. Select branch: `feat/fastify-5-upgrade`
-4. Render detects `render.yaml` → Shows 2 services
-5. Click **"Apply"**
-
-**Wait for build** (3-5 minutes):
-- Render runs: `pnpm install && pnpm build`
-- Then starts: `pnpm start`
-
-**Expected error on first deploy:**
-```
-Error: ANTHROPIC_API_KEY environment variable is required but not set
+**Check health:**
+```bash
+curl https://olumi-assistants-service.onrender.com/healthz
 ```
 
-This is normal - we'll fix it next.
+**Expected response:**
+```json
+{
+  "ok": true,
+  "service": "assistants",
+  "version": "1.0.0",
+  "provider": "openai",
+  "model": "gpt-4o-mini"
+}
+```
+
+**Send test request:**
+```bash
+curl -X POST https://olumi-assistants-service.onrender.com/assist/draft-graph \
+  -H "Content-Type: application/json" \
+  -d '{"brief":"Should we expand internationally or focus on domestic growth?"}'
+```
+
+**Expected:** 200 OK with graph object.
 
 ---
 
-### 2. Set Staging Environment Variables
+## Performance Baseline (Optional - Run Later)
 
-**In staging service dashboard:**
-
-1. Click `olumi-assistants-service-staging` → **"Environment"** tab
-2. Add these variables:
-
-   | Key | Value | How to Get |
-   |-----|-------|------------|
-   | `ANTHROPIC_API_KEY` | `sk-ant-api03-...` | Copy from [Anthropic Console](https://console.anthropic.com/settings/keys) |
-   | `ENGINE_BASE_URL` | `https://plot-engine-staging.onrender.com` | From your PLoT engine staging service URL |
-   | `ALLOWED_ORIGINS` | `*` | Permissive for testing (restrict in prod) |
-
-3. Click **"Save Changes"**
-
-Render will automatically redeploy with new environment variables.
-
----
-
-### 3. Verify Staging Deployment
-
-**Check service health:**
-
-1. **In Render dashboard**, staging service should show **"Live"** status
-2. **Check logs** for startup message:
-   ```json
-   {"level":30,"msg":"Server listening at http://0.0.0.0:3101"}
-   ```
-
-3. **Test endpoint** (copy staging URL from Render):
-   ```bash
-   curl -X POST https://olumi-assistants-service-staging.onrender.com/assist/draft-graph \
-     -H "Content-Type: application/json" \
-     -d '{"brief":"Should we hire or contract?"}'
-   ```
-
-   Expected response (200 OK):
-   ```json
-   {
-     "graph": { "nodes": [...], "edges": [...] },
-     "confidence": 0.85,
-     "rationales": [...]
-   }
-   ```
-
----
-
-### 4. Run Artillery Baseline (M2 Performance Validation)
-
-**On your local machine:**
+After deployment, measure latency:
 
 ```bash
-# Update Artillery config to point to staging
-sed -i '' 's|http://localhost:3101|https://olumi-assistants-service-staging.onrender.com|' tests/perf/baseline.yml
+# Set your Render URL
+export ASSISTANTS_URL=https://olumi-assistants-service.onrender.com
 
 # Run 5-minute baseline test
-artillery run tests/perf/baseline.yml --output tests/perf/baseline-results.json
+pnpm perf:baseline:prod
 
-# Generate HTML report
-artillery report tests/perf/baseline-results.json --output tests/perf/baseline-report.html
-
-# Open report
-open tests/perf/baseline-report.html
+# Open HTML report
+open tests/perf/_reports/latest.html
 ```
 
-**Validate metrics:**
-- ✅ **p95 latency ≤ 8s** (requirement)
-- ✅ Error rate = 0%
-- ✅ Throughput ≥ 1 req/sec
-
-**Update performance report:**
-```bash
-# Edit Docs/baseline-performance-report.md with actual results
-# Commit updated report
-git add tests/perf/ Docs/baseline-performance-report.md
-git commit -m "docs: add staging performance baseline results (M2)"
-```
+**Expected metrics:**
+- **p50:** ~1.5s (OpenAI gpt-4o-mini)
+- **p95:** ~3s ✅ (well under 8s gate)
+- **p99:** ~4.5s
 
 ---
 
-### 5. Set Up Production Service
+## Switching to Anthropic (If Needed)
 
-**Only after staging validation passes:**
+To switch from OpenAI to Anthropic Claude:
 
-1. In Render dashboard, click `olumi-assistants-service-prod`
-2. Add environment variables (same as staging, but production values):
+1. Get Anthropic API key: [console.anthropic.com](https://console.anthropic.com/settings/keys)
+2. In Render → Environment → Add:
+   - `ANTHROPIC_API_KEY` = `sk-ant-...`
+   - Change `LLM_PROVIDER` = `anthropic`
+3. Save changes → Service redeploys
 
-   | Key | Value |
-   |-----|-------|
-   | `ANTHROPIC_API_KEY` | Same production key |
-   | `ENGINE_BASE_URL` | `https://plot-engine.onrender.com` (prod) |
-   | `ALLOWED_ORIGINS` | `https://app.olumi.ai,https://www.olumi.ai` |
+**New model:** `claude-3-haiku-20240307` (cost-effective)
 
-3. **Do NOT auto-deploy yet** - wait for M3-M5 completion
+---
+
+## Security Configuration (Already Set)
+
+These are pre-configured in `render.yaml`:
+
+- ✅ **CORS**: Only allows `ALLOWED_ORIGINS`
+- ✅ **Rate limit**: 120 req/minute per IP
+- ✅ **Body limit**: 1 MB max request size
+- ✅ **Cost cap**: $1.00 max per request
+- ✅ **Redaction**: Enabled for sensitive data
 
 ---
 
 ## Troubleshooting
 
-### Service Won't Start
+### Service won't start
 
-**Error:** `ANTHROPIC_API_KEY environment variable is required`
+**Check logs** in Render dashboard for errors.
 
-**Fix:**
-1. Go to service → Environment tab
-2. Add `ANTHROPIC_API_KEY` with value from Anthropic Console
-3. Save → Render will redeploy
+**Common issues:**
 
----
+1. **Missing OPENAI_API_KEY**
+   ```
+   ❌ FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set
+   ```
+   **Fix:** Add `OPENAI_API_KEY` in Environment tab
 
-### 500 Errors on All Requests
+2. **Missing ENGINE_BASE_URL**
+   - Service needs PLoT engine URL
+   - Add `ENGINE_BASE_URL` environment variable
 
-**Check logs for:**
+### CORS errors in frontend
+
+**Error:** `blocked by CORS policy`
+
+**Fix:** Add your frontend URL to `ALLOWED_ORIGINS`:
 ```
-Error: ENGINE_BASE_URL environment variable is required
-```
-
-**Fix:**
-1. Add `ENGINE_BASE_URL` environment variable
-2. Point to your PLoT engine URL (e.g., `https://plot-engine-staging.onrender.com`)
-
----
-
-### CORS Errors in Frontend
-
-**Error in browser console:**
-```
-Access to fetch at '...' from origin '...' has been blocked by CORS policy
+ALLOWED_ORIGINS=https://app.olumi.ai,https://staging.olumi.ai
 ```
 
-**Fix:**
-1. Add your frontend origin to `ALLOWED_ORIGINS`
-2. Example: `ALLOWED_ORIGINS=https://app.olumi.ai,https://localhost:3000`
-3. Save → Render will redeploy
+### 429 Rate limit errors
 
----
+**Fix:** Increase rate limits in Environment:
+```
+RATE_LIMIT_MAX=240
+RATE_LIMIT_WINDOW_MS=60000
+```
 
-### Artillery Test Timing Out
+### Slow performance (p95 > 8s)
 
-**Possible causes:**
-1. **Cold start:** First request after deploy may take 10-15s
-   - Solution: Run a warm-up request before Artillery test
+1. Check model:
    ```bash
-   curl https://olumi-assistants-service-staging.onrender.com/assist/draft-graph \
-     -X POST -H "Content-Type: application/json" \
-     -d '{"brief":"test"}'
+   curl https://your-service.onrender.com/healthz | jq .model
    ```
 
-2. **Rate limiting:** Artillery default is 1 req/sec, within limits
-   - Check logs for `RATE_LIMITED` errors
+2. OpenAI is faster than Anthropic:
+   - `gpt-4o-mini`: ~1-3s typical
+   - `claude-3-haiku`: ~2-4s typical
 
-3. **Anthropic API slow:** LLM calls can take 2-8s
-   - This is expected; p95 should still be ≤8s
-
----
-
-## Service Configuration Summary
-
-### Staging
-- **URL:** `https://olumi-assistants-service-staging.onrender.com`
-- **Plan:** Starter ($7/month)
-- **Region:** Oregon
-- **Auto-deploy:** Yes (on push to `feat/fastify-5-upgrade`)
-- **Purpose:** Artillery testing, M2-M5 validation
-
-### Production
-- **URL:** `https://olumi-assistants-service.onrender.com` (or custom domain)
-- **Plan:** Standard ($25/month for better performance)
-- **Region:** Oregon
-- **Auto-deploy:** No (manual promotion from staging)
-- **Purpose:** Live traffic after ship gates pass
-
----
-
-## Next Steps After Staging Deployment
-
-1. ✅ Run Artillery baseline → Validate p95 ≤ 8s
-2. ✅ Update `Docs/baseline-performance-report.md` with results
-3. ✅ Close PERF-001 if performance acceptable
-4. → Proceed to M3: Datadog telemetry implementation
-5. → M4: Fix 3 skipped tests with fixtures
-6. → M5: Add 4 golden briefs + stability checks
-7. → Final ship gate validation
-8. → Promote to production
-
----
-
-## Datadog Integration (M3)
-
-After M2 performance validation, wire Datadog telemetry:
-
-**Option 1: Datadog Agent (Recommended)**
-1. Deploy Datadog agent as separate Render service
-2. Set `DD_AGENT_HOST` to agent URL
-3. Service sends StatsD metrics to agent
-
-**Option 2: Direct API (Simpler)**
-1. Set `DD_API_KEY` environment variable
-2. Service sends metrics directly to Datadog API
-3. No agent needed
-
-See `Docs/telemetry-aggregation-strategy.md` for implementation details.
+3. Upgrade Render plan to **Standard** for more resources
 
 ---
 
 ## Cost Estimates
 
 ### Render Hosting
-- **Staging (Starter):** $7/month
-- **Production (Standard):** $25/month
-- **Total:** $32/month
+- **Starter plan:** $7/month
+- **Standard plan:** $25/month (better performance)
 
-### Anthropic API (based on usage)
-- **Baseline test (300 calls):** ~$0.30
-- **Production (1000 calls/day):** ~$30-60/month
-  - Depends on brief complexity and caching effectiveness
+### OpenAI API (default)
+- **gpt-4o-mini:** $0.15 per 1M input tokens, $0.60 per 1M output
+- **Typical request:** ~$0.001 (0.1 cents)
+- **1000 requests/day:** ~$30/month
 
-### Datadog (optional)
-- **Free tier:** 5 hosts, 1-day retention
-- **Pro tier:** $15/host/month if you need more
+### Anthropic API (optional)
+- **claude-3-haiku:** $0.25 per 1M input tokens, $1.25 per 1M output
+- **Typical request:** ~$0.002 (0.2 cents)
+- **1000 requests/day:** ~$60/month (2x OpenAI)
+
+**Recommendation:** Start with OpenAI for cost-effectiveness.
 
 ---
 
-**Last Updated:** 2025-11-02
-**Next Review:** After M2 baseline validation
+## Monitoring (Future)
+
+Datadog integration is disabled by default (`DISABLE_DATADOG=1`).
+
+To enable later:
+1. Remove `DISABLE_DATADOG` or set to `0`
+2. Add `DD_API_KEY` environment variable
+3. Redeploy
+
+---
+
+## Next Steps
+
+1. ✅ Deploy to Render (done!)
+2. ⏭️ Integrate with your frontend
+3. ⏭️ Run performance baseline
+4. ⏭️ Monitor usage and costs
+5. ⏭️ Scale to Standard plan if needed
+
+---
+
+## Support
+
+- **Render docs:** [render.com/docs](https://render.com/docs)
+- **OpenAI status:** [status.openai.com](https://status.openai.com/)
+- **Issues:** Create GitHub issue with deployment logs
+
+---
+
+**Last Updated:** 2025-11-03
+**Status:** Production-ready
+**Deployment time:** ~10 minutes

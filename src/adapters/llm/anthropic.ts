@@ -4,6 +4,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
 
 export type DraftArgs = {
   brief: string;
@@ -684,5 +685,65 @@ export async function repairGraphWithAnthropic(
       "Anthropic repair call failed"
     );
     throw error;
+  }
+}
+
+/**
+ * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
+ * This wraps the existing functions to provide a consistent interface for the router.
+ */
+export class AnthropicAdapter implements LLMAdapter {
+  readonly name = 'anthropic' as const;
+  readonly model: string;
+
+  constructor(model?: string) {
+    // Default to Claude 3 Haiku for cost-effectiveness
+    this.model = model || process.env.LLM_MODEL || 'claude-3-haiku-20240307';
+  }
+
+  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
+    const { brief, docs = [], seed } = args;
+
+    // Call existing function with compatible args
+    const result = await draftGraphWithAnthropic({
+      brief,
+      docs,
+      seed,
+    });
+
+    return {
+      graph: result.graph,
+      rationales: result.rationales,
+      usage: result.usage,
+    };
+  }
+
+  async suggestOptions(args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
+    const options = await suggestOptionsWithAnthropic(args);
+
+    // suggestOptionsWithAnthropic doesn't return usage yet, so provide minimal usage
+    // TODO: Extract usage from actual API call in suggestOptionsWithAnthropic
+    return {
+      options,
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
+
+  async repairGraph(args: RepairGraphArgs, _opts: CallOpts): Promise<RepairGraphResult> {
+    const { graph, violations } = args;
+
+    const result = await repairGraphWithAnthropic({
+      graph,
+      violations,
+    });
+
+    return {
+      graph: result.graph,
+      rationales: result.rationales,
+      usage: result.usage,
+    };
   }
 }
