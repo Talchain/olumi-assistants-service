@@ -6,8 +6,10 @@ import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
 import clarifyRoute from "./routes/assist.clarify-brief.js";
 import critiqueRoute from "./routes/assist.critique-graph.js";
+import explainRoute from "./routes/assist.explain-diff.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
+import { getAllFeatureFlags } from "./utils/feature-flags.js";
 
 // Fail-fast: Verify LLM provider and API key configuration
 const llmProvider = env.LLM_PROVIDER || 'openai';
@@ -179,7 +181,8 @@ app.get("/healthz", async () => {
     version: SERVICE_VERSION,
     provider: adapter.name,
     model: adapter.model,
-    limits_source: env.ENGINE_BASE_URL ? "engine" : "config"
+    limits_source: env.ENGINE_BASE_URL ? "engine" : "config",
+    feature_flags: getAllFeatureFlags()
   };
 });
 
@@ -187,6 +190,7 @@ await draftRoute(app);
 await suggestRoute(app);
 await clarifyRoute(app);
 await critiqueRoute(app);
+await explainRoute(app);
 
 const port = Number(env.PORT || 3101);
 

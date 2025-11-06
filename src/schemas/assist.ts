@@ -12,6 +12,7 @@ export const DraftGraphInput = z.object({
       })
     )
     .optional(),
+  attachment_payloads: z.record(z.any()).optional(), // Attachment content (base64 or { data, encoding })
   constraints: z.record(z.any()).optional(),
   flags: z.record(z.boolean()).optional(),
   include_debug: z.boolean().optional()
@@ -89,6 +90,17 @@ export const ClarifyBriefOutput = z.object({
 export const CritiqueGraphInput = z.object({
   graph: Graph,
   brief: z.string().min(30).max(5000).optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        kind: z.enum(["pdf", "csv", "txt", "md"]),
+        name: z.string()
+      })
+    )
+    .optional(),
+  attachment_payloads: z.record(z.any()).optional(), // Attachment content (base64 or { data, encoding })
+  flags: z.record(z.boolean()).optional(), // Feature flags (per-request overrides)
   focus_areas: z.array(z.enum(["structure", "completeness", "feasibility", "provenance"])).optional()
 }).strict();
 
@@ -102,6 +114,30 @@ export const CritiqueGraphOutput = z.object({
   overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional()
 });
 
+export const ExplainDiffInput = z.object({
+  patch: z.object({
+    adds: z.object({
+      nodes: z.array(z.any()).default([]),
+      edges: z.array(z.any()).default([])
+    }).default({ nodes: [], edges: [] }),
+    updates: z.array(z.any()).default([]),
+    removes: z.array(z.any()).default([])
+  }),
+  brief: z.string().min(30).max(5000).optional(),
+  graph_summary: z.object({
+    node_count: z.number(),
+    edge_count: z.number()
+  }).optional()
+}).strict();
+
+export const ExplainDiffOutput = z.object({
+  rationales: z.array(z.object({
+    target: z.string(),
+    why: z.string().max(280),
+    provenance_source: z.string().optional()
+  })).min(1)
+});
+
 export const ErrorV1 = z.object({
   schema: z.literal("error.v1"),
   code: z.enum(["BAD_INPUT", "RATE_LIMITED", "INTERNAL"]),
@@ -112,3 +148,5 @@ export const ErrorV1 = z.object({
 export type DraftGraphInputT = z.infer<typeof DraftGraphInput>;
 export type ClarifyBriefInputT = z.infer<typeof ClarifyBriefInput>;
 export type CritiqueGraphInputT = z.infer<typeof CritiqueGraphInput>;
+export type ExplainDiffInputT = z.infer<typeof ExplainDiffInput>;
+export type ExplainDiffOutputT = z.infer<typeof ExplainDiffOutput>;

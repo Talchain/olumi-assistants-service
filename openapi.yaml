@@ -31,6 +31,8 @@ tags:
     description: Graph drafting endpoints
   - name: Suggest
     description: Option suggestion endpoints
+  - name: Explain
+    description: Explanation and rationale endpoints
   - name: Health
     description: Service health check
 
@@ -38,7 +40,14 @@ paths:
   /healthz:
     get:
       summary: Health check
-      description: Returns service health status and configuration info
+      description: |
+        Returns service health status and configuration info.
+
+        **Use for ops visibility:**
+        - Service status and version
+        - LLM provider and model configuration
+        - Active feature flags (environment-level)
+        - Graph limits source (engine vs config)
       tags:
         - Health
       responses:
@@ -48,6 +57,14 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ok
+                  - service
+                  - version
+                  - provider
+                  - model
+                  - limits_source
+                  - feature_flags
                 properties:
                   ok:
                     type: boolean
@@ -55,10 +72,40 @@ paths:
                   service:
                     type: string
                     example: "assistants"
+                  version:
+                    type: string
+                    description: Service version (semver)
+                    example: "1.0.1"
+                  provider:
+                    type: string
+                    description: LLM provider in use
+                    enum: [openai, anthropic, fixtures]
+                    example: "anthropic"
+                  model:
+                    type: string
+                    description: LLM model identifier
+                    example: "claude-3-5-sonnet-20241022"
                   limits_source:
                     type: string
                     enum: [engine, config]
                     description: Where graph limits are sourced from
+                  feature_flags:
+                    type: object
+                    description: Current feature flag values (environment-level)
+                    properties:
+                      grounding:
+                        type: boolean
+                        description: Document grounding enabled
+                      critique:
+                        type: boolean
+                        description: Critique endpoint enabled
+                      clarifier:
+                        type: boolean
+                        description: Clarifying questions enabled
+                    example:
+                      grounding: true
+                      critique: true
+                      clarifier: true
 
   /assist/draft-graph:
     post:
@@ -203,6 +250,119 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /assist/suggest-options:
+    post:
+      summary: Suggest strategic options for a goal
+      description: |
+        Generates 3-5 distinct strategic options for a given goal.
+
+        **Features:**
+        - Deterministic ordering (options sorted alphabetically by ID)
+        - Optional constraint consideration
+        - Can avoid duplicating existing options
+        - Returns structured options with IDs, titles, and descriptions
+      tags:
+        - Suggest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestOptionsInput'
+            examples:
+              basic:
+                summary: Basic goal
+                value:
+                  goal: "Increase customer retention"
+              with_constraints:
+                summary: With constraints and existing options
+                value:
+                  goal: "Reduce operational costs"
+                  constraints:
+                    budget: 100000
+                    timeline: "Q1 2025"
+                  graph_summary:
+                    decision: "dec_1"
+                    existing_options: ["Outsource IT", "Automate workflows"]
+      responses:
+        '200':
+          description: Options successfully generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestOptionsOutput'
+        '400':
+          $ref: '#/components/responses/BadInput'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /assist/explain-diff:
+    post:
+      summary: Explain changes in a graph patch
+      description: |
+        Generates rationales explaining why specific changes were made in a graph patch.
+
+        **Features:**
+        - Non-mutating (does not modify the graph)
+        - Deterministic ordering (rationales sorted alphabetically by target)
+        - Structured output with target IDs, explanations, and optional provenance
+        - Requires at least one change in the patch
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExplainDiffInput'
+            examples:
+              basic:
+                summary: Explain added nodes
+                value:
+                  patch:
+                    adds:
+                      nodes:
+                        - id: "opt_premium"
+                          kind: "option"
+                          label: "Premium pricing strategy"
+                      edges: []
+                    updates: []
+                    removes: []
+                  brief: "We need to increase revenue while maintaining customer satisfaction"
+              with_summary:
+                summary: With graph context
+                value:
+                  patch:
+                    adds:
+                      nodes:
+                        - id: "out_revenue"
+                          kind: "outcome"
+                          label: "Revenue impact +15%"
+                      edges:
+                        - from: "opt_premium"
+                          to: "out_revenue"
+                    updates: []
+                    removes: []
+                  brief: "Analyze pricing strategy impact"
+                  graph_summary:
+                    node_count: 8
+                    edge_count: 10
+      responses:
+        '200':
+          description: Rationales successfully generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExplainDiffOutput'
+        '400':
+          $ref: '#/components/responses/BadInput'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   schemas:
     DraftGraphInput:
@@ -218,12 +378,25 @@ components:
           example: "Should we migrate to microservices or keep the monolith? Consider cost, team size, and time to market."
         attachments:
           type: array
-          description: Optional document attachments for context
+          description: |
+            Optional document attachments for context (PDF, CSV, TXT, MD).
+
+            **Limits:**
+            - Per-file: 5,000 characters maximum
+            - Aggregate: 50,000 characters maximum across all files
+            - Exceeding limits returns 400 BAD_INPUT with actionable hints
           items:
             $ref: '#/components/schemas/Attachment'
         attachment_payloads:
           type: object
-          description: Base64-encoded content for each attachment
+          description: |
+            Base64-encoded content for each attachment.
+
+            **Format:**
+            - String: Direct base64-encoded content
+            - Object: `{data: string, encoding: "base64"}`
+
+            Whitespace in base64 strings is automatically stripped during validation.
           additionalProperties:
             oneOf:
               - type: string
@@ -241,7 +414,17 @@ components:
           additionalProperties: true
         flags:
           type: object
-          description: Feature flags (reserved for future use)
+          description: |
+            Per-request feature flag overrides.
+
+            **Available flags:**
+            - `grounding`: Enable/disable document grounding (env: ENABLE_GROUNDING, default: true)
+            - `critique`: Enable/disable critique endpoint (env: ENABLE_CRITIQUE, default: true)
+            - `clarifier`: Enable/disable clarifying questions (env: ENABLE_CLARIFIER, default: true)
+
+            **Priority:** Per-request flag > Environment variable > Default value
+
+            **Example:** `{"flags": {"grounding": false}}` disables grounding for this request only
           additionalProperties:
             type: boolean
         include_debug:
@@ -320,6 +503,159 @@ components:
               description: Document preview metadata
               items:
                 type: object
+
+    SuggestOptionsInput:
+      type: object
+      required:
+        - goal
+      properties:
+        goal:
+          type: string
+          minLength: 5
+          description: The goal or objective to generate options for
+          example: "Increase customer retention rate"
+        constraints:
+          type: object
+          description: Optional constraints to consider when generating options
+          additionalProperties: true
+          example:
+            budget: 100000
+            timeline: "Q1 2025"
+        graph_summary:
+          type: object
+          description: Optional context about existing graph state
+          properties:
+            decision:
+              type: string
+              description: Decision node ID
+            existing_options:
+              type: array
+              items:
+                type: string
+              description: List of existing option labels to avoid duplicating
+        include_debug:
+          type: boolean
+          description: Include debug information in response
+          default: false
+      additionalProperties: false
+
+    SuggestOptionsOutput:
+      type: object
+      required:
+        - options
+      properties:
+        options:
+          type: array
+          minItems: 3
+          maxItems: 5
+          description: Generated strategic options (sorted alphabetically by ID)
+          items:
+            type: object
+            required:
+              - id
+              - title
+              - description
+            properties:
+              id:
+                type: string
+                minLength: 1
+                description: Unique identifier for this option
+                example: "opt_premium_pricing"
+              title:
+                type: string
+                minLength: 3
+                maxLength: 120
+                description: Short title for the option
+                example: "Premium Pricing Strategy"
+              description:
+                type: string
+                minLength: 10
+                maxLength: 500
+                description: Detailed description of the option
+                example: "Increase prices by 20% while adding premium features and personalized support to justify the higher cost"
+
+    ExplainDiffInput:
+      type: object
+      required:
+        - patch
+      properties:
+        patch:
+          type: object
+          description: Graph patch containing changes to explain
+          properties:
+            adds:
+              type: object
+              description: Added nodes and edges
+              properties:
+                nodes:
+                  type: array
+                  items:
+                    type: object
+                  default: []
+                edges:
+                  type: array
+                  items:
+                    type: object
+                  default: []
+              default:
+                nodes: []
+                edges: []
+            updates:
+              type: array
+              description: Updated nodes
+              items:
+                type: object
+              default: []
+            removes:
+              type: array
+              description: Removed node/edge IDs
+              items:
+                type: string
+              default: []
+        brief:
+          type: string
+          description: Optional context about what the user is trying to achieve
+          example: "We need to reduce costs while maintaining quality"
+        graph_summary:
+          type: object
+          description: Optional summary of the current graph state
+          properties:
+            node_count:
+              type: number
+              description: Total number of nodes in the graph
+            edge_count:
+              type: number
+              description: Total number of edges in the graph
+      additionalProperties: false
+
+    ExplainDiffOutput:
+      type: object
+      required:
+        - rationales
+      properties:
+        rationales:
+          type: array
+          minItems: 1
+          description: Explanations for each change (sorted alphabetically by target)
+          items:
+            type: object
+            required:
+              - target
+              - why
+            properties:
+              target:
+                type: string
+                description: Node or edge ID being explained
+                example: "opt_premium"
+              why:
+                type: string
+                maxLength: 280
+                description: Brief explanation of why this change was made
+                example: "Premium pricing aligns with the goal of increasing revenue while maintaining brand positioning"
+              provenance_source:
+                type: string
+                description: Optional citation to source document that influenced this change
+                example: "market-analysis.pdf page 3"
 
     Graph:
       type: object

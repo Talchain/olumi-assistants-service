@@ -72,6 +72,42 @@ export interface SuggestOptionsResult {
 }
 
 /**
+ * Arguments for explaining a graph patch.
+ */
+export interface ExplainDiffArgs {
+  patch: {
+    adds: {
+      nodes: Array<{ id?: string; kind?: string; label?: string; [key: string]: unknown }>;
+      edges: Array<{ id?: string; from: string; to: string; [key: string]: unknown }>;
+    };
+    updates: Array<unknown>;
+    removes: Array<unknown>;
+  };
+  brief?: string;
+  graph_summary?: {
+    node_count: number;
+    edge_count: number;
+  };
+}
+
+/**
+ * A rationale explaining why a change was made.
+ */
+export interface DiffRationale {
+  target: string;
+  why: string;
+  provenance_source?: string;
+}
+
+/**
+ * Result from explaining a patch.
+ */
+export interface ExplainDiffResult {
+  rationales: DiffRationale[];
+  usage: UsageMetrics;
+}
+
+/**
  * Arguments for repairing a graph that failed validation.
  */
 export interface RepairGraphArgs {
@@ -141,6 +177,7 @@ export interface CritiqueIssue {
 export interface CritiqueGraphArgs {
   graph: GraphT;
   brief?: string;
+  docs?: DocPreview[];
   focus_areas?: Array<"structure" | "completeness" | "feasibility" | "provenance">;
 }
 
@@ -245,6 +282,16 @@ export interface LLMAdapter {
    * @throws Error on timeout or API failure
    */
   critiqueGraph(args: CritiqueGraphArgs, opts: CallOpts): Promise<CritiqueGraphResult>;
+
+  /**
+   * Explain why changes were made in a graph patch.
+   *
+   * @param args - Patch (adds/updates/removes), optional brief/graph summary
+   * @param opts - Request ID, timeout, abort signal
+   * @returns Rationales explaining each change with provenance
+   * @throws Error on timeout or API failure
+   */
+  explainDiff(args: ExplainDiffArgs, opts: CallOpts): Promise<ExplainDiffResult>;
 }
 
 /**

@@ -38,6 +38,16 @@ export const TelemetryEvents = {
   CritiqueComplete: "assist.critique.complete",
   CritiqueFailed: "assist.critique.failed",
 
+  // Suggest Options events (v04)
+  SuggestOptionsStart: "assist.suggest_options.start",
+  SuggestOptionsComplete: "assist.suggest_options.complete",
+  SuggestOptionsFailed: "assist.suggest_options.failed",
+
+  // Explain Diff events (v04)
+  ExplainDiffStart: "assist.explain_diff.start",
+  ExplainDiffComplete: "assist.explain_diff.complete",
+  ExplainDiffFailed: "assist.explain_diff.failed",
+
   // Guard violations
   GuardViolation: "assist.draft.guard_violation",
 
@@ -357,6 +367,66 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CritiqueFailed: {
           datadogClient.increment("critique.failed", 1);
+          break;
+        }
+
+        case TelemetryEvents.SuggestOptionsComplete: {
+          // Track suggest-options usage
+          datadogClient.increment("suggest_options.completed", 1, {
+            provider: String(data.provider || "unknown"),
+          });
+
+          // Latency histogram
+          if (typeof data.duration_ms === "number") {
+            datadogClient.histogram("suggest_options.duration_ms", data.duration_ms);
+          }
+
+          // Cost tracking
+          if (typeof data.cost_usd === "number") {
+            datadogClient.histogram("suggest_options.cost_usd", data.cost_usd, {
+              provider: String(data.provider || "unknown"),
+            });
+          }
+
+          // Option count distribution
+          if (typeof data.option_count === "number") {
+            datadogClient.gauge("suggest_options.option_count", data.option_count);
+          }
+          break;
+        }
+
+        case TelemetryEvents.SuggestOptionsFailed: {
+          datadogClient.increment("suggest_options.failed", 1);
+          break;
+        }
+
+        case TelemetryEvents.ExplainDiffComplete: {
+          // Track explain-diff usage
+          datadogClient.increment("explain_diff.completed", 1, {
+            provider: String(data.provider || "unknown"),
+          });
+
+          // Latency histogram
+          if (typeof data.duration_ms === "number") {
+            datadogClient.histogram("explain_diff.duration_ms", data.duration_ms);
+          }
+
+          // Cost tracking
+          if (typeof data.cost_usd === "number") {
+            datadogClient.histogram("explain_diff.cost_usd", data.cost_usd, {
+              provider: String(data.provider || "unknown"),
+            });
+          }
+
+          // Rationale count distribution
+          if (typeof data.rationale_count === "number") {
+            datadogClient.gauge("explain_diff.rationale_count", data.rationale_count);
+          }
+          break;
+        }
+
+        case TelemetryEvents.ExplainDiffFailed: {
+          datadogClient.increment("explain_diff.failed", 1);
           break;
         }
 

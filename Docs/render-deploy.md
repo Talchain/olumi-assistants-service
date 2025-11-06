@@ -1,7 +1,9 @@
 # Render Deployment Guide - Olumi Assistants Service
 
-**Service:** olumi-assistants-service v1.0.1
+**Service:** olumi-assistants-service v1.1.0
 **Target:** Render.com (Node 20, Oregon region)
+
+**New in v1.1.0:** Document grounding (opt-in via `ENABLE_GROUNDING=true`)
 
 ---
 
@@ -108,6 +110,91 @@ curl -s -X POST https://olumi-assistants-service.onrender.com/assist/critique-gr
 ```
 
 Expected: 200 OK with `issues` array
+
+---
+
+## Enabling Document Grounding (v1.1.0+)
+
+### Overview
+Document grounding is **disabled by default** for production safety. Enable explicitly after verifying baseline performance.
+
+### Step 1: Deploy with Grounding OFF (Default)
+Deploy v1.1.0 with default settings (grounding disabled):
+```bash
+# No action needed - ENABLE_GROUNDING defaults to false
+```
+
+Verify grounding is OFF:
+```bash
+curl -s https://YOUR-SERVICE-URL/healthz | jq '.feature_flags.grounding'
+# Should return: false
+```
+
+Monitor for 24 hours:
+- Check error rates (should be same as v1.0.1)
+- Check p95 latency (should be same as v1.0.1)
+- Verify all endpoints functional
+
+### Step 2: Enable Grounding
+After baseline verification, enable grounding:
+
+1. **Add Environment Variable:**
+   - Dashboard → Service → Environment
+   - Click **"Add Environment Variable"**
+   - Name: `ENABLE_GROUNDING`
+   - Value: `true`
+   - Click **"Save Changes"**
+
+2. **Restart Service:**
+   - Dashboard → Service → Manual Deploy → Redeploy
+   - Or wait for auto-restart (happens automatically)
+
+3. **Verify Grounding Enabled:**
+```bash
+curl -s https://YOUR-SERVICE-URL/healthz | jq '.feature_flags.grounding'
+# Should return: true
+```
+
+### Step 3: Test with Attachments
+```bash
+# Test with small text file
+curl -s -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "brief": "Analyze the attached document and create a decision framework",
+    "attachments": [{"id":"test","kind":"txt","name":"test.txt"}],
+    "attachment_payloads": {"test":"SGVsbG8gV29ybGQ="}
+  }' | jq .
+```
+
+**Expected Response:**
+- 200 OK
+- `rationales` array with provenance
+- Some rationales have `provenance_source: "document"`
+- Response time < 15s (p95 target)
+
+### Step 4: Monitor Grounding Usage
+After enabling, monitor:
+- **Attachment Processing Errors:** Should be < 1%
+- **Latency:** p95 should stay < 15s with attachments
+- **CSV Privacy:** Zero row data leaks (critical - automated tests verify)
+- **Cost:** Expect 10-20% increase in LLM tokens
+
+### Troubleshooting Grounding
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Attachments ignored | `ENABLE_GROUNDING=false` | Set `ENABLE_GROUNDING=true` in env |
+| 400 "file too large" | File > 5k chars or total > 50k | Reduce file size or split files |
+| 400 "invalid base64" | Malformed payload | Check base64 encoding |
+| Slow responses | Large PDF processing | Monitor p95, may need to lower limits |
+
+### Disabling Grounding (Rollback)
+If issues occur:
+1. Dashboard → Service → Environment
+2. Set `ENABLE_GROUNDING=false` (or remove variable)
+3. Redeploy
+4. Verify: `curl -s .../healthz | jq '.feature_flags.grounding'` returns `false`
 
 ---
 

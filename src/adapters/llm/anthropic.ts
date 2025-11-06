@@ -72,6 +72,16 @@ const AnthropicCritiqueResponse = z.object({
   overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional(),
 });
 
+const AnthropicExplainDiffResponse = z.object({
+  rationales: z.array(
+    z.object({
+      target: z.string().min(1),
+      why: z.string().min(10).max(280),
+      provenance_source: z.string().optional(),
+    })
+  ).min(1),
+});
+
 const apiKey = process.env.ANTHROPIC_API_KEY;
 
 // Lazy initialization to allow testing without API key
@@ -389,7 +399,7 @@ export async function suggestOptionsWithAnthropic(args: {
   goal: string;
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
-}): Promise<Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>> {
+}): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
   const existingContext = args.existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -495,7 +505,15 @@ Respond ONLY with valid JSON.`;
       options = options.slice(0, 5);
     }
 
-    return options;
+    return {
+      options,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
   } catch (error) {
     clearTimeout(timeoutId);
 
@@ -1031,6 +1049,111 @@ export async function critiqueGraphWithAnthropic(
 }
 
 /**
+ * Helper function for explaining graph patches with Anthropic.
+ */
+export async function explainDiffWithAnthropic(
+  args: { patch: any; brief?: string; graph_summary?: { node_count: number; edge_count: number }; model?: string }
+): Promise<{ rationales: Array<{ target: string; why: string; provenance_source?: string }>; usage: UsageMetrics }> {
+  const model = args.model || "claude-3-5-sonnet-20241022";
+
+  // Build prompt
+  const prompt = `You are explaining why changes were made to a decision graph.
+
+Given this patch:
+${JSON.stringify(args.patch, null, 2)}
+
+${args.brief ? `Context: ${args.brief}` : ""}
+${args.graph_summary ? `Graph has ${args.graph_summary.node_count} nodes and ${args.graph_summary.edge_count} edges.` : ""}
+
+Generate a JSON array of rationales explaining why each change was made. Each rationale should have:
+- target: the node/edge ID being explained
+- why: a concise explanation (≤280 chars)
+- provenance_source: optional source indicator (e.g., "user_brief", "hypothesis")
+
+Return ONLY valid JSON in this format:
+{
+  "rationales": [
+    {"target": "node_1", "why": "explanation here", "provenance_source": "user_brief"}
+  ]
+}`;
+
+  log.info({ change_count: (args.patch.adds?.nodes?.length || 0) + (args.patch.adds?.edges?.length || 0), model }, "calling Anthropic for explain-diff");
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+
+  try {
+    const apiClient = getClient();
+    const response = await apiClient.messages.create(
+      {
+        model,
+        max_tokens: 2048,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: abortController.signal }
+    );
+
+    clearTimeout(timeoutId);
+
+    const content = response.content[0];
+    if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+      throw new Error("unexpected_response_type");
+    }
+
+    // Extract JSON from response
+    let jsonText = content.text.trim();
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
+    } else if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
+    }
+
+    // Parse and validate with Zod
+    const rawJson = JSON.parse(jsonText);
+    const parseResult = AnthropicExplainDiffResponse.safeParse(rawJson);
+
+    if (!parseResult.success) {
+      log.error({ errors: parseResult.error.flatten() }, "Anthropic explain-diff response failed schema validation");
+      throw new Error("anthropic_explain_diff_invalid_schema");
+    }
+
+    const parsed = parseResult.data;
+
+    // Sort rationales by target for consistent ordering
+    const sortedRationales = [...parsed.rationales].sort((a, b) => a.target.localeCompare(b.target));
+
+    log.info({ rationale_count: sortedRationales.length }, "explain-diff complete");
+
+    return {
+      rationales: sortedRationales,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic explain-diff call timed out");
+        throw new Error("anthropic_explain_diff_timeout");
+      }
+      if (error.message === "anthropic_explain_diff_invalid_schema") {
+        throw error;
+      }
+    }
+
+    log.error({ error }, "Anthropic explain-diff call failed");
+    throw error;
+  }
+}
+
+/**
  * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
  * This wraps the existing functions to provide a consistent interface for the router.
  */
@@ -1061,16 +1184,11 @@ export class AnthropicAdapter implements LLMAdapter {
   }
 
   async suggestOptions(args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
-    const options = await suggestOptionsWithAnthropic(args);
+    const result = await suggestOptionsWithAnthropic(args);
 
-    // suggestOptionsWithAnthropic doesn't return usage yet, so provide minimal usage
-    // TODO: Extract usage from actual API call in suggestOptionsWithAnthropic
     return {
-      options,
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-      },
+      options: result.options,
+      usage: result.usage,
     };
   }
 
@@ -1123,6 +1241,20 @@ export class AnthropicAdapter implements LLMAdapter {
       issues: result.issues,
       suggested_fixes: result.suggested_fixes,
       overall_quality: result.overall_quality,
+      usage: result.usage,
+    };
+  }
+
+  async explainDiff(args: import("./types.js").ExplainDiffArgs, _opts: CallOpts): Promise<import("./types.js").ExplainDiffResult> {
+    const result = await explainDiffWithAnthropic({
+      patch: args.patch,
+      brief: args.brief,
+      graph_summary: args.graph_summary,
+      model: this.model,
+    });
+
+    return {
+      rationales: result.rationales,
       usage: result.usage,
     };
   }

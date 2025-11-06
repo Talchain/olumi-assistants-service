@@ -112,9 +112,10 @@ describe("LLM Router", () => {
         { requestId: "test", timeoutMs: 1000 }
       );
 
-      expect(result.options).toHaveLength(2);
+      expect(result.options).toHaveLength(3);
       expect(result.options[0].id).toBe("opt_a");
       expect(result.options[1].id).toBe("opt_b");
+      expect(result.options[2].id).toBe("opt_c");
       expect(result.usage.input_tokens).toBe(0);
     });
 

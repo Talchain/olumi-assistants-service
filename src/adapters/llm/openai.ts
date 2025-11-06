@@ -448,4 +448,10 @@ export class OpenAIAdapter implements LLMAdapter {
     // Switch to LLM_PROVIDER=anthropic to use this feature
     throw new Error("openai_critique_not_supported: Critique endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
   }
+
+  async explainDiff(_args: import("./types.js").ExplainDiffArgs, _opts: CallOpts): Promise<import("./types.js").ExplainDiffResult> {
+    // OpenAI provider does not yet support explainDiff
+    // Switch to LLM_PROVIDER=anthropic to use this feature
+    throw new Error("openai_explain_diff_not_supported: ExplainDiff endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  }
 }

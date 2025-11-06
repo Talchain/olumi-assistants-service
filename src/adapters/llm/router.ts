@@ -103,6 +103,13 @@ class FixturesAdapter implements LLMAdapter {
           cons: ["Not tailored", "Static"],
           evidence_to_gather: ["A/B test", "Analytics"],
         },
+        {
+          id: "opt_c",
+          title: "Fixture Option C",
+          pros: ["Comprehensive", "Well-tested"],
+          cons: ["Placeholder", "Not customized"],
+          evidence_to_gather: ["Benchmarks", "Case studies"],
+        },
       ],
       usage: {
         input_tokens: 0,
@@ -153,6 +160,45 @@ class FixturesAdapter implements LLMAdapter {
       ],
       suggested_fixes: [],
       overall_quality: "fair",
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
+
+  async explainDiff(args: any, _opts: any): Promise<any> {
+    const rationales: Array<{ target: string; why: string; provenance_source?: string }> = [];
+
+    // Generate rationales for added nodes
+    if (args.patch.adds?.nodes) {
+      for (const node of args.patch.adds.nodes) {
+        const target = node.id || 'unknown_node';
+        rationales.push({
+          target,
+          why: `Added ${node.kind || 'node'} to represent ${node.label || 'a decision element'}`,
+          provenance_source: args.brief ? 'user_brief' : undefined,
+        });
+      }
+    }
+
+    // Generate rationales for added edges
+    if (args.patch.adds?.edges) {
+      for (const edge of args.patch.adds.edges) {
+        const target = edge.id || `${edge.from}::${edge.to}`;
+        rationales.push({
+          target,
+          why: `Connected ${edge.from} to ${edge.to} to show the relationship`,
+          provenance_source: args.brief ? 'user_brief' : undefined,
+        });
+      }
+    }
+
+    // Sort rationales deterministically by target
+    rationales.sort((a, b) => a.target.localeCompare(b.target));
+
+    return {
+      rationales,
       usage: {
         input_tokens: 0,
         output_tokens: 0,

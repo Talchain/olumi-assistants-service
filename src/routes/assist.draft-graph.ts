@@ -4,7 +4,8 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
-import { toPreview, type DocPreview } from "../services/docProcessing.js";
+import { type DocPreview } from "../services/docProcessing.js";
+import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { validateGraph } from "../services/validateClient.js";
 import { simpleRepair } from "../services/repair.js";
@@ -14,6 +15,8 @@ import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
 import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
+import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
+import { isFeatureEnabled } from "../utils/feature-flags.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -68,35 +71,92 @@ function writeStage(reply: FastifyReply, event: StageEvent) {
   reply.raw.write('\n');
 }
 
-async function previewAttachments(input: DraftGraphInputT, rawBody: unknown): Promise<DocPreview[]> {
-  if (!input.attachments?.length) return [];
+/**
+ * Process attachments using grounding module (v04).
+ * Enforces 5k char limit per file with BAD_INPUT errors.
+ *
+ * @throws Error with details for over-limit files or processing failures
+ */
+async function groundAttachments(
+  input: DraftGraphInputT,
+  rawBody: unknown
+): Promise<{ docs: DocPreview[]; stats: GroundingStats }> {
+  // Check if grounding feature is enabled (env or per-request flag)
+  if (!isFeatureEnabled('grounding', input.flags)) {
+    return {
+      docs: [],
+      stats: { files_processed: 0, pdf: 0, txt_md: 0, csv: 0, total_chars: 0 }
+    };
+  }
 
-  const previews: DocPreview[] = [];
+  if (!input.attachments?.length) {
+    return {
+      docs: [],
+      stats: { files_processed: 0, pdf: 0, txt_md: 0, csv: 0, total_chars: 0 }
+    };
+  }
+
   const payloads = (rawBody as { attachment_payloads?: Record<string, AttachmentPayload> })?.attachment_payloads ?? {};
 
+  // Build AttachmentInput array with content
+  const attachmentInputs: AttachmentInput[] = [];
   for (const attachment of input.attachments) {
     const payload = payloads[attachment.id];
     if (!payload) {
-      log.warn({ attachment: attachment.id }, "attachment payload missing");
+      log.warn({ attachment_id: attachment.id, redacted: true }, "Attachment payload missing, skipping");
       continue;
     }
 
-    try {
-      const buffer =
-        typeof payload === "string"
-          ? Buffer.from(payload, "base64")
-          : Buffer.from(payload.data, payload.encoding ?? "base64");
-      previews.push(await toPreview(attachment.kind, attachment.name, buffer));
-    } catch (error) {
-      log.error({ attachment: attachment.id, error }, "failed to preview attachment");
-    }
+    const content = typeof payload === "string"
+      ? payload // Already base64 string
+      : Buffer.from(payload.data, payload.encoding ?? "base64");
+
+    attachmentInputs.push({
+      id: attachment.id,
+      kind: attachment.kind,
+      name: attachment.name,
+      content,
+    });
   }
 
-  return previews;
+  // Process attachments with grounding module (enforces 5k limit, privacy, safe CSV)
+  const result = await processAttachments(attachmentInputs);
+  return result;
 }
 
 async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown): Promise<PipelineResult> {
-  const docs = await previewAttachments(input, rawBody);
+  // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
+  let docs: DocPreview[];
+  let groundingStats: GroundingStats | undefined;
+
+  try {
+    const result = await groundAttachments(input, rawBody);
+    docs = result.docs;
+    groundingStats = result.stats;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+
+    // Handle over-limit files with BAD_INPUT error and helpful hint
+    if (err.message.includes('_exceeds_limit')) {
+      const hint = err.message.includes('aggregate_exceeds_limit')
+        ? "Total attachment size exceeds 50k character limit. Please reduce the number of attachments or their sizes."
+        : "One or more files exceed the 5k character limit. Please reduce file size or split into smaller files.";
+
+      return {
+        kind: "error",
+        statusCode: 400,
+        envelope: buildError("BAD_INPUT", err.message, { hint })
+      };
+    }
+
+    // Handle other processing errors
+    return {
+      kind: "error",
+      statusCode: 400,
+      envelope: buildError("BAD_INPUT", `Attachment processing failed: ${err.message}`)
+    };
+  }
+
   const confidence = calcConfidence({ goal: input.brief });
   const clarifier = determineClarifier(confidence);
 
@@ -213,6 +273,9 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));
   }
 
+  // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
+  candidate = enforceStableEdgeIds(candidate);
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -279,6 +342,11 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     telemetryData.mixed_providers = repairProviderName !== draftAdapter.name;
   }
 
+  // Add grounding stats if attachments were processed (v04)
+  if (groundingStats && groundingStats.files_processed > 0) {
+    telemetryData.grounding = groundingStats;
+  }
+
   emit("assist.draft.completed", telemetryData);
 
   return {
@@ -311,8 +379,10 @@ async function handleSseResponse(
     const fixtureTimeout = setTimeout(() => {
       if (!fixtureSent) {
         // Show minimal fixture graph while waiting for real draft
+        // Apply stable edge IDs to fixture graph for consistency
+        const stableFixture = enforceStableEdgeIds({ ...fixtureGraph });
         const fixturePayload = DraftGraphOutput.parse({
-          graph: fixtureGraph,
+          graph: stableFixture,
           patch: defaultPatch,
           rationales: [],
           confidence: 0.5,

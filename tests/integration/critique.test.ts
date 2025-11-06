@@ -216,7 +216,7 @@ describe("POST /assist/critique-graph (Severity Ordering)", () => {
 
     if (body.issues.length > 1) {
       // Verify ordering: BLOCKERs come before IMPROVEMENTs which come before OBSERVATIONs
-      const severityOrder = { BLOCKER: 0, IMPROVEMENT: 1, OBSERVATION: 2 };
+      const severityOrder: Record<string, number> = { BLOCKER: 0, IMPROVEMENT: 1, OBSERVATION: 2 };
       const severities = body.issues.map((issue: any) => severityOrder[issue.level]);
 
       for (let i = 1; i < severities.length; i++) {

@@ -49,6 +49,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         RepairPartial: "assist.draft.repair_partial",
         RepairFallback: "assist.draft.repair_fallback",
 
+        ClarifierRoundStart: "assist.clarifier.round_start",
+        ClarifierRoundComplete: "assist.clarifier.round_complete",
+        ClarifierRoundFailed: "assist.clarifier.round_failed",
+
+        CritiqueStart: "assist.critique.start",
+        CritiqueComplete: "assist.critique.complete",
+        CritiqueFailed: "assist.critique.failed",
+
+        SuggestOptionsStart: "assist.suggest_options.start",
+        SuggestOptionsComplete: "assist.suggest_options.complete",
+        SuggestOptionsFailed: "assist.suggest_options.failed",
+
+        ExplainDiffStart: "assist.explain_diff.start",
+        ExplainDiffComplete: "assist.explain_diff.complete",
+        ExplainDiffFailed: "assist.explain_diff.failed",
+
+        GuardViolation: "assist.draft.guard_violation",
+
         LegacyProvenance: "assist.draft.legacy_provenance",
 
         Stage: "assist.draft.stage",
@@ -74,11 +92,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   });
 
   describe("Event namespace consistency", () => {
-    it("ensures all events start with 'assist.draft.' prefix", () => {
+    it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
       const allEvents = Object.values(TelemetryEvents);
+      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff)\./;
 
       for (const event of allEvents) {
-        expect(event).toMatch(/^assist\.draft\./);
+        expect(event).toMatch(validPrefixes);
       }
     });
 
@@ -87,7 +106,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        const suffix = event.replace("assist.draft.", "");
+        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff.)
+        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -150,18 +170,53 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.legacy_provenance.occurrences": [TelemetryEvents.LegacyProvenance],
         "draft.fixture.shown": [TelemetryEvents.FixtureShown],
         "draft.fixture.replaced": [TelemetryEvents.FixtureReplaced],
+        "draft.guard_violation": [TelemetryEvents.GuardViolation],
+
+        // Clarifier events
+        "clarifier.round.started": [TelemetryEvents.ClarifierRoundStart],
+        "clarifier.round.completed": [TelemetryEvents.ClarifierRoundComplete],
+        "clarifier.round.failed": [TelemetryEvents.ClarifierRoundFailed],
+
+        // Critique events
+        "critique.started": [TelemetryEvents.CritiqueStart],
+        "critique.completed": [TelemetryEvents.CritiqueComplete],
+        "critique.failed": [TelemetryEvents.CritiqueFailed],
+
+        // Suggest Options events
+        "suggest_options.started": [TelemetryEvents.SuggestOptionsStart],
+        "suggest_options.completed": [TelemetryEvents.SuggestOptionsComplete],
+        "suggest_options.failed": [TelemetryEvents.SuggestOptionsFailed],
+
+        // Explain Diff events
+        "explain_diff.started": [TelemetryEvents.ExplainDiffStart],
+        "explain_diff.completed": [TelemetryEvents.ExplainDiffComplete],
+        "explain_diff.failed": [TelemetryEvents.ExplainDiffFailed],
 
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
         "draft.sse.stream_duration_ms": [TelemetryEvents.SSECompleted],
         "draft.confidence": [TelemetryEvents.DraftCompleted],
         "draft.cost_usd": [TelemetryEvents.DraftCompleted],
+        "clarifier.duration_ms": [TelemetryEvents.ClarifierRoundComplete],
+        "clarifier.cost_usd": [TelemetryEvents.ClarifierRoundComplete],
+        "clarifier.confidence": [TelemetryEvents.ClarifierRoundComplete],
+        "critique.duration_ms": [TelemetryEvents.CritiqueComplete],
+        "critique.cost_usd": [TelemetryEvents.CritiqueComplete],
+        "suggest_options.duration_ms": [TelemetryEvents.SuggestOptionsComplete],
+        "suggest_options.cost_usd": [TelemetryEvents.SuggestOptionsComplete],
+        "explain_diff.duration_ms": [TelemetryEvents.ExplainDiffComplete],
+        "explain_diff.cost_usd": [TelemetryEvents.ExplainDiffComplete],
 
         // Gauges
         "draft.graph.nodes": [TelemetryEvents.DraftCompleted],
         "draft.graph.edges": [TelemetryEvents.DraftCompleted],
         "draft.validation.violations": [TelemetryEvents.ValidationFailed],
         "draft.legacy_provenance.percentage": [TelemetryEvents.LegacyProvenance],
+        "critique.issues.blockers": [TelemetryEvents.CritiqueComplete],
+        "critique.issues.improvements": [TelemetryEvents.CritiqueComplete],
+        "critique.issues.observations": [TelemetryEvents.CritiqueComplete],
+        "suggest_options.option_count": [TelemetryEvents.SuggestOptionsComplete],
+        "explain_diff.rationale_count": [TelemetryEvents.ExplainDiffComplete],
       };
 
       // Verify all events are documented
@@ -199,8 +254,21 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.draft.repair_success",
         "assist.draft.repair_partial",
         "assist.draft.repair_fallback",
+        "assist.draft.guard_violation",
         "assist.draft.legacy_provenance",
         "assist.draft.stage",
+        "assist.clarifier.round_start",
+        "assist.clarifier.round_complete",
+        "assist.clarifier.round_failed",
+        "assist.critique.start",
+        "assist.critique.complete",
+        "assist.critique.failed",
+        "assist.suggest_options.start",
+        "assist.suggest_options.complete",
+        "assist.suggest_options.failed",
+        "assist.explain_diff.start",
+        "assist.explain_diff.complete",
+        "assist.explain_diff.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

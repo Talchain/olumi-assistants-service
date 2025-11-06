@@ -1,8 +1,10 @@
-# Operator Runbook - Olumi Assistants Service v1.0.1
+# Operator Runbook - Olumi Assistants Service v1.1.0
 
 **Service:** olumi-assistants-service
-**Version:** 1.0.1
-**Endpoints:** `/assist/clarify-brief`, `/assist/critique-graph`, `/assist/draft-graph` (JSON + SSE)
+**Version:** 1.1.0
+**Endpoints:** `/assist/clarify-brief`, `/assist/critique-graph`, `/assist/draft-graph` (JSON + SSE), `/assist/suggest-options`, `/assist/explain-diff`
+
+**New in v1.1.0:** Document grounding, feature flags, enhanced health endpoint
 
 ---
 
@@ -15,6 +17,78 @@
 | `/assist/critique-graph` | POST | 15s | 1 MB | Identify graph issues |
 | `/assist/draft-graph` | POST | 15s | 1 MB | Draft initial graph (JSON) |
 | `/assist/draft-graph/stream` | POST | 120s | 1 MB | Draft initial graph (SSE) |
+| `/assist/suggest-options` | POST | 15s | 1 MB | Generate 3-5 strategic options |
+| `/assist/explain-diff` | POST | 15s | 1 MB | Explain patch rationales |
+
+---
+
+## Feature Flags (v1.1.0+)
+
+### Overview
+Feature flags control optional capabilities with priority: **Per-Request > Environment > Default**
+
+### Flags Matrix
+
+| Flag | Env Var | Default | Purpose | Risk Level |
+|------|---------|---------|---------|------------|
+| `grounding` | `ENABLE_GROUNDING` | **false** | Document attachment processing | MEDIUM |
+| `critique` | `ENABLE_CRITIQUE` | true | Graph critique endpoint | LOW |
+| `clarifier` | `ENABLE_CLARIFIER` | true | Clarifying questions in drafts | LOW |
+
+### Checking Current Flags
+```bash
+curl -s https://YOUR-SERVICE-URL/healthz | jq '.feature_flags'
+```
+
+**Expected Output:**
+```json
+{
+  "grounding": false,
+  "critique": true,
+  "clarifier": true
+}
+```
+
+### Enabling Grounding (Production)
+**⚠️ IMPORTANT:** Grounding defaults to OFF for safety. Enable explicitly:
+
+```bash
+# In Render dashboard, add environment variable:
+ENABLE_GROUNDING=true
+
+# Restart service and verify:
+curl -s https://YOUR-SERVICE-URL/healthz | jq '.feature_flags.grounding'
+# Should return: true
+```
+
+### Per-Request Override
+Flags can be overridden per-request via `flags` field:
+
+```bash
+# Enable grounding for this request only
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "brief": "...",
+    "flags": {"grounding": true}
+  }'
+
+# Disable grounding for this request (even if env enabled)
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "brief": "...",
+    "flags": {"grounding": false}
+  }'
+```
+
+### Troubleshooting Flags
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Attachments ignored | `ENABLE_GROUNDING=false` (default) | Set `ENABLE_GROUNDING=true` in env |
+| Grounding always on | Env var set to `true` | Remove env var or set to `false` |
+| Per-request flag ignored | Typo in request body | Verify `flags` field spelling |
 
 ---
 
@@ -28,9 +102,17 @@ curl -s https://YOUR-SERVICE-URL/healthz | jq .
 ### Expected Response (Good)
 ```json
 {
-  "status": "ok",
-  "version": "1.0.1",
-  "provider": "fixtures"
+  "ok": true,
+  "service": "assistants",
+  "version": "1.1.0",
+  "provider": "fixtures",
+  "model": "fixture-v1",
+  "limits_source": "config",
+  "feature_flags": {
+    "grounding": false,
+    "critique": true,
+    "clarifier": true
+  }
 }
 ```
 
@@ -266,6 +348,150 @@ data: {}
 - **RFC 8895 framing:** Multi-line data with blank line terminators
 - **Timeout:** 120s max (SSE_MAX_MS)
 - **Parity:** Same validation guards as JSON endpoint
+
+---
+
+## Suggest Options - Strategic Alternatives
+
+### Purpose
+Given a goal, generate 3-5 distinct strategic options with:
+- **Deterministic ordering:** Options sorted by `id` alphabetically
+- **Structured output:** Each option has title, pros, cons, evidence_to_gather
+- **Avoid duplicates:** Optional `existing_options` to prevent repeats
+
+### Command
+```bash
+curl -s -X POST https://YOUR-SERVICE-URL/assist/suggest-options \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "goal": "Optimize hiring strategy for my startup"
+  }' | jq .
+```
+
+### Expected Response (Good)
+```json
+{
+  "options": [
+    {
+      "id": "opt_a",
+      "title": "Full-time employees",
+      "pros": ["Long-term commitment", "Team cohesion"],
+      "cons": ["Higher fixed costs", "Slower to scale"],
+      "evidence_to_gather": ["Average salary benchmarks", "Turnover rates"]
+    },
+    {
+      "id": "opt_b",
+      "title": "Contract workers",
+      "pros": ["Flexibility", "Lower overhead"],
+      "cons": ["Less loyalty", "Coordination overhead"],
+      "evidence_to_gather": ["Contractor availability", "Hourly rates"]
+    },
+    {
+      "id": "opt_c",
+      "title": "Hybrid approach",
+      "pros": ["Balanced risk", "Adaptable"],
+      "cons": ["Complex management", "Mixed incentives"],
+      "evidence_to_gather": ["Industry best practices", "Case studies"]
+    }
+  ]
+}
+```
+
+### Expected Behavior
+- **Count:** Returns 3-5 options
+- **Deterministic sorting:** Options sorted by `id` alphabetically
+- **Required fields:** Each option has `id`, `title`, `pros`, `cons`, `evidence_to_gather`
+
+### Error Cases
+
+**400 BAD_INPUT - Goal Too Short**
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "String must contain at least 30 character(s)"
+}
+```
+**Action:** Ensure `goal` is at least 30 characters
+
+**400 BAD_INPUT - Missing Goal**
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "Required"
+}
+```
+**Action:** Ensure `goal` field is present
+
+---
+
+## Explain Diff - Patch Rationales
+
+### Purpose
+Given a graph patch (adds/updates/removes), explain why each change was made:
+- **Rationales:** One per changed element (node/edge)
+- **Concise:** Each `why` is ≤280 characters
+- **Deterministic ordering:** Sorted by `target` alphabetically
+
+### Command
+```bash
+curl -s -X POST https://YOUR-SERVICE-URL/assist/explain-diff \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "patch": {
+      "adds": {
+        "nodes": [
+          {"id": "goal_1", "kind": "goal", "label": "Increase revenue"}
+        ],
+        "edges": []
+      },
+      "updates": [],
+      "removes": []
+    }
+  }' | jq .
+```
+
+### Expected Response (Good)
+```json
+{
+  "rationales": [
+    {
+      "target": "goal_1",
+      "why": "Added goal to represent the primary objective of increasing revenue",
+      "provenance_source": "user_brief"
+    }
+  ]
+}
+```
+
+### Expected Behavior
+- **Count:** At least 1 rationale per change
+- **Deterministic sorting:** Sorted by `target` alphabetically
+- **Concise:** Each `why` is ≤280 characters
+- **Optional provenance:** `provenance_source` indicates where the change came from
+
+### Error Cases
+
+**400 BAD_INPUT - Empty Patch**
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "patch has no changes to explain"
+}
+```
+**Action:** Ensure patch has at least one add, update, or remove
+
+**400 BAD_INPUT - Missing Patch**
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "Required"
+}
+```
+**Action:** Ensure `patch` field is present
 
 ---
 
