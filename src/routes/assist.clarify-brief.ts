@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
-import { emit, log, calculateCost } from "../utils/telemetry.js";
+import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { isFeatureEnabled } from "../utils/feature-flags.js";
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/clarify-brief", async (req, reply) => {
@@ -17,6 +18,12 @@ export default async function route(app: FastifyInstance) {
     }
 
     const input = parsed.data;
+
+    // Feature flag guard: return 404 if clarifier is disabled
+    if (!isFeatureEnabled('clarifier', input.flags)) {
+      reply.code(404);
+      return reply.send();
+    }
 
     // Check round limit (0-2, max 3 rounds)
     if (input.round > 2) {
@@ -35,7 +42,7 @@ export default async function route(app: FastifyInstance) {
       // Get adapter via router (env-driven or config)
       const adapter = getAdapter('clarify_brief');
 
-      emit("assist.clarifier.round_start", {
+      emit(TelemetryEvents.ClarifierRoundStart, {
         round: input.round,
         brief_chars: input.brief.length,
         has_previous_answers: !!input.previous_answers?.length,
@@ -61,7 +68,7 @@ export default async function route(app: FastifyInstance) {
       const cost_usd = calculateCost(adapter.model, result.usage.input_tokens, result.usage.output_tokens);
 
       // Emit telemetry with provider/cost fallbacks (per v04 spec)
-      emit("assist.clarifier.round_complete", {
+      emit(TelemetryEvents.ClarifierRoundComplete, {
         round: input.round,
         question_count: result.questions.length,
         confidence: result.confidence,
@@ -96,7 +103,7 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err, round: input.round }, "clarify-brief route failure");
 
-      emit("assist.clarifier.round_failed", {
+      emit(TelemetryEvents.ClarifierRoundFailed, {
         round: input.round,
         error: err.message,
       });

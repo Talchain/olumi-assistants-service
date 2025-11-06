@@ -72,7 +72,8 @@ export const ClarifyBriefInput = z.object({
     question: z.string(),
     answer: z.string()
   })).optional(),
-  seed: z.number().int().optional()
+  seed: z.number().int().optional(),
+  flags: z.record(z.boolean()).optional() // Feature flags (per-request overrides)
 }).strict();
 
 export const ClarifyBriefOutput = z.object({

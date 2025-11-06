@@ -173,14 +173,14 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   }
 
   const llmStartTime = Date.now();
-  emit("assist.draft.stage", { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name });
+  emit(TelemetryEvents.Stage, { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name });
   const draftResult = await draftAdapter.draftGraph(
     { brief: input.brief, docs, seed: 17 },
     { requestId: `draft_${Date.now()}`, timeoutMs: 15000 }
   );
   const { graph, rationales, usage: draftUsage } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
-  emit("assist.draft.stage", { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
+  emit(TelemetryEvents.Stage, { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
 
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
@@ -203,7 +203,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 
     // LLM-guided repair: use violations as hints
     try {
-      emit("assist.draft.repair_start", { violation_count: issues?.length ?? 0 });
+      emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
 
       // Get repair adapter (may be different provider than draft)
       const repairAdapter = getAdapter('repair_graph');
@@ -238,13 +238,13 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
       if (second.ok && second.normalized) {
         candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
         issues = second.violations;
-        emit("assist.draft.repair_success", { repair_worked: true });
+        emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
       } else {
         // Repair didn't fix all issues, fallback to simple repair
         candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired)));
         issues = second.violations ?? issues;
         repairFallbackReason = "partial_fix";
-        emit("assist.draft.repair_partial", { repair_worked: false, fallback_reason: repairFallbackReason });
+        emit(TelemetryEvents.RepairPartial, { repair_worked: false, fallback_reason: repairFallbackReason });
       }
     } catch (error) {
       // LLM repair failed (API error, schema validation, or DAG error), fallback to simple repair
@@ -263,7 +263,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
         candidate = repaired;
         issues = second.violations ?? issues;
       }
-      emit("assist.draft.repair_fallback", {
+      emit(TelemetryEvents.RepairFallback, {
         fallback: "simple_repair",
         reason: repairFallbackReason,
         error_type: errorType,
@@ -290,7 +290,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   const legacy = hasLegacyProvenance(candidate);
   if (legacy.hasLegacy) {
     // Emit telemetry event for aggregation (always)
-    emit("assist.draft.legacy_provenance", {
+    emit(TelemetryEvents.LegacyProvenance, {
       legacy_count: legacy.count,
       total_edges: candidate.edges.length,
       legacy_percentage: Math.round((legacy.count / candidate.edges.length) * 100),
@@ -347,7 +347,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
     telemetryData.grounding = groundingStats;
   }
 
-  emit("assist.draft.completed", telemetryData);
+  emit(TelemetryEvents.DraftCompleted, telemetryData);
 
   return {
     kind: "success",
@@ -390,7 +390,7 @@ async function handleSseResponse(
         });
         writeStage(reply, { stage: "DRAFTING", payload: fixturePayload });
         fixtureSent = true;
-        emit("assist.draft.fixture_shown", { timeout_ms: FIXTURE_TIMEOUT_MS });
+        emit(TelemetryEvents.FixtureShown, { timeout_ms: FIXTURE_TIMEOUT_MS });
       }
     }, FIXTURE_TIMEOUT_MS);
 
@@ -400,14 +400,14 @@ async function handleSseResponse(
     const streamDuration = Date.now() - streamStartTime;
 
     if (fixtureSent) {
-      emit("assist.draft.fixture_replaced", { fixture_shown: true, stream_duration_ms: streamDuration });
+      emit(TelemetryEvents.FixtureReplaced, { fixture_shown: true, stream_duration_ms: streamDuration });
     }
 
     // Handle pipeline errors (validation, rate limiting, etc.)
     if (result.kind === "error") {
       const streamDuration = Date.now() - streamStartTime;
       writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
-      emit("assist.draft.sse_error", {
+      emit(TelemetryEvents.SSEError, {
         stream_duration_ms: streamDuration,
         error: result.envelope.message,
         error_code: result.envelope.code,
@@ -423,7 +423,7 @@ async function handleSseResponse(
     if (!guardResult.ok) {
       const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
       writeStage(reply, { stage: "COMPLETE", payload: guardError });
-      emit("assist.draft.guard_violation", {
+      emit(TelemetryEvents.GuardViolation, {
         stream_duration_ms: streamDuration,
         violation_code: guardResult.violation.code,
         violation_message: guardResult.violation.message,
@@ -448,7 +448,7 @@ async function handleSseResponse(
     const hasIssues = (result.payload.issues?.length ?? 0) > 0;
 
     writeStage(reply, { stage: "COMPLETE", payload: result.payload });
-    emit("assist.draft.sse_completed", {
+    emit(TelemetryEvents.SSECompleted, {
       stream_duration_ms: streamDuration,
       fixture_shown: fixtureSent,
       quality_tier: qualityTier,
@@ -465,7 +465,7 @@ async function handleSseResponse(
     const envelope = buildError("INTERNAL", err.message || "internal");
     writeStage(reply, { stage: "COMPLETE", payload: envelope });
     const streamDuration = Date.now() - streamStartTime;
-    emit("assist.draft.sse_error", {
+    emit(TelemetryEvents.SSEError, {
       stream_duration_ms: streamDuration,
       error: err.message,
       error_code: "INTERNAL",
@@ -496,7 +496,7 @@ async function handleJsonResponse(
   const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
   if (!guardResult.ok) {
     const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
-    emit("assist.draft.guard_violation", {
+    emit(TelemetryEvents.GuardViolation, {
       violation_code: guardResult.violation.code,
       violation_message: guardResult.violation.message,
       provider: result.provider,

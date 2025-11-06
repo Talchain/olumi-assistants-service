@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import type { FastifyInstance } from "fastify";
 import { CritiqueGraphInput, CritiqueGraphOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
-import { emit, log, calculateCost } from "../utils/telemetry.js";
+import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
@@ -23,6 +23,12 @@ export default async function route(app: FastifyInstance) {
     }
 
     const input = parsed.data;
+
+    // Feature flag guard: return 404 if critique is disabled
+    if (!isFeatureEnabled('critique', input.flags)) {
+      reply.code(404);
+      return reply.send();
+    }
 
     try {
       // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
@@ -93,7 +99,7 @@ export default async function route(app: FastifyInstance) {
       // Get adapter via router (env-driven or config)
       const adapter = getAdapter('critique_graph');
 
-      emit("assist.critique.start", {
+      emit(TelemetryEvents.CritiqueStart, {
         node_count: input.graph.nodes.length,
         edge_count: input.graph.edges.length,
         has_brief: !!input.brief,
@@ -144,7 +150,7 @@ export default async function route(app: FastifyInstance) {
         telemetryData.grounding = groundingStats;
       }
 
-      emit("assist.critique.complete", telemetryData);
+      emit(TelemetryEvents.CritiqueComplete, telemetryData);
 
       // Deterministic ordering: BLOCKER → IMPROVEMENT → OBSERVATION, then by note
       const levelOrder: Record<string, number> = { BLOCKER: 0, IMPROVEMENT: 1, OBSERVATION: 2 };
@@ -166,7 +172,7 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err, node_count: input.graph.nodes.length }, "critique-graph route failure");
 
-      emit("assist.critique.failed", {
+      emit(TelemetryEvents.CritiqueFailed, {
         error: err.message,
       });
 
