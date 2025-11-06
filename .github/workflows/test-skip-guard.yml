@@ -1,0 +1,89 @@
+name: Test Skip Guard
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  check-skipped-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for unauthorized skipped tests
+        run: |
+          echo "Checking for .skip or it.skip without issue references..."
+
+          # Find all .skip tests in test files
+          SKIPPED_TESTS=$(grep -rn "\.skip\|it\.skip\|describe\.skip" tests/ --include="*.ts" --include="*.js" | grep -v node_modules || true)
+
+          if [ -z "$SKIPPED_TESTS" ]; then
+            echo "✅ No skipped tests found"
+            exit 0
+          fi
+
+          echo "Found skipped tests:"
+          echo "$SKIPPED_TESTS"
+          echo ""
+
+          # List of authorized skip patterns (with issue references)
+          # Format: file:line - reason
+          AUTHORIZED_SKIPS=(
+            # M5 - Golden brief tests (will be fixed in M5)
+            "tests/integration/golden-briefs.test.ts:.*generates deterministic.*GOLDEN-001"
+          )
+
+          UNAUTHORIZED=""
+          while IFS= read -r line; do
+            FILE_LINE=$(echo "$line" | cut -d: -f1-2)
+            AUTHORIZED=false
+
+            # Check if this skip has an associated issue comment within 2 lines
+            LINE_NUM=$(echo "$line" | cut -d: -f2)
+            FILE=$(echo "$line" | cut -d: -f1)
+
+            # Get 2 lines before the skip to check for TODO/issue references
+            CONTEXT=$(sed -n "$((LINE_NUM-2)),$((LINE_NUM))p" "$FILE" 2>/dev/null || echo "")
+
+            # Check if context contains issue reference (TODO, ISSUE, BUG followed by ID)
+            if echo "$CONTEXT" | grep -qE "(TODO|ISSUE|BUG|GOLDEN|TEST)-[0-9]+"; then
+              echo "✅ Authorized skip (has issue reference): $FILE_LINE"
+              AUTHORIZED=true
+            else
+              # Check against known authorized patterns
+              for pattern in "${AUTHORIZED_SKIPS[@]}"; do
+                if echo "$line" | grep -qE "$pattern"; then
+                  echo "✅ Authorized skip (matches pattern): $FILE_LINE"
+                  AUTHORIZED=true
+                  break
+                fi
+              done
+            fi
+
+            if [ "$AUTHORIZED" = false ]; then
+              UNAUTHORIZED="$UNAUTHORIZED\n  - $FILE_LINE"
+            fi
+          done <<< "$SKIPPED_TESTS"
+
+          if [ -n "$UNAUTHORIZED" ]; then
+            echo ""
+            echo "❌ FAILED: Unauthorized skipped tests detected:"
+            echo -e "$UNAUTHORIZED"
+            echo ""
+            echo "All skipped tests must have an associated issue reference (TODO-XXX, ISSUE-XXX, etc.) within 2 lines before the .skip"
+            echo ""
+            echo "To fix:"
+            echo "1. Add a comment with issue reference before the skip:"
+            echo "   // TODO: ISSUE-123 - Description of why skipped"
+            echo "   it.skip('test name', ...)"
+            echo ""
+            echo "2. Or remove the .skip if the test should run"
+            echo ""
+            echo "3. Or create a GitHub issue and reference it"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All skipped tests have issue references"

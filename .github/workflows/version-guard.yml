@@ -1,0 +1,85 @@
+# CI Version Guard - Ensures /healthz matches SERVICE_VERSION
+#
+# This workflow verifies that the deployed service returns the correct
+# version from the /healthz endpoint, matching the SERVICE_VERSION constant.
+
+name: Version Guard
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Extract SERVICE_VERSION
+        id: extract_version
+        run: |
+          VERSION=$(node -e "import('./dist/src/version.js').then(m => console.log(m.SERVICE_VERSION))")
+          echo "SERVICE_VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Expected SERVICE_VERSION: $VERSION"
+
+      - name: Start service in background
+        run: |
+          export LLM_PROVIDER=fixtures
+          export PORT=3101
+          pnpm start &
+          SERVICE_PID=$!
+          echo "SERVICE_PID=$SERVICE_PID" >> $GITHUB_ENV
+
+          # Wait for service to be ready (max 30s)
+          echo "⏳ Waiting for service to start..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:3101/healthz > /dev/null 2>&1; then
+              echo "✅ Service is ready!"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Verify /healthz version
+        run: |
+          EXPECTED="${{ steps.extract_version.outputs.SERVICE_VERSION }}"
+          ACTUAL=$(curl -s http://localhost:3101/healthz | jq -r '.version')
+
+          echo "Expected version: $EXPECTED"
+          echo "Actual version from /healthz: $ACTUAL"
+
+          if [ "$ACTUAL" = "$EXPECTED" ]; then
+            echo "✅ Version guard PASSED: /healthz returns correct version"
+          else
+            echo "❌ Version guard FAILED: /healthz version ($ACTUAL) does not match SERVICE_VERSION ($EXPECTED)"
+            exit 1
+          fi
+
+      - name: Stop service
+        if: always()
+        run: |
+          if [ -n "${SERVICE_PID:-}" ]; then
+            kill $SERVICE_PID || true
+          fi
+
+      - name: Run version regression tests
+        run: pnpm test tests/unit/service-version.test.ts

@@ -521,10 +521,19 @@
 
 ---
 
-### SD-004: Provenance Citation Format
+### SD-004: Provenance Citation Format ✅ COMPLETED
 **Spec says:** Strict format { source, quote ≤100 chars, location }
-**Current impl:** Plain string provenance
-**Decision:** Required for P0 (may need schema update)
+**Current impl:** ✅ Structured provenance implemented with backward compatibility
+**Decision:** **COMPLETED** in commit `3de95e3`
+**Priority:** High (blocking production readiness) — DONE
+**Impact:** Affects UI display, provenance traceability, compliance
+**Implementation:**
+- Schema: `StructuredProvenance` Zod object with source, quote, location
+- Migration: Edge provenance accepts union of `StructuredProvenance | string`
+- Doc processing: Added locationMetadata (totalPages, totalRows, totalLines)
+- Anthropic adapter: Updated prompts to generate structured citations
+- Examples: Documents with "page 3", CSV with "row 42", hypotheses without location
+**Completed:** 01 Nov 2025 (commit `3de95e3`)
 
 ---
 

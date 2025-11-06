@@ -1,0 +1,25 @@
+config:
+  target: '{{ $processEnvironment.PERF_TARGET_URL || "http://localhost:3101" }}'
+  phases:
+    - duration: {{ $processEnvironment.PERF_DURATION_SEC || 300 }}
+      arrivalRate: {{ $processEnvironment.PERF_RPS || 1 }}
+      name: 'Baseline load'
+  processor: './helpers.cjs'
+
+scenarios:
+  - name: 'Draft graph - baseline performance'
+    flow:
+      - post:
+          url: '/assist/draft-graph'
+          json:
+            brief: '{{ brief }}'
+          beforeRequest: 'selectBrief'
+          capture:
+            - json: '$.graph.nodes.length'
+              as: 'nodeCount'
+            - json: '$.confidence'
+              as: 'confidence'
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: 'graph'

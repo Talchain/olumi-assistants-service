@@ -1,0 +1,232 @@
+{
+  "title": "Olumi Assistants Service - Draft Graph",
+  "description": "Performance, quality, and cost metrics for draft-graph endpoint",
+  "widgets": [
+    {
+      "definition": {
+        "title": "Draft Latency (p50, p95, p99)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "p50:olumi.assistants.draft.latency_ms{*}",
+            "display_type": "line",
+            "style": {
+              "palette": "green",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          },
+          {
+            "q": "p95:olumi.assistants.draft.latency_ms{*}",
+            "display_type": "line",
+            "style": {
+              "palette": "orange",
+              "line_type": "solid",
+              "line_width": "thick"
+            }
+          },
+          {
+            "q": "p99:olumi.assistants.draft.latency_ms{*}",
+            "display_type": "line",
+            "style": {
+              "palette": "red",
+              "line_type": "dashed",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 8000",
+            "display_type": "error dashed",
+            "label": "p95 SLA (8s)"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Draft Completion Rate",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "sum:olumi.assistants.draft.completed{*}.as_rate()",
+            "aggregator": "sum"
+          }
+        ],
+        "autoscale": true,
+        "precision": 2,
+        "text_align": "left"
+      }
+    },
+    {
+      "definition": {
+        "title": "Quality Tier Distribution",
+        "type": "toplist",
+        "requests": [
+          {
+            "q": "top(sum:olumi.assistants.draft.completed{*} by {quality_tier}.as_count(), 10, 'mean', 'desc')"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Fallback Reason Mix",
+        "type": "sunburst",
+        "requests": [
+          {
+            "q": "sum:olumi.assistants.draft.completed{*} by {fallback_reason}.as_count()"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "SSE Error Rate",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:olumi.assistants.draft.sse.errors{*}.as_rate()",
+            "display_type": "bars",
+            "style": {
+              "palette": "warm"
+            }
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 0.05",
+            "display_type": "warning dashed",
+            "label": "5% error threshold"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Cost per Request (USD)",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "avg:olumi.assistants.draft.cost_usd{*}",
+            "display_type": "line"
+          },
+          {
+            "q": "p95:olumi.assistants.draft.cost_usd{*}",
+            "display_type": "line"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Total Cost (USD/hour)",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "sum:olumi.assistants.draft.cost_usd{*}.as_rate() * 3600",
+            "aggregator": "sum"
+          }
+        ],
+        "autoscale": false,
+        "custom_unit": "$",
+        "precision": 2
+      }
+    },
+    {
+      "definition": {
+        "title": "Prompt Cache Hit Rate",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "(sum:olumi.assistants.draft.prompt_cache{hit:true}.as_count() / sum:olumi.assistants.draft.prompt_cache{*}.as_count()) * 100",
+            "aggregator": "avg"
+          }
+        ],
+        "autoscale": false,
+        "custom_unit": "%",
+        "precision": 1
+      }
+    },
+    {
+      "definition": {
+        "title": "Repair Fallback Rate",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "(sum:olumi.assistants.draft.repair.fallback{*}.as_rate() / sum:olumi.assistants.draft.repair.attempted{*}.as_rate()) * 100",
+            "display_type": "line"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Legacy Provenance Usage (%)",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "avg:olumi.assistants.draft.legacy_provenance.percentage{*}",
+            "display_type": "line"
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 20",
+            "display_type": "warning dashed",
+            "label": "20% migration threshold"
+          },
+          {
+            "value": "y = 5",
+            "display_type": "ok dashed",
+            "label": "5% sunset threshold"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Graph Size Distribution",
+        "type": "distribution",
+        "requests": [
+          {
+            "q": "avg:olumi.assistants.draft.graph.nodes{*}"
+          },
+          {
+            "q": "avg:olumi.assistants.draft.graph.edges{*}"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Confidence Distribution",
+        "type": "heatmap",
+        "requests": [
+          {
+            "q": "avg:olumi.assistants.draft.confidence{*}"
+          }
+        ]
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "*",
+      "prefix": "env"
+    },
+    {
+      "name": "quality_tier",
+      "default": "*",
+      "prefix": "quality_tier"
+    }
+  ],
+  "layout_type": "ordered",
+  "is_read_only": false,
+  "notify_list": [],
+  "reflow_type": "fixed"
+}
