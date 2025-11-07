@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Olumi Assistants Service API
-  version: 1.1.1
+  version: 1.2.0
   description: |
     AI-powered decision graph drafting service that transforms natural language briefs into structured,
     executable decision models with provenance tracking and validation.
