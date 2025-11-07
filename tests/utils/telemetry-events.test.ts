@@ -41,6 +41,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         SSEError: "assist.draft.sse_error",
         FixtureShown: "assist.draft.fixture_shown",
         FixtureReplaced: "assist.draft.fixture_replaced",
+        LegacySSEPath: "assist.draft.legacy_sse_path",
 
         ValidationFailed: "assist.draft.validation_failed",
         RepairAttempted: "assist.draft.repair_attempted",
@@ -132,6 +133,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect(TelemetryEvents.SSEError).toBe("assist.draft.sse_error");
       expect(TelemetryEvents.FixtureShown).toBe("assist.draft.fixture_shown");
       expect(TelemetryEvents.FixtureReplaced).toBe("assist.draft.fixture_replaced");
+      expect(TelemetryEvents.LegacySSEPath).toBe("assist.draft.legacy_sse_path");
     });
 
     it("has validation and repair events for quality tracking", () => {
@@ -143,8 +145,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect(TelemetryEvents.RepairFallback).toBe("assist.draft.repair_fallback");
     });
 
-    it("has deprecation tracking event", () => {
+    it("has deprecation tracking events", () => {
       expect(TelemetryEvents.LegacyProvenance).toBe("assist.draft.legacy_provenance");
+      expect(TelemetryEvents.LegacySSEPath).toBe("assist.draft.legacy_sse_path");
     });
 
     it("has debug stage event", () => {
@@ -168,6 +171,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.repair.partial": [TelemetryEvents.RepairPartial],
         "draft.repair.fallback": [TelemetryEvents.RepairFallback],
         "draft.legacy_provenance.occurrences": [TelemetryEvents.LegacyProvenance],
+        "draft.sse.legacy_path": [TelemetryEvents.LegacySSEPath],
         "draft.fixture.shown": [TelemetryEvents.FixtureShown],
         "draft.fixture.replaced": [TelemetryEvents.FixtureReplaced],
         "draft.guard_violation": [TelemetryEvents.GuardViolation],
@@ -248,6 +252,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.draft.sse_error",
         "assist.draft.fixture_shown",
         "assist.draft.fixture_replaced",
+        "assist.draft.legacy_sse_path",
         "assist.draft.validation_failed",
         "assist.draft.repair_attempted",
         "assist.draft.repair_start",

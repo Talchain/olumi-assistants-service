@@ -22,6 +22,8 @@ const ASSISTANTS_URL = env.ASSISTANTS_BASE_URL || "http://localhost:3101";
 const ENGINE_URL = env.ENGINE_BASE_URL;
 const NUM_DRAFTS = 50;
 const SUCCESS_RATE_TARGET = 0.9; // 90%
+const MAX_NODES = 12;
+const MAX_EDGES = 24;
 
 interface ValidationResult {
   draftNumber: number;
@@ -31,6 +33,7 @@ interface ValidationResult {
   validationSuccess: boolean;
   validationError?: string;
   requestId?: string;
+  capViolation?: string;
 }
 
 const TEST_BRIEFS = [
@@ -73,6 +76,20 @@ async function generateDraft(brief: string): Promise<any> {
   }
 
   return await response.json();
+}
+
+function validateCaps(graph: any): string | null {
+  const nodeCount = graph.nodes?.length || 0;
+  const edgeCount = graph.edges?.length || 0;
+
+  if (nodeCount > MAX_NODES) {
+    return `Node count (${nodeCount}) exceeds max (${MAX_NODES})`;
+  }
+  if (edgeCount > MAX_EDGES) {
+    return `Edge count (${edgeCount}) exceeds max (${MAX_EDGES})`;
+  }
+
+  return null; // No violation
 }
 
 async function validateWithEngine(graph: any): Promise<{ success: boolean; error?: string }> {
@@ -125,6 +142,12 @@ async function runValidation(): Promise<ValidationResult[]> {
 
       console.log(`   ✓ Draft created: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
 
+      // Check caps
+      const capViolation = validateCaps(graph);
+      if (capViolation) {
+        console.log(`   ⚠️  Cap violation: ${capViolation}`);
+      }
+
       // Validate with engine
       const validation = await validateWithEngine(graph);
 
@@ -142,6 +165,7 @@ async function runValidation(): Promise<ValidationResult[]> {
         validationSuccess: validation.success,
         validationError: validation.error,
         requestId,
+        capViolation: capViolation || undefined,
       });
     } catch (error) {
       console.error(`   ✗ Error: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -163,10 +187,11 @@ async function runValidation(): Promise<ValidationResult[]> {
 
 function generateReport(results: ValidationResult[]): string {
   const successCount = results.filter((r) => r.validationSuccess).length;
+  const capViolationCount = results.filter((r) => r.capViolation).length;
   const successRate = successCount / results.length;
   const passed = successRate >= SUCCESS_RATE_TARGET;
 
-  let report = `# Engine Coordination Status Report\n\n`;
+  let report = `# Engine Verification Status - v1.2\n\n`;
   report += `**Generated:** ${new Date().toISOString()}\n\n`;
   report += `## Summary\n\n`;
   report += `- **Total Drafts:** ${results.length}\n`;
@@ -174,7 +199,8 @@ function generateReport(results: ValidationResult[]): string {
   report += `- **Validation Failures:** ${results.length - successCount}\n`;
   report += `- **Success Rate:** ${(successRate * 100).toFixed(1)}%\n`;
   report += `- **Target Success Rate:** ${SUCCESS_RATE_TARGET * 100}%\n`;
-  report += `- **Status:** ${passed ? "✅ PASSED" : "❌ FAILED"}\n\n`;
+  report += `- **Cap Violations (≤${MAX_NODES} nodes, ≤${MAX_EDGES} edges):** ${capViolationCount}\n`;
+  report += `- **Status:** ${passed && capViolationCount === 0 ? "✅ PASSED" : "❌ FAILED"}\n\n`;
 
   if (passed) {
     report += `✅ The assistants service is generating graphs that pass engine validation at the target rate.\n\n`;
@@ -187,20 +213,36 @@ function generateReport(results: ValidationResult[]): string {
   report += `- **Engine URL:** ${ENGINE_URL || "not configured"}\n\n`;
 
   report += `## Detailed Results\n\n`;
-  report += `| # | Brief | Nodes | Edges | Validation | Error |\n`;
-  report += `|---|-------|-------|-------|------------|-------|\n`;
+  report += `| # | Brief | Nodes | Edges | Caps | Validation | Error |\n`;
+  report += `|---|-------|-------|-------|------|------------|-------|\n`;
 
   for (const result of results) {
-    const briefShort = result.brief.substring(0, 50) + "...";
+    const briefShort = result.brief.substring(0, 40) + "...";
     const status = result.validationSuccess ? "✅" : "❌";
-    const error = result.validationError ? result.validationError.substring(0, 40) : "-";
-    report += `| ${result.draftNumber} | ${briefShort} | ${result.graphNodes} | ${result.graphEdges} | ${status} | ${error} |\n`;
+    const capsStatus = result.capViolation ? "⚠️" : "✅";
+    const error = result.validationError ? result.validationError.substring(0, 30) : "-";
+    report += `| ${result.draftNumber} | ${briefShort} | ${result.graphNodes} | ${result.graphEdges} | ${capsStatus} | ${status} | ${error} |\n`;
   }
 
-  report += `\n## Failures Analysis\n\n`;
+  report += `\n## Cap Violations\n\n`;
+  const capViolations = results.filter((r) => r.capViolation);
+  if (capViolations.length === 0) {
+    report += `✅ No cap violations detected. All graphs within limits (≤${MAX_NODES} nodes, ≤${MAX_EDGES} edges).\n`;
+  } else {
+    report += `⚠️  Total cap violations: ${capViolations.length}\n\n`;
+    for (const violation of capViolations) {
+      report += `### Draft #${violation.draftNumber}\n`;
+      report += `- **Brief:** ${violation.brief}\n`;
+      report += `- **Nodes:** ${violation.graphNodes} (max: ${MAX_NODES})\n`;
+      report += `- **Edges:** ${violation.graphEdges} (max: ${MAX_EDGES})\n`;
+      report += `- **Violation:** ${violation.capViolation}\n\n`;
+    }
+  }
+
+  report += `\n## Validation Failures\n\n`;
   const failures = results.filter((r) => !r.validationSuccess);
   if (failures.length === 0) {
-    report += `No failures detected.\n`;
+    report += `✅ No validation failures detected.\n`;
   } else {
     report += `Total failures: ${failures.length}\n\n`;
     for (const failure of failures) {
@@ -212,15 +254,22 @@ function generateReport(results: ValidationResult[]): string {
   }
 
   report += `\n## Recommendations\n\n`;
-  if (passed) {
+  if (passed && capViolationCount === 0) {
     report += `- ✅ Validation success rate meets target (≥90%)\n`;
+    report += `- ✅ No cap violations detected\n`;
     report += `- Consider this version ready for production handoff to engine team\n`;
     report += `- Monitor ongoing validation rates in production\n`;
   } else {
-    report += `- ❌ Validation success rate below target\n`;
-    report += `- Review failure patterns above\n`;
+    if (!passed) {
+      report += `- ❌ Validation success rate below target\n`;
+      report += `- Review failure patterns above\n`;
+    }
+    if (capViolationCount > 0) {
+      report += `- ⚠️  Cap violations detected (${capViolationCount} drafts exceed ≤${MAX_NODES} nodes or ≤${MAX_EDGES} edges)\n`;
+      report += `- Investigate why graphs are exceeding size limits\n`;
+    }
     report += `- Coordinate with engine team on schema compatibility\n`;
-    report += `- Do NOT deploy this version until validation rate improves\n`;
+    report += `- Do NOT deploy this version until issues are resolved\n`;
   }
 
   return report;
@@ -243,7 +292,7 @@ async function main() {
     const report = generateReport(results);
 
     // Write report to file
-    const reportPath = "Docs/engine-handovers/ENGINE_COORDINATION_STATUS.md";
+    const reportPath = "Docs/ENGINE_VERIFY_STATUS.md";
     writeFileSync(reportPath, report, "utf-8");
 
     console.log("═══════════════════════════════════════════════════════");
