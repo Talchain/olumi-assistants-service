@@ -40,7 +40,7 @@ scenarios:
             - hasProperty: "graph"
             - hasProperty: "rationales"
 
-  # Scenario 2: Draft with text attachment
+  # Scenario 2: Draft with text attachment (v1.1.0 schema)
   - name: "Draft with text attachment"
     weight: 30
     flow:
@@ -49,9 +49,11 @@ scenarios:
           json:
             brief: "Analyze the vendor requirements and create a selection strategy."
             attachments:
-              - filename: "requirements.txt"
-                mime_type: "text/plain"
-                content: "VGVzdCByZXF1aXJlbWVudHM6CjEuIFNjYWxhYmlsaXR5CjIuIFNlY3VyaXR5CjMuIENvc3QgZWZmaWNpZW5jeQo="
+              - id: "att_0"
+                kind: "document"
+                name: "requirements.txt"
+            attachment_payloads:
+              att_0: "VGVzdCByZXF1aXJlbWVudHM6CjEuIFNjYWxhYmlsaXR5CjIuIFNlY3VyaXR5CjMuIENvc3QgZWZmaWNpZW5jeQo="
           headers:
             Content-Type: "application/json"
           expect:
@@ -59,7 +61,7 @@ scenarios:
             - contentType: json
             - hasProperty: "graph"
 
-  # Scenario 3: Draft with multiple attachments
+  # Scenario 3: Draft with multiple attachments (v1.1.0 schema)
   - name: "Draft with multiple attachments"
     weight: 20
     flow:
@@ -68,12 +70,15 @@ scenarios:
           json:
             brief: "Create a strategy based on the attached documents."
             attachments:
-              - filename: "doc1.txt"
-                mime_type: "text/plain"
-                content: "RG9jdW1lbnQgMSBjb250ZW50"
-              - filename: "doc2.md"
-                mime_type: "text/markdown"
-                content: "IyBEb2N1bWVudCAyCkNvbnRlbnQgaGVyZQ=="
+              - id: "att_0"
+                kind: "document"
+                name: "doc1.txt"
+              - id: "att_1"
+                kind: "document"
+                name: "doc2.md"
+            attachment_payloads:
+              att_0: "RG9jdW1lbnQgMSBjb250ZW50"
+              att_1: "IyBEb2N1bWVudCAyCkNvbnRlbnQgaGVyZQ=="
           headers:
             Content-Type: "application/json"
           expect:

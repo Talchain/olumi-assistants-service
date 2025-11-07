@@ -2,7 +2,7 @@
 /**
  * Engine Validation Script
  *
- * Generates 25 draft graphs from the assistants service and validates each
+ * Generates 50 draft graphs from the assistants service and validates each
  * with the PLoT engine's /v1/validate endpoint.
  *
  * This script:
@@ -20,7 +20,7 @@ import { writeFileSync } from "node:fs";
 
 const ASSISTANTS_URL = env.ASSISTANTS_BASE_URL || "http://localhost:3101";
 const ENGINE_URL = env.ENGINE_BASE_URL;
-const NUM_DRAFTS = 25;
+const NUM_DRAFTS = 50;
 const SUCCESS_RATE_TARGET = 0.9; // 90%
 
 interface ValidationResult {
@@ -114,7 +114,7 @@ async function runValidation(): Promise<ValidationResult[]> {
   console.log(`   Engine URL: ${ENGINE_URL || "not set (skipping validation)"}\n`);
 
   for (let i = 0; i < NUM_DRAFTS; i++) {
-    const brief = TEST_BRIEFS[i];
+    const brief = TEST_BRIEFS[i % TEST_BRIEFS.length];
     console.log(`[${i + 1}/${NUM_DRAFTS}] Generating draft: "${brief.substring(0, 60)}..."`);
 
     try {

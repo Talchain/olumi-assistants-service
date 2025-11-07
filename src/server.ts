@@ -31,8 +31,8 @@ if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
 // Security configuration (read from env or use defaults)
 const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
 const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
-const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 60; // requests per minute per IP
-const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 10; // SSE-specific limit
+const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120; // requests per minute per IP
+const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20; // SSE-specific limit
 const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
 const app = Fastify({
@@ -45,6 +45,7 @@ const app = Fastify({
 // CORS: Strict allowlist (default: olumi.app + localhost dev)
 const DEFAULT_ORIGINS = [
   'https://olumi.app',
+  'https://app.olumi.app',
   'http://localhost:5173',
   'http://localhost:3000',
 ];
