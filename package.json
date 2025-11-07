@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:ci": "pnpm lint && pnpm typecheck && pnpm test",
@@ -26,6 +26,7 @@
     "@fastify/cors": "^10.1.0",
     "@fastify/rate-limit": "^10.3.0",
     "fastify": "^5.6.1",
+    "fastify-plugin": "^5.1.0",
     "hot-shots": "^11.2.0",
     "openai": "^6.7.0",
     "papaparse": "^5.4.1",
