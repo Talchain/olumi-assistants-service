@@ -1,6 +1,6 @@
 {
   "name": "olumi-assistants-service",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "perf:baseline": "node tests/perf/run-baseline.js",
     "perf:baseline:prod": "PERF_TARGET_URL=${ASSISTANTS_URL} node tests/perf/run-baseline.js",
+    "ops:evidence": "tsx scripts/evidence-pack-cli.ts",
     "openapi:validate": "swagger-cli validate openapi.yaml",
     "openapi:generate": "openapi-typescript openapi.yaml -o src/generated/openapi.d.ts",
     "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'"

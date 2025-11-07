@@ -7,9 +7,13 @@ import suggestRoute from "./routes/assist.suggest-options.js";
 import clarifyRoute from "./routes/assist.clarify-brief.js";
 import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
+import evidencePackRoute from "./routes/assist.evidence-pack.js";
+import observabilityPlugin from "./plugins/observability.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
+import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 
 // Fail-fast: Verify LLM provider and API key configuration
 const llmProvider = env.LLM_PROVIDER || 'openai';
@@ -27,8 +31,8 @@ if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
 // Security configuration (read from env or use defaults)
 const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
 const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
-const RATE_LIMIT_MAX = Number(env.RATE_LIMIT_MAX) || 10; // requests per minute per IP
-const RATE_LIMIT_WINDOW_MS = Number(env.RATE_LIMIT_WINDOW_MS) || 60000; // 1 minute
+const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120; // requests per minute per IP
+const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20; // SSE-specific limit
 const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
 const app = Fastify({
@@ -38,26 +42,27 @@ const app = Fastify({
   requestTimeout: REQUEST_TIMEOUT_MS,
 });
 
-// CORS: Allow localhost for development + production origins from env
-const allowedOrigins: (string | RegExp)[] = [
-  /^http:\/\/localhost:\d+$/,
-  /^http:\/\/127\.0\.0\.1:\d+$/,
+// CORS: Strict allowlist (default: olumi.app + localhost dev)
+const DEFAULT_ORIGINS = [
+  'https://olumi.app',
+  'https://app.olumi.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
 ];
 
-if (env.ALLOWED_ORIGINS) {
-  // Parse comma-separated list of production origins
-  const prodOrigins = env.ALLOWED_ORIGINS.split(",").map((o) => o.trim());
-  allowedOrigins.push(...prodOrigins);
-}
+const allowedOrigins: string[] = env.ALLOWED_ORIGINS
+  ? env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : DEFAULT_ORIGINS;
 
 await app.register(cors, {
   origin: allowedOrigins,
 });
 
-// Rate limiting: 10 requests per minute per IP
+// Rate limiting: Global + SSE-specific limits
 await app.register(rateLimit, {
-  max: RATE_LIMIT_MAX,
-  timeWindow: RATE_LIMIT_WINDOW_MS,
+  global: true,
+  max: GLOBAL_RATE_LIMIT_RPM,
+  timeWindow: '1 minute',
   addHeadersOnExceeding: {
     "x-ratelimit-limit": true,
     "x-ratelimit-remaining": true,
@@ -67,17 +72,49 @@ await app.register(rateLimit, {
     "x-ratelimit-limit": true,
     "x-ratelimit-remaining": true,
     "x-ratelimit-reset": true,
+    "retry-after": true,
   },
-  errorResponseBuilder: (_req, _context) => {
-    // Log rate limit hits for observability
-    app.log.warn({ event: "rate_limit_hit", max: RATE_LIMIT_MAX, window_ms: RATE_LIMIT_WINDOW_MS }, "Rate limit exceeded");
+  errorResponseBuilder: (req, context) => {
+    const requestId = getRequestId(req);
+    // Calculate retry_after_seconds with proper guards
+    let retryAfter = 60; // Default fallback
+    if (context.after && typeof context.after === 'number') {
+      const diff = Math.ceil((context.after - Date.now()) / 1000);
+      retryAfter = Math.max(1, diff); // Ensure at least 1 second
+    }
+    app.log.warn({
+      event: "rate_limit_hit",
+      max: GLOBAL_RATE_LIMIT_RPM,
+      request_id: requestId,
+    }, "Rate limit exceeded");
+
+    // Use centralized error builder for consistency
+    // Note: Must include statusCode for @fastify/rate-limit
     return {
-      schema: "error.v1",
-      code: "RATE_LIMITED",
-      message: "Rate limit exceeded",
-      details: { max: RATE_LIMIT_MAX, window_ms: RATE_LIMIT_WINDOW_MS },
+      statusCode: 429,
+      ...buildErrorV1(
+        'RATE_LIMITED',
+        'Too many requests',
+        { retry_after_seconds: retryAfter },
+        requestId
+      ),
     };
   },
+});
+
+// Observability: Structured logging with sampling and redaction
+await app.register(observabilityPlugin);
+
+// Request ID tracking: attach to every request
+app.addHook("onRequest", async (request, _reply) => {
+  attachRequestId(request);
+});
+
+// Response hook: Add X-Request-Id header to every response
+app.addHook("onSend", async (request, reply, payload) => {
+  const requestId = getRequestId(request);
+  reply.header(REQUEST_ID_HEADER, requestId);
+  return payload;
 });
 
 // Performance profiling hooks (enabled with PERF_TRACE=1)
@@ -139,37 +176,34 @@ if (env.PERF_TRACE === "1") {
   });
 }
 
-// Error handler for body size limit and other errors
-app.setErrorHandler((error, _request, reply) => {
-  // Body size limit exceeded
-  if (error.statusCode === 413) {
-    app.log.warn({ event: "body_limit_hit", limit_bytes: BODY_LIMIT_BYTES }, "Body size limit exceeded");
-    return reply.status(413).send({
-      schema: "error.v1",
-      code: "BAD_INPUT",
-      message: "Request payload too large",
-      details: { limit_bytes: BODY_LIMIT_BYTES },
-    });
+// Centralized error handler: structured error.v1 responses with request_id
+app.setErrorHandler((error, request, reply) => {
+  const errorV1 = toErrorV1(error, request);
+  const statusCode = getStatusCodeForErrorCode(errorV1.code);
+
+  // Log errors with context (redaction handled by logger)
+  if (statusCode >= 500) {
+    app.log.error({
+      error: error,
+      request_id: errorV1.request_id,
+      method: request.method,
+      url: request.url,
+    }, `[${errorV1.code}] ${errorV1.message}`);
+  } else {
+    app.log.warn({
+      request_id: errorV1.request_id,
+      code: errorV1.code,
+      method: request.method,
+      url: request.url,
+    }, `[${errorV1.code}] ${errorV1.message}`);
   }
 
-  // Request timeout
-  if (error.statusCode === 408 || error.code === "ETIMEDOUT") {
-    app.log.warn({ event: "request_timeout", timeout_ms: REQUEST_TIMEOUT_MS }, "Request timeout");
-    return reply.status(408).send({
-      schema: "error.v1",
-      code: "INTERNAL",
-      message: "Request timeout",
-      details: { timeout_ms: REQUEST_TIMEOUT_MS },
-    });
+  // Add Retry-After header for rate limit errors
+  if (errorV1.code === 'RATE_LIMITED' && errorV1.details?.retry_after_seconds) {
+    reply.header('Retry-After', errorV1.details.retry_after_seconds);
   }
 
-  // Default error handling
-  app.log.error({ error }, "Unhandled error");
-  return reply.status(error.statusCode || 500).send({
-    schema: "error.v1",
-    code: "INTERNAL",
-    message: error.message || "Internal server error",
-  });
+  return reply.status(statusCode).send(errorV1);
 });
 
 app.get("/healthz", async () => {
@@ -191,6 +225,7 @@ await suggestRoute(app);
 await clarifyRoute(app);
 await critiqueRoute(app);
 await explainRoute(app);
+await evidencePackRoute(app);
 
 const port = Number(env.PORT || 3101);
 
@@ -202,9 +237,10 @@ app.log.info({
   provider: adapter.name,
   model: adapter.model,
   cost_cap_usd: COST_MAX_USD,
-  rate_limit: `${RATE_LIMIT_MAX} req/${RATE_LIMIT_WINDOW_MS}ms`,
+  global_rate_limit_rpm: GLOBAL_RATE_LIMIT_RPM,
+  sse_rate_limit_rpm: SSE_RATE_LIMIT_RPM,
   body_limit_mb: (BODY_LIMIT_BYTES / 1024 / 1024).toFixed(1),
-  cors_origins: allowedOrigins.length,
+  cors_origins: allowedOrigins,
   engine_url: env.ENGINE_BASE_URL || 'not set',
 }, '🚀 Olumi Assistants Service starting');
 

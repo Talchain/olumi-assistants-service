@@ -1,0 +1,176 @@
+name: Performance Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/perf/**'
+      - 'package.json'
+      - '.github/workflows/perf-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  perf-gate:
+    name: Performance Gate (p95 < 8s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build service
+        run: pnpm build
+
+      - name: Start service with fixtures
+        run: |
+          # Start service in background with fixtures provider
+          LLM_PROVIDER=fixtures \
+          PORT=3101 \
+          GLOBAL_RATE_LIMIT_RPM=1000 \
+          SSE_RATE_LIMIT_RPM=1000 \
+          node dist/src/server.js &
+
+          # Wait for service to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:3101/healthz > /dev/null; then
+              echo "✅ Service ready"
+              break
+            fi
+            echo "⏳ Waiting for service... ($i/30)"
+            sleep 2
+          done
+
+          # Verify service is responding
+          curl -f http://localhost:3101/healthz || exit 1
+        env:
+          NODE_ENV: test
+
+      - name: Install Artillery
+        run: pnpm add -D artillery@latest
+
+      - name: Run performance tests
+        id: perf
+        run: |
+          echo "🚀 Running Artillery performance tests..."
+
+          # Run Artillery against local service
+          npx artillery run tests/perf/draft.yml --output perf-results.json
+
+          # Artillery exits with non-zero if thresholds fail
+          echo "✅ Performance tests passed"
+        env:
+          LLM_PROVIDER: fixtures
+
+      - name: Parse performance results
+        if: always()
+        run: |
+          if [ -f perf-results.json ]; then
+            echo "📊 Performance Results:"
+
+            # Extract key metrics using jq
+            P50=$(jq -r '.aggregate.summaries["http.response_time"].p50 // 0' perf-results.json)
+            P95=$(jq -r '.aggregate.summaries["http.response_time"].p95 // 0' perf-results.json)
+            P99=$(jq -r '.aggregate.summaries["http.response_time"].p99 // 0' perf-results.json)
+            ERROR_RATE=$(jq -r '(.aggregate.counters["errors.ETIMEDOUT"] // 0 + .aggregate.counters["errors.ECONNREFUSED"] // 0) / (.aggregate.counters["http.requests"] // 1) * 100' perf-results.json)
+
+            echo "  P50: ${P50}ms"
+            echo "  P95: ${P95}ms"
+            echo "  P99: ${P99}ms"
+            echo "  Error Rate: ${ERROR_RATE}%"
+
+            # Add results to GitHub summary
+            cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 📊 Performance Results
+
+          | Metric | Value | Target | Status |
+          |--------|-------|--------|--------|
+          | P50 | ${P50}ms | < 2000ms | $([ $(echo "$P50 < 2000" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          | P95 | ${P95}ms | < 8000ms | $([ $(echo "$P95 < 8000" | bc -l) -eq 1 ] && echo "✅" || echo "❌") |
+          | P99 | ${P99}ms | < 15000ms | $([ $(echo "$P99 < 15000" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          | Error Rate | ${ERROR_RATE}% | < 5% | $([ $(echo "$ERROR_RATE < 5" | bc -l) -eq 1 ] && echo "✅" || echo "❌") |
+          EOF
+          else
+            echo "⚠️ No performance results file found"
+            echo "## ⚠️ Performance Test Failed" >> $GITHUB_STEP_SUMMARY
+            echo "No results file generated. Check logs above." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: perf-results.json
+          retention-days: 30
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let comment = '## 🎯 Performance Gate Results\n\n';
+
+            try {
+              const results = JSON.parse(fs.readFileSync('perf-results.json', 'utf8'));
+              const p50 = results.aggregate.summaries['http.response_time'].p50 || 0;
+              const p95 = results.aggregate.summaries['http.response_time'].p95 || 0;
+              const p99 = results.aggregate.summaries['http.response_time'].p99 || 0;
+              const requests = results.aggregate.counters['http.requests'] || 0;
+              const errors = (results.aggregate.counters['errors.ETIMEDOUT'] || 0) +
+                            (results.aggregate.counters['errors.ECONNREFUSED'] || 0);
+              const errorRate = (errors / requests * 100).toFixed(2);
+
+              const p50Pass = p50 < 2000;
+              const p95Pass = p95 < 8000;
+              const p99Pass = p99 < 15000;
+              const errorPass = errorRate < 5;
+              const allPass = p50Pass && p95Pass && p99Pass && errorPass;
+
+              comment += allPass ? '### ✅ All performance targets met!\n\n' : '### ❌ Performance targets not met\n\n';
+              comment += '| Metric | Value | Target | Status |\n';
+              comment += '|--------|-------|--------|--------|\n';
+              comment += `| P50 | ${p50}ms | < 2000ms | ${p50Pass ? '✅' : '⚠️'} |\n`;
+              comment += `| **P95** | **${p95}ms** | **< 8000ms** | **${p95Pass ? '✅' : '❌'}** |\n`;
+              comment += `| P99 | ${p99}ms | < 15000ms | ${p99Pass ? '✅' : '⚠️'} |\n`;
+              comment += `| Error Rate | ${errorRate}% | < 5% | ${errorPass ? '✅' : '❌'} |\n`;
+              comment += `\n**Total Requests**: ${requests}\n`;
+
+              if (!allPass) {
+                comment += '\n⚠️ **Performance regression detected.** Please investigate before merging.\n';
+              }
+            } catch (error) {
+              comment += '⚠️ Failed to parse performance results.\n';
+              comment += `Error: ${error.message}\n`;
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if performance targets not met
+        if: failure()
+        run: |
+          echo "❌ Performance gate failed"
+          echo "   P95 must be < 8000ms"
+          echo "   Error rate must be < 5%"
+          exit 1
