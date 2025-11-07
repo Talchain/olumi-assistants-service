@@ -463,6 +463,37 @@ All logs automatically redact sensitive data using the `safeLog()` utility.
 - Error count by route
 - Recent errors (log stream)
 
+#### SSE Endpoint Monitoring (v1.1.1+)
+**Purpose**: Track migration from legacy SSE path to dedicated `/stream` endpoint
+
+**Metrics to Monitor**:
+```
+# Dedicated /stream endpoint (20 RPM limit)
+sum:http.requests{endpoint:/assist/draft-graph/stream}.as_count()
+
+# Legacy SSE via Accept header (120 RPM - DEPRECATED)
+sum:http.requests{endpoint:/assist/draft-graph,accept:text/event-stream}.as_count()
+```
+
+**Migration Progress Dashboard**:
+- Request count: `/stream` vs legacy SSE path
+- Rate limit hit rate by endpoint
+- Response time comparison (stream vs legacy)
+
+**Expected Pattern**:
+- **Week 1**: Legacy path dominant, /stream growing
+- **Week 4**: /stream majority, legacy declining
+- **Week 8**: Legacy path < 5% of traffic (ready for removal)
+
+**Alert on Legacy Usage**:
+```yaml
+- name: High Legacy SSE Traffic
+  condition: legacy_sse_requests > 100/hour
+  duration: 24 hours
+  severity: warning
+  action: Notify clients to migrate to /stream endpoint
+```
+
 ### Recommended Alerts
 
 #### Critical Alerts (PagerDuty)

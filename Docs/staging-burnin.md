@@ -100,6 +100,7 @@ curl -N -X POST https://staging.olumi-assistants-service.onrender.com/assist/dra
 ### 4. Rate Limiting
 Test rate limit enforcement:
 
+#### Global Rate Limit (120 RPM)
 ```bash
 # Send 125 requests rapidly (exceeds 120 RPM limit)
 for i in {1..125}; do
@@ -115,6 +116,37 @@ wait
 ✓ 429 response includes error.v1 schema
 ✓ 429 response includes Retry-After header
 ✓ 429 response includes request_id
+```
+
+#### SSE Stream Endpoint Rate Limit (20 RPM)
+```bash
+# Test dedicated /stream endpoint (stricter 20 RPM limit)
+for i in {1..25}; do
+  curl -N -X POST https://staging.olumi-assistants-service.onrender.com/assist/draft-graph/stream \
+    -H "Content-Type: application/json" \
+    -H "Accept: text/event-stream" \
+    -d '{"brief":"test"}' &
+done
+wait
+
+# Verify:
+✓ Requests 1-20 succeed (200 OK with SSE stream)
+✓ Requests 21-25 return 429 Rate Limited
+✓ X-RateLimit-Limit header shows "20"
+✓ 429 response includes error.v1 schema
+```
+
+#### Legacy SSE Path Monitoring (DEPRECATED)
+```bash
+# Legacy Accept header path uses global 120 RPM (deprecated - use /stream instead)
+curl -N -X POST https://staging.olumi-assistants-service.onrender.com/assist/draft-graph \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"brief":"test"}' -i
+
+# Verify:
+✓ X-RateLimit-Limit header shows "120" (global limit, not SSE-specific)
+⚠️  Monitor usage - clients should migrate to /assist/draft-graph/stream for 20 RPM protection
 ```
 
 ### 5. CORS Validation

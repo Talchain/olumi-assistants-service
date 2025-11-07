@@ -519,8 +519,18 @@ async function handleJsonResponse(
 }
 
 export default async function route(app: FastifyInstance) {
-  // Dedicated SSE streaming endpoint
-  app.post("/assist/draft-graph/stream", async (req, reply) => {
+  // SSE-specific rate limit (lower than global due to long-running connections)
+  const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
+
+  // Dedicated SSE streaming endpoint with stricter rate limiting
+  app.post("/assist/draft-graph/stream", {
+    config: {
+      rateLimit: {
+        max: SSE_RATE_LIMIT_RPM,
+        timeWindow: '1 minute'
+      }
+    }
+  }, async (req, reply) => {
     const parsed = DraftGraphInput.safeParse(req.body);
     if (!parsed.success) {
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
@@ -536,6 +546,8 @@ export default async function route(app: FastifyInstance) {
   });
 
   // Main endpoint with backward compatibility (supports both SSE and JSON)
+  // DEPRECATED: SSE access via Accept: text/event-stream header uses global 120 RPM limit
+  // For production SSE streaming, use dedicated /assist/draft-graph/stream endpoint (20 RPM limit)
   app.post("/assist/draft-graph", async (req, reply) => {
     const wantsSse = req.headers.accept?.includes(EVENT_STREAM) ?? false;
 

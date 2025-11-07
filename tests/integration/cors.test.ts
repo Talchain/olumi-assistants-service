@@ -7,6 +7,7 @@ describe("CORS integration", () => {
 
   const ALLOWED_ORIGINS = [
     "https://olumi.app",
+    "https://app.olumi.app",
     "http://localhost:5173",
     "http://localhost:3000",
   ];
@@ -19,9 +20,13 @@ describe("CORS integration", () => {
       origin: ALLOWED_ORIGINS,
     });
 
-    // Test endpoint
+    // Test endpoints
     app.get("/test", async () => {
       return { ok: true };
+    });
+
+    app.post("/api/data", async (request) => {
+      return { received: request.body };
     });
 
     await app.listen({ port: 0 });
@@ -69,6 +74,19 @@ describe("CORS integration", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+    });
+
+    it("should allow requests from https://app.olumi.app", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test",
+        headers: {
+          origin: "https://app.olumi.app",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["access-control-allow-origin"]).toBe("https://app.olumi.app");
     });
   });
 
@@ -222,13 +240,6 @@ describe("CORS integration", () => {
   });
 
   describe("POST requests", () => {
-    beforeAll(async () => {
-      // Add POST endpoint to test
-      app.post("/api/data", async (request) => {
-        return { received: request.body };
-      });
-    });
-
     it("should allow POST from allowed origin", async () => {
       const response = await app.inject({
         method: "POST",

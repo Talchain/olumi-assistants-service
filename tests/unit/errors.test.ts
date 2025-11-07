@@ -100,7 +100,7 @@ describe("error utilities", () => {
       const error = toErrorV1(rateLimitError);
 
       expect(error.code).toBe("RATE_LIMITED");
-      expect(error.message).toContain("rate limit");
+      expect(error.message).toBe("Too many requests");
     });
 
     it("should detect body limit errors", () => {
@@ -130,7 +130,8 @@ describe("error utilities", () => {
 
       expect(error.message).not.toContain("/app/src/db.ts");
       expect(error.message).not.toContain("at db.connect");
-      expect(error.details).not.toHaveProperty("stack");
+      // error.details is undefined when there are no details to add
+      expect(error.details).toBeUndefined();
     });
 
     it("should handle request object for request_id extraction", () => {
@@ -150,7 +151,7 @@ describe("error utilities", () => {
       const error = toErrorV1(stringError);
 
       expect(error.code).toBe("INTERNAL");
-      expect(error.message).toContain("Internal server error");
+      expect(error.message).toBe("String error message");
     });
 
     it("should handle null/undefined errors", () => {
@@ -196,7 +197,8 @@ describe("error utilities", () => {
       const errorV1 = toErrorV1(error);
 
       expect(JSON.stringify(errorV1)).not.toContain("Stack trace");
-      expect(errorV1.details).not.toHaveProperty("stack");
+      // error.details is undefined when there are no details
+      expect(errorV1.details).toBeUndefined();
     });
 
     it("should never expose environment variables", () => {

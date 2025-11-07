@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { attachRequestId, getRequestId } from "../../src/utils/request-id.js";
-import { toErrorV1, getStatusCodeForErrorCode } from "../../src/utils/errors.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "../../src/utils/errors.js";
 
 describe("rate limiting integration", () => {
   let app: FastifyInstance;
@@ -24,8 +24,14 @@ describe("rate limiting integration", () => {
       },
       errorResponseBuilder: (req, context) => {
         const requestId = getRequestId(req);
-        const retryAfter = Math.ceil((context.after - Date.now()) / 1000);
+        let retryAfter = 60; // Default fallback
+        if (context.after && typeof context.after === 'number') {
+          const diff = Math.ceil((context.after - Date.now()) / 1000);
+          retryAfter = Math.max(1, diff); // Ensure at least 1 second
+        }
+        // Return error.v1 schema with statusCode for @fastify/rate-limit
         return {
+          statusCode: 429,
           schema: "error.v1",
           code: "RATE_LIMITED",
           message: "Too many requests",
@@ -38,13 +44,6 @@ describe("rate limiting integration", () => {
     // Add request ID tracking
     app.addHook("onRequest", async (request) => {
       attachRequestId(request);
-    });
-
-    // Add error handler
-    app.setErrorHandler((error, request, reply) => {
-      const errorV1 = toErrorV1(error, request);
-      const statusCode = getStatusCodeForErrorCode(errorV1.code);
-      return reply.status(statusCode).send(errorV1);
     });
 
     // Test endpoint
@@ -122,6 +121,7 @@ describe("rate limiting integration", () => {
     });
 
     const body = JSON.parse(response.payload);
+    expect(body.details).toBeDefined();
     expect(body.details).toHaveProperty("retry_after_seconds");
     expect(typeof body.details.retry_after_seconds).toBe("number");
     expect(body.details.retry_after_seconds).toBeGreaterThan(0);
@@ -180,19 +180,21 @@ describe("rate limiting integration", () => {
 
     await app2.listen({ port: 0 });
 
-    // First app can still make requests
+    // First app's rate limit is exhausted from previous tests
     const response1 = await app.inject({
       method: "GET",
       url: "/test",
     });
 
-    // Second app has independent rate limit
+    // Second app has independent rate limit and should succeed
     const response2 = await app2.inject({
       method: "GET",
       url: "/test",
     });
 
-    expect(response1.statusCode).toBeLessThan(400);
+    // First app is rate limited (429) due to previous tests
+    expect(response1.statusCode).toBe(429);
+    // Second app succeeds because it has independent rate limit
     expect(response2.statusCode).toBe(200);
 
     await app2.close();

@@ -76,8 +76,12 @@ await app.register(rateLimit, {
   },
   errorResponseBuilder: (req, context) => {
     const requestId = getRequestId(req);
-    // Type assertion needed for @fastify/rate-limit context
-    const retryAfter = Math.ceil(((context.after as number) - Date.now()) / 1000);
+    // Calculate retry_after_seconds with proper guards
+    let retryAfter = 60; // Default fallback
+    if (context.after && typeof context.after === 'number') {
+      const diff = Math.ceil((context.after - Date.now()) / 1000);
+      retryAfter = Math.max(1, diff); // Ensure at least 1 second
+    }
     app.log.warn({
       event: "rate_limit_hit",
       max: GLOBAL_RATE_LIMIT_RPM,
@@ -85,12 +89,16 @@ await app.register(rateLimit, {
     }, "Rate limit exceeded");
 
     // Use centralized error builder for consistency
-    return buildErrorV1(
-      'RATE_LIMITED',
-      'Too many requests',
-      { retry_after_seconds: retryAfter },
-      requestId
-    );
+    // Note: Must include statusCode for @fastify/rate-limit
+    return {
+      statusCode: 429,
+      ...buildErrorV1(
+        'RATE_LIMITED',
+        'Too many requests',
+        { retry_after_seconds: retryAfter },
+        requestId
+      ),
+    };
   },
 });
 
