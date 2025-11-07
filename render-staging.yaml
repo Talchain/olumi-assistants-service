@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: olumi-assistants-staging
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: release/v1.1.1-ops
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node dist/src/server.js
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LLM_PROVIDER
+        value: fixtures
+      - key: ENABLE_DOCUMENT_GROUNDING
+        value: "true"
+      - key: ENABLE_CSV_GROUNDING
+        value: "true"
+      - key: ENABLE_CRITIQUE
+        value: "true"
+      - key: ENABLE_CLARIFIER
+        value: "true"
+      - key: ENABLE_EVIDENCE_PACK
+        value: "true"
+      - key: GLOBAL_RATE_LIMIT_RPM
+        value: "120"
+      - key: SSE_RATE_LIMIT_RPM
+        value: "20"
+      - key: BODY_LIMIT_BYTES
+        value: "1048576"
+      - key: COST_MAX_USD
+        value: "1.00"
+      - key: ALLOWED_ORIGINS
+        value: "https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:3000"
+      - key: INFO_SAMPLE_RATE
+        value: "1.0"
+      - key: PORT
+        value: "3101"
