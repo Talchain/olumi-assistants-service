@@ -13,7 +13,7 @@ import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
-import { toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 
 // Fail-fast: Verify LLM provider and API key configuration
 const llmProvider = env.LLM_PROVIDER || 'openai';
@@ -76,20 +76,21 @@ await app.register(rateLimit, {
   },
   errorResponseBuilder: (req, context) => {
     const requestId = getRequestId(req);
-    const retryAfter = Math.ceil((context.after - Date.now()) / 1000);
+    // Type assertion needed for @fastify/rate-limit context
+    const retryAfter = Math.ceil(((context.after as number) - Date.now()) / 1000);
     app.log.warn({
       event: "rate_limit_hit",
       max: GLOBAL_RATE_LIMIT_RPM,
       request_id: requestId,
     }, "Rate limit exceeded");
 
-    return {
-      schema: "error.v1",
-      code: "RATE_LIMITED",
-      message: "Too many requests",
-      details: { retry_after_seconds: retryAfter },
-      request_id: requestId,
-    };
+    // Use centralized error builder for consistency
+    return buildErrorV1(
+      'RATE_LIMITED',
+      'Too many requests',
+      { retry_after_seconds: retryAfter },
+      requestId
+    );
   },
 });
 
