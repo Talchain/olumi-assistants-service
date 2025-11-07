@@ -1,0 +1,109 @@
+config:
+  target: "http://localhost:3101"
+  phases:
+    # Warm-up phase: 5 users over 30 seconds
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up"
+    # Load test phase: 10 users per second for 2 minutes
+    - duration: 120
+      arrivalRate: 10
+      name: "Load test"
+  # Performance targets: p95 ≤ 8000ms
+  ensure:
+    p95: 8000
+    maxErrorRate: 0.05 # 5% error rate threshold
+  # Use fixtures for consistent testing
+  variables:
+    provider: "fixtures"
+  processor: "./helpers.cjs"
+
+scenarios:
+  # Scenario 1: Draft without attachments (baseline)
+  - name: "Draft without attachments"
+    weight: 50
+    flow:
+      - post:
+          url: "/assist/draft-graph"
+          json:
+            brief: "We need a comprehensive vendor selection strategy for our enterprise SaaS platform."
+          headers:
+            Content-Type: "application/json"
+          capture:
+            - json: "$.graph.nodes"
+              as: "nodes"
+            - json: "$.graph.edges"
+              as: "edges"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: "graph"
+            - hasProperty: "rationales"
+
+  # Scenario 2: Draft with text attachment
+  - name: "Draft with text attachment"
+    weight: 30
+    flow:
+      - post:
+          url: "/assist/draft-graph"
+          json:
+            brief: "Analyze the vendor requirements and create a selection strategy."
+            attachments:
+              - filename: "requirements.txt"
+                mime_type: "text/plain"
+                content: "VGVzdCByZXF1aXJlbWVudHM6CjEuIFNjYWxhYmlsaXR5CjIuIFNlY3VyaXR5CjMuIENvc3QgZWZmaWNpZW5jeQo="
+          headers:
+            Content-Type: "application/json"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: "graph"
+
+  # Scenario 3: Draft with multiple attachments
+  - name: "Draft with multiple attachments"
+    weight: 20
+    flow:
+      - post:
+          url: "/assist/draft-graph"
+          json:
+            brief: "Create a strategy based on the attached documents."
+            attachments:
+              - filename: "doc1.txt"
+                mime_type: "text/plain"
+                content: "RG9jdW1lbnQgMSBjb250ZW50"
+              - filename: "doc2.md"
+                mime_type: "text/markdown"
+                content: "IyBEb2N1bWVudCAyCkNvbnRlbnQgaGVyZQ=="
+          headers:
+            Content-Type: "application/json"
+          expect:
+            - statusCode: 200
+            - contentType: json
+
+  # Scenario 4: SSE streaming endpoint
+  - name: "Draft SSE stream"
+    weight: 10
+    flow:
+      - post:
+          url: "/assist/draft-graph/stream"
+          json:
+            brief: "Generate a strategy graph with streaming."
+          headers:
+            Content-Type: "application/json"
+            Accept: "text/event-stream"
+          expect:
+            - statusCode: 200
+            - contentType: "text/event-stream"
+
+  # Scenario 5: Health check (high frequency)
+  - name: "Health check"
+    weight: 20
+    flow:
+      - get:
+          url: "/healthz"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: "ok"
+            - hasProperty: "version"
+            - hasProperty: "feature_flags"

@@ -1,10 +1,11 @@
-# Operator Runbook - Olumi Assistants Service v1.1.0
+# Operator Runbook - Olumi Assistants Service v1.1.1
 
 **Service:** olumi-assistants-service
-**Version:** 1.1.0
-**Endpoints:** `/assist/clarify-brief`, `/assist/critique-graph`, `/assist/draft-graph` (JSON + SSE), `/assist/suggest-options`, `/assist/explain-diff`
+**Version:** 1.1.1
+**Endpoints:** `/assist/clarify-brief`, `/assist/critique-graph`, `/assist/draft-graph` (JSON + SSE), `/assist/suggest-options`, `/assist/explain-diff`, `/assist/evidence-pack`
 
 **New in v1.1.0:** Document grounding, feature flags, enhanced health endpoint
+**New in v1.1.1:** Request ID tracking, structured errors, redaction, rate limiting, observability, evidence packs
 
 ---
 
@@ -19,6 +20,7 @@
 | `/assist/draft-graph/stream` | POST | 120s | 1 MB | Draft initial graph (SSE) |
 | `/assist/suggest-options` | POST | 15s | 1 MB | Generate 3-5 strategic options |
 | `/assist/explain-diff` | POST | 15s | 1 MB | Explain patch rationales |
+| `/assist/evidence-pack` | POST | 15s | 1 MB | Generate redacted evidence pack (flag-gated) |
 
 ---
 
@@ -34,6 +36,7 @@ Feature flags control optional capabilities with priority: **Per-Request > Envir
 | `grounding` | `ENABLE_GROUNDING` | **false** | Document attachment processing | MEDIUM |
 | `critique` | `ENABLE_CRITIQUE` | true | Graph critique endpoint | LOW |
 | `clarifier` | `ENABLE_CLARIFIER` | true | Clarifying questions in drafts | LOW |
+| `evidence_pack` | `ENABLE_EVIDENCE_PACK` | **false** | Evidence pack download route | LOW |
 
 ### Checking Current Flags
 ```bash
@@ -495,6 +498,316 @@ curl -s -X POST https://YOUR-SERVICE-URL/assist/explain-diff \
 
 ---
 
+## v1.1.1 Ops Hardening
+
+### Request ID Tracking
+
+Every request receives a unique request ID for end-to-end tracing:
+
+**Request Header:**
+```bash
+curl -H "X-Request-Id: my-custom-id" https://YOUR-SERVICE-URL/assist/draft-graph
+```
+
+**Response Header:**
+```
+X-Request-Id: my-custom-id
+```
+
+**Auto-generation:** If no `X-Request-Id` is provided, a UUID v4 is generated automatically.
+
+**Use Cases:**
+- Correlate client requests with server logs
+- Debug specific request failures
+- Track request lifecycle across systems
+
+**Example Log Query:**
+```
+request_id:"my-custom-id"
+```
+
+### Rate Limiting (v1.1.1)
+
+**Global Limit:** 60 requests per minute per IP
+**SSE Limit:** 10 requests per minute per IP
+
+**Configuration:**
+```bash
+# Environment variables
+GLOBAL_RATE_LIMIT_RPM=60  # Default
+SSE_RATE_LIMIT_RPM=10     # Default
+```
+
+**Rate Limit Response:**
+```json
+{
+  "schema": "error.v1",
+  "code": "RATE_LIMITED",
+  "message": "Too many requests",
+  "details": {
+    "retry_after_seconds": 45
+  },
+  "request_id": "abc-123"
+}
+```
+
+**Response Headers:**
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1704758400
+Retry-After: 45
+```
+
+**Monitoring:**
+- Watch for `rate_limit_hit` events in logs
+- Track `X-RateLimit-Remaining` header in responses
+- Alert if consistent rate limiting indicates abuse or need for limit increase
+
+### Structured Error Responses (v1.1.1)
+
+All errors use the `error.v1` schema with consistent structure:
+
+**Error Codes:**
+- `BAD_INPUT`: Invalid request (400)
+- `RATE_LIMITED`: Too many requests (429)
+- `NOT_FOUND`: Endpoint not found (404)
+- `FORBIDDEN`: Not authorized (403)
+- `INTERNAL`: Server error (500)
+
+**Example Error:**
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "Validation failed",
+  "details": {
+    "field": "brief",
+    "reason": "String must contain at least 30 character(s)"
+  },
+  "request_id": "req_abc123"
+}
+```
+
+**Privacy Guarantee:** Errors never include:
+- Stack traces
+- Internal file paths
+- Environment variables
+- PII or sensitive data
+
+### Redaction & Privacy (v1.1.1)
+
+**Automatic Redaction:** All logs automatically strip sensitive data via the observability plugin.
+
+**What's Redacted:**
+- Base64 attachment content → `[REDACTED]:hash_prefix`
+- CSV row data → Only statistics kept
+- Long quotes → Truncated to 100 characters
+- Auth headers → `authorization`, `x-api-key`, `cookie`
+
+**Verification:**
+```bash
+# Check logs for redaction markers
+grep "\\[REDACTED\\]" /path/to/logs
+
+# Test CSV privacy (with grounding enabled)
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "brief": "Analyze sales data",
+    "attachments": [
+      {
+        "filename": "sales.csv",
+        "mime_type": "text/csv",
+        "content": "bmFtZSxyZXZlbnVlCkFsaWNlLDEwMDAwCkJvYiwxNTAwMA=="
+      }
+    ],
+    "flags": {"grounding": true}
+  }' | jq .
+
+# Verify response contains NO "Alice" or "Bob" (row data)
+# Should only contain aggregated statistics
+```
+
+**See Also:** [Privacy and Data Handling Documentation](./privacy-and-data-handling.md)
+
+### Observability (v1.1.1)
+
+**Structured Logging:** All requests logged with context via observability plugin
+
+**Sampling:** Info-level logs sampled at 10% (configurable via `INFO_SAMPLE_RATE`)
+- Errors (4xx, 5xx): Always logged (no sampling)
+- Success (2xx, 3xx): Sampled to reduce noise
+
+**Log Format:**
+```json
+{
+  "request_id": "abc-123",
+  "method": "POST",
+  "url": "/assist/draft-graph",
+  "status": 200,
+  "duration_ms": 3245,
+  "user_agent": "curl/7.68.0",
+  "redacted": true
+}
+```
+
+**Configuration:**
+```bash
+# Adjust sampling rate
+INFO_SAMPLE_RATE=0.1  # 10% (default)
+INFO_SAMPLE_RATE=1.0  # 100% (verbose, only for debugging)
+
+# Enable stack traces in logs (dev only)
+LOG_STACK=1
+```
+
+### Evidence Pack Route (v1.1.1)
+
+**Purpose:** Generate downloadable provenance pack with redacted citations and statistics
+
+**Feature Flag:** `ENABLE_EVIDENCE_PACK=true` (default: false)
+
+**Endpoint:** `POST /assist/evidence-pack`
+
+**Request:**
+```json
+{
+  "rationales": [...],
+  "citations": [...],
+  "csv_stats": [...]
+}
+```
+
+**Response:**
+```json
+{
+  "schema": "evidence_pack.v1",
+  "generated_at": "2025-01-07T12:00:00Z",
+  "service_version": "1.1.1",
+  "document_citations": [
+    {
+      "source": "requirements.pdf",
+      "location": "page 3",
+      "quote": "Scalability is a top priority...",
+      "provenance_source": "doc_0"
+    }
+  ],
+  "csv_statistics": [
+    {
+      "filename": "sales.csv",
+      "row_count": 1000,
+      "column_count": 5,
+      "statistics": {
+        "revenue": {"count": 1000, "mean": 45000, "p95": 92000}
+      }
+    }
+  ],
+  "rationales_with_provenance": [...],
+  "privacy_notice": "This evidence pack contains only..."
+}
+```
+
+**Privacy:** Never includes raw file contents, CSV rows, or PII
+
+### Burn-In Checklist (v1.1.1)
+
+Before promoting to production, verify all ops hardening features:
+
+**1. Health Check**
+```bash
+curl -s https://YOUR-SERVICE-URL/healthz | jq .
+# ✓ version: "1.1.1"
+# ✓ feature_flags present
+# ✓ provider and model shown
+```
+
+**2. Request ID Tracking**
+```bash
+curl -i -H "X-Request-Id: test-123" https://YOUR-SERVICE-URL/healthz
+# ✓ Response header: X-Request-Id: test-123
+```
+
+**3. Rate Limiting**
+```bash
+for i in {1..70}; do curl -s https://YOUR-SERVICE-URL/healthz > /dev/null; done
+# ✓ Should receive 429 RATE_LIMITED after 60 requests
+# ✓ Response includes Retry-After header
+```
+
+**4. Structured Errors**
+```bash
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "too short"}' | jq .
+# ✓ Response has schema: "error.v1"
+# ✓ Response has code: "BAD_INPUT"
+# ✓ Response has request_id
+# ✓ No stack trace exposed
+```
+
+**5. Redaction Verification**
+```bash
+# Upload CSV with PII
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "brief": "Analyze sales",
+    "attachments": [{
+      "filename": "data.csv",
+      "mime_type": "text/csv",
+      "content": "bmFtZSxyZXZlbnVlCkFsaWNlLDEwMDAwCkJvYiwxNTAwMA=="
+    }],
+    "flags": {"grounding": true}
+  }' | jq . | grep -i "alice"
+# ✓ Should return NO matches (PII redacted)
+```
+
+**6. CORS Allowlist**
+```bash
+curl -H "Origin: https://evil.com" https://YOUR-SERVICE-URL/healthz -i
+# ✓ No Access-Control-Allow-Origin header (blocked)
+
+curl -H "Origin: https://olumi.app" https://YOUR-SERVICE-URL/healthz -i
+# ✓ Access-Control-Allow-Origin: https://olumi.app (allowed)
+```
+
+**7. Evidence Pack (if enabled)**
+```bash
+# Set ENABLE_EVIDENCE_PACK=true first
+curl -X POST https://YOUR-SERVICE-URL/assist/evidence-pack \
+  -H 'Content-Type: application/json' \
+  -d '{"citations": [], "rationales": []}' | jq .
+# ✓ Response has schema: "evidence_pack.v1"
+# ✓ Response includes privacy_notice
+```
+
+**8. Observability Logs**
+```bash
+# Check Render logs for structured format
+# ✓ Logs include request_id
+# ✓ Logs include duration_ms
+# ✓ Logs show redacted: true
+# ✓ No base64 content in logs
+```
+
+**9. Performance (Artillery)**
+```bash
+cd tests/perf
+artillery run draft.yml
+# ✓ p95 ≤ 8000ms
+# ✓ Error rate ≤ 5%
+```
+
+**10. Engine Validation (if engine available)**
+```bash
+ENGINE_BASE_URL=http://engine-url tsx scripts/validate-with-engine.ts
+# ✓ Success rate ≥ 90%
+# ✓ Report generated in Docs/engine-handovers/
+```
+
+---
+
 ## Rollback Procedures
 
 ### Quick Rollback (Render Dashboard)
@@ -577,5 +890,5 @@ Settings → Auto-Deploy → OFF
 
 ---
 
-**Last Updated:** 2025-11-05
-**Version:** 1.0.1
+**Last Updated:** 2025-01-07
+**Version:** 1.1.1
