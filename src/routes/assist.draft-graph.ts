@@ -566,6 +566,21 @@ export default async function route(app: FastifyInstance) {
     }
 
     if (wantsSse) {
+      // DEPRECATED: Legacy SSE via Accept header - emit warning for observability
+      log.warn(
+        {
+          legacy_sse_path: true,
+          endpoint: '/assist/draft-graph',
+          deprecation: true,
+          recommended_endpoint: '/assist/draft-graph/stream',
+        },
+        "Legacy SSE path used (Accept: text/event-stream header) - client should migrate to /stream endpoint"
+      );
+      emit(TelemetryEvents.LegacySSEPath, {
+        endpoint: '/assist/draft-graph',
+        legacy_sse_path: true,
+      });
+
       await handleSseResponse(reply, parsed.data, req.body);
       return reply;
     }

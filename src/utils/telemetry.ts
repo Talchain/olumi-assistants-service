@@ -19,6 +19,7 @@ export const TelemetryEvents = {
   SSEError: "assist.draft.sse_error",
   FixtureShown: "assist.draft.fixture_shown",
   FixtureReplaced: "assist.draft.fixture_replaced",
+  LegacySSEPath: "assist.draft.legacy_sse_path",
 
   // Validation and repair events
   ValidationFailed: "assist.draft.validation_failed",
@@ -295,6 +296,13 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.FixtureReplaced: {
           datadogClient.increment("draft.fixture.replaced", 1);
+          break;
+        }
+
+        case TelemetryEvents.LegacySSEPath: {
+          datadogClient.increment("draft.sse.legacy_path", 1, {
+            endpoint: String(data.endpoint || "unknown"),
+          });
           break;
         }
 

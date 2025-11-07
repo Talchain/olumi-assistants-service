@@ -1,6 +1,6 @@
 {
   "name": "olumi-assistants-service",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,9 @@
     "ops:evidence": "tsx scripts/evidence-pack-cli.ts",
     "openapi:validate": "swagger-cli validate openapi.yaml",
     "openapi:generate": "openapi-typescript openapi.yaml -o src/generated/openapi.d.ts",
-    "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'"
+    "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'",
+    "demo:client": "cd examples/react-sse-client && pnpm dev",
+    "demo:build": "cd examples/react-sse-client && pnpm build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
