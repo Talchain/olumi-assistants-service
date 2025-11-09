@@ -9,6 +9,7 @@ import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import observabilityPlugin from "./plugins/observability.js";
+import authPlugin from "./plugins/auth.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -25,6 +26,15 @@ if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
 if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
   console.error('❌ FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
   console.error('   Set ANTHROPIC_API_KEY environment variable or switch to a different provider');
+  process.exit(1);
+}
+
+// Fail-fast: Verify API key authentication in production
+const isProduction = env.NODE_ENV === 'production';
+if (isProduction && !env.ASSIST_API_KEY) {
+  console.error('❌ FATAL: NODE_ENV=production but ASSIST_API_KEY is not set');
+  console.error('   Set ASSIST_API_KEY environment variable to enable API key authentication');
+  console.error('   Running without auth in production is a security risk');
   process.exit(1);
 }
 
@@ -104,6 +114,9 @@ await app.register(rateLimit, {
 
 // Observability: Structured logging with sampling and redaction
 await app.register(observabilityPlugin);
+
+// API Key Authentication: Enforce X-Olumi-Assist-Key on /assist/* routes
+await app.register(authPlugin);
 
 // Request ID tracking: attach to every request
 app.addHook("onRequest", async (request, _reply) => {

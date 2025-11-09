@@ -5,7 +5,7 @@ import { getRequestId } from './request-id.js';
 /**
  * Error codes for structured error responses
  */
-export type ErrorCode = 'BAD_INPUT' | 'RATE_LIMITED' | 'INTERNAL' | 'NOT_FOUND' | 'FORBIDDEN';
+export type ErrorCode = 'BAD_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'RATE_LIMITED' | 'INTERNAL';
 
 /**
  * Structured error response (error.v1 schema)
@@ -140,6 +140,8 @@ export function getStatusCodeForErrorCode(code: ErrorCode): number {
   switch (code) {
     case 'BAD_INPUT':
       return 400;
+    case 'UNAUTHENTICATED':
+      return 401;
     case 'FORBIDDEN':
       return 403;
     case 'NOT_FOUND':

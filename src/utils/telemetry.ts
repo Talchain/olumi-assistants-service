@@ -55,6 +55,14 @@ export const TelemetryEvents = {
   // Deprecation tracking
   LegacyProvenance: "assist.draft.legacy_provenance",
 
+  // LLM retry events (v1.2.1)
+  LlmRetry: "assist.llm.retry",
+  LlmRetrySuccess: "assist.llm.retry_success",
+  LlmRetryExhausted: "assist.llm.retry_exhausted",
+
+  // SSE client events (v1.2.1)
+  SseClientClosed: "assist.draft.sse_client_closed",
+
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
 } as const;
@@ -435,6 +443,40 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.ExplainDiffFailed: {
           datadogClient.increment("explain_diff.failed", 1);
+          break;
+        }
+
+        case TelemetryEvents.LlmRetry: {
+          datadogClient.increment("llm.retry", 1, {
+            adapter: String(data.adapter || "unknown"),
+            operation: String(data.operation || "unknown"),
+            attempt: String(data.attempt || "unknown"),
+          });
+          if (typeof data.delay_ms === "number") {
+            datadogClient.histogram("llm.retry.delay_ms", data.delay_ms);
+          }
+          break;
+        }
+
+        case TelemetryEvents.LlmRetrySuccess: {
+          datadogClient.increment("llm.retry.success", 1, {
+            adapter: String(data.adapter || "unknown"),
+            operation: String(data.operation || "unknown"),
+            total_attempts: String(data.total_attempts || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.LlmRetryExhausted: {
+          datadogClient.increment("llm.retry.exhausted", 1, {
+            adapter: String(data.adapter || "unknown"),
+            operation: String(data.operation || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.SseClientClosed: {
+          datadogClient.increment("draft.sse.client_closed", 1);
           break;
         }
 

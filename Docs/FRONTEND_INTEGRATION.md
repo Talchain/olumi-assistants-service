@@ -1,6 +1,6 @@
 # Frontend Integration Guide - Olumi Assistants Service
 
-**Version**: 1.2.0
+**Version**: 1.2.1
 **Base URL (Production)**: `https://olumi-assistants-service.onrender.com`
 **Base URL (Local)**: `http://localhost:3101`
 
@@ -9,14 +9,15 @@
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Core Endpoints](#core-endpoints)
-3. [SSE Streaming](#sse-streaming)
-4. [Document Attachments](#document-attachments)
-5. [Evidence Pack](#evidence-pack)
-6. [Draft Diff Application](#draft-diff-application)
-7. [Error Handling](#error-handling)
-8. [Rate Limiting](#rate-limiting)
-9. [CORS Configuration](#cors-configuration)
+2. [Authentication](#authentication)
+3. [Core Endpoints](#core-endpoints)
+4. [SSE Streaming](#sse-streaming)
+5. [Document Attachments](#document-attachments)
+6. [Evidence Pack](#evidence-pack)
+7. [Draft Diff Application](#draft-diff-application)
+8. [Error Handling](#error-handling)
+9. [Rate Limiting](#rate-limiting)
+10. [CORS Configuration](#cors-configuration)
 
 ---
 
@@ -39,6 +40,7 @@ async function draftGraph(brief: string) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-Olumi-Assist-Key': 'your-api-key-here', // Required for production
     },
     body: JSON.stringify({ brief }),
   });
@@ -56,6 +58,80 @@ async function draftGraph(brief: string) {
 const draft = await draftGraph('Should we expand into EU markets?');
 console.log(draft.graph.nodes);
 ```
+
+---
+
+## Authentication
+
+**Version**: 1.2.1+
+
+### API Key Authentication
+
+All `/assist/*` endpoints require API key authentication via the `X-Olumi-Assist-Key` header.
+
+**Header**: `X-Olumi-Assist-Key`
+**Value**: Your API key (provided by Olumi)
+
+### Configuration
+
+**Production**: API key authentication is **required** for all `/assist/*` routes.
+
+**Development**: If `ASSIST_API_KEY` environment variable is not set, authentication is disabled (unsafe for production).
+
+### Authentication Flow
+
+1. Client includes `X-Olumi-Assist-Key` header with every request
+2. Service validates the key against `ASSIST_API_KEY` environment variable
+3. If valid, request proceeds; if invalid or missing, returns error
+
+### Error Responses
+
+| Scenario | Status Code | Error Code | Message |
+|----------|-------------|------------|---------|
+| Missing header | 401 | `UNAUTHENTICATED` | Missing X-Olumi-Assist-Key header |
+| Invalid key | 403 | `FORBIDDEN` | Invalid API key |
+
+### Example: Authentication Error
+
+```json
+{
+  "schema": "error.v1",
+  "code": "UNAUTHENTICATED",
+  "message": "Missing X-Olumi-Assist-Key header",
+  "details": {
+    "hint": "Include X-Olumi-Assist-Key header with your API key"
+  },
+  "request_id": "req_abc123"
+}
+```
+
+### Example: Valid Request
+
+```typescript
+const response = await fetch(`${BASE_URL}/assist/draft-graph`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Olumi-Assist-Key': process.env.OLUMI_API_KEY, // Store securely
+  },
+  body: JSON.stringify({ brief: 'Your strategic question' }),
+});
+```
+
+### Security Best Practices
+
+1. **Never commit API keys to version control**
+2. **Store keys in environment variables** (e.g., `.env` file, secrets manager)
+3. **Rotate keys regularly** in production
+4. **Use HTTPS only** in production (enforced by service)
+5. **Monitor for invalid key attempts** (check logs/metrics)
+
+### Exempt Routes
+
+The following routes do **not** require authentication:
+- `GET /healthz` - Health check endpoint
+
+All other routes outside `/assist/*` also do not require authentication (e.g., `/metrics`, `/version`).
 
 ---
 
@@ -129,7 +205,10 @@ interface Edge {
 ```typescript
 const response = await fetch(`${BASE_URL}/assist/draft-graph`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Olumi-Assist-Key': process.env.OLUMI_API_KEY,
+  },
   body: JSON.stringify({
     brief: 'Should we expand into EU markets?',
   }),
@@ -211,6 +290,7 @@ async function streamDraftFetch(brief: string, onUpdate: (data: any) => void) {
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
+      'X-Olumi-Assist-Key': process.env.OLUMI_API_KEY,
     },
     body: JSON.stringify({ brief }),
   });
@@ -312,7 +392,10 @@ async function draftWithCsv(brief: string, csvContent: string) {
 
   const response = await fetch(`${BASE_URL}/assist/draft-graph`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Olumi-Assist-Key': process.env.OLUMI_API_KEY,
+    },
     body: JSON.stringify({
       brief,
       attachments: [
@@ -359,7 +442,10 @@ async function draftWithFiles(brief: string, files: File[]) {
 
   const response = await fetch(`${BASE_URL}/assist/draft-graph`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Olumi-Assist-Key': process.env.OLUMI_API_KEY,
+    },
     body: JSON.stringify({
       brief,
       attachments,
@@ -631,7 +717,7 @@ All errors follow the `error.v1` schema:
 ```typescript
 interface ErrorV1 {
   schema: "error.v1";
-  code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL";
+  code: "BAD_INPUT" | "UNAUTHENTICATED" | "FORBIDDEN" | "RATE_LIMITED" | "INTERNAL";
   message: string;                // Human-readable message
   details?: unknown;              // Additional context
   request_id: string;             // For support/debugging
@@ -643,6 +729,8 @@ interface ErrorV1 {
 | Code | HTTP Status | Meaning | Action |
 |------|-------------|---------|--------|
 | `BAD_INPUT` | 400 | Invalid request (e.g., missing brief, over-limit files) | Fix request and retry |
+| `UNAUTHENTICATED` | 401 | Missing authentication header | Include X-Olumi-Assist-Key header |
+| `FORBIDDEN` | 403 | Invalid API key | Check API key configuration |
 | `RATE_LIMITED` | 429 | Rate limit exceeded | Wait and retry with exponential backoff |
 | `INTERNAL` | 500 | Server error | Log request_id and contact support |
 
@@ -750,7 +838,7 @@ The service returns appropriate CORS headers:
 ```
 Access-Control-Allow-Origin: https://olumi.app
 Access-Control-Allow-Methods: GET,HEAD,PUT,PATCH,POST,DELETE
-Access-Control-Allow-Headers: Content-Type, Accept, X-Request-Id
+Access-Control-Allow-Headers: Content-Type, Accept, X-Request-Id, X-Olumi-Assist-Key
 Access-Control-Expose-Headers: X-RateLimit-*, X-Request-Id
 ```
 
@@ -856,5 +944,5 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2025-11-07
-**Service Version**: 1.2.0
+**Last Updated**: 2025-11-09
+**Service Version**: 1.2.1
