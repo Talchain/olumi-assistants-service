@@ -4,6 +4,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
+import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
 
 export type DraftArgs = {
@@ -259,14 +260,22 @@ export async function draftGraphWithAnthropic(
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 4096,
+            temperature: 0,
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model: "claude-3-5-sonnet-20241022",
-        max_tokens: 4096,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "draft_graph",
+      }
     );
 
     clearTimeout(timeoutId);
@@ -444,14 +453,22 @@ Respond ONLY with valid JSON.`;
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 2048,
+            temperature: 0.1, // Low temperature for more deterministic output
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model: "claude-3-5-sonnet-20241022",
-        max_tokens: 2048,
-        temperature: 0.1, // Low temperature for more deterministic output
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "suggest_options",
+      }
     );
 
     clearTimeout(timeoutId);
@@ -609,14 +626,22 @@ export async function repairGraphWithAnthropic(
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 4096,
+            temperature: 0,
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model: "claude-3-5-sonnet-20241022",
-        max_tokens: 4096,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "repair_graph",
+      }
     );
 
     clearTimeout(timeoutId);
@@ -804,14 +829,22 @@ export async function clarifyBriefWithAnthropic(
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model,
+            max_tokens: 2048,
+            temperature: args.seed ? 0 : 0.1,
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model,
-        max_tokens: 2048,
-        temperature: args.seed ? 0 : 0.1,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "clarify_brief",
+      }
     );
 
     clearTimeout(timeoutId);
@@ -964,14 +997,22 @@ export async function critiqueGraphWithAnthropic(
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model,
+            max_tokens: 2048,
+            temperature: 0,
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model,
-        max_tokens: 2048,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "critique_graph",
+      }
     );
 
     clearTimeout(timeoutId);
@@ -1084,14 +1125,22 @@ Return ONLY valid JSON in this format:
 
   try {
     const apiClient = getClient();
-    const response = await apiClient.messages.create(
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model,
+            max_tokens: 2048,
+            temperature: 0,
+            messages: [{ role: "user", content: prompt }],
+          },
+          { signal: abortController.signal }
+        ),
       {
+        adapter: "anthropic",
         model,
-        max_tokens: 2048,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: abortController.signal }
+        operation: "explain_diff",
+      }
     );
 
     clearTimeout(timeoutId);

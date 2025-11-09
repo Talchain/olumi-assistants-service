@@ -19,9 +19,11 @@ import { getRequestId } from "../utils/request-id.js";
  */
 
 const AUTH_HEADER = "X-Olumi-Assist-Key";
-const ASSIST_API_KEY = env.ASSIST_API_KEY;
 
 async function authPlugin(fastify: FastifyInstance) {
+  // Read API key at registration time (not module load time)
+  const ASSIST_API_KEY = env.ASSIST_API_KEY;
+
   // Skip auth entirely if ASSIST_API_KEY not configured
   if (!ASSIST_API_KEY) {
     fastify.log.warn(
