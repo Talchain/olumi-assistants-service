@@ -9,6 +9,7 @@ import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import observabilityPlugin from "./plugins/observability.js";
+import authPlugin from "./plugins/auth.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -104,6 +105,9 @@ await app.register(rateLimit, {
 
 // Observability: Structured logging with sampling and redaction
 await app.register(observabilityPlugin);
+
+// API Key Authentication: Enforce X-Olumi-Assist-Key on /assist/* routes
+await app.register(authPlugin);
 
 // Request ID tracking: attach to every request
 app.addHook("onRequest", async (request, _reply) => {
