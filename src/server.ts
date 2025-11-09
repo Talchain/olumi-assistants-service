@@ -29,6 +29,15 @@ if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
   process.exit(1);
 }
 
+// Fail-fast: Verify API key authentication in production
+const isProduction = env.NODE_ENV === 'production';
+if (isProduction && !env.ASSIST_API_KEY) {
+  console.error('❌ FATAL: NODE_ENV=production but ASSIST_API_KEY is not set');
+  console.error('   Set ASSIST_API_KEY environment variable to enable API key authentication');
+  console.error('   Running without auth in production is a security risk');
+  process.exit(1);
+}
+
 // Security configuration (read from env or use defaults)
 const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
 const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
