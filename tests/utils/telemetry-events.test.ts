@@ -286,6 +286,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.auth.success",
         "assist.auth.failed",
         "assist.auth.rate_limited",
+        "assist.draft.sse_client_closed",
+        "assist.llm.retry",
+        "assist.llm.retry_success",
+        "assist.llm.retry_exhausted",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
