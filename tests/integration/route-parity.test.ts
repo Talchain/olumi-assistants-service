@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
-import { emit } from "../../src/utils/telemetry.js";
+import { emit as _emit } from "../../src/utils/telemetry.js";
 
 describe("Route-Level Parity (JSON vs SSE)", () => {
   let app: FastifyInstance;

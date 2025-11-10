@@ -12,7 +12,7 @@ import {
   extractTextFromPdf,
   extractTextFromTxtMd,
   summarizeCsv,
-  type CsvSummary,
+  type CsvSummary as _CsvSummary,
 } from "./index.js";
 
 export type AttachmentInput = {

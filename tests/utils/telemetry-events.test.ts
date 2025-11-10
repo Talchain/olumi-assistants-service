@@ -71,6 +71,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LegacyProvenance: "assist.draft.legacy_provenance",
 
         Stage: "assist.draft.stage",
+
+        AuthSuccess: "assist.auth.success",
+        AuthFailed: "assist.auth.failed",
+        RateLimited: "assist.auth.rate_limited",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -95,7 +99,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   describe("Event namespace consistency", () => {
     it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
       const allEvents = Object.values(TelemetryEvents);
-      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff)\./;
+      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth)\./;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -107,8 +111,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff.)
-        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff)\./, "");
+        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth.)
+        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -196,6 +200,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "explain_diff.completed": [TelemetryEvents.ExplainDiffComplete],
         "explain_diff.failed": [TelemetryEvents.ExplainDiffFailed],
 
+        // Auth events (v1.3.0)
+        "auth.success": [TelemetryEvents.AuthSuccess],
+        "auth.failed": [TelemetryEvents.AuthFailed],
+        "auth.rate_limited": [TelemetryEvents.RateLimited],
+
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
         "draft.sse.stream_duration_ms": [TelemetryEvents.SSECompleted],
@@ -274,6 +283,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.explain_diff.start",
         "assist.explain_diff.complete",
         "assist.explain_diff.failed",
+        "assist.auth.success",
+        "assist.auth.failed",
+        "assist.auth.rate_limited",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

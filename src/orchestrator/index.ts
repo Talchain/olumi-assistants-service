@@ -1,32 +1,21 @@
 import type { GraphT } from "../schemas/graph.js";
-import { isDAG, pruneIsolates } from "../utils/dag.js";
+import { enforceGraphCompliance } from "../utils/graphGuards.js";
 
+/**
+ * Stabilise graph by enforcing v04 compliance
+ * Uses comprehensive guards: IDs, sorting, DAG, pruning, meta
+ */
 export function stabiliseGraph(g: GraphT): GraphT {
-  const edgesWithIds = g.edges.map((edge, idx) => ({
-    ...edge,
-    id: edge.id || `${edge.from}::${edge.to}::${idx}`
-  }));
-  const nodesSorted = [...g.nodes].sort((a, b) => a.id.localeCompare(b.id));
-  const edgesSorted = [...edgesWithIds].sort((a, b) => {
-    const from = a.from.localeCompare(b.from);
-    if (from !== 0) return from;
-    const to = a.to.localeCompare(b.to);
-    if (to !== 0) return to;
-    return (a.id ?? "").localeCompare(b.id ?? "");
+  return enforceGraphCompliance(g, {
+    maxNodes: 12,
+    maxEdges: 24,
   });
-  const meta = {
-    roots: g.meta?.roots ?? [],
-    leaves: g.meta?.leaves ?? [],
-    suggested_positions: g.meta?.suggested_positions ?? {},
-    source: g.meta?.source ?? "assistant"
-  };
-  return { ...g, nodes: nodesSorted, edges: edgesSorted, meta };
 }
 
+/**
+ * Ensure DAG and prune isolated nodes
+ * Now handled by enforceGraphCompliance
+ */
 export function ensureDagAndPrune(g: GraphT): GraphT {
-  const pruned = pruneIsolates(g);
-  if (!isDAG(pruned)) {
-    throw new Error("graph_not_dag");
-  }
-  return pruned;
+  return stabiliseGraph(g);
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { redactCsvData, safeLog } from "../../src/utils/redaction.js";
 import { buildEvidencePackRedacted } from "../../src/utils/evidence-pack.js";
+import { asTestData } from "../helpers/test-types.js";
 
 describe("CSV privacy guarantees (integration)", () => {
   describe("redaction of PII in CSV data", () => {
@@ -60,7 +61,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const redacted = redactCsvData(data);
+      const redacted = asTestData(redactCsvData(data));
 
       expect(redacted.csv.rows).toBeUndefined();
       expect(redacted.csv.count).toBe(2);
@@ -85,7 +86,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const redacted = redactCsvData(data);
+      const redacted = asTestData(redactCsvData(data));
 
       expect(redacted.csv_stats.revenue.count).toBe(1000);
       expect(redacted.csv_stats.revenue.mean).toBe(50000);
@@ -104,7 +105,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const redacted = redactCsvData(input);
+      const redacted = asTestData(redactCsvData(input));
 
       expect(redacted.analysis.data).toBeUndefined();
       expect(redacted.analysis.values).toBeUndefined();
@@ -142,7 +143,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const safe = safeLog(logPayload);
+      const safe = asTestData(safeLog(logPayload));
 
       // Check CSV rows removed
       expect(safe.grounding.csv_data[0].rows).toBeUndefined();
@@ -171,7 +172,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const safe = safeLog(deeplyNested);
+      const safe = asTestData(safeLog(deeplyNested));
       const json = JSON.stringify(safe);
 
       expect(json).not.toContain("alice@example.com");
@@ -324,7 +325,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const redacted = redactCsvData(piiOnlyData);
+      const redacted = asTestData(redactCsvData(piiOnlyData));
       const json = JSON.stringify(redacted);
 
       expect(json).not.toContain("Alice");
@@ -350,7 +351,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const redacted = redactCsvData(data);
+      const redacted = asTestData(redactCsvData(data));
 
       // Rows should be removed (even with numeric IDs)
       expect(redacted.csv.rows).toBeUndefined();
@@ -384,7 +385,7 @@ describe("CSV privacy guarantees (integration)", () => {
         },
       };
 
-      const safe = safeLog(multiFileData);
+      const safe = asTestData(safeLog(multiFileData));
       const json = JSON.stringify(safe);
 
       // No names should appear

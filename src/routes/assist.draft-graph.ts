@@ -29,6 +29,11 @@ const SSE_HEADERS = {
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
 const DEPRECATION_SUNSET = env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
 const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
+// v1.3.0: Legacy SSE flag (read at request time for testability)
+// Use process.env directly to avoid module-level caching issues in tests
+function isLegacySSEEnabled(): boolean {
+  return process.env.ENABLE_LEGACY_SSE === "true";
+}
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
 type SuccessPayload = ReturnType<typeof DraftGraphOutput.parse>;
@@ -566,6 +571,26 @@ export default async function route(app: FastifyInstance) {
     }
 
     if (wantsSse) {
+      // v1.3.0: Legacy SSE path disabled by default
+      if (!isLegacySSEEnabled()) {
+        log.info({
+          legacy_sse_disabled: true,
+          endpoint: '/assist/draft-graph',
+          recommended_endpoint: '/assist/draft-graph/stream',
+        }, "Legacy SSE path disabled - use /stream endpoint");
+
+        const envelope = buildError(
+          "BAD_INPUT",
+          "Legacy SSE path disabled. Use POST /assist/draft-graph/stream instead.",
+          {
+            migration_guide: "Replace Accept: text/event-stream with POST to /assist/draft-graph/stream",
+            recommended_endpoint: "/assist/draft-graph/stream",
+          }
+        );
+
+        return reply.code(426).send(envelope); // 426 Upgrade Required
+      }
+
       // DEPRECATED: Legacy SSE via Accept header - emit warning for observability
       // Sample detailed logs (10% of occurrences) to reduce noise
       if (Math.random() < 0.1) {

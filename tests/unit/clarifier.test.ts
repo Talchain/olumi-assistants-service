@@ -9,7 +9,7 @@
  * - Telemetry emissions
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi as _vi, beforeEach as _beforeEach } from "vitest";
 import { ClarifyBriefInput, ClarifyBriefOutput } from "../../src/schemas/assist.js";
 
 describe("Clarifier Schema Validation", () => {

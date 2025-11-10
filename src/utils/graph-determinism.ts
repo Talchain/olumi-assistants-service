@@ -6,7 +6,7 @@
  * - Consistent sorting: nodes by id asc, edges by from→to→id asc
  */
 
-import type { GraphT, NodeT, EdgeT } from "../schemas/graph.js";
+import type { GraphT, NodeT as _NodeT, EdgeT as _EdgeT } from "../schemas/graph.js";
 
 /**
  * Enforce stable edge IDs for edges missing IDs.
