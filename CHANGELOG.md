@@ -5,6 +5,80 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-11-10
+
+### Added
+- **Spec v04 Graph Guards** (Task E)
+  - Stable edge ID format: `${from}::${to}::${index}`
+  - Deterministic node and edge sorting (by ID)
+  - DAG enforcement with cycle detection and breaking
+  - Isolated node pruning for clean graph topology
+  - Automatic metadata calculation (roots, leaves, suggested_positions)
+  - Node/edge caps (maxNodes=12, maxEdges=24) with overflow protection
+  - `enforceGraphCompliance()` entry point in `src/utils/graphGuards.ts`
+
+- **Per-Key Authentication & Quotas** (Task G)
+  - Multi-key support via `ASSIST_API_KEYS` (comma-separated)
+  - Backwards compatible with single `ASSIST_API_KEY`
+  - Token bucket rate limiting per API key
+    - General endpoints: 120 requests/minute
+    - SSE endpoints: 20 requests/minute (stricter for long-lived connections)
+  - API key via `X-Olumi-Assist-Key` or `Authorization: Bearer` header
+  - Public routes bypass auth (e.g., `/healthz`)
+  - Auth telemetry events: `AuthSuccess`, `AuthFailed`, `RateLimited`
+
+- **Legacy SSE Migration Flag** (Task H)
+  - `ENABLE_LEGACY_SSE` environment variable (default: **false**)
+  - When disabled: `POST /assist/draft-graph` with `Accept: text/event-stream` returns 426 (Upgrade Required)
+  - Error response includes migration guide and recommended endpoint
+  - Recommended: Use `POST /assist/draft-graph/stream` for SSE
+  - When enabled: Legacy behavior preserved with deprecation telemetry
+
+- **CI Coverage Gates** (Task I)
+  - Coverage thresholds enforced: 90% lines/functions/statements, 85% branches
+  - Codecov integration for coverage tracking
+  - Security audit job (`pnpm audit --audit-level=high`)
+  - Spec v04 compliance workflow (separate)
+
+### Changed
+- All graph outputs now use deterministic edge IDs and sorting
+- Graph orchestrator uses new `enforceGraphCompliance()` guard
+- Rate limiting moved from IP-based to API key-based
+- Default legacy SSE path disabled (opt-in for backwards compatibility)
+
+### Fixed
+- **Critical: Auth Plugin Encapsulation**
+  - Fixed auth plugin not using `fastify-plugin`, causing hooks to not apply to routes
+  - Auth hooks now correctly enforce authentication on all protected endpoints
+  - Resolved issue where plugin encapsulation prevented `onRequest` hook from running
+- **Test Infrastructure Improvements**
+  - Fixed module caching issues causing test flakiness (100% pass rate achieved)
+  - Resolved 64+ TypeScript errors in test code with test helper utilities
+  - Improved `breakCycles` to remove only specific edge IDs, not all edges for a pair
+  - Added `vi.resetModules()` pattern for tests modifying environment variables
+  - Fixed `@vitest/coverage-v8` version mismatch (updated to 1.6.1)
+  - Added test type helpers in `tests/helpers/test-types.ts`
+  - Updated vitest configuration with coverage thresholds
+
+### Security
+- Per-key rate limiting prevents abuse and enables quota management
+- API keys hashed (SHA-256 prefix) for safe logging
+- Auth telemetry uses key ID, not raw key value
+
+### Testing
+- **100% test pass rate** (516/516 tests across 43 test files)
+- **0 TypeScript errors** (down from 64+)
+- Unit tests for graph guards (23 test cases)
+- Integration tests for multi-key auth (11 test cases)
+- Integration tests for legacy SSE flag (4 test cases)
+- CI enforces coverage thresholds on all PRs
+
+### Documentation
+- Updated CHANGELOG.md with v1.3.0 features
+- Auth configuration guide (single vs multi-key)
+- Legacy SSE migration guide
+- Graph guards API documentation
+
 ## [1.1.0] - 2025-01-06
 
 ### Added

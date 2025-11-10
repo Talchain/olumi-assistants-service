@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { attachRequestId, getRequestId } from "../../src/utils/request-id.js";
-import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "../../src/utils/errors.js";
+import { buildErrorV1 as _buildErrorV1, toErrorV1 as _toErrorV1, getStatusCodeForErrorCode as _getStatusCodeForErrorCode } from "../../src/utils/errors.js";
 
 describe("rate limiting integration", () => {
   let app: FastifyInstance;

@@ -5,7 +5,7 @@
  * and telemetry emission for LLM retry logic.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import {
   withRetry,
   isRetryableError,
@@ -154,7 +154,7 @@ describe("Retry Utility", () => {
   });
 
   describe("withRetry", () => {
-    let emitSpy: ReturnType<typeof vi.spyOn>;
+    let emitSpy: MockInstance;
 
     beforeEach(() => {
       emitSpy = vi.spyOn(telemetry, "emit");

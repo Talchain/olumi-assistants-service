@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { attachRequestId, getRequestId } from "../../src/utils/request-id.js";
-import { buildErrorV1 } from "../../src/utils/errors.js";
+import { buildErrorV1 as _buildErrorV1 } from "../../src/utils/errors.js";
 
 describe("SSE-specific rate limiting", () => {
   let app: FastifyInstance;

@@ -1,3 +1,6 @@
+// Load environment variables from .env file (local development only)
+import "dotenv/config";
+
 import { env } from "node:process";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
@@ -9,43 +12,35 @@ import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import observabilityPlugin from "./plugins/observability.js";
-import authPlugin from "./plugins/auth.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
+import { authPlugin } from "./plugins/auth.js";
 
-// Fail-fast: Verify LLM provider and API key configuration
-const llmProvider = env.LLM_PROVIDER || 'openai';
-if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
-  console.error('❌ FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set');
-  console.error('   Set OPENAI_API_KEY environment variable or switch to a different provider');
-  process.exit(1);
-}
-if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
-  console.error('❌ FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
-  console.error('   Set ANTHROPIC_API_KEY environment variable or switch to a different provider');
-  process.exit(1);
-}
+/**
+ * Build and configure Fastify server instance
+ * (Can be imported for testing or run directly)
+ */
+export async function build() {
+  // Fail-fast: Verify LLM provider and API key configuration
+  const llmProvider = env.LLM_PROVIDER || 'openai';
+  if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
+    throw new Error('FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set');
+  }
+  if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+    throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
+  }
 
-// Fail-fast: Verify API key authentication in production
-const isProduction = env.NODE_ENV === 'production';
-if (isProduction && !env.ASSIST_API_KEY) {
-  console.error('❌ FATAL: NODE_ENV=production but ASSIST_API_KEY is not set');
-  console.error('   Set ASSIST_API_KEY environment variable to enable API key authentication');
-  console.error('   Running without auth in production is a security risk');
-  process.exit(1);
-}
+  // Security configuration (read from env or use defaults)
+  const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
+  const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
+  const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120; // requests per minute per IP
+  const _SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20; // SSE-specific limit
+  const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
-// Security configuration (read from env or use defaults)
-const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
-const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
-const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120; // requests per minute per IP
-const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20; // SSE-specific limit
-const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
-
-const app = Fastify({
+  const app = Fastify({
   logger: true,
   bodyLimit: BODY_LIMIT_BYTES,
   connectionTimeout: REQUEST_TIMEOUT_MS,
@@ -112,26 +107,26 @@ await app.register(rateLimit, {
   },
 });
 
-// Observability: Structured logging with sampling and redaction
-await app.register(observabilityPlugin);
+  // Observability: Structured logging with sampling and redaction
+  await app.register(observabilityPlugin);
 
-// API Key Authentication: Enforce X-Olumi-Assist-Key on /assist/* routes
-await app.register(authPlugin);
+  // Auth: API key authentication with per-key quotas (v1.3.0)
+  await app.register(authPlugin);
 
-// Request ID tracking: attach to every request
-app.addHook("onRequest", async (request, _reply) => {
-  attachRequestId(request);
-});
+  // Request ID tracking: attach to every request
+  app.addHook("onRequest", async (request, _reply) => {
+    attachRequestId(request);
+  });
 
-// Response hook: Add X-Request-Id header to every response
-app.addHook("onSend", async (request, reply, payload) => {
-  const requestId = getRequestId(request);
-  reply.header(REQUEST_ID_HEADER, requestId);
-  return payload;
-});
+  // Response hook: Add X-Request-Id header to every response
+  app.addHook("onSend", async (request, reply, payload) => {
+    const requestId = getRequestId(request);
+    reply.header(REQUEST_ID_HEADER, requestId);
+    return payload;
+  });
 
-// Performance profiling hooks (enabled with PERF_TRACE=1)
-if (env.PERF_TRACE === "1") {
+  // Performance profiling hooks (enabled with PERF_TRACE=1)
+  if (env.PERF_TRACE === "1") {
   app.log.info("Performance tracing enabled (PERF_TRACE=1)");
 
   // Track timing for each request phase
@@ -233,33 +228,55 @@ app.get("/healthz", async () => {
   };
 });
 
-await draftRoute(app);
-await suggestRoute(app);
-await clarifyRoute(app);
-await critiqueRoute(app);
-await explainRoute(app);
-await evidencePackRoute(app);
+  await draftRoute(app);
+  await suggestRoute(app);
+  await clarifyRoute(app);
+  await critiqueRoute(app);
+  await explainRoute(app);
+  await evidencePackRoute(app);
 
-const port = Number(env.PORT || 3101);
+  return app;
+}
 
-// Boot summary: Log configuration before starting server
-const adapter = getAdapter();
-app.log.info({
-  service: 'olumi-assistants-service',
-  version: SERVICE_VERSION,
-  provider: adapter.name,
-  model: adapter.model,
-  cost_cap_usd: COST_MAX_USD,
-  global_rate_limit_rpm: GLOBAL_RATE_LIMIT_RPM,
-  sse_rate_limit_rpm: SSE_RATE_LIMIT_RPM,
-  body_limit_mb: (BODY_LIMIT_BYTES / 1024 / 1024).toFixed(1),
-  cors_origins: allowedOrigins,
-  engine_url: env.ENGINE_BASE_URL || 'not set',
-}, '🚀 Olumi Assistants Service starting');
+// If running directly (not imported), start the server
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const port = Number(env.PORT || 3101);
 
-app
-  .listen({ port, host: "0.0.0.0" })
-  .catch((err: unknown) => {
-    app.log.error(err);
-    process.exit(1);
-  });
+  build()
+    .then(async (app) => {
+      // Boot summary: Log configuration before starting server
+      const adapter = getAdapter();
+      const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120;
+      const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
+      const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024;
+      const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
+      const DEFAULT_ORIGINS = [
+        'https://olumi.app',
+        'https://app.olumi.app',
+        'http://localhost:5173',
+        'http://localhost:3000',
+      ];
+      const allowedOrigins = env.CORS_ORIGINS
+        ? env.CORS_ORIGINS.split(',')
+        : DEFAULT_ORIGINS;
+
+      app.log.info({
+        service: 'olumi-assistants-service',
+        version: SERVICE_VERSION,
+        provider: adapter.name,
+        model: adapter.model,
+        cost_cap_usd: COST_MAX_USD,
+        global_rate_limit_rpm: GLOBAL_RATE_LIMIT_RPM,
+        sse_rate_limit_rpm: SSE_RATE_LIMIT_RPM,
+        body_limit_mb: (BODY_LIMIT_BYTES / 1024 / 1024).toFixed(1),
+        cors_origins: allowedOrigins,
+        engine_url: env.ENGINE_BASE_URL || 'not set',
+      }, '🚀 Olumi Assistants Service starting');
+
+      await app.listen({ port, host: "0.0.0.0" });
+    })
+    .catch((err: unknown) => {
+      console.error('❌ Failed to start server:', err);
+      process.exit(1);
+    });
+}

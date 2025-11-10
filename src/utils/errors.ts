@@ -106,12 +106,12 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
     let message = error.message || 'An unexpected error occurred';
 
     // Remove file paths
-    message = message.replace(/\/[\w\/.@-]+/g, '[path]');
+    message = message.replace(/\/[\w/.@-]+/g, '[path]');
     // Remove potential secrets
     message = message.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
     message = message.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
     // Remove email addresses
-    message = message.replace(/[\w\.-]+@[\w\.-]+\.\w+/g, '[email]');
+    message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
 
     // Generic error - safe message only, no stack
     return buildErrorV1('INTERNAL', message, undefined, requestId);
@@ -121,10 +121,10 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
   if (typeof error === 'string') {
     let message = error;
     // Apply same sanitization
-    message = message.replace(/\/[\w\/.@-]+/g, '[path]');
+    message = message.replace(/\/[\w/.@-]+/g, '[path]');
     message = message.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
     message = message.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
-    message = message.replace(/[\w\.-]+@[\w\.-]+\.\w+/g, '[email]');
+    message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
 
     return buildErrorV1('INTERNAL', message, undefined, requestId);
   }

@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { CritiqueGraphInput, CritiqueGraphOutput } from "../../src/schemas/assist.js";
-import { Graph } from "../../src/schemas/graph.js";
+import { Graph as _Graph } from "../../src/schemas/graph.js";
 
 describe("Critique Schema Validation", () => {
   const validGraph = {

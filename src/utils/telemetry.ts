@@ -49,6 +49,11 @@ export const TelemetryEvents = {
   ExplainDiffComplete: "assist.explain_diff.complete",
   ExplainDiffFailed: "assist.explain_diff.failed",
 
+  // Auth events (v1.3.0)
+  AuthSuccess: "assist.auth.success",
+  AuthFailed: "assist.auth.failed",
+  RateLimited: "assist.auth.rate_limited",
+
   // Guard violations
   GuardViolation: "assist.draft.guard_violation",
 

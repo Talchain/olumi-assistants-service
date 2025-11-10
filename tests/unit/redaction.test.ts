@@ -6,6 +6,7 @@ import {
   redactHeaders,
   safeLog,
 } from "../../src/utils/redaction.js";
+import { asTestData } from "../helpers/test-types.js";
 
 describe("redaction utilities", () => {
   describe("redactAttachments", () => {
@@ -20,7 +21,7 @@ describe("redaction utilities", () => {
         ],
       };
 
-      const result = redactAttachments(input);
+      const result = asTestData(redactAttachments(input));
       expect(result.attachments[0].content).toMatch(/^\[REDACTED\]:[a-f0-9]{8}$/);
       expect(result.attachments[0].filename).toBe("test.pdf");
       expect(result.attachments[0].mime_type).toBe("application/pdf");
@@ -34,7 +35,7 @@ describe("redaction utilities", () => {
         ],
       };
 
-      const result = redactAttachments(input);
+      const result = asTestData(redactAttachments(input));
       expect(result.attachments).toHaveLength(2);
       expect(result.attachments[0].content).toMatch(/^\[REDACTED\]:/);
       expect(result.attachments[1].content).toMatch(/^\[REDACTED\]:/);
@@ -47,14 +48,14 @@ describe("redaction utilities", () => {
         attachments: [{ filename: "test.txt", content: "base64data" }],
       };
 
-      const result = redactAttachments(input);
+      const result = asTestData(redactAttachments(input));
       expect(result.brief).toBe("Test brief");
       expect(result.other_field).toBe("value");
     });
 
     it("should handle missing attachments gracefully", () => {
       const input = { brief: "No attachments" };
-      const result = redactAttachments(input);
+      const result = asTestData(redactAttachments(input));
       expect(result).toEqual(input);
     });
   });
@@ -73,7 +74,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = redactCsvData(input);
+      const result = asTestData(redactCsvData(input));
       expect(result.csv_data.rows).toBeUndefined();
       expect(result.csv_data.statistics).toBeDefined();
     });
@@ -97,7 +98,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = redactCsvData(input);
+      const result = asTestData(redactCsvData(input));
       expect(result.stats.revenue.count).toBe(100);
       expect(result.stats.revenue.mean).toBe(50000);
       expect(result.stats.revenue.p95).toBe(85000);
@@ -113,7 +114,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = redactCsvData(input);
+      const result = asTestData(redactCsvData(input));
       expect(result.analysis.data).toBeUndefined();
       expect(result.analysis.values).toBeUndefined();
       expect(result.analysis.raw_data).toBeUndefined();
@@ -130,7 +131,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = redactCsvData(input);
+      const result = asTestData(redactCsvData(input));
       expect(result.level1.level2.rows).toBeUndefined();
       expect(result.level1.level2.count).toBe(10);
     });
@@ -145,7 +146,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = truncateQuotes(input);
+      const result = asTestData(truncateQuotes(input));
       expect(result.citation.quote).toHaveLength(103); // 100 + "..."
       expect(result.citation.quote).toMatch(/...$/);
     });
@@ -158,7 +159,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = truncateQuotes(input);
+      const result = asTestData(truncateQuotes(input));
       expect(result.citation.quote).toBe(shortQuote);
     });
 
@@ -171,7 +172,7 @@ describe("redaction utilities", () => {
         ],
       };
 
-      const result = truncateQuotes(input);
+      const result = asTestData(truncateQuotes(input));
       expect(result.rationales[0].quote).toHaveLength(103);
       expect(result.rationales[0].quote).toMatch(/...$/);
       expect(result.rationales[1].quote).toBe("Short quote");
@@ -186,7 +187,7 @@ describe("redaction utilities", () => {
         },
       };
 
-      const result = truncateQuotes(input);
+      const result = asTestData(truncateQuotes(input));
       expect(result.citation.source).toBe("document.pdf");
       expect(result.citation.quote).toBeUndefined();
     });
@@ -200,7 +201,7 @@ describe("redaction utilities", () => {
         "user-agent": "curl/7.68.0",
       };
 
-      const result = redactHeaders(headers);
+      const result = asTestData(redactHeaders(headers));
       expect(result.authorization).toBeUndefined();
       expect(result["content-type"]).toBe("application/json");
       expect(result["user-agent"]).toBe("curl/7.68.0");
@@ -212,7 +213,7 @@ describe("redaction utilities", () => {
         "x-request-id": "req-123",
       };
 
-      const result = redactHeaders(headers);
+      const result = asTestData(redactHeaders(headers));
       expect(result["x-api-key"]).toBeUndefined();
       expect(result["x-request-id"]).toBe("req-123");
     });
@@ -224,7 +225,7 @@ describe("redaction utilities", () => {
         accept: "application/json",
       };
 
-      const result = redactHeaders(headers);
+      const result = asTestData(redactHeaders(headers));
       expect(result.cookie).toBeUndefined();
       expect(result["set-cookie"]).toBeUndefined();
       expect(result.accept).toBe("application/json");
@@ -259,7 +260,7 @@ describe("redaction utilities", () => {
         ],
       };
 
-      const result = safeLog(input);
+      const result = asTestData(safeLog(input));
 
       // Check redacted flag
       expect(result.redacted).toBe(true);
@@ -283,7 +284,7 @@ describe("redaction utilities", () => {
         data: "original",
       };
 
-      const result = safeLog(input);
+      const result = asTestData(safeLog(input));
       result.data = "modified";
 
       // Original should be unchanged
@@ -301,7 +302,7 @@ describe("redaction utilities", () => {
         { quote: "Short" },
       ];
 
-      const result = safeLog(input);
+      const result = asTestData(safeLog(input));
       expect(Array.isArray(result)).toBe(true);
       expect(result[0].quote).toHaveLength(103);
       expect(result[1].quote).toBe("Short");

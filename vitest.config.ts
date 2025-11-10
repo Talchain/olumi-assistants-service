@@ -16,5 +16,22 @@ export default defineConfig({
       "tests/integration/adversarial.test.ts",
       "tests/validation/golden-briefs-runner.test.ts",
     ],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      exclude: [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/*.config.ts",
+      ],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+        statements: 90,
+        branches: 85,
+      },
+    },
   },
 });

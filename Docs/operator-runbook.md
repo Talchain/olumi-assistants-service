@@ -1,11 +1,12 @@
-# Operator Runbook - Olumi Assistants Service v1.1.1
+# Operator Runbook - Olumi Assistants Service v1.3.0
 
 **Service:** olumi-assistants-service
-**Version:** 1.1.1
+**Version:** 1.3.0
 **Endpoints:** `/assist/clarify-brief`, `/assist/critique-graph`, `/assist/draft-graph` (JSON + SSE), `/assist/suggest-options`, `/assist/explain-diff`, `/assist/evidence-pack`
 
 **New in v1.1.0:** Document grounding, feature flags, enhanced health endpoint
 **New in v1.1.1:** Request ID tracking, structured errors, redaction, rate limiting, observability, evidence packs
+**New in v1.3.0:** Per-key auth & quotas, Spec v04 graph guards, legacy SSE migration flag, CI coverage gates
 
 ---
 
@@ -21,6 +22,138 @@
 | `/assist/suggest-options` | POST | 15s | 1 MB | Generate 3-5 strategic options |
 | `/assist/explain-diff` | POST | 15s | 1 MB | Explain patch rationales |
 | `/assist/evidence-pack` | POST | 15s | 1 MB | Generate redacted evidence pack (flag-gated) |
+
+---
+
+## Authentication & Rate Limiting (v1.3.0+)
+
+### Overview
+Per-key authentication with token bucket rate limiting. If no API keys are configured, authentication is disabled (development mode).
+
+### Configuration
+
+#### Single API Key (Backwards Compatible)
+```bash
+# Single key for all clients
+export ASSIST_API_KEY="your-secret-key-here"
+```
+
+#### Multiple API Keys (v1.3.0+)
+```bash
+# Comma-separated keys for multiple clients
+export ASSIST_API_KEYS="client-1-key,client-2-key,client-3-key"
+```
+
+**Note:** `ASSIST_API_KEYS` takes precedence over `ASSIST_API_KEY` if both are set.
+
+### Using API Keys
+
+#### Via Custom Header
+```bash
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'X-Olumi-Assist-Key: your-secret-key-here' \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "..."}'
+```
+
+#### Via Authorization Header
+```bash
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Authorization: Bearer your-secret-key-here' \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "..."}'
+```
+
+### Rate Limits (Per API Key)
+
+| Endpoint Type | Limit | Window | Reasoning |
+|---------------|-------|--------|-----------|
+| General endpoints | 120 requests | 60 seconds | Standard throughput |
+| SSE endpoints | 20 requests | 60 seconds | Long-lived connections |
+
+**Public Routes (No Auth Required):**
+- `GET /healthz`
+
+### Rate Limit Errors
+
+When rate limited, you'll receive a `429` response:
+```json
+{
+  "schema": "error.v1",
+  "code": "RATE_LIMITED",
+  "message": "Rate limit exceeded for this API key",
+  "details": {
+    "retry_after_seconds": 42
+  }
+}
+```
+
+### Auth Telemetry Events
+- `assist.auth.success` - Valid API key used
+- `assist.auth.failed` - Invalid or missing API key
+- `assist.auth.rate_limited` - Rate limit exceeded
+
+**Note:** All telemetry uses hashed key IDs (SHA-256 prefix), never raw keys.
+
+---
+
+## Legacy SSE Migration (v1.3.0+)
+
+### Overview
+The legacy SSE path (`POST /assist/draft-graph` with `Accept: text/event-stream`) is deprecated. Use the dedicated endpoint instead.
+
+### Configuration
+
+```bash
+# Default: Legacy SSE disabled (recommended)
+# (No env var needed)
+
+# Enable legacy SSE for backwards compatibility
+export ENABLE_LEGACY_SSE=true
+```
+
+### Recommended Migration
+
+**Old (Legacy):**
+```bash
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "..."}'
+```
+
+**New (Recommended):**
+```bash
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "..."}'
+```
+
+### Legacy SSE Disabled (Default)
+
+When `ENABLE_LEGACY_SSE` is false or unset, legacy SSE requests return `426 Upgrade Required`:
+
+```json
+{
+  "schema": "error.v1",
+  "code": "BAD_INPUT",
+  "message": "Legacy SSE path disabled. Use POST /assist/draft-graph/stream instead.",
+  "details": {
+    "recommended_endpoint": "/assist/draft-graph/stream",
+    "migration_guide": "..."
+  }
+}
+```
+
+### Checking Legacy SSE Status
+```bash
+# If legacy SSE is enabled, deprecation warnings appear in telemetry
+# If disabled, you'll get 426 responses
+curl -X POST https://YOUR-SERVICE-URL/assist/draft-graph \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"brief": "test"}'
+```
 
 ---
 
