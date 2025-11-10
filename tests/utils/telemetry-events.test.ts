@@ -39,6 +39,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         SSEStarted: "assist.draft.sse_started",
         SSECompleted: "assist.draft.sse_completed",
         SSEError: "assist.draft.sse_error",
+        SseClientClosed: "assist.draft.sse_client_closed",
         FixtureShown: "assist.draft.fixture_shown",
         FixtureReplaced: "assist.draft.fixture_replaced",
         LegacySSEPath: "assist.draft.legacy_sse_path",
@@ -75,6 +76,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         AuthSuccess: "assist.auth.success",
         AuthFailed: "assist.auth.failed",
         RateLimited: "assist.auth.rate_limited",
+
+        LlmRetry: "assist.llm.retry",
+        LlmRetrySuccess: "assist.llm.retry_success",
+        LlmRetryExhausted: "assist.llm.retry_exhausted",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -99,7 +104,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   describe("Event namespace consistency", () => {
     it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
       const allEvents = Object.values(TelemetryEvents);
-      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth)\./;
+      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -111,8 +116,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth.)
-        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth)\./, "");
+        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm.)
+        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -204,6 +209,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "auth.success": [TelemetryEvents.AuthSuccess],
         "auth.failed": [TelemetryEvents.AuthFailed],
         "auth.rate_limited": [TelemetryEvents.RateLimited],
+
+        // LLM retry events (v1.2.1)
+        "llm.retry": [TelemetryEvents.LlmRetry],
+        "llm.retry_success": [TelemetryEvents.LlmRetrySuccess],
+        "llm.retry_exhausted": [TelemetryEvents.LlmRetryExhausted],
+
+        // SSE client events (v1.2.1)
+        "sse.client_closed": [TelemetryEvents.SseClientClosed],
 
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
