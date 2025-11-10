@@ -6,6 +6,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+// Mock dotenv/config to prevent loading .env file during tests
+vi.mock("dotenv/config", () => ({}));
+
 describe("Legacy SSE Flag", () => {
   const originalEnv = { ...process.env };
 
