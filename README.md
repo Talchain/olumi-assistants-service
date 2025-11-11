@@ -2,11 +2,11 @@
 
 [![Nightly Smoke](https://github.com/Talchain/olumi-assistants-service/actions/workflows/nightly-smoke.yml/badge.svg)](https://github.com/Talchain/olumi-assistants-service/actions/workflows/nightly-smoke.yml)
 
-Production assistants service for Olumi platform (v1.3.0).
+Production assistants service for Olumi platform (v1.3.1).
 
 ## Status
 
-- Version: 1.3.0
+- Version: 1.3.1
 - Production: https://olumi-assistants-service.onrender.com
 - Tests: 544/544 passing
 - Nightly smoke: A1-A5 PASS
