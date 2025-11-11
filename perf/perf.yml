@@ -1,0 +1,42 @@
+config:
+  # target passed via --target flag in CI
+  target: "http://localhost:3000"  # fallback for local testing
+  phases:
+    - duration: 15   # ~15s total, tiny footprint
+      arrivalRate: 1
+  plugins:
+    ensure: {}       # safety to ensure status codes
+  processor: "./processor.cjs"
+  variables:
+    # Note: env var $ASSIST_API_KEY passed from workflow
+    apiKey: ""  # Will be set via environment
+
+scenarios:
+  - name: "healthz_gating"
+    weight: 9
+    flow:
+      - get:
+          url: "/healthz"
+          expect:
+            - statusCode: 200
+
+  - name: "draft_graph_observe"
+    weight: 1
+    flow:
+      - post:
+          url: "/assist/draft-graph"
+          headers:
+            authorization: "Bearer {{ apiKey }}"
+            content-type: "application/json"
+          json:
+            brief: "Choose a data-visualisation library"
+            flags:
+              clarifier_enabled: false
+              risks_enabled: false
+              actions_enabled: false
+          timeout: 75000        # allow up to 75s
+          capture:
+            - json: "$.version"
+              as: "version"
+          expect:
+            - statusCode: 200

@@ -5,6 +5,35 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2025-11-11
+
+### Added
+- **Undici Timeout Configuration** (v04 Resilience)
+  - Connect timeout: 3s (fail fast on connection issues)
+  - Headers timeout: 65s (align with 65s deadline)
+  - Body timeout: 60s (budget for LLM response streaming)
+  - Applied to OpenAI adapter via global dispatcher
+
+- **SSE Heartbeats** (v04 Resilience)
+  - SSE comment lines (`: heartbeat\n\n`) every 10s
+  - Prevents proxy idle timeouts on long-running LLM calls
+  - Applied to `/assist/draft-graph/stream` endpoint
+
+- **Nightly Smoke Retry Logic** (v04 Resilience)
+  - Retry A3/A4 tests once on 408/504/500 errors (upstream timeout)
+  - 2s backoff between retries
+  - 75s total timeout for smoke tests
+
+### Fixed
+- **Legacy SSE Auth Bypass**
+  - Auth plugin now skips legacy SSE deprecation path
+  - Allows 426 Upgrade Required response with migration guide
+  - Fixes regression where auth returned 401 before route could return 426
+
+### Notes
+- No breaking changes
+- Backward compatible with v1.3.0
+
 ## [1.3.0] - 2025-11-10
 
 ### Added
@@ -251,3 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed**: Features removed
 - **Testing**: Test coverage updates
 - **Documentation**: Docs updates
+
+## [1.3.0] – Released
+- GitHub Release: https://github.com/Talchain/olumi-assistants-service/releases/tag/v1.3.0
+- Nightly smoke (latest): https://github.com/Talchain/olumi-assistants-service/actions/runs/19263197136
+- Notes: Telemetry event validation; dotenv restored; lockfile regenerated; CI pin for pnpm/action-setup; 544/544 tests passing; TypeScript clean.

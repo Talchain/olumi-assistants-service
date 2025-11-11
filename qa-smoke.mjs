@@ -43,44 +43,107 @@ async function testA2() {
 async function testA3() {
   if (!RAW_KEY) { console.log("SKIP A3: no ASSIST_API_KEY in env"); return; }
   const body = { brief: "Should we expand to international markets or focus on domestic growth for our SaaS platform?" };
-  const { status, json } = await withAuth("/assist/draft-graph", body);
-  if (status !== 200) {
-    console.error("A3 error response:", JSON.stringify(json, null, 2));
+
+  // V04: Retry once on 408/504 (upstream timeout)
+  let attempts = 0;
+  const maxAttempts = 2;
+  let lastError = null;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      const { status, json } = await withAuth("/assist/draft-graph", body);
+
+      // Retry on 408/504 (timeout/gateway timeout)
+      if ((status === 408 || status === 504 || status === 500) && attempts < maxAttempts) {
+        console.log(`A3 attempt ${attempts} got ${status}, retrying...`);
+        lastError = { status, json };
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2s backoff
+        continue;
+      }
+
+      if (status !== 200) {
+        console.error("A3 error response:", JSON.stringify(json, null, 2));
+      }
+      assert.equal(status, 200, `expected 200, got ${status}`);
+      const nodes = (json.graph?.nodes ?? []).length;
+      const edges = (json.graph?.edges ?? []).length;
+      assert.ok(nodes >= 3 && edges >= 2, `small graph expected, got nodes=${nodes}, edges=${edges}`);
+      console.log("ACCEPT A3: /assist/draft-graph authenticated → 200 with small graph (≥3 nodes, ≥2 edges)");
+      return;
+    } catch (err) {
+      if (attempts < maxAttempts && (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT')) {
+        console.log(`A3 attempt ${attempts} network error, retrying...`);
+        lastError = err;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw err;
+    }
   }
-  assert.equal(status, 200, `expected 200, got ${status}`);
-  const nodes = (json.graph?.nodes ?? []).length;
-  const edges = (json.graph?.edges ?? []).length;
-  assert.ok(nodes >= 3 && edges >= 2, `small graph expected, got nodes=${nodes}, edges=${edges}`);
-  console.log("ACCEPT A3: /assist/draft-graph authenticated → 200 with small graph (≥3 nodes, ≥2 edges)");
+
+  // Exhausted retries
+  throw new Error(`A3 failed after ${maxAttempts} attempts: ${lastError?.status || lastError?.code || 'unknown'}`);
 }
 
 async function testA4() {
   if (!RAW_KEY) { console.log("SKIP A4: no ASSIST_API_KEY in env"); return; }
-  const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), 60000);
-  const headers = { "content-type": "application/json", "X-Olumi-Assist-Key": RAW_KEY };
-  let sawDrafting = false, sawComplete = false;
 
-  try {
-    const r = await fetch(`${BASE_URL}/assist/draft-graph/stream`, {
-      method: "POST", headers, body: JSON.stringify({ brief: "Should we build our own data center or use cloud providers for our infrastructure?" }),
-      signal: ctrl.signal
-    });
-    assert.equal(r.status, 200, `stream status ${r.status}`);
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value);
-      if (chunk.includes("DRAFTING")) sawDrafting = true;
-      if (chunk.includes("COMPLETE")) { sawComplete = true; break; }
+  // V04: Retry once on timeout/504; increased timeout to 75s
+  let attempts = 0;
+  const maxAttempts = 2;
+  let lastError = null;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 75000); // 75s timeout
+    const headers = { "content-type": "application/json", "X-Olumi-Assist-Key": RAW_KEY };
+    let sawDrafting = false, sawComplete = false;
+
+    try {
+      const r = await fetch(`${BASE_URL}/assist/draft-graph/stream`, {
+        method: "POST", headers, body: JSON.stringify({ brief: "Should we build our own data center or use cloud providers for our infrastructure?" }),
+        signal: ctrl.signal
+      });
+
+      // Retry on 408/504
+      if ((r.status === 408 || r.status === 504 || r.status === 500) && attempts < maxAttempts) {
+        console.log(`A4 attempt ${attempts} got ${r.status}, retrying...`);
+        lastError = { status: r.status };
+        clearTimeout(timeout);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+
+      assert.equal(r.status, 200, `stream status ${r.status}`);
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = dec.decode(value);
+        if (chunk.includes("DRAFTING")) sawDrafting = true;
+        if (chunk.includes("COMPLETE")) { sawComplete = true; break; }
+      }
+      clearTimeout(timeout);
+      assert.ok(sawDrafting && sawComplete, "did not see DRAFTING→COMPLETE");
+      console.log("ACCEPT A4: /assist/draft-graph/stream emits DRAFTING→COMPLETE within 75s");
+      return;
+    } catch (err) {
+      clearTimeout(timeout);
+      if (attempts < maxAttempts && (err.name === 'AbortError' || err.code === 'ECONNRESET')) {
+        console.log(`A4 attempt ${attempts} error (${err.name || err.code}), retrying...`);
+        lastError = err;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw err;
     }
-  } finally {
-    clearTimeout(timeout);
   }
-  assert.ok(sawDrafting && sawComplete, "did not see DRAFTING→COMPLETE");
-  console.log("ACCEPT A4: /assist/draft-graph/stream emits DRAFTING→COMPLETE within 60s");
+
+  // Exhausted retries
+  throw new Error(`A4 failed after ${maxAttempts} attempts: ${lastError?.status || lastError?.name || 'unknown'}`);
 }
 
 async function testA5() {

@@ -378,6 +378,17 @@ async function handleSseResponse(
   writeStage(reply, { stage: "DRAFTING" });
   emit(TelemetryEvents.SSEStarted, {});
 
+  // V04: SSE heartbeats every 10s to prevent proxy idle timeouts
+  // Send SSE comment lines that keep connection alive but don't affect client state
+  const heartbeatInterval = setInterval(() => {
+    try {
+      reply.raw.write(': heartbeat\n\n');
+    } catch (err) {
+      log.warn({ err }, "Heartbeat write failed (client may have disconnected)");
+      clearInterval(heartbeatInterval);
+    }
+  }, 10000); // 10s
+
   try {
 
     // SSE with fixture fallback: show fixture if draft takes > 2.5s
@@ -419,6 +430,7 @@ async function handleSseResponse(
         status_code: result.statusCode,
         fixture_shown: fixtureSent,
       });
+      clearInterval(heartbeatInterval);
       reply.raw.end();
       return;
     }
@@ -436,6 +448,7 @@ async function handleSseResponse(
         cost_usd: result.cost_usd,
         fixture_shown: fixtureSent,
       });
+      clearInterval(heartbeatInterval);
       reply.raw.end();
       return;
     }
@@ -463,8 +476,10 @@ async function handleSseResponse(
       cost_usd: result.cost_usd ?? 0,          // Fallback for parity
       model: result.model,
     });
+    clearInterval(heartbeatInterval);
     reply.raw.end();
   } catch (error: unknown) {
+    clearInterval(heartbeatInterval);
     const err = error instanceof Error ? error : new Error("unexpected error");
     log.error({ err }, "SSE draft graph failure");
     const envelope = buildError("INTERNAL", err.message || "internal");
