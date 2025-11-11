@@ -1,5 +1,6 @@
 config:
-  target: "$BASE_URL"
+  # target passed via --target flag in CI
+  target: "http://localhost:3000"  # fallback for local testing
   phases:
     - duration: 15   # ~15s total, tiny footprint
       arrivalRate: 1
@@ -7,7 +8,8 @@ config:
     ensure: {}       # safety to ensure status codes
   processor: "./processor.cjs"
   variables:
-    apiKey: "$ASSIST_API_KEY"
+    # Note: env var $ASSIST_API_KEY passed from workflow
+    apiKey: ""  # Will be set via environment
 
 scenarios:
   - name: "healthz_gating"

@@ -32,10 +32,11 @@ jobs:
       - name: Run Artillery against production (always write JSON)
         env:
           ASSIST_API_KEY: ${{ secrets.ASSIST_API_KEY }}
-          BASE_URL: ${{ env.BASE_URL }}
         run: |
           set -euxo pipefail
-          npx --yes artillery@2 run perf/perf.yml -o perf-results.json || echo "ARTILLERY_FAILED=1" >> $GITHUB_ENV
+          npx --yes artillery@2 run perf/perf.yml \
+            --target "$BASE_URL" \
+            -o perf-results.json || echo "ARTILLERY_FAILED=1" >> $GITHUB_ENV
           # Ensure artefact presence even if Artillery failed early
           [[ -f perf-results.json ]] || echo '{}' > perf-results.json
 
