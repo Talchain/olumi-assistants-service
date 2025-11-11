@@ -13,6 +13,10 @@ export const TelemetryEvents = {
   DraftStarted: "assist.draft.started",
   DraftCompleted: "assist.draft.completed",
 
+  // V04: Upstream telemetry events
+  DraftUpstreamSuccess: "assist.draft.upstream_success",
+  DraftUpstreamError: "assist.draft.upstream_error",
+
   // SSE streaming events
   SSEStarted: "assist.draft.sse_started",
   SSECompleted: "assist.draft.sse_completed",

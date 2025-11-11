@@ -1,5 +1,6 @@
 import { env } from "node:process";
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
@@ -129,7 +130,7 @@ async function groundAttachments(
   return result;
 }
 
-async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown): Promise<PipelineResult> {
+async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
@@ -178,13 +179,39 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
   }
 
   const llmStartTime = Date.now();
-  emit(TelemetryEvents.Stage, { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name });
-  const draftResult = await draftAdapter.draftGraph(
-    { brief: input.brief, docs, seed: 17 },
-    { requestId: `draft_${Date.now()}`, timeoutMs: 15000 }
-  );
+  emit(TelemetryEvents.Stage, { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name, correlation_id: correlationId });
+
+  // V04: Telemetry for upstream calls
+  let draftResult;
+  let upstreamStatusCode = 200; // Default to success
+  try {
+    draftResult = await draftAdapter.draftGraph(
+      { brief: input.brief, docs, seed: 17 },
+      { requestId: `draft_${Date.now()}`, timeoutMs: 15000 }
+    );
+  } catch (error) {
+    const llmDuration = Date.now() - llmStartTime;
+    // Determine status code from error (timeout vs other failures)
+    upstreamStatusCode = error instanceof Error && error.name === "UpstreamTimeoutError" ? 504 : 500;
+    emit(TelemetryEvents.DraftUpstreamError, {
+      status_code: upstreamStatusCode,
+      latency_ms: llmDuration,
+      provider: draftAdapter.name,
+      correlation_id: correlationId,
+    });
+    throw error; // Re-throw to let outer handler deal with it
+  }
+
   const { graph, rationales, usage: draftUsage } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
+
+  // V04: Emit upstream telemetry for successful calls
+  emit(TelemetryEvents.DraftUpstreamSuccess, {
+    status_code: upstreamStatusCode,
+    latency_ms: llmDuration,
+    provider: draftAdapter.name,
+    correlation_id: correlationId,
+  });
   emit(TelemetryEvents.Stage, { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
 
   // Calculate draft cost immediately (provider-specific pricing)
@@ -370,13 +397,18 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown):
 async function handleSseResponse(
   reply: FastifyReply,
   input: DraftGraphInputT,
-  rawBody: unknown
+  rawBody: unknown,
+  correlationId: string
 ): Promise<void> {
   const streamStartTime = Date.now();
   let fixtureSent = false;
+  let sseEndState: "complete" | "timeout" | "aborted" | "error" = "complete"; // V04: Track SSE end state
+
+  // V04: Echo correlation ID in response header
+  reply.raw.setHeader("X-Correlation-ID", correlationId);
   reply.raw.writeHead(200, SSE_HEADERS);
   writeStage(reply, { stage: "DRAFTING" });
-  emit(TelemetryEvents.SSEStarted, {});
+  emit(TelemetryEvents.SSEStarted, { correlation_id: correlationId });
 
   // V04: SSE heartbeats every 10s to prevent proxy idle timeouts
   // Send SSE comment lines that keep connection alive but don't affect client state
@@ -411,7 +443,7 @@ async function handleSseResponse(
     }, FIXTURE_TIMEOUT_MS);
 
     // Run pipeline
-    const result = await runDraftGraphPipeline(input, rawBody);
+    const result = await runDraftGraphPipeline(input, rawBody, correlationId);
     clearTimeout(fixtureTimeout);
     const streamDuration = Date.now() - streamStartTime;
 
@@ -422,6 +454,7 @@ async function handleSseResponse(
     // Handle pipeline errors (validation, rate limiting, etc.)
     if (result.kind === "error") {
       const streamDuration = Date.now() - streamStartTime;
+      sseEndState = "error"; // V04: Track SSE end state
       writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
       emit(TelemetryEvents.SSEError, {
         stream_duration_ms: streamDuration,
@@ -429,6 +462,8 @@ async function handleSseResponse(
         error_code: result.envelope.code,
         status_code: result.statusCode,
         fixture_shown: fixtureSent,
+        correlation_id: correlationId,
+        sse_end_state: sseEndState,
       });
       clearInterval(heartbeatInterval);
       reply.raw.end();
@@ -438,6 +473,7 @@ async function handleSseResponse(
     // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
     const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
     if (!guardResult.ok) {
+      sseEndState = "error"; // V04: Track SSE end state
       const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
       writeStage(reply, { stage: "COMPLETE", payload: guardError });
       emit(TelemetryEvents.GuardViolation, {
@@ -447,6 +483,8 @@ async function handleSseResponse(
         provider: result.provider,
         cost_usd: result.cost_usd,
         fixture_shown: fixtureSent,
+        correlation_id: correlationId,
+        sse_end_state: sseEndState,
       });
       clearInterval(heartbeatInterval);
       reply.raw.end();
@@ -465,6 +503,7 @@ async function handleSseResponse(
     const qualityTier = confidence >= 0.9 ? "high" : confidence >= 0.7 ? "medium" : "low";
     const hasIssues = (result.payload.issues?.length ?? 0) > 0;
 
+    sseEndState = "complete"; // V04: Track SSE end state - successful completion
     writeStage(reply, { stage: "COMPLETE", payload: result.payload });
     emit(TelemetryEvents.SSECompleted, {
       stream_duration_ms: streamDuration,
@@ -475,13 +514,16 @@ async function handleSseResponse(
       provider: result.provider || "unknown",  // Fallback for parity
       cost_usd: result.cost_usd ?? 0,          // Fallback for parity
       model: result.model,
+      correlation_id: correlationId,
+      sse_end_state: sseEndState,
     });
     clearInterval(heartbeatInterval);
     reply.raw.end();
   } catch (error: unknown) {
     clearInterval(heartbeatInterval);
     const err = error instanceof Error ? error : new Error("unexpected error");
-    log.error({ err }, "SSE draft graph failure");
+    sseEndState = err.name === "AbortError" ? "timeout" : "error"; // V04: Track SSE end state
+    log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
     const envelope = buildError("INTERNAL", err.message || "internal");
     writeStage(reply, { stage: "COMPLETE", payload: envelope });
     const streamDuration = Date.now() - streamStartTime;
@@ -491,6 +533,8 @@ async function handleSseResponse(
       error_code: "INTERNAL",
       error_type: err.name,
       fixture_shown: fixtureSent,
+      correlation_id: correlationId,
+      sse_end_state: sseEndState,
     });
     reply.raw.end();
   }
@@ -502,9 +546,13 @@ async function handleSseResponse(
 async function handleJsonResponse(
   reply: FastifyReply,
   input: DraftGraphInputT,
-  rawBody: unknown
+  rawBody: unknown,
+  correlationId: string
 ): Promise<void> {
-  const result = await runDraftGraphPipeline(input, rawBody);
+  // V04: Echo correlation ID in response header
+  reply.header("X-Correlation-ID", correlationId);
+
+  const result = await runDraftGraphPipeline(input, rawBody, correlationId);
 
   // Handle errors
   if (result.kind === "error") {
@@ -551,9 +599,13 @@ export default async function route(app: FastifyInstance) {
       }
     }
   }, async (req, reply) => {
+    // V04: Generate correlation ID for request traceability
+    const correlationId = randomUUID();
+
     const parsed = DraftGraphInput.safeParse(req.body);
     if (!parsed.success) {
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
+      reply.raw.setHeader("X-Correlation-ID", correlationId);
       reply.raw.writeHead(400, SSE_HEADERS);
       writeStage(reply, { stage: "DRAFTING" });
       writeStage(reply, { stage: "COMPLETE", payload: envelope });
@@ -561,7 +613,7 @@ export default async function route(app: FastifyInstance) {
       return reply;
     }
 
-    await handleSseResponse(reply, parsed.data, req.body);
+    await handleSseResponse(reply, parsed.data, req.body, correlationId);
     return reply;
   });
 
@@ -569,18 +621,23 @@ export default async function route(app: FastifyInstance) {
   // DEPRECATED: SSE access via Accept: text/event-stream header uses global 120 RPM limit
   // For production SSE streaming, use dedicated /assist/draft-graph/stream endpoint (20 RPM limit)
   app.post("/assist/draft-graph", async (req, reply) => {
+    // V04: Generate correlation ID for request traceability
+    const correlationId = randomUUID();
+
     const wantsSse = req.headers.accept?.includes(EVENT_STREAM) ?? false;
 
     const parsed = DraftGraphInput.safeParse(req.body);
     if (!parsed.success) {
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
       if (wantsSse) {
+        reply.raw.setHeader("X-Correlation-ID", correlationId);
         reply.raw.writeHead(400, SSE_HEADERS);
         writeStage(reply, { stage: "DRAFTING" });
         writeStage(reply, { stage: "COMPLETE", payload: envelope });
         reply.raw.end();
         return reply;
       }
+      reply.header("X-Correlation-ID", correlationId);
       reply.code(400);
       return reply.send(envelope);
     }
@@ -627,13 +684,13 @@ export default async function route(app: FastifyInstance) {
         legacy_sse_path: true,
       });
 
-      await handleSseResponse(reply, parsed.data, req.body);
+      await handleSseResponse(reply, parsed.data, req.body, correlationId);
       return reply;
     }
 
     // JSON response
     try {
-      await handleJsonResponse(reply, parsed.data, req.body);
+      await handleJsonResponse(reply, parsed.data, req.body, correlationId);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err }, "draft graph route failure");
