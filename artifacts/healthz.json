@@ -1,0 +1,1 @@
+{"ok":true,"service":"assistants","version":"1.3.1","provider":"openai","model":"gpt-4o-mini","limits_source":"config","feature_flags":{"grounding":true,"critique":true,"clarifier":true}}

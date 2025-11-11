@@ -1,0 +1,33 @@
+{
+  "release": "v1.3.1",
+  "tag_created": true,
+  "github_release_url": "https://github.com/Talchain/olumi-assistants-service/releases/tag/v1.3.1",
+  "production_healthz": {
+    "ok": true,
+    "version": "1.3.1",
+    "feature_flags": {
+      "grounding": true,
+      "critique": true,
+      "clarifier": true
+    }
+  },
+  "smoke_tests": {
+    "A1": "PASS",
+    "A2": "PASS",
+    "A3": "DEGRADED - upstream timeout (500)",
+    "A4": "SKIPPED - A3 prerequisite failed",
+    "A5": "SKIPPED - A3 prerequisite failed",
+    "note": "Fixed version check in qa-smoke.mjs (PR pending)"
+  },
+  "perf_gate": {
+    "status": "PASS",
+    "healthz_p95_ms": 407.5,
+    "threshold_ms": 8000,
+    "draft_graph_p95_ms": 179.5,
+    "run_url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/19273385983"
+  },
+  "workflows": {
+    "nightly_smoke": "https://github.com/Talchain/olumi-assistants-service/actions/runs/19273383002",
+    "perf_gate": "https://github.com/Talchain/olumi-assistants-service/actions/runs/19273385983"
+  }
+}

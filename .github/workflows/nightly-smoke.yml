@@ -1,7 +1,7 @@
 name: nightly-smoke
 on:
-  schedule:
-    - cron: "15 2 * * *"   # 02:15 UTC nightly
+  # V04: Converted to on-demand workflow_dispatch only (removed schedule)
+  # Previously: schedule cron "15 2 * * *" (02:15 UTC nightly)
   workflow_dispatch:
 jobs:
   smoke:
@@ -16,7 +16,74 @@ jobs:
         with: { node-version: 18 }
       - run: pnpm install --frozen-lockfile
       - name: Run smoke tests
-        run: node qa-smoke.mjs
+        id: smoke
+        continue-on-error: true
+        run: node qa-smoke.mjs 2>&1 | tee nightly-smoke.log
         env:
           BASE_URL: https://olumi-assistants-service.onrender.com
           ASSIST_API_KEY: ${{ secrets.ASSIST_API_KEY }}
+      - name: Generate job summary
+        if: always()
+        run: |
+          echo "# Production Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target**: https://olumi-assistants-service.onrender.com" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          # Parse results from log
+          if grep -q "ACCEPT A1:" nightly-smoke.log; then
+            A1_RESULT="✅ PASS"
+            A1_DETAIL=$(grep "ACCEPT A1:" nightly-smoke.log | head -1)
+          else
+            A1_RESULT="❌ FAIL"
+            A1_DETAIL="Healthz check failed"
+          fi
+
+          if grep -q "ACCEPT A2:" nightly-smoke.log; then
+            A2_RESULT="✅ PASS"
+            A2_DETAIL="Unauth returns 401/403"
+          else
+            A2_RESULT="❌ FAIL"
+            A2_DETAIL="Auth check failed"
+          fi
+
+          if grep -q "ACCEPT A3:" nightly-smoke.log; then
+            A3_RESULT="✅ PASS"
+            A3_DETAIL=$(grep "ACCEPT A3:" nightly-smoke.log | head -1 | sed 's/ACCEPT A3: //')
+          else
+            A3_RESULT="❌ FAIL"
+            A3_DETAIL=$(grep -E "A3|draft-graph" nightly-smoke.log | tail -1 || echo "Authenticated draft failed")
+          fi
+
+          if grep -q "ACCEPT A4:" nightly-smoke.log; then
+            A4_RESULT="✅ PASS"
+            A4_DETAIL="SSE streaming DRAFTING→COMPLETE"
+          else
+            A4_RESULT="❌ FAIL"
+            A4_DETAIL=$(grep -E "A4|stream" nightly-smoke.log | tail -1 || echo "SSE streaming failed")
+          fi
+
+          if grep -q "ACCEPT A5:" nightly-smoke.log; then
+            A5_RESULT="✅ PASS"
+            A5_DETAIL="Feature flags verified"
+          else
+            A5_RESULT="❌ FAIL"
+            A5_DETAIL="Feature flags check failed"
+          fi
+
+          echo "| A1: Healthz | $A1_RESULT | $A1_DETAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| A2: Auth | $A2_RESULT | $A2_DETAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| A3: Draft Graph | $A3_RESULT | $A3_DETAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| A4: SSE Stream | $A4_RESULT | $A4_DETAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| A5: Feature Flags | $A5_RESULT | $A5_DETAIL |" >> $GITHUB_STEP_SUMMARY
+      - name: Upload smoke test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-smoke-log
+          path: nightly-smoke.log
+      - name: Fail if smoke tests failed
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1

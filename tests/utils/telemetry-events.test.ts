@@ -36,6 +36,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DraftStarted: "assist.draft.started",
         DraftCompleted: "assist.draft.completed",
 
+        // V04: Upstream telemetry events
+        DraftUpstreamSuccess: "assist.draft.upstream_success",
+        DraftUpstreamError: "assist.draft.upstream_error",
+
         SSEStarted: "assist.draft.sse_started",
         SSECompleted: "assist.draft.sse_completed",
         SSEError: "assist.draft.sse_error",
@@ -218,11 +222,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // SSE client events (v1.2.1)
         "sse.client_closed": [TelemetryEvents.SseClientClosed],
 
+        // V04: Upstream telemetry events
+        "draft.upstream.success": [TelemetryEvents.DraftUpstreamSuccess],
+        "draft.upstream.error": [TelemetryEvents.DraftUpstreamError],
+
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
         "draft.sse.stream_duration_ms": [TelemetryEvents.SSECompleted],
         "draft.confidence": [TelemetryEvents.DraftCompleted],
         "draft.cost_usd": [TelemetryEvents.DraftCompleted],
+        "draft.upstream.latency_ms": [TelemetryEvents.DraftUpstreamSuccess, TelemetryEvents.DraftUpstreamError],
         "clarifier.duration_ms": [TelemetryEvents.ClarifierRoundComplete],
         "clarifier.cost_usd": [TelemetryEvents.ClarifierRoundComplete],
         "clarifier.confidence": [TelemetryEvents.ClarifierRoundComplete],
@@ -269,6 +278,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       const specV04Events = [
         "assist.draft.started",
         "assist.draft.completed",
+        "assist.draft.upstream_success",
+        "assist.draft.upstream_error",
         "assist.draft.sse_started",
         "assist.draft.sse_completed",
         "assist.draft.sse_error",
