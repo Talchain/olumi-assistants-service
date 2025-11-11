@@ -1,5 +1,5 @@
 config:
-  target: "{{ BASE_URL }}"
+  target: "$BASE_URL"
   phases:
     - duration: 15   # ~15s total, tiny footprint
       arrivalRate: 1
@@ -7,7 +7,7 @@ config:
     ensure: {}       # safety to ensure status codes
   processor: "./processor.js"
   variables:
-    ASSIST_API_KEY: "{{ ASSIST_API_KEY }}"
+    apiKey: "$ASSIST_API_KEY"
 
 scenarios:
   - name: "healthz_gating"
@@ -24,7 +24,7 @@ scenarios:
       - post:
           url: "/assist/draft-graph"
           headers:
-            authorization: "Bearer {{ ASSIST_API_KEY }}"
+            authorization: "Bearer {{ apiKey }}"
             content-type: "application/json"
           json:
             brief: "Choose a data-visualisation library"
