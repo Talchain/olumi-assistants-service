@@ -36,6 +36,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DraftStarted: "assist.draft.started",
         DraftCompleted: "assist.draft.completed",
 
+        DraftUpstreamSuccess: "assist.draft.upstream_success",
+        DraftUpstreamError: "assist.draft.upstream_error",
+
         SSEStarted: "assist.draft.sse_started",
         SSECompleted: "assist.draft.sse_completed",
         SSEError: "assist.draft.sse_error",
@@ -218,6 +221,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // SSE client events (v1.2.1)
         "sse.client_closed": [TelemetryEvents.SseClientClosed],
 
+        // Upstream telemetry events (v04)
+        "draft.upstream_success": [TelemetryEvents.DraftUpstreamSuccess],
+        "draft.upstream_error": [TelemetryEvents.DraftUpstreamError],
+
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
         "draft.sse.stream_duration_ms": [TelemetryEvents.SSECompleted],
@@ -269,6 +276,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       const specV04Events = [
         "assist.draft.started",
         "assist.draft.completed",
+        "assist.draft.upstream_success",
+        "assist.draft.upstream_error",
         "assist.draft.sse_started",
         "assist.draft.sse_completed",
         "assist.draft.sse_error",
