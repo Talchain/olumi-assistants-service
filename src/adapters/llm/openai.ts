@@ -6,6 +6,8 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
+import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
+import { makeIdempotencyKey } from "./idempotency.js";
 
 // Zod schemas for OpenAI response validation (same as Anthropic)
 const OpenAINode = z.object({
@@ -231,8 +233,12 @@ export class OpenAIAdapter implements LLMAdapter {
     const { brief, docs = [], seed } = args;
     const prompt = buildDraftPrompt(brief, docs);
 
+    // V04: Generate idempotency key for request traceability
+    const idempotencyKey = makeIdempotencyKey();
+    const startTime = Date.now();
+
     log.info(
-      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai' },
+      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey },
       "calling OpenAI for draft"
     );
 
@@ -249,10 +255,14 @@ export class OpenAIAdapter implements LLMAdapter {
           response_format: { type: "json_object" },
           seed: seed, // OpenAI supports deterministic seed
         },
-        { signal: abortController.signal as any }
+        {
+          signal: abortController.signal as any,
+          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+        }
       );
 
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -308,10 +318,41 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
-      if (error instanceof Error && error.name === "AbortError") {
-        log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS }, "OpenAI draft call timed out");
-        throw new Error("openai_timeout");
+      if (error instanceof Error) {
+        // V04: Throw typed UpstreamTimeoutError for timeout classification
+        if (error.name === "AbortError" || abortController.signal.aborted) {
+          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
+          throw new UpstreamTimeoutError(
+            "OpenAI draft_graph timed out",
+            "openai",
+            "draft_graph",
+            "body",
+            elapsedMs,
+            error
+          );
+        }
+
+        // V04: Check for OpenAI API errors (non-2xx responses)
+        // OpenAI SDK throws errors with status and headers properties
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.['x-request-id'] || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI draft_graph failed: ${apiError.message || 'unknown error'}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
       }
 
       log.error({ error }, "OpenAI draft call failed");
@@ -323,7 +364,11 @@ export class OpenAIAdapter implements LLMAdapter {
     const { goal, constraints, existingOptions } = args;
     const prompt = buildSuggestOptionsPrompt(goal, constraints, existingOptions);
 
-    log.info({ goal_chars: goal.length, model: this.model, provider: 'openai' }, "calling OpenAI for options");
+    // V04: Generate idempotency key for request traceability
+    const idempotencyKey = makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info({ goal_chars: goal.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for options");
 
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
@@ -337,10 +382,14 @@ export class OpenAIAdapter implements LLMAdapter {
           temperature: 0.7, // Slightly higher for creativity in options
           response_format: { type: "json_object" },
         },
-        { signal: abortController.signal as any }
+        {
+          signal: abortController.signal as any,
+          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+        }
       );
 
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -365,10 +414,40 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
-      if (error instanceof Error && error.name === "AbortError") {
-        log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS }, "OpenAI options call timed out");
-        throw new Error("openai_timeout");
+      if (error instanceof Error) {
+        // V04: Throw typed UpstreamTimeoutError for timeout classification
+        if (error.name === "AbortError" || abortController.signal.aborted) {
+          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI options call timed out");
+          throw new UpstreamTimeoutError(
+            "OpenAI suggest_options timed out",
+            "openai",
+            "suggest_options",
+            "body",
+            elapsedMs,
+            error
+          );
+        }
+
+        // V04: Check for OpenAI API errors (non-2xx responses)
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.['x-request-id'] || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI suggest_options failed: ${apiError.message || 'unknown error'}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
       }
 
       log.error({ error }, "OpenAI options call failed");
@@ -380,7 +459,11 @@ export class OpenAIAdapter implements LLMAdapter {
     const { graph, violations } = args;
     const prompt = buildRepairPrompt(graph, violations);
 
-    log.info({ violation_count: violations.length, model: this.model, provider: 'openai' }, "calling OpenAI for repair");
+    // V04: Generate idempotency key for request traceability
+    const idempotencyKey = makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for repair");
 
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
@@ -394,10 +477,14 @@ export class OpenAIAdapter implements LLMAdapter {
           temperature: 0,
           response_format: { type: "json_object" },
         },
-        { signal: abortController.signal as any }
+        {
+          signal: abortController.signal as any,
+          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+        }
       );
 
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -443,10 +530,40 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
 
-      if (error instanceof Error && error.name === "AbortError") {
-        log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS }, "OpenAI repair call timed out");
-        throw new Error("openai_timeout");
+      if (error instanceof Error) {
+        // V04: Throw typed UpstreamTimeoutError for timeout classification
+        if (error.name === "AbortError" || abortController.signal.aborted) {
+          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
+          throw new UpstreamTimeoutError(
+            "OpenAI repair_graph timed out",
+            "openai",
+            "repair_graph",
+            "body",
+            elapsedMs,
+            error
+          );
+        }
+
+        // V04: Check for OpenAI API errors (non-2xx responses)
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.['x-request-id'] || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI repair_graph failed: ${apiError.message || 'unknown error'}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
       }
 
       log.error({ error }, "OpenAI repair call failed");

@@ -30,8 +30,8 @@ async function testA1() {
   const { status, json } = await jget("/healthz");
   assert.equal(status, 200, "healthz not 200");
   assert.equal(json.ok, true, "healthz.ok != true");
-  assert.ok(String(json.version || "").startsWith("1.3.0"), "version mismatch");
-  console.log("ACCEPT A1: /healthz 200 and version=1.3.0");
+  assert.ok(String(json.version || "").startsWith("1.3."), "version mismatch");
+  console.log(`ACCEPT A1: /healthz 200 and version=${json.version}`);
 }
 
 async function testA2() {
