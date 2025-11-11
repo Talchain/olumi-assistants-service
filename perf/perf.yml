@@ -5,7 +5,7 @@ config:
       arrivalRate: 1
   plugins:
     ensure: {}       # safety to ensure status codes
-  processor: "./processor.js"
+  processor: "./processor.cjs"
   variables:
     apiKey: "$ASSIST_API_KEY"
 
