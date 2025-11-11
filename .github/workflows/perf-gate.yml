@@ -45,17 +45,20 @@ jobs:
           node -e "
           const fs=require('fs');
           const p=JSON.parse(fs.readFileSync('perf-results.json','utf8'));
-          // Try common Artillery shapes
           const agg = p.aggregate || p.aggregates || {};
           let p95;
-          // Prefer scenario-specific latency when available
-          const s = (p.intermediate || []).find(x => x.name === 'healthz_gating');
-          if (s?.summaries?.http?.latency?.p95) p95 = s.summaries.http.latency.p95;
-          if (!p95 && agg.latency?.p95) p95 = agg.latency.p95;
-          if (!p95 && agg.http?.latency?.p95) p95 = agg.http.latency.p95;
-          if (!p95) throw new Error('p95 not found in perf-results.json for healthz_gating');
+          // Try endpoint-specific metrics first (most accurate)
+          if (agg.summaries?.['plugins.metrics-by-endpoint.response_time./healthz']?.p95) {
+            p95 = agg.summaries['plugins.metrics-by-endpoint.response_time./healthz'].p95;
+          }
+          // Fallback to overall response time
+          if (!p95 && agg.summaries?.['http.response_time']?.p95) {
+            p95 = agg.summaries['http.response_time'].p95;
+          }
+          if (!p95) throw new Error('p95 not found in perf-results.json');
           console.log('healthz p95:', p95, 'ms');
-          if (p95 > 8000) { throw new Error(\`p95 \${p95}ms > 8000ms\`); }
+          if (p95 > 8000) { throw new Error(\`p95 \${p95}ms > 8000ms (FAIL)\`); }
+          console.log('✅ p95 gate passed');
           "
 
       - name: Summarise p95 (healthz + draft-graph if present)
@@ -63,22 +66,18 @@ jobs:
           node -e "
           const fs=require('fs');
           const p=JSON.parse(fs.readFileSync('perf-results.json','utf8'));
-          const rows=[];
-          function pickP95(name){
-            const i=(p.intermediate||[]).find(x=>x.name===name);
-            return i?.summaries?.http?.latency?.p95 ?? null;
-          }
-          const healthz=pickP95('healthz_gating');
-          const draft=pickP95('draft_graph_observe');
-          rows.push(['Scenario','p95 (ms)']);
-          rows.push(['healthz_gating', healthz ?? 'n/a']);
-          rows.push(['draft_graph_observe (non-blocking)', draft ?? 'n/a']);
+          const agg = p.aggregate || {};
+          const healthz = agg.summaries?.['plugins.metrics-by-endpoint.response_time./healthz']?.p95 ?? 'n/a';
+          const draft = agg.summaries?.['plugins.metrics-by-endpoint.response_time./assist/draft-graph']?.p95 ?? 'n/a';
+          const overall = agg.summaries?.['http.response_time']?.p95 ?? 'n/a';
           const md = [
             '### Performance Gate Summary',
             '',
-            '| Scenario | p95 (ms) |',
-            '|---|---|',
-            ...rows.slice(1).map(r=>\`| \${r[0]} | \${r[1]} |\`)
+            '| Metric | p95 (ms) | Status |',
+            '|---|---|---|',
+            \`| /healthz (gating) | \${healthz} | \${healthz !== 'n/a' && healthz < 8000 ? '✅' : '❌'} |\`,
+            \`| /assist/draft-graph (observe) | \${draft} | ℹ️ |\`,
+            \`| Overall | \${overall} | - |\`
           ].join('\n');
           fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, md);
           "
