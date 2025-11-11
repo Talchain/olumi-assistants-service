@@ -1,0 +1,40 @@
+config:
+  target: "{{ BASE_URL }}"
+  phases:
+    - duration: 15   # ~15s total, tiny footprint
+      arrivalRate: 1
+  plugins:
+    ensure: {}       # safety to ensure status codes
+  processor: "./processor.js"
+  variables:
+    ASSIST_API_KEY: "{{ ASSIST_API_KEY }}"
+
+scenarios:
+  - name: "healthz_gating"
+    weight: 9
+    flow:
+      - get:
+          url: "/healthz"
+          expect:
+            - statusCode: 200
+
+  - name: "draft_graph_observe"
+    weight: 1
+    flow:
+      - post:
+          url: "/assist/draft-graph"
+          headers:
+            authorization: "Bearer {{ ASSIST_API_KEY }}"
+            content-type: "application/json"
+          json:
+            brief: "Choose a data-visualisation library"
+            flags:
+              clarifier_enabled: false
+              risks_enabled: false
+              actions_enabled: false
+          timeout: 75000        # allow up to 75s
+          capture:
+            - json: "$.version"
+              as: "version"
+          expect:
+            - statusCode: 200
