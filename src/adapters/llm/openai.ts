@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
+import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
@@ -42,6 +43,22 @@ const OpenAIOptionsResponse = z.object({
 });
 
 const apiKey = process.env.OPENAI_API_KEY;
+
+// V04: Undici dispatcher with production-grade timeouts
+// - connectTimeout: 3s (fail fast on connection issues)
+// - headersTimeout: 65s (align with 65s deadline)
+// - bodyTimeout: 60s (budget for LLM response)
+// Note: OpenAI SDK v6 uses fetch API, so we set global undici dispatcher
+const undiciAgent = new Agent({
+  connect: {
+    timeout: 3000, // 3s
+  },
+  headersTimeout: 65000, // 65s
+  bodyTimeout: 60000, // 60s
+});
+
+// Set global dispatcher for fetch API (affects all fetch calls in this module)
+setGlobalDispatcher(undiciAgent);
 
 // Lazy initialization to allow testing without API key
 let client: OpenAI | null = null;
