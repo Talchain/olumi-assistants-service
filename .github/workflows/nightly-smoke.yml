@@ -1,12 +1,21 @@
 name: nightly-smoke
 on:
   schedule:
-    - cron: "15 2 * * *"   # 02:15 UTC nightly
+    - cron: "0 2 * * 0"   # Sundays 02:00 UTC (gated by SMOKE_SCHEDULE_ENABLED)
   workflow_dispatch:
+
+# V04: Prevent overlapping smoke test runs
+concurrency:
+  group: nightly-smoke
+  cancel-in-progress: false
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # V04: Gate scheduled runs with SMOKE_SCHEDULE_ENABLED variable (disabled by default)
+    # Manual workflow_dispatch runs always execute regardless of variable setting
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.SMOKE_SCHEDULE_ENABLED == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3

@@ -1,11 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
+import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
+import { makeIdempotencyKey } from "./idempotency.js";
 
 export type DraftArgs = {
   brief: string;
@@ -84,6 +87,22 @@ const AnthropicExplainDiffResponse = z.object({
 });
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
+
+// V04: Undici dispatcher with production-grade timeouts
+// - connectTimeout: 3s (fail fast on connection issues)
+// - headersTimeout: 65s (align with 65s deadline)
+// - bodyTimeout: 60s (budget for LLM response)
+// Note: Anthropic SDK uses fetch API, so we set global undici dispatcher
+const undiciAgent = new Agent({
+  connect: {
+    timeout: 3000, // 3s
+  },
+  headersTimeout: 65000, // 65s
+  bodyTimeout: 60000, // 60s
+});
+
+// Set global dispatcher for fetch API (affects all fetch calls in this module)
+setGlobalDispatcher(undiciAgent);
 
 // Lazy initialization to allow testing without API key
 let client: Anthropic | null = null;
@@ -253,7 +272,11 @@ export async function draftGraphWithAnthropic(
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildPrompt(args);
 
-  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length }, "calling Anthropic for draft");
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, idempotency_key: idempotencyKey }, "calling Anthropic for draft");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -269,7 +292,10 @@ export async function draftGraphWithAnthropic(
             temperature: 0,
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -279,6 +305,7 @@ export async function draftGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -378,14 +405,23 @@ export async function draftGraphWithAnthropic(
     };
   } catch (error) {
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
         log.error(
-          { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
+          { timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
           "Anthropic call timed out and was aborted"
         );
-        throw new Error("anthropic_timeout");
+        throw new UpstreamTimeoutError(
+          "Anthropic draft_graph timed out",
+          "anthropic",
+          "draft_graph",
+          "body", // Timeout occurred during response body
+          elapsedMs,
+          error
+        );
       }
       if (error.message === "anthropic_response_invalid_schema") {
         log.error(
@@ -393,6 +429,26 @@ export async function draftGraphWithAnthropic(
           "Anthropic returned response that failed schema validation"
         );
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      // Anthropic SDK throws errors with status and request_id properties
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs, fallback_reason: "anthropic_api_error", quality_tier: "failed" },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic draft_graph failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
@@ -448,6 +504,10 @@ IMPORTANT: Each option must be distinct. Do not duplicate existing options or cr
 
 Respond ONLY with valid JSON.`;
 
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
+
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
 
@@ -462,7 +522,10 @@ Respond ONLY with valid JSON.`;
             temperature: 0.1, // Low temperature for more deterministic output
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -472,6 +535,7 @@ Respond ONLY with valid JSON.`;
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -533,14 +597,23 @@ Respond ONLY with valid JSON.`;
     };
   } catch (error) {
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
         log.error(
-          { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
+          { timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
           "Anthropic suggest-options call timed out and was aborted"
         );
-        throw new Error("anthropic_timeout");
+        throw new UpstreamTimeoutError(
+          "Anthropic suggest_options timed out",
+          "anthropic",
+          "suggest_options",
+          "body",
+          elapsedMs,
+          error
+        );
       }
       if (error.message === "anthropic_response_invalid_schema") {
         log.error(
@@ -548,6 +621,25 @@ Respond ONLY with valid JSON.`;
           "Anthropic options response failed schema validation"
         );
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs, fallback_reason: "anthropic_api_error", quality_tier: "failed" },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic suggest_options failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
@@ -619,7 +711,11 @@ export async function repairGraphWithAnthropic(
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildRepairPrompt(args);
 
-  log.info({ violation_count: args.violations.length }, "calling Anthropic for graph repair");
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info({ violation_count: args.violations.length, idempotency_key: idempotencyKey }, "calling Anthropic for graph repair");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -635,7 +731,10 @@ export async function repairGraphWithAnthropic(
             temperature: 0,
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -645,6 +744,7 @@ export async function repairGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -724,14 +824,25 @@ export async function repairGraphWithAnthropic(
       },
     };
   } catch (error: unknown) {
-    if (error instanceof Error && error.name === "AbortError") {
-      log.error(
-        { timeout_ms: TIMEOUT_MS, fallback_reason: "anthropic_repair_timeout", quality_tier: "failed" },
-        "Anthropic repair call timed out"
-      );
-      throw error;
-    }
+    clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
+
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error(
+          { timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs, fallback_reason: "anthropic_repair_timeout", quality_tier: "failed" },
+          "Anthropic repair call timed out"
+        );
+        throw new UpstreamTimeoutError(
+          "Anthropic repair_graph timed out",
+          "anthropic",
+          "repair_graph",
+          "body",
+          elapsedMs,
+          error
+        );
+      }
       if (error.message === "ANTHROPIC_API_KEY environment variable is required but not set") {
         log.error(
           { fallback_reason: "missing_api_key", quality_tier: "failed" },
@@ -745,6 +856,25 @@ export async function repairGraphWithAnthropic(
           "Anthropic repair response failed schema validation"
         );
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs, fallback_reason: "anthropic_api_error", quality_tier: "failed" },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic repair_graph failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
@@ -822,7 +952,11 @@ export async function clarifyBriefWithAnthropic(
   const prompt = buildClarifyPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
 
-  log.info({ brief_chars: args.brief.length, round: args.round, model }, "calling Anthropic for clarification");
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info({ brief_chars: args.brief.length, round: args.round, model, idempotency_key: idempotencyKey }, "calling Anthropic for clarification");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -838,7 +972,10 @@ export async function clarifyBriefWithAnthropic(
             temperature: args.seed ? 0 : 0.1,
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -848,6 +985,7 @@ export async function clarifyBriefWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -892,15 +1030,43 @@ export async function clarifyBriefWithAnthropic(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic clarify call timed out");
-        throw new Error("anthropic_clarify_timeout");
+        log.error({ timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs }, "Anthropic clarify call timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic clarify_brief timed out",
+          "anthropic",
+          "clarify_brief",
+          "body",
+          elapsedMs,
+          error
+        );
       }
       if (error.message === "anthropic_clarify_invalid_schema") {
         log.error({}, "Anthropic clarify response failed schema validation");
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic clarify_brief failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
@@ -990,7 +1156,11 @@ export async function critiqueGraphWithAnthropic(
   const prompt = buildCritiquePrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
 
-  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model }, "calling Anthropic for critique");
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for critique");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -1006,7 +1176,10 @@ export async function critiqueGraphWithAnthropic(
             temperature: 0,
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -1016,6 +1189,7 @@ export async function critiqueGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -1072,15 +1246,43 @@ export async function critiqueGraphWithAnthropic(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic critique call timed out");
-        throw new Error("anthropic_critique_timeout");
+        log.error({ timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs }, "Anthropic critique call timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic critique_graph timed out",
+          "anthropic",
+          "critique_graph",
+          "body",
+          elapsedMs,
+          error
+        );
       }
       if (error.message === "anthropic_critique_invalid_schema") {
         log.error({}, "Anthropic critique response failed schema validation");
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic critique_graph failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
@@ -1096,6 +1298,10 @@ export async function explainDiffWithAnthropic(
   args: { patch: any; brief?: string; graph_summary?: { node_count: number; edge_count: number }; model?: string }
 ): Promise<{ rationales: Array<{ target: string; why: string; provenance_source?: string }>; usage: UsageMetrics }> {
   const model = args.model || "claude-3-5-sonnet-20241022";
+
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = makeIdempotencyKey();
+  const startTime = Date.now();
 
   // Build prompt
   const prompt = `You are explaining why changes were made to a decision graph.
@@ -1118,7 +1324,7 @@ Return ONLY valid JSON in this format:
   ]
 }`;
 
-  log.info({ change_count: (args.patch.adds?.nodes?.length || 0) + (args.patch.adds?.edges?.length || 0), model }, "calling Anthropic for explain-diff");
+  log.info({ change_count: (args.patch.adds?.nodes?.length || 0) + (args.patch.adds?.edges?.length || 0), model, idempotency_key: idempotencyKey }, "calling Anthropic for explain-diff");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -1134,7 +1340,10 @@ Return ONLY valid JSON in this format:
             temperature: 0,
             messages: [{ role: "user", content: prompt }],
           },
-          { signal: abortController.signal }
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          }
         ),
       {
         adapter: "anthropic",
@@ -1144,6 +1353,7 @@ Return ONLY valid JSON in this format:
     );
 
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -1186,14 +1396,42 @@ Return ONLY valid JSON in this format:
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: TIMEOUT_MS }, "Anthropic explain-diff call timed out");
-        throw new Error("anthropic_explain_diff_timeout");
+        log.error({ timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs }, "Anthropic explain-diff call timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic explain_diff timed out",
+          "anthropic",
+          "explain_diff",
+          "body",
+          elapsedMs,
+          error
+        );
       }
       if (error.message === "anthropic_explain_diff_invalid_schema") {
         throw error;
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic explain_diff failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
       }
     }
 
