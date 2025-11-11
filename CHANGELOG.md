@@ -251,3 +251,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed**: Features removed
 - **Testing**: Test coverage updates
 - **Documentation**: Docs updates
+
+## [1.3.0] – Released
+- GitHub Release: https://github.com/Talchain/olumi-assistants-service/releases/tag/v1.3.0
+- Nightly smoke (latest): https://github.com/Talchain/olumi-assistants-service/actions/runs/19263197136
+- Notes: Telemetry event validation; dotenv restored; lockfile regenerated; CI pin for pnpm/action-setup; 544/544 tests passing; TypeScript clean.
