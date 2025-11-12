@@ -11,6 +11,7 @@ import clarifyRoute from "./routes/assist.clarify-brief.js";
 import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
+import limitsRoute from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
@@ -234,6 +235,7 @@ app.get("/healthz", async () => {
   await critiqueRoute(app);
   await explainRoute(app);
   await evidencePackRoute(app);
+  await limitsRoute(app);
 
   return app;
 }
