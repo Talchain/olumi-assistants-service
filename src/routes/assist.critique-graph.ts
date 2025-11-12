@@ -6,6 +6,7 @@ import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { lintPatch, type PatchIssue } from "../utils/patch-lint.js";
 
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
 
@@ -94,6 +95,9 @@ export default async function route(app: FastifyInstance) {
         }
       }
 
+      // V1.4.0: Lint patch if provided (structural validation before LLM critique)
+      const patchIssues: PatchIssue[] = input.patch ? lintPatch(input.graph, input.patch) : [];
+
       const critiqueStartTime = Date.now();
 
       // Get adapter via router (env-driven or config)
@@ -103,6 +107,7 @@ export default async function route(app: FastifyInstance) {
         node_count: input.graph.nodes.length,
         edge_count: input.graph.edges.length,
         has_brief: !!input.brief,
+        has_patch: !!input.patch,
         has_attachments: docs.length > 0,
         focus_areas: input.focus_areas,
         provider: adapter.name,
@@ -126,15 +131,18 @@ export default async function route(app: FastifyInstance) {
       // Calculate cost (provider-specific pricing)
       const cost_usd = calculateCost(adapter.model, result.usage.input_tokens, result.usage.output_tokens);
 
+      // Merge patch lint issues with LLM critique issues
+      const allIssues = [...patchIssues, ...result.issues];
+
       // Count issues by level
-      const blockerCount = result.issues.filter(i => i.level === "BLOCKER").length;
-      const improvementCount = result.issues.filter(i => i.level === "IMPROVEMENT").length;
-      const observationCount = result.issues.filter(i => i.level === "OBSERVATION").length;
+      const blockerCount = allIssues.filter(i => i.level === "BLOCKER").length;
+      const improvementCount = allIssues.filter(i => i.level === "IMPROVEMENT").length;
+      const observationCount = allIssues.filter(i => i.level === "OBSERVATION").length;
 
       // Emit telemetry with provider/cost fallbacks (per v04 spec)
       const telemetryData: Record<string, unknown> = {
         duration_ms: critiqueDuration,
-        issue_count: result.issues.length,
+        issue_count: allIssues.length,
         blocker_count: blockerCount,
         improvement_count: improvementCount,
         observation_count: observationCount,
@@ -143,6 +151,8 @@ export default async function route(app: FastifyInstance) {
         cost_usd: cost_usd ?? 0,
         model: adapter.model,
         cache_hit: (result.usage.cache_read_input_tokens || 0) > 0,
+        has_patch: patchIssues.length > 0,
+        patch_issue_count: patchIssues.length,
       };
 
       // Add grounding stats if attachments were processed (v04)
@@ -154,7 +164,7 @@ export default async function route(app: FastifyInstance) {
 
       // Deterministic ordering: BLOCKER → IMPROVEMENT → OBSERVATION, then by note
       const levelOrder: Record<string, number> = { BLOCKER: 0, IMPROVEMENT: 1, OBSERVATION: 2 };
-      const sortedIssues = [...result.issues].sort((a, b) => {
+      const sortedIssues = allIssues.sort((a, b) => {
         const la = levelOrder[a.level] ?? 99;
         const lb = levelOrder[b.level] ?? 99;
         if (la !== lb) return la - lb;
