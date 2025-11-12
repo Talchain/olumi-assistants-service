@@ -39,6 +39,7 @@ export const DraftGraphOutput = z.object({
       suggested_positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() }))
     })
     .optional(),
+  archetype: z.enum(["resource_allocation", "vendor_selection", "feature_prioritization", "hiring", "process_design", "risk_assessment", "strategic_direction", "unknown"]).optional(),
   debug: z.object({ needle_movers: z.any().optional() }).optional(),
   confidence: z.number().min(0).max(1).optional()
 });
