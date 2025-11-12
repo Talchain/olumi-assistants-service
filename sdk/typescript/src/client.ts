@@ -19,8 +19,19 @@ import type {
   EvidencePackRequest,
   EvidencePackResponse,
   ErrorResponse,
+  HealthCheckResponse,
 } from "./types.js";
 import { OlumiAPIError, OlumiNetworkError, OlumiConfigError } from "./errors.js";
+
+/**
+ * Create an AbortSignal that times out after the specified milliseconds
+ * Browser-compatible alternative to AbortSignal.timeout() (Node 17.3+)
+ */
+function createTimeoutSignal(timeoutMs: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
+}
 
 export class OlumiClient {
   private readonly apiKey: string;
@@ -82,20 +93,20 @@ export class OlumiClient {
   /**
    * Health check endpoint
    */
-  async healthCheck(): Promise<{ status: string; version: string }> {
+  async healthCheck(): Promise<HealthCheckResponse> {
     const response = await fetch(`${this.baseUrl}/healthz`, {
       method: "GET",
       headers: {
         "Accept": "application/json",
       },
-      signal: AbortSignal.timeout(this.timeout),
+      signal: createTimeoutSignal(this.timeout),
     });
 
     if (!response.ok) {
       throw new OlumiNetworkError(`Health check failed: ${response.status}`);
     }
 
-    return response.json() as Promise<{ status: string; version: string }>;
+    return response.json() as Promise<HealthCheckResponse>;
   }
 
   /**
@@ -113,7 +124,7 @@ export class OlumiClient {
           "Accept": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeout),
+        signal: createTimeoutSignal(this.timeout),
       });
 
       const data = await response.json();

@@ -128,6 +128,17 @@ export interface ErrorResponse {
   request_id?: string;
 }
 
+// Health Check Response
+export interface HealthCheckResponse {
+  ok: boolean;
+  service: string;
+  version: string;
+  provider: string;
+  model: string;
+  limits_source: string;
+  feature_flags: Record<string, unknown>;
+}
+
 // SDK Config
 export interface OlumiConfig {
   apiKey: string;

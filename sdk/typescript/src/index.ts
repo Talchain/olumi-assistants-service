@@ -30,6 +30,7 @@ export type {
   ExplainDiffResponse,
   EvidencePackRequest,
   EvidencePackResponse,
+  HealthCheckResponse,
   ErrorResponse,
   Attachment,
 } from "./types.js";
