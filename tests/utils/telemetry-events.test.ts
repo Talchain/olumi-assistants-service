@@ -79,6 +79,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         AuthSuccess: "assist.auth.success",
         AuthFailed: "assist.auth.failed",
         RateLimited: "assist.auth.rate_limited",
+        QuotaExceeded: "assist.auth.quota_exceeded",
 
         LlmRetry: "assist.llm.retry",
         LlmRetrySuccess: "assist.llm.retry_success",
@@ -212,6 +213,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "auth.success": [TelemetryEvents.AuthSuccess],
         "auth.failed": [TelemetryEvents.AuthFailed],
         "auth.rate_limited": [TelemetryEvents.RateLimited],
+        "auth.quota_exceeded": [TelemetryEvents.QuotaExceeded],
 
         // LLM retry events (v1.2.1)
         "llm.retry": [TelemetryEvents.LlmRetry],
@@ -308,6 +310,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.auth.success",
         "assist.auth.failed",
         "assist.auth.rate_limited",
+        "assist.auth.quota_exceeded",
         "assist.draft.sse_client_closed",
         "assist.llm.retry",
         "assist.llm.retry_success",

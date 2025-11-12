@@ -5,7 +5,7 @@ import { getRequestId } from './request-id.js';
 /**
  * Error codes for structured error responses
  */
-export type ErrorCode = 'BAD_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'RATE_LIMITED' | 'INTERNAL';
+export type ErrorCode = 'BAD_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'RATE_LIMITED' | 'QUOTA_EXCEEDED' | 'INTERNAL';
 
 /**
  * Structured error response (error.v1 schema)
@@ -147,6 +147,7 @@ export function getStatusCodeForErrorCode(code: ErrorCode): number {
     case 'NOT_FOUND':
       return 404;
     case 'RATE_LIMITED':
+    case 'QUOTA_EXCEEDED':
       return 429;
     case 'INTERNAL':
     default:
