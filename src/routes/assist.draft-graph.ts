@@ -18,6 +18,7 @@ import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { classifyArchetype } from "../utils/archetype.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -308,6 +309,10 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
   candidate = enforceStableEdgeIds(candidate);
 
+  // V1.4.0: Classify archetype using regex patterns (inline, no LLM call)
+  const archetype = classifyArchetype(input.brief);
+  emit(TelemetryEvents.ArchetypeDetected, { archetype, brief_length: input.brief.length });
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -315,6 +320,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
     issues: issues?.length ? issues : undefined,
     confidence,
     clarifier_status: clarifier,
+    archetype,
     debug: input.include_debug ? { needle_movers: docs } : undefined
   });
 

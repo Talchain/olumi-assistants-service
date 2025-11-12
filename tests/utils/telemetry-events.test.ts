@@ -83,6 +83,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LlmRetry: "assist.llm.retry",
         LlmRetrySuccess: "assist.llm.retry_success",
         LlmRetryExhausted: "assist.llm.retry_exhausted",
+
+        ArchetypeDetected: "assist.draft.archetype_detected",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -221,6 +223,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // SSE client events (v1.2.1)
         "sse.client_closed": [TelemetryEvents.SseClientClosed],
 
+        // Archetype detection (v1.4.0)
+        "draft.archetype.detected": [TelemetryEvents.ArchetypeDetected],
+
         // Upstream telemetry events (v04)
         "draft.upstream_success": [TelemetryEvents.DraftUpstreamSuccess],
         "draft.upstream_error": [TelemetryEvents.DraftUpstreamError],
@@ -312,6 +317,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.llm.retry",
         "assist.llm.retry_success",
         "assist.llm.retry_exhausted",
+        "assist.draft.archetype_detected",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

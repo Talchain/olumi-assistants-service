@@ -72,6 +72,9 @@ export const TelemetryEvents = {
   // SSE client events (v1.2.1)
   SseClientClosed: "assist.draft.sse_client_closed",
 
+  // Archetype detection (v1.4.0)
+  ArchetypeDetected: "assist.draft.archetype_detected",
+
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
 } as const;
@@ -486,6 +489,13 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.SseClientClosed: {
           datadogClient.increment("draft.sse.client_closed", 1);
+          break;
+        }
+
+        case TelemetryEvents.ArchetypeDetected: {
+          datadogClient.increment("draft.archetype.detected", 1, {
+            archetype: String(data.archetype || "unknown"),
+          });
           break;
         }
 
