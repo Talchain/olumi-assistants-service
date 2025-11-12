@@ -18,6 +18,7 @@ import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { generateLayout, hasClientPositions } from "../layout/deterministic.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -308,6 +309,9 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
   candidate = enforceStableEdgeIds(candidate);
 
+  // V1.4.0: Generate deterministic layout if client didn't provide positions
+  const suggestedPositions = !hasClientPositions(candidate) ? generateLayout(candidate) : undefined;
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -315,6 +319,7 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
     issues: issues?.length ? issues : undefined,
     confidence,
     clarifier_status: clarifier,
+    layout: suggestedPositions ? { suggested_positions: suggestedPositions } : undefined,
     debug: input.include_debug ? { needle_movers: docs } : undefined
   });
 
