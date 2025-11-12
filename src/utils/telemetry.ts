@@ -72,6 +72,12 @@ export const TelemetryEvents = {
   // SSE client events (v1.2.1)
   SseClientClosed: "assist.draft.sse_client_closed",
 
+  // Cache events (v1.4.0)
+  CacheHit: "assist.cache.hit",
+  CacheMiss: "assist.cache.miss",
+  CachePut: "assist.cache.put",
+  CacheEvict: "assist.cache.evict",
+
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
 } as const;
@@ -493,6 +499,52 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("draft.guard_violation", 1, {
             violation_type: String(data.violation_type || "unknown"),
           });
+          break;
+        }
+
+        case TelemetryEvents.CacheHit:
+        case TelemetryEvents.CacheMiss: {
+          // Track cache hit/miss events
+          const hit = data.hit === true;
+          datadogClient.increment("cache.requests", 1, {
+            hit: String(hit),
+            reason: String(data.reason || "none"),
+          });
+
+          // Track cache age for hits
+          if (hit && typeof data.age_ms === "number") {
+            datadogClient.histogram("cache.age_ms", data.age_ms);
+          }
+
+          // Track cost savings for hits
+          if (hit && typeof data.cost_usd_saved === "number") {
+            datadogClient.histogram("cache.cost_usd_saved", data.cost_usd_saved);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CachePut: {
+          datadogClient.increment("cache.put", 1, {
+            provider: String(data.provider || "unknown"),
+            evicted: String(data.evicted || false),
+          });
+
+          // Track cache size gauge
+          if (typeof data.cache_size === "number") {
+            datadogClient.gauge("cache.size", data.cache_size);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CacheEvict: {
+          datadogClient.increment("cache.evict", 1, {
+            reason: String(data.reason || "unknown"),
+          });
+
+          // Track age of evicted entries
+          if (typeof data.age_ms === "number") {
+            datadogClient.histogram("cache.evict.age_ms", data.age_ms);
+          }
           break;
         }
 

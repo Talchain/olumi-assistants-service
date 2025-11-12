@@ -18,6 +18,8 @@ import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { promptCache } from "../cache/promptCache.js";
+import { generateCacheKey } from "../cache/cacheKey.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -130,15 +132,41 @@ async function groundAttachments(
   return result;
 }
 
-async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
+async function runDraftGraphPipeline(
+  input: DraftGraphInputT,
+  rawBody: unknown,
+  correlationId: string,
+  noCacheHeader: boolean
+): Promise<PipelineResult> {
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
+  const attachmentInputs: Array<{ id: string; kind: string; name: string; content: Buffer | string }> = [];
 
   try {
     const result = await groundAttachments(input, rawBody);
     docs = result.docs;
     groundingStats = result.stats;
+
+    // Build attachment inputs for cache key generation
+    const payloads = (rawBody as { attachment_payloads?: Record<string, AttachmentPayload> })?.attachment_payloads ?? {};
+    if (input.attachments) {
+      for (const attachment of input.attachments) {
+        const payload = payloads[attachment.id];
+        if (payload) {
+          const content = typeof payload === "string"
+            ? payload
+            : Buffer.from(payload.data, payload.encoding ?? "base64");
+
+          attachmentInputs.push({
+            id: attachment.id,
+            kind: attachment.kind,
+            name: attachment.name,
+            content,
+          });
+        }
+      }
+    }
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
 
@@ -161,6 +189,28 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
       statusCode: 400,
       envelope: buildError("BAD_INPUT", `Attachment processing failed: ${err.message}`)
     };
+  }
+
+  // V1.4.0: Generate cache key and check cache (unless x-no-cache header is set)
+  if (!noCacheHeader) {
+    const { key: cacheKey } = generateCacheKey({
+      brief: input.brief,
+      attachments: attachmentInputs,
+      flags: input.flags,
+    });
+
+    const cachedPayload = promptCache.get(cacheKey, correlationId);
+    if (cachedPayload) {
+      // Cache hit - return cached payload immediately
+      log.info({ cache_key: cacheKey.substring(0, 12), correlation_id: correlationId }, "Cache hit - returning cached draft");
+      return {
+        kind: "success",
+        payload: cachedPayload,
+        cost_usd: 0, // Cache hit has no cost
+        provider: "cache",
+        model: "cached",
+      };
+    }
   }
 
   const confidence = calcConfidence({ goal: input.brief });
@@ -381,6 +431,25 @@ async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, 
 
   emit(TelemetryEvents.DraftCompleted, telemetryData);
 
+  // V1.4.0: Store result in cache (unless x-no-cache header was set)
+  if (!noCacheHeader) {
+    const { key: cacheKey, shape: keyShape } = generateCacheKey({
+      brief: input.brief,
+      attachments: attachmentInputs,
+      flags: input.flags,
+    });
+
+    promptCache.put(
+      cacheKey,
+      payload,
+      keyShape,
+      draftAdapter.name,
+      draftAdapter.model,
+      totalCost,
+      correlationId
+    );
+  }
+
   return {
     kind: "success",
     payload,
@@ -398,7 +467,8 @@ async function handleSseResponse(
   reply: FastifyReply,
   input: DraftGraphInputT,
   rawBody: unknown,
-  correlationId: string
+  correlationId: string,
+  noCacheHeader: boolean
 ): Promise<void> {
   const streamStartTime = Date.now();
   let fixtureSent = false;
@@ -443,7 +513,7 @@ async function handleSseResponse(
     }, FIXTURE_TIMEOUT_MS);
 
     // Run pipeline
-    const result = await runDraftGraphPipeline(input, rawBody, correlationId);
+    const result = await runDraftGraphPipeline(input, rawBody, correlationId, noCacheHeader);
     clearTimeout(fixtureTimeout);
     const streamDuration = Date.now() - streamStartTime;
 
@@ -547,12 +617,13 @@ async function handleJsonResponse(
   reply: FastifyReply,
   input: DraftGraphInputT,
   rawBody: unknown,
-  correlationId: string
+  correlationId: string,
+  noCacheHeader: boolean
 ): Promise<void> {
   // V04: Echo correlation ID in response header
   reply.header("X-Correlation-ID", correlationId);
 
-  const result = await runDraftGraphPipeline(input, rawBody, correlationId);
+  const result = await runDraftGraphPipeline(input, rawBody, correlationId, noCacheHeader);
 
   // Handle errors
   if (result.kind === "error") {
@@ -602,6 +673,9 @@ export default async function route(app: FastifyInstance) {
     // V04: Generate correlation ID for request traceability
     const correlationId = randomUUID();
 
+    // V1.4.0: Check for x-no-cache header (bypass cache if present)
+    const noCacheHeader = req.headers["x-no-cache"] === "true";
+
     const parsed = DraftGraphInput.safeParse(req.body);
     if (!parsed.success) {
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
@@ -613,7 +687,7 @@ export default async function route(app: FastifyInstance) {
       return reply;
     }
 
-    await handleSseResponse(reply, parsed.data, req.body, correlationId);
+    await handleSseResponse(reply, parsed.data, req.body, correlationId, noCacheHeader);
     return reply;
   });
 
@@ -623,6 +697,9 @@ export default async function route(app: FastifyInstance) {
   app.post("/assist/draft-graph", async (req, reply) => {
     // V04: Generate correlation ID for request traceability
     const correlationId = randomUUID();
+
+    // V1.4.0: Check for x-no-cache header (bypass cache if present)
+    const noCacheHeader = req.headers["x-no-cache"] === "true";
 
     const wantsSse = req.headers.accept?.includes(EVENT_STREAM) ?? false;
 
@@ -684,13 +761,13 @@ export default async function route(app: FastifyInstance) {
         legacy_sse_path: true,
       });
 
-      await handleSseResponse(reply, parsed.data, req.body, correlationId);
+      await handleSseResponse(reply, parsed.data, req.body, correlationId, noCacheHeader);
       return reply;
     }
 
     // JSON response
     try {
-      await handleJsonResponse(reply, parsed.data, req.body, correlationId);
+      await handleJsonResponse(reply, parsed.data, req.body, correlationId, noCacheHeader);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err }, "draft graph route failure");
