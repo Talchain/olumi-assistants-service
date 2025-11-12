@@ -1,0 +1,68 @@
+/**
+ * Response Hash Plugin
+ *
+ * Adds X-Olumi-Response-Hash header to all API responses for:
+ * - Response integrity verification
+ * - Cache validation
+ * - Replay detection
+ *
+ * Hash is deterministic: same response always produces same hash
+ */
+
+import type { FastifyInstance, FastifyReply } from "fastify";
+import fp from "fastify-plugin";
+import { hashResponse, shortHash } from "../utils/response-hash.js";
+import { log } from "../utils/telemetry.js";
+
+/**
+ * Response hash plugin (internal implementation)
+ */
+async function responseHashPluginImpl(fastify: FastifyInstance) {
+  // Hook: onSend (before sending response to client)
+  // This runs after serialization, so we can hash the final response body
+  fastify.addHook("onSend", async (_request, reply: FastifyReply, payload: unknown) => {
+    // Skip for non-JSON responses (e.g., SSE streams)
+    const contentType = reply.getHeader("content-type");
+    if (typeof contentType === "string" && !contentType.includes("application/json")) {
+      return payload;
+    }
+
+    // Parse response body
+    let body: unknown;
+    try {
+      if (typeof payload === "string") {
+        body = JSON.parse(payload);
+      } else if (Buffer.isBuffer(payload)) {
+        body = JSON.parse(payload.toString("utf8"));
+      } else {
+        body = payload;
+      }
+    } catch {
+      // If parsing fails, skip hashing (invalid JSON)
+      return payload;
+    }
+
+    // Generate hash
+    const hash = hashResponse(body);
+
+    // Add header
+    reply.header("X-Olumi-Response-Hash", hash);
+
+    // Log for debugging (short hash to reduce noise)
+    log.debug({
+      response_hash: shortHash(hash),
+      path: _request.url,
+      status: reply.statusCode,
+    }, "Response hash computed");
+
+    return payload;
+  });
+}
+
+/**
+ * Response hash plugin (exported with fastify-plugin)
+ */
+export const responseHashPlugin = fp(responseHashPluginImpl, {
+  name: "response-hash",
+  fastify: "5.x",
+});
