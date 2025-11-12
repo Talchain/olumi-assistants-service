@@ -18,6 +18,7 @@ import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 import { authPlugin } from "./plugins/auth.js";
+import { responseHashPlugin } from "./plugins/response-hash.js";
 
 /**
  * Build and configure Fastify server instance
@@ -112,6 +113,9 @@ await app.register(rateLimit, {
 
   // Auth: API key authentication with per-key quotas (v1.3.0)
   await app.register(authPlugin);
+
+  // Response hash: Add X-Olumi-Response-Hash header (v1.5 PR N)
+  await app.register(responseHashPlugin);
 
   // Request ID tracking: attach to every request
   app.addHook("onRequest", async (request, _reply) => {
