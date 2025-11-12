@@ -28,6 +28,9 @@ async function responseHashPluginImpl(fastify: FastifyInstance) {
     }
 
     // Parse response body
+    // Note: We must parse to an object to enable deterministic hashing via
+    // canonical JSON serialization (sorted keys). Hashing the string directly
+    // would break determinism if key order varies between responses.
     let body: unknown;
     try {
       if (typeof payload === "string") {
@@ -42,7 +45,7 @@ async function responseHashPluginImpl(fastify: FastifyInstance) {
       return payload;
     }
 
-    // Generate hash
+    // Generate hash (canonicalizes JSON for determinism)
     const hash = hashResponse(body);
 
     // Add header
