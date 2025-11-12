@@ -15,6 +15,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
 import { env } from "node:process";
 import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
+import { checkQuota, recordRequest, getKeyQuotaConfig } from "../utils/per-key-quotas.js";
+import { getRequestId } from "../utils/request-id.js";
 
 // Rate limit: 120 requests per minute per key (2 req/sec sustained)
 const RATE_LIMIT_RPM = Number(env.RATE_LIMIT_RPM) || 120;
@@ -252,7 +254,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
     // Get key metadata
     const metadata = getKeyMetadata(apiKey);
 
-    // Check rate limit
+    // Check rate limit (token bucket - short-term spike protection)
     const isSSE = isSseRequest(request);
     const bucket = isSSE ? metadata.sseBucket : metadata.bucket;
     const allowed = tryConsume(bucket);
@@ -277,6 +279,35 @@ async function authPluginImpl(fastify: FastifyInstance) {
         },
       });
     }
+
+    // V1.5 PR L: Check per-key quotas (rolling windows - long-term protection)
+    const quotaConfig = getKeyQuotaConfig(metadata.keyId);
+    const quotaCheck = checkQuota(metadata.keyId, quotaConfig);
+
+    if (!quotaCheck.allowed) {
+      const requestId = getRequestId(request);
+
+      emit(TelemetryEvents.QuotaExceeded, {
+        key_id: metadata.keyId,
+        path: request.url,
+        reason: quotaCheck.reason,
+        retry_after: quotaCheck.retryAfter,
+      });
+
+      return reply.code(429).send({
+        schema: "error.v1",
+        code: "QUOTA_EXCEEDED",
+        message: `Quota exceeded: ${quotaCheck.reason}`,
+        details: {
+          retry_after_seconds: quotaCheck.retryAfter || 3600,
+          reason: quotaCheck.reason,
+        },
+        request_id: requestId,
+      });
+    }
+
+    // Record request in quota windows
+    recordRequest(metadata.keyId);
 
     // Auth successful
     emit(TelemetryEvents.AuthSuccess, {

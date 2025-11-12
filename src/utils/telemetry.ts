@@ -57,6 +57,7 @@ export const TelemetryEvents = {
   AuthSuccess: "assist.auth.success",
   AuthFailed: "assist.auth.failed",
   RateLimited: "assist.auth.rate_limited",
+  QuotaExceeded: "assist.auth.quota_exceeded", // v1.5 PR L
 
   // Guard violations
   GuardViolation: "assist.draft.guard_violation",
