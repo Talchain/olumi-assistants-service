@@ -83,6 +83,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LlmRetry: "assist.llm.retry",
         LlmRetrySuccess: "assist.llm.retry_success",
         LlmRetryExhausted: "assist.llm.retry_exhausted",
+
+        CacheHit: "assist.cache.hit",
+        CacheMiss: "assist.cache.miss",
+        CachePut: "assist.cache.put",
+        CacheEvict: "assist.cache.evict",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -107,7 +112,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   describe("Event namespace consistency", () => {
     it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
       const allEvents = Object.values(TelemetryEvents);
-      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./;
+      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|cache)\./;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -119,8 +124,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm.)
-        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./, "");
+        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm., assist.cache.)
+        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|cache)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -225,6 +230,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.upstream_success": [TelemetryEvents.DraftUpstreamSuccess],
         "draft.upstream_error": [TelemetryEvents.DraftUpstreamError],
 
+        // Cache events (v1.4.0)
+        "cache.requests": [TelemetryEvents.CacheHit, TelemetryEvents.CacheMiss],
+        "cache.put": [TelemetryEvents.CachePut],
+        "cache.evict": [TelemetryEvents.CacheEvict],
+
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
         "draft.sse.stream_duration_ms": [TelemetryEvents.SSECompleted],
@@ -239,6 +249,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "suggest_options.cost_usd": [TelemetryEvents.SuggestOptionsComplete],
         "explain_diff.duration_ms": [TelemetryEvents.ExplainDiffComplete],
         "explain_diff.cost_usd": [TelemetryEvents.ExplainDiffComplete],
+        "cache.age_ms": [TelemetryEvents.CacheHit],
+        "cache.cost_usd_saved": [TelemetryEvents.CacheHit],
+        "cache.evict.age_ms": [TelemetryEvents.CacheEvict],
 
         // Gauges
         "draft.graph.nodes": [TelemetryEvents.DraftCompleted],
@@ -250,6 +263,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "critique.issues.observations": [TelemetryEvents.CritiqueComplete],
         "suggest_options.option_count": [TelemetryEvents.SuggestOptionsComplete],
         "explain_diff.rationale_count": [TelemetryEvents.ExplainDiffComplete],
+        "cache.size": [TelemetryEvents.CachePut],
       };
 
       // Verify all events are documented
@@ -312,6 +326,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.llm.retry",
         "assist.llm.retry_success",
         "assist.llm.retry_exhausted",
+        "assist.cache.hit",
+        "assist.cache.miss",
+        "assist.cache.put",
+        "assist.cache.evict",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
