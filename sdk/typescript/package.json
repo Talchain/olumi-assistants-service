@@ -1,0 +1,43 @@
+{
+  "name": "@olumi/assistants-sdk",
+  "version": "1.8.0",
+  "description": "Official TypeScript SDK for Olumi Assistants Service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "olumi",
+    "assistants",
+    "decision-making",
+    "graph",
+    "typescript",
+    "sdk"
+  ],
+  "author": "Olumi",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.4.5",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

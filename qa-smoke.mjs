@@ -221,6 +221,121 @@ async function testA4() {
   throw new Error(`A4 failed after ${maxAttempts} attempts: ${lastError?.status || lastError?.code || lastError?.name || lastError?.reason || 'unknown'}`);
 }
 
+async function testA4R() {
+  // v1.8: Optional SSE Resume smoke test (opt-in via SMOKE_RESUME_ENABLED)
+  const resumeEnabled = process.env.SMOKE_RESUME_ENABLED === "true";
+  if (!resumeEnabled) {
+    console.log("SKIP A4R: SMOKE_RESUME_ENABLED not set (resume smoke test is opt-in)");
+    return;
+  }
+
+  if (!RAW_KEY) {
+    console.log("SKIP A4R: no ASSIST_API_KEY in env");
+    return;
+  }
+
+  const maxAttempts = 2;
+  const backoff = 3000; // 3s
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const startMs = Date.now();
+    let resumeToken = null;
+
+    try {
+      // Step 1: Start stream and capture resume token
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 30000); // 30s timeout
+
+      const r = await fetch(`${BASE_URL}/assist/draft-graph/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Olumi-Assist-Key": RAW_KEY },
+        body: JSON.stringify({ brief: "Resume smoke test" }),
+        signal: ctrl.signal
+      });
+
+      assert.equal(r.status, 200, `stream status ${r.status}`);
+
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buffer = "";
+
+      // Read until we get resume token
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += dec.decode(value);
+
+        // Look for resume event
+        if (buffer.includes("event: resume")) {
+          const events = buffer.split("\n\n");
+          for (const event of events) {
+            if (event.includes("event: resume")) {
+              const dataLine = event.split("\n").find(line => line.startsWith("data: "));
+              if (dataLine) {
+                const jsonData = dataLine.substring(6);
+                const parsed = JSON.parse(jsonData);
+                resumeToken = parsed.token;
+                break;
+              }
+            }
+          }
+          if (resumeToken) break;
+        }
+      }
+
+      clearTimeout(timeoutId);
+      reader.releaseLock();
+
+      assert.ok(resumeToken, "no resume token received");
+
+      // Step 2: Resume with token
+      const resumeStartMs = Date.now();
+      const resumeResp = await fetch(`${BASE_URL}/assist/draft-graph/resume`, {
+        method: "POST",
+        headers: { "X-Resume-Token": resumeToken, "X-Olumi-Assist-Key": RAW_KEY }
+      });
+
+      const resumeElapsedMs = Date.now() - resumeStartMs;
+
+      // Accept 200 (success) or 426 (resume not available/expired)
+      const validStatuses = [200, 426];
+      assert.ok(validStatuses.includes(resumeResp.status),
+        `resume expected 200 or 426, got ${resumeResp.status}`);
+
+      if (resumeResp.status === 200) {
+        // Verify we got some replay content
+        const resumeBody = await resumeResp.text();
+        assert.ok(resumeBody.length > 0, "empty resume response");
+
+        console.log(`ACCEPT A4R: /assist/draft-graph/resume with valid token → 200 (replay succeeded in ${resumeElapsedMs}ms)`);
+      } else {
+        // 426 is acceptable (state expired or Redis not configured)
+        const resumeJson = await resumeResp.json().catch(() => ({}));
+        console.log(`ACCEPT A4R: /assist/draft-graph/resume → 426 (resume unavailable: ${resumeJson.message || "unknown"})`);
+      }
+
+      return;
+    } catch (err) {
+      const elapsedMs = Date.now() - startMs;
+      const isNetworkError = err.name === "AbortError" || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
+
+      if ((isNetworkError || err.status >= 500) && attempt < maxAttempts) {
+        const reason = err.name === "AbortError" ? "abort" : err.code || `status_${err.status}`;
+        console.log(JSON.stringify({ check: "A4R", attempt, status: err.status || null, elapsed_ms: elapsedMs, reason }));
+        lastError = err;
+        await new Promise(resolve => setTimeout(resolve, backoff));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  // Exhausted retries
+  throw new Error(`A4R failed after ${maxAttempts} attempts: ${lastError?.status || lastError?.code || lastError?.name || "unknown"}`);
+}
+
 async function testA5() {
   const { status, json } = await jget("/healthz");
   assert.equal(status, 200, "healthz not 200 for A5");
@@ -243,6 +358,7 @@ async function warmup() {
   await warmup();
   await testA3();
   await testA4();
+  await testA4R(); // v1.8: Optional resume smoke test
   await testA5();
   console.log("✅ All smoke tests PASS");
 })();

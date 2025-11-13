@@ -5,6 +5,89 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2025-11-13
+
+### Added
+- **SSE Resilience II: Resumable Streaming** (Feature A)
+  - HMAC-signed resume tokens (X-Resume-Token header)
+  - Redis-backed stream state management with event buffering
+  - Automatic buffer trimming (256 events, 1.5 MB limits)
+  - Resume endpoint: `POST /assist/draft-graph/resume`
+  - Snapshot fallback for late resume after stream completion
+  - 15-minute token TTL with constant-time verification
+  - Base64url-encoded tokens (URL-safe, no padding)
+
+- **Resume Token Utilities** (`src/utils/sse-resume-token.ts`)
+  - `createResumeToken()` - Generate resume token with request_id, step, seq
+  - `verifyResumeToken()` - HMAC signature verification with expiration check
+  - Falls back to HMAC_SECRET if SSE_RESUME_SECRET not configured
+
+- **SSE State Management** (`src/utils/sse-state.ts`)
+  - `initStreamState()` - Initialize stream with Redis state tracking
+  - `bufferEvent()` - Buffer events with automatic size/count trimming
+  - `getBufferedEvents()` - Retrieve events from sequence for replay
+  - `markStreamComplete()` - Save completion snapshot (15-minute TTL, matches token expiry)
+  - `getSnapshot()` - Retrieve snapshot for late resume
+  - `cleanupStreamState()` - Clean up after stream ends
+
+- **Resume Telemetry Events**
+  - `SseResumeIssued` - Token generated on first event
+  - `SseResumeAttempt` - Client attempts reconnection
+  - `SseResumeSuccess` - Resume successful with event replay
+  - `SseResumeExpired` - Token expired or state unavailable
+  - `SseResumeIncompatible` - Step mismatch on resume
+  - `SseResumeReplayCount` - Number of events replayed
+  - `SsePartialRecovery` - Snapshot fallback used
+  - `SseBufferTrimmed` - Buffer limit exceeded, oldest events removed
+  - `SseSnapshotCreated` - Completion snapshot saved
+
+- **Test Coverage**
+  - `tests/unit/sse-resume-token.test.ts` - 18 unit tests for token generation/verification
+  - `tests/unit/sse-state.test.ts` - 20 unit tests for state management (Redis-dependent)
+  - `tests/integration/sse-resume.test.ts` - 14 integration tests including E2E replay-only flow
+  - `qa-smoke.mjs` - Optional A4R smoke test for production resume validation (opt-in via `SMOKE_RESUME_ENABLED`)
+
+- **SDK (TypeScript) - SSE Streaming Support** (`sdk/typescript@1.8.0`)
+  - `streamDraftGraph()` - Async generator for SSE streaming with token capture
+  - `resumeDraftGraph()` - Resume interrupted streams with replay-only behavior
+  - `extractResumeTokenFromEvent()` - Helper to extract token from SSE events
+  - Full type support for SSE events (`SseEvent`, `SseStageEvent`, `SseResumeEvent`, etc.)
+  - HMAC authentication support for streaming endpoints
+  - Comprehensive README with resilient streaming patterns
+  - 17 new SDK tests (59 total SDK tests passing)
+
+### Security
+- **Constant-time signature verification** - HMAC comparison uses bitwise XOR to prevent timing attacks
+- **Graceful secret handling** - Resume endpoint returns 426 (Upgrade Required) when secrets not configured
+- **Rate limiting** - Resume endpoint shares SSE rate limit (20 req/min) to prevent abuse
+- **Buffer trimming observability** - `SseBufferTrimmed` telemetry emitted when events are dropped
+- **Token expiration enforcement** - 15-minute TTL prevents replay of old tokens
+- **No PII in tokens** - Only request_id, step, and sequence stored
+
+### Changed
+- SSE streaming endpoint now buffers all events for resume capability
+- First event now includes `event: resume` with X-Resume-Token
+- Stream completion now saves snapshot for late reconnection (15-minute TTL, up from 60s)
+- All stage events are buffered in Redis with size/count limits
+- Resume endpoint now includes rate limiting (20 req/min, matching stream endpoint)
+
+### Security
+- Resume tokens use HMAC-SHA256 with constant-time verification
+- No PII stored in tokens (only request_id, step, seq, expires_at)
+- Token expiry enforced at 15 minutes
+- Redis keys use TTL-based expiration (15 min state, 60s snapshot)
+
+### Fixed
+- **Snapshot TTL alignment** - Increased completion snapshot TTL from 60s to 900s (15 minutes) to match token expiry, enabling late resume within token validity window
+- **Rate limit enforcement** - Added rate limiting to resume endpoint to prevent abuse and match stream endpoint protection
+
+### Notes
+- Resume functionality requires Redis for production use
+- In-memory fallback not implemented (Redis-only feature)
+- Tests skip gracefully when Redis unavailable
+- Backward compatible - existing clients work without resume support
+- **Smoke test:** A4R resume check is opt-in via `SMOKE_RESUME_ENABLED=true` environment variable
+
 ## [1.3.1] - 2025-11-11
 
 ### Added

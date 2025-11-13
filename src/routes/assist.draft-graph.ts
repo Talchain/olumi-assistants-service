@@ -18,6 +18,8 @@ import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { createResumeToken, verifyResumeToken } from "../utils/sse-resume-token.js";
+import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot } from "../utils/sse-state.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -403,12 +405,53 @@ async function handleSseResponse(
   const streamStartTime = Date.now();
   let fixtureSent = false;
   let sseEndState: "complete" | "timeout" | "aborted" | "error" = "complete"; // V04: Track SSE end state
+  let eventSeq = 0; // v1.8: Track event sequence for resume
 
   // V04: Echo correlation ID in response header
   reply.raw.setHeader("X-Correlation-ID", correlationId);
   reply.raw.writeHead(200, SSE_HEADERS);
   writeStage(reply, { stage: "DRAFTING" });
   emit(TelemetryEvents.SSEStarted, { correlation_id: correlationId });
+
+  // v1.8: Initialize SSE resume state in Redis (gracefully skip if Redis unavailable)
+  try {
+    await initStreamState(correlationId);
+
+    // Buffer first DRAFTING event
+    await bufferEvent(correlationId, {
+      seq: eventSeq,
+      type: "stage",
+      data: JSON.stringify({ stage: "DRAFTING" }),
+      timestamp: Date.now(),
+    });
+    eventSeq++;
+
+    // Generate and send resume token on first event
+    try {
+      const resumeToken = createResumeToken(correlationId, "DRAFTING", eventSeq);
+      reply.raw.write(`event: resume\ndata: ${JSON.stringify({ token: resumeToken })}\n\n`);
+      emit(TelemetryEvents.SseResumeIssued, {
+        request_id: correlationId,
+        seq: eventSeq,
+        step: "DRAFTING",
+      });
+
+      // Buffer resume event
+      await bufferEvent(correlationId, {
+        seq: eventSeq,
+        type: "resume",
+        data: JSON.stringify({ token: resumeToken }),
+        timestamp: Date.now(),
+      });
+      eventSeq++;
+    } catch (tokenError) {
+      log.debug({ error: tokenError, request_id: correlationId }, "Resume token generation skipped (secrets not configured)");
+      // Continue without resume functionality
+    }
+  } catch (stateError) {
+    log.debug({ error: stateError, request_id: correlationId }, "SSE resume state initialization skipped (Redis unavailable)");
+    // Continue without resume functionality
+  }
 
   // V04: SSE heartbeats every 10s to prevent proxy idle timeouts
   // Send SSE comment lines that keep connection alive but don't affect client state
@@ -421,10 +464,28 @@ async function handleSseResponse(
     }
   }, 10000); // 10s
 
+  // v1.8: Helper to write stage and buffer event (gracefully handle buffering errors)
+  const writeStageAndBuffer = async (event: StageEvent) => {
+    writeStage(reply, event);
+    try {
+      await bufferEvent(correlationId, {
+        seq: eventSeq,
+        type: "stage",
+        data: JSON.stringify(event),
+        timestamp: Date.now(),
+      });
+      eventSeq++;
+    } catch (error) {
+      log.debug({ error, request_id: correlationId }, "Event buffering skipped (Redis unavailable)");
+      eventSeq++;
+      // Continue without buffering
+    }
+  };
+
   try {
 
     // SSE with fixture fallback: show fixture if draft takes > 2.5s
-    const fixtureTimeout = setTimeout(() => {
+    const fixtureTimeout = setTimeout(async () => {
       if (!fixtureSent) {
         // Show minimal fixture graph while waiting for real draft
         // Apply stable edge IDs to fixture graph for consistency
@@ -436,7 +497,7 @@ async function handleSseResponse(
           confidence: 0.5,
           clarifier_status: "complete",
         });
-        writeStage(reply, { stage: "DRAFTING", payload: fixturePayload });
+        await writeStageAndBuffer({ stage: "DRAFTING", payload: fixturePayload });
         fixtureSent = true;
         emit(TelemetryEvents.FixtureShown, { timeout_ms: FIXTURE_TIMEOUT_MS });
       }
@@ -455,7 +516,7 @@ async function handleSseResponse(
     if (result.kind === "error") {
       const streamDuration = Date.now() - streamStartTime;
       sseEndState = "error"; // V04: Track SSE end state
-      writeStage(reply, { stage: "COMPLETE", payload: result.envelope });
+      await writeStageAndBuffer({ stage: "COMPLETE", payload: result.envelope });
       emit(TelemetryEvents.SSEError, {
         stream_duration_ms: streamDuration,
         error: result.envelope.message,
@@ -466,6 +527,12 @@ async function handleSseResponse(
         sse_end_state: sseEndState,
       });
       clearInterval(heartbeatInterval);
+      // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
+      try {
+        await cleanupStreamState(correlationId);
+      } catch (cleanupError) {
+        log.debug({ error: cleanupError, request_id: correlationId }, "State cleanup skipped (Redis unavailable)");
+      }
       reply.raw.end();
       return;
     }
@@ -475,7 +542,7 @@ async function handleSseResponse(
     if (!guardResult.ok) {
       sseEndState = "error"; // V04: Track SSE end state
       const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
-      writeStage(reply, { stage: "COMPLETE", payload: guardError });
+      await writeStageAndBuffer({ stage: "COMPLETE", payload: guardError });
       emit(TelemetryEvents.GuardViolation, {
         stream_duration_ms: streamDuration,
         violation_code: guardResult.violation.code,
@@ -487,6 +554,12 @@ async function handleSseResponse(
         sse_end_state: sseEndState,
       });
       clearInterval(heartbeatInterval);
+      // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
+      try {
+        await cleanupStreamState(correlationId);
+      } catch (cleanupError) {
+        log.debug({ error: cleanupError, request_id: correlationId }, "State cleanup skipped (Redis unavailable)");
+      }
       reply.raw.end();
       return;
     }
@@ -504,7 +577,19 @@ async function handleSseResponse(
     const hasIssues = (result.payload.issues?.length ?? 0) > 0;
 
     sseEndState = "complete"; // V04: Track SSE end state - successful completion
-    writeStage(reply, { stage: "COMPLETE", payload: result.payload });
+    await writeStageAndBuffer({ stage: "COMPLETE", payload: result.payload });
+
+    // v1.8: Save completion snapshot for late resume (gracefully skip if Redis unavailable)
+    try {
+      await markStreamComplete(correlationId, result.payload);
+      emit(TelemetryEvents.SseSnapshotCreated, {
+        request_id: correlationId,
+        status: "complete",
+      });
+    } catch (error) {
+      log.debug({ error, request_id: correlationId }, "Snapshot creation skipped (Redis unavailable)");
+    }
+
     emit(TelemetryEvents.SSECompleted, {
       stream_duration_ms: streamDuration,
       fixture_shown: fixtureSent,
@@ -518,6 +603,13 @@ async function handleSseResponse(
       sse_end_state: sseEndState,
     });
     clearInterval(heartbeatInterval);
+
+    // v1.8: Cleanup SSE resume state after successful completion (gracefully skip if Redis unavailable)
+    try {
+      await cleanupStreamState(correlationId);
+    } catch (error) {
+      log.debug({ error, request_id: correlationId }, "State cleanup skipped (Redis unavailable)");
+    }
     reply.raw.end();
   } catch (error: unknown) {
     clearInterval(heartbeatInterval);
@@ -525,7 +617,7 @@ async function handleSseResponse(
     sseEndState = err.name === "AbortError" ? "timeout" : "error"; // V04: Track SSE end state
     log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
     const envelope = buildError("INTERNAL", err.message || "internal");
-    writeStage(reply, { stage: "COMPLETE", payload: envelope });
+    await writeStageAndBuffer({ stage: "COMPLETE", payload: envelope });
     const streamDuration = Date.now() - streamStartTime;
     emit(TelemetryEvents.SSEError, {
       stream_duration_ms: streamDuration,
@@ -536,6 +628,12 @@ async function handleSseResponse(
       correlation_id: correlationId,
       sse_end_state: sseEndState,
     });
+    // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
+    try {
+      await cleanupStreamState(correlationId);
+    } catch (cleanupError) {
+      log.debug({ error: cleanupError, request_id: correlationId }, "State cleanup skipped (Redis unavailable)");
+    }
     reply.raw.end();
   }
 }
@@ -614,6 +712,143 @@ export default async function route(app: FastifyInstance) {
     }
 
     await handleSseResponse(reply, parsed.data, req.body, correlationId);
+    return reply;
+  });
+
+  // v1.8: SSE Resume endpoint for reconnections
+  app.post("/assist/draft-graph/resume", {
+    config: {
+      rateLimit: {
+        max: SSE_RATE_LIMIT_RPM,
+        timeWindow: '1 minute'
+      }
+    }
+  }, async (req, reply) => {
+    // Extract X-Resume-Token from headers
+    const resumeToken = req.headers["x-resume-token"];
+
+    if (!resumeToken || typeof resumeToken !== "string") {
+      const envelope = buildError("BAD_INPUT", "Missing or invalid X-Resume-Token header");
+      reply.code(400);
+      return reply.send(envelope);
+    }
+
+    // Verify token (gracefully handle missing secrets)
+    let verifyResult;
+    try {
+      verifyResult = verifyResumeToken(resumeToken);
+    } catch (error) {
+      // Secrets not configured, return 426 (Upgrade Required) to match streaming endpoint degradation
+      log.debug({ error, token_prefix: resumeToken.substring(0, 12) }, "Resume token verification failed (secrets not configured)");
+      const envelope = buildError("INTERNAL", "Resume functionality not available (secrets not configured)", {
+        upgrade: "resume=unsupported",
+      });
+      reply.code(426);
+      return reply.send(envelope);
+    }
+
+    if (!verifyResult.valid) {
+      emit(TelemetryEvents.SseResumeExpired, {
+        error: verifyResult.error,
+      });
+      const envelope = buildError("BAD_INPUT", `Invalid resume token: ${verifyResult.error}`);
+      reply.code(401);
+      return reply.send(envelope);
+    }
+
+    const { request_id, step, seq } = verifyResult.payload;
+
+    emit(TelemetryEvents.SseResumeAttempt, {
+      request_id,
+      from_seq: seq,
+      step,
+    });
+
+    // Get stream state
+    const state = await getStreamState(request_id);
+
+    // Check if resume is possible
+    if (!state) {
+      // Try snapshot fallback
+      const snapshot = await getSnapshot(request_id);
+      if (snapshot) {
+        // Return snapshot as complete event via SSE
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(snapshot.final_payload)}\n\n`);
+        reply.raw.end();
+
+        emit(TelemetryEvents.SsePartialRecovery, {
+          request_id,
+          recovery_type: "snapshot_fallback",
+        });
+        return reply;
+      }
+
+      // Stream expired, return 426 Upgrade Required
+      emit(TelemetryEvents.SseResumeExpired, {
+        request_id,
+        reason: "state_expired",
+      });
+      const envelope = buildError("INTERNAL", "Stream state expired, resume not available", {
+        upgrade: "resume=unsupported",
+      });
+      reply.code(426);
+      return reply.send(envelope);
+    }
+
+    // Check step compatibility
+    if (state.status !== step.toLowerCase()) {
+      emit(TelemetryEvents.SseResumeIncompatible, {
+        request_id,
+        expected_step: step,
+        actual_step: state.status,
+      });
+      const envelope = buildError("INTERNAL", `Stream state incompatible: expected ${step}, got ${state.status}`, {
+        upgrade: "resume=unsupported",
+      });
+      reply.code(426);
+      return reply.send(envelope);
+    }
+
+    // Get buffered events from seq+1
+    const events = await getBufferedEvents(request_id, seq);
+
+    // Start SSE response
+    reply.raw.writeHead(200, SSE_HEADERS);
+    reply.raw.setHeader("X-Correlation-ID", request_id);
+
+    // Replay buffered events
+    for (const event of events) {
+      reply.raw.write(`event: ${event.type}\ndata: ${event.data}\n\n`);
+    }
+
+    emit(TelemetryEvents.SseResumeSuccess, {
+      request_id,
+      replayed_count: events.length,
+      from_seq: seq,
+      to_seq: state.last_seq,
+    });
+
+    emit(TelemetryEvents.SseResumeReplayCount, {
+      request_id,
+      count: events.length,
+    });
+
+    // If stream already complete, send final event and end
+    if (state.status === "complete") {
+      const snapshot = await getSnapshot(request_id);
+      if (snapshot) {
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(snapshot.final_payload)}\n\n`);
+      }
+      reply.raw.end();
+      return reply;
+    }
+
+    // Otherwise, stream is still in progress
+    // For now, we'll send a heartbeat and close (live reconnection to be implemented later)
+    reply.raw.write(`: heartbeat\n\n`);
+    reply.raw.end();
+
     return reply;
   });
 
