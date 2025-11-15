@@ -83,6 +83,39 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LlmRetry: "assist.llm.retry",
         LlmRetrySuccess: "assist.llm.retry_success",
         LlmRetryExhausted: "assist.llm.retry_exhausted",
+
+        ProviderFailover: "assist.llm.provider_failover",
+        ProviderFailoverSuccess: "assist.llm.provider_failover_success",
+        ProviderFailoverExhausted: "assist.llm.provider_failover_exhausted",
+
+        ShareCreated: "assist.share.created",
+        ShareAccessed: "assist.share.accessed",
+        ShareRevoked: "assist.share.revoked",
+        ShareExpired: "assist.share.expired",
+        ShareNotFound: "assist.share.not_found",
+
+        PromptCacheHit: "assist.llm.prompt_cache_hit",
+        PromptCacheMiss: "assist.llm.prompt_cache_miss",
+        PromptCacheEviction: "assist.llm.prompt_cache_eviction",
+
+        SseResumeIssued: "assist.sse.resume_issued",
+        SseResumeAttempt: "assist.sse.resume_attempt",
+        SseResumeSuccess: "assist.sse.resume_success",
+        SseResumeExpired: "assist.sse.resume_expired",
+        SseResumeIncompatible: "assist.sse.resume_incompatible",
+        SseResumeReplayCount: "assist.sse.resume_replay_count",
+        SsePartialRecovery: "assist.sse.partial_recovery",
+        SseBufferTrimmed: "assist.sse.buffer_trimmed",
+        SseSnapshotCreated: "assist.sse.snapshot_created",
+
+        // v1.9 SSE Live Resume events
+        SseResumeLiveStart: "assist.sse.resume_live_start",
+        SseResumeLiveContinue: "assist.sse.resume_live_continue",
+        SseResumeLiveEnd: "assist.sse.resume_live_end",
+        SseSnapshotRenewed: "assist.sse.snapshot_renewed",
+
+        // v1.11 SSE degraded mode events
+        SseDegradedMode: "assist.sse.degraded_mode",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -107,7 +140,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   describe("Event namespace consistency", () => {
     it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
       const allEvents = Object.values(TelemetryEvents);
-      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./;
+      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -119,8 +152,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm.)
-        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm)\./, "");
+        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm., assist.share., assist.sse.)
+        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -218,12 +251,49 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "llm.retry_success": [TelemetryEvents.LlmRetrySuccess],
         "llm.retry_exhausted": [TelemetryEvents.LlmRetryExhausted],
 
+        // Provider failover events (v1.6)
+        "llm.provider_failover": [TelemetryEvents.ProviderFailover],
+        "llm.provider_failover.success": [TelemetryEvents.ProviderFailoverSuccess],
+        "llm.provider_failover.exhausted": [TelemetryEvents.ProviderFailoverExhausted],
+
         // SSE client events (v1.2.1)
         "sse.client_closed": [TelemetryEvents.SseClientClosed],
 
         // Upstream telemetry events (v04)
         "draft.upstream_success": [TelemetryEvents.DraftUpstreamSuccess],
         "draft.upstream_error": [TelemetryEvents.DraftUpstreamError],
+
+        // Share events (v1.6)
+        "share.created": [TelemetryEvents.ShareCreated],
+        "share.accessed": [TelemetryEvents.ShareAccessed],
+        "share.revoked": [TelemetryEvents.ShareRevoked],
+
+        // Prompt cache events (v1.6)
+        "llm.prompt_cache.hit": [TelemetryEvents.PromptCacheHit],
+        "llm.prompt_cache.miss": [TelemetryEvents.PromptCacheMiss],
+        "llm.prompt_cache.eviction": [TelemetryEvents.PromptCacheEviction],
+        "share.expired": [TelemetryEvents.ShareExpired],
+        "share.not_found": [TelemetryEvents.ShareNotFound],
+
+        // SSE Resume events (v1.8)
+        "sse.resume.issued": [TelemetryEvents.SseResumeIssued],
+        "sse.resume.attempt": [TelemetryEvents.SseResumeAttempt],
+        "sse.resume.success": [TelemetryEvents.SseResumeSuccess],
+        "sse.resume.expired": [TelemetryEvents.SseResumeExpired],
+        "sse.resume.incompatible": [TelemetryEvents.SseResumeIncompatible],
+        "sse.resume.replay_count": [TelemetryEvents.SseResumeReplayCount],
+        "sse.partial_recovery": [TelemetryEvents.SsePartialRecovery],
+        "sse.buffer_trimmed": [TelemetryEvents.SseBufferTrimmed],
+        "sse.snapshot_created": [TelemetryEvents.SseSnapshotCreated],
+
+        // SSE Live Resume events (v1.9)
+        "sse.resume_live.started": [TelemetryEvents.SseResumeLiveStart],
+        "sse.resume_live.continue": [TelemetryEvents.SseResumeLiveContinue],
+        "sse.resume_live.ended": [TelemetryEvents.SseResumeLiveEnd],
+        "sse.snapshot.renewed": [TelemetryEvents.SseSnapshotRenewed],
+
+        // SSE degraded mode events (v1.11)
+        "sse.degraded_mode": [TelemetryEvents.SseDegradedMode],
 
         // Histograms
         "draft.latency_ms": [TelemetryEvents.DraftCompleted],
@@ -269,11 +339,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     });
   });
 
-  describe("Spec v04 compliance", () => {
-    it("matches frozen event names from specification v04", () => {
-      // These event names are specified in the v04 specification
+  describe("Spec compliance", () => {
+    it("matches frozen event names from specification (v04 + v1.8)", () => {
+      // These event names are specified in the v04 specification and v1.8 release
       // and must not change without updating the spec document
-      const specV04Events = [
+      const frozenEvents = [
+        // v04 spec events
         "assist.draft.started",
         "assist.draft.completed",
         "assist.draft.upstream_success",
@@ -312,10 +383,39 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.llm.retry",
         "assist.llm.retry_success",
         "assist.llm.retry_exhausted",
+        "assist.llm.provider_failover",
+        "assist.llm.provider_failover_success",
+        "assist.llm.provider_failover_exhausted",
+        "assist.share.created",
+        "assist.share.accessed",
+        "assist.share.revoked",
+        "assist.share.expired",
+        "assist.share.not_found",
+        "assist.llm.prompt_cache_hit",
+        "assist.llm.prompt_cache_miss",
+        "assist.llm.prompt_cache_eviction",
+        // v1.8 SSE Resume events
+        "assist.sse.resume_issued",
+        "assist.sse.resume_attempt",
+        "assist.sse.resume_success",
+        "assist.sse.resume_expired",
+        "assist.sse.resume_incompatible",
+        "assist.sse.resume_replay_count",
+        "assist.sse.partial_recovery",
+        "assist.sse.buffer_trimmed",
+        "assist.sse.snapshot_created",
+        // v1.9 SSE Live Resume events
+        "assist.sse.resume_live_start",
+        "assist.sse.resume_live_continue",
+        "assist.sse.resume_live_end",
+        "assist.sse.snapshot_renewed",
+
+        // v1.11 SSE degraded mode events
+        "assist.sse.degraded_mode",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
-      expect(actualEvents).toEqual(specV04Events.sort());
+      expect(actualEvents).toEqual(frozenEvents.sort());
     });
   });
 });

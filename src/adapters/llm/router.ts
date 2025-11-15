@@ -15,6 +15,8 @@ import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter } from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
+import { FailoverAdapter } from "./failover.js";
+import { withCaching } from "./caching.js";
 
 // Default configuration (OpenAI for cost-effectiveness)
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
@@ -56,6 +58,9 @@ function loadConfig(): ProviderConfig | null {
 
 // Lazy-load config on first use
 let configCache: ProviderConfig | null | undefined;
+
+// Cached wrapper instances (caching, failover) to preserve state across requests
+const wrappedAdapters = new Map<string, LLMAdapter>();
 
 function getConfig(): ProviderConfig | null {
   if (configCache === undefined) {
@@ -246,15 +251,74 @@ function getAdapterInstance(provider: 'anthropic' | 'openai' | 'fixtures', model
 }
 
 /**
+ * Create a failover-enabled adapter from environment configuration
+ *
+ * Reads LLM_FAILOVER_PROVIDERS env var (comma-separated list, e.g., "anthropic,openai,fixtures")
+ * Returns FailoverAdapter that tries providers in sequence, or null if not configured
+ */
+function createFailoverAdapter(task?: string): LLMAdapter | null {
+  const failoverProviders = process.env.LLM_FAILOVER_PROVIDERS;
+
+  if (!failoverProviders) {
+    return null;
+  }
+
+  // Parse comma-separated list
+  const providerNames = failoverProviders
+    .split(',')
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+
+  if (providerNames.length < 2) {
+    log.warn(
+      { LLM_FAILOVER_PROVIDERS: failoverProviders },
+      "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring"
+    );
+    return null;
+  }
+
+  // Create adapter for each provider
+  const adapterList: LLMAdapter[] = [];
+  for (const providerName of providerNames) {
+    try {
+      const provider = providerName as 'anthropic' | 'openai' | 'fixtures';
+      const adapter = getAdapterInstance(provider);
+      adapterList.push(adapter);
+    } catch (error) {
+      log.warn(
+        { provider: providerName, error },
+        "Failed to create adapter for failover provider, skipping"
+      );
+    }
+  }
+
+  if (adapterList.length < 2) {
+    log.warn(
+      { valid_adapters: adapterList.length },
+      "Not enough valid adapters for failover, disabling"
+    );
+    return null;
+  }
+
+  log.info(
+    { providers: adapterList.map(a => a.name), task },
+    "Failover enabled - will try providers in sequence"
+  );
+
+  return new FailoverAdapter(adapterList, task || "unknown");
+}
+
+/**
  * Get the appropriate LLM adapter for a given task.
  *
  * Selection precedence:
- * 1. Task-specific override from config file
- * 2. Environment variables (LLM_PROVIDER, LLM_MODEL)
- * 3. Hard-coded defaults
+ * 1. Failover configuration (LLM_FAILOVER_PROVIDERS) - wraps multiple providers
+ * 2. Task-specific override from config file
+ * 3. Environment variables (LLM_PROVIDER, LLM_MODEL)
+ * 4. Hard-coded defaults
  *
  * @param task - Optional task name for task-specific routing (e.g., "draft_graph", "suggest_options")
- * @returns LLMAdapter instance
+ * @returns LLMAdapter instance (may be FailoverAdapter wrapping multiple adapters)
  *
  * @example
  * ```typescript
@@ -263,6 +327,16 @@ function getAdapterInstance(provider: 'anthropic' | 'openai' | 'fixtures', model
  * ```
  */
 export function getAdapter(task?: string): LLMAdapter {
+  // Check for failover configuration first
+  const failoverAdapter = createFailoverAdapter(task);
+  if (failoverAdapter) {
+    // Reuse cached failover wrapper to preserve cache state
+    const cacheKey = `failover:${task || "default"}`;
+    if (!wrappedAdapters.has(cacheKey)) {
+      wrappedAdapters.set(cacheKey, withCaching(failoverAdapter));
+    }
+    return wrappedAdapters.get(cacheKey)!;
+  }
   const config = getConfig();
 
   // Read environment variables dynamically (not cached at module load time)
@@ -303,7 +377,13 @@ export function getAdapter(task?: string): LLMAdapter {
     );
   }
 
-  return getAdapterInstance(selectedProvider, selectedModel);
+  // Reuse cached wrapper to preserve cache state across requests
+  const cacheKey = `single:${selectedProvider}:${selectedModel || "default"}`;
+  if (!wrappedAdapters.has(cacheKey)) {
+    const adapter = getAdapterInstance(selectedProvider, selectedModel);
+    wrappedAdapters.set(cacheKey, withCaching(adapter));
+  }
+  return wrappedAdapters.get(cacheKey)!;
 }
 
 /**
@@ -321,5 +401,6 @@ export function getAdapterForProvider(
  */
 export function resetAdapterCache(): void {
   adapters.clear();
+  wrappedAdapters.clear();
   configCache = undefined;
 }

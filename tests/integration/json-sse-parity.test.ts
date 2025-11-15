@@ -2,7 +2,7 @@
  * JSON↔SSE Parity Tests (v04 spec compliance)
  *
  * Ensures both JSON and SSE endpoints enforce identical guards:
- * - Node/edge caps (≤12 nodes, ≤24 edges)
+ * - Node/edge caps (≤50 nodes, ≤200 edges)
  * - cost_usd presence and validation
  * - Cost cap enforcement
  * - Telemetry parity (provider, cost_usd with fallbacks)
@@ -13,14 +13,15 @@
 import { describe, it, expect } from "vitest";
 import { validateResponse, validateGraphCaps, validateCost } from "../../src/utils/responseGuards.js";
 import type { GraphT } from "../../src/schemas/graph.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../src/config/graphCaps.js";
 
 describe("JSON↔SSE Parity Guards", () => {
   describe("Node/Edge Cap Validation", () => {
-    it("accepts graph with exactly 12 nodes", () => {
+    it("accepts graph with exactly max nodes", () => {
       const graph: GraphT = {
         version: "1",
         default_seed: 17,
-        nodes: Array.from({ length: 12 }, (_, i) => ({
+        nodes: Array.from({ length: GRAPH_MAX_NODES }, (_, i) => ({
           id: `node-${i}`,
           kind: "goal" as const,
           label: `Node ${i}`,
@@ -33,7 +34,7 @@ describe("JSON↔SSE Parity Guards", () => {
       expect(result.ok).toBe(true);
     });
 
-    it("accepts graph with exactly 24 edges", () => {
+    it("accepts graph with exactly max edges", () => {
       const graph: GraphT = {
         version: "1",
         default_seed: 17,
@@ -41,7 +42,7 @@ describe("JSON↔SSE Parity Guards", () => {
           { id: "A", kind: "goal" as const, label: "Goal A" },
           { id: "B", kind: "decision" as const, label: "Decision B" },
         ],
-        edges: Array.from({ length: 24 }, (_, i) => ({
+        edges: Array.from({ length: GRAPH_MAX_EDGES }, (_, i) => ({
           id: `edge-${i}`,
           from: "A",
           to: "B",
@@ -54,11 +55,11 @@ describe("JSON↔SSE Parity Guards", () => {
       expect(result.ok).toBe(true);
     });
 
-    it("rejects graph with 13 nodes", () => {
+    it("rejects graph with more than max nodes", () => {
       const graph: GraphT = {
         version: "1",
         default_seed: 17,
-        nodes: Array.from({ length: 13 }, (_, i) => ({
+        nodes: Array.from({ length: GRAPH_MAX_NODES + 1 }, (_, i) => ({
           id: `node-${i}`,
           kind: "goal" as const,
           label: `Node ${i}`,
@@ -71,12 +72,12 @@ describe("JSON↔SSE Parity Guards", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.violation.code).toBe("CAP_EXCEEDED");
-        expect(result.violation.message).toContain("13");
-        expect(result.violation.message).toContain("12");
+        expect(result.violation.message).toContain(String(GRAPH_MAX_NODES + 1));
+        expect(result.violation.message).toContain(String(GRAPH_MAX_NODES));
       }
     });
 
-    it("rejects graph with 25 edges", () => {
+    it("rejects graph with more than max edges", () => {
       const graph: GraphT = {
         version: "1",
         default_seed: 17,
@@ -84,7 +85,7 @@ describe("JSON↔SSE Parity Guards", () => {
           { id: "A", kind: "goal" as const, label: "Goal A" },
           { id: "B", kind: "decision" as const, label: "Decision B" },
         ],
-        edges: Array.from({ length: 25 }, (_, i) => ({
+        edges: Array.from({ length: GRAPH_MAX_EDGES + 1 }, (_, i) => ({
           id: `edge-${i}`,
           from: "A",
           to: "B",
@@ -97,8 +98,8 @@ describe("JSON↔SSE Parity Guards", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.violation.code).toBe("CAP_EXCEEDED");
-        expect(result.violation.message).toContain("25");
-        expect(result.violation.message).toContain("24");
+        expect(result.violation.message).toContain(String(GRAPH_MAX_EDGES + 1));
+        expect(result.violation.message).toContain(String(GRAPH_MAX_EDGES));
       }
     });
   });
@@ -188,7 +189,7 @@ describe("JSON↔SSE Parity Guards", () => {
       const oversizedGraph: GraphT = {
         version: "1",
         default_seed: 17,
-        nodes: Array.from({ length: 15 }, (_, i) => ({
+        nodes: Array.from({ length: GRAPH_MAX_NODES + 5 }, (_, i) => ({
           id: `node-${i}`,
           kind: "goal" as const,
           label: `Node ${i}`,

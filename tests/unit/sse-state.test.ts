@@ -197,6 +197,24 @@ describe.skipIf(() => !redisAvailable)("SSE State Management", () => {
       expect(snapshot?.created_at).toBeGreaterThanOrEqual(before);
       expect(snapshot?.created_at).toBeLessThanOrEqual(after);
     });
+
+    it("should support error snapshots", async () => {
+      const finalPayload = {
+        schema: "error.v1",
+        code: "INTERNAL",
+        message: "test error",
+      };
+
+      await markStreamComplete(testRequestId, finalPayload, "error");
+
+      const state = await getStreamState(testRequestId);
+      expect(state?.status).toBe("error");
+
+      const snapshot = await getSnapshot(testRequestId);
+      expect(snapshot).toBeDefined();
+      expect(snapshot?.status).toBe("error");
+      expect(snapshot?.final_payload).toEqual(finalPayload);
+    });
   });
 
   describe("getStreamState", () => {
@@ -309,6 +327,46 @@ describe.skipIf(() => !redisAvailable)("SSE State Management", () => {
       // Latest events should still be present
       const lastEvent = retrieved[retrieved.length - 1];
       expect(lastEvent.seq).toBeGreaterThan(250);
+    });
+
+    it("should maintain sidecar metadata for non-critical events and clean it up", async () => {
+      const redis = await getRedis();
+      if (!redis) return;
+
+      const event: SseEvent = {
+        seq: 1,
+        type: "stage",
+        data: JSON.stringify({ stage: "DRAFTING" }),
+        timestamp: Date.now(),
+      };
+
+      await bufferEvent(testRequestId, event);
+
+      // Sidecar keys for non-critical priorities should exist
+      const lowKey = `sse:meta:${testRequestId}:low`;
+      const mediumKey = `sse:meta:${testRequestId}:medium`;
+      const highKey = `sse:meta:${testRequestId}:high`;
+
+      const [lowExists, medExists, highExists] = await Promise.all([
+        redis.exists(lowKey),
+        redis.exists(mediumKey),
+        redis.exists(highKey),
+      ]);
+
+      expect(lowExists || medExists || highExists).toBe(1);
+
+      // After cleanup, metadata keys should be removed
+      await cleanupStreamState(testRequestId);
+
+      const [lowAfter, medAfter, highAfter] = await Promise.all([
+        redis.exists(lowKey),
+        redis.exists(mediumKey),
+        redis.exists(highKey),
+      ]);
+
+      expect(lowAfter).toBe(0);
+      expect(medAfter).toBe(0);
+      expect(highAfter).toBe(0);
     });
   });
 

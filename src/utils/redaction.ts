@@ -6,11 +6,14 @@
  * - CSV row data
  * - Long quotes (truncate to 100 chars)
  * - Authorization headers
+ * - PII (emails, phones, API keys, etc.) - via PII Guard
  */
+
+import { redactObject as piiRedactObject, getDefaultGuardConfig } from "./pii-guard.js";
+import { fastHash } from "./hash.js";
 
 const MAX_QUOTE_LENGTH = 100;
 const REDACTED_MARKER = '[REDACTED]';
-const HASH_PREFIX_LENGTH = 8;
 
 /**
  * Truncate long strings to max length with ellipsis
@@ -20,19 +23,6 @@ function truncateString(str: string, maxLength: number): string {
     return str;
   }
   return str.substring(0, maxLength) + '...';
-}
-
-/**
- * Create a short hash prefix for identification (not cryptographic)
- */
-function hashPrefix(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  // Pad with zeros to ensure consistent length
-  return Math.abs(hash).toString(16).padStart(HASH_PREFIX_LENGTH, '0').substring(0, HASH_PREFIX_LENGTH);
 }
 
 /**
@@ -51,7 +41,7 @@ export function redactAttachments(payload: Record<string, unknown>): Record<stri
     for (const [key, value] of Object.entries(payloads)) {
       if (typeof value === 'string') {
         // Replace with hash prefix for tracking
-        redactedPayloads[key] = `${REDACTED_MARKER}:${hashPrefix(value)}`;
+        redactedPayloads[key] = `${REDACTED_MARKER}:${fastHash(value, 8)}`;
       } else {
         redactedPayloads[key] = REDACTED_MARKER;
       }
@@ -66,9 +56,9 @@ export function redactAttachments(payload: Record<string, unknown>): Record<stri
       if (typeof att === 'object' && att !== null) {
         const redactedAtt = { ...att };
         if (att.content && typeof att.content === 'string') {
-          redactedAtt.content = `${REDACTED_MARKER}:${hashPrefix(att.content)}`;
+          redactedAtt.content = `${REDACTED_MARKER}:${fastHash(att.content, 8)}`;
         } else if (att.data && typeof att.data === 'string') {
-          redactedAtt.data = `${REDACTED_MARKER}:${hashPrefix(att.data)}`;
+          redactedAtt.data = `${REDACTED_MARKER}:${fastHash(att.data, 8)}`;
         }
         return redactedAtt;
       }
@@ -258,4 +248,45 @@ export function safeLog(obj: unknown): unknown {
   }
 
   return cloned;
+}
+
+/**
+ * Redact PII from telemetry events (v1.6 PII Guard)
+ *
+ * Applies configurable PII redaction based on PII_REDACTION_MODE:
+ * - standard: emails, phones, API keys, tokens, SSNs, credit cards
+ * - strict: + URLs, IPs, file paths, potential names
+ * - off: no redaction
+ *
+ * Preserves telemetry structure while protecting sensitive data
+ */
+export function redactTelemetryEvent(event: Record<string, unknown>): Record<string, unknown> {
+  const config = getDefaultGuardConfig();
+
+  // Off mode: no redaction
+  if (config.mode === "off") {
+    return event;
+  }
+
+  // Apply PII redaction to the entire event object
+  const redacted = piiRedactObject(event, config);
+
+  // Add redaction metadata
+  return {
+    ...redacted,
+    pii_redacted: true,
+    redaction_mode: config.mode,
+  };
+}
+
+/**
+ * Redact PII from log messages
+ */
+export function redactLogMessage(message: string): string {
+  const config = getDefaultGuardConfig();
+  if (config.mode === "off") {
+    return message;
+  }
+
+  return piiRedactObject(message, config);
 }

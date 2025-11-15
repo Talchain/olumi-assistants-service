@@ -19,7 +19,8 @@ import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { createResumeToken, verifyResumeToken } from "../utils/sse-resume-token.js";
-import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot } from "../utils/sse-state.js";
+import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot, renewSnapshot } from "../utils/sse-state.js";
+import { getRedis } from "../platform/redis.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -46,7 +47,78 @@ type StageEvent =
   | { stage: "DRAFTING"; payload?: SuccessPayload }
   | { stage: "COMPLETE"; payload: SuccessPayload | ErrorEnvelope };
 
+type Diagnostics = {
+  resumes: number;
+  trims: number;
+  recovered_events: number;
+  correlation_id: string;
+};
+
+function buildDiagnosticsFromPayload(
+  payload: Record<string, any>,
+  correlationId: string,
+  overrides?: Partial<Pick<Diagnostics, "resumes" | "trims" | "recovered_events">>
+): Diagnostics {
+  const telemetry = payload && typeof payload === "object" ? (payload as any).telemetry : undefined;
+  const trimsFromTelemetry = telemetry && telemetry.buffer_trimmed ? 1 : 0;
+
+  return {
+    resumes: overrides?.resumes ?? 0,
+    trims: overrides?.trims ?? trimsFromTelemetry,
+    recovered_events: overrides?.recovered_events ?? 0,
+    correlation_id: correlationId,
+  };
+}
+
+function withDiagnostics<T extends Record<string, any>>(
+  payload: T,
+  diagnostics: Diagnostics
+): T & { diagnostics: Diagnostics } {
+  return {
+    ...(payload as any),
+    diagnostics,
+  } as T & { diagnostics: Diagnostics };
+}
+
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
+
+export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInputT {
+  const {
+    brief,
+    attachments,
+    attachment_payloads,
+    constraints,
+    flags,
+    include_debug,
+    ...rest
+  } = input as DraftGraphInputT & Record<string, unknown>;
+
+  const base: DraftGraphInputT = {
+    brief,
+    attachments,
+    attachment_payloads,
+    constraints,
+    flags,
+    include_debug,
+  };
+
+  const passthrough: Record<string, unknown> = {};
+
+  const fixturesValue = rest["fixtures"];
+  if (typeof fixturesValue === "boolean") {
+    passthrough.fixtures = fixturesValue;
+  }
+
+  for (const [key, value] of Object.entries(rest)) {
+    if (!key.startsWith("sim_")) continue;
+    const valueType = typeof value;
+    if (valueType === "string" || valueType === "number" || valueType === "boolean") {
+      passthrough[key] = value;
+    }
+  }
+
+  return { ...base, ...passthrough } as DraftGraphInputT;
+}
 
 type PipelineResult =
   | { kind: "success"; payload: SuccessPayload; hasLegacyProvenance?: boolean; cost_usd: number; provider: string; model: string }
@@ -457,10 +529,12 @@ async function handleSseResponse(
   // Send SSE comment lines that keep connection alive but don't affect client state
   const heartbeatInterval = setInterval(() => {
     try {
-      reply.raw.write(': heartbeat\n\n');
-    } catch (err) {
-      log.warn({ err }, "Heartbeat write failed (client may have disconnected)");
+      // SSE comment event that keeps the connection alive but does not affect client state
+      reply.raw.write(`: heartbeat\n\n`);
+    } catch (error) {
+      // Client likely disconnected; stop heartbeats to avoid leaking timers
       clearInterval(heartbeatInterval);
+      log.debug({ error, correlation_id: correlationId }, "Failed to write SSE heartbeat - stopping heartbeats");
     }
   }, 10000); // 10s
 
@@ -482,9 +556,33 @@ async function handleSseResponse(
     }
   };
 
-  try {
+  const withBufferTrimTelemetry = async <T extends Record<string, any>>(payload: T): Promise<T> => {
+    try {
+      const state = await getStreamState(correlationId);
+      if (!state?.buffer_trimmed) {
+        return payload;
+      }
 
-    // SSE with fixture fallback: show fixture if draft takes > 2.5s
+      const existingTelemetry =
+        payload && typeof (payload as any).telemetry === "object"
+          ? (payload as any).telemetry
+          : {};
+
+      return {
+        ...(payload as any),
+        telemetry: {
+          ...existingTelemetry,
+          buffer_trimmed: true,
+        },
+      } as T;
+    } catch (error) {
+      log.debug({ error, request_id: correlationId }, "Buffer trim state lookup skipped (Redis unavailable)");
+      return payload;
+    }
+  };
+
+  // SSE with fixture fallback: show fixture if draft takes > 2.5s
+  try {
     const fixtureTimeout = setTimeout(async () => {
       if (!fixtureSent) {
         // Show minimal fixture graph while waiting for real draft
@@ -516,7 +614,10 @@ async function handleSseResponse(
     if (result.kind === "error") {
       const streamDuration = Date.now() - streamStartTime;
       sseEndState = "error"; // V04: Track SSE end state
-      await writeStageAndBuffer({ stage: "COMPLETE", payload: result.envelope });
+      const payloadWithTelemetry = await withBufferTrimTelemetry(result.envelope);
+      const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
+      const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
+      await writeStageAndBuffer({ stage: "COMPLETE", payload: completePayload });
       emit(TelemetryEvents.SSEError, {
         stream_duration_ms: streamDuration,
         error: result.envelope.message,
@@ -526,6 +627,16 @@ async function handleSseResponse(
         correlation_id: correlationId,
         sse_end_state: sseEndState,
       });
+      // Persist error snapshot for late resume (gracefully skip if Redis unavailable)
+      try {
+        await markStreamComplete(correlationId, completePayload, "error");
+        emit(TelemetryEvents.SseSnapshotCreated, {
+          request_id: correlationId,
+          status: "error",
+        });
+      } catch (error) {
+        log.debug({ error, request_id: correlationId }, "Snapshot creation skipped (Redis unavailable)");
+      }
       clearInterval(heartbeatInterval);
       // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
       try {
@@ -542,7 +653,10 @@ async function handleSseResponse(
     if (!guardResult.ok) {
       sseEndState = "error"; // V04: Track SSE end state
       const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
-      await writeStageAndBuffer({ stage: "COMPLETE", payload: guardError });
+      const payloadWithTelemetry = await withBufferTrimTelemetry(guardError);
+      const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
+      const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
+      await writeStageAndBuffer({ stage: "COMPLETE", payload: completePayload });
       emit(TelemetryEvents.GuardViolation, {
         stream_duration_ms: streamDuration,
         violation_code: guardResult.violation.code,
@@ -553,6 +667,16 @@ async function handleSseResponse(
         correlation_id: correlationId,
         sse_end_state: sseEndState,
       });
+      // Persist guard violation snapshot for late resume (gracefully skip if Redis unavailable)
+      try {
+        await markStreamComplete(correlationId, completePayload, "error");
+        emit(TelemetryEvents.SseSnapshotCreated, {
+          request_id: correlationId,
+          status: "error",
+        });
+      } catch (error) {
+        log.debug({ error, request_id: correlationId }, "Snapshot creation skipped (Redis unavailable)");
+      }
       clearInterval(heartbeatInterval);
       // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
       try {
@@ -577,11 +701,14 @@ async function handleSseResponse(
     const hasIssues = (result.payload.issues?.length ?? 0) > 0;
 
     sseEndState = "complete"; // V04: Track SSE end state - successful completion
-    await writeStageAndBuffer({ stage: "COMPLETE", payload: result.payload });
+    const payloadWithTelemetry = await withBufferTrimTelemetry(result.payload);
+    const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
+    const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
+    await writeStageAndBuffer({ stage: "COMPLETE", payload: completePayload });
 
     // v1.8: Save completion snapshot for late resume (gracefully skip if Redis unavailable)
     try {
-      await markStreamComplete(correlationId, result.payload);
+      await markStreamComplete(correlationId, completePayload, "complete");
       emit(TelemetryEvents.SseSnapshotCreated, {
         request_id: correlationId,
         status: "complete",
@@ -596,8 +723,8 @@ async function handleSseResponse(
       quality_tier: qualityTier,
       has_issues: hasIssues,
       confidence,
-      provider: result.provider || "unknown",  // Fallback for parity
-      cost_usd: result.cost_usd ?? 0,          // Fallback for parity
+      provider: result.provider || "unknown", // Fallback for parity
+      cost_usd: result.cost_usd ?? 0, // Fallback for parity
       model: result.model,
       correlation_id: correlationId,
       sse_end_state: sseEndState,
@@ -617,7 +744,10 @@ async function handleSseResponse(
     sseEndState = err.name === "AbortError" ? "timeout" : "error"; // V04: Track SSE end state
     log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
     const envelope = buildError("INTERNAL", err.message || "internal");
-    await writeStageAndBuffer({ stage: "COMPLETE", payload: envelope });
+    const payloadWithTelemetry = await withBufferTrimTelemetry(envelope);
+    const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
+    const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
+    await writeStageAndBuffer({ stage: "COMPLETE", payload: completePayload });
     const streamDuration = Date.now() - streamStartTime;
     emit(TelemetryEvents.SSEError, {
       stream_duration_ms: streamDuration,
@@ -628,6 +758,16 @@ async function handleSseResponse(
       correlation_id: correlationId,
       sse_end_state: sseEndState,
     });
+    // v1.11: Persist internal error snapshot for late resume (gracefully skip if Redis unavailable)
+    try {
+      await markStreamComplete(correlationId, completePayload, "error");
+      emit(TelemetryEvents.SseSnapshotCreated, {
+        request_id: correlationId,
+        status: "error",
+      });
+    } catch (snapshotError) {
+      log.debug({ error: snapshotError, request_id: correlationId }, "Snapshot creation skipped (Redis unavailable)");
+    }
     // v1.8: Cleanup SSE resume state on error (gracefully skip if Redis unavailable)
     try {
       await cleanupStreamState(correlationId);
@@ -680,13 +820,18 @@ async function handleJsonResponse(
   }
 
   // Success
+  const diagnostics = buildDiagnosticsFromPayload(result.payload as any, correlationId);
+  const responsePayload = withDiagnostics(result.payload, diagnostics);
   reply.code(200);
-  return reply.send(result.payload);
+  return reply.send(responsePayload);
 }
 
 export default async function route(app: FastifyInstance) {
   // SSE-specific rate limit (lower than global due to long-running connections)
   const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
+  // v1.9: Live resume feature flag and rate limit
+  const SSE_RESUME_LIVE_ENABLED = process.env.SSE_RESUME_LIVE_ENABLED === "true";
+  const SSE_RESUME_LIVE_RPM = Number(env.SSE_RESUME_LIVE_RPM) || SSE_RATE_LIMIT_RPM;
 
   // Dedicated SSE streaming endpoint with stricter rate limiting
   app.post("/assist/draft-graph/stream", {
@@ -700,8 +845,33 @@ export default async function route(app: FastifyInstance) {
     // V04: Generate correlation ID for request traceability
     const correlationId = randomUUID();
 
+    // v1.11: Detect Redis-unavailable degraded mode for SSE streaming
+    // When Redis is unavailable, we still stream normally but explicitly signal
+    // degraded mode and disable resume/buffering semantics.
+    try {
+      const redis = await getRedis();
+      if (!redis) {
+        reply.raw.setHeader("X-Olumi-Degraded", "redis");
+        emit(TelemetryEvents.SseDegradedMode, {
+          kind: "redis_unavailable",
+          correlation_id: correlationId,
+          endpoint: "/assist/draft-graph/stream",
+        });
+      }
+    } catch (error) {
+      // Treat Redis connection errors as degraded mode as well
+      reply.raw.setHeader("X-Olumi-Degraded", "redis");
+      emit(TelemetryEvents.SseDegradedMode, {
+        kind: "redis_unavailable",
+        correlation_id: correlationId,
+        endpoint: "/assist/draft-graph/stream",
+      });
+      log.warn({ error, correlation_id: correlationId }, "Redis unavailable for SSE streaming - entering degraded mode");
+    }
+
     const parsed = DraftGraphInput.safeParse(req.body);
     if (!parsed.success) {
+      log.warn({ correlation_id: correlationId, validation_error: parsed.error.flatten() }, "draft-graph stream input validation failed");
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
       reply.raw.setHeader("X-Correlation-ID", correlationId);
       reply.raw.writeHead(400, SSE_HEADERS);
@@ -711,19 +881,27 @@ export default async function route(app: FastifyInstance) {
       return reply;
     }
 
-    await handleSseResponse(reply, parsed.data, req.body, correlationId);
+    const input = sanitizeDraftGraphInput(parsed.data);
+
+    await handleSseResponse(reply, input, req.body, correlationId);
     return reply;
   });
 
   // v1.8: SSE Resume endpoint for reconnections
+  // v1.9: Supports live mode for continued streaming
   app.post("/assist/draft-graph/resume", {
     config: {
       rateLimit: {
-        max: SSE_RATE_LIMIT_RPM,
+        max: SSE_RESUME_LIVE_RPM, // v1.9: Use live resume rate limit
         timeWindow: '1 minute'
       }
     }
   }, async (req, reply) => {
+    // v1.9: Check for live mode request
+    const resumeMode = (req.query as any).mode || req.headers["x-resume-mode"] || "replay";
+    const requestLiveMode = resumeMode === "live";
+    const liveEnabled = requestLiveMode && SSE_RESUME_LIVE_ENABLED;
+
     // Extract X-Resume-Token from headers
     const resumeToken = req.headers["x-resume-token"];
 
@@ -772,9 +950,18 @@ export default async function route(app: FastifyInstance) {
       // Try snapshot fallback
       const snapshot = await getSnapshot(request_id);
       if (snapshot) {
-        // Return snapshot as complete event via SSE
+        // Return snapshot as complete event via SSE with resume diagnostics
+        reply.raw.setHeader("X-Correlation-ID", request_id);
         reply.raw.writeHead(200, SSE_HEADERS);
-        reply.raw.write(`event: complete\ndata: ${JSON.stringify(snapshot.final_payload)}\n\n`);
+
+        const basePayload = snapshot.final_payload as any;
+        const diagnostics = buildDiagnosticsFromPayload(basePayload, request_id, {
+          resumes: 1,
+          recovered_events: 0,
+        });
+        const payloadWithDiagnostics = withDiagnostics(basePayload, diagnostics);
+
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(payloadWithDiagnostics)}\n\n`);
         reply.raw.end();
 
         emit(TelemetryEvents.SsePartialRecovery, {
@@ -797,7 +984,35 @@ export default async function route(app: FastifyInstance) {
     }
 
     // Check step compatibility
-    if (state.status !== step.toLowerCase()) {
+    // Treat "complete" state as compatible so we can replay buffered events
+    // and then send the final snapshot, while still falling back for other
+    // mismatches.
+    if (state.status !== step.toLowerCase() && state.status !== "complete") {
+      // If state has moved to a different step (e.g. COMPLETE) but we have a
+      // snapshot, prefer snapshot-based recovery instead of hard 426 so
+      // transient cleanup/Redis issues don't break resume.
+      const snapshot = await getSnapshot(request_id);
+      if (snapshot) {
+        reply.raw.setHeader("X-Correlation-ID", request_id);
+        reply.raw.writeHead(200, SSE_HEADERS);
+
+        const basePayload = snapshot.final_payload as any;
+        const diagnostics = buildDiagnosticsFromPayload(basePayload, request_id, {
+          resumes: 1,
+          recovered_events: 0,
+        });
+        const payloadWithDiagnostics = withDiagnostics(basePayload, diagnostics);
+
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(payloadWithDiagnostics)}\n\n`);
+        reply.raw.end();
+
+        emit(TelemetryEvents.SsePartialRecovery, {
+          request_id,
+          recovery_type: "snapshot_step_mismatch",
+        });
+        return reply;
+      }
+
       emit(TelemetryEvents.SseResumeIncompatible, {
         request_id,
         expected_step: step,
@@ -838,14 +1053,142 @@ export default async function route(app: FastifyInstance) {
     if (state.status === "complete") {
       const snapshot = await getSnapshot(request_id);
       if (snapshot) {
-        reply.raw.write(`event: complete\ndata: ${JSON.stringify(snapshot.final_payload)}\n\n`);
+        const basePayload = snapshot.final_payload as any;
+        const diagnostics = buildDiagnosticsFromPayload(basePayload, request_id, {
+          resumes: 1,
+          recovered_events: events.length,
+        });
+        const payloadWithDiagnostics = withDiagnostics(basePayload, diagnostics);
+
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(payloadWithDiagnostics)}\n\n`);
       }
       reply.raw.end();
       return reply;
     }
 
     // Otherwise, stream is still in progress
-    // For now, we'll send a heartbeat and close (live reconnection to be implemented later)
+    // v1.9: Live mode continuation (if enabled)
+    if (liveEnabled) {
+      emit(TelemetryEvents.SseResumeLiveStart, {
+        request_id,
+        from_seq: state.last_seq,
+      });
+
+      let currentSeq = state.last_seq;
+      let lastHeartbeat = Date.now();
+      let lastSnapshotRenewal = Date.now();
+      const startTime = Date.now();
+      const liveTimeout = 120000; // 2 minutes
+      const pollInterval = 1500; // 1.5 seconds
+      const heartbeatInterval = 10000; // 10 seconds
+      const snapshotRenewalInterval = 30000; // 30 seconds
+      let pollTimer: NodeJS.Timeout | null = null;
+
+      try {
+        const pollForEvents = async (): Promise<boolean> => {
+          // Check timeout
+          if (Date.now() - startTime > liveTimeout) {
+            emit(TelemetryEvents.SseResumeLiveEnd, {
+              request_id,
+              state: "timeout",
+              duration_ms: Date.now() - startTime,
+            });
+            return false; // Stop polling
+          }
+
+          // Get latest state
+          const latestState = await getStreamState(request_id);
+          if (!latestState) {
+            emit(TelemetryEvents.SseResumeLiveEnd, {
+              request_id,
+              state: "expired",
+              duration_ms: Date.now() - startTime,
+            });
+            return false; // Stop polling
+          }
+
+          // Check for new events
+          if (latestState.last_seq > currentSeq) {
+            const newEvents = await getBufferedEvents(request_id, currentSeq);
+            for (const event of newEvents) {
+              reply.raw.write(`event: ${event.type}\ndata: ${event.data}\n\n`);
+            }
+            currentSeq = latestState.last_seq;
+
+            emit(TelemetryEvents.SseResumeLiveContinue, {
+              request_id,
+              new_events: newEvents.length,
+              current_seq: currentSeq,
+            });
+          }
+
+          // Send heartbeat if needed
+          const now = Date.now();
+          if (now - lastHeartbeat > heartbeatInterval) {
+            reply.raw.write(`: heartbeat\n\n`);
+            lastHeartbeat = now;
+          }
+
+          // Renew snapshot if needed
+          if (now - lastSnapshotRenewal > snapshotRenewalInterval) {
+            await renewSnapshot(request_id);
+            lastSnapshotRenewal = now;
+          }
+
+          // Check if stream completed
+          if (latestState.status === "complete") {
+            const snapshot = await getSnapshot(request_id);
+            if (snapshot) {
+              reply.raw.write(`event: complete\ndata: ${JSON.stringify(snapshot.final_payload)}\n\n`);
+            }
+            emit(TelemetryEvents.SseResumeLiveEnd, {
+              request_id,
+              state: "complete",
+              duration_ms: Date.now() - startTime,
+            });
+            return false; // Stop polling
+          }
+
+          if (latestState.status === "error") {
+            emit(TelemetryEvents.SseResumeLiveEnd, {
+              request_id,
+              state: "error",
+              duration_ms: Date.now() - startTime,
+            });
+            return false; // Stop polling
+          }
+
+          return true; // Continue polling
+        };
+
+        // Poll until stream completes or timeout
+        let shouldContinue = true;
+        while (shouldContinue) {
+          shouldContinue = await pollForEvents();
+          if (shouldContinue) {
+            // Wait before next poll
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+          }
+        }
+      } catch (error) {
+        log.error({ error, request_id }, "Error during live resume continuation");
+        emit(TelemetryEvents.SseResumeLiveEnd, {
+          request_id,
+          state: "error",
+          duration_ms: Date.now() - startTime,
+          error: String(error),
+        });
+      } finally {
+        if (pollTimer) {
+          clearTimeout(pollTimer);
+        }
+        reply.raw.end();
+      }
+
+      return reply;
+    }
+
+    // Replay-only mode (default): send heartbeat and close
     reply.raw.write(`: heartbeat\n\n`);
     reply.raw.end();
 
@@ -876,6 +1219,8 @@ export default async function route(app: FastifyInstance) {
       reply.code(400);
       return reply.send(envelope);
     }
+
+    const input = sanitizeDraftGraphInput(parsed.data);
 
     if (wantsSse) {
       // v1.3.0: Legacy SSE path disabled by default
@@ -919,13 +1264,13 @@ export default async function route(app: FastifyInstance) {
         legacy_sse_path: true,
       });
 
-      await handleSseResponse(reply, parsed.data, req.body, correlationId);
+      await handleSseResponse(reply, input, req.body, correlationId);
       return reply;
     }
 
     // JSON response
     try {
-      await handleJsonResponse(reply, parsed.data, req.body, correlationId);
+      await handleJsonResponse(reply, input, req.body, correlationId);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err }, "draft graph route failure");

@@ -2,7 +2,8 @@
  * Post-response guards for JSON↔SSE parity (v04 spec)
  *
  * Both JSON and SSE handlers MUST call these guards to ensure:
- * - Node/edge caps (≤12 nodes, ≤24 edges)
+ * - Node/edge caps (configured via GRAPH_MAX_NODES / GRAPH_MAX_EDGES,
+ *   default: ≤50 nodes, ≤200 edges)
  * - cost_usd presence and numeric validation
  * - Cost cap enforcement against $COST_MAX_USD
  *
@@ -10,9 +11,7 @@
  */
 
 import type { GraphT } from "../schemas/graph.js";
-
-const MAX_NODES = 12;
-const MAX_EDGES = 24;
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 export type GuardViolation = {
   code: "CAP_EXCEEDED" | "INVALID_COST";
@@ -28,24 +27,24 @@ export type GuardResult =
  * Validate graph against node/edge caps
  */
 export function validateGraphCaps(graph: GraphT): GuardResult {
-  if (graph.nodes.length > MAX_NODES) {
+  if (graph.nodes.length > GRAPH_MAX_NODES) {
     return {
       ok: false,
       violation: {
         code: "CAP_EXCEEDED",
-        message: `Graph exceeds maximum node count (${graph.nodes.length} > ${MAX_NODES})`,
-        details: { nodes: graph.nodes.length, max_nodes: MAX_NODES },
+        message: `Graph exceeds maximum node count (${graph.nodes.length} > ${GRAPH_MAX_NODES})`,
+        details: { nodes: graph.nodes.length, max_nodes: GRAPH_MAX_NODES },
       },
     };
   }
 
-  if (graph.edges.length > MAX_EDGES) {
+  if (graph.edges.length > GRAPH_MAX_EDGES) {
     return {
       ok: false,
       violation: {
         code: "CAP_EXCEEDED",
-        message: `Graph exceeds maximum edge count (${graph.edges.length} > ${MAX_EDGES})`,
-        details: { edges: graph.edges.length, max_edges: MAX_EDGES },
+        message: `Graph exceeds maximum edge count (${graph.edges.length} > ${GRAPH_MAX_EDGES})`,
+        details: { edges: graph.edges.length, max_edges: GRAPH_MAX_EDGES },
       },
     };
   }

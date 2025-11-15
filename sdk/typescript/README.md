@@ -310,22 +310,21 @@ try {
 }
 ```
 
-### ⚠️ Important - Replay-Only Behavior (v1.8.0)
+### ⚠️ Important - Resume Modes
 
-The resume endpoint currently implements **replay-only** behavior:
+The resume endpoint supports two modes:
 
+**Replay-Only Mode (v1.8.0, default):**
 1. Server replays all buffered events since the token sequence
 2. For **completed streams**: Final `complete` event is sent, then connection closes
 3. For **in-progress streams**: Buffered events are replayed, heartbeat sent, then connection closes
+4. Clients must reconnect to the main stream endpoint for ongoing updates
 
-**This means:**
-- Resume does NOT keep the connection open for live events
-- Clients must reconnect to the main stream endpoint for ongoing updates
-- Resume is designed for recovering missed events after disconnection, not live streaming
-
-**Future Enhancement (v1.9+):**
-- Keep resume connection open for live event continuation
-- Support seamless transition from replay to live streaming
+**Live Resume Mode (v1.9.0):**
+1. Server replays all buffered events since the token sequence
+2. Connection stays open and continues streaming new events until completion
+3. Requires `SSE_RESUME_LIVE_ENABLED=true` on server (gracefully falls back to replay-only if disabled)
+4. See `resumeDraftGraphLive()` and `streamDraftGraphWithAutoReconnect()` below
 
 ### Resilient Streaming Pattern
 
@@ -421,6 +420,83 @@ async function resilientStream(brief: string) {
 const result = await resilientStream("Should we expand into EU markets?");
 console.log("Final graph:", result.graph);
 ```
+
+### Auto-Reconnect with Live Resume (v1.9.0)
+
+**✨ New in v1.9**: Fully automated resilient streaming with live resume support!
+
+The SDK now provides `streamDraftGraphWithAutoReconnect()` for production-ready streaming with zero configuration:
+
+```typescript
+import {
+  streamDraftGraphWithAutoReconnect,
+  type AutoReconnectConfig,
+} from "@olumi/assistants-sdk";
+
+const config: AutoReconnectConfig = {
+  baseUrl: "https://olumi-assistants-service.onrender.com",
+  apiKey: process.env.OLUMI_API_KEY!,
+  maxRetries: 3, // Maximum reconnection attempts (default: 3)
+  preferLiveResume: true, // Prefer live resume mode (default: true)
+};
+
+try {
+  for await (const event of streamDraftGraphWithAutoReconnect(
+    config,
+    { brief: "Should we expand into EU markets?" }
+  )) {
+    if (event.type === "stage" && event.data.stage === "COMPLETE") {
+      console.log("Stream completed:", event.data.payload);
+    }
+  }
+} catch (error) {
+  console.error("Stream failed after all retries:", error);
+}
+```
+
+**Features:**
+- **Automatic reconnection** with exponential backoff (1.5s, 4s, 8s)
+- **Live resume preferred** - Single reconnection recovers missed events AND continues streaming
+- **Graceful fallback** - Falls back to replay-only resume if live mode unavailable
+- **Smart retry logic** - Retries on network errors, 5xx errors, 429 rate limits
+- **Memory safe** - Automatic iterator cleanup in finally blocks
+
+**How it works:**
+1. Starts initial stream and automatically captures resume token
+2. On disconnection, attempts live resume with token
+3. If live mode unavailable, falls back to replay-only + reconnect
+4. If resume fails (426/401), starts fresh stream
+5. Max 3 retries with exponential backoff
+
+### Live Resume (Manual Control)
+
+For fine-grained control, use `resumeDraftGraphLive()` directly:
+
+```typescript
+import { resumeDraftGraphLive } from "@olumi/assistants-sdk";
+
+const events = resumeDraftGraphLive(
+  { baseUrl, apiKey },
+  { token: savedResumeToken, signal: controller.signal }
+);
+
+for await (const event of events) {
+  // Process events - stream continues until completion
+  if (event.type === "stage" && event.data.stage === "COMPLETE") {
+    console.log("Stream completed via live resume");
+  }
+}
+```
+
+**Live Resume vs Replay-Only:**
+
+| Feature | Replay-Only (`resumeDraftGraph`) | Live Resume (`resumeDraftGraphLive`) |
+|---------|-----------------------------------|---------------------------------------|
+| Replays missed events | ✅ Yes | ✅ Yes |
+| Continues live streaming | ❌ No (closes after replay) | ✅ Yes (until completion) |
+| Reconnection needed | ✅ Yes (to `/stream`) | ❌ No |
+| Server requirement | v1.8.0+ | v1.9.0+ with `SSE_RESUME_LIVE_ENABLED=true` |
+| Fallback | N/A | Gracefully falls back to replay-only |
 
 ### SSE Event Types
 

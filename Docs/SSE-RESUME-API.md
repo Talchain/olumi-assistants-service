@@ -2,11 +2,14 @@
 
 ## Overview
 
-The SSE Resume feature (v1.8.0) enables clients to reconnect to interrupted SSE streams without losing data. When a network connection drops or a client needs to reconnect, they can use the resume token to continue streaming from where they left off.
+The SSE Resume feature (v1.8.0+) enables clients to reconnect to interrupted SSE streams without losing data. When a network connection drops or a client needs to reconnect, they can use the resume token to continue streaming from where they left off.
+
+**v1.9.0** adds **Live Resume** mode for seamless continuation with automatic event streaming.
 
 ## Key Features
 
 - **Zero-loss reconnection** - Replay missed events during disconnection
+- **Live resume mode (v1.9)** - Continue streaming new events after replay
 - **Automatic buffering** - Server buffers up to 256 events or 1.5 MB
 - **Snapshot fallback** - Late reconnection to completed streams returns final result
 - **Graceful degradation** - Streams continue without resume if Redis unavailable
@@ -74,21 +77,36 @@ data: {"stage":"COMPLETE","payload":{...}}
 
 The server replays all events after the sequence number in the token.
 
-**⚠️ Important - Replay-Only Behavior (v1.8.0)**
+**⚠️ Important - Resume Modes**
 
-The resume endpoint currently implements **replay-only** behavior:
+The resume endpoint supports two modes:
+
+**Replay-Only Mode (default, v1.8.0):**
 1. Server replays all buffered events since the token sequence
 2. For **completed streams**: Final `event: complete` is sent, then connection closes
 3. For **in-progress streams**: Buffered events are replayed, heartbeat sent, then connection closes
+4. Clients must reconnect to the main `/stream` endpoint for ongoing updates
 
-**This means:**
-- Resume does NOT keep the connection open for live events
-- Clients must reconnect to the main `/stream` endpoint for ongoing updates
-- Resume is designed for recovering missed events after disconnection, not live streaming
+**Live Resume Mode (v1.9.0):**
+1. Server replays all buffered events since the token sequence
+2. Connection stays open and continues streaming new events
+3. Server polls for new events until stream completes or times out (2 minutes)
+4. Snapshot TTL renewed every 30 seconds during live streaming
+5. Requires `SSE_RESUME_LIVE_ENABLED=true` (opt-in feature flag)
 
-**Future Enhancement (v1.9+):**
-- Keep resume connection open for live event continuation
-- Support seamless transition from replay to live streaming
+**To use Live Resume Mode:**
+```bash
+# Via query parameter
+curl -X POST https://api.example.com/assist/draft-graph/resume?mode=live \
+  -H "X-Resume-Token: eyJ..."
+
+# Or via header
+curl -X POST https://api.example.com/assist/draft-graph/resume \
+  -H "X-Resume-Token: eyJ..." \
+  -H "X-Resume-Mode: live"
+```
+
+If live mode is not enabled on the server, it gracefully falls back to replay-only.
 
 ## API Reference
 
@@ -126,15 +144,25 @@ Resume an interrupted stream using a resume token.
 
 **Request Headers:**
 - `X-Resume-Token: <token>` - **Required**
+- `X-Resume-Mode: live` - **Optional** (v1.9) - Enable live resume mode
+
+**Query Parameters:**
+- `mode=live` - **Optional** (v1.9) - Alternative way to enable live resume mode
 
 **Response Codes:**
 
 | Code | Meaning | Details |
 |------|---------|---------|
-| 200 | Success | Replaying buffered events |
+| 200 | Success | Replaying buffered events (+ live streaming if mode=live) |
 | 400 | Bad Request | Missing or malformed token |
 | 401 | Unauthorized | Invalid signature or expired token |
 | 426 | Upgrade Required | Resume not available (secrets/Redis not configured) |
+
+**Live Resume Mode (v1.9):**
+- Requires `SSE_RESUME_LIVE_ENABLED=true` on server
+- Rate limit: `SSE_RESUME_LIVE_RPM` (default: same as stream endpoint)
+- Timeout: 120 seconds (2 minutes)
+- Falls back to replay-only if feature disabled
 
 **Success Response (200):**
 ```
@@ -168,7 +196,7 @@ data: {"graph": {...}}
 
 ## Resume Scenarios
 
-### Scenario 1: Mid-Stream Reconnection (v1.8 Replay-Only)
+### Scenario 1: Mid-Stream Reconnection - Replay-Only Mode (v1.8)
 
 **Timeline:**
 1. Client starts stream at seq=0
@@ -180,7 +208,23 @@ data: {"graph": {...}}
 
 **Result:** Zero data loss (all missed events replayed)
 
-**⚠️ Note:** Resume connection closes after replay. For in-progress streams, client must reconnect to the main streaming endpoint to continue receiving live events. Future versions will support keeping the resume connection open.
+**⚠️ Note:** Resume connection closes after replay. For in-progress streams, client must reconnect to the main streaming endpoint to continue receiving live events.
+
+### Scenario 1b: Mid-Stream Reconnection - Live Resume Mode (v1.9)
+
+**Timeline:**
+1. Client starts stream at seq=0
+2. Client receives events 0-10
+3. Network drops at seq=11
+4. Client reconnects with resume token + `mode=live` (seq=10)
+5. Server replays events 11-20
+6. Server continues polling and streaming events 21-50
+7. Stream completes with `event: complete`
+8. Connection closes
+
+**Result:** Zero data loss with seamless continuation (no reconnection needed)
+
+**✅ Advantage:** Single reconnection recovers all missed events AND continues streaming until completion.
 
 ### Scenario 2: Late Reconnection (Snapshot Fallback)
 

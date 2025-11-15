@@ -3,6 +3,11 @@ name: Performance Gate
 on:
   pull_request:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 3 * * *'
 
 concurrency:
   group: perf-gate-${{ github.ref }}
@@ -98,3 +103,196 @@ jobs:
             **Performance Gate (production):**
             Results uploaded as artefact **perf-results**.
             See job summary for p95 values (healthz gating, draft-graph observed).
+
+  sse-live-resume-gate:
+    name: SSE Live Resume Performance Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PERF_TARGET_URL: https://olumi-assistants-service.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with: { version: 9 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run SSE Live Resume Performance Test (v1.11 windowed)
+        env:
+          ASSIST_API_KEY: ${{ secrets.ASSIST_API_KEY }}
+        run: |
+          set -euxo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            export PERF_MODE=dry
+          else
+            export PERF_MODE=full
+          fi
+          echo "Running SSE perf in PERF_MODE=${PERF_MODE}"
+          node perf/sse-live-resume.mjs || echo "SSE_TEST_FAILED=1" >> $GITHUB_ENV
+          # Ensure artefact presence even if test failed early
+          [[ -f perf-sse-live-results.json ]] || echo '{}' > perf-sse-live-results.json
+          [[ -f perf-sse-live-windowed.json ]] || echo '{"windows":[]}' > perf-sse-live-windowed.json
+
+      - name: Enforce SSE Performance Gates (aggregate + windowed)
+        run: |
+          node -e "
+          const fs=require('fs');
+          const results=JSON.parse(fs.readFileSync('perf-sse-live-results.json','utf8'));
+          const windowed=JSON.parse(fs.readFileSync('perf-sse-live-windowed.json','utf8'));
+          const gates = results.gates || {};
+          const summary = results.summary || {};
+          const reconnect = results.reconnect_latencies_ms || {};
+          const mode = results.perf_mode || 'full';
+          const errorRate = summary.error_rate || results.aggregate_error_rate || 'n/a';
+
+          console.log('=== SSE Live Resume Performance Gates (v1.11) ===');
+          console.log('Mode:', mode);
+          console.log('Resume success rate:', summary.resume_success_rate || 'n/a');
+          console.log('Buffer trim rate:', summary.buffer_trim_rate || 'n/a');
+          console.log('p95 latency:', results.latencies_ms?.p95 || 'n/a', 'ms');
+          console.log('Reconnect p95 latency:', reconnect.p95 || 'n/a', 'ms');
+          console.log('Error rate:', errorRate);
+          console.log('Windows analyzed:', windowed.windows?.length || 0);
+          console.log('');
+
+          let failed = false;
+
+          // Aggregate gates (v1.10 compatible)
+          if (!gates.resume_success_rate_98) {
+            console.error('❌ Resume success rate gate FAILED:', summary.resume_success_rate, '< 98%');
+            failed = true;
+          } else {
+            console.log('✅ Resume success rate gate passed:', summary.resume_success_rate);
+          }
+
+          if (!gates.buffer_trim_rate_0_5) {
+            console.error('❌ Buffer trim rate gate FAILED:', summary.buffer_trim_rate, '> 0.5%');
+            failed = true;
+          } else {
+            console.log('✅ Buffer trim rate gate passed:', summary.buffer_trim_rate);
+          }
+
+          if (!gates.p95_under_12s) {
+            console.error('❌ p95 latency gate FAILED:', results.latencies_ms?.p95, 'ms >= 12000ms');
+            failed = true;
+          } else {
+            console.log('✅ p95 latency gate passed:', results.latencies_ms?.p95, 'ms');
+          }
+
+          if (!gates.reconnect_p95_under_15s) {
+            console.error('❌ reconnect p95 gate FAILED:', reconnect.p95 || 'n/a', 'ms >= 15000ms');
+            failed = true;
+          } else {
+            console.log('✅ reconnect p95 gate passed:', reconnect.p95 || 'n/a', 'ms');
+          }
+
+          if (!gates.error_rate_1) {
+            console.error('❌ error rate gate FAILED:', errorRate, '> 1.0%');
+            failed = true;
+          } else {
+            console.log('✅ error rate gate passed:', errorRate);
+          }
+
+          // Windowed gates (v1.11 - already enforced by fail-fast)
+          const windowViolations = windowed.windows?.filter(w =>
+            !w.gates.resume_success_95 || !w.gates.trim_rate_1 || !w.gates.max_latency_15s || !w.gates.error_rate_1
+          ) || [];
+
+          if (windowViolations.length > 0) {
+            console.error('❌ Window gates FAILED (should have been caught by fail-fast):');
+            windowViolations.forEach(w => {
+              console.error(`  Window ${w.start}: resume=${w.resume_success_rate}, trim=${w.buffer_trim_rate}, latency=${w.max_resume_latency_ms}ms`);
+            });
+            failed = true;
+          } else {
+            console.log('✅ All window gates passed (no violations detected)');
+          }
+
+          if (failed) {
+            if (mode === 'dry') {
+              console.error('Perf gates FAILED in dry mode; not failing CI (soft gate).');
+            } else {
+              process.exit(1);
+            }
+          }
+          "
+
+      - name: Summarise SSE Performance (with worst-case windows)
+        if: always()
+        run: |
+          node -e "
+          const fs=require('fs');
+          const results=JSON.parse(fs.readFileSync('perf-sse-live-results.json','utf8'));
+          const windowed=JSON.parse(fs.readFileSync('perf-sse-live-windowed.json','utf8'));
+          const summary = results.summary || {};
+          const latencies = results.latencies_ms || {};
+          const gates = results.gates || {};
+          const worst = windowed.worst_case || null;
+          const reconnect = results.reconnect_latencies_ms || {};
+          const errorRate = summary.error_rate || results.aggregate_error_rate || 'n/a';
+          const mode = results.perf_mode || 'full';
+
+          const md = [
+            `### SSE Live Resume Performance Gate (v1.11, mode=${mode})`,
+            '',
+            '#### Aggregate Metrics',
+            '| Metric | Value | Gate | Status |',
+            '|---|---|---|---|',
+            `| Resume Success Rate | ${summary.resume_success_rate || 'n/a'} | ≥98% | ${gates.resume_success_rate_98 ? '✅' : '❌'} |`,
+            `| Buffer Trim Rate | ${summary.buffer_trim_rate || 'n/a'} | ≤0.5% | ${gates.buffer_trim_rate_0_5 ? '✅' : '❌'} |`,
+            `| p95 Latency | ${latencies.p95 || 'n/a'}ms | <12000ms | ${gates.p95_under_12s ? '✅' : '❌'} |`,
+            `| Error Rate | ${errorRate} | ≤1.0% | ${gates.error_rate_1 ? '✅' : '❌'} |`,
+            `| Reconnect p95 | ${reconnect.p95 || 'n/a'}ms | <15000ms | ${gates.reconnect_p95_under_15s ? '✅' : '❌'} |`,
+            '',
+            `#### Windowed Analysis (${windowed.window_size_sec || 10}s windows)`,
+            '',
+            worst ? [
+              '**Worst-Case Windows:**',
+              `- Resume rate: ${worst.worst_resume_success_rate} at ${worst.worst_resume_window}`,
+              `- Trim rate: ${worst.worst_trim_rate} at ${worst.worst_trim_window}`,
+              `- Max latency: ${worst.worst_resume_latency_ms}ms at ${worst.worst_latency_window}`,
+              `- Error rate: ${worst.worst_error_rate} at ${worst.worst_error_window}`,
+            ].join('\\n') : '*(No windows with significant activity)*',
+            '',
+            '**Stream Summary:**',
+            `- Streams started: ${summary.streams_started || 0}`,
+            `- Streams completed: ${summary.streams_completed || 0}`,
+            `- Resume attempts: ${summary.resume_attempts || 0}`,
+            `- Resume successes: ${summary.resume_successes || 0}`,
+            \`- Resume successes: \${summary.resume_successes || 0}\`,
+            '',
+            '**Latency Distribution:**',
+            \`- p50: \${latencies.p50 || 'n/a'}ms\`,
+            \`- p95: \${latencies.p95 || 'n/a'}ms\`,
+            \`- p99: \${latencies.p99 || 'n/a'}ms\`,
+            '',
+            '📊 **Artifacts:** perf-sse-live-results (aggregate), perf-sse-live-windowed (time-series)'
+          ].join('\\n');
+          fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          "
+
+      - name: Upload SSE performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-sse-live-results
+          path: |
+            perf-sse-live-results.json
+            perf-sse-live-windowed.json
+
+      - name: Comment SSE performance on PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          message: |
+            **SSE Live Resume Performance Gate:**
+            Results uploaded as artefact **perf-sse-live-results**.
+            See job summary for resume success rate, buffer trim rate, and latency metrics.

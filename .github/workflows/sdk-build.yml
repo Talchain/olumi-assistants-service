@@ -1,0 +1,64 @@
+name: SDK Build & Size Check
+
+on:
+  pull_request:
+    paths:
+      - 'sdk/typescript/**'
+  push:
+    branches: [main]
+    paths:
+      - 'sdk/typescript/**'
+
+jobs:
+  build-sdk:
+    name: Build SDK (ESM + CJS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with: { version: 9 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm --dir sdk/typescript build
+
+      - name: Run SDK tests
+        run: pnpm --dir sdk/typescript test
+
+      - name: Check bundle sizes
+        run: |
+          cd sdk/typescript
+          pnpm size > size-report.txt
+          cat size-report.txt
+
+      - name: Upload size snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-size-snapshot
+          path: sdk/typescript/size-report.txt
+
+      - name: Verify exports
+        run: |
+          node -e "
+          const esm = require('./sdk/typescript/dist/esm/index.js');
+          const cjs = require('./sdk/typescript/dist/cjs/index.js');
+          console.log('✅ ESM exports:', Object.keys(esm));
+          console.log('✅ CJS exports:', Object.keys(cjs));
+          "
+
+      - name: Comment size on PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          message: |
+            **SDK Build Summary:**
+            Artifact **sdk-size-snapshot** uploaded with bundle sizes.

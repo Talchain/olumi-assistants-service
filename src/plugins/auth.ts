@@ -13,108 +13,10 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
-import { env } from "node:process";
 import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
-
-// Rate limit: 120 requests per minute per key (2 req/sec sustained)
-const RATE_LIMIT_RPM = Number(env.RATE_LIMIT_RPM) || 120;
-const _RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-
-// SSE rate limit: 20 requests per minute per key
-const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
-
-interface TokenBucket {
-  tokens: number;
-  lastRefill: number;
-  capacity: number;
-  refillRate: number; // tokens per second
-}
-
-interface KeyMetadata {
-  keyId: string; // sha256 hash prefix for logging
-  bucket: TokenBucket;
-  sseBucket: TokenBucket;
-  requestCount: number;
-  lastUsed: number;
-}
-
-const keyMetadata = new Map<string, KeyMetadata>();
-
-/**
- * Get or create metadata for an API key
- */
-function getKeyMetadata(apiKey: string): KeyMetadata {
-  if (!keyMetadata.has(apiKey)) {
-    // Generate short hash for telemetry (first 8 chars of sha256)
-    const keyId = hashKeyId(apiKey);
-
-    keyMetadata.set(apiKey, {
-      keyId,
-      bucket: createTokenBucket(RATE_LIMIT_RPM),
-      sseBucket: createTokenBucket(SSE_RATE_LIMIT_RPM),
-      requestCount: 0,
-      lastUsed: Date.now(),
-    });
-  }
-
-  const metadata = keyMetadata.get(apiKey)!;
-  metadata.lastUsed = Date.now();
-  metadata.requestCount++;
-
-  return metadata;
-}
-
-/**
- * Create a token bucket for rate limiting
- */
-function createTokenBucket(rpm: number): TokenBucket {
-  return {
-    tokens: rpm,
-    lastRefill: Date.now(),
-    capacity: rpm,
-    refillRate: rpm / 60, // tokens per second
-  };
-}
-
-/**
- * Refill token bucket based on elapsed time
- */
-function refillBucket(bucket: TokenBucket): void {
-  const now = Date.now();
-  const elapsedSeconds = (now - bucket.lastRefill) / 1000;
-  const tokensToAdd = elapsedSeconds * bucket.refillRate;
-
-  bucket.tokens = Math.min(bucket.capacity, bucket.tokens + tokensToAdd);
-  bucket.lastRefill = now;
-}
-
-/**
- * Try to consume a token from the bucket
- * Returns true if successful, false if rate limited
- */
-function tryConsume(bucket: TokenBucket): boolean {
-  refillBucket(bucket);
-
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Hash API key to short ID for logging (non-reversible)
- */
-function hashKeyId(apiKey: string): string {
-  // Simple hash for telemetry (not cryptographic, just for grouping)
-  let hash = 0;
-  for (let i = 0; i < apiKey.length; i++) {
-    hash = ((hash << 5) - hash) + apiKey.charCodeAt(i);
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(16).substring(0, 8);
-}
+import { tryConsumeToken } from "../utils/quota.js";
+import { verifyHmacSignature } from "../utils/hmac-auth.js";
+import { fastHash } from "../utils/hash.js";
 
 /**
  * Get valid API keys from environment
@@ -143,12 +45,18 @@ function getValidApiKeys(): Set<string> {
 /**
  * Check if route is public (no auth required)
  */
-function isPublicRoute(path: string): boolean {
+function isPublicRoute(path: string, method?: string): boolean {
   const publicRoutes = [
     "/healthz",
     "/health",
     "/",
+    "/v1/status",
   ];
+
+  // Share GET/DELETE are public (token-based auth)
+  if ((method === "GET" || method === "DELETE") && path.startsWith("/assist/share/")) {
+    return true;
+  }
 
   return publicRoutes.some(route => path === route || path.startsWith(route + "/"));
 }
@@ -194,7 +102,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
 
   fastify.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     // Skip auth for public routes
-    if (isPublicRoute(request.url)) {
+    if (isPublicRoute(request.url, request.method)) {
       return;
     }
 
@@ -215,77 +123,123 @@ async function authPluginImpl(fastify: FastifyInstance) {
     const validKeys = getValidApiKeys();
 
     // If no keys configured, skip auth
-    if (validKeys.size === 0) {
-      return;
+    if (validKeys.size === 0 && !process.env.HMAC_SECRET) {
+      return; // No auth configured
     }
 
-    // Extract API key
-    const apiKey = extractApiKey(request);
+    // Check for HMAC signature (preferred method)
+    const hasSignature = request.headers["x-olumi-signature"];
 
+    let apiKey: string | null = null;
+    let keyId: string | null = null;
+
+    if (hasSignature && process.env.HMAC_SECRET) {
+      // HMAC signature authentication (preferred)
+      const body = typeof request.body === "string" ? request.body :
+                   request.body ? JSON.stringify(request.body) : undefined;
+
+      const hmacResult = await verifyHmacSignature(
+        request.method,
+        request.url,
+        body,
+        request.headers as Record<string, string | string[] | undefined>
+      );
+
+      if (!hmacResult.valid) {
+        emit(TelemetryEvents.AuthFailed, {
+          reason: hmacResult.error,
+          path: request.url,
+          hmac: true,
+          fallback: validKeys.size > 0 ? "api_key" : "none",
+        });
+
+        // If no API keys are configured, behave as before and fail hard on HMAC
+        if (validKeys.size === 0) {
+          return reply.code(403).send({
+            schema: "error.v1",
+            code: hmacResult.error || "FORBIDDEN",
+            message: `HMAC signature validation failed: ${hmacResult.error}`,
+          });
+        }
+
+        // Otherwise, fall through to API key auth
+      } else {
+        // HMAC auth successful - use HMAC secret as the "API key" for quota tracking
+        apiKey = process.env.HMAC_SECRET;
+        keyId = "hmac"; // Special key ID for HMAC-authenticated requests
+
+        log.info(
+          { legacy: hmacResult.legacy, path: request.url },
+          "HMAC signature authentication successful"
+        );
+      }
+    }
+
+    // Fallback or primary path: API key authentication
     if (!apiKey) {
-      emit(TelemetryEvents.AuthFailed, {
-        reason: "missing_header",
-        path: request.url,
-      });
+      const extractedKey = extractApiKey(request);
 
-      return reply.code(401).send({
-        schema: "error.v1",
-        code: "FORBIDDEN",
-        message: "Missing API key. Provide X-Olumi-Assist-Key header.",
-      });
+      if (!extractedKey) {
+        emit(TelemetryEvents.AuthFailed, {
+          reason: "missing_header",
+          path: request.url,
+        });
+
+        return reply.code(401).send({
+          schema: "error.v1",
+          code: "FORBIDDEN",
+          message: "Missing API key. Provide X-Olumi-Assist-Key header.",
+        });
+      }
+
+      // Validate API key
+      if (!validKeys.has(extractedKey)) {
+        emit(TelemetryEvents.AuthFailed, {
+          reason: "invalid_key",
+          path: request.url,
+        });
+
+        return reply.code(403).send({
+          schema: "error.v1",
+          code: "FORBIDDEN",
+          message: "Invalid API key.",
+        });
+      }
+
+      apiKey = extractedKey;
+      keyId = fastHash(apiKey, 8);
     }
 
-    // Validate API key
-    if (!validKeys.has(apiKey)) {
-      emit(TelemetryEvents.AuthFailed, {
-        reason: "invalid_key",
-        path: request.url,
-      });
-
-      return reply.code(403).send({
-        schema: "error.v1",
-        code: "FORBIDDEN",
-        message: "Invalid API key.",
-      });
-    }
-
-    // Get key metadata
-    const metadata = getKeyMetadata(apiKey);
-
-    // Check rate limit
+    // Check rate limit (dual-mode: Redis + memory fallback)
     const isSSE = isSseRequest(request);
-    const bucket = isSSE ? metadata.sseBucket : metadata.bucket;
-    const allowed = tryConsume(bucket);
+    const quotaResult = await tryConsumeToken(apiKey, isSSE);
+    keyId = quotaResult.keyId;
 
-    if (!allowed) {
+    if (!quotaResult.allowed) {
       emit(TelemetryEvents.RateLimited, {
-        key_id: metadata.keyId,
+        key_id: keyId,
         path: request.url,
         is_sse: isSSE,
       });
-
-      // Calculate retry-after in seconds
-      const tokensNeeded = 1 - bucket.tokens;
-      const retryAfterSec = Math.ceil(tokensNeeded / bucket.refillRate);
 
       return reply.code(429).send({
         schema: "error.v1",
         code: "RATE_LIMITED",
         message: "Rate limit exceeded.",
         details: {
-          retry_after_seconds: retryAfterSec,
+          retry_after_seconds: quotaResult.retryAfterSeconds || 1,
         },
       });
     }
 
     // Auth successful
     emit(TelemetryEvents.AuthSuccess, {
-      key_id: metadata.keyId,
+      key_id: keyId!,
       path: request.url,
     });
 
-    // Attach key metadata to request for downstream use
-    (request as any).keyMetadata = metadata;
+    // Attach key ID to request for downstream use (e.g., /v1/limits)
+    (request as any).keyId = keyId;
   });
 }
 
@@ -298,8 +252,8 @@ export const authPlugin = fp(authPluginImpl, {
 });
 
 /**
- * Get key metadata from request (if authenticated)
+ * Get key ID from request (if authenticated)
  */
-export function getRequestKeyMetadata(request: FastifyRequest): KeyMetadata | null {
-  return (request as any).keyMetadata || null;
+export function getRequestKeyId(request: FastifyRequest): string | null {
+  return (request as any).keyId || null;
 }

@@ -1,6 +1,6 @@
 {
   "name": "olumi-assistants-service",
-  "version": "1.3.1",
+  "version": "1.11.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -27,10 +27,12 @@
     "@anthropic-ai/sdk": "^0.68.0",
     "@fastify/cors": "^10.1.0",
     "@fastify/rate-limit": "^10.3.0",
+    "archiver": "^7.0.1",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.1",
     "fastify-plugin": "^5.1.0",
     "hot-shots": "^11.2.0",
+    "ioredis": "^5.8.2",
     "openai": "^6.7.0",
     "papaparse": "^5.4.1",
     "pdf-parse": "^1.1.1",
@@ -40,6 +42,8 @@
   },
   "devDependencies": {
     "@apidevtools/swagger-cli": "^4.0.4",
+    "@types/archiver": "^7.0.0",
+    "@types/ioredis": "^5.0.0",
     "@types/node": "^20.14.10",
     "@types/papaparse": "^5.3.14",
     "@types/pdf-parse": "^1.1.5",

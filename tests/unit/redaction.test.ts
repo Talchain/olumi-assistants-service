@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   redactAttachments,
   redactCsvData,
   truncateQuotes,
   redactHeaders,
   safeLog,
+  redactTelemetryEvent,
+  redactLogMessage,
 } from "../../src/utils/redaction.js";
 import { asTestData } from "../helpers/test-types.js";
 
@@ -306,6 +308,136 @@ describe("redaction utilities", () => {
       expect(Array.isArray(result)).toBe(true);
       expect(result[0].quote).toHaveLength(103);
       expect(result[1].quote).toBe("Short");
+    });
+  });
+
+  describe("redactTelemetryEvent", () => {
+    beforeEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("should preserve object keys while redacting values", () => {
+      const event = {
+        event_type: "test.event",
+        user_email: "john@example.com",
+        phone: "555-123-4567",
+        api_key: "sk_test_abc123",
+        metadata: {
+          contact: "alice@company.com",
+        },
+      };
+
+      const result = asTestData(redactTelemetryEvent(event));
+
+      // Keys should be preserved
+      expect(result.event_type).toBeDefined();
+      expect(result.user_email).toBeDefined();
+      expect(result.phone).toBeDefined();
+      expect(result.api_key).toBeDefined();
+      expect(result.metadata).toBeDefined();
+      expect(result.metadata.contact).toBeDefined();
+
+      // Values should be redacted
+      expect(result.user_email).toBe("[EMAIL]");
+      expect(result.phone).toBe("[PHONE]");
+      expect(result.api_key).toBe("[KEY]");
+      expect(result.metadata.contact).toBe("[EMAIL]");
+      expect(result.event_type).toBe("test.event"); // No PII, unchanged
+
+      // Metadata should be added
+      expect(result.pii_redacted).toBe(true);
+      expect(result.redaction_mode).toBe("standard");
+    });
+
+    it("should handle strict mode", () => {
+      vi.stubEnv("PII_REDACTION_MODE", "strict");
+
+      const event = {
+        event_type: "test.event",
+        server_ip: "192.168.1.1",
+        url: "https://example.com/path",
+      };
+
+      const result = asTestData(redactTelemetryEvent(event));
+
+      // Strict mode should redact IPs and URLs
+      expect(result.server_ip).toBe("[IP]");
+      expect(result.url).toBe("[URL]");
+      expect(result.redaction_mode).toBe("strict");
+    });
+
+    it("should skip redaction when mode is off", () => {
+      vi.stubEnv("PII_REDACTION_MODE", "off");
+
+      const event = {
+        user_email: "john@example.com",
+        phone: "555-123-4567",
+      };
+
+      const result = asTestData(redactTelemetryEvent(event));
+
+      // No redaction should occur
+      expect(result.user_email).toBe("john@example.com");
+      expect(result.phone).toBe("555-123-4567");
+      expect(result.pii_redacted).toBeUndefined();
+      expect(result.redaction_mode).toBeUndefined();
+    });
+
+    it("should handle nested objects and arrays", () => {
+      const event = {
+        users: [
+          { name: "Alice", email: "alice@company.com" },
+          { name: "Bob", email: "bob@startup.io" },
+        ],
+        config: {
+          admin: {
+            email: "admin@example.com",
+          },
+        },
+      };
+
+      const result = asTestData(redactTelemetryEvent(event));
+
+      // Structure preserved, values redacted
+      expect(result.users).toHaveLength(2);
+      expect(result.users[0].email).toBe("[EMAIL]");
+      expect(result.users[1].email).toBe("[EMAIL]");
+      expect(result.config.admin.email).toBe("[EMAIL]");
+    });
+  });
+
+  describe("redactLogMessage", () => {
+    beforeEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("should redact PII from log messages", () => {
+      const message = "User john@example.com called from 555-123-4567";
+      const result = redactLogMessage(message);
+      expect(result).toBe("User [EMAIL] called from [PHONE]");
+    });
+
+    it("should handle multiple PII types", () => {
+      const message = "API key sk_test_abc123, email alice@company.com, token Bearer xyz789";
+      const result = redactLogMessage(message);
+      expect(result).toContain("[KEY]");
+      expect(result).toContain("[EMAIL]");
+      expect(result).toContain("Bearer [TOKEN]");
+    });
+
+    it("should respect redaction mode from environment", () => {
+      vi.stubEnv("PII_REDACTION_MODE", "off");
+      const message = "User john@example.com called";
+      const result = redactLogMessage(message);
+      expect(result).toBe(message); // No redaction
     });
   });
 });

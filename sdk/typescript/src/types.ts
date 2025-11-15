@@ -84,6 +84,13 @@ export interface ShareRequest {
   redaction_mode?: "minimal" | "full";
 }
 
+export interface Diagnostics {
+  resumes: number;
+  trims: number;
+  recovered_events: number;
+  correlation_id: string;
+}
+
 export interface DraftGraphResponse {
   schema: "draft-graph.v1";
   graph: Graph;
@@ -96,6 +103,7 @@ export interface DraftGraphResponse {
     input_tokens: number;
     output_tokens: number;
   };
+  diagnostics?: Diagnostics;
 }
 
 export interface SuggestOptionsResponse {
@@ -230,6 +238,30 @@ export interface StatusResponse {
     pii_guard: boolean;
     share_review: boolean;
     prompt_cache: boolean;
+  };
+}
+
+export interface LimitsResponse {
+  schema: "limits.v1";
+  key_id: string;
+  rate_limit_rpm: number;
+  sse_rate_limit_rpm: number;
+  quota_backend: "redis" | "memory";
+  graph_max_nodes: number;
+  graph_max_edges: number;
+   max_nodes: number;
+   max_edges: number;
+  standard_quota?: {
+    capacity_rpm: number;
+    tokens?: number;
+    refill_rate_per_sec?: number;
+    retry_after_seconds?: number;
+  };
+  sse_quota?: {
+    capacity_rpm: number;
+    tokens?: number;
+    refill_rate_per_sec?: number;
+    retry_after_seconds?: number;
   };
 }
 

@@ -3,12 +3,14 @@ import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
+import { generateDeterministicLayout } from "../../utils/layout.js";
 
 export type DraftArgs = {
   brief: string;
@@ -118,8 +120,6 @@ function getClient(): Anthropic {
 }
 
 const TIMEOUT_MS = 15000;
-const MAX_NODES = 12;
-const MAX_EDGES = 24;
 
 function buildPrompt(args: DraftArgs): string {
   const docContext = args.docs.length
@@ -139,8 +139,8 @@ ${docContext}
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${MAX_NODES} nodes (goal, decision, option, outcome)
-- ≤${MAX_EDGES} edges
+- ≤${GRAPH_MAX_NODES} nodes (goal, decision, option, outcome)
+- ≤${GRAPH_MAX_EDGES} edges
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
@@ -204,32 +204,16 @@ Draft a small decision graph with:
 Respond ONLY with valid JSON matching this structure.`;
 }
 
-function generateSuggestedPositions(nodes: NodeT[]): Record<string, { x: number; y: number }> {
-  const positions: Record<string, { x: number; y: number }> = {};
-
-  // Simple layered layout: goals at top, decisions below, options and outcomes spread horizontally
-  const goals = nodes.filter((n) => n.kind === "goal");
-  const decisions = nodes.filter((n) => n.kind === "decision");
-  const options = nodes.filter((n) => n.kind === "option");
-  const outcomes = nodes.filter((n) => n.kind === "outcome");
-
-  goals.forEach((n, i) => {
-    positions[n.id] = { x: 400, y: 50 + i * 100 };
-  });
-
-  decisions.forEach((n, i) => {
-    positions[n.id] = { x: 400, y: 200 + i * 100 };
-  });
-
-  options.forEach((n, i) => {
-    positions[n.id] = { x: 200 + i * 200, y: 350 };
-  });
-
-  outcomes.forEach((n, i) => {
-    positions[n.id] = { x: 200 + i * 200, y: 500 };
-  });
-
-  return positions;
+/**
+ * Generate suggested positions using deterministic topology-aware layout
+ * @deprecated - moved to src/utils/layout.ts, this wrapper maintained for migration
+ */
+function generateSuggestedPositions(
+  nodes: NodeT[],
+  edges: EdgeT[],
+  roots: string[]
+): Record<string, { x: number; y: number }> {
+  return generateDeterministicLayout(nodes, edges, roots);
 }
 
 function assignStableEdgeIds(edges: EdgeT[]): EdgeT[] {
@@ -333,14 +317,14 @@ export async function draftGraphWithAnthropic(
     const parsed = parseResult.data;
 
     // Validate and cap node/edge counts
-    if (parsed.nodes.length > MAX_NODES) {
-      log.warn({ count: parsed.nodes.length }, "node count exceeded, trimming");
-      parsed.nodes = parsed.nodes.slice(0, MAX_NODES);
+    if (parsed.nodes.length > GRAPH_MAX_NODES) {
+      log.warn({ count: parsed.nodes.length, max: GRAPH_MAX_NODES }, "node count exceeded, trimming");
+      parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
     }
 
-    if (parsed.edges.length > MAX_EDGES) {
-      log.warn({ count: parsed.edges.length }, "edge count exceeded, trimming");
-      parsed.edges = parsed.edges.slice(0, MAX_EDGES);
+    if (parsed.edges.length > GRAPH_MAX_EDGES) {
+      log.warn({ count: parsed.edges.length, max: GRAPH_MAX_EDGES }, "edge count exceeded, trimming");
+      parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
     // Filter edges to only valid node IDs
@@ -383,7 +367,7 @@ export async function draftGraphWithAnthropic(
       meta: {
         roots,
         leaves,
-        suggested_positions: generateSuggestedPositions(nodes),
+        suggested_positions: generateSuggestedPositions(nodes, edgesWithIds, roots),
         source: "assistant" as const,
       },
     });
@@ -772,11 +756,11 @@ export async function repairGraphWithAnthropic(
     const parsed = parseResult.data;
 
     // Cap node/edge counts
-    if (parsed.nodes.length > MAX_NODES) {
-      parsed.nodes = parsed.nodes.slice(0, MAX_NODES);
+    if (parsed.nodes.length > GRAPH_MAX_NODES) {
+      parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
     }
-    if (parsed.edges.length > MAX_EDGES) {
-      parsed.edges = parsed.edges.slice(0, MAX_EDGES);
+    if (parsed.edges.length > GRAPH_MAX_EDGES) {
+      parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
     // Filter edges to only valid node IDs

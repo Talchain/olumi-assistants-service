@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine"]);
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action"]);
@@ -32,8 +33,8 @@ export const Edge = z.object({
 export const Graph = z.object({
   version: z.string().default("1"),
   default_seed: z.number().default(17),
-  nodes: z.array(Node).max(12),
-  edges: z.array(Edge).max(24),
+  nodes: z.array(Node),
+  edges: z.array(Edge),
   meta: z
     .object({
       roots: z.array(z.string()).default([]),

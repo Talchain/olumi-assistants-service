@@ -1,0 +1,291 @@
+{
+  "title": "Olumi Assistants Service - Production Monitoring",
+  "description": "v1.7 Production monitoring dashboard with SLO tracking",
+  "widgets": [
+    {
+      "id": 1,
+      "definition": {
+        "title": "Request Rate & Success",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:assistants.request.count{env:prod}.as_count()",
+            "display_type": "line",
+            "style": {
+              "palette": "dog_classic",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          },
+          {
+            "q": "sum:assistants.request.error{env:prod,status_code:5*}.as_count()",
+            "display_type": "line",
+            "style": {
+              "palette": "warm",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "yaxis": {
+          "label": "Requests/min",
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "definition": {
+        "title": "Draft Graph SLO - Success Rate ≥99.0%",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "(sum:assistants.draft.complete{env:prod}.as_count() / (sum:assistants.draft.complete{env:prod}.as_count() + sum:assistants.draft.error{env:prod}.as_count())) * 100",
+            "aggregator": "avg"
+          }
+        ],
+        "precision": 2,
+        "custom_unit": "%",
+        "text_align": "center",
+        "conditional_formats": [
+          {
+            "comparator": ">=",
+            "value": 99.0,
+            "palette": "white_on_green"
+          },
+          {
+            "comparator": "<",
+            "value": 99.0,
+            "palette": "white_on_red"
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "definition": {
+        "title": "Draft Graph p95 Latency - Target ≤12s",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "p95:assistants.draft.duration{env:prod}",
+            "display_type": "line"
+          }
+        ],
+        "yaxis": {
+          "label": "Duration (ms)",
+          "scale": "linear",
+          "include_zero": true,
+          "max": 12000
+        },
+        "markers": [
+          {
+            "value": "y = 12000",
+            "display_type": "error dashed",
+            "label": "SLO Target"
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "SSE Stream States",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:assistants.sse.completed{env:prod,sse_end_state:complete}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "green"
+            }
+          },
+          {
+            "q": "sum:assistants.sse.completed{env:prod,sse_end_state:timeout}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "orange"
+            }
+          },
+          {
+            "q": "sum:assistants.sse.completed{env:prod,sse_end_state:aborted}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "red"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "definition": {
+        "title": "Redis Cache Hit Rate",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "(sum:assistants.cache.hit{env:prod,backend:redis}.as_count() / (sum:assistants.cache.hit{env:prod,backend:redis}.as_count() + sum:assistants.cache.miss{env:prod,backend:redis}.as_count())) * 100",
+            "aggregator": "avg"
+          }
+        ],
+        "precision": 1,
+        "custom_unit": "%",
+        "conditional_formats": [
+          {
+            "comparator": ">=",
+            "value": 50,
+            "palette": "white_on_green"
+          },
+          {
+            "comparator": "<",
+            "value": 30,
+            "palette": "white_on_yellow"
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "definition": {
+        "title": "Redis Operations Latency (p95)",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "p95:assistants.redis.command.duration{env:prod} by {command}",
+            "display_type": "line"
+          }
+        ],
+        "yaxis": {
+          "label": "Duration (ms)",
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "definition": {
+        "title": "HMAC Auth Events",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:assistants.auth.success{env:prod,hmac:true}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "green"
+            }
+          },
+          {
+            "q": "sum:assistants.auth.failed{env:prod,hmac:true,reason:replay_blocked}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "red"
+            }
+          },
+          {
+            "q": "sum:assistants.auth.failed{env:prod,hmac:true,reason:signature_skew}.as_count()",
+            "display_type": "bars",
+            "style": {
+              "palette": "orange"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "definition": {
+        "title": "Rate Limiting Events",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "sum:assistants.rate_limited{env:prod}.as_count()",
+            "aggregator": "sum"
+          }
+        ],
+        "autoscale": true,
+        "custom_unit": "reqs",
+        "conditional_formats": [
+          {
+            "comparator": ">",
+            "value": 100,
+            "palette": "white_on_yellow"
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "definition": {
+        "title": "Prompt Cache Performance",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:assistants.cache.hit{env:prod} by {backend}.as_count()",
+            "display_type": "bars"
+          },
+          {
+            "q": "sum:assistants.cache.miss{env:prod} by {backend}.as_count()",
+            "display_type": "bars"
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "definition": {
+        "title": "Share Storage Stats",
+        "type": "query_value",
+        "requests": [
+          {
+            "q": "avg:assistants.share.active_count{env:prod}",
+            "aggregator": "last"
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "custom_unit": "shares"
+      }
+    },
+    {
+      "id": 11,
+      "definition": {
+        "title": "Evidence Pack v2 Downloads",
+        "type": "timeseries",
+        "requests": [
+          {
+            "q": "sum:assistants.evidence_pack.generated{env:prod}.as_count()",
+            "display_type": "bars"
+          },
+          {
+            "q": "sum:assistants.evidence_pack.generated{env:prod,has_share_url:true}.as_count()",
+            "display_type": "line",
+            "style": {
+              "palette": "cool"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "definition": {
+        "title": "Health Check Status",
+        "type": "check_status",
+        "check": "assistants.healthz",
+        "grouping": "cluster",
+        "group_by": ["env"],
+        "tags": ["env:prod"]
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "prod",
+      "prefix": "env"
+    }
+  ],
+  "layout_type": "ordered",
+  "notify_list": [],
+  "reflow_type": "fixed"
+}

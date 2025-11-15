@@ -23,6 +23,7 @@ import type {
   ShareResponse,
   ShareRevokeResponse,
   StatusResponse,
+  LimitsResponse,
 } from "./types.js";
 import {
   OlumiConfigError,
@@ -222,6 +223,15 @@ export class OlumiClient {
     options?: RequestOptions
   ): Promise<ApiResponse<StatusResponse>> {
     return this.request<StatusResponse>("GET", "/v1/status", null, options);
+  }
+
+  /**
+   * Get current quota and graph cap limits for the authenticated key (v1.7+)
+   */
+  async getLimits(
+    options?: RequestOptions
+  ): Promise<ApiResponse<LimitsResponse>> {
+    return this.request<LimitsResponse>("GET", "/v1/limits", null, options);
   }
 
   /**

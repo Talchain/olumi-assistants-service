@@ -38,6 +38,7 @@ export type {
   ShareResponse,
   ShareRevokeResponse,
   StatusResponse,
+  LimitsResponse,
   ErrorResponse,
   // SSE Resume types (v1.8.0)
   ResumeToken,
@@ -49,6 +50,8 @@ export type {
   SseHeartbeatEvent,
   ResumeOptions,
   ResumeResult,
+  // Diagnostics (v1.11.0)
+  Diagnostics,
 } from "./types.js";
 
 // HMAC authentication utilities
@@ -62,3 +65,10 @@ export {
   extractResumeTokenFromEvent,
 } from "./sse.js";
 export type { SseStreamConfig } from "./sse.js";
+
+// SSE Live Resume & Auto-Reconnect (v1.9.0)
+export {
+  resumeDraftGraphLive,
+  streamDraftGraphWithAutoReconnect,
+} from "./sse.js";
+export type { AutoReconnectConfig } from "./sse.js";

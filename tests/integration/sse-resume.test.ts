@@ -221,7 +221,37 @@ describe("SSE Resume Integration", () => {
       expect(resumeResponse.headers["content-type"]).toContain("text/event-stream");
 
       // Should have X-Correlation-ID header
-      expect(resumeResponse.headers["x-correlation-id"]).toBeDefined();
+      const resumeCorrelationId = resumeResponse.headers["x-correlation-id"] as string | undefined;
+      expect(resumeCorrelationId).toBeDefined();
+
+      // Parse SSE events from resume response
+      const resumeBody = resumeResponse.body;
+      const resumeEvents = resumeBody.split("\n\n").filter(Boolean);
+
+      // Count replayed stage events
+      const replayedStageEvents = resumeEvents.filter(e => e.includes("event: stage"));
+      const replayedCount = replayedStageEvents.length;
+      expect(replayedCount).toBeGreaterThanOrEqual(1);
+
+      // The final snapshot is sent as a dedicated "complete" event with diagnostics
+      const completeEvent = resumeEvents.find(e => e.includes("event: complete"));
+      expect(completeEvent).toBeDefined();
+
+      const completeDataLine = completeEvent
+        ?.split("\n")
+        .find(line => line.startsWith("data: "));
+      expect(completeDataLine).toBeDefined();
+
+      const completePayload = JSON.parse(completeDataLine!.substring(6));
+      expect(completePayload).toHaveProperty("diagnostics");
+      expect(completePayload.diagnostics).toMatchObject({
+        resumes: 1,
+        recovered_events: replayedCount,
+      });
+
+      if (resumeCorrelationId) {
+        expect(completePayload.diagnostics.correlation_id).toBe(resumeCorrelationId);
+      }
     });
   });
 
@@ -273,6 +303,28 @@ describe("SSE Resume Integration", () => {
       // Should have complete event in response
       const resumeBody = resumeResponse.body;
       expect(resumeBody).toContain("event: complete");
+
+      // Parse complete event payload and verify diagnostics
+      const resumeEvents = resumeBody.split("\n\n").filter(Boolean);
+      const completeEvent = resumeEvents.find(e => e.includes("event: complete"));
+      expect(completeEvent).toBeDefined();
+
+      const completeDataLine = completeEvent
+        ?.split("\n")
+        .find(line => line.startsWith("data: "));
+      expect(completeDataLine).toBeDefined();
+
+      const completePayload = JSON.parse(completeDataLine!.substring(6));
+      expect(completePayload).toHaveProperty("diagnostics");
+      expect(completePayload.diagnostics).toMatchObject({
+        resumes: 1,
+        recovered_events: 0,
+      });
+
+      const correlationId = resumeResponse.headers["x-correlation-id"] as string | undefined;
+      if (correlationId) {
+        expect(completePayload.diagnostics.correlation_id).toBe(correlationId);
+      }
     });
   });
 
@@ -524,6 +576,89 @@ describe("SSE Resume Integration", () => {
 
       // Verify we can establish new stream after resume
       expect(phase3.body).toContain('event:');
+    });
+  });
+
+  describe("Live Resume Mode (v1.9)", () => {
+    it("should accept live mode query parameter", { skip: !redisAvailable || !secretsConfigured }, async () => {
+      // Start stream and get resume token
+      const streamResp = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph/stream",
+        payload: { brief: "test" },
+      });
+
+      expect(streamResp.statusCode).toBe(200);
+
+      // Extract token
+      const events = streamResp.body.split("\n\n").filter(Boolean);
+      let resumeToken: string | null = null;
+      for (const event of events) {
+        if (event.includes('event: resume')) {
+          const dataLine = event.split('\n').find(line => line.startsWith('data: '));
+          if (dataLine) {
+            resumeToken = JSON.parse(dataLine.substring(6)).token;
+          }
+        }
+      }
+      expect(resumeToken).toBeTruthy();
+
+      // Try live resume with query parameter (should fall back to replay-only without flag)
+      const resumeResp = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph/resume?mode=live",
+        headers: { "x-resume-token": resumeToken! },
+      });
+
+      expect(resumeResp.statusCode).toBe(200);
+      expect(resumeResp.headers["content-type"]).toContain("text/event-stream");
+    });
+
+    it("should accept live mode via X-Resume-Mode header", { skip: !redisAvailable || !secretsConfigured }, async () => {
+      // Start stream and get resume token
+      const streamResp = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph/stream",
+        payload: { brief: "test" },
+      });
+
+      expect(streamResp.statusCode).toBe(200);
+
+      // Extract token
+      const events = streamResp.body.split("\n\n").filter(Boolean);
+      let resumeToken: string | null = null;
+      for (const event of events) {
+        if (event.includes('event: resume')) {
+          const dataLine = event.split('\n').find(line => line.startsWith('data: '));
+          if (dataLine) {
+            resumeToken = JSON.parse(dataLine.substring(6)).token;
+          }
+        }
+      }
+      expect(resumeToken).toBeTruthy();
+
+      // Try live resume with header (should still fall back to replay-only without flag)
+      const resumeResp = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph/resume",
+        headers: {
+          "x-resume-token": resumeToken!,
+          "x-resume-mode": "live"
+        },
+      });
+
+      expect(resumeResp.statusCode).toBe(200);
+      expect(resumeResp.headers["content-type"]).toContain("text/event-stream");
+    });
+
+    it("should verify telemetry events are defined for live mode", async () => {
+      // Verify the telemetry events are defined
+      const { TelemetryEvents } = await import("../../src/utils/telemetry.js");
+
+      expect(TelemetryEvents.SseResumeLiveStart).toBeDefined();
+      expect(TelemetryEvents.SseResumeLiveContinue).toBeDefined();
+      expect(TelemetryEvents.SseResumeLiveEnd).toBeDefined();
+      expect(TelemetryEvents.SseSnapshotRenewed).toBeDefined();
     });
   });
 });

@@ -103,8 +103,21 @@ function appendSummary(results, target, duration, rps) {
 
   const throughput = summary.rps?.mean || 0;
 
-  const passGate = p95 <= 8000; // 8s = 8000ms
+  // v1.7: SLO metrics calculation
+  const successCount = summary.codes?.['200'] || 0;
+  const totalRequests = summary.scenariosCompleted || 1;
+  const successRate = ((successCount / totalRequests) * 100).toFixed(2);
+
+  // SLO targets: success ≥99.0%, p95 ≤12s
+  const sloSuccessTarget = 99.0;
+  const sloLatencyTarget = 12000; // 12s in ms
+
+  const passSuccessSLO = parseFloat(successRate) >= sloSuccessTarget;
+  const passLatencySLO = p95 <= sloLatencyTarget;
+  const passGate = p95 <= 8000; // Legacy 8s gate (stricter)
+
   const gateStatus = passGate ? '✅ PASS' : '❌ FAIL';
+  const sloStatus = passSuccessSLO && passLatencySLO ? '✅ PASS' : '⚠️ FAIL';
 
   const summaryText = `
 ---
@@ -119,15 +132,21 @@ function appendSummary(results, target, duration, rps) {
 
 **Latency (ms):**
 - p50: **${p50}ms**
-- p95: **${p95}ms** ${passGate ? '✅' : '⚠️ >8s threshold'}
+- p95: **${p95}ms** ${passGate ? '✅' : passLatencySLO ? '⚠️ >8s (within 12s SLO)' : '❌ >12s SLO'}
 - p99: **${p99}ms**
 - min/max: ${min}ms / ${max}ms
 
 **Reliability:**
+- Success rate: **${successRate}%** ${passSuccessSLO ? '✅' : '❌ <99% SLO'}
 - Error rate: **${errorRate}%**
 - Throughput: **${throughput.toFixed(2)} req/sec**
 
-**Acceptance Gate (p95 ≤ 8s):** ${gateStatus}
+**v1.7 SLO Compliance:**
+- Draft Graph Success Rate ≥99.0%: ${passSuccessSLO ? '✅ PASS' : '❌ FAIL'} (${successRate}%)
+- Draft Graph p95 ≤12s: ${passLatencySLO ? '✅ PASS' : '❌ FAIL'} (${p95}ms)
+- **Overall SLO Status:** ${sloStatus}
+
+**Legacy Perf Gate (p95 ≤ 8s):** ${gateStatus}
 
 ${!passGate ? `
 **Profiling Notes:**
