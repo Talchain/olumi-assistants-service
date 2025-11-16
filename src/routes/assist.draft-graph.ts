@@ -90,16 +90,18 @@ export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInpu
     constraints,
     flags,
     include_debug,
+    focus_areas,
     ...rest
   } = input as DraftGraphInputT & Record<string, unknown>;
 
-  const base: DraftGraphInputT = {
+  const base = {
     brief,
     attachments,
     attachment_payloads,
     constraints,
     flags,
     include_debug,
+    focus_areas,
   };
 
   const passthrough: Record<string, unknown> = {};
@@ -1082,7 +1084,6 @@ export default async function route(app: FastifyInstance) {
       const pollInterval = 1500; // 1.5 seconds
       const heartbeatInterval = 10000; // 10 seconds
       const snapshotRenewalInterval = 30000; // 30 seconds
-      let pollTimer: NodeJS.Timeout | null = null;
 
       try {
         const pollForEvents = async (): Promise<boolean> => {
@@ -1179,9 +1180,6 @@ export default async function route(app: FastifyInstance) {
           error: String(error),
         });
       } finally {
-        if (pollTimer) {
-          clearTimeout(pollTimer);
-        }
         reply.raw.end();
       }
 

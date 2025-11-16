@@ -50,4 +50,15 @@ describe("sanitizeDraftGraphInput", () => {
     expect(sanitized.sim_enabled).toBe(true);
     expect(sanitized.sim_object).toBeUndefined();
   });
+
+  it("preserves focus_areas from validated input", () => {
+    const input = makeBaseInput({
+      // focus_areas is allowed by DraftGraphInput.passthrough; values are validated downstream
+      focus_areas: ["structure", "feasibility"],
+    });
+
+    const sanitized = sanitizeDraftGraphInput(input) as DraftGraphInputT & Record<string, unknown>;
+
+    expect(sanitized.focus_areas).toEqual(["structure", "feasibility"]);
+  });
 });
