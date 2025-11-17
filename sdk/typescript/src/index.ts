@@ -7,21 +7,17 @@
  */
 
 export { OlumiClient } from "./client.js";
-export type { ApiResponse, ResponseMetadata } from "./client.js";
 export {
   OlumiError,
   OlumiAPIError,
   OlumiNetworkError,
   OlumiConfigError,
-  OlumiValidationError,
 } from "./errors.js";
 export type {
   OlumiConfig,
-  RequestOptions,
   Graph,
   GraphNode,
   GraphEdge,
-  Attachment,
   DraftGraphRequest,
   DraftGraphResponse,
   SuggestOptionsRequest,
@@ -34,41 +30,7 @@ export type {
   ExplainDiffResponse,
   EvidencePackRequest,
   EvidencePackResponse,
-  ShareRequest,
-  ShareResponse,
-  ShareRevokeResponse,
-  StatusResponse,
-  LimitsResponse,
+  HealthCheckResponse,
   ErrorResponse,
-  // SSE Resume types (v1.8.0)
-  ResumeToken,
-  SseEventType,
-  SseEvent,
-  SseStageEvent,
-  SseResumeEvent,
-  SseCompleteEvent,
-  SseHeartbeatEvent,
-  ResumeOptions,
-  ResumeResult,
-  // Diagnostics (v1.11.0)
-  Diagnostics,
+  Attachment,
 } from "./types.js";
-
-// HMAC authentication utilities
-export { sign, generateNonce, verifyResponseHash } from "./hmac.js";
-export type { HmacHeaders, HmacSignOptions } from "./hmac.js";
-
-// SSE Resume utilities (v1.8.0)
-export {
-  streamDraftGraph,
-  resumeDraftGraph,
-  extractResumeTokenFromEvent,
-} from "./sse.js";
-export type { SseStreamConfig } from "./sse.js";
-
-// SSE Live Resume & Auto-Reconnect (v1.9.0)
-export {
-  resumeDraftGraphLive,
-  streamDraftGraphWithAutoReconnect,
-} from "./sse.js";
-export type { AutoReconnectConfig } from "./sse.js";

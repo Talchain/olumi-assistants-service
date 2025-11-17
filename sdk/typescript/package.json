@@ -1,55 +1,37 @@
 {
   "name": "@olumi/assistants-sdk",
-  "version": "1.10.0",
+  "version": "1.5.0",
   "description": "Official TypeScript SDK for Olumi Assistants Service",
-  "type": "module",
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/types/index.d.ts",
-  "sideEffects": false,
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/cjs/index.js"
-      }
-    }
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "pnpm clean && pnpm build:esm && pnpm build:cjs && pnpm build:types",
-    "build:esm": "tsc -p tsconfig.esm.json",
-    "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
-    "build:types": "tsc -p tsconfig.types.json",
+    "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "size": "du -sh dist && find dist -name '*.js' -exec du -h {} \\; | sort -h"
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "olumi",
     "assistants",
     "decision-making",
-    "graph",
+    "llm",
     "typescript",
     "sdk"
   ],
   "author": "Olumi",
   "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^20.14.10",
-    "typescript": "^5.4.5",
-    "vitest": "^2.1.8"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Talchain/olumi-assistants-service.git",
+    "directory": "sdk/typescript"
   },
-  "engines": {
-    "node": ">=18"
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vitest": "^1.6.1"
   }
 }
