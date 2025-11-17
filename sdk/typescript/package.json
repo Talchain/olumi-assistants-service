@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/esm dist/cjs && cp dist/index.js dist/cjs/index.js && cp dist/index.js dist/esm/index.js",
     "test": "vitest run",
     "prepublishOnly": "pnpm build",
     "size": "node -e \"try{require('fs').statSync('dist')}catch(e){process.exit(0)};require('child_process').execSync('du -sh dist || true',{stdio:'inherit'})\""
