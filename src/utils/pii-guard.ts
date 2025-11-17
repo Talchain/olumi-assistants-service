@@ -62,7 +62,7 @@ const STRICT_PATTERNS = {
   url: /https?:\/\/[^\s]+/g,
 
   // File paths (potential leakage)
-  file_path: /\b[A-Za-z]:\\[\w\\.-]+|\b\/[\w\/.-]+\b/g,
+  file_path: /\b[A-Za-z]:\\[\w/.-]+|\b\/[\w/. -]+\b/g,
 
   // Potential names (conservative: 3+ chars per word, avoid common technical terms)
   // Matches "John Smith", "Alice Johnson" but not "Decision Graph", "API Key", etc.

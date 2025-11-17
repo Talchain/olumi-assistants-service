@@ -262,7 +262,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -397,7 +397,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -492,7 +492,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {

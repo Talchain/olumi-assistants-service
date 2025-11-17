@@ -280,8 +280,8 @@ describe("Hash utilities integration (real-world scenarios)", () => {
 
   it("should work for share ID hashing (cryptographic with truncation)", () => {
     const shareId = "share_abc123def456";
-    const secret = "telemetry_secret";
-    const hashedId = hmacSha256(shareId, secret, "hex", 16);
+    const _secret = "telemetry_secret";
+    const hashedId = hmacSha256(shareId, _secret, "hex", 16);
 
     expect(hashedId).toHaveLength(16);
     expect(hashedId).toMatch(/^[0-9a-f]{16}$/);
@@ -289,7 +289,7 @@ describe("Hash utilities integration (real-world scenarios)", () => {
 
   it("should demonstrate difference between cryptographic and non-cryptographic", () => {
     const input = "sensitive_data";
-    const secret = "secret_key";
+    const _secret = "secret_key";
 
     // Non-cryptographic (fast, not secret-based)
     const fast1 = fastHash(input, 8);

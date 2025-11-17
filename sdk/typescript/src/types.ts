@@ -7,9 +7,11 @@
 // Graph Types
 export interface GraphNode {
   id: string;
-  type: "question" | "option" | "info" | "concern";
+  kind?: "question" | "option" | "info" | "concern" | "goal";
+  type?: "question" | "option" | "info" | "concern" | "goal";
   label: string;
   body?: string;
+  position?: { x: number; y: number };
 }
 
 export interface GraphEdge {
@@ -67,8 +69,18 @@ export interface Attachment {
 export interface DraftGraphResponse {
   schema: "draft-graph.v1";
   graph: Graph;
-  confidence: number;
+  confidence?: number;
   issues?: string[];
+  rationales?: Array<{
+    target: string;
+    why: string;
+    provenance_source?: string;
+  }>;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+  diagnostics?: Diagnostics;
 }
 
 export interface SuggestOptionsResponse {
@@ -119,6 +131,37 @@ export interface EvidencePackResponse {
   }>;
 }
 
+export interface Diagnostics {
+  resumes: number;
+  trims: number;
+  recovered_events: number;
+  correlation_id: string;
+}
+
+export interface LimitsResponse {
+  schema: "limits.v1";
+  key_id: string;
+  rate_limit_rpm: number;
+  sse_rate_limit_rpm: number;
+  quota_backend: "redis" | "memory";
+  graph_max_nodes: number;
+  graph_max_edges: number;
+  max_nodes: number;
+  max_edges: number;
+  standard_quota?: {
+    capacity_rpm: number;
+    tokens?: number;
+    refill_rate_per_sec?: number;
+    retry_after_seconds?: number;
+  };
+  sse_quota?: {
+    capacity_rpm: number;
+    tokens?: number;
+    refill_rate_per_sec?: number;
+    retry_after_seconds?: number;
+  };
+}
+
 // Error Response
 export interface ErrorResponse {
   schema: "error.v1";
@@ -144,4 +187,62 @@ export interface OlumiConfig {
   apiKey: string;
   baseUrl?: string;
   timeout?: number;
+}
+
+// Request options for individual API calls
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  retries?: number;
+}
+
+// Resume token for reconnecting to interrupted SSE streams
+export type ResumeToken = string;
+
+// SSE event types
+export type SseEventType = "stage" | "resume" | "complete" | "heartbeat";
+
+export interface SseStageEvent {
+  type: "stage";
+  data: {
+    stage: "DRAFTING" | "COMPLETE";
+    payload?: DraftGraphResponse | ErrorResponse;
+  };
+}
+
+export interface SseResumeEvent {
+  type: "resume";
+  data: {
+    token: ResumeToken;
+  };
+}
+
+export interface SseCompleteEvent {
+  type: "complete";
+  data: DraftGraphResponse | ErrorResponse;
+}
+
+export interface SseHeartbeatEvent {
+  type: "heartbeat";
+  data: null;
+}
+
+export type SseEvent =
+  | SseStageEvent
+  | SseResumeEvent
+  | SseCompleteEvent
+  | SseHeartbeatEvent;
+
+// Options for resuming an interrupted stream
+export interface ResumeOptions {
+  token: ResumeToken;
+  signal?: AbortSignal;
+  timeout?: number;
+}
+
+// Result from resume operation
+export interface ResumeResult {
+  events: SseEvent[];
+  completed: boolean;
+  replayedCount: number;
 }

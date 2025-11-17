@@ -15,7 +15,7 @@ class MockAdapter implements LLMAdapter {
   readonly model = "mock-v1";
   private callCount = 0;
 
-  async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
+  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     this.callCount++;
     return {
       graph: {

@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { Graph, type GraphT } from "../schemas/graph.js";
+import { Graph } from "../schemas/graph.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { TelemetryEvents, emit } from "../utils/telemetry.js";

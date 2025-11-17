@@ -9,6 +9,7 @@
     "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:ci": "pnpm lint && pnpm typecheck && pnpm test",
+    "preflight": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi:check",
     "test:live": "LIVE_LLM=1 vitest run tests/integration/adversarial.test.ts tests/validation/golden-briefs-runner.test.ts",
     "test:watch": "vitest",
     "lint": "eslint .",

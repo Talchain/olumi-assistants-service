@@ -289,7 +289,6 @@ export async function draftGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -519,7 +518,7 @@ Respond ONLY with valid JSON.`;
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
+    const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -728,7 +727,7 @@ export async function repairGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
+    const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -969,7 +968,7 @@ export async function clarifyBriefWithAnthropic(
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
+    const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -1173,7 +1172,7 @@ export async function critiqueGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
+    const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {
@@ -1337,7 +1336,7 @@ Return ONLY valid JSON in this format:
     );
 
     clearTimeout(timeoutId);
-    const elapsedMs = Date.now() - startTime;
+    const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
     if (content.type !== "text") {

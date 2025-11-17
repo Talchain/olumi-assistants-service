@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine"]);
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action"]);

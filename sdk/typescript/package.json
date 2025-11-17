@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "size": "node -e \"try{require('fs').statSync('dist')}catch(e){process.exit(0)};require('child_process').execSync('du -sh dist || true',{stdio:'inherit'})\""
   },
   "keywords": [
     "olumi",

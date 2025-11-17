@@ -17,7 +17,7 @@ class MockAdapter implements LLMAdapter {
     private shouldFail: boolean = false
   ) {}
 
-  async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
+  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }
@@ -33,7 +33,7 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(args: any, opts: CallOpts): Promise<any> {
+  async suggestOptions(_args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }
@@ -43,7 +43,7 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: any, opts: CallOpts): Promise<any> {
+  async repairGraph(args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }
@@ -54,7 +54,7 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async clarifyBrief(args: any, opts: CallOpts): Promise<any> {
+  async clarifyBrief(args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }
@@ -67,7 +67,7 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async critiqueGraph(args: any, opts: CallOpts): Promise<any> {
+  async critiqueGraph(_args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }
@@ -79,7 +79,7 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async explainDiff(args: any, opts: CallOpts): Promise<any> {
+  async explainDiff(_args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
     }

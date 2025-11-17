@@ -35,10 +35,9 @@ export class TelemetrySink {
     // Dynamically import to avoid circular dependencies
     this.telemetryModule = await import('../../src/utils/telemetry.js');
 
-    // Register sink callback
-    const self = this;
+    // Register sink callback (arrow function captures lexical this)
     this.telemetryModule.setTestSink((eventName: string, data: Record<string, any>) => {
-      self.capture(eventName, data);
+      this.capture(eventName, data);
     });
   }
 

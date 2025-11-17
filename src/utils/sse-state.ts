@@ -26,7 +26,6 @@ import {
   decompressEvent,
   calculateSavings,
   getEventPriority,
-  sortEventsByPriority,
   EventPriority,
 } from "./buffer-optimization.js";
 

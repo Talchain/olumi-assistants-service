@@ -9,7 +9,7 @@
  * - Graceful degradation when secrets not configured
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
 import { getRedis } from "../../src/platform/redis.js";

@@ -12,7 +12,6 @@ import type {
   SseEvent,
   SseStageEvent,
   SseResumeEvent,
-  SseCompleteEvent,
 } from "./types.js";
 import { OlumiAPIError, OlumiNetworkError, OlumiConfigError } from "./errors.js";
 
@@ -71,8 +70,9 @@ describe("SSE Resume", () => {
             { baseUrl: "https://api.example.com", apiKey: "" },
             { brief: "Test" }
           );
+          const iterator = stream[Symbol.asyncIterator]();
           // Consume one event to trigger execution
-          await stream.next();
+          await iterator.next();
         })()
       ).rejects.toThrow(OlumiConfigError);
     });
@@ -213,7 +213,8 @@ data: {"token":"test-token-456"}
             { brief: "Test" },
             { signal: abortController.signal }
           );
-          await stream.next();
+          const iterator = stream[Symbol.asyncIterator]();
+          await iterator.next();
         })()
       ).rejects.toThrow("Request aborted by user");
     });
@@ -227,7 +228,8 @@ data: {"token":"test-token-456"}
             { baseUrl: "https://api.example.com", apiKey: "test-key", timeout: 100 },
             { brief: "Test" }
           );
-          await stream.next();
+          const iterator = stream[Symbol.asyncIterator]();
+          await iterator.next();
         })()
       ).rejects.toThrow(OlumiNetworkError);
     });
@@ -250,7 +252,8 @@ data: {"token":"test-token-456"}
             { baseUrl: "https://api.example.com", apiKey: "test-key" },
             { brief: "" }
           );
-          await stream.next();
+          const iterator = stream[Symbol.asyncIterator]();
+          await iterator.next();
         })()
       ).rejects.toThrow(OlumiAPIError);
     });

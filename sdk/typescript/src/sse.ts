@@ -38,7 +38,7 @@ export interface SseStreamConfig {
 function parseSseEvent(eventText: string): SseEvent | null {
   const lines = eventText.trim().split("\n");
   let eventType: string | null = null;
-  let dataLines: string[] = [];
+  const dataLines: string[] = [];
 
   for (const line of lines) {
     if (line.startsWith("event: ")) {
@@ -218,18 +218,21 @@ export async function* streamDraftGraph(
   } catch (error) {
     // Handle abort
     if (signal?.aborted) {
-      throw new OlumiNetworkError("Request aborted by user");
+      throw new OlumiNetworkError("Request aborted by user", { cause: error });
     }
 
     // Handle timeout
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, error, true);
+      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, {
+        timeout: true,
+        cause: error,
+      });
     }
 
     // Handle network errors
     throw new OlumiNetworkError(
       "Network request failed - check your connection",
-      error as Error
+      { cause: error }
     );
   }
 
@@ -278,6 +281,7 @@ export async function* streamDraftGraph(
   let buffer = "";
 
   try {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -409,18 +413,21 @@ export async function resumeDraftGraph(
   } catch (error) {
     // Handle abort
     if (signal?.aborted) {
-      throw new OlumiNetworkError("Request aborted by user");
+      throw new OlumiNetworkError("Request aborted by user", { cause: error });
     }
 
     // Handle timeout
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, error, true);
+      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, {
+        timeout: true,
+        cause: error,
+      });
     }
 
     // Handle network errors
     throw new OlumiNetworkError(
       "Network request failed - check your connection",
-      error as Error
+      { cause: error }
     );
   }
 
@@ -461,6 +468,7 @@ export async function resumeDraftGraph(
   let completed = false;
 
   try {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -594,18 +602,21 @@ export async function* resumeDraftGraphLive(
   } catch (error) {
     // Handle abort
     if (signal?.aborted) {
-      throw new OlumiNetworkError("Request aborted by user");
+      throw new OlumiNetworkError("Request aborted by user", { cause: error });
     }
 
     // Handle timeout
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, error, true);
+      throw new OlumiNetworkError(`Request timeout after ${timeout}ms`, {
+        timeout: true,
+        cause: error,
+      });
     }
 
     // Handle network errors
     throw new OlumiNetworkError(
       "Network request failed - check your connection",
-      error as Error
+      { cause: error }
     );
   }
 
@@ -773,7 +784,7 @@ export async function* streamDraftGraphWithAutoReconnect(
         const apiErrorLike =
           error instanceof OlumiAPIError ||
           (error && typeof (error as any).statusCode === "number");
-        const statusCode = apiErrorLike ? (error as any).statusCode as number : undefined;
+        const statusCode = apiErrorLike ? ((error as any).statusCode as number) : undefined;
 
         const isRetryable =
           error instanceof OlumiNetworkError ||
@@ -791,16 +802,14 @@ export async function* streamDraftGraphWithAutoReconnect(
 
         retryCount++;
 
-        // Calculate backoff delay (prefer server-provided retry_after_seconds when available)
-        let delay = backoffDelays[Math.min(retryCount - 1, backoffDelays.length - 1)];
-        if (apiErrorLike && typeof (error as any).getRetryAfter === "function") {
-          const retryAfter = (error as any).getRetryAfter();
-          if (retryAfter !== null) {
-            delay = retryAfter;
-          }
-        }
+        // Prefer server-provided retry-after (seconds) if present, else fall back to static backoff
+        const serverRetryAfterSec = (error as any)?.details?.retry_after_seconds ?? null;
+        const delay =
+          Number.isFinite(serverRetryAfterSec) && serverRetryAfterSec! > 0
+            ? serverRetryAfterSec! * 1000
+            : backoffDelays[Math.min(retryCount - 1, backoffDelays.length - 1)];
 
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
 
         // Attempt resume if we have a token
         if (resumeToken) {
