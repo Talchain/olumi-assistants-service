@@ -36,6 +36,7 @@ beforeAll(async () => {
   }
 });
 
+// TODO-1010: Re-enable SSE state tests without conditional skip once Redis test infra is stable across environments
 describe.skipIf(() => !redisAvailable)("SSE State Management", () => {
   const testRequestId = "test-req-123";
 
