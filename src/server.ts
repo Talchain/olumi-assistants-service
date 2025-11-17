@@ -11,6 +11,9 @@ import clarifyRoute from "./routes/assist.clarify-brief.js";
 import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
+import shareRoute from "./routes/assist.share.js";
+import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
+import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
@@ -120,6 +123,7 @@ await app.register(rateLimit, {
   // Request ID tracking: attach to every request
   app.addHook("onRequest", async (request, _reply) => {
     attachRequestId(request);
+    incrementRequestCount();
   });
 
   // Response hook: Add X-Request-Id header to every response
@@ -193,6 +197,9 @@ app.setErrorHandler((error, request, reply) => {
   const errorV1 = toErrorV1(error, request);
   const statusCode = getStatusCodeForErrorCode(errorV1.code);
 
+  // Track error for /v1/status metrics (separates 4xx vs 5xx)
+  incrementErrorCount(statusCode);
+
   // Log errors with context (redaction handled by logger)
   if (statusCode >= 500) {
     app.log.error({
@@ -232,12 +239,15 @@ app.get("/healthz", async () => {
   };
 });
 
+  await statusRoutes(app);
+  await limitsRoute(app);
   await draftRoute(app);
   await suggestRoute(app);
   await clarifyRoute(app);
   await critiqueRoute(app);
   await explainRoute(app);
   await evidencePackRoute(app);
+  await shareRoute(app);
 
   return app;
 }

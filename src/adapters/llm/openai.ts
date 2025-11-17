@@ -4,10 +4,12 @@ import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
+import { generateDeterministicLayout } from "../../utils/layout.js";
 
 // Zod schemas for OpenAI response validation (same as Anthropic)
 const OpenAINode = z.object({
@@ -76,8 +78,6 @@ function getClient(): OpenAI {
 }
 
 const TIMEOUT_MS = 15000;
-const MAX_NODES = 12;
-const MAX_EDGES = 24;
 
 function buildDraftPrompt(brief: string, docs: DocPreview[]): string {
   const docContext = docs.length
@@ -97,8 +97,8 @@ ${docContext}
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${MAX_NODES} nodes (goal, decision, option, outcome)
-- ≤${MAX_EDGES} edges
+- ≤${GRAPH_MAX_NODES} nodes (goal, decision, option, outcome)
+- ≤${GRAPH_MAX_EDGES} edges
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
@@ -139,7 +139,7 @@ ${violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}
 Fix ALL violations while preserving as much structure as possible:
 - Remove cycles (make it a DAG)
 - Remove edges referencing non-existent nodes
-- Cap at ${MAX_NODES} nodes and ${MAX_EDGES} edges
+- Cap at ${GRAPH_MAX_NODES} nodes and ${GRAPH_MAX_EDGES} edges
 - Maintain structured provenance on all edges
 - Keep stable node IDs (don't change IDs unless necessary)
 
@@ -262,7 +262,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -282,18 +282,26 @@ export class OpenAIAdapter implements LLMAdapter {
       const parsed = parseResult.data;
 
       // Validate and cap node/edge counts
-      if (parsed.nodes.length > MAX_NODES) {
-        log.warn({ count: parsed.nodes.length, max: MAX_NODES }, "OpenAI returned too many nodes, capping");
-        parsed.nodes = parsed.nodes.slice(0, MAX_NODES);
+      if (parsed.nodes.length > GRAPH_MAX_NODES) {
+        log.warn({ count: parsed.nodes.length, max: GRAPH_MAX_NODES }, "OpenAI returned too many nodes, capping");
+        parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
       }
 
-      if (parsed.edges.length > MAX_EDGES) {
-        log.warn({ count: parsed.edges.length, max: MAX_EDGES }, "OpenAI returned too many edges, capping");
-        parsed.edges = parsed.edges.slice(0, MAX_EDGES);
+      if (parsed.edges.length > GRAPH_MAX_EDGES) {
+        log.warn({ count: parsed.edges.length, max: GRAPH_MAX_EDGES }, "OpenAI returned too many edges, capping");
+        parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
       // Sort for determinism
       const sorted = sortGraph({ nodes: parsed.nodes, edges: parsed.edges });
+
+      // Calculate roots and leaves
+      const roots = sorted.nodes
+        .filter((n) => !sorted.edges.some((e) => e.to === n.id))
+        .map((n) => n.id);
+      const leaves = sorted.nodes
+        .filter((n) => !sorted.edges.some((e) => e.from === n.id))
+        .map((n) => n.id);
 
       const graph: GraphT = {
         version: "1",
@@ -301,9 +309,9 @@ export class OpenAIAdapter implements LLMAdapter {
         nodes: sorted.nodes,
         edges: sorted.edges,
         meta: {
-          roots: [],
-          leaves: [],
-          suggested_positions: {},
+          roots,
+          leaves,
+          suggested_positions: generateDeterministicLayout(sorted.nodes, sorted.edges, roots),
           source: "assistant",
         },
       };
@@ -389,7 +397,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -484,7 +492,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
-      const elapsedMs = Date.now() - startTime;
+      const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -503,12 +511,12 @@ export class OpenAIAdapter implements LLMAdapter {
       const parsed = parseResult.data;
 
       // Cap node/edge counts
-      if (parsed.nodes.length > MAX_NODES) {
-        parsed.nodes = parsed.nodes.slice(0, MAX_NODES);
+      if (parsed.nodes.length > GRAPH_MAX_NODES) {
+        parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
       }
 
-      if (parsed.edges.length > MAX_EDGES) {
-        parsed.edges = parsed.edges.slice(0, MAX_EDGES);
+      if (parsed.edges.length > GRAPH_MAX_EDGES) {
+        parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
       // Sort for determinism

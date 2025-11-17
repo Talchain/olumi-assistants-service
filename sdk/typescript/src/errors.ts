@@ -33,19 +33,51 @@ export class OlumiAPIError extends OlumiError {
     this.requestId = error.request_id;
     Object.setPrototypeOf(this, OlumiAPIError.prototype);
   }
+
+  /**
+   * Check if this error is retryable (5xx or 429)
+   */
+  isRetryable(): boolean {
+    return this.statusCode >= 500 || this.statusCode === 429;
+  }
+
+  /**
+   * Get retry-after delay in milliseconds (if available)
+   */
+  getRetryAfter(): number | null {
+    const retryAfterSec = (this.details as any)?.retry_after_seconds;
+    if (typeof retryAfterSec === "number" && Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+      return retryAfterSec * 1000;
+    }
+    return null;
+  }
+}
+
+export interface OlumiNetworkErrorOptions {
+  cause?: unknown;
+  timeout?: boolean;
 }
 
 /**
  * Network error (connection failed, timeout, etc.)
  */
 export class OlumiNetworkError extends OlumiError {
-  public readonly cause?: Error;
+  public readonly cause?: unknown;
+  public readonly isTimeout: boolean;
 
-  constructor(message: string, cause?: Error) {
+  constructor(message: string, options: OlumiNetworkErrorOptions = {}) {
     super(message);
     this.name = "OlumiNetworkError";
-    this.cause = cause;
+    this.cause = options.cause;
+    this.isTimeout = options.timeout === true;
     Object.setPrototypeOf(this, OlumiNetworkError.prototype);
+  }
+
+  /**
+   * Network errors are always retryable
+   */
+  isRetryable(): boolean {
+    return true;
   }
 }
 
@@ -57,5 +89,19 @@ export class OlumiConfigError extends OlumiError {
     super(message);
     this.name = "OlumiConfigError";
     Object.setPrototypeOf(this, OlumiConfigError.prototype);
+  }
+}
+
+/**
+ * Validation error (invalid input before request)
+ */
+export class OlumiValidationError extends OlumiError {
+  public readonly field?: string;
+
+  constructor(message: string, field?: string) {
+    super(message);
+    this.name = "OlumiValidationError";
+    this.field = field;
+    Object.setPrototypeOf(this, OlumiValidationError.prototype);
   }
 }

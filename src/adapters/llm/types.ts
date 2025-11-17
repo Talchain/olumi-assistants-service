@@ -198,13 +198,14 @@ export interface CallOpts {
   requestId: string;
   timeoutMs: number;
   abortSignal?: AbortSignal;
+  bypassCache?: boolean; // Skip prompt cache (for testing/debugging)
 }
 
 /**
  * Provider-agnostic LLM adapter interface.
  *
  * All methods must:
- * - Respect spec v04 constraints (≤12 nodes, ≤24 edges, DAG only)
+ * - Respect graph caps from centralized configuration (default: ≤50 nodes, ≤200 edges, DAG only)
  * - Return stable, deterministic IDs (e.g., "goal_1", "${from}::${to}::${index}")
  * - Enforce sorted outputs (nodes by ID ascending, edges by from/to/id)
  * - Never fabricate needle-movers/influence scores (only engine can provide these)

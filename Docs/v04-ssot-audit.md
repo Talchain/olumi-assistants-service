@@ -14,20 +14,20 @@
 ## 1. Caps Enforcement
 
 ### Node/Edge Limits
-**Location**: `src/adapters/llm/anthropic.ts`, `src/adapters/llm/openai.ts`
+**Location**: `src/config/graphCaps.ts`, `src/adapters/llm/anthropic.ts`, `src/adapters/llm/openai.ts`
 
 ```typescript
-const MAX_NODES = 12;
-const MAX_EDGES = 24;
+export const GRAPH_MAX_NODES = /* default 50, configurable via env */;
+export const GRAPH_MAX_EDGES = /* default 200, configurable via env */;
 ```
 
-**Enforcement**: Both adapters slice arrays when limits exceeded:
+**Enforcement**: Both adapters slice arrays when limits (from `GRAPH_MAX_NODES` / `GRAPH_MAX_EDGES`) are exceeded:
 - `anthropic.ts:265-272` - Draft graph capping
 - `anthropic.ts:607-611` - Suggest options capping
 - `openai.ts:258-265` - Draft graph capping (with warnings)
 - `openai.ts:402-407` - Suggest options capping
 
-**Verdict**: ✅ PASS - Caps enforced in LLM adapters
+**Verdict**: ✅ PASS - Caps enforced in LLM adapters via centralized config
 
 ### Payload Size Cap
 **Requirement**: ≤1MB per request
@@ -140,7 +140,7 @@ Correct SSE state flow:
 **Status**: ✅ READY FOR PR
 
 All critical v04 SSOT requirements met:
-- ✅ Caps enforced (≤12 nodes, ≤24 edges, ≤1MB payload)
+- ✅ Caps enforced (default ≤50 nodes, ≤200 edges, ≤1MB payload via centralized limits)
 - ✅ Telemetry complete (provider + cost_usd with fallbacks)
 - ✅ SSE RFC 8895 compliant
 - ✅ Version centralized to 1.0.1

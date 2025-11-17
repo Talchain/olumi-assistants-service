@@ -21,7 +21,7 @@ Without access to the PLoT engine's `/v1/validate` endpoint, the following valid
 
 1. **Graph Schema Compatibility**: Verify that assistants-generated graphs conform to engine's expected schema
 2. **Validation Success Rate**: Target ≥90% first-pass validation success
-3. **Cap Enforcement**: Verify graphs stay within ≤12 nodes, ≤24 edges limits
+3. **Cap Enforcement**: Verify graphs stay within ≤50 nodes, ≤200 edges limits
 4. **Edge Case Handling**: Test engine's handling of various graph topologies
 
 ---
@@ -45,8 +45,8 @@ ENGINE_BASE_URL=https://plot-engine.example.com pnpm exec tsx scripts/validate-w
 The `scripts/validate-with-engine.ts` script was enhanced with the following features:
 
 ### Cap Enforcement
-- **Max Nodes:** ≤12
-- **Max Edges:** ≤24
+- **Max Nodes:** ≤50
+- **Max Edges:** ≤200
 - Reports cap violations separately from validation failures
 
 ### Enhanced Reporting
@@ -74,8 +74,8 @@ The enhanced validation script will:
    - Cycles through 25 unique briefs to cover various decision types
 
 2. **Check Cap Compliance**
-   - Enforces ≤12 nodes per graph
-   - Enforces ≤24 edges per graph
+   - Enforces ≤50 nodes per graph
+   - Enforces ≤200 edges per graph
    - Reports violations with specific details
 
 3. **Validate with Engine** (when ENGINE_BASE_URL is set)
@@ -149,7 +149,7 @@ While engine validation is skipped, v1.2 includes:
 ### Short-term (Next Week)
 - 📊 Set up ENGINE_BASE_URL when engine service becomes available
 - 📊 Run full 50-draft validation
-- 📊 Verify cap enforcement (≤12 nodes, ≤24 edges)
+- 📊 Verify cap enforcement (≤50 nodes, ≤200 edges)
 - 📊 Confirm ≥90% validation success rate
 
 ### Medium-term (Next Month)

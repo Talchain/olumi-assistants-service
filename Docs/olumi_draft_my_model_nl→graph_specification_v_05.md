@@ -11,7 +11,7 @@
 ## 1) Purpose and outcomes
 
 **Purpose**\
-Deliver a low‑friction copilot that turns a short plain‑English brief (plus optional documents and data) into a small, valid decision graph (≤ 12 nodes, ≤ 24 edges) that users can review, understand, and run deterministically in the PLoT engine.
+Deliver a low‑friction copilot that turns a short plain‑English brief (plus optional documents and data) into a small, valid decision graph (by default ≤ 50 nodes, ≤ 200 edges) that users can review, understand, and run deterministically in the PLoT engine.
 
 **User outcomes**
 
@@ -43,7 +43,7 @@ Deliver a low‑friction copilot that turns a short plain‑English brief (plus 
 - **Document grounding (text‑only):** PDF → text, TXT/MD direct, CSV → safe summaries (count/mean/p50/p90). Cap **5k characters per file**; strict citation format.
 - **Assistant service**: schema validation, single repair retry, safe fallback. **Streaming** for perceived latency with **user‑visible Drafting → Complete** (fixture at 2.5 s).
 - **Feature flags in API:** `clarifier_enabled`, `risks_enabled`, `actions_enabled`, `rag_enabled`, `share_review_enabled`, `shadow_canary_enabled`, `fixtures_fallback_enabled`.
-- **Caps:** ≤ 12 nodes, ≤ 24 edges, payload ≤ 1 MB, **first draft p95 ≤ 8 s**; caps auto‑discovered from `/v1/limits` at boot with config fallback.
+- **Caps:** By default ≤ 50 nodes, ≤ 200 edges, payload ≤ 1 MB, **first draft p95 ≤ 8 s**; actual caps are auto‑discovered from `/v1/limits` at boot with config fallback.
 
 **Out of scope (this release)**
 

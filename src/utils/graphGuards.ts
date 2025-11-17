@@ -10,6 +10,7 @@
  */
 
 import type { GraphT, NodeT, EdgeT } from "../schemas/graph.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { log } from "./telemetry.js";
 
 /**
@@ -302,7 +303,7 @@ export function enforceGraphCompliance(
     maxEdges?: number;
   } = {}
 ): GraphT {
-  const { maxNodes = 12, maxEdges = 24 } = options;
+  const { maxNodes = GRAPH_MAX_NODES, maxEdges = GRAPH_MAX_EDGES } = options;
 
   let { nodes, edges } = graph;
 

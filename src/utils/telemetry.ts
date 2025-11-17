@@ -5,6 +5,20 @@ import { StatsD } from "hot-shots";
 export const log = pino({ level: env.LOG_LEVEL || "info" });
 
 /**
+ * Test sink for capturing telemetry events in tests (v1.11.0)
+ * Only used when NODE_ENV=test or VITEST=true
+ */
+let testSink: ((eventName: string, data: Record<string, any>) => void) | null = null;
+
+export function setTestSink(sink: ((eventName: string, data: Record<string, any>) => void) | null): void {
+  // Safety check: only allow in test environment
+  if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+    throw new Error('setTestSink() can only be used in test environment');
+  }
+  testSink = sink;
+}
+
+/**
  * Frozen telemetry event names (v04 spec)
  * DO NOT modify these names without updating CI guards and dashboards
  */
@@ -69,8 +83,45 @@ export const TelemetryEvents = {
   LlmRetrySuccess: "assist.llm.retry_success",
   LlmRetryExhausted: "assist.llm.retry_exhausted",
 
+  // Provider failover events (v1.6.0)
+  ProviderFailover: "assist.llm.provider_failover",
+  ProviderFailoverSuccess: "assist.llm.provider_failover_success",
+  ProviderFailoverExhausted: "assist.llm.provider_failover_exhausted",
+
   // SSE client events (v1.2.1)
   SseClientClosed: "assist.draft.sse_client_closed",
+
+  // Share events (v1.6.0)
+  ShareCreated: "assist.share.created",
+  ShareAccessed: "assist.share.accessed",
+  ShareRevoked: "assist.share.revoked",
+  ShareExpired: "assist.share.expired",
+  ShareNotFound: "assist.share.not_found",
+
+  // Prompt cache events (v1.6.0)
+  PromptCacheHit: "assist.llm.prompt_cache_hit",
+  PromptCacheMiss: "assist.llm.prompt_cache_miss",
+  PromptCacheEviction: "assist.llm.prompt_cache_eviction",
+
+  // SSE Resume events (v1.8.0)
+  SseResumeIssued: "assist.sse.resume_issued",
+  SseResumeAttempt: "assist.sse.resume_attempt",
+  SseResumeSuccess: "assist.sse.resume_success",
+  SseResumeExpired: "assist.sse.resume_expired",
+  SseResumeIncompatible: "assist.sse.resume_incompatible",
+  SseResumeReplayCount: "assist.sse.resume_replay_count",
+  SsePartialRecovery: "assist.sse.partial_recovery",
+  SseBufferTrimmed: "assist.sse.buffer_trimmed",
+  SseSnapshotCreated: "assist.sse.snapshot_created",
+
+  // SSE Live Resume events (v1.9.0)
+  SseResumeLiveStart: "assist.sse.resume_live_start",
+  SseResumeLiveContinue: "assist.sse.resume_live_continue",
+  SseResumeLiveEnd: "assist.sse.resume_live_end",
+  SseSnapshotRenewed: "assist.sse.snapshot_renewed",
+
+  // SSE degraded mode events (v1.11.0)
+  SseDegradedMode: "assist.sse.degraded_mode",
 
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
@@ -190,6 +241,11 @@ export function calculateCost(model: string, tokensIn: number, tokensOut: number
  * @param data Event data
  */
 export function emit(event: string, data: Event) {
+  // Call test sink if installed (v1.11.0)
+  if (testSink) {
+    testSink(event, data);
+  }
+
   // Always log to pino
   log.info({ event, ...data });
 
@@ -484,8 +540,58 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.ProviderFailover: {
+          datadogClient.increment("llm.provider_failover", 1, {
+            from_provider: String(data.from_provider || "unknown"),
+            to_provider: String(data.to_provider || "unknown"),
+            operation: String(data.operation || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.ProviderFailoverSuccess: {
+          datadogClient.increment("llm.provider_failover.success", 1, {
+            primary_provider: String(data.primary_provider || "unknown"),
+            fallback_provider: String(data.fallback_provider || "unknown"),
+            operation: String(data.operation || "unknown"),
+            fallback_index: String(data.fallback_index || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.ProviderFailoverExhausted: {
+          datadogClient.increment("llm.provider_failover.exhausted", 1, {
+            operation: String(data.operation || "unknown"),
+            total_attempts: String(data.total_attempts || "unknown"),
+          });
+          break;
+        }
+
         case TelemetryEvents.SseClientClosed: {
           datadogClient.increment("draft.sse.client_closed", 1);
+          break;
+        }
+
+        case TelemetryEvents.PromptCacheHit: {
+          datadogClient.increment("llm.prompt_cache.hit", 1, {
+            operation: String(data.operation || "unknown"),
+            provider: String(data.provider || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptCacheMiss: {
+          datadogClient.increment("llm.prompt_cache.miss", 1, {
+            operation: String(data.operation || "unknown"),
+            provider: String(data.provider || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptCacheEviction: {
+          datadogClient.increment("llm.prompt_cache.eviction", 1, {
+            reason: String(data.reason || "unknown"),
+          });
           break;
         }
 

@@ -5,6 +5,206 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2025-11-15
+
+### Added
+
+- **SSE Diagnostics & Limits**
+  - Final JSON success responses now include `diagnostics = { resumes, trims, recovered_events, correlation_id }`.
+  - SSE `COMPLETE` events and resume snapshot fallbacks carry the same diagnostics payload for parity.
+  - `/v1/limits` exposes graph caps (50 nodes / 200 edges) plus live quota hints and quota backend name.
+
+- **Windowed Performance Gate**
+  - Live SSE resume perf harness emits windowed metrics (10s windows) including resume success rate, trim rate, reconnect p50/p95, and error rate.
+  - GitHub Actions perf gate job now summarizes windowed metrics with ✅/❌ per gate and interpolated window size.
+
+### Changed
+
+- **Degraded Mode & Chaos Telemetry**
+  - When Redis is unavailable, `/assist/draft-graph/stream` returns HTTP 200 with `X-Olumi-Degraded: redis`, disables resume, and emits degraded-mode telemetry while leaving no stray Redis state.
+
+- **SDK SSE Auto-Reconnect**
+  - TypeScript SDK `streamDraftGraphWithAutoReconnect` prefers server-provided `retry_after_seconds` over static backoff when handling `RATE_LIMITED` errors.
+  - SDK safely reads `X-Olumi-Degraded` headers and surfaces them via an optional `onDegraded(kind)` hook without assuming headers are always present in test or production environments.
+
+- **Perf Gate Workflow**
+  - SSE Live Resume Performance Gate uses diagnostics-based trim counting (`diagnostics.trims`) from final `COMPLETE` events.
+  - CI perf gate enforcement is now mode-sensitive: `PERF_MODE=dry` (PRs) yields soft gates (no CI failure), while `PERF_MODE=full` (main/nightly) enforces hard gates.
+
+### Fixed
+
+- **SSE Heartbeat Leak**
+  - Heartbeat interval timers on `/assist/draft-graph/stream` are cleared on write failure and when the stream ends, preventing timer leaks.
+
+- **Chaos & Test Housekeeping**
+  - Chaos Redis blip tests use briefs that satisfy schema minimum length, ensuring degraded-mode paths are exercised without schema failures.
+  - Unused imports were removed from SSE resume integration tests and other unit tests to keep the suite clean.
+
+### Testing
+
+- Full Vitest suite passes (900+ tests) with new diagnostics, limits, degraded mode, and perf gate behaviors covered by unit, integration, and chaos tests.
+
+## [1.10.0] - 2025-11-14
+
+### Added
+
+- **Performance & Chaos Validation**
+  - SSE live resume performance test (`perf/sse-live-resume.mjs`) with 60s concurrent stream simulation
+  - Performance gates: resume success ≥98%, buffer trim ≤0.5%, p95 latency <12s
+  - Extended perf-gate CI workflow with SSE-specific metrics and job summary
+  - Chaos tests for mid-stream disconnects (`tests/chaos/disconnect.test.ts`) - 10%, 50%, 90% positions
+  - Chaos tests for Redis blips (`tests/chaos/redis-blip.test.ts`) - graceful degradation validation
+
+- **Buffer & Bandwidth Optimization**
+  - Event payload trimming (`src/utils/buffer-optimization.ts`) - keeps essential fields only
+  - Optional gzip compression behind `SSE_BUFFER_COMPRESS=true` flag (~40% savings)
+  - Priority-based trimming: heartbeats → trace → stage deltas (COMPLETE/ERROR never trimmed)
+  - Buffer savings telemetry: `original_size`, `optimized_size`, `savings_percent`
+  - Backward-compatible decompression with legacy event support
+
+- **SDK Exemplars & DX Polish**
+  - React + Vite example (`examples/react-vite-sse-resume/`) with auto-reconnect hook
+  - Next.js App Router example (`examples/nextjs-ssr-sse-resume/`) with server actions
+  - SDK dual build: ESM (`dist/esm/`) + CJS (`dist/cjs/`) with tree-shaking support
+  - `sideEffects: false` for optimized bundling
+  - SDK build CI job (`.github/workflows/sdk-build.yml`) with size snapshot artifacts
+
+- **Ops: Dashboards, Alerts, Runbooks**
+  - Production runbook: `Docs/runbooks/resume-failures.md` - 401/404/410 diagnostics
+  - Production runbook: `Docs/runbooks/buffer-pressure.md` - buffer trim mitigation
+  - Production runbook: `Docs/runbooks/redis-incidents.md` - Redis outage response
+  - Incident response procedures with escalation paths and SLO targets
+
+- **HMAC/Redis Operational Hardening**
+  - HMAC rotation helper (`scripts/rotate-hmac.mjs`) - zero-downtime gradual rotation
+  - Secret generation, verification, and rotation guidance
+  - Cryptographically secure 32-byte (256-bit) secret generation
+
+### Changed
+
+- **SDK version** bumped to 1.10.0 with dual module format
+- SSE buffer events now use base64-encoded compressed format in Redis
+- Event payload trimming enabled by default (`SSE_BUFFER_TRIM_PAYLOADS=true`)
+- Buffer optimization logged at debug level with size savings metrics
+- Graph caps contract raised to 50 nodes / 200 edges (configurable via `LIMIT_MAX_NODES` / `LIMIT_MAX_EDGES` and surfaced by `/v1/limits`).
+
+### Performance
+
+- **Buffer optimization** reduces Redis memory usage by 30-50% (with trimming + compression)
+- **Dual build** enables tree-shaking for smaller client bundles
+- **Priority trimming** protects critical events (COMPLETE/ERROR) from removal
+
+### Security
+
+- **HMAC rotation** without token invalidation using gradual two-secret approach
+- **Constant-time verification** maintained in all optimization paths
+- **No secret logging** in rotation helper output (shows first 8 chars only)
+
+### Fixed
+
+- **CRITICAL: Buffer accounting bug** - Fixed size tracking to use compressed byte length (not base64 string length) when trimming events, preventing buffer size drift and false quota exhaustion under load
+- TypeScript type safety for `response.headers["content-type"]` in chaos tests
+- Base64 encoding/decoding for compressed events in Redis storage
+- Fallback handling for legacy uncompressed events during migration
+
+### Documentation
+
+- Added comprehensive runbooks for production incidents
+- React SSE hook with exponential backoff and visual feedback
+- Next.js SSR streaming patterns with server-side HMAC
+- SDK build size optimization guide
+
+### Notes
+
+- Buffer compression is opt-in (`SSE_BUFFER_COMPRESS=true`) due to CPU trade-off - see runbook for guidance
+- Chaos tests skip gracefully when Redis/secrets unavailable
+- Dual build increases SDK package size but enables better tree-shaking
+- Operational runbooks assume Render deployment (adapt for other platforms)
+- Priority-based trimming uses O(n) scan on overflow - acceptable at default limits (256 events), consider metadata optimization for higher limits (v1.11+)
+
+## [1.8.0] - 2025-11-13
+
+### Added
+- **SSE Resilience II: Resumable Streaming** (Feature A)
+  - HMAC-signed resume tokens (X-Resume-Token header)
+  - Redis-backed stream state management with event buffering
+  - Automatic buffer trimming (256 events, 1.5 MB limits)
+  - Resume endpoint: `POST /assist/draft-graph/resume`
+  - Snapshot fallback for late resume after stream completion
+  - 15-minute token TTL with constant-time verification
+  - Base64url-encoded tokens (URL-safe, no padding)
+
+- **Resume Token Utilities** (`src/utils/sse-resume-token.ts`)
+  - `createResumeToken()` - Generate resume token with request_id, step, seq
+  - `verifyResumeToken()` - HMAC signature verification with expiration check
+  - Falls back to HMAC_SECRET if SSE_RESUME_SECRET not configured
+
+- **SSE State Management** (`src/utils/sse-state.ts`)
+  - `initStreamState()` - Initialize stream with Redis state tracking
+  - `bufferEvent()` - Buffer events with automatic size/count trimming
+  - `getBufferedEvents()` - Retrieve events from sequence for replay
+  - `markStreamComplete()` - Save completion snapshot (15-minute TTL, matches token expiry)
+  - `getSnapshot()` - Retrieve snapshot for late resume
+  - `cleanupStreamState()` - Clean up after stream ends
+
+- **Resume Telemetry Events**
+  - `SseResumeIssued` - Token generated on first event
+  - `SseResumeAttempt` - Client attempts reconnection
+  - `SseResumeSuccess` - Resume successful with event replay
+  - `SseResumeExpired` - Token expired or state unavailable
+  - `SseResumeIncompatible` - Step mismatch on resume
+  - `SseResumeReplayCount` - Number of events replayed
+  - `SsePartialRecovery` - Snapshot fallback used
+  - `SseBufferTrimmed` - Buffer limit exceeded, oldest events removed
+  - `SseSnapshotCreated` - Completion snapshot saved
+
+- **Test Coverage**
+  - `tests/unit/sse-resume-token.test.ts` - 18 unit tests for token generation/verification
+  - `tests/unit/sse-state.test.ts` - 20 unit tests for state management (Redis-dependent)
+  - `tests/integration/sse-resume.test.ts` - 14 integration tests including E2E replay-only flow
+  - `qa-smoke.mjs` - Optional A4R smoke test for production resume validation (opt-in via `SMOKE_RESUME_ENABLED`)
+
+- **SDK (TypeScript) - SSE Streaming Support** (`sdk/typescript@1.8.0`)
+  - `streamDraftGraph()` - Async generator for SSE streaming with token capture
+  - `resumeDraftGraph()` - Resume interrupted streams with replay-only behavior
+  - `extractResumeTokenFromEvent()` - Helper to extract token from SSE events
+  - Full type support for SSE events (`SseEvent`, `SseStageEvent`, `SseResumeEvent`, etc.)
+  - HMAC authentication support for streaming endpoints
+  - Comprehensive README with resilient streaming patterns
+  - 17 new SDK tests (59 total SDK tests passing)
+
+### Security
+- **Constant-time signature verification** - HMAC comparison uses bitwise XOR to prevent timing attacks
+- **Graceful secret handling** - Resume endpoint returns 426 (Upgrade Required) when secrets not configured
+- **Rate limiting** - Resume endpoint shares SSE rate limit (20 req/min) to prevent abuse
+- **Buffer trimming observability** - `SseBufferTrimmed` telemetry emitted when events are dropped
+- **Token expiration enforcement** - 15-minute TTL prevents replay of old tokens
+- **No PII in tokens** - Only request_id, step, and sequence stored
+
+### Changed
+- SSE streaming endpoint now buffers all events for resume capability
+- First event now includes `event: resume` with X-Resume-Token
+- Stream completion now saves snapshot for late reconnection (15-minute TTL, up from 60s)
+- All stage events are buffered in Redis with size/count limits
+- Resume endpoint now includes rate limiting (20 req/min, matching stream endpoint)
+
+### Security
+- Resume tokens use HMAC-SHA256 with constant-time verification
+- No PII stored in tokens (only request_id, step, seq, expires_at)
+- Token expiry enforced at 15 minutes
+- Redis keys use TTL-based expiration (15 min state, 60s snapshot)
+
+### Fixed
+- **Snapshot TTL alignment** - Increased completion snapshot TTL from 60s to 900s (15 minutes) to match token expiry, enabling late resume within token validity window
+- **Rate limit enforcement** - Added rate limiting to resume endpoint to prevent abuse and match stream endpoint protection
+
+### Notes
+- Resume functionality requires Redis for production use
+- In-memory fallback not implemented (Redis-only feature)
+- Tests skip gracefully when Redis unavailable
+- Backward compatible - existing clients work without resume support
+- **Smoke test:** A4R resume check is opt-in via `SMOKE_RESUME_ENABLED=true` environment variable
+
 ## [1.3.1] - 2025-11-11
 
 ### Added

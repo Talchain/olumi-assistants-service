@@ -141,14 +141,17 @@ export class OlumiClient {
       }
 
       if (error instanceof TypeError && error.message.includes("fetch")) {
-        throw new OlumiNetworkError("Network request failed", error as Error);
+        throw new OlumiNetworkError("Network request failed", { cause: error });
       }
 
       if (error instanceof DOMException && error.name === "AbortError") {
-        throw new OlumiNetworkError(`Request timeout after ${this.timeout}ms`);
+        throw new OlumiNetworkError(`Request timeout after ${this.timeout}ms`, {
+          timeout: true,
+          cause: error,
+        });
       }
 
-      throw new OlumiNetworkError("Unknown error", error as Error);
+      throw new OlumiNetworkError("Unknown error", { cause: error });
     }
   }
 }

@@ -17,13 +17,12 @@
 
 import { env } from "node:process";
 import { writeFileSync } from "node:fs";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../src/config/graphCaps.js";
 
 const ASSISTANTS_URL = env.ASSISTANTS_BASE_URL || "http://localhost:3101";
 const ENGINE_URL = env.ENGINE_BASE_URL;
 const NUM_DRAFTS = 50;
 const SUCCESS_RATE_TARGET = 0.9; // 90%
-const MAX_NODES = 12;
-const MAX_EDGES = 24;
 
 interface ValidationResult {
   draftNumber: number;
@@ -82,11 +81,11 @@ function validateCaps(graph: any): string | null {
   const nodeCount = graph.nodes?.length || 0;
   const edgeCount = graph.edges?.length || 0;
 
-  if (nodeCount > MAX_NODES) {
-    return `Node count (${nodeCount}) exceeds max (${MAX_NODES})`;
+  if (nodeCount > GRAPH_MAX_NODES) {
+    return `Node count (${nodeCount}) exceeds max (${GRAPH_MAX_NODES})`;
   }
-  if (edgeCount > MAX_EDGES) {
-    return `Edge count (${edgeCount}) exceeds max (${MAX_EDGES})`;
+  if (edgeCount > GRAPH_MAX_EDGES) {
+    return `Edge count (${edgeCount}) exceeds max (${GRAPH_MAX_EDGES})`;
   }
 
   return null; // No violation
@@ -199,7 +198,7 @@ function generateReport(results: ValidationResult[]): string {
   report += `- **Validation Failures:** ${results.length - successCount}\n`;
   report += `- **Success Rate:** ${(successRate * 100).toFixed(1)}%\n`;
   report += `- **Target Success Rate:** ${SUCCESS_RATE_TARGET * 100}%\n`;
-  report += `- **Cap Violations (≤${MAX_NODES} nodes, ≤${MAX_EDGES} edges):** ${capViolationCount}\n`;
+  report += `- **Cap Violations (≤${GRAPH_MAX_NODES} nodes, ≤${GRAPH_MAX_EDGES} edges):** ${capViolationCount}\n`;
   report += `- **Status:** ${passed && capViolationCount === 0 ? "✅ PASSED" : "❌ FAILED"}\n\n`;
 
   if (passed) {
@@ -227,14 +226,14 @@ function generateReport(results: ValidationResult[]): string {
   report += `\n## Cap Violations\n\n`;
   const capViolations = results.filter((r) => r.capViolation);
   if (capViolations.length === 0) {
-    report += `✅ No cap violations detected. All graphs within limits (≤${MAX_NODES} nodes, ≤${MAX_EDGES} edges).\n`;
+    report += `✅ No cap violations detected. All graphs within limits (≤${GRAPH_MAX_NODES} nodes, ≤${GRAPH_MAX_EDGES} edges).\n`;
   } else {
     report += `⚠️  Total cap violations: ${capViolations.length}\n\n`;
     for (const violation of capViolations) {
       report += `### Draft #${violation.draftNumber}\n`;
       report += `- **Brief:** ${violation.brief}\n`;
-      report += `- **Nodes:** ${violation.graphNodes} (max: ${MAX_NODES})\n`;
-      report += `- **Edges:** ${violation.graphEdges} (max: ${MAX_EDGES})\n`;
+      report += `- **Nodes:** ${violation.graphNodes} (max: ${GRAPH_MAX_NODES})\n`;
+      report += `- **Edges:** ${violation.graphEdges} (max: ${GRAPH_MAX_EDGES})\n`;
       report += `- **Violation:** ${violation.capViolation}\n\n`;
     }
   }
@@ -265,7 +264,7 @@ function generateReport(results: ValidationResult[]): string {
       report += `- Review failure patterns above\n`;
     }
     if (capViolationCount > 0) {
-      report += `- ⚠️  Cap violations detected (${capViolationCount} drafts exceed ≤${MAX_NODES} nodes or ≤${MAX_EDGES} edges)\n`;
+      report += `- ⚠️  Cap violations detected (${capViolationCount} drafts exceed ≤${GRAPH_MAX_NODES} nodes or ≤${GRAPH_MAX_EDGES} edges)\n`;
       report += `- Investigate why graphs are exceeding size limits\n`;
     }
     report += `- Coordinate with engine team on schema compatibility\n`;

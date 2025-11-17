@@ -32,8 +32,8 @@ export const Edge = z.object({
 export const Graph = z.object({
   version: z.string().default("1"),
   default_seed: z.number().default(17),
-  nodes: z.array(Node).max(12),
-  edges: z.array(Edge).max(24),
+  nodes: z.array(Node),
+  edges: z.array(Edge),
   meta: z
     .object({
       roots: z.array(z.string()).default([]),
