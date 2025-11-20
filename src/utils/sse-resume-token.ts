@@ -134,6 +134,18 @@ export function verifyResumeToken(
       expires_at,
     };
 
+    // Ensure the token is a canonical encoding of the payload produced by
+    // generateResumeToken. This protects against any base64-level tampering
+    // that might otherwise decode into a self-consistent but altered
+    // canonical/signature pair.
+    const expectedToken = generateResumeToken(payload);
+    if (expectedToken !== token) {
+      log.warn(
+        { request_id, token_prefix: token.substring(0, 12) },
+        "SSE resume token canonical mismatch",
+      );
+      return { valid: false, error: "INVALID_SIGNATURE" };
+    }
     log.debug(
       {
         request_id,

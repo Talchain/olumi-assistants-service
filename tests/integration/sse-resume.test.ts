@@ -15,6 +15,7 @@ import type { FastifyInstance } from "fastify";
 import { getRedis } from "../../src/platform/redis.js";
 import { randomUUID } from "node:crypto";
 import { createResumeToken } from "../../src/utils/sse-resume-token.js";
+import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 
 describe("SSE Resume Integration", () => {
   let app: FastifyInstance;
@@ -252,6 +253,8 @@ describe("SSE Resume Integration", () => {
       if (resumeCorrelationId) {
         expect(completePayload.diagnostics.correlation_id).toBe(resumeCorrelationId);
       }
+
+      expectNoBannedSubstrings(completePayload.diagnostics);
     });
   });
 
@@ -325,6 +328,8 @@ describe("SSE Resume Integration", () => {
       if (correlationId) {
         expect(completePayload.diagnostics.correlation_id).toBe(correlationId);
       }
+
+      expectNoBannedSubstrings(completePayload.diagnostics);
     });
   });
 

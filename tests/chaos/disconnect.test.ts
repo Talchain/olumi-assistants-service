@@ -15,6 +15,7 @@ import type { FastifyInstance } from "fastify";
 import { getRedis } from "../../src/platform/redis.js";
 import { TelemetrySink, expectTelemetry } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
+import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 
 interface SseEvent {
   type: string;
@@ -533,6 +534,54 @@ describe("Chaos: Mid-Stream Disconnect", () => {
 
         if (bufferTTL !== -2) {
           expect(bufferTTL).toBeGreaterThan(0);
+        }
+      }
+    );
+
+    it(
+      "Scenario B - client disconnect/reconnect emits sane diagnostics and privacy-safe telemetry",
+      { skip: !redisAvailable || !secretsConfigured, timeout: 30000 },
+      async () => {
+        telemetrySink.clear();
+
+        const result = await streamWithDisconnect(app, 4);
+
+        expect(result.resumeToken).toBeTruthy();
+
+        const allStageEvents = [
+          ...result.phase1Events.filter((e) => e.type === "stage"),
+          ...result.phase2Events.filter((e) => e.type === "stage"),
+        ];
+
+        const completeStage = allStageEvents
+          .slice()
+          .reverse()
+          .find((e) => e.data?.stage === "COMPLETE");
+
+        expect(completeStage).toBeDefined();
+
+        const payload = completeStage!.data?.payload as Record<string, any> | undefined;
+        expect(payload).toBeDefined();
+
+        const diagnostics = payload!.diagnostics as Record<string, any> | undefined;
+        expect(diagnostics).toBeDefined();
+
+        expect(typeof diagnostics!.resumes).toBe("number");
+        expect(diagnostics!.resumes).toBeGreaterThanOrEqual(1);
+        expect(typeof diagnostics!.recovered_events).toBe("number");
+        expect(typeof diagnostics!.trims).toBe("number");
+        expect(typeof diagnostics!.correlation_id).toBe("string");
+
+        expectNoBannedSubstrings(diagnostics!);
+
+        const resumeAttempts = telemetrySink.getEventsByName(TelemetryEvents.SseResumeAttempt);
+        expect(resumeAttempts.length).toBeGreaterThan(0);
+
+        const replayCounts = telemetrySink.getEventsByName(TelemetryEvents.SseResumeReplayCount);
+        expect(replayCounts.length).toBeGreaterThan(0);
+
+        for (const event of telemetrySink.getEvents()) {
+          expectNoBannedSubstrings(event.data);
         }
       }
     );

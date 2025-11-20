@@ -363,6 +363,488 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /assist/v1/draft-graph:
+    post:
+      summary: Draft decision graph (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Draft My Model** endpoint.
+
+        This endpoint drafts a decision graph from a natural language brief using
+        the engine's canonical GraphV1 / GraphPatchV1 contracts and the CEE
+        validation pipeline. The underlying graph and patch payloads are the
+        same engine contracts used by `/assist/draft-graph`; CEE adds trace,
+        quality, validation metadata and archetype classification on top.
+
+        **Rate limiting (CEE‑specific):**
+        - Default: 5 requests per 60 seconds per API key (or client IP fallback).
+        - Configurable via `CEE_DRAFT_RATE_LIMIT_RPM`.
+        - Exceeding this per‑feature limit returns `CEEErrorResponseV1` with
+          `code="CEE_RATE_LIMIT"`, `retryable=true`, a `Retry-After` header,
+          and `details.retry_after_seconds` describing when it is safe to retry.
+      tags:
+        - Draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEDraftGraphRequestV1'
+      responses:
+        '200':
+          description: Graph successfully generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Draft My Model feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEDraftGraphResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Draft My Model
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/team-perspectives:
+    post:
+      summary: Summarise team perspectives on a decision (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Team Perspectives** endpoint.
+
+        This endpoint takes structured team stances (for/against/neutral) and
+        returns a compact numeric summary of agreement vs disagreement. It does
+        **not** process or return any free-text comments.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEETeamPerspectivesRequestV1'
+      responses:
+        '200':
+          description: Team perspectives summarised (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Team Perspectives feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEETeamPerspectivesResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Team Perspectives
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/sensitivity-coach:
+    post:
+      summary: Suggest sensitivity directions for key drivers (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Sensitivity Coach** endpoint.
+
+        This endpoint turns `InferenceResultsV1.explain.top_drivers` into a
+        small, deterministic set of suggestions about which drivers to
+        increase or decrease. It does **not** call any LLMs and only returns
+        structured, ID-based suggestions.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEESensitivityCoachRequestV1'
+      responses:
+        '200':
+          description: Sensitivity suggestions computed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Sensitivity Coach feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEESensitivityCoachResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Sensitivity Coach
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/options:
+    post:
+      summary: Suggest structural decision options (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Options Helper** endpoint.
+
+        This endpoint suggests structured decision options using simple,
+        deterministic heuristics over the decision graph and optional
+        archetype metadata. It does **not** call any LLMs and only returns
+        structured suggestions.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEOptionsRequestV1'
+      responses:
+        '200':
+          description: Options suggestions computed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Options feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEOptionsResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Options
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/bias-check:
+    post:
+      summary: Analyse decision graph for potential biases (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Bias Checker** endpoint.
+
+        This endpoint inspects a decision graph (and optional archetype
+        metadata) using simple, deterministic heuristics to surface
+        potential sources of bias. It does **not** call any LLMs and only
+        returns structured findings.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEBiasCheckRequestV1'
+      responses:
+        '200':
+          description: Bias findings computed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Bias Checker feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEBiasCheckResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Bias Checker
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/evidence-helper:
+    post:
+      summary: Score evidence items (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Evidence Helper** endpoint.
+
+        This endpoint scores evidence items with simple, deterministic
+        strength and relevance signals that can be reused across CEE
+        experiences. It does **not** inspect or log raw evidence content;
+        only structured, non-PII metadata is used.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEEvidenceHelperRequestV1'
+      responses:
+        '200':
+          description: Evidence strengths computed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Evidence Helper feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEEvidenceHelperResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Evidence Helper
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/explain-graph:
+    post:
+      summary: Explain decision graph (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Explain My Model** endpoint.
+
+        This endpoint provides a structured explanation of a decision graph
+        using the engine's canonical `Graph` contract together with
+        `InferenceResultsV1` (report.v1 alias). CEE adds trace, quality,
+        validation metadata and a structured `explanation` object on top.
+
+        For v1 this endpoint is deterministic and does not perform additional
+        LLM calls; it derives explanations directly from the supplied
+        inference payload.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEExplainGraphRequestV1'
+      responses:
+        '200':
+          description: Explanation successfully generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Explain Graph feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEExplainGraphResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Explain Graph
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
 components:
   schemas:
     DraftGraphInput:
@@ -818,8 +1300,122 @@ components:
           items:
             type: object
 
+    InferenceResultsV1:
+      type: object
+      description: Engine inference results (alias for report.v1) used by CEE explain endpoints
+      required:
+        - summary
+        - seed
+        - response_hash
+      properties:
+        summary:
+          type: string
+          description: Short natural language summary of inference results
+        explain:
+          type: object
+          description: Optional explanation details such as top drivers
+          properties:
+            top_drivers:
+              type: array
+              items:
+                type: object
+                properties:
+                  node_id:
+                    type: string
+                  description:
+                    type: string
+                  contribution:
+                    type: number
+        model_card:
+          type: object
+          description: Optional engine/model metadata
+          additionalProperties: true
+        seed:
+          type: string
+          description: Seed used by the engine for this inference
+        response_hash:
+          type: string
+          description: Engine-provided response hash for reproducibility
+
+    CEETraceMeta:
+      type: object
+      description: Trace metadata for CEE responses
+      properties:
+        request_id:
+          type: string
+          description: Unique request identifier
+        correlation_id:
+          type: string
+          description: Correlates to server logs and telemetry
+        engine:
+          type: object
+          description: Engine-level trace information
+          properties:
+            provider:
+              type: string
+            model:
+              type: string
+            version:
+              type: string
+            response_hash:
+              type: string
+            degraded:
+              type: boolean
+        details:
+          type: object
+          description: Additional trace metadata
+          additionalProperties: true
+
+    CEEValidationIssue:
+      type: object
+      description: Validation issue discovered in the CEE pipeline
+      required:
+        - code
+        - severity
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, error]
+        field:
+          type: string
+          description: Optional field or path this issue relates to
+        message:
+          type: string
+          description: Human-readable description for clients (not logged as telemetry)
+        details:
+          type: object
+          additionalProperties: true
+
+    CEEGuidanceV1:
+      type: object
+      description: |
+        High-level user guidance derived from quality, validation_issues, and (where applicable) response_limits.
+        Intended for UI hints and summaries rather than core programmatic logic.
+      required:
+        - summary
+      properties:
+        summary:
+          type: string
+          description: Short overview of model quality and any notable limitations.
+        risks:
+          type: array
+          description: Concise risk or gap statements derived from validation issues and truncation flags.
+          items:
+            type: string
+        next_actions:
+          type: array
+          description: Suggested next actions to improve confidence in the decision.
+          items:
+            type: string
+        any_truncated:
+          type: boolean
+          description: True if any truncation flag in response_limits is set.
+
     ErrorV1:
       type: object
+      description: Generic error response schema for non-CEE endpoints and SSE helpers
       required:
         - schema
         - code
@@ -828,11 +1424,9 @@ components:
         schema:
           type: string
           enum: [error.v1]
-          description: Error schema version
         code:
           type: string
           enum: [BAD_INPUT, RATE_LIMITED, INTERNAL]
-          description: Machine-readable error code
         message:
           type: string
           description: Human-readable error message
@@ -840,6 +1434,696 @@ components:
           type: object
           description: Additional error context
           additionalProperties: true
+
+    CEEQualityMeta:
+      type: object
+      description: Quality scores for CEE outputs (1-10 scale)
+      required:
+        - overall
+      properties:
+        overall:
+          type: integer
+          minimum: 1
+          maximum: 10
+        structure:
+          type: integer
+          minimum: 1
+          maximum: 10
+        causality:
+          type: integer
+          minimum: 1
+          maximum: 10
+        coverage:
+          type: integer
+          minimum: 1
+          maximum: 10
+        safety:
+          type: integer
+          minimum: 1
+          maximum: 10
+        details:
+          type: object
+          additionalProperties: true
+
+    CEEErrorCode:
+      type: string
+      description: Machine-readable CEE error code
+      enum:
+        - CEE_TIMEOUT
+        - CEE_RATE_LIMIT
+        - CEE_GRAPH_INVALID
+        - CEE_VALIDATION_FAILED
+        - CEE_INTERNAL_ERROR
+        - CEE_SERVICE_UNAVAILABLE
+        - CEE_ENGINE_DEGRADED
+        - CEE_REPRO_MISMATCH
+
+    CEEErrorResponseV1:
+      type: object
+      description: Error response schema for CEE endpoints
+      required:
+        - schema
+        - code
+        - message
+      properties:
+        schema:
+          type: string
+          enum: [cee.error.v1]
+        code:
+          $ref: '#/components/schemas/CEEErrorCode'
+        message:
+          type: string
+          description: Human-readable error message
+        retryable:
+          type: boolean
+          description: Whether the client may safely retry this request
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        details:
+          type: object
+          additionalProperties: true
+
+    CEEDraftGraphRequestV1:
+      allOf:
+        - $ref: '#/components/schemas/DraftGraphInput'
+        - type: object
+          properties:
+            seed:
+              type: string
+              description: Optional client-provided seed for deterministic behaviour
+            archetype_hint:
+              type: string
+              description: Optional hint for the target archetype, e.g. pricing_decision
+
+    CEEExplainGraphRequestV1:
+      type: object
+      description: CEE explain-graph request payload
+      required:
+        - graph
+        - inference
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        inference:
+          type: object
+          required:
+            - summary
+            - seed
+            - response_hash
+          properties:
+            summary:
+              type: string
+              description: Short summary of the inference run.
+            explain:
+              type: object
+              description: Optional explainability metadata used to derive explanations.
+              properties:
+                top_drivers:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - node_id
+                    properties:
+                      node_id:
+                        type: string
+                      description:
+                        type: string
+                      contribution:
+                        type: number
+                  default: []
+            model_card:
+              type: object
+              additionalProperties: true
+              description: Optional model metadata blob.
+            seed:
+              type: string
+            response_hash:
+              type: string
+        context_id:
+          type: string
+          description: Optional opaque context/brief identifier (not logged in telemetry).
+
+    CEEEvidenceItemRequestV1:
+      type: object
+      description: Evidence item provided by the client for strength scoring
+      required:
+        - id
+        - type
+      properties:
+        id:
+          type: string
+          description: Opaque evidence identifier
+        type:
+          type: string
+          description: Evidence kind (see enum for recommended values)
+          enum: [experiment, user_research, market_data, expert_opinion, other]
+        source:
+          type: string
+          description: Optional short source code (not logged in telemetry)
+        content:
+          type: string
+          description: Optional raw evidence content (never logged or emitted in telemetry)
+
+    CEEEvidenceItemResponseV1:
+      type: object
+      description: Evidence item with computed strength metadata
+      required:
+        - id
+        - type
+        - strength
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        strength:
+          type: string
+          enum: [none, weak, medium, strong]
+        relevance:
+          type: string
+          enum: [low, medium, high]
+
+    CEEEvidenceHelperRequestV1:
+      type: object
+      description: CEE evidence helper request payload
+      required:
+        - evidence
+      properties:
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEEvidenceItemRequestV1'
+
+    CEEBiasCheckRequestV1:
+      type: object
+      description: CEE bias check request payload
+      required:
+        - graph
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        archetype:
+          type: object
+          description: Optional archetype metadata from a previous draft run
+          properties:
+            decision_type:
+              type: string
+            match:
+              type: string
+              enum: [exact, fuzzy, generic]
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+        context_id:
+          type: string
+          description: Optional opaque context/brief identifier (not logged in telemetry).
+
+    CEEOptionsRequestV1:
+      type: object
+      description: CEE options helper request
+      required:
+        - graph
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        archetype:
+          type: object
+          description: Optional archetype metadata from a previous draft run
+          properties:
+            decision_type:
+              type: string
+            match:
+              type: string
+              enum: [exact, fuzzy, generic]
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+        context_id:
+          type: string
+          description: Optional opaque context/brief identifier (not logged in telemetry).
+
+    CEEDraftGraphResponseV1:
+      allOf:
+        - $ref: '#/components/schemas/DraftGraphOutput'
+        - type: object
+          required:
+            - trace
+            - quality
+          properties:
+            trace:
+              $ref: '#/components/schemas/CEETraceMeta'
+            quality:
+              $ref: '#/components/schemas/CEEQualityMeta'
+            validation_issues:
+              type: array
+              items:
+                $ref: '#/components/schemas/CEEValidationIssue'
+            archetype:
+              type: object
+              description: Archetype classification metadata
+              properties:
+                decision_type:
+                  type: string
+                  description: Classified decision type, e.g. pricing_decision
+                match:
+                  type: string
+                  enum: [exact, fuzzy, generic]
+                confidence:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+            seed:
+              type: string
+              description: Seed value used for this response
+            response_hash:
+              type: string
+              description: Engine-provided response hash for reproducibility
+            response_limits:
+              type: object
+              properties:
+                bias_findings_max:
+                  type: integer
+                bias_findings_truncated:
+                  type: boolean
+                options_max:
+                  type: integer
+                options_truncated:
+                  type: boolean
+                evidence_suggestions_max:
+                  type: integer
+                evidence_suggestions_truncated:
+                  type: boolean
+                sensitivity_suggestions_max:
+                  type: integer
+                sensitivity_suggestions_truncated:
+                  type: boolean
+            guidance:
+              $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEEExplainGraphResponseV1:
+      type: object
+      description: Structured explanation for a decision graph
+      required:
+        - trace
+        - quality
+        - explanation
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
+        explanation:
+          type: object
+          description: Structured explanation derived from inference results
+          properties:
+            targets:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  summary:
+                    type: string
+                  p10:
+                    type: number
+                  p50:
+                    type: number
+                  p90:
+                    type: number
+            top_drivers:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  impact:
+                    type: number
+                  rank:
+                    type: integer
+                  label:
+                    type: string
+
+    CEEEvidenceHelperResponseV1:
+      type: object
+      description: CEE evidence helper response with strength scores
+      required:
+        - trace
+        - quality
+        - items
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEEvidenceItemResponseV1'
+        response_limits:
+          type: object
+          description: Response caps applied to evidence items, if any
+          properties:
+            items_max:
+              type: integer
+              description: Maximum number of items returned
+              example: 20
+            items_truncated:
+              type: boolean
+              description: Whether items was truncated to the cap
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEEBiasFindingV1:
+      type: object
+      description: Bias or fairness-related finding detected by CEE
+      required:
+        - id
+        - category
+        - severity
+      properties:
+        id:
+          type: string
+          description: Stable identifier for this finding type
+        category:
+          type: string
+          enum: [selection, measurement, optimisation, framing, other]
+        severity:
+          type: string
+          enum: [low, medium, high]
+        node_ids:
+          type: array
+          description: Related graph node IDs (no labels or free text)
+          items:
+            type: string
+        explanation:
+          type: string
+          description: Short human-readable explanation (not used in telemetry)
+
+    CEEBiasCheckResponseV1:
+      type: object
+      description: Structured bias findings for a decision graph
+      required:
+        - trace
+        - quality
+        - bias_findings
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        bias_findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEBiasFindingV1'
+        response_limits:
+          type: object
+          description: Response caps applied to bias findings, if any
+          properties:
+            bias_findings_max:
+              type: integer
+              description: Maximum number of bias findings returned
+              example: 10
+            bias_findings_truncated:
+              type: boolean
+              description: Whether bias_findings was truncated to the cap
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEEOptionV1:
+      type: object
+      description: Structured decision option suggested by CEE
+      required:
+        - id
+        - kind
+      properties:
+        id:
+          type: string
+          description: Stable identifier for this option suggestion
+        kind:
+          type: string
+          enum: [expand_scope, reduce_scope, change_channel, adjust_timing, other]
+        node_ids:
+          type: array
+          description: Related graph node IDs (no labels or free text)
+          items:
+            type: string
+        priority:
+          type: string
+          description: Relative importance or urgency of this option
+          enum: [low, medium, high]
+        explanation:
+          type: string
+          description: Short human-readable explanation (not used in telemetry)
+
+    CEEOptionsResponseV1:
+      type: object
+      description: Structured options suggestions for a decision graph
+      required:
+        - trace
+        - quality
+        - options
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEOptionV1'
+        response_limits:
+          type: object
+          description: Response caps applied to options list, if any
+          properties:
+            options_max:
+              type: integer
+              description: Maximum number of options returned
+            options_truncated:
+              type: boolean
+              description: Whether options list was truncated to the cap
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEESensitivityCoachRequestV1:
+      type: object
+      description: CEE sensitivity coach request payload
+      required:
+        - graph
+        - inference
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        inference:
+          type: object
+          required:
+            - summary
+            - seed
+            - response_hash
+          properties:
+            summary:
+              type: string
+              description: Short summary of the inference run.
+            explain:
+              type: object
+              description: Optional explainability metadata used to derive suggestions.
+              properties:
+                top_drivers:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - node_id
+                    properties:
+                      node_id:
+                        type: string
+                      description:
+                        type: string
+                      contribution:
+                        type: number
+                  default: []
+            model_card:
+              type: object
+              additionalProperties: true
+              description: Optional model metadata blob.
+            seed:
+              type: string
+            response_hash:
+              type: string
+        context_id:
+          type: string
+          description: Optional opaque context identifier (not logged in telemetry).
+
+    CEESensitivitySuggestionV1:
+      type: object
+      description: Deterministic sensitivity suggestion derived from inference top drivers.
+      required:
+        - driver_id
+        - rank
+      properties:
+        driver_id:
+          type: string
+          description: ID of the driver node in the graph.
+        rank:
+          type: integer
+          minimum: 1
+          description: Ordering of this suggestion (1 is the strongest driver).
+        direction:
+          type: string
+          enum: [increase, decrease]
+          description: Suggested direction to probe (increase/decrease). Absent when contribution is 0.
+        target_id:
+          type: string
+          description: Optional target node for further analysis (reserved for future versions).
+
+    CEESensitivityCoachResponseV1:
+      type: object
+      description: Structured sensitivity coaching for a decision graph
+      required:
+        - trace
+        - quality
+        - sensitivity_suggestions
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        sensitivity_suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEESensitivitySuggestionV1'
+        response_limits:
+          type: object
+          description: Response caps applied to sensitivity suggestions, if any
+          properties:
+            sensitivity_suggestions_max:
+              type: integer
+              description: Maximum number of suggestions returned
+            sensitivity_suggestions_truncated:
+              type: boolean
+              description: Whether sensitivity_suggestions was truncated to the cap
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEETeamPerspectiveItemV1:
+      type: object
+      description: Individual team perspective item
+      required:
+        - id
+        - stance
+      properties:
+        id:
+          type: string
+          description: Opaque participant identifier
+        stance:
+          type: string
+          enum: [for, against, neutral]
+        weight:
+          type: number
+          description: Optional positive weight for this participant (0 or negative values are treated as 0).
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Optional confidence in this stance.
+
+    CEETeamPerspectivesRequestV1:
+      type: object
+      description: CEE team perspectives request payload
+      required:
+        - perspectives
+      properties:
+        perspectives:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEETeamPerspectiveItemV1'
+        context_id:
+          type: string
+          description: Optional opaque context/brief identifier (not logged in telemetry).
+
+    CEETeamPerspectivesSummaryV1:
+      type: object
+      description: Aggregated summary of team perspectives.
+      required:
+        - participant_count
+        - for_count
+        - against_count
+        - neutral_count
+        - disagreement_score
+      properties:
+        participant_count:
+          type: integer
+          description: Total number of participants.
+        for_count:
+          type: integer
+          description: Number of participants with stance "for".
+        against_count:
+          type: integer
+          description: Number of participants with stance "against".
+        neutral_count:
+          type: integer
+          description: Number of participants with stance "neutral".
+        weighted_for_fraction:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Weighted fraction of "for" stances; neutrals are included in the denominator.
+        disagreement_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 0 means everyone is aligned on the same stance; higher values indicate more disagreement.
+        has_team_disagreement:
+          type: boolean
+          description: |
+            True when disagreement_score is above an internal threshold and there are enough
+            participants to consider the disagreement material. Exposed as a convenience flag
+            for UIs; always derived from existing summary metadata.
+
+    CEETeamPerspectivesResponseV1:
+      type: object
+      description: CEE team perspectives response
+      required:
+        - trace
+        - quality
+        - summary
+      properties:
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        validation_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEValidationIssue'
+        summary:
+          $ref: '#/components/schemas/CEETeamPerspectivesSummaryV1'
+        guidance:
+          $ref: '#/components/schemas/CEEGuidanceV1'
 
     SSEStream:
       type: object
@@ -992,6 +2276,22 @@ components:
         type: string
         format: uri
         example: "https://docs.olumi.ai/provenance-migration"
+
+    X-CEE-API-Version:
+      description: CEE API version used to process the request
+      schema:
+        type: string
+        enum: ["v1"]
+
+    X-CEE-Feature-Version:
+      description: Version of the CEE feature implementation
+      schema:
+        type: string
+
+    X-CEE-Request-ID:
+      description: Unique request identifier for CEE calls
+      schema:
+        type: string
 
   securitySchemes:
     apiKey:

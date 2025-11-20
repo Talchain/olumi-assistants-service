@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify from "fastify";
 import route from "../src/routes/assist.draft-graph.js";
+import { expectNoBannedSubstrings } from "./utils/telemetry-banned-substrings.js";
 
 describe("SSE parity and framing", () => {
   const envBackup = { ...process.env } as any;
@@ -73,6 +74,7 @@ describe("SSE parity and framing", () => {
       correlation_id: expect.any(String),
     });
 
+    expectNoBannedSubstrings(payloadJson.diagnostics);
     if (correlationId) {
       expect(payloadJson.diagnostics.correlation_id).toBe(correlationId);
     }

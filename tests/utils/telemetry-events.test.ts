@@ -98,6 +98,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PromptCacheMiss: "assist.llm.prompt_cache_miss",
         PromptCacheEviction: "assist.llm.prompt_cache_eviction",
 
+        ValidationCacheHit: "assist.draft.validation_cache_hit",
+        ValidationCacheMiss: "assist.draft.validation_cache_miss",
+        ValidationCacheBypass: "assist.draft.validation_cache_bypass",
+
+        AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
         SseResumeIssued: "assist.sse.resume_issued",
         SseResumeAttempt: "assist.sse.resume_attempt",
         SseResumeSuccess: "assist.sse.resume_success",
@@ -116,6 +121,40 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // v1.11 SSE degraded mode events
         SseDegradedMode: "assist.sse.degraded_mode",
+        // CEE v1 Draft My Model events (v1.12.0)
+        CeeDraftGraphRequested: "cee.draft_graph.requested",
+        CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
+        CeeDraftGraphFailed: "cee.draft_graph.failed",
+
+        // CEE v1 Explain Graph events (v1.12.0)
+        CeeExplainGraphRequested: "cee.explain_graph.requested",
+        CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
+        CeeExplainGraphFailed: "cee.explain_graph.failed",
+
+        // CEE v1 Evidence Helper events (v1.12.0)
+        CeeEvidenceHelperRequested: "cee.evidence_helper.requested",
+        CeeEvidenceHelperSucceeded: "cee.evidence_helper.succeeded",
+        CeeEvidenceHelperFailed: "cee.evidence_helper.failed",
+
+        // CEE v1 Bias Checker events (v1.12.0)
+        CeeBiasCheckRequested: "cee.bias_check.requested",
+        CeeBiasCheckSucceeded: "cee.bias_check.succeeded",
+        CeeBiasCheckFailed: "cee.bias_check.failed",
+
+        // CEE v1 Options events (v1.12.0)
+        CeeOptionsRequested: "cee.options.requested",
+        CeeOptionsSucceeded: "cee.options.succeeded",
+        CeeOptionsFailed: "cee.options.failed",
+
+        // CEE v1 Sensitivity Coach events (v1.12.0)
+        CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
+        CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
+        CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
+
+        // CEE v1 Team Perspectives events (v1.12.0)
+        CeeTeamPerspectivesRequested: "cee.team_perspectives.requested",
+        CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
+        CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -138,9 +177,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   });
 
   describe("Event namespace consistency", () => {
-    it("ensures all events start with 'assist.' prefix and use valid namespaces", () => {
+    it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
-      const validPrefixes = /^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./;
+      const validPrefixes =
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -152,8 +192,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.draft., assist.clarifier., assist.critique., assist.suggest_options., assist.explain_diff., assist.auth., assist.llm., assist.share., assist.sse.)
-        const suffix = event.replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./, "");
+        // Remove the namespace prefix (assist.* or cee.*)
+        const suffix = event
+          .replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./, "")
+          .replace(/^cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -268,10 +310,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "share.accessed": [TelemetryEvents.ShareAccessed],
         "share.revoked": [TelemetryEvents.ShareRevoked],
 
-        // Prompt cache events (v1.6)
+        // Prompt cache & validation cache events
         "llm.prompt_cache.hit": [TelemetryEvents.PromptCacheHit],
         "llm.prompt_cache.miss": [TelemetryEvents.PromptCacheMiss],
         "llm.prompt_cache.eviction": [TelemetryEvents.PromptCacheEviction],
+        "draft.validation_cache.hit": [TelemetryEvents.ValidationCacheHit],
+        "draft.validation_cache.miss": [TelemetryEvents.ValidationCacheMiss],
+        "draft.validation_cache.bypass": [TelemetryEvents.ValidationCacheBypass],
+        "llm.anthropic_prompt_cache.hint": [TelemetryEvents.AnthropicPromptCacheHint],
         "share.expired": [TelemetryEvents.ShareExpired],
         "share.not_found": [TelemetryEvents.ShareNotFound],
 
@@ -322,14 +368,37 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "explain_diff.rationale_count": [TelemetryEvents.ExplainDiffComplete],
       };
 
-      // Verify all events are documented
+      // Verify all events are documented, except debug-only/CEE events
       const allEvents = Object.values(TelemetryEvents);
       const documentedEvents = new Set(
         Object.values(datadogMetrics).flat()
       );
 
-      // Stage events are debug-only, don't need Datadog metrics
-      const debugOnlyEvents: string[] = [TelemetryEvents.Stage];
+      // Stage events are debug-only, and CEE events don't have Datadog mappings yet
+      const debugOnlyEvents: string[] = [
+        TelemetryEvents.Stage,
+        TelemetryEvents.CeeDraftGraphRequested,
+        TelemetryEvents.CeeDraftGraphSucceeded,
+        TelemetryEvents.CeeDraftGraphFailed,
+        TelemetryEvents.CeeExplainGraphRequested,
+        TelemetryEvents.CeeExplainGraphSucceeded,
+        TelemetryEvents.CeeExplainGraphFailed,
+        TelemetryEvents.CeeEvidenceHelperRequested,
+        TelemetryEvents.CeeEvidenceHelperSucceeded,
+        TelemetryEvents.CeeEvidenceHelperFailed,
+        TelemetryEvents.CeeBiasCheckRequested,
+        TelemetryEvents.CeeBiasCheckSucceeded,
+        TelemetryEvents.CeeBiasCheckFailed,
+        TelemetryEvents.CeeOptionsRequested,
+        TelemetryEvents.CeeOptionsSucceeded,
+        TelemetryEvents.CeeOptionsFailed,
+        TelemetryEvents.CeeSensitivityCoachRequested,
+        TelemetryEvents.CeeSensitivityCoachSucceeded,
+        TelemetryEvents.CeeSensitivityCoachFailed,
+        TelemetryEvents.CeeTeamPerspectivesRequested,
+        TelemetryEvents.CeeTeamPerspectivesSucceeded,
+        TelemetryEvents.CeeTeamPerspectivesFailed,
+      ];
 
       for (const event of allEvents) {
         if (!debugOnlyEvents.includes(event)) {
@@ -340,7 +409,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   });
 
   describe("Spec compliance", () => {
-    it("matches frozen event names from specification (v04 + v1.8)", () => {
+    it("matches frozen event names from specification (v04 + v1.8 + CEE v1)", () => {
       // These event names are specified in the v04 specification and v1.8 release
       // and must not change without updating the spec document
       const frozenEvents = [
@@ -412,6 +481,49 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // v1.11 SSE degraded mode events
         "assist.sse.degraded_mode",
+
+        // CEE v1 Draft My Model events
+        "cee.draft_graph.requested",
+        "cee.draft_graph.succeeded",
+        "cee.draft_graph.failed",
+
+        // CEE v1 Explain Graph events
+        "cee.explain_graph.requested",
+        "cee.explain_graph.succeeded",
+        "cee.explain_graph.failed",
+
+        // CEE v1 Evidence Helper events
+        "cee.evidence_helper.requested",
+        "cee.evidence_helper.succeeded",
+        "cee.evidence_helper.failed",
+
+        // CEE v1 Bias Checker events
+        "cee.bias_check.requested",
+        "cee.bias_check.succeeded",
+        "cee.bias_check.failed",
+
+        // CEE v1 Options events
+        "cee.options.requested",
+        "cee.options.succeeded",
+        "cee.options.failed",
+
+        // CEE v1 Sensitivity Coach events
+        "cee.sensitivity_coach.requested",
+        "cee.sensitivity_coach.succeeded",
+        "cee.sensitivity_coach.failed",
+
+        // CEE v1 Team Perspectives events
+        "cee.team_perspectives.requested",
+        "cee.team_perspectives.succeeded",
+        "cee.team_perspectives.failed",
+
+        // Validation cache events
+        "assist.draft.validation_cache_hit",
+        "assist.draft.validation_cache_miss",
+        "assist.draft.validation_cache_bypass",
+
+        // Anthropic prompt cache hint event
+        "assist.llm.anthropic_prompt_cache_hint",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

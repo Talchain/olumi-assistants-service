@@ -12,9 +12,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
-import { getRedis } from "../../src/platform/redis.js";
+import { getRedis, resetRedis } from "../../src/platform/redis.js";
 import { TelemetrySink, expectTelemetry } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
+import { SSE_DEGRADED_KIND_REDIS_UNAVAILABLE } from "../../src/utils/degraded-mode.js";
+import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 
 interface SseEvent {
   type: string;
@@ -64,11 +66,13 @@ describe("Chaos: Redis Blips and Unavailability", () => {
   let app: FastifyInstance;
   let redisAvailable = false;
   let telemetrySink: TelemetrySink;
+  let secretsConfigured = false;
 
   beforeAll(async () => {
     // Check Redis availability
     const redis = await getRedis();
     redisAvailable = redis !== null;
+    secretsConfigured = !!(process.env.SSE_RESUME_SECRET || process.env.HMAC_SECRET);
 
     // Set test environment
     process.env.LLM_PROVIDER = "fixtures";
@@ -132,7 +136,7 @@ describe("Chaos: Redis Blips and Unavailability", () => {
         const degradedEvents = telemetrySink.getEventsByName(TelemetryEvents.SseDegradedMode);
         expect(degradedEvents.length).toBeGreaterThan(0);
         const hasRedisKind = degradedEvents.some(
-          (e) => e.data.kind === "redis_unavailable" && e.data.endpoint === "/assist/draft-graph/stream"
+          (e) => e.data.kind === SSE_DEGRADED_KIND_REDIS_UNAVAILABLE && e.data.endpoint === "/assist/draft-graph/stream"
         );
         expect(hasRedisKind).toBe(true);
       }
@@ -604,6 +608,94 @@ describe("Chaos: Redis Blips and Unavailability", () => {
           const eventStr = JSON.stringify(event.data).toLowerCase();
           expect(eventStr).not.toContain("redis connection");
           expect(eventStr).not.toContain("econnrefused");
+        }
+      }
+    );
+
+    it(
+      "Scenario A - Redis client reset between stream and resume preserves diagnostics and telemetry invariants",
+      { skip: !redisAvailable || !secretsConfigured, timeout: 30000 },
+      async () => {
+        telemetrySink.clear();
+
+        const streamResponse = await app.inject({
+          method: "POST",
+          url: "/assist/draft-graph/stream",
+          headers: {
+            "content-type": "application/json",
+          },
+          payload: {
+            brief: "Choose a data visualization library",
+          },
+        });
+
+        expect(streamResponse.statusCode).toBe(200);
+
+        const events1 = parseSseEvents(streamResponse.body);
+        const firstStage = events1.find((e) => e.type === "stage");
+        const correlationId = firstStage?.data?.correlation_id as string | undefined;
+
+        const resumeEvent = events1.find((e) => e.type === "resume");
+        expect(resumeEvent).toBeDefined();
+        const token = resumeEvent!.data!.token as string;
+
+        const originalRedisUrl = process.env.REDIS_URL;
+        try {
+          resetRedis();
+          const redisAfterReset = await getRedis();
+          expect(redisAfterReset).not.toBeNull();
+        } finally {
+          if (originalRedisUrl !== undefined) {
+            process.env.REDIS_URL = originalRedisUrl;
+          }
+        }
+
+        telemetrySink.clear();
+
+        const resumeResponse = await app.inject({
+          method: "POST",
+          url: "/assist/draft-graph/resume?mode=live",
+          headers: {
+            "X-Resume-Token": token,
+            "X-Resume-Mode": "live",
+          },
+        });
+
+        expect([200, 404, 410]).toContain(resumeResponse.statusCode);
+        if (resumeResponse.statusCode !== 200) {
+          return;
+        }
+
+        const resumeEvents = parseSseEvents(resumeResponse.body);
+        const stageEvents = resumeEvents.filter((e) => e.type === "stage");
+        const completeStages = stageEvents.filter((e) => e.data?.stage === "COMPLETE");
+        expect(completeStages.length).toBe(1);
+        const completeStage = completeStages[0];
+
+        const payload = completeStage.data?.payload as Record<string, any> | undefined;
+        expect(payload).toBeDefined();
+
+        const diagnostics = payload!.diagnostics as Record<string, any> | undefined;
+        expect(diagnostics).toBeDefined();
+
+        expect(typeof diagnostics!.resumes).toBe("number");
+        expect(diagnostics!.resumes).toBeGreaterThanOrEqual(1);
+        expect(typeof diagnostics!.recovered_events).toBe("number");
+        expect(typeof diagnostics!.trims).toBe("number");
+        expect(typeof diagnostics!.correlation_id).toBe("string");
+
+        if (correlationId) {
+          expect(diagnostics!.correlation_id).toBe(correlationId);
+        }
+
+        expectNoBannedSubstrings(diagnostics!);
+
+        expectTelemetry(telemetrySink).toContain(TelemetryEvents.SseResumeAttempt);
+        const replayCounts = telemetrySink.getEventsByName(TelemetryEvents.SseResumeReplayCount);
+        expect(replayCounts.length).toBeGreaterThan(0);
+
+        for (const event of telemetrySink.getEvents()) {
+          expectNoBannedSubstrings(event.data);
         }
       }
     );

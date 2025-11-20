@@ -8,7 +8,7 @@ import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { getAdapter } from "../adapters/llm/router.js";
-import { validateGraph } from "../services/validateClient.js";
+import { validateGraph } from "../services/validateClientWithCache.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
@@ -21,6 +21,11 @@ import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { createResumeToken, verifyResumeToken } from "../utils/sse-resume-token.js";
 import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot, renewSnapshot } from "../utils/sse-state.js";
 import { getRedis } from "../platform/redis.js";
+import {
+  SSE_DEGRADED_HEADER_NAME,
+  SSE_DEGRADED_REDIS_REASON,
+  SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
+} from "../utils/degraded-mode.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -111,6 +116,16 @@ export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInpu
     passthrough.fixtures = fixturesValue;
   }
 
+  // Preserve CEE-specific passthrough fields
+  const seedValue = rest["seed"];
+  if (typeof seedValue === "string") {
+    passthrough.seed = seedValue;
+  }
+
+  const archetypeHintValue = rest["archetype_hint"];
+  if (typeof archetypeHintValue === "string") {
+    passthrough.archetype_hint = archetypeHintValue;
+  }
   for (const [key, value] of Object.entries(rest)) {
     if (!key.startsWith("sim_")) continue;
     const valueType = typeof value;
@@ -139,18 +154,36 @@ function determineClarifier(confidence: number): "complete" | "max_rounds" | "co
  * Write SSE event following RFC 8895 multi-line semantics
  * Each line of the data field must be prefixed with "data: "
  */
-function writeStage(reply: FastifyReply, event: StageEvent) {
-  reply.raw.write(`event: ${STAGE_EVENT}\n`);
+async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const jsonStr = JSON.stringify(event);
+    const lines = jsonStr.split('\n');
 
-  // RFC 8895: split JSON on newlines and prefix each line with "data: "
-  const jsonStr = JSON.stringify(event);
-  const lines = jsonStr.split('\n');
-  for (const line of lines) {
-    reply.raw.write(`data: ${line}\n`);
-  }
+    let buffer = `event: ${STAGE_EVENT}\n`;
+    for (const line of lines) {
+      buffer += `data: ${line}\n`;
+    }
+    buffer += '\n';
 
-  // Blank line terminates event
-  reply.raw.write('\n');
+    const ok = reply.raw.write(buffer);
+    if (ok) {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      reply.raw.removeListener("drain", onDrain);
+      reject(new Error("SSE write timeout"));
+    }, 30000);
+
+    const onDrain = () => {
+      log.debug({ event: (event as any).stage }, "SSE write resumed after drain");
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    reply.raw.once("drain", onDrain);
+  });
 }
 
 /**
@@ -206,7 +239,7 @@ async function groundAttachments(
   return result;
 }
 
-async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
+export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
@@ -484,7 +517,7 @@ async function handleSseResponse(
   // V04: Echo correlation ID in response header
   reply.raw.setHeader("X-Correlation-ID", correlationId);
   reply.raw.writeHead(200, SSE_HEADERS);
-  writeStage(reply, { stage: "DRAFTING" });
+  await writeStage(reply, { stage: "DRAFTING" });
   emit(TelemetryEvents.SSEStarted, { correlation_id: correlationId });
 
   // v1.8: Initialize SSE resume state in Redis (gracefully skip if Redis unavailable)
@@ -542,7 +575,7 @@ async function handleSseResponse(
 
   // v1.8: Helper to write stage and buffer event (gracefully handle buffering errors)
   const writeStageAndBuffer = async (event: StageEvent) => {
-    writeStage(reply, event);
+    await writeStage(reply, event);
     try {
       await bufferEvent(correlationId, {
         seq: eventSeq,
@@ -853,18 +886,18 @@ export default async function route(app: FastifyInstance) {
     try {
       const redis = await getRedis();
       if (!redis) {
-        reply.raw.setHeader("X-Olumi-Degraded", "redis");
+        reply.raw.setHeader(SSE_DEGRADED_HEADER_NAME, SSE_DEGRADED_REDIS_REASON);
         emit(TelemetryEvents.SseDegradedMode, {
-          kind: "redis_unavailable",
+          kind: SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
           correlation_id: correlationId,
           endpoint: "/assist/draft-graph/stream",
         });
       }
     } catch (error) {
       // Treat Redis connection errors as degraded mode as well
-      reply.raw.setHeader("X-Olumi-Degraded", "redis");
+      reply.raw.setHeader(SSE_DEGRADED_HEADER_NAME, SSE_DEGRADED_REDIS_REASON);
       emit(TelemetryEvents.SseDegradedMode, {
-        kind: "redis_unavailable",
+        kind: SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
         correlation_id: correlationId,
         endpoint: "/assist/draft-graph/stream",
       });
@@ -877,8 +910,8 @@ export default async function route(app: FastifyInstance) {
       const envelope = buildError("BAD_INPUT", "invalid input", parsed.error.flatten());
       reply.raw.setHeader("X-Correlation-ID", correlationId);
       reply.raw.writeHead(400, SSE_HEADERS);
-      writeStage(reply, { stage: "DRAFTING" });
-      writeStage(reply, { stage: "COMPLETE", payload: envelope });
+      await writeStage(reply, { stage: "DRAFTING" });
+      await writeStage(reply, { stage: "COMPLETE", payload: envelope });
       reply.raw.end();
       return reply;
     }
@@ -1208,8 +1241,8 @@ export default async function route(app: FastifyInstance) {
       if (wantsSse) {
         reply.raw.setHeader("X-Correlation-ID", correlationId);
         reply.raw.writeHead(400, SSE_HEADERS);
-        writeStage(reply, { stage: "DRAFTING" });
-        writeStage(reply, { stage: "COMPLETE", payload: envelope });
+        await writeStage(reply, { stage: "DRAFTING" });
+        await writeStage(reply, { stage: "COMPLETE", payload: envelope });
         reply.raw.end();
         return reply;
       }

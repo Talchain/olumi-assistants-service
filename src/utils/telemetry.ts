@@ -27,6 +27,35 @@ export const TelemetryEvents = {
   DraftStarted: "assist.draft.started",
   DraftCompleted: "assist.draft.completed",
 
+  // CEE v1 Draft My Model events (v1.12.0)
+  CeeDraftGraphRequested: "cee.draft_graph.requested",
+  CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
+  CeeDraftGraphFailed: "cee.draft_graph.failed",
+
+  CeeExplainGraphRequested: "cee.explain_graph.requested",
+  CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
+  CeeExplainGraphFailed: "cee.explain_graph.failed",
+
+  CeeEvidenceHelperRequested: "cee.evidence_helper.requested",
+  CeeEvidenceHelperSucceeded: "cee.evidence_helper.succeeded",
+  CeeEvidenceHelperFailed: "cee.evidence_helper.failed",
+
+  CeeBiasCheckRequested: "cee.bias_check.requested",
+  CeeBiasCheckSucceeded: "cee.bias_check.succeeded",
+  CeeBiasCheckFailed: "cee.bias_check.failed",
+
+  CeeOptionsRequested: "cee.options.requested",
+  CeeOptionsSucceeded: "cee.options.succeeded",
+  CeeOptionsFailed: "cee.options.failed",
+
+  CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
+  CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
+  CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
+
+  CeeTeamPerspectivesRequested: "cee.team_perspectives.requested",
+  CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
+  CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",
@@ -103,6 +132,11 @@ export const TelemetryEvents = {
   PromptCacheMiss: "assist.llm.prompt_cache_miss",
   PromptCacheEviction: "assist.llm.prompt_cache_eviction",
 
+  ValidationCacheHit: "assist.draft.validation_cache_hit",
+  ValidationCacheMiss: "assist.draft.validation_cache_miss",
+  ValidationCacheBypass: "assist.draft.validation_cache_bypass",
+
+  AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
   SseResumeAttempt: "assist.sse.resume_attempt",
@@ -153,7 +187,67 @@ if (env.DD_AGENT_HOST || env.DD_API_KEY) {
   log.info({ dd_host: env.DD_AGENT_HOST }, "Datadog StatsD client initialized");
 }
 
+export type TelemetryLeaf = string | number | boolean | null | undefined;
+export type TelemetryShape = {
+  [key: string]: TelemetryLeaf | TelemetryShape | Array<TelemetryLeaf | TelemetryShape>;
+};
 export type Event = Record<string, unknown>;
+
+function sanitizeTelemetryValue(
+  value: unknown
+): TelemetryLeaf | TelemetryShape | Array<TelemetryLeaf | TelemetryShape> | undefined {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === undefined
+  ) {
+    return value as TelemetryLeaf;
+  }
+
+  if (Array.isArray(value)) {
+    const sanitizedArray: Array<TelemetryLeaf | TelemetryShape> = [];
+    for (const item of value) {
+      const sanitizedItem = sanitizeTelemetryValue(item);
+      if (sanitizedItem !== undefined) {
+        sanitizedArray.push(sanitizedItem as TelemetryLeaf | TelemetryShape);
+      }
+    }
+    return sanitizedArray;
+  }
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const sanitizedObj: TelemetryShape = {};
+    for (const [key, v] of Object.entries(obj)) {
+      const sanitizedChild = sanitizeTelemetryValue(v);
+      if (sanitizedChild !== undefined) {
+        sanitizedObj[key] = sanitizedChild as
+          | TelemetryLeaf
+          | TelemetryShape
+          | Array<TelemetryLeaf | TelemetryShape>;
+      }
+    }
+    return sanitizedObj;
+  }
+
+  return undefined;
+}
+
+function sanitizeTelemetryData(data: Event): TelemetryShape {
+  const result: TelemetryShape = {};
+  for (const [key, value] of Object.entries(data)) {
+    const sanitized = sanitizeTelemetryValue(value);
+    if (sanitized !== undefined) {
+      result[key] = sanitized as
+        | TelemetryLeaf
+        | TelemetryShape
+        | Array<TelemetryLeaf | TelemetryShape>;
+    }
+  }
+  return result;
+}
 
 /**
  * Anthropic pricing (as of 2025-01, Claude 3.5 Sonnet)
@@ -241,13 +335,14 @@ export function calculateCost(model: string, tokensIn: number, tokensOut: number
  * @param data Event data
  */
 export function emit(event: string, data: Event) {
+  const eventData = sanitizeTelemetryData(data);
   // Call test sink if installed (v1.11.0)
   if (testSink) {
-    testSink(event, data);
+    testSink(event, eventData);
   }
 
   // Always log to pino
-  log.info({ event, ...data });
+  log.info({ event, ...eventData });
 
   // Send metrics to Datadog if configured
   if (datadogClient) {
@@ -256,40 +351,40 @@ export function emit(event: string, data: Event) {
       switch (event) {
         case TelemetryEvents.DraftCompleted: {
           // Latency histogram
-          if (typeof data.latency_ms === "number") {
-            datadogClient.histogram("draft.latency_ms", data.latency_ms, {
-              draft_source: String(data.draft_source || "unknown"),
-              quality_tier: String(data.quality_tier || "unknown"),
-              fallback_reason: String(data.fallback_reason || "none"),
+          if (typeof eventData.latency_ms === "number") {
+            datadogClient.histogram("draft.latency_ms", eventData.latency_ms as number, {
+              draft_source: String((eventData.draft_source as string) || "unknown"),
+              quality_tier: String((eventData.quality_tier as string) || "unknown"),
+              fallback_reason: String((eventData.fallback_reason as string) || "none"),
             });
           }
 
           // Graph size metrics
-          if (typeof data.graph_nodes === "number") {
-            datadogClient.gauge("draft.graph.nodes", data.graph_nodes);
+          if (typeof eventData.graph_nodes === "number") {
+            datadogClient.gauge("draft.graph.nodes", eventData.graph_nodes as number);
           }
-          if (typeof data.graph_edges === "number") {
-            datadogClient.gauge("draft.graph.edges", data.graph_edges);
+          if (typeof eventData.graph_edges === "number") {
+            datadogClient.gauge("draft.graph.edges", eventData.graph_edges as number);
           }
 
           // Confidence distribution
-          if (typeof data.confidence === "number") {
-            datadogClient.histogram("draft.confidence", data.confidence, {
-              quality_tier: String(data.quality_tier || "unknown"),
+          if (typeof eventData.confidence === "number") {
+            datadogClient.histogram("draft.confidence", eventData.confidence as number, {
+              quality_tier: String((eventData.quality_tier as string) || "unknown"),
             });
           }
 
           // Cost tracking (per request)
-          if (typeof data.cost_usd === "number") {
-            datadogClient.histogram("draft.cost_usd", data.cost_usd, {
-              draft_source: String(data.draft_source || "unknown"),
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("draft.cost_usd", eventData.cost_usd as number, {
+              draft_source: String((eventData.draft_source as string) || "unknown"),
             });
           }
 
           // Cache hit rate
-          if (typeof data.prompt_cache_hit === "boolean") {
+          if (typeof eventData.prompt_cache_hit === "boolean") {
             datadogClient.increment("draft.prompt_cache", 1, {
-              hit: String(data.prompt_cache_hit),
+              hit: String(eventData.prompt_cache_hit as boolean),
             });
           }
 
@@ -308,12 +403,15 @@ export function emit(event: string, data: Event) {
         }
 
         case TelemetryEvents.SSECompleted: {
-          if (typeof data.stream_duration_ms === "number") {
-            datadogClient.histogram("draft.sse.stream_duration_ms", data.stream_duration_ms);
+          if (typeof eventData.stream_duration_ms === "number") {
+            datadogClient.histogram(
+              "draft.sse.stream_duration_ms",
+              eventData.stream_duration_ms as number
+            );
           }
-          if (typeof data.fixture_shown === "boolean") {
+          if (typeof eventData.fixture_shown === "boolean") {
             datadogClient.increment("draft.sse.completed", 1, {
-              fixture_shown: String(data.fixture_shown),
+              fixture_shown: String(eventData.fixture_shown as boolean),
             });
           } else {
             datadogClient.increment("draft.sse.completed", 1);
@@ -323,15 +421,18 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.SSEError: {
           datadogClient.increment("draft.sse.errors", 1, {
-            error_code: String(data.error_code || "unknown"),
+            error_code: String((eventData.error_code as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.ValidationFailed: {
           datadogClient.increment("draft.validation.failed", 1);
-          if (typeof data.violation_count === "number") {
-            datadogClient.gauge("draft.validation.violations", data.violation_count);
+          if (typeof eventData.violation_count === "number") {
+            datadogClient.gauge(
+              "draft.validation.violations",
+              eventData.violation_count as number
+            );
           }
           break;
         }
@@ -349,15 +450,18 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.RepairFallback: {
           datadogClient.increment("draft.repair.fallback", 1, {
-            reason: String(data.reason || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.LegacyProvenance: {
           datadogClient.increment("draft.legacy_provenance.occurrences", 1);
-          if (typeof data.legacy_percentage === "number") {
-            datadogClient.gauge("draft.legacy_provenance.percentage", data.legacy_percentage);
+          if (typeof eventData.legacy_percentage === "number") {
+            datadogClient.gauge(
+              "draft.legacy_provenance.percentage",
+              eventData.legacy_percentage as number
+            );
           }
           break;
         }
@@ -374,7 +478,7 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.LegacySSEPath: {
           datadogClient.increment("draft.sse.legacy_path", 1, {
-            endpoint: String(data.endpoint || "unknown"),
+            endpoint: String((eventData.endpoint as string) || "unknown"),
           });
           break;
         }
@@ -382,34 +486,34 @@ export function emit(event: string, data: Event) {
         case TelemetryEvents.ClarifierRoundComplete: {
           // Track clarifier usage
           datadogClient.increment("clarifier.round.completed", 1, {
-            round: String(data.round ?? "unknown"),
-            provider: String(data.provider || "unknown"),
+            round: String((eventData.round as string | number | undefined) ?? "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
           });
 
           // Latency histogram
-          if (typeof data.duration_ms === "number") {
-            datadogClient.histogram("clarifier.duration_ms", data.duration_ms, {
-              round: String(data.round ?? "unknown"),
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram("clarifier.duration_ms", eventData.duration_ms as number, {
+              round: String((eventData.round as string | number | undefined) ?? "unknown"),
             });
           }
 
           // Cost tracking
-          if (typeof data.cost_usd === "number") {
-            datadogClient.histogram("clarifier.cost_usd", data.cost_usd, {
-              provider: String(data.provider || "unknown"),
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("clarifier.cost_usd", eventData.cost_usd as number, {
+              provider: String((eventData.provider as string) || "unknown"),
             });
           }
 
           // Confidence tracking
-          if (typeof data.confidence === "number") {
-            datadogClient.histogram("clarifier.confidence", data.confidence);
+          if (typeof eventData.confidence === "number") {
+            datadogClient.histogram("clarifier.confidence", eventData.confidence as number);
           }
           break;
         }
 
         case TelemetryEvents.ClarifierRoundFailed: {
           datadogClient.increment("clarifier.round.failed", 1, {
-            round: String(data.round ?? "unknown"),
+            round: String((eventData.round as string | number | undefined) ?? "unknown"),
           });
           break;
         }
@@ -417,31 +521,40 @@ export function emit(event: string, data: Event) {
         case TelemetryEvents.CritiqueComplete: {
           // Track critique usage
           datadogClient.increment("critique.completed", 1, {
-            provider: String(data.provider || "unknown"),
-            overall_quality: String(data.overall_quality || "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
+            overall_quality: String((eventData.overall_quality as string | number) || "unknown"),
           });
 
           // Latency histogram
-          if (typeof data.duration_ms === "number") {
-            datadogClient.histogram("critique.duration_ms", data.duration_ms);
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram("critique.duration_ms", eventData.duration_ms as number);
           }
 
           // Cost tracking
-          if (typeof data.cost_usd === "number") {
-            datadogClient.histogram("critique.cost_usd", data.cost_usd, {
-              provider: String(data.provider || "unknown"),
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("critique.cost_usd", eventData.cost_usd as number, {
+              provider: String((eventData.provider as string) || "unknown"),
             });
           }
 
           // Issue counts by severity
-          if (typeof data.blocker_count === "number") {
-            datadogClient.gauge("critique.issues.blockers", data.blocker_count);
+          if (typeof eventData.blocker_count === "number") {
+            datadogClient.gauge(
+              "critique.issues.blockers",
+              eventData.blocker_count as number
+            );
           }
-          if (typeof data.improvement_count === "number") {
-            datadogClient.gauge("critique.issues.improvements", data.improvement_count);
+          if (typeof eventData.improvement_count === "number") {
+            datadogClient.gauge(
+              "critique.issues.improvements",
+              eventData.improvement_count as number
+            );
           }
-          if (typeof data.observation_count === "number") {
-            datadogClient.gauge("critique.issues.observations", data.observation_count);
+          if (typeof eventData.observation_count === "number") {
+            datadogClient.gauge(
+              "critique.issues.observations",
+              eventData.observation_count as number
+            );
           }
           break;
         }
@@ -458,20 +571,26 @@ export function emit(event: string, data: Event) {
           });
 
           // Latency histogram
-          if (typeof data.duration_ms === "number") {
-            datadogClient.histogram("suggest_options.duration_ms", data.duration_ms);
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram(
+              "suggest_options.duration_ms",
+              eventData.duration_ms as number
+            );
           }
 
           // Cost tracking
-          if (typeof data.cost_usd === "number") {
-            datadogClient.histogram("suggest_options.cost_usd", data.cost_usd, {
-              provider: String(data.provider || "unknown"),
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("suggest_options.cost_usd", eventData.cost_usd as number, {
+              provider: String((eventData.provider as string) || "unknown"),
             });
           }
 
           // Option count distribution
-          if (typeof data.option_count === "number") {
-            datadogClient.gauge("suggest_options.option_count", data.option_count);
+          if (typeof eventData.option_count === "number") {
+            datadogClient.gauge(
+              "suggest_options.option_count",
+              eventData.option_count as number
+            );
           }
           break;
         }
@@ -488,20 +607,26 @@ export function emit(event: string, data: Event) {
           });
 
           // Latency histogram
-          if (typeof data.duration_ms === "number") {
-            datadogClient.histogram("explain_diff.duration_ms", data.duration_ms);
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram(
+              "explain_diff.duration_ms",
+              eventData.duration_ms as number
+            );
           }
 
           // Cost tracking
-          if (typeof data.cost_usd === "number") {
-            datadogClient.histogram("explain_diff.cost_usd", data.cost_usd, {
-              provider: String(data.provider || "unknown"),
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("explain_diff.cost_usd", eventData.cost_usd as number, {
+              provider: String((eventData.provider as string) || "unknown"),
             });
           }
 
           // Rationale count distribution
-          if (typeof data.rationale_count === "number") {
-            datadogClient.gauge("explain_diff.rationale_count", data.rationale_count);
+          if (typeof eventData.rationale_count === "number") {
+            datadogClient.gauge(
+              "explain_diff.rationale_count",
+              eventData.rationale_count as number
+            );
           }
           break;
         }
@@ -513,56 +638,67 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.LlmRetry: {
           datadogClient.increment("llm.retry", 1, {
-            adapter: String(data.adapter || "unknown"),
-            operation: String(data.operation || "unknown"),
-            attempt: String(data.attempt || "unknown"),
+            adapter: String((eventData.adapter as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            attempt: String(
+              (eventData.attempt as string | number | undefined) || "unknown"
+            ),
+            max_attempts: String(
+              (eventData.max_attempts as string | number | undefined) || "unknown"
+            ),
           });
-          if (typeof data.delay_ms === "number") {
-            datadogClient.histogram("llm.retry.delay_ms", data.delay_ms);
+          if (typeof eventData.delay_ms === "number") {
+            datadogClient.histogram("llm.retry.delay_ms", eventData.delay_ms as number);
           }
           break;
         }
 
         case TelemetryEvents.LlmRetrySuccess: {
-          datadogClient.increment("llm.retry.success", 1, {
-            adapter: String(data.adapter || "unknown"),
-            operation: String(data.operation || "unknown"),
-            total_attempts: String(data.total_attempts || "unknown"),
+          datadogClient.increment("llm.retry_success", 1, {
+            adapter: String((eventData.adapter as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            total_attempts: String(
+              (eventData.total_attempts as string | number | undefined) || "unknown"
+            ),
           });
           break;
         }
 
         case TelemetryEvents.LlmRetryExhausted: {
           datadogClient.increment("llm.retry.exhausted", 1, {
-            adapter: String(data.adapter || "unknown"),
-            operation: String(data.operation || "unknown"),
+            adapter: String((eventData.adapter as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.ProviderFailover: {
           datadogClient.increment("llm.provider_failover", 1, {
-            from_provider: String(data.from_provider || "unknown"),
-            to_provider: String(data.to_provider || "unknown"),
-            operation: String(data.operation || "unknown"),
+            from_provider: String((eventData.from_provider as string) || "unknown"),
+            to_provider: String((eventData.to_provider as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.ProviderFailoverSuccess: {
           datadogClient.increment("llm.provider_failover.success", 1, {
-            primary_provider: String(data.primary_provider || "unknown"),
-            fallback_provider: String(data.fallback_provider || "unknown"),
-            operation: String(data.operation || "unknown"),
-            fallback_index: String(data.fallback_index || "unknown"),
+            primary_provider: String((eventData.primary_provider as string) || "unknown"),
+            fallback_provider: String((eventData.fallback_provider as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            fallback_index: String(
+              (eventData.fallback_index as string | number | undefined) || "unknown"
+            ),
           });
           break;
         }
 
         case TelemetryEvents.ProviderFailoverExhausted: {
           datadogClient.increment("llm.provider_failover.exhausted", 1, {
-            operation: String(data.operation || "unknown"),
-            total_attempts: String(data.total_attempts || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            total_attempts: String(
+              (eventData.total_attempts as string | number | undefined) || "unknown"
+            ),
           });
           break;
         }
@@ -574,30 +710,60 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.PromptCacheHit: {
           datadogClient.increment("llm.prompt_cache.hit", 1, {
-            operation: String(data.operation || "unknown"),
-            provider: String(data.provider || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.PromptCacheMiss: {
           datadogClient.increment("llm.prompt_cache.miss", 1, {
-            operation: String(data.operation || "unknown"),
-            provider: String(data.provider || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.PromptCacheEviction: {
           datadogClient.increment("llm.prompt_cache.eviction", 1, {
-            reason: String(data.reason || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.ValidationCacheHit: {
+          datadogClient.increment("draft.validation_cache.hit", 1, {
+            operation: String((eventData.operation as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.ValidationCacheMiss: {
+          datadogClient.increment("draft.validation_cache.miss", 1, {
+            operation: String((eventData.operation as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.ValidationCacheBypass: {
+          datadogClient.increment("draft.validation_cache.bypass", 1, {
+            operation: String((eventData.operation as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AnthropicPromptCacheHint: {
+          datadogClient.increment("llm.anthropic_prompt_cache.hint", 1, {
+            provider: String((eventData.provider as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
           });
           break;
         }
 
         case TelemetryEvents.GuardViolation: {
           datadogClient.increment("draft.guard_violation", 1, {
-            violation_type: String(data.violation_type || "unknown"),
+            violation_type: String((eventData.violation_type as string) || "unknown"),
           });
           break;
         }
