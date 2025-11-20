@@ -215,6 +215,31 @@ import type {
 } from "@olumi/assistants-sdk";
 ```
 
+## CEE v1 Helpers (Decision Engine)
+
+The SDK includes a small, deterministic surface area for CEE v1
+("Controlled Evaluation Engine"):
+
+- `createCEEClient` – typed client for CEE endpoints.
+- `buildDecisionStorySummary` – metadata-only narrative summary.
+- `buildCeeJourneySummary` – aggregates per-envelope health and completeness.
+- `buildCeeUiFlags` – UI-ready booleans (high risk, truncation, disagreement, completeness).
+- `buildCeeDecisionReviewPayload` – compact payload suitable for "decision review" APIs.
+- `isRetryableCEEError` – classifies retryable CEE failures.
+
+Recommended reading and examples:
+
+- `Docs/CEE-v1.md` – CEE endpoints, error shapes, and judgement policy.
+- `Docs/CEE-recipes.md` – canonical usage patterns (draft-only, draft+options, full journey).
+- `sdk/typescript/src/examples/ceeJourneyExample.ts` – simple CEE journey via SDK.
+- `sdk/typescript/src/examples/ceeDecisionReviewExample.ts` – Sandbox-style
+  decision review payload example.
+ - `Docs/CEE-sandbox-integration.md` – how to integrate CEE into a
+   Scenario/Sandbox-style Decision Review surface.
+
+For contributors touching CEE helpers or contracts, also see
+`Docs/CEE-maintainers-guide.md`.
+
 ## Examples
 
 See [examples/](../../examples/) directory for complete examples:
