@@ -146,7 +146,6 @@ export function verifyResumeToken(
       );
       return { valid: false, error: "INVALID_SIGNATURE" };
     }
-
     log.debug(
       {
         request_id,

@@ -75,7 +75,6 @@ describe("SSE parity and framing", () => {
     });
 
     expectNoBannedSubstrings(payloadJson.diagnostics);
-
     if (correlationId) {
       expect(payloadJson.diagnostics.correlation_id).toBe(correlationId);
     }

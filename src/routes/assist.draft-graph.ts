@@ -126,7 +126,6 @@ export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInpu
   if (typeof archetypeHintValue === "string") {
     passthrough.archetype_hint = archetypeHintValue;
   }
-
   for (const [key, value] of Object.entries(rest)) {
     if (!key.startsWith("sim_")) continue;
     const valueType = typeof value;

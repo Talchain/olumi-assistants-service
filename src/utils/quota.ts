@@ -66,6 +66,11 @@ else
   -- Rate limited - calculate retry delay
   local tokens_needed = 1 - bucket.tokens
   local retry_after_seconds = math.ceil(tokens_needed / bucket.refillRate)
+
+  -- Persist updated bucket state and TTL even on rejections so that
+  -- callers observe a consistent view of quota state over time.
+  redis.call('SET', bucket_key, cjson.encode(bucket), 'EX', ttl_seconds)
+
   return cjson.encode({allowed = 0, tokens = bucket.tokens, retry_after_seconds = retry_after_seconds})
 end
 `;

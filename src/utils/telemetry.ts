@@ -137,7 +137,6 @@ export const TelemetryEvents = {
   ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
   AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
-
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
   SseResumeAttempt: "assist.sse.resume_attempt",

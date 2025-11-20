@@ -103,7 +103,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
         AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
-
         SseResumeIssued: "assist.sse.resume_issued",
         SseResumeAttempt: "assist.sse.resume_attempt",
         SseResumeSuccess: "assist.sse.resume_success",
@@ -122,7 +121,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // v1.11 SSE degraded mode events
         SseDegradedMode: "assist.sse.degraded_mode",
-
         // CEE v1 Draft My Model events (v1.12.0)
         CeeDraftGraphRequested: "cee.draft_graph.requested",
         CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
@@ -194,7 +192,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.* or cee.draft_graph.*)
+        // Remove the namespace prefix (assist.* or cee.*)
         const suffix = event
           .replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./, "")
           .replace(/^cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\./, "");
@@ -312,7 +310,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "share.accessed": [TelemetryEvents.ShareAccessed],
         "share.revoked": [TelemetryEvents.ShareRevoked],
 
-        // Prompt cache events (v1.6)
+        // Prompt cache & validation cache events
         "llm.prompt_cache.hit": [TelemetryEvents.PromptCacheHit],
         "llm.prompt_cache.miss": [TelemetryEvents.PromptCacheMiss],
         "llm.prompt_cache.eviction": [TelemetryEvents.PromptCacheEviction],
