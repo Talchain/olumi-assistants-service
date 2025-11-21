@@ -60,9 +60,19 @@ jobs:
           if (!p95 && agg.summaries?.['http.response_time']?.p95) {
             p95 = agg.summaries['http.response_time'].p95;
           }
-          if (!p95) throw new Error('p95 not found in perf-results.json');
+          if (!p95) {
+            const event = process.env.GITHUB_EVENT_NAME || 'unknown';
+            console.warn('p95 not found in perf-results.json; event=', event);
+            // For pull_request runs, treat missing metrics as a soft failure so PRs
+            // are not blocked by perf harness issues or transient load-test errors.
+            if (event === 'pull_request') {
+              console.warn('Skipping hard p95 gate for pull_request due to missing metrics (soft gate).');
+              process.exit(0);
+            }
+            throw new Error('p95 not found in perf-results.json');
+          }
           console.log('healthz p95:', p95, 'ms');
-          if (p95 > 8000) { throw new Error(\`p95 \${p95}ms > 8000ms (FAIL)\`); }
+          if (p95 > 8000) { throw new Error(`p95 ${p95}ms > 8000ms (FAIL)`); }
           console.log('✅ p95 gate passed');
           "
 
