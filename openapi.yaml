@@ -434,6 +434,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/decision-review/example:
+    get:
+      summary: Example Decision Review payload (CEE v1, internal)
+      description: |
+        Internal example endpoint exposing a frozen CEE Decision Review v1 payload
+        for engine/PLoT documentation and testing. This path is authenticated via
+        the standard API key mechanism and returns a static, metadata-only payload.
+
+        This endpoint is intended for documentation, SDK alignment, and ops tooling
+        only. It is not a primary product surface for Scenario UI.
+      tags:
+        - Explain
+      x-internal: true
+      responses:
+        '200':
+          description: Example CEE Decision Review v1 payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeeDecisionReviewPayloadV1'
+
   /assist/v1/team-perspectives:
     post:
       summary: Summarise team perspectives on a decision (CEE v1)
