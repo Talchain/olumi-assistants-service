@@ -3,6 +3,8 @@ import type { FastifyRequest } from "fastify";
 import type { DraftGraphInputT } from "../../src/schemas/assist.js";
 import { TelemetrySink } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
+import { CEE_QUALITY_HIGH_MIN, CEE_QUALITY_MEDIUM_MIN } from "../../src/cee/policy.js";
+import { CEE_CALIBRATION_CASES, loadCalibrationCase } from "../utils/cee-calibration.js";
 
 // Mocks for underlying draft pipeline and response guards
 const runDraftGraphPipelineMock = vi.fn();
@@ -105,6 +107,49 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     expect(success.archetype.decision_type).toBe("pricing_decision");
     expect(success.archetype.match).toBe("fuzzy");
     expect(success.seed).toBe("cee-unit-seed");
+  });
+
+  it("produces low-band quality for golden_under_specified calibration case", async () => {
+    const calibration = await loadCalibrationCase(CEE_CALIBRATION_CASES.UNDER_SPECIFIED);
+    const { quality_input } = calibration;
+
+    runDraftGraphPipelineMock.mockResolvedValueOnce({
+      kind: "success",
+      payload: {
+        graph: quality_input.graph,
+        patch: { adds: { nodes: [] as any[], edges: [] as any[] }, updates: [], removes: [] },
+        rationales: [],
+        confidence: quality_input.confidence,
+        // Simulate one CEE issue by emitting a single engine issue string; computeQuality only
+        // cares about the count of CEE issues, not their codes, so this exercises the same path.
+        issues: ["structural_gap"],
+      },
+      cost_usd: 0.05,
+      provider: "fixtures",
+      model: "fixture-v1",
+    });
+
+    validateResponseMock.mockReturnValueOnce({ ok: true });
+
+    const input = makeInput();
+    const req = makeRequest();
+
+    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
+
+    expect(statusCode).toBe(200);
+    const success = body as any;
+
+    const overall: number | undefined = success.quality?.overall;
+    expect(typeof overall).toBe("number");
+
+    const band =
+      overall! >= CEE_QUALITY_HIGH_MIN
+        ? "high"
+        : overall! >= CEE_QUALITY_MEDIUM_MIN
+          ? "medium"
+          : "low";
+
+    expect(band).toBe("low");
   });
 
   it("converts guard violations into CEE error responses with validation issues", async () => {

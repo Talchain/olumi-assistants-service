@@ -234,6 +234,9 @@ Recommended reading and examples:
 - `sdk/typescript/src/examples/ceeJourneyExample.ts` – simple CEE journey via SDK.
 - `sdk/typescript/src/examples/ceeDecisionReviewExample.ts` – Sandbox-style
   decision review payload example.
+ - `sdk/typescript/src/examples/ceeCalibrationExample.ts` – small calibration
+   snapshot helper focusing on quality bands, truncation, and validation
+   issues.
  - `Docs/CEE-sandbox-integration.md` – how to integrate CEE into a
    Scenario/Sandbox-style Decision Review surface.
 

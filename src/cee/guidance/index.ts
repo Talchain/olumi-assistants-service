@@ -19,6 +19,17 @@ export type ResponseLimitsLike = {
   sensitivity_suggestions_truncated?: boolean;
 };
 
+export function ceeAnyTruncated(limits: ResponseLimitsLike | undefined): boolean {
+  if (!limits) return false;
+  return (
+    !!limits.bias_findings_truncated ||
+    !!limits.options_truncated ||
+    !!limits.evidence_suggestions_truncated ||
+    !!limits.items_truncated ||
+    !!limits.sensitivity_suggestions_truncated
+  );
+}
+
 export function buildCeeGuidance(args: {
   quality: CEEQualityMeta;
   validationIssues: CEEValidationIssue[];
@@ -35,12 +46,7 @@ export function buildCeeGuidance(args: {
     else qualityBand = "low";
   }
 
-  const anyTruncated =
-    !!limits.bias_findings_truncated ||
-    !!limits.options_truncated ||
-    !!limits.evidence_suggestions_truncated ||
-    !!limits.items_truncated ||
-    !!limits.sensitivity_suggestions_truncated;
+  const anyTruncated = ceeAnyTruncated(limits);
 
   const issueCount = Array.isArray(validationIssues) ? validationIssues.length : 0;
   const hasErrors = validationIssues.some((issue: any) => issue && issue.severity === "error");

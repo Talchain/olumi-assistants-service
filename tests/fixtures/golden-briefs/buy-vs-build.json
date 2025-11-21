@@ -86,10 +86,8 @@
         "nodes": [],
         "edges": []
       },
-      "removes": {
-        "nodes": [],
-        "edges": []
-      }
+      "updates": [],
+      "removes": []
     },
     "rationales": [
       {

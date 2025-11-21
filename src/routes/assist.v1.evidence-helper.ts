@@ -224,6 +224,9 @@ export default async function route(app: FastifyInstance) {
         evidence_count: input.evidence.length,
         strong_count: strongCount,
         any_unsupported_types: unsupportedTypeIds.length > 0,
+        any_truncated: !!guidance.any_truncated,
+        has_validation_issues:
+          Array.isArray(ceeResponse.validation_issues) && ceeResponse.validation_issues.length > 0,
       });
 
       reply.header("X-CEE-API-Version", "v1");

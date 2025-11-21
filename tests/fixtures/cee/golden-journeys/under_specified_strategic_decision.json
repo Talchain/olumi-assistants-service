@@ -1,0 +1,23 @@
+{
+  "kind": "cee_journey",
+  "id": "under_specified_strategic_decision",
+  "description": "Under-specified strategic decision with sparse structure and low confidence; used to exercise an incomplete but untruncated, disagreement-free journey.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide long-term company strategy with minimal detail.",
+      "archetype_hint": "strategy_decision"
+    },
+    "team": {
+      "perspectives": [
+        { "id": "p1", "stance": "for", "confidence": 0.4 },
+        { "id": "p2", "stance": "against", "confidence": 0.4 }
+      ]
+    }
+  },
+  "expectations": {
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}

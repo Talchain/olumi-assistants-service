@@ -1,0 +1,37 @@
+{
+  "kind": "quality_guidance",
+  "id": "golden_under_specified",
+  "description": "Sparse CEE graph with low confidence and structural issues; should land in the low quality band with validation issues present and no truncation.",
+  "quality_input": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        { "id": "goal_1", "kind": "goal" }
+      ],
+      "edges": [],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["goal_1"],
+        "suggested_positions": {},
+        "source": "fixtures"
+      }
+    },
+    "confidence": 0.35,
+    "engine_issue_count": 0,
+    "cee_issues": [
+      {
+        "code": "structural_gap",
+        "severity": "error",
+        "field": "graph",
+        "details": { "reason": "too_few_nodes" }
+      }
+    ],
+    "limits": {}
+  },
+  "expectations": {
+    "expected_band": "low",
+    "expect_validation_issues": true,
+    "expect_any_truncated": false
+  }
+}

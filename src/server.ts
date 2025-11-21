@@ -12,6 +12,13 @@ import critiqueRoute from "./routes/assist.critique-graph.js";
 import explainRoute from "./routes/assist.explain-diff.js";
 import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import shareRoute from "./routes/assist.share.js";
+import ceeDraftRouteV1 from "./routes/assist.v1.draft-graph.js";
+import ceeOptionsRouteV1 from "./routes/assist.v1.options.js";
+import ceeBiasCheckRouteV1 from "./routes/assist.v1.bias-check.js";
+import ceeExplainGraphRouteV1 from "./routes/assist.v1.explain-graph.js";
+import ceeEvidenceHelperRouteV1 from "./routes/assist.v1.evidence-helper.js";
+import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js";
+import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
@@ -248,6 +255,14 @@ app.get("/healthz", async () => {
   await explainRoute(app);
   await evidencePackRoute(app);
   await shareRoute(app);
+
+  await ceeDraftRouteV1(app);
+  await ceeOptionsRouteV1(app);
+  await ceeBiasCheckRouteV1(app);
+  await ceeExplainGraphRouteV1(app);
+  await ceeEvidenceHelperRouteV1(app);
+  await ceeSensitivityCoachRouteV1(app);
+  await ceeTeamPerspectivesRouteV1(app);
 
   return app;
 }

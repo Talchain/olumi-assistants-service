@@ -1,0 +1,25 @@
+{
+  "kind": "cee_journey",
+  "id": "team_disagreement",
+  "description": "Team disagreement journey with multiple options and high disagreement on team perspectives.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide whether to pivot product strategy.",
+      "archetype_hint": "product_strategy_decision"
+    },
+    "team": {
+      "perspectives": [
+        { "id": "p1", "stance": "for", "confidence": 0.8 },
+        { "id": "p2", "stance": "against", "confidence": 0.8 },
+        { "id": "p3", "stance": "neutral", "confidence": 0.8 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "medium",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": true,
+    "expect_is_complete": false
+  }
+}
