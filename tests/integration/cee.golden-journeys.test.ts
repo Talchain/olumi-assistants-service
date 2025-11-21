@@ -206,4 +206,30 @@ describe("CEE golden journeys (fixtures provider)", () => {
     expect(snapshot.has_team_disagreement).toBe(true);
     expect(snapshot.is_complete).toBe(false);
   });
+
+  it("long_term_strategic_bet yields an incomplete, untruncated, disagreement-free snapshot", async () => {
+    const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.LONG_TERM_STRATEGIC_BET);
+    const { snapshot } = await runGoldenJourney(app, fixture);
+
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
+    expect(snapshot.has_validation_issues).toBe(
+      fixture.expectations.expect_has_validation_issues,
+    );
+
+    if (fixture.expectations.expect_has_team_disagreement !== undefined) {
+      expect(snapshot.has_team_disagreement).toBe(
+        fixture.expectations.expect_has_team_disagreement,
+      );
+    }
+
+    if (fixture.expectations.expect_is_complete !== undefined) {
+      expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
+    }
+
+    const briefLower = fixture.inputs.draft?.brief.toLowerCase() ?? "";
+    if (briefLower) {
+      const serialized = JSON.stringify(snapshot).toLowerCase();
+      expect(serialized.includes(briefLower)).toBe(false);
+    }
+  });
 });

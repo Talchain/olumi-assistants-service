@@ -1,0 +1,55 @@
+{
+  "kind": "quality_guidance",
+  "id": "golden_medium_with_cee_warnings",
+  "description": "Medium-band case with multiple CEE validation warnings but no truncation; calibrates medium quality with issues present.",
+  "quality_input": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        { "id": "goal_1", "kind": "goal" },
+        { "id": "dec_1", "kind": "decision" },
+        { "id": "opt_1", "kind": "option" },
+        { "id": "opt_2", "kind": "option" },
+        { "id": "risk_1", "kind": "risk" },
+        { "id": "out_1", "kind": "outcome" }
+      ],
+      "edges": [
+        { "from": "goal_1", "to": "dec_1" },
+        { "from": "dec_1", "to": "opt_1" },
+        { "from": "dec_1", "to": "opt_2" },
+        { "from": "opt_1", "to": "out_1" },
+        { "from": "opt_2", "to": "out_1" },
+        { "from": "opt_2", "to": "risk_1" }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["out_1"],
+        "suggested_positions": {},
+        "source": "fixtures"
+      }
+    },
+    "confidence": 0.6,
+    "engine_issue_count": 0,
+    "cee_issues": [
+      {
+        "code": "structural_gap_warning",
+        "severity": "warning",
+        "field": "graph",
+        "details": { "reason": "missing_alternative_risks" }
+      },
+      {
+        "code": "coverage_warning",
+        "severity": "warning",
+        "field": "graph",
+        "details": { "reason": "limited_outcomes" }
+      }
+    ],
+    "limits": {}
+  },
+  "expectations": {
+    "expected_band": "medium",
+    "expect_validation_issues": true,
+    "expect_any_truncated": false
+  }
+}

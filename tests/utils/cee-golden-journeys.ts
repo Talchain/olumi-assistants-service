@@ -45,6 +45,7 @@ export const CEE_GOLDEN_JOURNEYS = {
   UNDER_SPECIFIED_STRATEGIC_DECISION: "under_specified_strategic_decision",
   EVIDENCE_HEAVY_WITH_TRUNCATION: "evidence_heavy_with_truncation",
   TEAM_DISAGREEMENT: "team_disagreement",
+  LONG_TERM_STRATEGIC_BET: "long_term_strategic_bet",
 } as const;
 
 export type CeeGoldenJourneyId =

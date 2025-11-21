@@ -41,6 +41,8 @@ export const CEE_CALIBRATION_CASES = {
   BOUNDARY_LOW_MEDIUM: "golden_boundary_low_medium",
   BOUNDARY_MEDIUM_HIGH: "golden_boundary_medium_high",
   MIXED_TRUNCATION_ISSUES: "golden_mixed_truncation_issues",
+  LOW_CONFIDENCE_NO_ISSUES: "golden_low_confidence_no_issues",
+  MEDIUM_WITH_CEE_WARNINGS: "golden_medium_with_cee_warnings",
 } as const;
 
 export type CeeCalibrationCaseId = (typeof CEE_CALIBRATION_CASES)[keyof typeof CEE_CALIBRATION_CASES];

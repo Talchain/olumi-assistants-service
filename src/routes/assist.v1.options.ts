@@ -5,7 +5,7 @@ import { generateOptions } from "../cee/options/index.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
-import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { resolveCeeRateLimit, CEE_OPTIONS_MAX } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
@@ -186,11 +186,10 @@ export default async function route(app: FastifyInstance) {
 
       const options = generateOptions(graph, (input as any).archetype ?? null);
 
-      const OPTIONS_MAX = 6;
       let optionsTruncated = false;
       let cappedOptions = options;
-      if (options.length > OPTIONS_MAX) {
-        cappedOptions = options.slice(0, OPTIONS_MAX);
+      if (options.length > CEE_OPTIONS_MAX) {
+        cappedOptions = options.slice(0, CEE_OPTIONS_MAX);
         optionsTruncated = true;
       }
 
@@ -213,7 +212,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       const responseLimits = {
-        options_max: OPTIONS_MAX,
+        options_max: CEE_OPTIONS_MAX,
         options_truncated: optionsTruncated,
       } as CEEOptionsResponseV1["response_limits"];
 

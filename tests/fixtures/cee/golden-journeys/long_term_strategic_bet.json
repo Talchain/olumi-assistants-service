@@ -1,0 +1,32 @@
+{
+  "kind": "cee_journey",
+  "id": "long_term_strategic_bet",
+  "description": "Long-term strategic bet with mixed evidence and no expected truncation; used to exercise a medium-risk journey with multiple envelopes but no strong disagreement.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide on a long-term strategic bet for the next 5 years.",
+      "archetype_hint": "strategy_decision"
+    },
+    "evidence": {
+      "items": [
+        { "id": "e1", "type": "experiment" },
+        { "id": "e2", "type": "market_data" },
+        { "id": "e3", "type": "user_research" }
+      ]
+    },
+    "team": {
+      "perspectives": [
+        { "id": "p1", "stance": "for", "confidence": 0.8 },
+        { "id": "p2", "stance": "for", "confidence": 0.6 },
+        { "id": "p3", "stance": "neutral", "confidence": 0.5 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "medium",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}
