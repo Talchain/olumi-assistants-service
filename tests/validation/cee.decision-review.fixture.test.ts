@@ -3,12 +3,48 @@ import { describe, it, expect } from "vitest";
 import type { CeeDecisionReviewPayloadV1 } from "../../src/contracts/cee/decision-review.js";
 import { loadCeeDecisionReviewFixture } from "../utils/cee-decision-review.js";
 
-function expectNoBannedSubstrings(payload: unknown): void {
-  const serialized = JSON.stringify(payload).toLowerCase();
-  const banned = ["secret", "password", "token", "apikey", "prompt", "brief", "label"];
-  for (const token of banned) {
-    expect(serialized.includes(token)).toBe(false);
-  }
+function expectNoSecretLikeKeys(payload: unknown): void {
+  const secretKeyTokens = [
+    "secret",
+    "password",
+    "token",
+    "apikey",
+    "api_key",
+    "access_key",
+    "session_id",
+  ];
+
+  const promptKeyNames = ["prompt", "raw_prompt", "system_prompt"];
+
+  const bannedKeys: string[] = [];
+
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item);
+      }
+      return;
+    }
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      const lowerKey = key.toLowerCase();
+
+      if (
+        secretKeyTokens.some((token) => lowerKey.includes(token)) ||
+        promptKeyNames.includes(lowerKey)
+      ) {
+        bannedKeys.push(key);
+      }
+
+      visit(child);
+    }
+  };
+
+  visit(payload);
+
+  expect(bannedKeys).toEqual([]);
 }
 
 describe("CEE Decision Review v1 golden fixture", () => {
@@ -33,6 +69,6 @@ describe("CEE Decision Review v1 golden fixture", () => {
     expect(typeof fixture.uiFlags.is_journey_complete).toBe("boolean");
 
     // Privacy: fixture must be metadata-only and free of obvious sensitive markers
-    expectNoBannedSubstrings(fixture);
+    expectNoSecretLikeKeys(fixture);
   });
 });

@@ -45,6 +45,8 @@ The canonical v1 Decision Review payload is defined in:
 
 - **OpenAPI schema**: `components.schemas.CeeDecisionReviewPayloadV1`
 - **Server type alias**: `src/contracts/cee/decision-review.ts`
+- **Doc-only response example**: `components.responses.CeeDecisionReviewPayloadV1Example`
+  (used for engine/PLoT documentation; not exposed as a standalone HTTP path).
 
 Shape (high level, metadata-only):
 
