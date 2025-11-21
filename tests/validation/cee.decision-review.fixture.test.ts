@@ -2,50 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { CeeDecisionReviewPayloadV1 } from "../../src/contracts/cee/decision-review.js";
 import { loadCeeDecisionReviewFixture } from "../utils/cee-decision-review.js";
-
-function expectNoSecretLikeKeys(payload: unknown): void {
-  const secretKeyTokens = [
-    "secret",
-    "password",
-    "token",
-    "apikey",
-    "api_key",
-    "access_key",
-    "session_id",
-  ];
-
-  const promptKeyNames = ["prompt", "raw_prompt", "system_prompt"];
-
-  const bannedKeys: string[] = [];
-
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== "object") return;
-
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        visit(item);
-      }
-      return;
-    }
-
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      const lowerKey = key.toLowerCase();
-
-      if (
-        secretKeyTokens.some((token) => lowerKey.includes(token)) ||
-        promptKeyNames.includes(lowerKey)
-      ) {
-        bannedKeys.push(key);
-      }
-
-      visit(child);
-    }
-  };
-
-  visit(payload);
-
-  expect(bannedKeys).toEqual([]);
-}
+import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 
 describe("CEE Decision Review v1 golden fixture", () => {
   it("conforms to CeeDecisionReviewPayloadV1 and remains metadata-only", async () => {

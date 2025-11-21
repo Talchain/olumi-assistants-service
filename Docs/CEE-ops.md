@@ -60,6 +60,17 @@ As documented in `openapi.yaml` and `Docs/CEE-v1.md`, `/healthz` returns:
     "grounding": true,
     "critique": true,
     "clarifier": true
+  },
+  "cee": {
+    "diagnostics_enabled": false,
+    "config": {
+      "draft_graph": {
+        "feature_version": "draft-model-1.0.0",
+        "rate_limit_rpm": 5
+      }
+      // ... other CEE v1 capabilities (options, evidence-helper, bias-check,
+      // sensitivity-coach, team-perspectives, explain-graph)
+    }
   }
 }
 ```
@@ -75,6 +86,11 @@ Fields:
   from the engine or configuration.
 - `feature_flags: { grounding: boolean; critique: boolean; clarifier: boolean }`
   – coarse feature flags.
+- `cee.diagnostics_enabled: boolean` – whether the `/diagnostics` endpoint is
+  enabled for this deployment.
+- `cee.config: object` – per-capability CEE v1 configuration (feature version
+  strings and per-endpoint RPM limits). This is metadata-only and mirrors the
+  `CEE_*_FEATURE_VERSION` and `CEE_*_RATE_LIMIT_RPM` environment variables.
 
 `/healthz` is intended for:
 
@@ -97,11 +113,72 @@ Minimal checks for staging / production:
   - Surface `version` in deployment dashboards to correlate CEE changes with
     engine behaviour.
 
+### 2.2 Diagnostics endpoint
+
+For deeper, metadata-only diagnostics, the service exposes an **optional**
+endpoint:
+
+- `GET <CEE_BASE_URL>/diagnostics`
+
+Notes:
+
+- The route is only registered when `CEE_DIAGNOSTICS_ENABLED=true` on the
+  service.
+- It is protected by the same API key auth plugin as other CEE routes and
+  should only be called from trusted operator tooling.
+
+High-level response shape:
+
+```json
+{
+  "service": "assistants",
+  "version": "1.1.0",
+  "timestamp": "2025-11-21T23:59:59.000Z",
+  "feature_flags": { "grounding": true, "critique": true, "clarifier": true },
+  "cee": {
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "config": {
+      "draft_graph": { "feature_version": "draft-model-1.0.0", "rate_limit_rpm": 5 }
+      // ... other CEE capabilities
+    },
+    "recent_errors": [
+      {
+        "request_id": "cee-req-id",
+        "capability": "cee_draft_graph",
+        "status": "error",
+        "error_code": "CEE_INTERNAL_ERROR",
+        "http_status": 500,
+        "latency_ms": 123,
+        "any_truncated": false,
+        "has_validation_issues": false,
+        "timestamp": "2025-11-21T23:59:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+`recent_errors` is sourced from an in-memory ring buffer of structured
+`cee.call` log entries. These entries are:
+
+- Metadata-only (IDs, booleans, counts, numeric latencies, error codes).
+- Explicitly **exclude** prompts, briefs, graph labels, LLM text, and API keys.
+
+Operators can use `/diagnostics` for:
+
+- Quick inspection of which CEE capabilities are failing and with which codes.
+- Verifying that rate limits and feature versions are configured as expected.
+
 ## 4. Security and privacy
 
 - Never expose `CEE_API_KEY` or any CEE headers in client-side code or logs.
-- `/healthz` intentionally exposes only high-level configuration metadata; it
-  does not include prompts, graphs, or user data.
+- `/healthz` and `/diagnostics` intentionally expose only high-level
+  configuration and error metadata; they do not include prompts, graphs, or
+  user data.
+- Structured `cee.call` logs and the corresponding `recent_errors` payloads are
+  restricted to metadata fields (IDs, booleans, counts, numeric latencies,
+  error codes, and status enums).
 - Decision Review payloads (`CeeDecisionReviewPayloadV1`) are metadata-only and
   safe to log on the engine side, but product teams should still avoid logging
   them at high volume unless necessary for debugging.

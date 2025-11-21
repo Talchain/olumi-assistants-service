@@ -29,6 +29,7 @@ import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/reques
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 import { authPlugin } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
+import { getRecentCeeErrors } from "./cee/logging.js";
 
 /**
  * Build and configure Fastify server instance
@@ -232,9 +233,52 @@ app.setErrorHandler((error, request, reply) => {
   return reply.status(statusCode).send(errorV1);
 });
 
+const CEE_RATE_LIMIT_DEFAULT = 5;
+
+function resolveCeeRate(raw: string | undefined): number {
+  const parsed = raw === undefined ? NaN : Number(raw);
+  return parsed || CEE_RATE_LIMIT_DEFAULT;
+}
+
+function buildCeeConfig() {
+  return {
+    draft_graph: {
+      feature_version: env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_DRAFT_RATE_LIMIT_RPM),
+    },
+    options: {
+      feature_version: env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_OPTIONS_RATE_LIMIT_RPM),
+    },
+    bias_check: {
+      feature_version: env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_BIAS_CHECK_RATE_LIMIT_RPM),
+    },
+    evidence_helper: {
+      feature_version:
+        env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM),
+    },
+    sensitivity_coach: {
+      feature_version:
+        env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM),
+    },
+    team_perspectives: {
+      feature_version:
+        env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM),
+    },
+    explain_graph: {
+      feature_version: env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
+      rate_limit_rpm: resolveCeeRate(env.CEE_EXPLAIN_RATE_LIMIT_RPM),
+    },
+  };
+}
+
 app.get("/healthz", async () => {
-  // Get current adapter to show provider info
   const adapter = getAdapter();
+  const ceeConfig = buildCeeConfig();
   return {
     ok: true,
     service: "assistants",
@@ -242,9 +286,33 @@ app.get("/healthz", async () => {
     provider: adapter.name,
     model: adapter.model,
     limits_source: env.ENGINE_BASE_URL ? "engine" : "config",
-    feature_flags: getAllFeatureFlags()
+    feature_flags: getAllFeatureFlags(),
+    cee: {
+      diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
+      config: ceeConfig,
+    },
   };
 });
+
+if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
+  app.get("/diagnostics", async () => {
+    const adapter = getAdapter();
+    const ceeConfig = buildCeeConfig();
+    const recentErrors = getRecentCeeErrors(20);
+    return {
+      service: "assistants",
+      version: SERVICE_VERSION,
+      timestamp: new Date().toISOString(),
+      feature_flags: getAllFeatureFlags(),
+      cee: {
+        provider: adapter.name,
+        model: adapter.model,
+        config: ceeConfig,
+        recent_errors: recentErrors,
+      },
+    };
+  });
+}
 
   await statusRoutes(app);
   await limitsRoute(app);

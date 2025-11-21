@@ -9,6 +9,7 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
+import { logCeeCall } from "../cee/logging.js";
 
 type CEEExplainGraphResponseV1 = components["schemas"]["CEEExplainGraphResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -111,6 +112,15 @@ export default async function route(app: FastifyInstance) {
         http_status: 429,
       });
 
+      logCeeCall({
+        requestId,
+        capability: "cee_explain_graph",
+        latencyMs: Date.now() - start,
+        status: "limited",
+        errorCode: "CEE_RATE_LIMIT",
+        httpStatus: 429,
+      });
+
       reply.header("Retry-After", retryAfterSeconds.toString());
       reply.header("X-CEE-API-Version", "v1");
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
@@ -132,6 +142,15 @@ export default async function route(app: FastifyInstance) {
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
         http_status: 400,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_explain_graph",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_VALIDATION_FAILED",
+        httpStatus: 400,
       });
 
       reply.header("X-CEE-API-Version", "v1");
@@ -193,15 +212,32 @@ export default async function route(app: FastifyInstance) {
         guidance,
       };
 
+      const latencyMs = Date.now() - start;
+      const hasValidationIssues = validationIssues.length > 0;
+      const engineProvider = trace.engine?.provider ?? "unknown";
+      const engineModel = trace.engine?.model ?? "unknown";
+      const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
+
       emit(TelemetryEvents.CeeExplainGraphSucceeded, {
         request_id: requestId,
-        latency_ms: Date.now() - start,
+        latency_ms: latencyMs,
         quality_overall: quality.overall,
         target_count: explanation.targets ? Object.keys(explanation.targets).length : 0,
         driver_count: Array.isArray(explanation.top_drivers) ? explanation.top_drivers.length : 0,
-        engine_provider: trace.engine?.provider ?? "unknown",
-        engine_model: trace.engine?.model ?? "unknown",
-        has_validation_issues: validationIssues.length > 0,
+        engine_provider: engineProvider,
+        engine_model: engineModel,
+        has_validation_issues: hasValidationIssues,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_explain_graph",
+        provider: engineProvider,
+        model: engineModel,
+        latencyMs,
+        status: engineDegraded || hasValidationIssues ? "degraded" : "ok",
+        hasValidationIssues,
+        httpStatus: 200,
       });
 
       reply.header("X-CEE-API-Version", "v1");
@@ -217,6 +253,15 @@ export default async function route(app: FastifyInstance) {
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR",
         http_status: 500,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_explain_graph",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_INTERNAL_ERROR",
+        httpStatus: 500,
       });
 
       const errorBody = buildCeeErrorResponse("CEE_INTERNAL_ERROR", err.message || "internal error", {

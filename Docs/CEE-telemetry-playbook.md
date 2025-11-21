@@ -15,6 +15,12 @@ CEE telemetry is **privacy-safe** by design:
 - No briefs, graphs, or LLM text are included.
 - Fields are IDs, counts, booleans, numbers, or short codes/enums.
 
+In addition to these structured events, the service also emits a single
+structured **`cee.call` log line** for each CEE v1 request and exposes a
+metadata-only `/diagnostics` endpoint backed by an in-memory ring buffer of
+recent `cee.call` entries. These are intended for operators and internal
+dashboards rather than as primary product telemetry.
+
 ---
 
 ## 1. CEE event families and key fields
@@ -97,6 +103,41 @@ All `*.failed` events share the same minimal shape:
 - `latency_ms: number`
 - `error_code: string` (e.g. `CEE_RATE_LIMIT`, `CEE_VALIDATION_FAILED`).
 - `http_status: number` (400/429/500, etc.).
+
+---
+
+## 1.1 Structured CEE logs and diagnostics (non-metric)
+
+Alongside the `cee.*` telemetry events, the service writes a structured log
+entry for each CEE v1 call:
+
+- Log event: `event: "cee.call"` with fields such as:
+  - `request_id`, `capability`, `provider`, `model`.
+  - `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`.
+  - `status: "ok" | "degraded" | "timeout" | "limited" | "error"`.
+  - `error_code`, `http_status`, `any_truncated`, `has_validation_issues`.
+
+These log entries are:
+
+- Metadata-only (no prompts, briefs, graphs, or LLM text).
+- Written via the shared `logCeeCall` helper in `src/cee/logging.ts`.
+
+For convenience, a small ring buffer of recent `cee.call` entries is surfaced
+via the `/diagnostics` endpoint when `CEE_DIAGNOSTICS_ENABLED=true`:
+
+- `GET <CEE_BASE_URL>/diagnostics`
+- Response includes:
+  - `service`, `version`, `timestamp`, `feature_flags`.
+  - `cee.config` – per-capability CEE config (feature versions and RPM limits).
+  - `cee.recent_errors` – a list of non-`ok` `cee.call` entries.
+
+These diagnostics surfaces are useful for:
+
+- Quickly understanding which CEE capabilities are failing and why
+  (status/error codes, HTTP status, high-level config).
+- Complementing metric-based dashboards built on top of `cee.*` events.
+
+For operational usage patterns, see `Docs/CEE-ops.md`.
 
 ---
 
