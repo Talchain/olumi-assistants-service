@@ -598,6 +598,15 @@ All `*.failed` events share the same minimal error shape validated in tests:
 - `error_code: string` (CEE error code, e.g. `CEE_RATE_LIMIT`, `CEE_VALIDATION_FAILED`).
 - `http_status: number` (400/429/500 etc.).
 
+In addition to these events, the service writes a single structured
+`cee.call` log entry for each CEE v1 request via `src/cee/logging.ts` and
+maintains a small in-memory ring buffer of recent calls. This buffer is exposed
+in a metadata-only form via the optional `/diagnostics` endpoint when
+`CEE_DIAGNOSTICS_ENABLED=true`. Both the log entries and diagnostics payloads:
+
+- Remain metadata-only (IDs, booleans, counts, numeric latencies, error codes).
+- Never include briefs, graphs, prompts, or LLM text.
+
 **Operational notes for CEE telemetry**:
 
 - CEE `cee.*` events are **debug-only** today: they have **no Datadog metric mappings** yet,

@@ -6,6 +6,7 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
+import { logCeeCall } from "../cee/logging.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -113,6 +114,15 @@ export default async function route(app: FastifyInstance) {
         http_status: 429,
       });
 
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "limited",
+        errorCode: "CEE_RATE_LIMIT",
+        httpStatus: 429,
+      });
+
       reply.header("Retry-After", retryAfterSeconds.toString());
       reply.header("X-CEE-API-Version", "v1");
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
@@ -134,6 +144,15 @@ export default async function route(app: FastifyInstance) {
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
         http_status: 400,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_VALIDATION_FAILED",
+        httpStatus: 400,
       });
 
       reply.header("X-CEE-API-Version", "v1");

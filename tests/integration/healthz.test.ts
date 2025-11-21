@@ -14,6 +14,46 @@ describe('GET /healthz', () => {
     // Replicate the healthz endpoint from server.ts
     app.get("/healthz", async () => {
       const adapter = getAdapter();
+      const ceeRateDefault = 5;
+      const resolveCeeRate = (raw: string | undefined): number => {
+        const parsed = raw === undefined ? NaN : Number(raw);
+        return parsed || ceeRateDefault;
+      };
+      const ceeConfig = {
+        draft_graph: {
+          feature_version: process.env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_DRAFT_RATE_LIMIT_RPM),
+        },
+        options: {
+          feature_version: process.env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_OPTIONS_RATE_LIMIT_RPM),
+        },
+        bias_check: {
+          feature_version: process.env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_BIAS_CHECK_RATE_LIMIT_RPM),
+        },
+        evidence_helper: {
+          feature_version:
+            process.env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM),
+        },
+        sensitivity_coach: {
+          feature_version:
+            process.env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM),
+        },
+        team_perspectives: {
+          feature_version:
+            process.env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM),
+        },
+        explain_graph: {
+          feature_version:
+            process.env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
+          rate_limit_rpm: resolveCeeRate(process.env.CEE_EXPLAIN_RATE_LIMIT_RPM),
+        },
+      };
+
       return {
         ok: true,
         service: "assistants",
@@ -21,7 +61,11 @@ describe('GET /healthz', () => {
         provider: adapter.name,
         model: adapter.model,
         limits_source: process.env.ENGINE_BASE_URL ? "engine" : "config",
-        feature_flags: getAllFeatureFlags()
+        feature_flags: getAllFeatureFlags(),
+        cee: {
+          diagnostics_enabled: process.env.CEE_DIAGNOSTICS_ENABLED === "true",
+          config: ceeConfig,
+        },
       };
     });
 
@@ -128,5 +172,25 @@ describe('GET /healthz', () => {
     expect(body).toHaveProperty('model');
     expect(body).toHaveProperty('limits_source');
     expect(body).toHaveProperty('feature_flags');
+  });
+
+  it('includes CEE status summary', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/healthz'
+    });
+
+    const body = JSON.parse(response.body);
+
+    expect(body).toHaveProperty('cee');
+    expect(typeof body.cee).toBe('object');
+    expect(body.cee).toHaveProperty('diagnostics_enabled');
+    expect(body.cee).toHaveProperty('config');
+
+    const config = body.cee.config;
+    expect(typeof config).toBe('object');
+    expect(config).toHaveProperty('draft_graph');
+    expect(config).toHaveProperty('options');
+    expect(config).toHaveProperty('bias_check');
   });
 });

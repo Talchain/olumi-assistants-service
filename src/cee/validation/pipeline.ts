@@ -9,6 +9,7 @@ import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { inferArchetype } from "../archetypes/index.js";
 import { computeQuality } from "../quality/index.js";
 import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
+import { logCeeCall } from "../logging.js";
 import {
   CEE_BIAS_FINDINGS_MAX,
   CEE_OPTIONS_MAX,
@@ -148,6 +149,14 @@ export async function finaliseCeeDraftResponse(
       error_code: code,
       http_status: statusCode,
     });
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs: Date.now() - start,
+      status: isTimeout ? "timeout" : "error",
+      errorCode: code,
+      httpStatus: statusCode,
+    });
     return {
       statusCode,
       body: buildCeeErrorResponse(code, isTimeout ? "upstream timeout" : err.message || "internal error", {
@@ -167,6 +176,14 @@ export async function finaliseCeeDraftResponse(
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR" as CEEErrorCode,
         http_status: statusCode,
+      });
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_INTERNAL_ERROR",
+        httpStatus: statusCode,
       });
       return {
         statusCode,
@@ -207,6 +224,14 @@ export async function finaliseCeeDraftResponse(
       latency_ms: Date.now() - start,
       error_code: ceeCode,
       http_status: statusCode,
+    });
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs: Date.now() - start,
+      status: ceeCode === "CEE_RATE_LIMIT" ? "limited" : "error",
+      errorCode: ceeCode,
+      httpStatus: statusCode,
     });
 
     return {
@@ -249,6 +274,14 @@ export async function finaliseCeeDraftResponse(
       latency_ms: Date.now() - start,
       error_code: ceeCode,
       http_status: 400,
+    });
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs: Date.now() - start,
+      status: "error",
+      errorCode: ceeCode,
+      httpStatus: 400,
     });
 
     return {
@@ -368,21 +401,38 @@ export async function finaliseCeeDraftResponse(
     guidance,
   };
 
+  const latencyMs = Date.now() - start;
+  const anyTruncated = ceeAnyTruncated(limits);
+  const hasValidationIssues = validationIssues.length > 0;
+  const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
+
   emit(TelemetryEvents.CeeDraftGraphSucceeded, {
     request_id: requestId,
-    latency_ms: Date.now() - start,
+    latency_ms: latencyMs,
     quality_overall: quality.overall,
     graph_nodes: Array.isArray(payload.graph?.nodes) ? payload.graph.nodes.length : 0,
     graph_edges: Array.isArray(payload.graph?.edges) ? payload.graph.edges.length : 0,
-    has_validation_issues: validationIssues.length > 0,
-    any_truncated: ceeAnyTruncated(limits),
+    has_validation_issues: hasValidationIssues,
+    any_truncated: anyTruncated,
     engine_provider: provider,
     engine_model: model,
+  });
+
+  logCeeCall({
+    requestId,
+    capability: "cee_draft_graph",
+    provider,
+    model,
+    latencyMs,
+    costUsd: cost_usd,
+    status: engineDegraded || anyTruncated || hasValidationIssues ? "degraded" : "ok",
+    anyTruncated,
+    hasValidationIssues,
+    httpStatus: 200,
   });
 
   return {
     statusCode: 200,
     body: ceeResponse,
-    headers: {},
   };
 }

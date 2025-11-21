@@ -7,6 +7,7 @@ import type {
 import { buildCeeDecisionReviewPayload } from "../../sdk/typescript/src/ceeHelpers.js";
 import { summarizeReviewForSnapshot } from "../../scripts/cee-health-snapshot.js";
 import type { CeeEngineStatus } from "../../sdk/typescript/src/ceeHelpers.js";
+import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 
 describe("cee-health-snapshot", () => {
   it("summarizes a truncated, partial journey without leaking secrets", () => {
@@ -39,6 +40,8 @@ describe("cee-health-snapshot", () => {
 
     const serialized = JSON.stringify(snapshot).toLowerCase();
     expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
+
+    expectNoSecretLikeKeys(snapshot);
   });
 
   it("captures team disagreement in the snapshot", () => {

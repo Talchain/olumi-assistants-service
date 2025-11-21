@@ -18,6 +18,7 @@ import {
   type CeeJourneySummary,
   type CeeDecisionReviewPayload,
 } from "../../sdk/typescript/src/ceeHelpers.js";
+import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 
 describe("CEE hero journey: options + team disagreement with low evidence", () => {
   let app: FastifyInstance;
@@ -129,6 +130,8 @@ describe("CEE hero journey: options + team disagreement with low evidence", () =
       teamGuidance: teamBody.guidance,
     }).toLowerCase();
     expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
+
+    expectNoSecretLikeKeys(journey);
   });
 
   it("builds a decision review combining draft + team with disagreement and missing evidence", async () => {
@@ -176,5 +179,6 @@ describe("CEE hero journey: options + team disagreement with low evidence", () =
 
     const serialized = JSON.stringify(review).toLowerCase();
     expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
+    expectNoSecretLikeKeys(review);
   });
 });
