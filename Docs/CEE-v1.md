@@ -551,7 +551,7 @@ frozen in `TelemetryEvents` and enforced by tests.
     - Fields: `request_id`, `feature`, `evidence_count`, `api_key_present`.
   - `cee.evidence_helper.succeeded` (`CeeEvidenceHelperSucceeded`)
     - Fields: `request_id`, `latency_ms`, `quality_overall`, `evidence_count`, `strong_count`,
-      `any_unsupported_types`.
+      `any_unsupported_types`, `any_truncated`, `has_validation_issues`.
   - `cee.evidence_helper.failed` (`CeeEvidenceHelperFailed`)
     - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
 

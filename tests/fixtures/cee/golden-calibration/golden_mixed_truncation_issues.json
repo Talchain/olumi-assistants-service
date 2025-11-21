@@ -1,0 +1,47 @@
+{
+  "kind": "quality_guidance",
+  "id": "golden_mixed_truncation_issues",
+  "description": "Medium-band case with both validation issues and truncation flags set; used to calibrate combined risk posture.",
+  "quality_input": {
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        { "id": "goal_1", "kind": "goal" },
+        { "id": "opt_1", "kind": "option" },
+        { "id": "opt_2", "kind": "option" }
+      ],
+      "edges": [
+        { "from": "goal_1", "to": "opt_1" },
+        { "from": "goal_1", "to": "opt_2" }
+      ],
+      "meta": {
+        "roots": ["goal_1"],
+        "leaves": ["opt_1", "opt_2"],
+        "suggested_positions": {},
+        "source": "fixtures"
+      }
+    },
+    "confidence": 0.6,
+    "engine_issue_count": 0,
+    "cee_issues": [
+      {
+        "code": "structural_gap",
+        "severity": "error",
+        "field": "graph",
+        "details": { "reason": "missing_outcomes" }
+      }
+    ],
+    "limits": {
+      "bias_findings_truncated": false,
+      "options_truncated": true,
+      "evidence_suggestions_truncated": false,
+      "sensitivity_suggestions_truncated": false
+    }
+  },
+  "expectations": {
+    "expected_band": "medium",
+    "expect_validation_issues": true,
+    "expect_any_truncated": true
+  }
+}

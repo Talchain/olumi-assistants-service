@@ -554,6 +554,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     });
 
     expect(res.statusCode).toBe(200);
+    const _body = res.json() as any;
     const requestId = res.headers["x-cee-request-id"] as string;
 
     const requested = telemetrySink
@@ -710,6 +711,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     });
 
     expect(res.statusCode).toBe(200);
+    const _body = res.json() as any;
     const requestId = res.headers["x-cee-request-id"] as string;
 
     const requested = telemetrySink
@@ -925,6 +927,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     });
 
     expect(res.statusCode).toBe(200);
+    const _body = res.json() as any;
     const requestId = res.headers["x-cee-request-id"] as string;
 
     const requested = telemetrySink
@@ -1086,6 +1089,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     });
 
     expect(res.statusCode).toBe(200);
+    const _body = res.json() as any;
     const requestId = res.headers["x-cee-request-id"] as string;
 
     const requested = telemetrySink
@@ -1121,6 +1125,8 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
         "evidence_count",
         "strong_count",
         "any_unsupported_types",
+        "any_truncated",
+        "has_validation_issues",
       ].sort()
     );
     expect(typeof succeededData.latency_ms).toBe("number");
@@ -1128,6 +1134,8 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     expect(typeof succeededData.evidence_count).toBe("number");
     expect(typeof succeededData.strong_count).toBe("number");
     expect(typeof succeededData.any_unsupported_types).toBe("boolean");
+    expect(typeof succeededData.any_truncated).toBe("boolean");
+    expect(typeof succeededData.has_validation_issues).toBe("boolean");
 
     expectNoFreeTextFields(requestedData);
     expectNoFreeTextFields(succeededData);

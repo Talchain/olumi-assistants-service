@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { z } from "zod";
 import { DraftGraphOutput } from "../../src/schemas/assist.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface GoldenBriefFixture {
   brief: string;

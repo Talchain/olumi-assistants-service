@@ -49,7 +49,8 @@ For each CEE endpoint, three events are emitted:
 - `cee.evidence_helper.requested`
   - `evidence_count`, `api_key_present`.
 - `cee.evidence_helper.succeeded`
-  - `quality_overall`, `evidence_count`, `strong_count`, `any_unsupported_types`.
+  - `quality_overall`, `evidence_count`, `strong_count`, `any_unsupported_types`,
+    `any_truncated`, `has_validation_issues`.
 - `cee.evidence_helper.failed`
   - `error_code`, `http_status`.
 
@@ -137,7 +138,7 @@ The same metadata that powers CEE telemetry also underpins the SDK helpers:
 ### 2.3 Truncation and list caps
 
 - Telemetry: `any_truncated` on `options`, `bias_check`, `sensitivity_coach`,
-  and, via list lengths, on `evidence_helper`.
+  and `evidence_helper`.
 - SDK:
   - `CeeHealthSummary.any_truncated` is true when list caps were applied.
   - `DecisionStorySummary.any_truncated` and `risks_and_gaps` surface generic

@@ -8,7 +8,7 @@ import { getRequestId } from "../../utils/request-id.js";
 import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { inferArchetype } from "../archetypes/index.js";
 import { computeQuality } from "../quality/index.js";
-import { buildCeeGuidance } from "../guidance/index.js";
+import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
 import {
   CEE_BIAS_FINDINGS_MAX,
   CEE_OPTIONS_MAX,
@@ -375,11 +375,7 @@ export async function finaliseCeeDraftResponse(
     graph_nodes: Array.isArray(payload.graph?.nodes) ? payload.graph.nodes.length : 0,
     graph_edges: Array.isArray(payload.graph?.edges) ? payload.graph.edges.length : 0,
     has_validation_issues: validationIssues.length > 0,
-    any_truncated:
-      limits.bias_findings_truncated ||
-      limits.options_truncated ||
-      limits.evidence_suggestions_truncated ||
-      limits.sensitivity_suggestions_truncated,
+    any_truncated: ceeAnyTruncated(limits),
     engine_provider: provider,
     engine_model: model,
   });

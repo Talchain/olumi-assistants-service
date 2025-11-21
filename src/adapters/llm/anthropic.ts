@@ -5,7 +5,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
-import { log } from "../../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
@@ -16,6 +16,17 @@ export type DraftArgs = {
   brief: string;
   docs: DocPreview[];
   seed: number;
+};
+
+// PERF 2.1 - Anthropic prompt caching:
+// Extract static system instructions into Anthropic system text blocks and (optionally)
+// mark them as cacheable, so Anthropic's prompt cache can reuse them across calls while
+// user-specific content (briefs, documents, violations, graphs) remains dynamic.
+
+type AnthropicSystemBlock = {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
 };
 
 // Zod schemas for Anthropic response validation
@@ -120,22 +131,34 @@ function getClient(): Anthropic {
 }
 
 const TIMEOUT_MS = 15000;
+function isAnthropicPromptCacheEnabled(): boolean {
+  return process.env.ANTHROPIC_PROMPT_CACHE_ENABLED !== "false";
+}
 
-function buildPrompt(args: DraftArgs): string {
-  const docContext = args.docs.length
-    ? `\n\n## Attached Documents\n${args.docs
-        .map((d) => {
-          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-        })
-        .join("\n\n")}`
-    : "";
+function buildSystemBlocks(text: string, opts?: { operation?: string }): AnthropicSystemBlock[] {
+  if (isAnthropicPromptCacheEnabled()) {
+    emit(TelemetryEvents.AnthropicPromptCacheHint, {
+      provider: "anthropic",
+      operation: opts?.operation ?? "unknown",
+    });
+    return [
+      {
+        type: "text",
+        text,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+  }
 
-  return `You are an expert at drafting small decision graphs from plain-English briefs.
+  return [
+    {
+      type: "text",
+      text,
+    },
+  ];
+}
 
-## Brief
-${args.brief}
-${docContext}
+const DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
 
 ## Your Task
 Draft a small decision graph with:
@@ -202,6 +225,71 @@ Draft a small decision graph with:
 }
 
 Respond ONLY with valid JSON matching this structure.`;
+
+function buildDraftPrompt(args: DraftArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+  const docContext = args.docs.length
+    ? `\n\n## Attached Documents\n${args.docs
+        .map((d) => {
+          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+        })
+        .join("\n\n")}`
+    : "";
+
+  const userContent = `## Brief\n${args.brief}${docContext}`;
+
+  return {
+    system: buildSystemBlocks(DRAFT_SYSTEM_PROMPT, { operation: "draft_graph" }),
+    userContent,
+  };
+}
+
+const SUGGEST_SYSTEM_PROMPT = `You are an expert at generating strategic options for decisions.
+
+## Your Task
+Generate 3-5 distinct, actionable options. For each option provide:
+- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
+- title: concise name (3-8 words)
+- pros: 2-3 advantages
+- cons: 2-3 disadvantages or risks
+- evidence_to_gather: 2-3 data points or metrics to collect
+
+IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
+
+## Output Format (JSON)
+{
+  "options": [
+    {
+      "id": "extend_trial",
+      "title": "Extend free trial period",
+      "pros": ["Experiential value", "Low dev cost"],
+      "cons": ["Cost exposure", "Expiry dip risk"],
+      "evidence_to_gather": ["Trial→upgrade funnel", "Usage lift during trial"]
+    }
+  ]
+}
+
+Respond ONLY with valid JSON.`;
+
+function buildSuggestPrompt(args: {
+  goal: string;
+  constraints?: Record<string, unknown>;
+  existingOptions?: string[];
+}): { system: AnthropicSystemBlock[]; userContent: string } {
+  const existingContext = args.existingOptions?.length
+    ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
+    : "";
+
+  const constraintsContext = args.constraints
+    ? `\n\n## Constraints\n${JSON.stringify(args.constraints, null, 2)}`
+    : "";
+
+  const userContent = `## Goal\n${args.goal}${constraintsContext}${existingContext}`;
+
+  return {
+    system: buildSystemBlocks(SUGGEST_SYSTEM_PROMPT, { operation: "suggest_options" }),
+    userContent,
+  };
 }
 
 /**
@@ -254,7 +342,7 @@ export type UsageMetrics = {
 export async function draftGraphWithAnthropic(
   args: DraftArgs
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
-  const prompt = buildPrompt(args);
+  const prompt = buildDraftPrompt(args);
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -274,7 +362,8 @@ export async function draftGraphWithAnthropic(
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 4096,
             temperature: 0,
-            messages: [{ role: "user", content: prompt }],
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.userContent }],
           },
           {
             signal: abortController.signal,
@@ -448,44 +537,7 @@ export async function suggestOptionsWithAnthropic(args: {
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
 }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
-  const existingContext = args.existingOptions?.length
-    ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
-    : "";
-
-  const constraintsContext = args.constraints
-    ? `\n\n## Constraints\n${JSON.stringify(args.constraints, null, 2)}`
-    : "";
-
-  const prompt = `You are an expert at generating strategic options for decisions.
-
-## Goal
-${args.goal}
-${constraintsContext}${existingContext}
-
-## Your Task
-Generate 3-5 distinct, actionable options. For each option provide:
-- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
-- title: concise name (3-8 words)
-- pros: 2-3 advantages
-- cons: 2-3 disadvantages or risks
-- evidence_to_gather: 2-3 data points or metrics to collect
-
-IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
-
-## Output Format (JSON)
-{
-  "options": [
-    {
-      "id": "extend_trial",
-      "title": "Extend free trial period",
-      "pros": ["Experiential value", "Low dev cost"],
-      "cons": ["Cost exposure", "Expiry dip risk"],
-      "evidence_to_gather": ["Trial→upgrade funnel", "Usage lift during trial"]
-    }
-  ]
-}
-
-Respond ONLY with valid JSON.`;
+  const prompt = buildSuggestPrompt(args);
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -503,7 +555,8 @@ Respond ONLY with valid JSON.`;
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 2048,
             temperature: 0.1, // Low temperature for more deterministic output
-            messages: [{ role: "user", content: prompt }],
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.userContent }],
           },
           {
             signal: abortController.signal,
@@ -639,23 +692,7 @@ export type RepairArgs = {
   violations: string[];
 };
 
-function buildRepairPrompt(args: RepairArgs): string {
-  const graphJson = JSON.stringify(
-    {
-      nodes: args.graph.nodes,
-      edges: args.graph.edges,
-    },
-    null,
-    2
-  );
-
-  return `You are an expert at fixing decision graph violations.
-
-## Current Graph (INVALID)
-${graphJson}
-
-## Violations Found
-${args.violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}
+const REPAIR_SYSTEM_PROMPT = `You are an expert at fixing decision graph violations.
 
 ## Your Task
 Fix the graph to resolve ALL violations. Common fixes:
@@ -687,6 +724,29 @@ Fix the graph to resolve ALL violations. Common fixes:
 }
 
 Respond ONLY with valid JSON matching this structure.`;
+
+function buildRepairPrompt(args: RepairArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+  const graphJson = JSON.stringify(
+    {
+      nodes: args.graph.nodes,
+      edges: args.graph.edges,
+    },
+    null,
+    2
+  );
+
+  const violationsText = args.violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
+
+  const userContent = `## Current Graph (INVALID)
+${graphJson}
+
+## Violations Found
+${violationsText}`;
+
+  return {
+    system: buildSystemBlocks(REPAIR_SYSTEM_PROMPT, { operation: "repair_graph" }),
+    userContent,
+  };
 }
 
 export async function repairGraphWithAnthropic(
@@ -712,7 +772,8 @@ export async function repairGraphWithAnthropic(
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 4096,
             temperature: 0,
-            messages: [{ role: "user", content: prompt }],
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.userContent }],
           },
           {
             signal: abortController.signal,
@@ -877,16 +938,7 @@ export type ClarifyArgs = {
   model?: string;
 };
 
-function buildClarifyPrompt(args: ClarifyArgs): string {
-  const previousContext = args.previous_answers?.length
-    ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
-    : "";
-
-  return `You are an expert at identifying ambiguities in decision briefs and generating clarifying questions.
-
-## Brief
-${args.brief}
-${previousContext}
+const CLARIFY_SYSTEM_PROMPT = `You are an expert at identifying ambiguities in decision briefs and generating clarifying questions.
 
 ## Your Task
 Analyze this brief and generate 1-5 clarifying questions to refine the decision graph. Focus on:
@@ -927,6 +979,20 @@ Also provide:
 }
 
 Respond ONLY with valid JSON.`;
+
+function buildClarifyPrompt(args: ClarifyArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+  const previousContext = args.previous_answers?.length
+    ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
+    : "";
+
+  const userContent = `## Brief
+${args.brief}
+${previousContext}`;
+
+  return {
+    system: buildSystemBlocks(CLARIFY_SYSTEM_PROMPT, { operation: "clarify_brief" }),
+    userContent,
+  };
 }
 
 export async function clarifyBriefWithAnthropic(
@@ -953,7 +1019,8 @@ export async function clarifyBriefWithAnthropic(
             model,
             max_tokens: 2048,
             temperature: args.seed ? 0 : 0.1,
-            messages: [{ role: "user", content: prompt }],
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.userContent }],
           },
           {
             signal: abortController.signal,
@@ -1065,26 +1132,7 @@ export type CritiqueArgs = {
   model?: string;
 };
 
-function buildCritiquePrompt(args: CritiqueArgs): string {
-  const graphJson = JSON.stringify(
-    {
-      nodes: args.graph.nodes,
-      edges: args.graph.edges,
-    },
-    null,
-    2
-  );
-
-  const briefContext = args.brief ? `\n\n## Original Brief\n${args.brief}` : "";
-  const focusContext = args.focus_areas?.length
-    ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
-    : "";
-
-  return `You are an expert at critiquing decision graphs for quality and feasibility.
-
-## Graph to Critique
-${graphJson}
-${briefContext}${focusContext}
+const CRITIQUE_SYSTEM_PROMPT = `You are an expert at critiquing decision graphs for quality and feasibility.
 
 ## Your Task
 Analyze this graph and identify issues across these dimensions:
@@ -1131,6 +1179,30 @@ Also provide:
 }
 
 Respond ONLY with valid JSON.`;
+
+function buildCritiquePrompt(args: CritiqueArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+  const graphJson = JSON.stringify(
+    {
+      nodes: args.graph.nodes,
+      edges: args.graph.edges,
+    },
+    null,
+    2
+  );
+
+  const briefContext = args.brief ? `\n\n## Original Brief\n${args.brief}` : "";
+  const focusContext = args.focus_areas?.length
+    ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
+    : "";
+
+  const userContent = `## Graph to Critique
+${graphJson}
+${briefContext}${focusContext}`;
+
+  return {
+    system: buildSystemBlocks(CRITIQUE_SYSTEM_PROMPT, { operation: "critique_graph" }),
+    userContent,
+  };
 }
 
 export async function critiqueGraphWithAnthropic(
@@ -1157,7 +1229,8 @@ export async function critiqueGraphWithAnthropic(
             model,
             max_tokens: 2048,
             temperature: 0,
-            messages: [{ role: "user", content: prompt }],
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.userContent }],
           },
           {
             signal: abortController.signal,
@@ -1529,3 +1602,13 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 }
+
+// Test-only exports for verifying prompt composition and cache-control behaviour
+export const __test_only = {
+  buildSystemBlocks,
+  buildDraftPrompt,
+  buildSuggestPrompt,
+  buildRepairPrompt,
+  buildClarifyPrompt,
+  buildCritiquePrompt,
+};

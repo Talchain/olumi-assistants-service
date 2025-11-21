@@ -1,0 +1,31 @@
+{
+  "kind": "cee_journey",
+  "id": "healthy_product_decision",
+  "description": "Healthy product decision journey with strong structure, adequate evidence, and no truncation or validation issues.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide how to grow product revenue for a single offering.",
+      "archetype_hint": "product_decision"
+    },
+    "evidence": {
+      "items": [
+        { "id": "e1", "type": "experiment" },
+        { "id": "e2", "type": "user_research" }
+      ]
+    },
+    "team": {
+      "perspectives": [
+        { "id": "p1", "stance": "for", "confidence": 0.8 },
+        { "id": "p2", "stance": "for", "confidence": 0.7 },
+        { "id": "p3", "stance": "neutral", "confidence": 0.6 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "high",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}

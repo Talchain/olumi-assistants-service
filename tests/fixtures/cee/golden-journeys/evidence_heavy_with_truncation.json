@@ -1,0 +1,47 @@
+{
+  "kind": "cee_journey",
+  "id": "evidence_heavy_with_truncation",
+  "description": "Evidence-heavy journey that hits evidence-helper limits and exercises truncation flags while remaining medium quality.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide whether to expand into a new market based on many studies.",
+      "archetype_hint": "market_expansion_decision"
+    },
+    "evidence": {
+      "items": [
+        { "id": "e1", "type": "experiment" },
+        { "id": "e2", "type": "user_research" },
+        { "id": "e3", "type": "market_data" },
+        { "id": "e4", "type": "expert_opinion" },
+        { "id": "e5", "type": "experiment" },
+        { "id": "e6", "type": "user_research" },
+        { "id": "e7", "type": "market_data" },
+        { "id": "e8", "type": "experiment" },
+        { "id": "e9", "type": "user_research" },
+        { "id": "e10", "type": "market_data" },
+        { "id": "e11", "type": "experiment" },
+        { "id": "e12", "type": "user_research" },
+        { "id": "e13", "type": "market_data" },
+        { "id": "e14", "type": "expert_opinion" },
+        { "id": "e15", "type": "experiment" },
+        { "id": "e16", "type": "user_research" },
+        { "id": "e17", "type": "market_data" },
+        { "id": "e18", "type": "experiment" },
+        { "id": "e19", "type": "user_research" },
+        { "id": "e20", "type": "market_data" },
+        { "id": "e21", "type": "experiment" },
+        { "id": "e22", "type": "user_research" },
+        { "id": "e23", "type": "market_data" },
+        { "id": "e24", "type": "expert_opinion" },
+        { "id": "e25", "type": "experiment" }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "medium",
+    "expect_any_truncated": true,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}
