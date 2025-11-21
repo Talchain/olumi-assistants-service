@@ -217,3 +217,93 @@ Any future Decision Review versions should:
 - Add a new schema (e.g. `CeeDecisionReviewPayloadV2`).
 - Add a parallel TS alias under `src/contracts/cee/`.
 - Keep v1 available and documented for as long as PLoT / UI depend on it.
+
+## 5. Golden journeys as reference scenarios (PLoT-style)
+
+The CEE golden journeys in this repo provide concrete, metadata-only examples
+that PLoT can use as reference scenarios when wiring Decision Review.
+
+### 5.1 Healthy product decision (high band, no disagreement)
+
+- Fixture: `tests/fixtures/cee/golden-journeys/healthy_product_decision.json`.
+- Description:
+  - Strong structure, adequate evidence, no truncation or validation issues.
+  - Expectations:
+    - `expected_quality_band = "high"`.
+    - `expect_any_truncated = false`.
+    - `expect_has_validation_issues = false`.
+    - `expect_has_team_disagreement = false`.
+
+**Engine/PLoT orchestration sketch:**
+
+1. Build a `CeeGoldenJourneyInput`-style structure from the fixture inputs
+   (mirroring `buildCeeGoldenJourneyInputFromFixtureInputs`):
+
+   - `draftBrief = "Synthetic: Decide how to grow product revenue for a single offering."`.
+   - `draftArchetypeHint = "product_decision"`.
+   - `evidenceItems = [{id: "e1", type: "experiment"}, {id: "e2", type: "user_research"}]`.
+   - `teamPerspectives` from the fixture.
+
+2. Call CEE via the SDK using `createCEEClient`:
+
+   - `draft = cee.draftGraph({ brief: draftBrief, seed, archetype_hint: draftArchetypeHint })`.
+   - `options = cee.options({ graph: draft.graph, archetype: draft.archetype })`.
+   - `evidence = cee.evidenceHelper({ evidence: evidenceItems })`.
+   - `bias = cee.biasCheck({ graph: draft.graph, archetype: draft.archetype })`.
+   - `team = cee.teamPerspectives({ perspectives: teamPerspectives })`.
+
+3. Build the Decision Review payload and trace bundle:
+
+   - `review = buildCeeDecisionReviewPayload({ draft, options, evidence, bias, team })`.
+   - `trace = buildCeeTraceSummary({ trace: draft.trace, engineStatus })`.
+   - `bundle = buildCeeIntegrationReviewBundle({ review, trace })`.
+
+4. Expose `bundle.review` as `ceeReview` and `bundle.trace` as `ceeTrace` on the
+   PLoT API response for this scenario.
+
+In this journey, PLoT should see:
+
+- `review.journey.health.overallStatus = "ok"` and `overallTone = "success"`.
+- `review.journey.health.any_truncated = false`.
+- `review.journey.health.has_validation_issues = false`.
+- `review.uiFlags.has_high_risk_envelopes = false`.
+- `review.uiFlags.has_team_disagreement = false`.
+
+### 5.2 Team disagreement (high disagreement, mixed band)
+
+- Fixture: `tests/fixtures/cee/golden-journeys/team_disagreement.json`.
+- Description:
+  - Multiple options and materially split team perspectives.
+  - Expectations:
+    - `expected_quality_band = "medium"`.
+    - `expect_any_truncated = false`.
+    - `expect_has_validation_issues = false`.
+    - `expect_has_team_disagreement = true`.
+
+**Engine/PLoT orchestration sketch:**
+
+1. Build a `CeeGoldenJourneyInput`-style structure from the fixture inputs:
+
+   - `draftBrief = "Synthetic: Decide whether to pivot product strategy."`.
+   - `draftArchetypeHint = "product_strategy_decision"`.
+   - `teamPerspectives` as given in the fixture.
+
+2. Call CEE via the SDK:
+
+   - `draft = cee.draftGraph({ brief: draftBrief, archetype_hint: draftArchetypeHint })`.
+   - `team = cee.teamPerspectives({ perspectives: teamPerspectives })`.
+   - (Options/evidence/bias are optional; PLoT may choose to include them depending on cost.)
+
+3. Build the review payload:
+
+   - `review = buildCeeDecisionReviewPayload({ draft, team })`.
+   - `trace = buildCeeTraceSummary({ trace: draft.trace, engineStatus })`.
+   - Expose `review` / `trace` via `CeeIntegrationReviewBundle` as above.
+
+PloT and UI can then interpret disagreement flags using existing fields:
+
+- `review.journey.has_team_disagreement = true`.
+- `review.uiFlags.has_team_disagreement = true`.
+
+UI surfaces disagreement only via these metadata fields; it never inspects the
+raw team perspectives or any free-text content.
