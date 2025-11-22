@@ -1,6 +1,6 @@
 {
   "name": "olumi-assistants-service",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "private": true,
   "type": "module",
   "scripts": {

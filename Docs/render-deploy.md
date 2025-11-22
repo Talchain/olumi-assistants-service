@@ -50,11 +50,21 @@ ASSISTANTS_TIMEOUT_MS=15000
 ASSISTANTS_MAX_RETRIES=1
 SSE_MAX_MS=120000
 PORT=3101
-CORS_ALLOWED_ORIGINS=*
+ALLOWED_ORIGINS="https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:3000"
 RATE_LIMIT_MAX=120
 RATE_LIMIT_WINDOW_MS=60000
 BODY_LIMIT_BYTES=1048576
 ```
+
+**Optional (memory limit):**
+
+In addition to Render's container-level memory limits, operators who want an extra in-process guardrail against out-of-memory conditions can set:
+
+```bash
+NODE_OPTIONS=--max-old-space-size=512
+```
+
+This caps the Node.js heap at ~512MB. Treat this as an operational tuning knob: validate in staging before applying to production, and adjust the value based on your service plan and observed memory usage.
 
 **Optional (if using Anthropic):**
 ```bash

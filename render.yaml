@@ -27,8 +27,8 @@ services:
         value: "120000"
       - key: PORT
         value: "3101"
-      - key: CORS_ALLOWED_ORIGINS
-        value: "*"
+      - key: ALLOWED_ORIGINS
+        value: "https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:3000"
       - key: RATE_LIMIT_MAX
         value: "120"
       - key: RATE_LIMIT_WINDOW_MS

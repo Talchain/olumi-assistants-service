@@ -5,6 +5,42 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2025-11-22
+
+### Changed
+
+- **CEE Diagnostics Ring**
+  - CEE internal diagnostics ring buffer now retains only non-OK calls, preserving error visibility while keeping the external `/diagnostics` contract unchanged.
+- **CEE Rate Limit Config**
+  - Hardened `resolveCeeRateLimit` to clamp invalid, negative, or non-finite RPM values back to safe defaults while keeping existing HTTP behavior stable.
+- **Diagnostics Access Control**
+  - `/diagnostics` endpoint is now gated to operator-only keys configured via `CEE_DIAGNOSTICS_KEY_IDS`, returning a standard `FORBIDDEN` `error.v1` payload for non-operator keys.
+
+### Security
+
+- **CORS Wildcard Guard**
+  - Introduced a shared `resolveAllowedOrigins()` helper and fail-fast guard that rejects `ALLOWED_ORIGINS` lists containing `*` in production.
+  - Aligned Render production config and deployment docs to use a strict allowlist for CORS instead of `CORS_ALLOWED_ORIGINS=*`.
+- **Error Message Redaction**
+  - Integrated `redactLogMessage` / PII Guard into `toErrorV1`, extending error message scrubbing to cover bearer tokens, JWTs, URLs with embedded credentials, and other potential secrets.
+- **CI Security Audit**
+  - CI security job now runs `pnpm audit --audit-level=high` without `|| true`, causing the job to fail visibly when high-severity dependency issues are detected.
+- **Duplicate Shadow Files**
+  - Removed tracked `* 2.ts` duplicate source and test files and added a CI guard that fails the security job if any new `* 2.ts` files are introduced.
+
+### Added
+
+- **Ops & Versioning Docs**
+  - New `Docs/versioning-strategy.md` outlining API stability guarantees, version identifiers, and upgrade expectations.
+  - Render deployment guide now documents an optional `NODE_OPTIONS=--max-old-space-size=512` heap cap for operators who want an extra guardrail against OOM, with guidance to validate in staging.
+- **Perf Baseline Workflow**
+  - Optional GitHub Actions workflow (`perf-baseline.yml`) that runs the existing Artillery baseline (`pnpm perf:baseline`) against a configurable target URL via `workflow_dispatch`, with a commented-out schedule for future nightly runs.
+
+### Testing
+
+- Full `pnpm preflight` suite (lint, typecheck, tests, OpenAPI validation) passes with the new hardening changes.
+- SDK TypeScript tests continue to pass against the updated core service behavior.
+
 ## [1.11.0] - 2025-11-15
 
 ### Added

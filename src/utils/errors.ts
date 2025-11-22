@@ -1,6 +1,7 @@
 import { ZodError } from 'zod';
 import type { FastifyRequest } from 'fastify';
 import { getRequestId } from './request-id.js';
+import { redactLogMessage } from './redaction.js';
 
 /**
  * Error codes for structured error responses
@@ -113,6 +114,8 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
     // Remove email addresses
     message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
 
+    message = redactLogMessage(message);
+
     // Generic error - safe message only, no stack
     return buildErrorV1('INTERNAL', message, undefined, requestId);
   }
@@ -125,6 +128,8 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
     message = message.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
     message = message.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
     message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+
+    message = redactLogMessage(message);
 
     return buildErrorV1('INTERNAL', message, undefined, requestId);
   }
