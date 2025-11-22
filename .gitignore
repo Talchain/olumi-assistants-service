@@ -5,3 +5,6 @@ src/generated
 # Environment variables (never commit secrets!)
 .env
 .env.local
+
+# Duplicate files (macOS/editor backups)
+* 2.*
