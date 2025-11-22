@@ -195,6 +195,11 @@ Both endpoints are intended for staging/ops usage and should not be exposed to
 untrusted callers. They remain strictly metadata-only: no prompts, briefs,
 graphs, or LLM text are ever included.
 
+For day-to-day operations, we recommend using the `cee:diagnostics` CLI as the
+entrypoint for inspecting `/healthz` + `/diagnostics` together. See
+`Docs/CEE-runbook.md` for a concrete triage flow, example commands, and exit
+code semantics.
+
 ## 5. Security and privacy
 
 - Never expose `CEE_API_KEY` or any CEE headers in client-side code or logs.

@@ -1,0 +1,31 @@
+{
+  "kind": "cee_journey",
+  "id": "kill_vs_pivot_experiment",
+  "description": "Olumi-flavoured journey: deciding whether to kill, pivot, or double down on an under-performing growth experiment.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide whether to kill, pivot, or double down on an under-performing growth experiment.",
+      "archetype_hint": "growth_experiment_decision"
+    },
+    "evidence": {
+      "items": [
+        { "id": "experiment_results", "type": "experiment" },
+        { "id": "kpi_dashboard", "type": "market_data" }
+      ]
+    },
+    "team": {
+      "perspectives": [
+        { "id": "growth_lead", "stance": "for", "confidence": 0.6 },
+        { "id": "data_science", "stance": "against", "confidence": 0.7 },
+        { "id": "product_lead", "stance": "neutral", "confidence": 0.5 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "medium",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": true,
+    "expect_is_complete": false
+  }
+}

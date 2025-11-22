@@ -34,6 +34,16 @@ They are intended to catch regressions in:
   - `long_term_strategic_bet.json` – long-horizon strategic bet with mixed
     evidence and no expected truncation; intended to exercise a medium-risk
     journey without strong team disagreement.
+  - `launch_vs_delay_feature.json` – Olumi-flavoured feature-launch decision
+    with mixed experiment/UX signals and realistic team perspectives (Eng
+    cautious, Product/Design positive); expected to be **medium band**,
+    untruncated, with low-level disagreement that may or may not cross the
+    `has_team_disagreement` threshold depending on heuristics.
+  - `kill_vs_pivot_experiment.json` – Olumi-flavoured growth experiment
+    decision (kill vs pivot vs double down) with experiment + analytics-type
+    evidence and meaningful stance differences between Growth, Data, and
+    Product; expected to be **medium band**, untruncated, and to exercise
+    `has_team_disagreement` in the snapshot.
 - **Loader/helper**: `tests/utils/cee-golden-journeys.ts`
   - Exposes `CEE_GOLDEN_JOURNEYS` and `loadCeeGoldenJourney(id)`.
   - Fixtures are cached and deep-cloned to keep tests from mutating shared

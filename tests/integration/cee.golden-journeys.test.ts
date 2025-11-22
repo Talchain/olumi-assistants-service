@@ -232,4 +232,50 @@ describe("CEE golden journeys (fixtures provider)", () => {
       expect(serialized.includes(briefLower)).toBe(false);
     }
   });
+
+  it("launch_vs_delay_feature behaves like a realistic feature-launch decision", async () => {
+    const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.LAUNCH_VS_DELAY_FEATURE);
+    const { snapshot } = await runGoldenJourney(app, fixture);
+
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
+
+    if (fixture.expectations.expect_has_validation_issues !== undefined) {
+      expect(snapshot.has_validation_issues).toBe(
+        fixture.expectations.expect_has_validation_issues,
+      );
+    }
+
+    if (fixture.expectations.expect_has_team_disagreement !== undefined) {
+      expect(snapshot.has_team_disagreement).toBe(
+        fixture.expectations.expect_has_team_disagreement,
+      );
+    }
+
+    if (fixture.expectations.expect_is_complete !== undefined) {
+      expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
+    }
+  });
+
+  it("kill_vs_pivot_experiment behaves like a realistic experiment decision with disagreement", async () => {
+    const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.KILL_VS_PIVOT_EXPERIMENT);
+    const { snapshot } = await runGoldenJourney(app, fixture);
+
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
+
+    if (fixture.expectations.expect_has_validation_issues !== undefined) {
+      expect(snapshot.has_validation_issues).toBe(
+        fixture.expectations.expect_has_validation_issues,
+      );
+    }
+
+    if (fixture.expectations.expect_has_team_disagreement !== undefined) {
+      expect(snapshot.has_team_disagreement).toBe(
+        fixture.expectations.expect_has_team_disagreement,
+      );
+    }
+
+    if (fixture.expectations.expect_is_complete !== undefined) {
+      expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
+    }
+  });
 });
