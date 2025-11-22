@@ -1,0 +1,32 @@
+{
+  "kind": "cee_journey",
+  "id": "launch_vs_delay_feature",
+  "description": "Olumi-flavoured journey: deciding whether to launch or delay a product feature based on mixed experiment results and UX research.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Decide whether to launch a new onboarding feature now or delay for more polish.",
+      "archetype_hint": "product_launch_decision"
+    },
+    "evidence": {
+      "items": [
+        { "id": "exp_signup_conversion", "type": "experiment" },
+        { "id": "ux_research_round_1", "type": "user_research" },
+        { "id": "support_tickets_onboarding", "type": "market_data" }
+      ]
+    },
+    "team": {
+      "perspectives": [
+        { "id": "eng_lead", "stance": "against", "confidence": 0.7 },
+        { "id": "product_manager", "stance": "for", "confidence": 0.8 },
+        { "id": "design_lead", "stance": "for", "confidence": 0.7 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "medium",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}
