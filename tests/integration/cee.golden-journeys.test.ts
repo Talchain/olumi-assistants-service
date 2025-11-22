@@ -255,7 +255,6 @@ describe("CEE golden journeys (fixtures provider)", () => {
       expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
     }
   });
-
   it("high_band_portfolio_prioritisation behaves like a high-band, low-disagreement portfolio decision", async () => {
     const fixture = await loadCeeGoldenJourney(
       CEE_GOLDEN_JOURNEYS.HIGH_BAND_PORTFOLIO_PRIORITISATION,
@@ -285,7 +284,6 @@ describe("CEE golden journeys (fixtures provider)", () => {
     // heuristic tuning.
     expect(snapshot.quality_band).not.toBe("low");
   });
-
   it("kill_vs_pivot_experiment behaves like a realistic experiment decision with disagreement", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.KILL_VS_PIVOT_EXPERIMENT);
     const { snapshot } = await runGoldenJourney(app, fixture);
