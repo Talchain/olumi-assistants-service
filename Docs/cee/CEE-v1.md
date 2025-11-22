@@ -426,7 +426,7 @@ in this repository.
 
 For canonical CEE usage patterns ("draft-only", "draft + options", full
 journey, and deferred tools across multiple envelopes), see
-`Docs/CEE-recipes.md`.
+`recipes.md`.
 
 For an illustrative, metadata-only **golden Decision Review** bundle and a
 CLI-style summary formatter (useful as a reference when wiring PLoT  UI), see:
@@ -628,10 +628,10 @@ same health/guidance posture that clients see via the SDK, without adding new te
 events or logging any user content.
 
 For a more operations-focused walkthrough of how to turn these events into
-dashboards and alerts, see `Docs/CEE-telemetry-playbook.md`.
+dashboards and alerts, see `telemetry-playbook.md`.
 
 For incident response checklists (triage, mitigation levers, and when to
-escalate), see `Docs/CEE-incident-runbook.md`.
+escalate), see `incident-runbook.md`.
 
 ### 4.3 Feature flags and configuration
 
@@ -681,10 +681,10 @@ Consumers should:
   - `tests/integration/cee.telemetry.test.ts`
 
 For guidance on evolving CEE safely (invariants, key surfaces, tests, and
-common pitfalls), see `Docs/CEE-maintainers-guide.md`.
+common pitfalls), see `maintainers-guide.md`.
 
 For a reference downstream consumer (Sandbox/Scenario-style service layer and
-UI contract), see `Docs/CEE-sandbox-integration.md`.
+UI contract), see `sandbox-integration.md`.
 
 ## 6. Streaming for CEE v1
 

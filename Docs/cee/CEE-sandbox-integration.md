@@ -22,7 +22,7 @@ All examples here are **metadata-only**:
 
 - They never log or inspect prompts, graphs, or LLM outputs.
 - They rely only on structured metadata (error codes, trace IDs, counts,
-  booleans) and the SDK helpers documented in `Docs/CEE-v1.md`.
+  booleans) and the SDK helpers documented in `v1.md`.
 
 ---
 
@@ -185,7 +185,7 @@ A typical v1 integration for a Scenario/Sandbox-style product should:
 - Build a `journey` with per-envelope health and missing envelopes.
 - Derive `uiFlags` summarising the overall posture.
 
-This mirrors the behaviour described in `Docs/CEE-v1.md` and exercised in the
+This mirrors the behaviour described in `v1.md` and exercised in the
 hero journey tests under `tests/integration/`.
 
 ---
@@ -393,11 +393,11 @@ function DecisionReviewPanel({ review, loading, error }: DecisionReviewProps) {
 
 For anyone working on CEE itself (this repo):
 
-- `Docs/CEE-v1.md` – CEE endpoints, judgement policy, and helper semantics.
-- `Docs/CEE-recipes.md` – canonical usage patterns and hero journeys.
-- `Docs/CEE-telemetry-playbook.md` – telemetry fields and dashboards.
-- `Docs/CEE-incident-runbook.md` – incident triage and mitigation.
-- `Docs/CEE-maintainers-guide.md` – invariants, key surfaces, and tests.
+- `v1.md` – CEE endpoints, judgement policy, and helper semantics.
+- `recipes.md` – canonical usage patterns and hero journeys.
+- `telemetry-playbook.md` – telemetry fields and dashboards.
+- `incident-runbook.md` – incident triage and mitigation.
+- `maintainers-guide.md` – invariants, key surfaces, and tests.
 
 For downstream UI / Scenario repos:
 

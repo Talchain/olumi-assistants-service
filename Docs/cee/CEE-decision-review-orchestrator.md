@@ -6,8 +6,8 @@ This doc captures the "Freeze & Furnish" slice for the CEE Decision Review
 path as exercised by the PLoT engine. It should be read together with:
 
 - `Docs/Olumi - CEE–Scenario–PLoT Integration SSOT v10.md` (primary SSOT)
-- `Docs/CEE-v1.md` (CEE endpoints & helper semantics)
-- `Docs/CEE-sandbox-integration.md` (Scenario-side consumption patterns)
+- `v1.md` (CEE endpoints & helper semantics)
+- `sandbox-integration.md` (Scenario-side consumption patterns)
 
 ## 1. Responsibilities (D1–D7, condensed)
 
