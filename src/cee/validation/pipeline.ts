@@ -414,6 +414,7 @@ export async function finaliseCeeDraftResponse(
     graph_edges: Array.isArray(payload.graph?.edges) ? payload.graph.edges.length : 0,
     has_validation_issues: hasValidationIssues,
     any_truncated: anyTruncated,
+    cost_usd: typeof cost_usd === "number" && Number.isFinite(cost_usd) ? cost_usd : 0,
     engine_provider: provider,
     engine_model: model,
   });

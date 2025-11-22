@@ -776,6 +776,12 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CeeDraftGraphSucceeded: {
           datadogClient.increment("cee.draft_graph.succeeded", 1);
+          if (typeof eventData.cost_usd === "number") {
+            datadogClient.histogram("cee.draft_graph.cost_usd", eventData.cost_usd as number, {
+              provider: String((eventData.engine_provider as string) || "unknown"),
+              model: String((eventData.engine_model as string) || "unknown"),
+            });
+          }
           break;
         }
 

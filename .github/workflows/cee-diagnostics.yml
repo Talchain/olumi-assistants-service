@@ -1,0 +1,60 @@
+name: CEE Diagnostics (staging)
+
+on:
+  schedule:
+    # Hourly diagnostics against staging (gated by CEE_DIAGNOSTICS_SCHEDULE_ENABLED)
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cee-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnostics:
+    name: Run CEE diagnostics against staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Gate scheduled runs on a repo variable so this can be disabled without code changes.
+    # Manual workflow_dispatch runs always execute.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED == 'true' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run CEE diagnostics CLI (staging)
+        id: diagnostics
+        continue-on-error: true
+        env:
+          # Staging URL for assistants service (set as a GitHub variable)
+          ASSIST_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL }}
+          # Operator key for diagnostics in staging (stored as a GitHub secret)
+          ASSIST_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
+          # Slightly higher threshold for staging noise; prod can override separately via env.
+          CEE_DIAGNOSTICS_ERROR_THRESHOLD: 50
+        run: |
+          pnpm cee:diagnostics --json > cee-diagnostics.json
+
+      - name: Upload diagnostics summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cee-diagnostics-summary
+          path: cee-diagnostics.json
+
+      - name: Fail if diagnostics failed
+        if: steps.diagnostics.outcome == 'failure'
+        run: exit 1

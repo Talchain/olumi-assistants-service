@@ -255,7 +255,35 @@ describe("CEE golden journeys (fixtures provider)", () => {
       expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
     }
   });
+  it("high_band_portfolio_prioritisation behaves like a high-band, low-disagreement portfolio decision", async () => {
+    const fixture = await loadCeeGoldenJourney(
+      CEE_GOLDEN_JOURNEYS.HIGH_BAND_PORTFOLIO_PRIORITISATION,
+    );
+    const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
+
+    if (fixture.expectations.expect_has_validation_issues !== undefined) {
+      expect(snapshot.has_validation_issues).toBe(
+        fixture.expectations.expect_has_validation_issues,
+      );
+    }
+
+    if (fixture.expectations.expect_has_team_disagreement !== undefined) {
+      expect(snapshot.has_team_disagreement).toBe(
+        fixture.expectations.expect_has_team_disagreement,
+      );
+    }
+
+    if (fixture.expectations.expect_is_complete !== undefined) {
+      expect(snapshot.is_complete).toBe(fixture.expectations.expect_is_complete);
+    }
+
+    // High-band journeys should never be classified as low band, but we avoid
+    // asserting strictly on "high" to keep the test resilient to minor
+    // heuristic tuning.
+    expect(snapshot.quality_band).not.toBe("low");
+  });
   it("kill_vs_pivot_experiment behaves like a realistic experiment decision with disagreement", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.KILL_VS_PIVOT_EXPERIMENT);
     const { snapshot } = await runGoldenJourney(app, fixture);

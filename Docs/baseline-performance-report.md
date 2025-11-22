@@ -377,3 +377,38 @@ scenarios:
 **Status:** Ready for staging validation
 **Next Review:** After staging deployment with API key
 **PERF-001 Status:** Partially resolved - server ready, validation pending
+
+---
+
+## Run: 2025-11-22T15:17:14.302Z
+
+**Configuration:**
+- Target: `https://olumi-assistants-service-staging.onrender.com`
+- Duration: 300s
+- Rate: 1 req/sec
+- Scenarios completed: 300
+
+**Latency (ms):**
+- p50: **223.7ms**
+- p95: **497.8ms** ✅
+- p99: **584.2ms**
+- min/max: 185ms / 629ms
+
+**Reliability:**
+- Success rate: **0.00%** ❌ <99% SLO
+- Error rate: **100.00%**
+- Throughput: **1.00 req/sec**
+
+**v1.7 SLO Compliance:**
+- Draft Graph Success Rate ≥99.0%: ❌ FAIL (0.00%)
+- Draft Graph p95 ≤12s: ✅ PASS (497.8ms)
+- **Overall SLO Status:** ⚠️ FAIL
+
+**Legacy Perf Gate (p95 ≤ 8s):** ✅ PASS
+
+
+
+**Reports:**
+- [JSON](../tests/perf/_reports/baseline-2025-11-22T15-12-08.json)
+- [HTML](../tests/perf/_reports/baseline-2025-11-22T15-12-08.html)
+

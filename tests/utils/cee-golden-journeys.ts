@@ -48,6 +48,7 @@ export const CEE_GOLDEN_JOURNEYS = {
   LONG_TERM_STRATEGIC_BET: "long_term_strategic_bet",
   LAUNCH_VS_DELAY_FEATURE: "launch_vs_delay_feature",
   KILL_VS_PIVOT_EXPERIMENT: "kill_vs_pivot_experiment",
+  HIGH_BAND_PORTFOLIO_PRIORITISATION: "high_band_portfolio_prioritisation",
 } as const;
 
 export type CeeGoldenJourneyId =

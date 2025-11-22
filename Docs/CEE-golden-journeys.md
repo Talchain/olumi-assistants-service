@@ -44,6 +44,11 @@ They are intended to catch regressions in:
     evidence and meaningful stance differences between Growth, Data, and
     Product; expected to be **medium band**, untruncated, and to exercise
     `has_team_disagreement` in the snapshot.
+  - `high_band_portfolio_prioritisation.json` – Olumi-flavoured portfolio
+    decision between two strong bets for the next quarter, with rich
+    experiment/user research/market evidence and broad team alignment;
+    expected to be **high band** or at least non-low, untruncated, and
+    disagreement-free.
 - **Loader/helper**: `tests/utils/cee-golden-journeys.ts`
   - Exposes `CEE_GOLDEN_JOURNEYS` and `loadCeeGoldenJourney(id)`.
   - Fixtures are cached and deep-cloned to keep tests from mutating shared

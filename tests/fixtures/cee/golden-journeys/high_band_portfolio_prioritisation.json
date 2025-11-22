@@ -1,0 +1,33 @@
+{
+  "kind": "cee_journey",
+  "id": "high_band_portfolio_prioritisation",
+  "description": "Olumi-flavoured journey: prioritising between two strong product bets for the next quarter with rich, consistent evidence and broad team agreement.",
+  "inputs": {
+    "draft": {
+      "brief": "Synthetic: Prioritise between two strong product bets for next quarter based on experiments, user research, and revenue impact.",
+      "archetype_hint": "product_portfolio_prioritisation"
+    },
+    "evidence": {
+      "items": [
+        { "id": "exp_onboarding_completion", "type": "experiment" },
+        { "id": "exp_reporting_adoption", "type": "experiment" },
+        { "id": "ux_research_quarterly", "type": "user_research" },
+        { "id": "revenue_dashboard", "type": "market_data" }
+      ]
+    },
+    "team": {
+      "perspectives": [
+        { "id": "product_lead", "stance": "for", "confidence": 0.9 },
+        { "id": "eng_lead", "stance": "for", "confidence": 0.8 },
+        { "id": "design_lead", "stance": "for", "confidence": 0.8 }
+      ]
+    }
+  },
+  "expectations": {
+    "expected_quality_band": "high",
+    "expect_any_truncated": false,
+    "expect_has_validation_issues": false,
+    "expect_has_team_disagreement": false,
+    "expect_is_complete": false
+  }
+}
