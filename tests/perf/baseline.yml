@@ -6,7 +6,7 @@ config:
       name: 'Baseline load'
   processor: './helpers.cjs'
   variables:
-    apiKey: ""
+    apiKey: "{{ $processEnvironment.ARTILLERY_API_KEY }}"
 
 scenarios:
   - name: 'Draft graph - baseline performance'
@@ -14,7 +14,7 @@ scenarios:
       - post:
           url: '/assist/v1/draft-graph'
           headers:
-            authorization: "Bearer {{ apiKey }}"
+            x-olumi-assist-key: "{{ apiKey }}"
             content-type: "application/json"
           json:
             brief: '{{ brief }}'

@@ -49,10 +49,13 @@ try {
 
   // Run Artillery and capture JSON output
   console.log('🚀 Running Artillery...\n');
-  const variablesArg = apiKey ? ` --variables apiKey=${apiKey}` : '';
+  const env = { ...process.env };
+  if (apiKey) {
+    env.ARTILLERY_API_KEY = apiKey;
+  }
   execSync(
-    `artillery run "${BASELINE_YML}" --output "${jsonFile}" --target "${target}"${variablesArg}`,
-    { stdio: 'inherit', env: { ...process.env } }
+    `artillery run "${BASELINE_YML}" --output "${jsonFile}" --target "${target}"`,
+    { stdio: 'inherit', env }
   );
 
   console.log('\n✅ Artillery run complete\n');

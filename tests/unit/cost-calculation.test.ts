@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { calculateCost } from "../../src/utils/telemetry.js";
+import { calculateCost, TelemetryEvents } from "../../src/utils/telemetry.js";
+import { TelemetrySink } from "../utils/telemetry-sink.js";
 
 describe("Cost Calculation", () => {
   describe("Anthropic pricing", () => {
@@ -77,14 +78,32 @@ describe("Cost Calculation", () => {
   });
 
   describe("Fixtures and unknown models", () => {
-    it("returns 0 for fixture-v1 without warning", () => {
-      const cost = calculateCost("fixture-v1", 1000, 1000);
-      expect(cost).toBe(0);
+    it("returns 0 for fixture-v1 without emitting unknown-model telemetry", async () => {
+      const sink = new TelemetrySink();
+      await sink.install();
+      try {
+        const cost = calculateCost("fixture-v1", 1000, 1000);
+        expect(cost).toBe(0);
+        expect(sink.hasEvent(TelemetryEvents.CostCalculationUnknownModel)).toBe(false);
+      } finally {
+        sink.uninstall();
+      }
     });
 
-    it("returns 0 for unknown models", () => {
-      const cost = calculateCost("unknown-model-123", 1000, 1000);
-      expect(cost).toBe(0);
+    it("returns 0 for unknown models and emits CostCalculationUnknownModel telemetry", async () => {
+      const sink = new TelemetrySink();
+      await sink.install();
+      try {
+        const cost = calculateCost("unknown-model-123", 1000, 1000);
+        expect(cost).toBe(0);
+        expect(
+          sink.hasEventWithTags(TelemetryEvents.CostCalculationUnknownModel, {
+            model: "unknown-model-123",
+          }),
+        ).toBe(true);
+      } finally {
+        sink.uninstall();
+      }
     });
   });
 

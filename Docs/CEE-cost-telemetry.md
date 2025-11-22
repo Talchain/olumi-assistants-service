@@ -19,7 +19,11 @@ LLM call costs are centralised in `src/utils/telemetry.ts`:
   - `calculateCost(model: string, tokensIn: number, tokensOut: number): number`
     - Returns an estimated USD cost per request.
     - Uses the appropriate per‑1K token prices for the given model.
-    - Returns `0` for unknown/fixture models.
+    - Returns `0` for fixture models (`fixture-v1`).
+    - Emits `TelemetryEvents.CostCalculationUnknownModel` when asked to price
+      an unknown **non-fixture** model so operators can alert on cost
+      calculation gaps (e.g. typos or newly added models that are missing from
+      the pricing tables).
 
 CEE pipelines use this cost estimate to populate the `cost_usd` field
 in engine results. For the draft-graph pipeline, this is surfaced as
@@ -102,7 +106,6 @@ With logs + metrics in place, you can answer questions like:
   - Logs:
     - Group by `model`/`provider` fields on `cee.call` and aggregate
       `sum(cost_usd)`.
-
 - **Which capabilities are most expensive?**
   - For now, draft-graph is the primary cost driver; other CEE endpoints
     mostly operate on existing graphs/metadata.
@@ -114,6 +117,10 @@ All of these views use **metadata-only** telemetry (IDs, enums, counts,
 latencies, costs) and **do not** expose prompts, briefs, graphs, or
 LLM-generated text.
 
+If you want explicit alerting when cost cannot be computed for a model,
+configure a log-based metric or alert on occurrences of the
+`assist.cost_calculation.unknown_model` event name. This will surface cases
+where a new model has been enabled without adding it to the pricing tables.
 ---
 
 ## 5. Future extensions (optional)

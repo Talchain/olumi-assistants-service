@@ -44,7 +44,7 @@ jobs:
           # Operator key for diagnostics in staging (stored as a GitHub secret)
           ASSIST_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
           # Slightly higher threshold for staging noise; prod can override separately via env.
-          CEE_DIAGNOSTICS_ERROR_THRESHOLD: 50
+          CEE_DIAGNOSTICS_ERROR_THRESHOLD: ${{ vars.CEE_DIAGNOSTICS_ERROR_THRESHOLD }}
         run: |
           pnpm cee:diagnostics --json > cee-diagnostics.json
 
