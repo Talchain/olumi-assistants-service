@@ -106,8 +106,7 @@ With logs + metrics in place, you can answer questions like:
   - Logs:
     - Group by `model`/`provider` fields on `cee.call` and aggregate
       `sum(cost_usd)`.
-
-  - **Which capabilities are most expensive?**
+- **Which capabilities are most expensive?**
   - For now, draft-graph is the primary cost driver; other CEE endpoints
     mostly operate on existing graphs/metadata.
   - As additional CEE endpoints start invoking LLMs directly, they should
@@ -122,7 +121,6 @@ If you want explicit alerting when cost cannot be computed for a model,
 configure a log-based metric or alert on occurrences of the
 `assist.cost_calculation.unknown_model` event name. This will surface cases
 where a new model has been enabled without adding it to the pricing tables.
-
 ---
 
 ## 5. Future extensions (optional)
