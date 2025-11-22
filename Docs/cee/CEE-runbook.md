@@ -91,7 +91,7 @@ When engine or product teams report failing CEE calls (e.g. 4xx/5xx from
      "$ASSIST_BASE_URL/diagnostics" | jq .
    ```
 
-   See `Docs/CEE-ops.md` for full field descriptions.
+   See `ops.md` for full field descriptions.
 
 5. **Escalate to structured logs if the summary is not enough**
 
@@ -106,7 +106,7 @@ When engine or product teams report failing CEE calls (e.g. 4xx/5xx from
 
 ### 2.1 `/healthz`
 
-See `Docs/CEE-ops.md` §2.1 for the full schema. In short:
+See `ops.md` §2.1 for the full schema. In short:
 
 - `ok` – overall health flag used for probes.
 - `service` / `version` – identity and deployment version.
@@ -216,5 +216,5 @@ allowlist.
 For LLM provider outages or sudden CEE error spikes, see also
 `Docs/runbooks/cee-llm-outage-or-spike.md` for a focused incident playbook
 that builds on the diagnostics CLI and these surfaces.
-This runbook is intentionally concise; see `Docs/CEE-ops.md` and
-`Docs/CEE-v1.md` for more detail on the underlying schemas and configuration.
+This runbook is intentionally concise; see `ops.md` and
+`v1.md` for more detail on the underlying schemas and configuration.
