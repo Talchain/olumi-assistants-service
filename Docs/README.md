@@ -169,7 +169,7 @@ See [contributing.md](contributing.md) for:
 - **Issues:** Check [issues/](issues/) for known problems
 - **Runbooks:** See [runbooks/](runbooks/) for incident response
 - **Architecture Questions:** Start with [getting-started/architecture.md](getting-started/architecture.md)
-- **API Questions:** See [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)
+- **API Questions:** See [api/FRONTEND_INTEGRATION.md](api/FRONTEND_INTEGRATION.md)
 
 ---
 
