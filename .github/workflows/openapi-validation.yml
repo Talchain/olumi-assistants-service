@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - feat/**
+  workflow_dispatch:  # Allow manual triggering for required status checks
 
 jobs:
   validate:
