@@ -12,19 +12,13 @@ import {
   buildCeeDecisionReviewPayload,
   type CeeDecisionReviewPayload,
 } from "./ceeHelpers.js";
-
-async function expectNoSecretLikeKeysShared(payload: unknown): Promise<void> {
-  const mod = await import("../../../tests/utils/shared-privacy-guards.js");
-  mod.expectNoSecretLikeKeysShared(payload);
-}
-
-async function expectNoBannedSubstringsShared(payload: unknown): Promise<void> {
-  const mod = await import("../../../tests/utils/shared-privacy-guards.js");
-  mod.expectNoBannedSubstringsShared(payload);
-}
+import {
+  expectNoSecretLikeKeysShared,
+  expectNoBannedSubstringsShared,
+} from "./testUtils/privacyGuards.js";
 
 describe("buildCeeDecisionReviewPayload regression", () => {
-  it("builds a high-quality, complete, untruncated review from deterministic envelopes", async () => {
+  it("builds a high-quality, complete, untruncated review from deterministic envelopes", () => {
     const draft: CEEDraftGraphResponseV1 = {
       trace: { request_id: "r-journey-ok", correlation_id: "r-journey-ok", engine: {} },
       quality: { overall: 8 } as any,
@@ -109,11 +103,11 @@ describe("buildCeeDecisionReviewPayload regression", () => {
     expect(review.trace?.request_id).toBe("r-journey-ok");
     expect(review.trace?.correlation_id).toBe("r-journey-ok");
 
-    await expectNoSecretLikeKeysShared(review);
-    await expectNoBannedSubstringsShared(review);
+    expectNoSecretLikeKeysShared(review);
+    expectNoBannedSubstringsShared(review);
   });
 
-  it("captures truncation, validation issues, and team disagreement in review metadata", async () => {
+  it("captures truncation, validation issues, and team disagreement in review metadata", () => {
     const draft: CEEDraftGraphResponseV1 = {
       trace: { request_id: "r-journey-mixed", correlation_id: "r-journey-mixed", engine: {} },
       quality: { overall: 6 } as any,
@@ -157,7 +151,7 @@ describe("buildCeeDecisionReviewPayload regression", () => {
     expect(review.uiFlags.has_team_disagreement).toBe(true);
     expect(review.uiFlags.is_journey_complete).toBe(false);
 
-    await expectNoSecretLikeKeysShared(review);
-    await expectNoBannedSubstringsShared(review);
+    expectNoSecretLikeKeysShared(review);
+    expectNoBannedSubstringsShared(review);
   });
 });

@@ -2,14 +2,17 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 
 import { build } from "../../src/server.js";
+import { fastHash } from "../../src/utils/hash.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 
 describe("GET /diagnostics", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "diagnostics-test-key");
+    vi.stubEnv("ASSIST_API_KEYS", "diagnostics-test-key,non-operator-key");
     vi.stubEnv("CEE_DIAGNOSTICS_ENABLED", "true");
+    const operatorKeyId = fastHash("diagnostics-test-key", 8);
+    vi.stubEnv("CEE_DIAGNOSTICS_KEY_IDS", operatorKeyId);
     vi.stubEnv("LLM_PROVIDER", "fixtures");
 
     app = await build();
@@ -47,5 +50,21 @@ describe("GET /diagnostics", () => {
 
     // Ensure diagnostics payload does not contain obvious secrets or headers
     expectNoBannedSubstrings(body as Record<string, any>);
+  });
+
+  it("returns 403 FORBIDDEN for non-operator keys when diagnostics is operator-gated", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/diagnostics",
+      headers: {
+        "X-Olumi-Assist-Key": "non-operator-key",
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+
+    expect(body.schema).toBe("error.v1");
+    expect(body.code).toBe("FORBIDDEN");
   });
 });

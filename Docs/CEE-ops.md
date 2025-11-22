@@ -126,6 +126,13 @@ Notes:
   service.
 - It is protected by the same API key auth plugin as other CEE routes and
   should only be called from trusted operator tooling.
+  - By default, any authenticated API key may call this route.
+  - To further restrict access to specific operator keys, set
+    `CEE_DIAGNOSTICS_KEY_IDS` to a comma-separated list of **key IDs** (the
+    hashed identifiers surfaced in `/v1/limits` and auth telemetry). When this
+    variable is non-empty, only requests whose authenticated key ID is in the
+    allowlist will receive diagnostics; all other keys receive a standard
+    `error.v1` `FORBIDDEN` response.
 
 High-level response shape:
 

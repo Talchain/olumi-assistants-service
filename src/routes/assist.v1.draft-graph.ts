@@ -163,7 +163,7 @@ export default async function route(app: FastifyInstance) {
     }
 
     // Preserve CEE extras (seed, archetype_hint) via sanitizer
-    const baseInput = sanitizeDraftGraphInput(parsed.data) as DraftGraphInputT & {
+    const baseInput = sanitizeDraftGraphInput(parsed.data, req.body) as DraftGraphInputT & {
       seed?: string;
       archetype_hint?: string;
     };

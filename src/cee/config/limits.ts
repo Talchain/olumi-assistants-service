@@ -7,6 +7,15 @@ export const CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM = 5;
 
 export function resolveCeeRateLimit(envVarName: string): number {
   const raw = process.env[envVarName];
-  const parsed = raw === undefined ? NaN : Number(raw);
-  return parsed || CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM;
+  if (raw === undefined) {
+    return CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM;
+  }
+
+  return Math.floor(parsed);
 }

@@ -236,10 +236,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect(TelemetryEvents.LegacyProvenance).toBe("assist.draft.legacy_provenance");
       expect(TelemetryEvents.LegacySSEPath).toBe("assist.draft.legacy_sse_path");
     });
-
-    it("has debug stage event", () => {
-      expect(TelemetryEvents.Stage).toBe("assist.draft.stage");
-    });
   });
 
   describe("Datadog metric alignment", () => {
@@ -309,6 +305,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "share.created": [TelemetryEvents.ShareCreated],
         "share.accessed": [TelemetryEvents.ShareAccessed],
         "share.revoked": [TelemetryEvents.ShareRevoked],
+        "share.expired": [TelemetryEvents.ShareExpired],
+        "share.not_found": [TelemetryEvents.ShareNotFound],
 
         // Prompt cache & validation cache events
         "llm.prompt_cache.hit": [TelemetryEvents.PromptCacheHit],
@@ -318,8 +316,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.validation_cache.miss": [TelemetryEvents.ValidationCacheMiss],
         "draft.validation_cache.bypass": [TelemetryEvents.ValidationCacheBypass],
         "llm.anthropic_prompt_cache.hint": [TelemetryEvents.AnthropicPromptCacheHint],
-        "share.expired": [TelemetryEvents.ShareExpired],
-        "share.not_found": [TelemetryEvents.ShareNotFound],
 
         // SSE Resume events (v1.8)
         "sse.resume.issued": [TelemetryEvents.SseResumeIssued],
@@ -366,38 +362,40 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "critique.issues.observations": [TelemetryEvents.CritiqueComplete],
         "suggest_options.option_count": [TelemetryEvents.SuggestOptionsComplete],
         "explain_diff.rationale_count": [TelemetryEvents.ExplainDiffComplete],
+
+        // CEE v1 endpoint events (counters)
+        "cee.draft_graph.requested": [TelemetryEvents.CeeDraftGraphRequested],
+        "cee.draft_graph.succeeded": [TelemetryEvents.CeeDraftGraphSucceeded],
+        "cee.draft_graph.failed": [TelemetryEvents.CeeDraftGraphFailed],
+        "cee.explain_graph.requested": [TelemetryEvents.CeeExplainGraphRequested],
+        "cee.explain_graph.succeeded": [TelemetryEvents.CeeExplainGraphSucceeded],
+        "cee.explain_graph.failed": [TelemetryEvents.CeeExplainGraphFailed],
+        "cee.evidence_helper.requested": [TelemetryEvents.CeeEvidenceHelperRequested],
+        "cee.evidence_helper.succeeded": [TelemetryEvents.CeeEvidenceHelperSucceeded],
+        "cee.evidence_helper.failed": [TelemetryEvents.CeeEvidenceHelperFailed],
+        "cee.bias_check.requested": [TelemetryEvents.CeeBiasCheckRequested],
+        "cee.bias_check.succeeded": [TelemetryEvents.CeeBiasCheckSucceeded],
+        "cee.bias_check.failed": [TelemetryEvents.CeeBiasCheckFailed],
+        "cee.options.requested": [TelemetryEvents.CeeOptionsRequested],
+        "cee.options.succeeded": [TelemetryEvents.CeeOptionsSucceeded],
+        "cee.options.failed": [TelemetryEvents.CeeOptionsFailed],
+        "cee.sensitivity_coach.requested": [TelemetryEvents.CeeSensitivityCoachRequested],
+        "cee.sensitivity_coach.succeeded": [TelemetryEvents.CeeSensitivityCoachSucceeded],
+        "cee.sensitivity_coach.failed": [TelemetryEvents.CeeSensitivityCoachFailed],
+        "cee.team_perspectives.requested": [TelemetryEvents.CeeTeamPerspectivesRequested],
+        "cee.team_perspectives.succeeded": [TelemetryEvents.CeeTeamPerspectivesSucceeded],
+        "cee.team_perspectives.failed": [TelemetryEvents.CeeTeamPerspectivesFailed],
       };
 
-      // Verify all events are documented, except debug-only/CEE events
+      // Verify all events are documented, except debug-only events
       const allEvents = Object.values(TelemetryEvents);
       const documentedEvents = new Set(
         Object.values(datadogMetrics).flat()
       );
 
-      // Stage events are debug-only, and CEE events don't have Datadog mappings yet
+      // Stage events are debug-only and intentionally have no Datadog mappings
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
-        TelemetryEvents.CeeDraftGraphRequested,
-        TelemetryEvents.CeeDraftGraphSucceeded,
-        TelemetryEvents.CeeDraftGraphFailed,
-        TelemetryEvents.CeeExplainGraphRequested,
-        TelemetryEvents.CeeExplainGraphSucceeded,
-        TelemetryEvents.CeeExplainGraphFailed,
-        TelemetryEvents.CeeEvidenceHelperRequested,
-        TelemetryEvents.CeeEvidenceHelperSucceeded,
-        TelemetryEvents.CeeEvidenceHelperFailed,
-        TelemetryEvents.CeeBiasCheckRequested,
-        TelemetryEvents.CeeBiasCheckSucceeded,
-        TelemetryEvents.CeeBiasCheckFailed,
-        TelemetryEvents.CeeOptionsRequested,
-        TelemetryEvents.CeeOptionsSucceeded,
-        TelemetryEvents.CeeOptionsFailed,
-        TelemetryEvents.CeeSensitivityCoachRequested,
-        TelemetryEvents.CeeSensitivityCoachSucceeded,
-        TelemetryEvents.CeeSensitivityCoachFailed,
-        TelemetryEvents.CeeTeamPerspectivesRequested,
-        TelemetryEvents.CeeTeamPerspectivesSucceeded,
-        TelemetryEvents.CeeTeamPerspectivesFailed,
       ];
 
       for (const event of allEvents) {

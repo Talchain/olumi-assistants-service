@@ -28,9 +28,10 @@ import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
-import { authPlugin } from "./plugins/auth.js";
+import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
+import { resolveCeeRateLimit } from "./cee/config/limits.js";
 
 /**
  * Build and configure Fastify server instance
@@ -234,45 +235,38 @@ app.setErrorHandler((error, request, reply) => {
   return reply.status(statusCode).send(errorV1);
 });
 
-const CEE_RATE_LIMIT_DEFAULT = 5;
-
-function resolveCeeRate(raw: string | undefined): number {
-  const parsed = raw === undefined ? NaN : Number(raw);
-  return parsed || CEE_RATE_LIMIT_DEFAULT;
-}
-
 function buildCeeConfig() {
   return {
     draft_graph: {
       feature_version: env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_DRAFT_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM"),
     },
     options: {
       feature_version: env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_OPTIONS_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_OPTIONS_RATE_LIMIT_RPM"),
     },
     bias_check: {
       feature_version: env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_BIAS_CHECK_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_BIAS_CHECK_RATE_LIMIT_RPM"),
     },
     evidence_helper: {
       feature_version:
         env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM"),
     },
     sensitivity_coach: {
       feature_version:
         env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM"),
     },
     team_perspectives: {
       feature_version:
         env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM"),
     },
     explain_graph: {
       feature_version: env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
-      rate_limit_rpm: resolveCeeRate(env.CEE_EXPLAIN_RATE_LIMIT_RPM),
+      rate_limit_rpm: resolveCeeRateLimit("CEE_EXPLAIN_RATE_LIMIT_RPM"),
     },
   };
 }
@@ -296,7 +290,29 @@ app.get("/healthz", async () => {
 });
 
 if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
-  app.get("/diagnostics", async () => {
+  const diagnosticsKeyIdsRaw = env.CEE_DIAGNOSTICS_KEY_IDS;
+  const diagnosticsKeyIds = diagnosticsKeyIdsRaw && diagnosticsKeyIdsRaw.trim().length > 0
+    ? new Set(
+        diagnosticsKeyIdsRaw
+          .split(",")
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0),
+      )
+    : null;
+
+  app.get("/diagnostics", async (request, reply) => {
+    if (diagnosticsKeyIds && diagnosticsKeyIds.size > 0) {
+      const keyId = getRequestKeyId(request);
+      if (!keyId || !diagnosticsKeyIds.has(keyId)) {
+        reply.code(403);
+        return reply.send({
+          schema: "error.v1",
+          code: "FORBIDDEN",
+          message: "Diagnostics access denied.",
+        });
+      }
+    }
+
     const adapter = getAdapter();
     const ceeConfig = buildCeeConfig();
     const recentErrors = getRecentCeeErrors(20);
@@ -332,7 +348,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeEvidenceHelperRouteV1(app);
   await ceeSensitivityCoachRouteV1(app);
   await ceeTeamPerspectivesRouteV1(app);
-  await ceeDecisionReviewExampleRouteV1(app);
+  if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
+    await ceeDecisionReviewExampleRouteV1(app);
+  }
 
   return app;
 }

@@ -87,7 +87,10 @@ function withDiagnostics<T extends Record<string, any>>(
 
 type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
 
-export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInputT {
+export function sanitizeDraftGraphInput(
+  input: DraftGraphInputT,
+  rawInput?: unknown,
+): DraftGraphInputT {
   const {
     brief,
     attachments,
@@ -96,8 +99,7 @@ export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInpu
     flags,
     include_debug,
     focus_areas,
-    ...rest
-  } = input as DraftGraphInputT & Record<string, unknown>;
+  } = input;
 
   const base = {
     brief,
@@ -111,22 +113,28 @@ export function sanitizeDraftGraphInput(input: DraftGraphInputT): DraftGraphInpu
 
   const passthrough: Record<string, unknown> = {};
 
-  const fixturesValue = rest["fixtures"];
+  const extrasSource =
+    rawInput && typeof rawInput === "object"
+      ? (rawInput as Record<string, unknown>)
+      : (input as unknown as Record<string, unknown>);
+
+  const fixturesValue = extrasSource["fixtures"];
   if (typeof fixturesValue === "boolean") {
     passthrough.fixtures = fixturesValue;
   }
 
   // Preserve CEE-specific passthrough fields
-  const seedValue = rest["seed"];
+  const seedValue = extrasSource["seed"];
   if (typeof seedValue === "string") {
     passthrough.seed = seedValue;
   }
 
-  const archetypeHintValue = rest["archetype_hint"];
+  const archetypeHintValue = extrasSource["archetype_hint"];
   if (typeof archetypeHintValue === "string") {
     passthrough.archetype_hint = archetypeHintValue;
   }
-  for (const [key, value] of Object.entries(rest)) {
+
+  for (const [key, value] of Object.entries(extrasSource)) {
     if (!key.startsWith("sim_")) continue;
     const valueType = typeof value;
     if (valueType === "string" || valueType === "number" || valueType === "boolean") {
@@ -916,7 +924,7 @@ export default async function route(app: FastifyInstance) {
       return reply;
     }
 
-    const input = sanitizeDraftGraphInput(parsed.data);
+    const input = sanitizeDraftGraphInput(parsed.data, req.body);
 
     await handleSseResponse(reply, input, req.body, correlationId);
     return reply;

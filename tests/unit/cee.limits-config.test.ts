@@ -37,4 +37,14 @@ describe("resolveCeeRateLimit", () => {
     vi.stubEnv(TEST_ENV_VAR, "NaN");
     expect(resolveCeeRateLimit(TEST_ENV_VAR)).toBe(CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM);
   });
+
+  it("treats negative values as invalid and falls back to the default", () => {
+    vi.stubEnv(TEST_ENV_VAR, "-5");
+    expect(resolveCeeRateLimit(TEST_ENV_VAR)).toBe(CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM);
+  });
+
+  it("floors fractional positive values to the nearest lower integer", () => {
+    vi.stubEnv(TEST_ENV_VAR, "2.9");
+    expect(resolveCeeRateLimit(TEST_ENV_VAR)).toBe(2);
+  });
 });

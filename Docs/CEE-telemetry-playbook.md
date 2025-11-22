@@ -316,3 +316,53 @@ This means you can:
 
 For concrete steps to take during incidents (rate-limit spikes, validation
 failures, upstream outages), see `Docs/CEE-incident-runbook.md`.
+
+---
+
+## 6. CEE Datadog metrics (metadata-only)
+
+CEE v1 `cee.*` telemetry events are exported to Datadog via the shared
+`emit()` helper in `src/utils/telemetry.ts`. Metrics are intentionally
+simple and **reuse the frozen event names**:
+
+- **Draft My Model**
+  - Counter: `cee.draft_graph.requested`
+  - Counter: `cee.draft_graph.succeeded`
+  - Counter: `cee.draft_graph.failed` (tagged by `error_code` / `http_status`)
+
+- **Explain My Model**
+  - Counter: `cee.explain_graph.requested`
+  - Counter: `cee.explain_graph.succeeded`
+  - Counter: `cee.explain_graph.failed` (tagged by `error_code` / `http_status`)
+
+- **Evidence Helper**
+  - Counter: `cee.evidence_helper.requested`
+  - Counter: `cee.evidence_helper.succeeded`
+  - Counter: `cee.evidence_helper.failed` (tagged by `error_code` / `http_status`)
+
+- **Bias Check**
+  - Counter: `cee.bias_check.requested`
+  - Counter: `cee.bias_check.succeeded`
+  - Counter: `cee.bias_check.failed` (tagged by `error_code` / `http_status`)
+
+- **Options Helper**
+  - Counter: `cee.options.requested`
+  - Counter: `cee.options.succeeded`
+  - Counter: `cee.options.failed` (tagged by `error_code` / `http_status`)
+
+- **Sensitivity Coach**
+  - Counter: `cee.sensitivity_coach.requested`
+  - Counter: `cee.sensitivity_coach.succeeded`
+  - Counter: `cee.sensitivity_coach.failed` (tagged by `error_code` / `http_status`)
+
+- **Team Perspectives**
+  - Counter: `cee.team_perspectives.requested`
+  - Counter: `cee.team_perspectives.succeeded`
+  - Counter: `cee.team_perspectives.failed` (tagged by `error_code` / `http_status`)
+
+These metrics are **metadata-only** and use the same event payloads that are
+already validated in `tests/integration/cee.telemetry.test.ts`. No new events
+or fields are introduced; dashboards should continue to treat the
+`cee.*` family as structured, non-textual signals aligned with
+`Docs/CEE-v1.md`.
+
