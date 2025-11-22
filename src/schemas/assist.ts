@@ -1,27 +1,25 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
 
-export const DraftGraphInput = z
-  .object({
-    brief: z.string().min(30).max(5000),
-    attachments: z
-      .array(
-        z.object({
-          id: z.string(),
-          kind: z.enum(["pdf", "csv", "txt", "md"]),
-          name: z.string()
-        })
-      )
-      .optional(),
-    attachment_payloads: z.record(z.any()).optional(), // Attachment content (base64 or { data, encoding })
-    constraints: z.record(z.any()).optional(),
-    flags: z.record(z.boolean()).optional(),
-    include_debug: z.boolean().optional()
-  })
-  // TODO: This is a temporary fix to allow for unknown keys. We should revisit this and find a more robust solution.
-  // Chaos fixtures and perf harnesses add helper fields (fixtures, sim_*, etc.).
-  // Accept unknown keys so degraded-mode testing doesn't 400.
-  .passthrough();
+export const DraftGraphInput = z.object({
+  brief: z.string().min(30).max(5000),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        kind: z.enum(["pdf", "csv", "txt", "md"]),
+        name: z.string()
+      })
+    )
+    .optional(),
+  attachment_payloads: z.record(z.any()).optional(), // Attachment content (base64 or { data, encoding })
+  constraints: z.record(z.any()).optional(),
+  flags: z.record(z.boolean()).optional(),
+  include_debug: z.boolean().optional(),
+  focus_areas: z
+    .array(z.enum(["structure", "completeness", "feasibility", "provenance"]))
+    .optional()
+});
 
 export const DraftGraphOutput = z.object({
   graph: Graph,

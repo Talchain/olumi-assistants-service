@@ -10,8 +10,12 @@ import {
 
 describe("expectNoSecretLikeKeys across long-lived fixtures", () => {
   it("holds for golden calibration fixtures", async () => {
-    const highQuality = await loadCalibrationCase(CEE_CALIBRATION_CASES.HIGH_QUALITY);
-    expectNoSecretLikeKeys(highQuality);
+    const ids = Object.values(CEE_CALIBRATION_CASES);
+    const cases = await Promise.all(ids.map((id) => loadCalibrationCase(id)));
+
+    for (const calibration of cases) {
+      expectNoSecretLikeKeys(calibration);
+    }
   });
 
   it("holds for golden brief fixtures", async () => {
@@ -29,12 +33,8 @@ describe("expectNoSecretLikeKeys across long-lived fixtures", () => {
   });
 
   it("holds for CEE golden journey fixtures", async () => {
-    const journeys = await Promise.all([
-      loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.HEALTHY_PRODUCT_DECISION),
-      loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.UNDER_SPECIFIED_STRATEGIC_DECISION),
-      loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.EVIDENCE_HEAVY_WITH_TRUNCATION),
-      loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.TEAM_DISAGREEMENT),
-    ]);
+    const ids = Object.values(CEE_GOLDEN_JOURNEYS);
+    const journeys = await Promise.all(ids.map((id) => loadCeeGoldenJourney(id)));
 
     for (const journey of journeys) {
       expectNoSecretLikeKeys(journey);

@@ -31,6 +31,9 @@ They are intended to catch regressions in:
     **medium** band.
   - `team_disagreement.json` – journey with strong team disagreement (for /
     against / neutral) to exercise disagreement and team summary heuristics.
+  - `long_term_strategic_bet.json` – long-horizon strategic bet with mixed
+    evidence and no expected truncation; intended to exercise a medium-risk
+    journey without strong team disagreement.
 - **Loader/helper**: `tests/utils/cee-golden-journeys.ts`
   - Exposes `CEE_GOLDEN_JOURNEYS` and `loadCeeGoldenJourney(id)`.
   - Fixtures are cached and deep-cloned to keep tests from mutating shared

@@ -126,6 +126,13 @@ Notes:
   service.
 - It is protected by the same API key auth plugin as other CEE routes and
   should only be called from trusted operator tooling.
+  - By default, any authenticated API key may call this route.
+  - To further restrict access to specific operator keys, set
+    `CEE_DIAGNOSTICS_KEY_IDS` to a comma-separated list of **key IDs** (the
+    hashed identifiers surfaced in `/v1/limits` and auth telemetry). When this
+    variable is non-empty, only requests whose authenticated key ID is in the
+    allowlist will receive diagnostics; all other keys receive a standard
+    `error.v1` `FORBIDDEN` response.
 
 High-level response shape:
 
@@ -170,7 +177,25 @@ Operators can use `/diagnostics` for:
 - Quick inspection of which CEE capabilities are failing and with which codes.
 - Verifying that rate limits and feature versions are configured as expected.
 
-## 4. Security and privacy
+## 4. Internal diagnostics and examples
+
+In addition to `/healthz`, the service exposes two operator-only surfaces that
+are disabled by default in production environments:
+
+- `/diagnostics` – metadata-only diagnostics (see above), controlled by
+  `CEE_DIAGNOSTICS_ENABLED=true`.
+- `/assist/v1/decision-review/example` – an **internal example endpoint** that
+  serves a static `CeeDecisionReviewPayloadV1` object for documentation and
+  regression testing. It is controlled by `CEE_DECISION_REVIEW_EXAMPLE_ENABLED`:
+  - When `CEE_DECISION_REVIEW_EXAMPLE_ENABLED="true"`, the route is
+    registered and protected by the standard API key auth plugin.
+  - Otherwise, the route is not registered and requests receive a normal `404`.
+
+Both endpoints are intended for staging/ops usage and should not be exposed to
+untrusted callers. They remain strictly metadata-only: no prompts, briefs,
+graphs, or LLM text are ever included.
+
+## 5. Security and privacy
 
 - Never expose `CEE_API_KEY` or any CEE headers in client-side code or logs.
 - `/healthz` and `/diagnostics` intentionally expose only high-level

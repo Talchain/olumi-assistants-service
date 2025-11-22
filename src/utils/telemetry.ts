@@ -768,6 +768,153 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        // CEE v1 Draft My Model
+        case TelemetryEvents.CeeDraftGraphRequested: {
+          datadogClient.increment("cee.draft_graph.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeDraftGraphSucceeded: {
+          datadogClient.increment("cee.draft_graph.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeDraftGraphFailed: {
+          datadogClient.increment("cee.draft_graph.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Explain My Model
+        case TelemetryEvents.CeeExplainGraphRequested: {
+          datadogClient.increment("cee.explain_graph.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeExplainGraphSucceeded: {
+          datadogClient.increment("cee.explain_graph.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeExplainGraphFailed: {
+          datadogClient.increment("cee.explain_graph.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Evidence Helper
+        case TelemetryEvents.CeeEvidenceHelperRequested: {
+          datadogClient.increment("cee.evidence_helper.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeEvidenceHelperSucceeded: {
+          datadogClient.increment("cee.evidence_helper.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeEvidenceHelperFailed: {
+          datadogClient.increment("cee.evidence_helper.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Bias Check
+        case TelemetryEvents.CeeBiasCheckRequested: {
+          datadogClient.increment("cee.bias_check.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeBiasCheckSucceeded: {
+          datadogClient.increment("cee.bias_check.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeBiasCheckFailed: {
+          datadogClient.increment("cee.bias_check.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Options Helper
+        case TelemetryEvents.CeeOptionsRequested: {
+          datadogClient.increment("cee.options.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeOptionsSucceeded: {
+          datadogClient.increment("cee.options.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeOptionsFailed: {
+          datadogClient.increment("cee.options.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Sensitivity Coach
+        case TelemetryEvents.CeeSensitivityCoachRequested: {
+          datadogClient.increment("cee.sensitivity_coach.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeSensitivityCoachSucceeded: {
+          datadogClient.increment("cee.sensitivity_coach.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeSensitivityCoachFailed: {
+          datadogClient.increment("cee.sensitivity_coach.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Team Perspectives
+        case TelemetryEvents.CeeTeamPerspectivesRequested: {
+          datadogClient.increment("cee.team_perspectives.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeTeamPerspectivesSucceeded: {
+          datadogClient.increment("cee.team_perspectives.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeTeamPerspectivesFailed: {
+          datadogClient.increment("cee.team_perspectives.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
         // Stage events are debug-only, don't send to Datadog by default
         default:
           // Unknown event - log warning but don't fail

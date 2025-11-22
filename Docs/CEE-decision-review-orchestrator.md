@@ -46,7 +46,8 @@ The canonical v1 Decision Review payload is defined in:
 - **OpenAPI schema**: `components.schemas.CeeDecisionReviewPayloadV1`
 - **Server type alias**: `src/contracts/cee/decision-review.ts`
 - **Doc-only response example**: `components.responses.CeeDecisionReviewPayloadV1Example`
-  (used for engine/PLoT documentation; not exposed as a standalone HTTP path).
+  (used for engine/PLoT documentation; not exposed as a primary product
+  surface).
 
 Shape (high level, metadata-only):
 
@@ -90,6 +91,18 @@ A golden v1 payload fixture exists at:
 and is validated by:
 
 - `tests/validation/cee.decision-review.fixture.test.ts`
+
+For OpenAPI discoverability and operator tooling, there is also an **internal,
+env-gated** example endpoint:
+
+- `GET /assist/v1/decision-review/example` – returns a static
+  `CeeDecisionReviewPayloadV1` object backed by the same canonical example as
+  the fixture above. This route is:
+  - Protected by the standard API key auth plugin.
+  - Only registered when `CEE_DECISION_REVIEW_EXAMPLE_ENABLED="true"` on the
+    Assistants service.
+  - Intended for documentation/ops and should not be called by PLoT or UI
+    directly (PLoT should use the SDK helpers instead).
 
 ## 3. Orchestrator flow (PLoT → CEE → PLoT → UI)
 

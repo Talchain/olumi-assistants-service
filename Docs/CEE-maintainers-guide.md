@@ -283,3 +283,34 @@ If you are unsure about a change:
 
 CEE is intentionally small and conservative; prefer incremental, well-tested
 changes over broad refactors.
+
+---
+
+## 7. Current CEE roadmap slice (internal)
+
+This section tracks the next small, additive CEE v1 maintenance slice. Each
+task group should be implemented without changing existing HTTP schemas,
+telemetry event names/shapes, or public SDK contracts.
+
+- **TG1 – CEE telemetry ergonomics for maintainers**
+  - [ ] Wire `cee.*` telemetry events into Datadog metrics in
+    `src/utils/telemetry.ts`, using only existing metadata fields. Do not add
+    new telemetry events or change any payload shapes.
+  - [ ] Extend `Docs/CEE-telemetry-playbook.md` with a CEE-specific section
+    describing the new metrics and example dashboards.
+  - [ ] Keep `tests/utils/telemetry-events.test.ts` in sync with the metrics
+    mapping so dashboards and CI guards remain aligned with the frozen event
+    enum.
+
+- **TG2 – Additional CEE golden coverage for risk/disagreement journeys**
+  - [ ] Add a new golden journey fixture under
+    `tests/fixtures/cee/golden-journeys/` that exercises a high-risk,
+    disagreement-heavy decision with truncation (metadata-only).
+  - [ ] Wire the new fixture into `tests/utils/cee-golden-journeys.ts` and
+    `tests/integration/cee.golden-journeys.test.ts`, asserting the expected
+    journey health, truncation, and disagreement flags without relying on raw
+    briefs or graph labels.
+  - [ ] Update `Docs/CEE-golden-journeys.md` to document the new fixture and its
+    intent.
+  - [ ] Ensure existing privacy guards still pass for the new fixture, reusing
+    `expectNoSecretLikeKeys` and `expectNoBannedSubstrings`.

@@ -25,6 +25,8 @@ The suite does **not** depend on live LLMs or external services.
   - `golden_boundary_low_medium.json` – case near the low/medium numeric threshold where rounding plus `CEE_QUALITY_MEDIUM_MIN` yields **medium**.
   - `golden_boundary_medium_high.json` – case at the medium/high boundary where rounding plus `CEE_QUALITY_HIGH_MIN` yields **high**.
   - `golden_mixed_truncation_issues.json` – medium-band case with both truncation and validation issues; calibrates combined risk posture.
+  - `golden_low_confidence_no_issues.json` – low-confidence case with a well-formed graph and **no** CEE validation issues; calibrates that low band can be driven purely by confidence.
+  - `golden_medium_with_cee_warnings.json` – medium-band case with multiple CEE validation warnings but no truncation; calibrates medium quality when issues are present.
 - Loader/helper: `tests/utils/cee-calibration.ts`
 - Integration test: `tests/integration/cee.calibration.test.ts`
 

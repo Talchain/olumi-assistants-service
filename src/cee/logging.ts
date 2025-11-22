@@ -64,17 +64,18 @@ export function logCeeCall(opts: CeeCallLogOptions): void {
     timestamp: new Date().toISOString(),
   };
 
-  // Persist in ring buffer for diagnostics (errors only are filtered at read time)
-  pushToRing(entry);
+  // Persist in ring buffer for diagnostics (errors and non-ok outcomes only)
+  if (entry.status !== "ok") {
+    pushToRing(entry);
+  }
 
   // Emit structured log line. Message kept stable for log routing.
   log.info({ event: "cee.call", ...entry });
 }
 
 export function getRecentCeeErrors(limit = 20): CeeCallLogEntry[] {
-  const errors = ceeCallLogRing.filter((e) => e.status !== "ok");
-  if (errors.length <= limit) return errors.slice();
-  return errors.slice(errors.length - limit);
+  if (ceeCallLogRing.length <= limit) return ceeCallLogRing.slice();
+  return ceeCallLogRing.slice(ceeCallLogRing.length - limit);
 }
 
 export function getRecentCeeCalls(limit = 50): CeeCallLogEntry[] {
