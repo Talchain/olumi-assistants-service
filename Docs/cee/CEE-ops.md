@@ -46,7 +46,7 @@ The canonical health endpoint for this service is:
 
 ### 2.1 Expected response shape
 
-As documented in `openapi.yaml` and `Docs/CEE-v1.md`, `/healthz` returns:
+As documented in `openapi.yaml` and `v1.md`, `/healthz` returns:
 
 ```json
 {
@@ -197,7 +197,7 @@ graphs, or LLM text are ever included.
 
 For day-to-day operations, we recommend using the `cee:diagnostics` CLI as the
 entrypoint for inspecting `/healthz` + `/diagnostics` together. See
-`Docs/CEE-runbook.md` for a concrete triage flow, example commands, and exit
+`runbook.md` for a concrete triage flow, example commands, and exit
 code semantics, and `Docs/runbooks/cee-llm-outage-or-spike.md` for a focused
 incident playbook covering LLM provider outages or sudden CEE error spikes.
 

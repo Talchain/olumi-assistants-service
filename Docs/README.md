@@ -32,46 +32,48 @@ Welcome to the Olumi Assistants Service documentation! This directory contains c
 #### CEE (Contextual Evidence Engine)
 The CEE subsystem provides quality assessment and evidence management for AI-generated decisions.
 
-- **[CEE v1 Overview](CEE-v1.md)** - Core CEE documentation and concepts
-- **[CEE Maintainer's Guide](CEE-maintainers-guide.md)** - Internal architecture and development guide
-- **[CEE Recipes](CEE-recipes.md)** - Common CEE usage patterns
-- **[CEE Calibration](CEE-calibration.md)** - Quality calibration and tuning
-- **[CEE Golden Journeys](CEE-golden-journeys.md)** - Test fixtures for regression testing
-- **[CEE Decision Review Orchestrator](CEE-decision-review-orchestrator.md)** - Request orchestration
-- **[CEE Sandbox Integration](CEE-sandbox-integration.md)** - Integration with Scenario Sandbox
-- **[CEE Limits & Budgets](CEE-limits-and-budgets.md)** - Rate limiting and quotas
-- **[CEE Telemetry Playbook](CEE-telemetry-playbook.md)** - Observability and metrics
-- **[CEE Cost Telemetry](CEE-cost-telemetry.md)** - LLM cost tracking and analysis
+📂 **[Complete CEE Documentation Index](cee/README.md)** - Organized guide to all CEE docs
+
+- **[CEE v1 Overview](cee/CEE-v1.md)** - Core CEE documentation and concepts
+- **[CEE Maintainer's Guide](cee/CEE-maintainers-guide.md)** - Internal architecture and development guide
+- **[CEE Recipes](cee/CEE-recipes.md)** - Common CEE usage patterns
+- **[CEE Calibration](cee/CEE-calibration.md)** - Quality calibration and tuning
+- **[CEE Golden Journeys](cee/CEE-golden-journeys.md)** - Test fixtures for regression testing
+- **[CEE Decision Review Orchestrator](cee/CEE-decision-review-orchestrator.md)** - Request orchestration
+- **[CEE Sandbox Integration](cee/CEE-sandbox-integration.md)** - Integration with Scenario Sandbox
+- **[CEE Limits & Budgets](cee/CEE-limits-and-budgets.md)** - Rate limiting and quotas
+- **[CEE Telemetry Playbook](cee/CEE-telemetry-playbook.md)** - Observability and metrics
+- **[CEE Cost Telemetry](cee/CEE-cost-telemetry.md)** - LLM cost tracking and analysis
 
 #### Testing & Performance
 - **[Baseline Performance Report](baseline-performance-report.md)** - Current performance baselines
-- **[CEE Baseline Performance](CEE-baseline-performance.md)** - CEE-specific performance targets
+- **[CEE Baseline Performance](cee/CEE-baseline-performance.md)** - CEE-specific performance targets
 - **[Performance Testing Plan](PERFORMANCE-ANALYSIS.md)** - Load testing strategy
 - **[Golden Brief Fixture Strategy](issues/golden-brief-fixture-strategy.md)** - Test data approach
 
 #### Development Guides
 - **[Contributing Guide](contributing.md)** - Code style, PR process, testing requirements
-- **[ADR: CEE Streaming v1](ADR-CEE-streaming-v1.md)** - Architecture decision record for streaming
+- **[ADR: CEE Streaming v1](cee/ADR-CEE-streaming-v1.md)** - Architecture decision record for streaming
 
 ### For Operators
 
 #### Operations & Deployment
-- **[Operator Runbook](CEE-ops.md)** - Day-to-day operations guide
-- **[CEE Runbook](CEE-runbook.md)** - CEE-specific operations
+- **[Operator Runbook](cee/CEE-ops.md)** - Day-to-day operations guide
+- **[CEE Runbook](cee/CEE-runbook.md)** - CEE-specific operations
 - **[Render Deployment Guide](api/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
 - **[Production Grounding Flip Plan](PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
 - **[Release Rollback](RELEASE_ROLLBACK.md)** - How to roll back a release
 
 #### Incident Response
-- **[CEE Incident Runbook](CEE-incident-runbook.md)** - CEE-specific incident response
+- **[CEE Incident Runbook](cee/CEE-incident-runbook.md)** - CEE-specific incident response
 - **[LLM Outage/Spike Runbook](runbooks/cee-llm-outage-or-spike.md)** - Handle LLM provider issues
 - **[Buffer Pressure Runbook](runbooks/buffer-pressure.md)** - SSE buffer pressure scenarios
 - **[Redis Incidents Runbook](runbooks/redis-incidents.md)** - Redis failure handling
 - **[Resume Failures Runbook](runbooks/resume-failures.md)** - SSE resume troubleshooting
 
 #### Monitoring & Observability
-- **[CEE Telemetry Playbook](CEE-telemetry-playbook.md)** - Metrics and monitoring
-- **[CEE Cost Telemetry](CEE-cost-telemetry.md)** - Cost tracking and alerting
+- **[CEE Telemetry Playbook](cee/CEE-telemetry-playbook.md)** - Metrics and monitoring
+- **[CEE Cost Telemetry](cee/CEE-cost-telemetry.md)** - Cost tracking and alerting
 - **[Production Validation (v1.1.1)](PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
 
 ---

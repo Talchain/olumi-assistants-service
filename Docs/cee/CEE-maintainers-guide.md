@@ -66,11 +66,11 @@ shapes.
     - `sdk/typescript/src/ceeHelpers.test.ts`.
     - `tests/unit/cee.*.test.ts`.
 - **Docs and playbooks**
-  - `Docs/CEE-v1.md` – main spec, judgement policy, SDK usage.
-  - `Docs/CEE-recipes.md` – usage patterns (draft-only, full journey, deferred tools).
-  - `Docs/CEE-telemetry-playbook.md` – dashboards and alerts.
-  - `Docs/CEE-incident-runbook.md` – incident triage and mitigation.
-  - `Docs/CEE-troubleshooting.md` (if present) – FAQ-style answers.
+  - `v1.md` – main spec, judgement policy, SDK usage.
+  - `recipes.md` – usage patterns (draft-only, full journey, deferred tools).
+  - `telemetry-playbook.md` – dashboards and alerts.
+  - `incident-runbook.md` – incident triage and mitigation.
+  - `troubleshooting.md` (if present) – FAQ-style answers.
   - Dev-only tools (non-normative helpers)
     - `scripts/cee-demo-cli.ts`, `scripts/cee-health-snapshot.ts`,
       `scripts/cee-review-cli.ts`, and `scripts/cee-prompt-lint.ts` are
@@ -95,7 +95,7 @@ Always update both tests and docs when changing behaviour.
 - **Live contract sources**
   - For CEE v1, the source of truth is:
     - `openapi.yaml` and `src/generated/openapi.d.ts`.
-    - `Docs/CEE-v1.md`.
+    - `v1.md`.
     - The SDK CEE types and client in `sdk/typescript/src/ceeTypes.ts` and
       `sdk/typescript/src/ceeClient.ts`.
   - These surfaces must remain in lockstep. Any contract change should be
@@ -106,7 +106,7 @@ Always update both tests and docs when changing behaviour.
   - `Docs/Olumi- Cognitive Enhancement Engine (CEE) - Specification v04.*`
     is kept as a design artefact capturing early intent.
   - It is **not** the live contract. Where it disagrees with OpenAPI or
-    `Docs/CEE-v1.md`, the latter two win.
+    `v1.md`, the latter two win.
 
 - **Intentional divergences from the v0.4 draft**
   - **Endpoint names**
@@ -234,8 +234,8 @@ When adding new helper functionality (e.g. new flags, new summary fields):
 3. **Update tests and docs together**
    - Add unit tests in `ceeHelpers.test.ts` to lock in semantics and prevent
      regressions.
-   - If behaviour changes, update `Docs/CEE-v1.md` and/or
-     `Docs/CEE-recipes.md` to describe the new semantics.
+   - If behaviour changes, update `v1.md` and/or
+     `recipes.md` to describe the new semantics.
 
 4. **Preserve determinism**
    - Avoid any dependency on current time, randomness, or environment flags
@@ -273,9 +273,9 @@ When adding new helper functionality (e.g. new flags, new summary fields):
 If you are unsure about a change:
 
 - Start by reading:
-  - `Docs/CEE-v1.md` – for judgement policy and helper semantics.
-  - `Docs/CEE-telemetry-playbook.md` – for observability.
-  - `Docs/CEE-incident-runbook.md` – for incident handling.
+  - `v1.md` – for judgement policy and helper semantics.
+  - `telemetry-playbook.md` – for observability.
+  - `incident-runbook.md` – for incident handling.
 - Then propose your change in a small PR with:
   - Clear description of the intended behaviour.
   - Tests demonstrating the new semantics.
@@ -296,7 +296,7 @@ telemetry event names/shapes, or public SDK contracts.
   - [ ] Wire `cee.*` telemetry events into Datadog metrics in
     `src/utils/telemetry.ts`, using only existing metadata fields. Do not add
     new telemetry events or change any payload shapes.
-  - [ ] Extend `Docs/CEE-telemetry-playbook.md` with a CEE-specific section
+  - [ ] Extend `telemetry-playbook.md` with a CEE-specific section
     describing the new metrics and example dashboards.
   - [ ] Keep `tests/utils/telemetry-events.test.ts` in sync with the metrics
     mapping so dashboards and CI guards remain aligned with the frozen event
@@ -310,7 +310,7 @@ telemetry event names/shapes, or public SDK contracts.
     `tests/integration/cee.golden-journeys.test.ts`, asserting the expected
     journey health, truncation, and disagreement flags without relying on raw
     briefs or graph labels.
-  - [ ] Update `Docs/CEE-golden-journeys.md` to document the new fixture and its
+  - [ ] Update `golden-journeys.md` to document the new fixture and its
     intent.
   - [ ] Ensure existing privacy guards still pass for the new fixture, reusing
     `expectNoSecretLikeKeys` and `expectNoBannedSubstrings`.
