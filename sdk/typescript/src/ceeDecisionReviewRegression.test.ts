@@ -13,67 +13,18 @@ import {
   type CeeDecisionReviewPayload,
 } from "./ceeHelpers.js";
 
-function expectNoSecretLikeKeys(payload: unknown): void {
-  const SECRET_KEY_TOKENS = [
-    "secret",
-    "password",
-    "token",
-    "apikey",
-    "api_key",
-    "access_key",
-    "session_id",
-  ];
-
-  const PROMPT_KEY_NAMES = ["prompt", "raw_prompt", "system_prompt"];
-  const bannedKeys: string[] = [];
-
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== "object") return;
-
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      const lowerKey = key.toLowerCase();
-      if (
-        SECRET_KEY_TOKENS.some((token) => lowerKey.includes(token)) ||
-        PROMPT_KEY_NAMES.includes(lowerKey)
-      ) {
-        bannedKeys.push(key);
-      }
-      visit(child);
-    }
-  };
-
-  visit(payload);
-  expect(bannedKeys).toEqual([]);
+async function expectNoSecretLikeKeysShared(payload: unknown): Promise<void> {
+  const mod = await import("../../../tests/utils/shared-privacy-guards.js");
+  mod.expectNoSecretLikeKeysShared(payload);
 }
 
-function expectNoBannedSubstrings(data: unknown): void {
-  const BANNED = [
-    "secret",
-    "password",
-    "passwd",
-    "api_key",
-    "apikey",
-    "authorization",
-    "bearer ",
-    "sk-",
-    "sessionid",
-    "cookie",
-    "x-olumi-assist-key",
-  ];
-
-  const serialized = JSON.stringify(data).toLowerCase();
-  for (const token of BANNED) {
-    expect(serialized.includes(token)).toBe(false);
-  }
+async function expectNoBannedSubstringsShared(payload: unknown): Promise<void> {
+  const mod = await import("../../../tests/utils/shared-privacy-guards.js");
+  mod.expectNoBannedSubstringsShared(payload);
 }
 
 describe("buildCeeDecisionReviewPayload regression", () => {
-  it("builds a high-quality, complete, untruncated review from deterministic envelopes", () => {
+  it("builds a high-quality, complete, untruncated review from deterministic envelopes", async () => {
     const draft: CEEDraftGraphResponseV1 = {
       trace: { request_id: "r-journey-ok", correlation_id: "r-journey-ok", engine: {} },
       quality: { overall: 8 } as any,
@@ -158,11 +109,11 @@ describe("buildCeeDecisionReviewPayload regression", () => {
     expect(review.trace?.request_id).toBe("r-journey-ok");
     expect(review.trace?.correlation_id).toBe("r-journey-ok");
 
-    expectNoSecretLikeKeys(review);
-    expectNoBannedSubstrings(review);
+    await expectNoSecretLikeKeysShared(review);
+    await expectNoBannedSubstringsShared(review);
   });
 
-  it("captures truncation, validation issues, and team disagreement in review metadata", () => {
+  it("captures truncation, validation issues, and team disagreement in review metadata", async () => {
     const draft: CEEDraftGraphResponseV1 = {
       trace: { request_id: "r-journey-mixed", correlation_id: "r-journey-mixed", engine: {} },
       quality: { overall: 6 } as any,
@@ -206,7 +157,7 @@ describe("buildCeeDecisionReviewPayload regression", () => {
     expect(review.uiFlags.has_team_disagreement).toBe(true);
     expect(review.uiFlags.is_journey_complete).toBe(false);
 
-    expectNoSecretLikeKeys(review);
-    expectNoBannedSubstrings(review);
+    await expectNoSecretLikeKeysShared(review);
+    await expectNoBannedSubstringsShared(review);
   });
 });
