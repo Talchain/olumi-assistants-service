@@ -33,6 +33,29 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 
+const DEFAULT_ORIGINS = [
+  "https://olumi.app",
+  "https://app.olumi.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+function resolveAllowedOrigins(): string[] {
+  const raw = env.ALLOWED_ORIGINS;
+  const origins = raw
+    ? raw
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0)
+    : DEFAULT_ORIGINS;
+
+  if (env.NODE_ENV === "production" && origins.some((origin) => origin === "*" || origin === '"*"')) {
+    throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
+  }
+
+  return origins;
+}
+
 /**
  * Build and configure Fastify server instance
  * (Can be imported for testing or run directly)
@@ -55,27 +78,18 @@ export async function build() {
   const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
   const app = Fastify({
-  logger: true,
-  bodyLimit: BODY_LIMIT_BYTES,
-  connectionTimeout: REQUEST_TIMEOUT_MS,
-  requestTimeout: REQUEST_TIMEOUT_MS,
-});
+    logger: true,
+    bodyLimit: BODY_LIMIT_BYTES,
+    connectionTimeout: REQUEST_TIMEOUT_MS,
+    requestTimeout: REQUEST_TIMEOUT_MS,
+  });
 
-// CORS: Strict allowlist (default: olumi.app + localhost dev)
-const DEFAULT_ORIGINS = [
-  'https://olumi.app',
-  'https://app.olumi.app',
-  'http://localhost:5173',
-  'http://localhost:3000',
-];
+  // CORS: Strict allowlist (default: olumi.app + localhost dev)
+  const allowedOrigins = resolveAllowedOrigins();
 
-const allowedOrigins: string[] = env.ALLOWED_ORIGINS
-  ? env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-  : DEFAULT_ORIGINS;
-
-await app.register(cors, {
-  origin: allowedOrigins,
-});
+  await app.register(cors, {
+    origin: allowedOrigins,
+  });
 
 // Rate limiting: Global + SSE-specific limits
 await app.register(rateLimit, {
@@ -367,15 +381,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
       const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024;
       const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
-      const DEFAULT_ORIGINS = [
-        'https://olumi.app',
-        'https://app.olumi.app',
-        'http://localhost:5173',
-        'http://localhost:3000',
-      ];
-      const allowedOrigins = env.CORS_ORIGINS
-        ? env.CORS_ORIGINS.split(',')
-        : DEFAULT_ORIGINS;
+      const allowedOrigins = resolveAllowedOrigins();
 
       app.log.info({
         service: 'olumi-assistants-service',
