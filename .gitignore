@@ -8,3 +8,4 @@ src/generated
 
 # Duplicate files (macOS/editor backups)
 * 2.*
+tests/perf/_reports/
