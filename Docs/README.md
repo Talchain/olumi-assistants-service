@@ -8,11 +8,11 @@ Welcome to the Olumi Assistants Service documentation! This directory contains c
 
 1. **[Architecture Overview](getting-started/architecture.md)** - What is this service and how does it work?
 2. **[Contributing Guide](contributing.md)** - How to contribute code, tests, and documentation
-3. **[Frontend Integration](FRONTEND_INTEGRATION.md)** - Complete API reference for integrating with clients
+3. **[Frontend Integration](api/FRONTEND_INTEGRATION.md)** - Complete API reference for integrating with clients
 
 **Setting up locally?**
 - See the [Quick Start](../README.md#quick-start) in the root README
-- Read [Staging Setup Instructions](STAGING_SETUP_INSTRUCTIONS.md) for environment configuration
+- Read [Staging Setup Instructions](api/STAGING_SETUP_INSTRUCTIONS.md) for environment configuration
 
 ---
 
@@ -21,10 +21,13 @@ Welcome to the Olumi Assistants Service documentation! This directory contains c
 ### For Developers
 
 #### API & Integration
-- **[Frontend Integration Guide](FRONTEND_INTEGRATION.md)** - Complete API reference with examples
-- **[SSE Streaming API](SSE-RESUME-API.md)** - Server-Sent Events with resume capability
-- **[Provider Configuration](CEE-sandbox-integration.md)** - LLM provider setup (Anthropic, OpenAI)
-- **[OpenAPI Validation](CEE-v1.md)** - API schema and validation
+
+📂 **[Complete API Documentation Index](api/README.md)** - Organized guide to all API docs
+
+- **[Frontend Integration Guide](api/FRONTEND_INTEGRATION.md)** - Complete API reference with examples
+- **[SSE Streaming API](api/SSE-RESUME-API.md)** - Server-Sent Events with resume capability
+- **[Provider Configuration](api/provider-configuration.md)** - LLM provider setup (Anthropic, OpenAI)
+- **[OpenAPI Validation](api/openapi-validation.md)** - API schema and validation
 
 #### CEE (Contextual Evidence Engine)
 The CEE subsystem provides quality assessment and evidence management for AI-generated decisions.
@@ -55,7 +58,7 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 #### Operations & Deployment
 - **[Operator Runbook](CEE-ops.md)** - Day-to-day operations guide
 - **[CEE Runbook](CEE-runbook.md)** - CEE-specific operations
-- **[Render Deployment Guide](STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
+- **[Render Deployment Guide](api/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
 - **[Production Grounding Flip Plan](PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
 - **[Release Rollback](RELEASE_ROLLBACK.md)** - How to roll back a release
 
@@ -157,7 +160,7 @@ See [contributing.md](contributing.md) for:
 - **Issues:** Check [issues/](issues/) for known problems
 - **Runbooks:** See [runbooks/](runbooks/) for incident response
 - **Architecture Questions:** Start with [getting-started/architecture.md](getting-started/architecture.md)
-- **API Questions:** See [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)
+- **API Questions:** See [api/FRONTEND_INTEGRATION.md](api/FRONTEND_INTEGRATION.md)
 
 ---
 
