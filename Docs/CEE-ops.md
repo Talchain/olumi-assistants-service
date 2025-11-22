@@ -198,7 +198,8 @@ graphs, or LLM text are ever included.
 For day-to-day operations, we recommend using the `cee:diagnostics` CLI as the
 entrypoint for inspecting `/healthz` + `/diagnostics` together. See
 `Docs/CEE-runbook.md` for a concrete triage flow, example commands, and exit
-code semantics.
+code semantics, and `Docs/runbooks/cee-llm-outage-or-spike.md` for a focused
+incident playbook covering LLM provider outages or sudden CEE error spikes.
 
 ## 5. Security and privacy
 

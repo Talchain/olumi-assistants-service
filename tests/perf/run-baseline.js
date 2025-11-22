@@ -10,7 +10,7 @@
  */
 
 import { execSync } from 'child_process';
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -33,6 +33,7 @@ const latestHtml = join(REPORTS_DIR, 'latest.html');
 const target = process.env.PERF_TARGET_URL || 'http://localhost:3101';
 const duration = process.env.PERF_DURATION_SEC || '300';
 const rps = process.env.PERF_RPS || '1';
+const apiKey = process.env.ASSIST_API_KEY || '';
 
 console.log('\n📊 Artillery Baseline Performance Test\n');
 console.log(`Target:   ${target}`);
@@ -41,10 +42,16 @@ console.log(`Rate:     ${rps} req/sec`);
 console.log('');
 
 try {
+  // Ensure reports directory exists before running Artillery
+  if (!existsSync(REPORTS_DIR)) {
+    mkdirSync(REPORTS_DIR, { recursive: true });
+  }
+
   // Run Artillery and capture JSON output
   console.log('🚀 Running Artillery...\n');
+  const variablesArg = apiKey ? ` --variables apiKey=${apiKey}` : '';
   execSync(
-    `artillery run "${BASELINE_YML}" --output "${jsonFile}"`,
+    `artillery run "${BASELINE_YML}" --output "${jsonFile}" --target "${target}"${variablesArg}`,
     { stdio: 'inherit', env: { ...process.env } }
   );
 
@@ -58,10 +65,14 @@ try {
   );
 
   // Create symlinks to latest
-  if (existsSync(latestJson)) unlinkSync(latestJson);
-  if (existsSync(latestHtml)) unlinkSync(latestHtml);
-  execSync(`ln -s "${jsonFile}" "${latestJson}"`);
-  execSync(`ln -s "${htmlFile}" "${latestHtml}"`);
+  try {
+    if (existsSync(latestJson)) unlinkSync(latestJson);
+    if (existsSync(latestHtml)) unlinkSync(latestHtml);
+    execSync(`ln -s "${jsonFile}" "${latestJson}"`);
+    execSync(`ln -s "${htmlFile}" "${latestHtml}"`);
+  } catch (err) {
+    console.warn('⚠️  Failed to update latest report symlinks:', err.message);
+  }
 
   console.log(`\n✅ Reports generated:`);
   console.log(`   JSON: ${jsonFile}`);
@@ -85,28 +96,45 @@ try {
  * Append summary to baseline-performance-report.md
  */
 function appendSummary(results, target, duration, rps) {
-  const summary = results.aggregate?.summary;
-  if (!summary) {
+  const aggregate = results.aggregate || {};
+
+  // Artillery v2 exposes metrics under aggregate.summaries / aggregate.histograms.
+  // Prefer the per-endpoint metric for /assist/draft-graph, falling back to the
+  // overall HTTP response time histogram.
+  const latencySource =
+    aggregate.summaries?.['plugins.metrics-by-endpoint.response_time./assist/draft-graph'] ||
+    aggregate.histograms?.['plugins.metrics-by-endpoint.response_time./assist/draft-graph'] ||
+    aggregate.summaries?.['http.response_time'] ||
+    aggregate.histograms?.['http.response_time'];
+
+  if (!latencySource) {
     console.warn('⚠️  No summary found in Artillery results');
     return;
   }
 
-  const p50 = summary.latency?.median || 0;
-  const p95 = summary.latency?.p95 || 0;
-  const p99 = summary.latency?.p99 || 0;
-  const min = summary.latency?.min || 0;
-  const max = summary.latency?.max || 0;
+  const p50 =
+    typeof latencySource.p50 === 'number'
+      ? latencySource.p50
+      : typeof latencySource.median === 'number'
+      ? latencySource.median
+      : 0;
+  const p95 = typeof latencySource.p95 === 'number' ? latencySource.p95 : 0;
+  const p99 = typeof latencySource.p99 === 'number' ? latencySource.p99 : 0;
+  const min = typeof latencySource.min === 'number' ? latencySource.min : 0;
+  const max = typeof latencySource.max === 'number' ? latencySource.max : 0;
 
-  const errorRate = summary.codes && summary.codes['200']
-    ? ((1 - (summary.codes['200'] / summary.scenariosCompleted)) * 100).toFixed(2)
-    : '0.00';
+  const counters = aggregate.counters || {};
+  const successCount = counters['http.codes.200'] || 0;
+  const totalRequests = counters['http.requests'] || successCount || 0;
+  const successRate =
+    totalRequests > 0 ? ((successCount / totalRequests) * 100).toFixed(2) : '0.00';
+  const errorRate =
+    totalRequests > 0 ? (100 - parseFloat(successRate)).toFixed(2) : '0.00';
 
-  const throughput = summary.rps?.mean || 0;
+  const throughput = aggregate.rates?.['http.request_rate'] || 0;
 
-  // v1.7: SLO metrics calculation
-  const successCount = summary.codes?.['200'] || 0;
-  const totalRequests = summary.scenariosCompleted || 1;
-  const successRate = ((successCount / totalRequests) * 100).toFixed(2);
+  const scenariosCompleted =
+    counters['vusers.created_by_name.Draft graph - baseline performance'] || 0;
 
   // SLO targets: success ≥99.0%, p95 ≤12s
   const sloSuccessTarget = 99.0;
@@ -128,7 +156,7 @@ function appendSummary(results, target, duration, rps) {
 - Target: \`${target}\`
 - Duration: ${duration}s
 - Rate: ${rps} req/sec
-- Scenarios completed: ${summary.scenariosCompleted || 0}
+- Scenarios completed: ${scenariosCompleted}
 
 **Latency (ms):**
 - p50: **${p50}ms**

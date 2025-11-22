@@ -214,5 +214,9 @@ allowlist.
   4. Coordinate with engine/product teams using **only metadata** (no prompts
      or user payloads) when sharing snapshots.
 
+For LLM provider outages or sudden CEE error spikes, see also
+`Docs/runbooks/cee-llm-outage-or-spike.md` for a focused incident playbook
+that builds on the diagnostics CLI and these surfaces.
+
 This runbook is intentionally concise; see `Docs/CEE-ops.md` and
 `Docs/CEE-v1.md` for more detail on the underlying schemas and configuration.

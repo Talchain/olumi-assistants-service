@@ -1,16 +1,21 @@
 config:
-  target: '{{ $processEnvironment.PERF_TARGET_URL || "http://localhost:3101" }}'
+  target: "http://localhost:3101"
   phases:
-    - duration: {{ $processEnvironment.PERF_DURATION_SEC || 300 }}
-      arrivalRate: {{ $processEnvironment.PERF_RPS || 1 }}
+    - duration: 300   # 5 minutes
+      arrivalRate: 1  # 1 req/sec
       name: 'Baseline load'
   processor: './helpers.cjs'
+  variables:
+    apiKey: ""
 
 scenarios:
   - name: 'Draft graph - baseline performance'
     flow:
       - post:
-          url: '/assist/draft-graph'
+          url: '/assist/v1/draft-graph'
+          headers:
+            authorization: "Bearer {{ apiKey }}"
+            content-type: "application/json"
           json:
             brief: '{{ brief }}'
           beforeRequest: 'selectBrief'
