@@ -7,7 +7,7 @@ brief and a graph" to a safe, metadata-only decision review in a few steps.
 
 It is **not** a protocol spec. For request/response schemas, see:
 
-- `Docs/CEE-v1.md` – CEE endpoints, error envelopes, and judgement policy.
+- `v1.md` – CEE endpoints, error envelopes, and judgement policy.
 - `openapi.yaml` – full schema reference.
 
 All recipes:
@@ -29,7 +29,7 @@ engine/trace metadata, see the golden fixture and example in the SDK:
 - `sdk/typescript/src/examples/ceeDecisionReviewFixtureExample.ts`
 
 These are illustrative only; real integrations must continue to follow
-OpenAPI + `Docs/CEE-v1.md` + the published SDK types as the live contract.
+OpenAPI + `v1.md` + the published SDK types as the live contract.
 
 During development you can also inspect the same review payloads via the
 dev-only CLI helper in this repo:
@@ -215,7 +215,7 @@ All recipes should use the same error-handling pattern:
 
 For details and examples, see:
 
-- `Docs/CEE-v1.md` – SDK usage and retry semantics section.
+- `v1.md` – SDK usage and retry semantics section.
 - `scripts/cee-demo-cli.ts` – CLI example handling retries and request IDs.
 
 ---
@@ -406,7 +406,7 @@ const updated: GraphV1 = applyGraphPatch(storedGraph, incomingPatch);
 
 ## 10. Where to go next
 
-- For telemetry/dashboards: `Docs/CEE-telemetry-playbook.md`.
+- For telemetry/dashboards: `telemetry-playbook.md`.
 - For deeper helper semantics and thresholds:
   - `sdk/typescript/src/ceeHelpers.ts`
   - `src/cee/guidance/index.ts`

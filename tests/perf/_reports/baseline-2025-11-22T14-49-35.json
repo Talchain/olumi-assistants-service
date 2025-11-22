@@ -1,0 +1,516 @@
+{
+  "aggregate": {
+    "counters": {
+      "vusers.created_by_name.Draft graph - baseline performance": 300,
+      "vusers.created": 300,
+      "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 300,
+      "vusers.failed": 300
+    },
+    "rates": {},
+    "firstCounterAt": 1763822979096,
+    "lastCounterAt": 1763823278096,
+    "firstMetricAt": 1763822979096,
+    "lastMetricAt": 1763823278096,
+    "period": 1763823270000,
+    "summaries": {},
+    "histograms": {}
+  },
+  "intermediate": [
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 1,
+        "vusers.created": 1,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 1,
+        "vusers.failed": 1
+      },
+      "rates": {},
+      "firstCounterAt": 1763822979096,
+      "lastCounterAt": 1763822979099,
+      "firstMetricAt": 1763822979096,
+      "lastMetricAt": 1763822979099,
+      "period": "1763822970000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763822980092,
+      "lastCounterAt": 1763822989464,
+      "firstMetricAt": 1763822980092,
+      "lastMetricAt": 1763822989464,
+      "period": "1763822980000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763822990440,
+      "lastCounterAt": 1763822999241,
+      "firstMetricAt": 1763822990440,
+      "lastMetricAt": 1763822999241,
+      "period": "1763822990000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823000219,
+      "lastCounterAt": 1763823009214,
+      "firstMetricAt": 1763823000219,
+      "lastMetricAt": 1763823009214,
+      "period": "1763823000000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823010191,
+      "lastCounterAt": 1763823019093,
+      "firstMetricAt": 1763823010191,
+      "lastMetricAt": 1763823019093,
+      "period": "1763823010000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823020093,
+      "lastCounterAt": 1763823029093,
+      "firstMetricAt": 1763823020093,
+      "lastMetricAt": 1763823029093,
+      "period": "1763823020000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823030093,
+      "lastCounterAt": 1763823039094,
+      "firstMetricAt": 1763823030093,
+      "lastMetricAt": 1763823039094,
+      "period": "1763823030000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823040093,
+      "lastCounterAt": 1763823049093,
+      "firstMetricAt": 1763823040093,
+      "lastMetricAt": 1763823049093,
+      "period": "1763823040000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823050093,
+      "lastCounterAt": 1763823059094,
+      "firstMetricAt": 1763823050093,
+      "lastMetricAt": 1763823059094,
+      "period": "1763823050000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823060094,
+      "lastCounterAt": 1763823069103,
+      "firstMetricAt": 1763823060094,
+      "lastMetricAt": 1763823069103,
+      "period": "1763823060000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823070094,
+      "lastCounterAt": 1763823079113,
+      "firstMetricAt": 1763823070094,
+      "lastMetricAt": 1763823079113,
+      "period": "1763823070000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823080102,
+      "lastCounterAt": 1763823089095,
+      "firstMetricAt": 1763823080102,
+      "lastMetricAt": 1763823089095,
+      "period": "1763823080000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823090103,
+      "lastCounterAt": 1763823099137,
+      "firstMetricAt": 1763823090103,
+      "lastMetricAt": 1763823099137,
+      "period": "1763823090000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823100117,
+      "lastCounterAt": 1763823109094,
+      "firstMetricAt": 1763823100117,
+      "lastMetricAt": 1763823109094,
+      "period": "1763823100000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823110094,
+      "lastCounterAt": 1763823119094,
+      "firstMetricAt": 1763823110094,
+      "lastMetricAt": 1763823119094,
+      "period": "1763823110000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823120094,
+      "lastCounterAt": 1763823129096,
+      "firstMetricAt": 1763823120094,
+      "lastMetricAt": 1763823129096,
+      "period": "1763823120000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823130094,
+      "lastCounterAt": 1763823139094,
+      "firstMetricAt": 1763823130094,
+      "lastMetricAt": 1763823139094,
+      "period": "1763823130000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823140094,
+      "lastCounterAt": 1763823149094,
+      "firstMetricAt": 1763823140094,
+      "lastMetricAt": 1763823149094,
+      "period": "1763823140000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823150094,
+      "lastCounterAt": 1763823159094,
+      "firstMetricAt": 1763823150094,
+      "lastMetricAt": 1763823159094,
+      "period": "1763823150000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823160094,
+      "lastCounterAt": 1763823169094,
+      "firstMetricAt": 1763823160094,
+      "lastMetricAt": 1763823169094,
+      "period": "1763823160000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823170094,
+      "lastCounterAt": 1763823179097,
+      "firstMetricAt": 1763823170094,
+      "lastMetricAt": 1763823179097,
+      "period": "1763823170000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823180094,
+      "lastCounterAt": 1763823189095,
+      "firstMetricAt": 1763823180094,
+      "lastMetricAt": 1763823189095,
+      "period": "1763823180000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823190095,
+      "lastCounterAt": 1763823199095,
+      "firstMetricAt": 1763823190095,
+      "lastMetricAt": 1763823199095,
+      "period": "1763823190000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823200095,
+      "lastCounterAt": 1763823209095,
+      "firstMetricAt": 1763823200095,
+      "lastMetricAt": 1763823209095,
+      "period": "1763823200000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823210099,
+      "lastCounterAt": 1763823219095,
+      "firstMetricAt": 1763823210099,
+      "lastMetricAt": 1763823219095,
+      "period": "1763823210000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823220095,
+      "lastCounterAt": 1763823229096,
+      "firstMetricAt": 1763823220095,
+      "lastMetricAt": 1763823229096,
+      "period": "1763823220000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823230095,
+      "lastCounterAt": 1763823239099,
+      "firstMetricAt": 1763823230095,
+      "lastMetricAt": 1763823239099,
+      "period": "1763823230000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823240095,
+      "lastCounterAt": 1763823249097,
+      "firstMetricAt": 1763823240095,
+      "lastMetricAt": 1763823249097,
+      "period": "1763823240000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823250095,
+      "lastCounterAt": 1763823259096,
+      "firstMetricAt": 1763823250095,
+      "lastMetricAt": 1763823259096,
+      "period": "1763823250000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 10,
+        "vusers.created": 10,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 10,
+        "vusers.failed": 10
+      },
+      "rates": {},
+      "firstCounterAt": 1763823260096,
+      "lastCounterAt": 1763823269097,
+      "firstMetricAt": 1763823260096,
+      "lastMetricAt": 1763823269097,
+      "period": "1763823260000",
+      "summaries": {},
+      "histograms": {}
+    },
+    {
+      "counters": {
+        "vusers.created_by_name.Draft graph - baseline performance": 9,
+        "vusers.created": 9,
+        "errors.Invalid URL - {{ $processEnvironment.PERF_TARGET_URL || \"http://localhost:3101\" }}/assist/draft-graph": 9,
+        "vusers.failed": 9
+      },
+      "rates": {},
+      "firstCounterAt": 1763823270096,
+      "lastCounterAt": 1763823278096,
+      "firstMetricAt": 1763823270096,
+      "lastMetricAt": 1763823278096,
+      "period": "1763823270000",
+      "summaries": {},
+      "histograms": {}
+    }
+  ]
+}
