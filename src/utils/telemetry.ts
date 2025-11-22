@@ -137,6 +137,7 @@ export const TelemetryEvents = {
   ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
   AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
+  CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
   SseResumeAttempt: "assist.sse.resume_attempt",
@@ -322,7 +323,12 @@ export function calculateCost(model: string, tokensIn: number, tokensOut: number
   }
 
   // Fixtures or unknown model - return 0 (only warn if not fixtures)
-  if (model !== 'fixture-v1') {
+  if (model !== "fixture-v1") {
+    emit(TelemetryEvents.CostCalculationUnknownModel, {
+      model,
+      tokens_in: tokensIn,
+      tokens_out: tokensOut,
+    });
     log.warn({ model }, "Unknown model for cost calculation");
   }
   return 0;

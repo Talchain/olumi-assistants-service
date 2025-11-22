@@ -103,6 +103,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
         AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
+        CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
         SseResumeIssued: "assist.sse.resume_issued",
         SseResumeAttempt: "assist.sse.resume_attempt",
         SseResumeSuccess: "assist.sse.resume_success",
@@ -180,7 +181,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -396,6 +397,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // Stage events are debug-only and intentionally have no Datadog mappings
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
+        TelemetryEvents.CostCalculationUnknownModel,
       ];
 
       for (const event of allEvents) {
@@ -522,6 +524,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Anthropic prompt cache hint event
         "assist.llm.anthropic_prompt_cache_hint",
+
+        // Cost calculation guardrails
+        "assist.cost_calculation.unknown_model",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

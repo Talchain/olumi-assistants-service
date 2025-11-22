@@ -159,6 +159,14 @@ interface FetchResultErr {
 type FetchResult = FetchResultOk | FetchResultErr;
 
 async function fetchJson(url: string, apiKey?: string): Promise<FetchResult> {
+  const controller = new AbortController();
+  const rawTimeout = env.CEE_DIAGNOSTICS_FETCH_TIMEOUT_MS;
+  const parsedTimeout = rawTimeout ? Number(rawTimeout) : NaN;
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 10000;
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -167,7 +175,7 @@ async function fetchJson(url: string, apiKey?: string): Promise<FetchResult> {
       headers["X-Olumi-Assist-Key"] = apiKey;
     }
 
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: controller.signal });
     const text = await res.text();
 
     let json: unknown = undefined;
@@ -193,11 +201,19 @@ async function fetchJson(url: string, apiKey?: string): Promise<FetchResult> {
 
     return { ok: true, status: res.status, json };
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.name === "AbortError"
+          ? `Request timed out after ${timeoutMs}ms`
+          : error.message
+        : String(error);
     return {
       ok: false,
       status: 0,
-      message: error instanceof Error ? error.message : String(error),
+      message,
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
