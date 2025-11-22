@@ -53,11 +53,15 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 ### For Operators
 
 #### Operations & Deployment
-- **[Operator Runbook](CEE-ops.md)** - Day-to-day operations guide
-- **[CEE Runbook](CEE-runbook.md)** - CEE-specific operations
-- **[Render Deployment Guide](STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
-- **[Production Grounding Flip Plan](PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
-- **[Release Rollback](RELEASE_ROLLBACK.md)** - How to roll back a release
+
+📂 **[Complete Operations Documentation Index](operations/README.md)** - Organized guide to all operations docs
+
+- **[Operator Runbook](operations/operator-runbook.md)** - Day-to-day operations guide
+- **[CEE Operations Guide](cee/CEE-ops.md)** - CEE-specific operations
+- **[CEE Runbook](cee/CEE-runbook.md)** - CEE operational procedures
+- **[Render Deployment Guide](api/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
+- **[Production Grounding Flip Plan](operations/PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
+- **[Release Rollback](operations/RELEASE_ROLLBACK.md)** - How to roll back a release
 
 #### Incident Response
 - **[CEE Incident Runbook](CEE-incident-runbook.md)** - CEE-specific incident response
@@ -69,7 +73,7 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 #### Monitoring & Observability
 - **[CEE Telemetry Playbook](CEE-telemetry-playbook.md)** - Metrics and monitoring
 - **[CEE Cost Telemetry](CEE-cost-telemetry.md)** - Cost tracking and alerting
-- **[Production Validation (v1.1.1)](PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
+- **[Production Validation (v1.1.1)](operations/PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
 
 ---
 
