@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
-import { computeQuality } from "../../src/cee/quality/index.js";
+import { computeQuality, getCeeQualityBand, type CeeQualityBand } from "../../src/cee/quality/index.js";
 
 function makeGraph(nodes: Array<{ id: string; kind: string; label?: string }>, edges: Array<{ from: string; to: string }>): GraphV1 {
   return {
@@ -94,5 +94,22 @@ describe("CEE quality helper - computeQuality", () => {
     expect(quality.coverage).toBeGreaterThanOrEqual(1);
     expect(quality.safety).toBeGreaterThanOrEqual(1);
     expect(quality.causality).toBe(quality.structure);
+  });
+
+  it("maps overall scores into deterministic quality bands", () => {
+    const expectBand = (score: number, band: CeeQualityBand) => {
+      expect(getCeeQualityBand(score)).toBe(band);
+    };
+
+    expectBand(1, "low_confidence");
+    expectBand(3, "low_confidence");
+    expectBand(4, "uncertain");
+    expectBand(6, "uncertain");
+    expectBand(7, "confident");
+    expectBand(10, "confident");
+
+    // Non-integer scores are clamped and rounded before banding.
+    expectBand(6.6, "confident");
+    expectBand(3.7, "uncertain");
   });
 });

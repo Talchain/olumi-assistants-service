@@ -211,6 +211,9 @@ When escalating, include only **metadata**:
   environment and roll changes out safely.
 - `troubleshooting.md` (if present) – FAQ-style answers to
   "why is CEE doing X?".
- - `scripts/cee-health-snapshot.ts` – dev-only CLI to summarise CEE envelope
-   health (status bands, truncation, completeness) from JSON without printing
-   prompts or graphs.
+- `scripts/cee-health-snapshot.ts` – dev-only CLI to summarise CEE envelope
+  health (status bands, truncation, completeness) from JSON without printing
+  prompts or graphs.
+- `scripts/cee-bias-structure-snapshot.ts` – dev-only CLI to summarise
+  structural warnings and bias distributions from CEE envelopes using only
+  IDs, enums, counts, and quality bands (no briefs, graphs, or LLM text).

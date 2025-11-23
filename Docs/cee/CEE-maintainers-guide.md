@@ -73,9 +73,8 @@ shapes.
   - `troubleshooting.md` (if present) – FAQ-style answers.
   - Dev-only tools (non-normative helpers)
     - `scripts/cee-demo-cli.ts`, `scripts/cee-health-snapshot.ts`,
-      `scripts/cee-review-cli.ts`, and `scripts/cee-prompt-lint.ts` are
-      **local debugging and linting aids only**. They must remain metadata-only
-      and are not part of the runtime CEE pipeline or public SDK contract.
+      `scripts/cee-review-cli.ts`, `scripts/cee-bias-structure-snapshot.ts`,
+      and `scripts/cee-prompt-lint.ts` are **local debugging and linting aids only**. They must remain metadata-only and are not part of the runtime CEE pipeline or public SDK contract.
 
 - **SSE / degraded-mode surfaces**
   - SSE stream and resume implementation and diagnostics:

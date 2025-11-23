@@ -86,6 +86,101 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
     });
   });
 
+  it("orders bias_findings deterministically and accepts optional seed", async () => {
+    const graph = {
+      version: "1",
+      default_seed: 17,
+      nodes: [
+        { id: "g1", kind: "goal", label: "Increase revenue" },
+        { id: "opt1", kind: "option", label: "Premium pricing" },
+        { id: "opt2", kind: "option", label: "Discount pricing" },
+      ],
+      edges: [],
+      meta: { roots: ["g1"], leaves: ["opt1", "opt2"], suggested_positions: {}, source: "assistant" },
+    };
+
+    const payload = {
+      graph,
+      archetype: { decision_type: "pricing_decision", match: "exact", confidence: 0.9 },
+      seed: "cee-bias-seed-1",
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/bias-check",
+      headers: headersKey1,
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json();
+
+    expect(Array.isArray(body.bias_findings)).toBe(true);
+
+    const ids = body.bias_findings.map((f: any) => f.id);
+
+    // With this graph and archetype we expect measurement, optimisation, then framing biases.
+    expect(ids).toEqual([
+      "measurement_missing_risks_or_outcomes",
+      "optimisation_pricing_no_risks",
+      "framing_single_goal_no_risks",
+    ]);
+  });
+
+  it("emits structural confirmation bias with enrichment when CEE_BIAS_STRUCTURAL_ENABLED is true", async () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = {
+        version: "1",
+        default_seed: 17,
+        nodes: [
+          { id: "goal", kind: "goal", label: "Increase revenue" },
+          { id: "opt_a", kind: "option", label: "Path A" },
+          { id: "opt_b", kind: "option", label: "Path B" },
+          { id: "r1", kind: "risk", label: "Risk for A" },
+        ],
+        edges: [{ from: "opt_a", to: "r1" }],
+        meta: {
+          roots: ["goal"],
+          leaves: ["opt_a", "opt_b"],
+          suggested_positions: {},
+          source: "assistant",
+        },
+      };
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/bias-check",
+        headers: headersKey2,
+        payload: { graph },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      const confirmation = body.bias_findings.find(
+        (f: any) => f.code === "CONFIRMATION_BIAS",
+      );
+
+      expect(confirmation).toBeDefined();
+      expect(confirmation.node_ids).toEqual(expect.arrayContaining(["opt_a", "opt_b"]));
+      expect(typeof confirmation.mechanism).toBe("string");
+      expect(typeof confirmation.citation).toBe("string");
+      const steps = confirmation.micro_intervention?.steps ?? [];
+      expect(Array.isArray(steps)).toBe(true);
+      expect(steps.length).toBeGreaterThan(0);
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
   it("returns CEE_VALIDATION_FAILED for invalid input", async () => {
     const res = await app.inject({
       method: "POST",

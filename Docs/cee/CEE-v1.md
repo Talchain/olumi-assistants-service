@@ -46,6 +46,12 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
       - `seed?: string`
       - `response_hash?: string`
       - `response_limits: { ... }` (see below).
+    - `draft_warnings?: CEEStructuralWarningV1[]` – optional structural warnings derived from graph topology only (IDs, enums, counts) when `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED=true`.
+      - Examples include `no_outcome_node`, `orphan_node`, `cycle_detected`, `decision_after_outcome`.
+      - Each warning only references node/edge IDs plus a short explanation string; no labels or prompts are logged or surfaced.
+    - `confidence_flags?: CEEConfidenceFlagsV1` – optional machine-friendly flags derived from structural diagnostics and response caps:
+      - `uncertain_nodes?: string[]` – node IDs that participate in structural warnings.
+      - `simplification_applied?: boolean` – true when CEE applied structural simplification (e.g. cycle-breaking, pruning) or list caps.
       - `guidance?: { summary: string; risks?: string[]; next_actions?: string[]; any_truncated?: boolean }` – a small, heuristic
         guidance block derived from quality, validation_issues, and response_limits. This is meant for UI hints and summaries and
         never includes raw user content.
@@ -56,7 +62,7 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
   - **Request**
     - Body: `CEEExplainGraphRequestV1` – wraps an existing graph (same shape as the draft pipeline emits) plus an `inference` blob
       (`summary`, optional `explain.top_drivers`, optional `model_card`, `seed`, `response_hash`, optional `context_id`).
-  - **Response (success)** – `CEEExplainGraphResponseV1`
+  - **Response (success) **– `CEEExplainGraphResponseV1`
     - `trace`, `quality`, `validation_issues?`.
     - `guidance?: CEEGuidanceV1` – shared guidance block derived from quality and any truncation flags.
     - A structured explanation payload (IDs, enums, short codes only).
@@ -86,9 +92,20 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
   - Analyses a graph for structural / content biases.
   - **Request**
     - Body: `CEEBiasCheckRequestV1` – `graph` plus optional `archetype` metadata from the draft endpoint.
+      - Optional `seed?: string` field is accepted and used as a deterministic tie-breaker when ordering bias findings.
   - **Response (success)** – `CEEBiasCheckResponseV1`
     - `trace`, `quality`, `validation_issues?`.
     - `bias_findings: [...]` – structured bias findings (codes, severities, node IDs).
+      - Findings are ordered deterministically by severity, category, ID, and (optionally) the caller-provided `seed`; given the same input graph and seed, ordering is stable.
+      - Each finding includes a canonical `code` and structured `targets` (node IDs only) suitable for UI highlighting.
+      - When a finding’s `code` matches the internal bias library (e.g. `CONFIRMATION_BIAS`, `SUNK_COST`, `BASE_RATE_NEGLECT`), CEE populates additional metadata:
+        - `mechanism` – short description of the cognitive mechanism.
+        - `citation` – canonical reference (authors + venue).
+        - `micro_intervention` – small, time-bounded intervention (`steps[]`, `estimated_minutes`).
+      - **Structural detectors (v1, optional):** when `CEE_BIAS_STRUCTURAL_ENABLED=true`, CEE enables additional graph-structural detectors that only use node kinds and edges (no free text or prompts), for example:
+        - **Structural confirmation bias** when one option has explicit risks/outcomes connected while alternatives have none.
+        - **Structural sunk cost bias** when a single option has multiple attached actions consistent with “keep investing in the current path”.
+      - These detectors are additive and **opt-in by env flag**; turning them off does not change existing non-structural findings.
     - `response_limits: { bias_findings_max, bias_findings_truncated }`.
     - `guidance?: CEEGuidanceV1` – shared guidance block for this endpoint.
 
@@ -641,6 +658,8 @@ Key environment variables relevant to CEE v1:
 - `CEE_DRAFT_FEATURE_VERSION` – version string surfaced in `X-CEE-Feature-Version` header.
 - `CEE_DRAFT_RATE_LIMIT_RPM` – per-feature CEE rate limit per key/IP.
 - `COST_MAX_USD` – maximum allowed cost per draft response (shared guard).
+- `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` – when `true`, enables structural draft warnings (`draft_warnings`) and confidence flags (`confidence_flags`) on `CEEDraftGraphResponseV1`. Default: `false`.
+- `CEE_BIAS_STRUCTURAL_ENABLED` – when `true`, enables additional graph-structural bias detectors (e.g. confirmation bias and sunk cost) inside Bias Check. Default: `false`.
 
 ### 4.2 CEE response headers
 
