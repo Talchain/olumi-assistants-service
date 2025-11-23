@@ -23,6 +23,8 @@ import {
   type CeeTraceSummary,
   type CeeErrorView,
   type CeeIntegrationReviewBundle,
+  classifyCeeQuality,
+  type CeeQualityBand,
 } from "./ceeHelpers.js";
 import { OlumiAPIError, OlumiNetworkError } from "./errors.js";
 import type {
@@ -33,10 +35,35 @@ import type {
   CEETeamPerspectivesResponseV1,
   CEESensitivityCoachResponseV1,
   CEEExplainGraphResponseV1,
+  CEEQualityMeta,
 } from "./ceeTypes.js";
 import type { ErrorResponse } from "./types.js";
 
 describe("ceeHelpers", () => {
+  it("classifyCeeQuality maps overall scores into deterministic bands", () => {
+    const makeQuality = (overall: number): CEEQualityMeta => ({ overall } as any);
+
+    const expectBand = (score: number, band: CeeQualityBand | undefined) => {
+      expect(classifyCeeQuality(makeQuality(score))).toBe(band);
+    };
+
+    expectBand(1, "low_confidence");
+    expectBand(3, "low_confidence");
+    expectBand(4, "uncertain");
+    expectBand(6, "uncertain");
+    expectBand(7, "confident");
+    expectBand(10, "confident");
+
+    // Non-integer scores are clamped and rounded before banding.
+    expectBand(6.6, "confident");
+    expectBand(3.7, "uncertain");
+
+    // Missing or invalid quality objects return undefined.
+    expect(classifyCeeQuality(undefined)).toBeUndefined();
+    expect(classifyCeeQuality(null)).toBeUndefined();
+    expect(classifyCeeQuality({ overall: Number.NaN } as any)).toBeUndefined();
+  });
+
   it("extracts trace and overall quality when present", () => {
     const response: CEEOptionsResponseV1 = {
       trace: {

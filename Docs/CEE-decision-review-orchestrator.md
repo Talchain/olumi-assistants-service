@@ -214,6 +214,9 @@ interface EngineScenarioReview {
   `src/contracts/cee/decision-review.ts`.
 - SDK surface: `CeeDecisionReviewPayload` and helpers in
   `sdk/typescript/src/ceeHelpers.ts`.
+- Error surface: `CeeErrorViewModel` in the SDK exposes a
+  `suggestedAction` union of **`"retry" | "fix_input" | "fail"`**, which is
+  part of the frozen v1 integration surface for this POC.
 
 For POC v02:
 
@@ -223,7 +226,7 @@ For POC v02:
 - **Breaking changes are not allowed** for v1, including:
   - Renaming/removing existing fields.
   - Changing enums or value semantics in a way that would break existing
-    consumers.
+    consumers (including the `CeeErrorViewModel.suggestedAction` union).
 
 Any future Decision Review versions should:
 
@@ -320,3 +323,148 @@ PloT and UI can then interpret disagreement flags using existing fields:
 
 UI surfaces disagreement only via these metadata fields; it never inspects the
 raw team perspectives or any free-text content.
+
+## 6. Using Decision Review from the Engine (PLoT)
+
+For POC v02, PLoT is the **orchestrator** for Decision Review. It:
+
+- Calls individual CEE v1 endpoints via the TypeScript SDK.
+- Collapses their metadata into a `CeeDecisionReviewPayload` using
+  `buildCeeDecisionReviewPayload`.
+- Attaches the resulting review/trace/error to its own APIs as
+  `ceeReview` / `ceeTrace` / `ceeError`.
+
+There is **no separate Decision Review HTTP endpoint**; the orchestration
+lives entirely on the engine side.
+
+### 6.1 Engine-side client creation
+
+PloT should create a dedicated CEE client using engine-only env vars:
+
+```ts
+import {
+  createCEEClient,
+  buildCeeDecisionReviewPayload,
+  buildCeeTraceSummary,
+  buildCeeErrorView,
+  buildCeeIntegrationReviewBundle,
+  type CeeDecisionReviewPayload,
+  type CeeTraceSummary,
+  type CeeIntegrationReviewBundle,
+} from "@olumi/assistants-sdk";
+
+const cee = createCEEClient({
+  apiKey: process.env.CEE_API_KEY!,
+  baseUrl: process.env.CEE_BASE_URL,
+  // Best-effort: a single, time-boxed attempt per Decision Review run.
+  timeout: Number(process.env.CEE_TIMEOUT_MS ?? "10000"),
+});
+```
+
+Environment variables are documented in `Docs/CEE-ops.md`:
+
+- `CEE_BASE_URL` – base URL for the Assistants service used for CEE.
+- `CEE_API_KEY` – engine-side API key, never exposed to UI.
+- `CEE_TIMEOUT_MS` – optional engine-level timeout in milliseconds; for POC
+  v02 a **~10s** client timeout with a **single attempt** is recommended.
+
+### 6.2 Orchestrating CEE and building the payload
+
+A typical engine-side flow for a Decision Review run is:
+
+```ts
+async function runDecisionReviewForScenario(
+  scenarioId: string,
+  requestId: string,
+): Promise<CeeIntegrationReviewBundle> {
+  try {
+    // 1) Call core CEE v1 endpoints via the SDK (brief/graph never logged).
+    const draft = await cee.draftGraph({
+      brief: "ENGINE_SCENARIO_DO_NOT_LOG",
+    } as any);
+
+    const options = await cee.options({
+      graph: draft.graph as any,
+      archetype: draft.archetype,
+    } as any);
+
+    const evidence = await cee.evidenceHelper({
+      evidence: [], // engine-specific evidence IDs/types live here.
+    } as any);
+
+    const bias = await cee.biasCheck({
+      graph: draft.graph as any,
+      archetype: draft.archetype,
+    } as any);
+
+    const team = await cee.teamPerspectives({
+      perspectives: [],
+    } as any);
+
+    // 2) Collapse envelopes into a metadata-only Decision Review payload.
+    const review: CeeDecisionReviewPayload = buildCeeDecisionReviewPayload({
+      draft,
+      options,
+      evidence,
+      bias,
+      team,
+    });
+
+    // 3) Build a compact trace summary (metadata-only).
+    const trace: CeeTraceSummary | null = buildCeeTraceSummary({
+      trace: draft.trace as any,
+      engineStatus: undefined,
+      timestamp: new Date().toISOString(),
+    });
+
+    return buildCeeIntegrationReviewBundle({ review, trace });
+  } catch (error) {
+    // 4) Map any error into a CeeErrorViewModel; no prompts/graphs are logged.
+    const ceeError = buildCeeErrorView(error);
+    return buildCeeIntegrationReviewBundle({ error: ceeError });
+  }
+}
+```
+
+Engine/PloT responses can then expose Decision Review metadata additively:
+
+```ts
+interface EngineScenarioReview {
+  id: string;
+  createdAt: string;
+  // Existing engine fields...
+  ceeReview: CeeDecisionReviewPayload | null;
+  ceeTrace: CeeTraceSummary | null;
+  ceeError?: {
+    code?: string;
+    retryable: boolean;
+    traceId?: string;
+    suggestedAction: "retry" | "fix_input" | "fail";
+  };
+}
+
+async function buildEngineScenarioReview(
+  scenarioId: string,
+  requestId: string,
+): Promise<EngineScenarioReview> {
+  const bundle = await runDecisionReviewForScenario(scenarioId, requestId);
+
+  return {
+    id: scenarioId,
+    createdAt: new Date().toISOString(),
+    ceeReview: bundle.review,
+    ceeTrace: bundle.trace,
+    ceeError: bundle.error,
+  };
+}
+```
+
+Key semantics for POC v02:
+
+- Decision Review is **best-effort and optional**. Failures or degraded traces
+  must **not** block `/v1/run` or equivalent engine APIs.
+- Engines should:
+  - Use a single, time-boxed attempt (~10s client timeout).
+  - Treat `ceeReview` / `ceeTrace` / `ceeError` as **advisory metadata** on
+    top of an already-valid report.
+  - Never log or persist prompts, graphs, or LLM text when wiring CEE.

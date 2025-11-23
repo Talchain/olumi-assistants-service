@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { components } from "../generated/openapi.d.ts";
 import { CEEBiasCheckInput, type CEEBiasCheckInputT } from "../schemas/cee.js";
-import { detectBiases } from "../cee/bias/index.js";
+import { detectBiases, sortBiasFindings } from "../cee/bias/index.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
@@ -175,12 +175,13 @@ export default async function route(app: FastifyInstance) {
       const validationIssues: CEEValidationIssue[] = [];
 
       const findings = detectBiases(graph, (input as any).archetype ?? null);
+      const sortedFindings = sortBiasFindings(findings, input.seed);
 
       const BIAS_FINDINGS_MAX = 10;
       let biasFindingsTruncated = false;
-      let cappedFindings = findings;
-      if (findings.length > BIAS_FINDINGS_MAX) {
-        cappedFindings = findings.slice(0, BIAS_FINDINGS_MAX);
+      let cappedFindings = sortedFindings;
+      if (sortedFindings.length > BIAS_FINDINGS_MAX) {
+        cappedFindings = sortedFindings.slice(0, BIAS_FINDINGS_MAX);
         biasFindingsTruncated = true;
       }
 

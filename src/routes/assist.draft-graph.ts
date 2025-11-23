@@ -17,6 +17,7 @@ import { fixtureGraph } from "../utils/fixtures.js";
 import type { GraphT } from "../schemas/graph.js";
 import { validateResponse } from "../utils/responseGuards.js";
 import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
+import { detectCycles } from "../utils/graphGuards.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { createResumeToken, verifyResumeToken } from "../utils/sse-resume-token.js";
 import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot, renewSnapshot } from "../utils/sse-state.js";
@@ -57,6 +58,12 @@ type Diagnostics = {
   trims: number;
   recovered_events: number;
   correlation_id: string;
+};
+
+type StructuralMeta = {
+  had_cycles?: boolean;
+  cycle_node_ids?: string[];
+  had_pruned_nodes?: boolean;
 };
 
 function buildDiagnosticsFromPayload(
@@ -146,7 +153,15 @@ export function sanitizeDraftGraphInput(
 }
 
 type PipelineResult =
-  | { kind: "success"; payload: SuccessPayload; hasLegacyProvenance?: boolean; cost_usd: number; provider: string; model: string }
+  | {
+      kind: "success";
+      payload: SuccessPayload;
+      hasLegacyProvenance?: boolean;
+      cost_usd: number;
+      provider: string;
+      model: string;
+      structural_meta?: StructuralMeta;
+    }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
 
 function buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
@@ -342,6 +357,13 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let repairProviderName: string | null = null;
   let repairModelName: string | null = null;
 
+  const initialNodeIds = new Set<string>(graph.nodes.map((n: any) => (n as any).id as string));
+  const cycles = detectCycles(graph.nodes as any, graph.edges as any);
+  const hadCycles = cycles.length > 0;
+  const cycleNodeIds: string[] = Array.from(
+    new Set<string>((cycles.flat() as string[])),
+  ).slice(0, 20);
+
   let candidate = stabiliseGraph(ensureDagAndPrune(graph));
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
@@ -425,6 +447,26 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
   candidate = enforceStableEdgeIds(candidate);
 
+  const finalNodeIds = new Set<string>(candidate.nodes.map((n: any) => (n as any).id as string));
+  let hadPrunedNodes = false;
+  for (const id of initialNodeIds) {
+    if (!finalNodeIds.has(id)) {
+      hadPrunedNodes = true;
+      break;
+    }
+  }
+
+  const structuralMeta: StructuralMeta = {};
+  if (hadCycles) {
+    structuralMeta.had_cycles = true;
+    if (cycleNodeIds.length > 0) {
+      structuralMeta.cycle_node_ids = cycleNodeIds;
+    }
+  }
+  if (hadPrunedNodes) {
+    structuralMeta.had_pruned_nodes = true;
+  }
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -505,6 +547,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     cost_usd: totalCost,
     provider: draftAdapter.name,
     model: draftAdapter.model,
+    structural_meta: (structuralMeta.had_cycles || structuralMeta.had_pruned_nodes) ? structuralMeta : undefined,
   };
 }
 

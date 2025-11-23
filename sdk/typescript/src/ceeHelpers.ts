@@ -19,6 +19,29 @@ import {
 } from "./ceePolicy.js";
 import { OlumiAPIError, OlumiNetworkError } from "./errors.js";
 
+export type CeeQualityBand = "confident" | "uncertain" | "low_confidence";
+
+export function classifyCeeQuality(
+  quality: CEEQualityMeta | null | undefined,
+): CeeQualityBand | undefined {
+  const overall = quality?.overall;
+  if (typeof overall !== "number" || !Number.isFinite(overall)) {
+    return undefined;
+  }
+
+  const score = Math.min(10, Math.max(1, Math.round(overall)));
+
+  if (score >= 7) {
+    return "confident";
+  }
+
+  if (score >= 4) {
+    return "uncertain";
+  }
+
+  return "low_confidence";
+}
+
 // Union of all known CEE response envelopes.
 export type AnyCEEEnvelope =
   | CEEDraftGraphResponseV1

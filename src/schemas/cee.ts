@@ -67,6 +67,7 @@ export const CEEBiasCheckInput = z
       .strict()
       .optional(),
     context_id: z.string().optional(),
+    seed: z.string().optional(),
   })
   .strict();
 

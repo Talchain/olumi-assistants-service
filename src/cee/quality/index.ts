@@ -4,6 +4,8 @@ import type { GraphV1 } from "../../contracts/plot/engine.js";
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
+export type CeeQualityBand = "confident" | "uncertain" | "low_confidence";
+
 export interface QualityInputs {
   graph: GraphV1 | undefined;
   confidence: number;
@@ -14,6 +16,20 @@ export interface QualityInputs {
 function clampScore(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(10, Math.max(1, Math.round(value)));
+}
+
+export function getCeeQualityBand(overall: number): CeeQualityBand {
+  const score = clampScore(overall);
+
+  if (score >= 7) {
+    return "confident";
+  }
+
+  if (score >= 4) {
+    return "uncertain";
+  }
+
+  return "low_confidence";
 }
 
 function countNodesByKind(graph: GraphV1 | undefined, kind: string): number {
