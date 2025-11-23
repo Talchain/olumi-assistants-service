@@ -89,6 +89,7 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 - **[api/](api/)** - API and integration documentation
 - **[cee/](cee/)** - CEE (Contextual Evidence Engine) documentation
 - **[operations/](operations/)** - Operations and deployment documentation
+- **[releases/](releases/)** - Release notes and version history
 - **[runbooks/](runbooks/)** - Incident response playbooks for specific failure scenarios
 - **[issues/](issues/)** - Technical investigations and problem analyses
 - **[notes/](notes/)** - Development notes and feedback responses
@@ -97,20 +98,23 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 ### By Topic
 
 #### Release Notes & Version History
-- **[V1.1.1 Completion Summary](V1.1.1_COMPLETION_SUMMARY.md)**
-- **[Go/No-Go Checklist v1.1.1](GO_NOGO_CHECKLIST_v1.1.1.md)**
-- **[PR-001: Fastify 5 Upgrade](PR-001-fastify-5-upgrade.md)**
-- **[PR-1 Completion Report](PR-1-completion-report.md)**
-- **[PR-1 Production Validation](PR-1-production-validation.md)**
-- **[PR Assistants Proxy v1](PR-ASSISTANTS-PROXY-V1.md)**
-- **[PR Assistants v1.1.1 Ops](PR-ASSISTANTS-v1.1.1-ops.md)**
-- **[PR Assistants v1.3.0 Test Infrastructure](PR-ASSISTANTS-v1.3.0-test-infrastructure.md)**
+
+📂 **[Complete Release Documentation Index](releases/README.md)** - Organized guide to all releases
+
+- **[V1.1.1 Completion Summary](releases/V1.1.1_COMPLETION_SUMMARY.md)**
+- **[Go/No-Go Checklist v1.1.1](releases/GO_NOGO_CHECKLIST_v1.1.1.md)**
+- **[PR-001: Fastify 5 Upgrade](releases/PR-001-fastify-5-upgrade.md)**
+- **[PR-1 Completion Report](releases/PR-1-completion-report.md)**
+- **[PR-1 Production Validation](releases/PR-1-production-validation.md)**
+- **[PR Assistants Proxy v1](releases/PR-ASSISTANTS-PROXY-V1.md)**
+- **[PR Assistants v1.1.1 Ops](releases/PR-ASSISTANTS-v1.1.1-ops.md)**
+- **[PR Assistants v1.3.0 Test Infrastructure](releases/PR-ASSISTANTS-v1.3.0-test-infrastructure.md)**
 
 #### Migration & Upgrade Guides
-- **[Fastify 5 Migration Report](fastify-5-migration-report.md)** - Fastify 4 → 5 upgrade details
+- **[Fastify 5 Migration Report](releases/fastify-5-migration-report.md)** - Fastify 4 → 5 upgrade details
 
 #### Analysis & Reports
-- **[Comprehensive Assessment Report](COMPREHENSIVE-ASSESSMENT-REPORT.md)** - Detailed system assessment
+- **[Comprehensive Assessment Report](releases/COMPREHENSIVE-ASSESSMENT-REPORT.md)** - Detailed system assessment
 - **[Performance Analysis](PERFORMANCE-ANALYSIS.md)** - Performance deep-dive
 - **[Performance Analysis Summary](PERFORMANCE-ANALYSIS-SUMMARY.md)** - Executive summary
 - **[Performance Action Items](PERFORMANCE-ACTION-ITEMS.md)** - Performance improvement tasks
