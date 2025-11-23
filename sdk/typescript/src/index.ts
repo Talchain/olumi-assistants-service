@@ -60,6 +60,7 @@ export {
   buildCeeTraceSummary,
   buildCeeErrorView,
   buildCeeIntegrationReviewBundle,
+  buildCeeBiasStructureSnapshot,
 } from "./ceeHelpers.js";
 
 export { applyGraphPatch } from "./applyGraphPatch.js";
@@ -100,4 +101,11 @@ export type {
   CeeTraceSummary,
   CeeErrorView,
   CeeIntegrationReviewBundle,
+  CeeError,
+  CeeTrace,
+  CeeDecisionReviewPayloadV1,
+  CeeReviewResult,
+  CeeBiasStructureDraftSummary,
+  CeeBiasStructureBiasSummary,
+  CeeBiasStructureSnapshot,
 } from "./ceeHelpers.js";

@@ -98,6 +98,15 @@ async function authPluginImpl(fastify: FastifyInstance) {
 
   if (initialKeys.size === 0) {
     log.warn("No API keys configured (ASSIST_API_KEY or ASSIST_API_KEYS). Auth disabled.");
+  } else {
+    const summaries = Array.from(initialKeys).map(key => {
+      const length = key.length;
+      const prefix = key.slice(0, Math.min(4, length));
+      const suffix = length > 4 ? key.slice(-4) : "";
+      return { prefix, suffix, length };
+    });
+
+    log.info({ api_keys: summaries, count: initialKeys.size }, "API keys configured (redacted)");
   }
 
   fastify.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
