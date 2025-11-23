@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import type { components } from "../../generated/openapi.d.ts";
+import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { runDraftGraphPipeline } from "../../routes/assist.draft-graph.js";
 import { SSE_DEGRADED_HEADER_NAME_LOWER } from "../../utils/degraded-mode.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
@@ -16,6 +17,8 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
+import { detectStructuralWarnings, type StructuralMeta } from "../structure/index.js";
+import { sortBiasFindings } from "../bias/index.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -23,6 +26,8 @@ type CEEErrorCode = components["schemas"]["CEEErrorCode"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
+type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
+type CEEConfidenceFlagsV1 = components["schemas"]["CEEConfidenceFlagsV1"];
 
 type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
@@ -85,6 +90,14 @@ function archetypesEnabled(): boolean {
   const flag = process.env.CEE_DRAFT_ARCHETYPES_ENABLED;
   if (flag === undefined) {
     return true;
+  }
+  return flag === "true" || flag === "1";
+}
+
+function structuralWarningsEnabled(): boolean {
+  const flag = process.env.CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED;
+  if (flag === undefined) {
+    return false;
   }
   return flag === "true" || flag === "1";
 }
@@ -244,12 +257,13 @@ export async function finaliseCeeDraftResponse(
     };
   }
 
-  const { payload, cost_usd, provider, model, repro_mismatch } = pipelineResult as {
+  const { payload, cost_usd, provider, model, repro_mismatch, structural_meta } = pipelineResult as {
     payload: any;
     cost_usd: number;
     provider: string;
     model: string;
     repro_mismatch?: boolean;
+    structural_meta?: StructuralMeta;
   };
 
   // Post-response guard: graph caps and cost (CEE must honour the same limits)
@@ -381,7 +395,41 @@ export async function finaliseCeeDraftResponse(
     ceeIssues: validationIssues,
   });
 
+  if (Array.isArray(payload.bias_findings)) {
+    payload.bias_findings = sortBiasFindings(payload.bias_findings as any, input.seed);
+  }
+
   const { cappedPayload, limits } = applyResponseCaps(payload);
+
+  const anyTruncated = ceeAnyTruncated(limits);
+
+  let draftWarnings: CEEStructuralWarningV1[] | undefined;
+  let confidenceFlags: CEEConfidenceFlagsV1 | undefined;
+
+  if (structuralWarningsEnabled()) {
+    const structural = detectStructuralWarnings(
+      payload.graph as GraphV1 | undefined,
+      structural_meta,
+    );
+
+    if (structural.warnings.length > 0) {
+      draftWarnings = structural.warnings;
+    }
+
+    const uncertain_nodes =
+      structural.uncertainNodeIds.length > 0 ? structural.uncertainNodeIds : undefined;
+    const simplificationApplied = Boolean(
+      anyTruncated ||
+        (structural_meta && (structural_meta.had_cycles || structural_meta.had_pruned_nodes)),
+    );
+
+    if (uncertain_nodes || simplificationApplied) {
+      confidenceFlags = {
+        ...(uncertain_nodes ? { uncertain_nodes } : {}),
+        ...(simplificationApplied ? { simplification_applied: true } : {}),
+      };
+    }
+  }
 
   const guidance = buildCeeGuidance({
     quality,
@@ -398,11 +446,12 @@ export async function finaliseCeeDraftResponse(
     seed: input.seed,
     response_hash: cappedPayload.response_hash as string | undefined,
     response_limits: limits,
+    draft_warnings: draftWarnings,
+    confidence_flags: confidenceFlags,
     guidance,
   };
 
   const latencyMs = Date.now() - start;
-  const anyTruncated = ceeAnyTruncated(limits);
   const hasValidationIssues = validationIssues.length > 0;
   const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
 

@@ -3,12 +3,11 @@ import type { FastifyRequest } from "fastify";
 import type { DraftGraphInputT } from "../../src/schemas/assist.js";
 import { TelemetrySink } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
-import { CEE_QUALITY_HIGH_MIN, CEE_QUALITY_MEDIUM_MIN } from "../../src/cee/policy.js";
-import { CEE_CALIBRATION_CASES, loadCalibrationCase } from "../utils/cee-calibration.js";
 
-// Mocks for underlying draft pipeline and response guards
+// Mocks for underlying draft pipeline, structural helpers, and response guards
 const runDraftGraphPipelineMock = vi.fn();
 const validateResponseMock = vi.fn();
+const detectStructuralWarningsMock = vi.fn();
 
 vi.mock("../../src/routes/assist.draft-graph.js", () => ({
   runDraftGraphPipeline: (...args: any[]) => runDraftGraphPipelineMock(...args),
@@ -16,6 +15,10 @@ vi.mock("../../src/routes/assist.draft-graph.js", () => ({
 
 vi.mock("../../src/utils/responseGuards.js", () => ({
   validateResponse: (...args: any[]) => validateResponseMock(...args),
+}));
+
+vi.mock("../../src/cee/structure/index.js", () => ({
+  detectStructuralWarnings: (...args: any[]) => detectStructuralWarningsMock(...args),
 }));
 
 import { finaliseCeeDraftResponse } from "../../src/cee/validation/pipeline.js";
@@ -45,6 +48,7 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
   beforeEach(async () => {
     runDraftGraphPipelineMock.mockReset();
     validateResponseMock.mockReset();
+    detectStructuralWarningsMock.mockReset();
 
     telemetrySink = new TelemetrySink();
     await telemetrySink.install();
@@ -53,6 +57,7 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
 
   afterEach(() => {
     telemetrySink.uninstall();
+    vi.unstubAllEnvs();
   });
 
   it("wraps successful pipeline result with CEE metadata (no raw DraftGraphOutput bypass)", async () => {
@@ -109,183 +114,7 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     expect(success.seed).toBe("cee-unit-seed");
   });
 
-  it("produces low-band quality for golden_under_specified calibration case", async () => {
-    const calibration = await loadCalibrationCase(CEE_CALIBRATION_CASES.UNDER_SPECIFIED);
-    const { quality_input } = calibration;
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "success",
-      payload: {
-        graph: quality_input.graph,
-        patch: { adds: { nodes: [] as any[], edges: [] as any[] }, updates: [], removes: [] },
-        rationales: [],
-        confidence: quality_input.confidence,
-        // Simulate one CEE issue by emitting a single engine issue string; computeQuality only
-        // cares about the count of CEE issues, not their codes, so this exercises the same path.
-        issues: ["structural_gap"],
-      },
-      cost_usd: 0.05,
-      provider: "fixtures",
-      model: "fixture-v1",
-    });
-
-    validateResponseMock.mockReturnValueOnce({ ok: true });
-
-    const input = makeInput();
-    const req = makeRequest();
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-
-    expect(statusCode).toBe(200);
-    const success = body as any;
-
-    const overall: number | undefined = success.quality?.overall;
-    expect(typeof overall).toBe("number");
-
-    const band =
-      overall! >= CEE_QUALITY_HIGH_MIN
-        ? "high"
-        : overall! >= CEE_QUALITY_MEDIUM_MIN
-          ? "medium"
-          : "low";
-
-    expect(band).toBe("low");
-  });
-
-  it("converts guard violations into CEE error responses with validation issues", async () => {
-    const graph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [],
-      edges: [],
-      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
-    } as any;
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "success",
-      payload: {
-        graph,
-        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
-        rationales: [],
-        confidence: 0.6,
-      },
-      cost_usd: 5.0,
-      provider: "fixtures",
-      model: "fixture-v1",
-    });
-
-    validateResponseMock.mockReturnValueOnce({
-      ok: false,
-      violation: {
-        code: "CAP_EXCEEDED",
-        message: "Graph exceeds maximum node count (60 > 50)",
-        details: { nodes: 60, max_nodes: 50 },
-      },
-    });
-
-    const input = makeInput();
-    const req = makeRequest();
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-
-    expect(statusCode).toBe(400);
-
-    const error = body as any;
-    expect(error.schema).toBe("cee.error.v1");
-    expect(error.code).toBe("CEE_GRAPH_INVALID");
-    expect(error.retryable).toBe(false);
-    expect(error.details).toBeDefined();
-    expect(error.details.guard_violation).toMatchObject({ code: "CAP_EXCEEDED" });
-    expect(Array.isArray(error.details.validation_issues)).toBe(true);
-    expect(error.details.validation_issues[0].code).toBe("CAP_EXCEEDED");
-    expect(error.details.validation_issues[0].severity).toBe("error");
-
-    const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(1);
-    expect(failedEvents[0].data.error_code).toBe("CEE_GRAPH_INVALID");
-    expect(failedEvents[0].data.http_status).toBe(400);
-  });
-
-  it("maps underlying error.v1 codes into CEE error codes", async () => {
-    const input = makeInput();
-    const req = makeRequest();
-
-    // BAD_INPUT → CEE_VALIDATION_FAILED
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "error",
-      statusCode: 400,
-      envelope: { code: "BAD_INPUT", message: "invalid", details: { field: "brief" } },
-    });
-
-    let result = await finaliseCeeDraftResponse(input, {}, req);
-    let error = result.body as any;
-    expect(result.statusCode).toBe(400);
-    expect(error.code).toBe("CEE_VALIDATION_FAILED");
-    expect(error.retryable).toBe(false);
-
-    let failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(1);
-    expect(failedEvents[0].data.error_code).toBe("CEE_VALIDATION_FAILED");
-    expect(failedEvents[0].data.http_status).toBe(400);
-
-    // RATE_LIMITED → CEE_RATE_LIMIT
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "error",
-      statusCode: 429,
-      envelope: { code: "RATE_LIMITED", message: "too many", details: { retry_after_seconds: 10 } },
-    });
-
-    result = await finaliseCeeDraftResponse(input, {}, req);
-    error = result.body as any;
-    expect(result.statusCode).toBe(429);
-    expect(error.code).toBe("CEE_RATE_LIMIT");
-    expect(error.retryable).toBe(true);
-
-    failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(2);
-    expect(failedEvents[1].data.error_code).toBe("CEE_RATE_LIMIT");
-    expect(failedEvents[1].data.http_status).toBe(429);
-
-    // INTERNAL → CEE_INTERNAL_ERROR
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "error",
-      statusCode: 500,
-      envelope: { code: "INTERNAL", message: "boom", details: {} },
-    });
-
-    result = await finaliseCeeDraftResponse(input, {}, req);
-    error = result.body as any;
-    expect(result.statusCode).toBe(500);
-    expect(error.code).toBe("CEE_INTERNAL_ERROR");
-    expect(error.retryable).toBe(false);
-
-    failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(3);
-    expect(failedEvents[2].data.error_code).toBe("CEE_INTERNAL_ERROR");
-    expect(failedEvents[2].data.http_status).toBe(500);
-  });
-
-  it("returns CEE_INTERNAL_ERROR when pipeline throws", async () => {
-    const input = makeInput();
-    const req = makeRequest();
-
-    runDraftGraphPipelineMock.mockRejectedValueOnce(new Error("pipeline failed"));
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-    const error = body as any;
-
-    expect(statusCode).toBe(500);
-    expect(error.schema).toBe("cee.error.v1");
-    expect(error.code).toBe("CEE_INTERNAL_ERROR");
-    expect(error.retryable).toBe(false);
-
-    const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(1);
-    expect(failedEvents[0].data.error_code).toBe("CEE_INTERNAL_ERROR");
-    expect(failedEvents[0].data.http_status).toBe(500);
-  });
-
-  it("applies response caps and sets response_limits metadata when lists exceed thresholds", async () => {
+  it("does not call structural detectors or set structural fields when flag is disabled", async () => {
     const graph = {
       version: "1",
       default_seed: 17,

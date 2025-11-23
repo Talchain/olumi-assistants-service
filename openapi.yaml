@@ -1660,6 +1660,9 @@ components:
         context_id:
           type: string
           description: Optional opaque context/brief identifier (not logged in telemetry).
+        seed:
+          type: string
+          description: Optional deterministic ordering seed for bias findings (not logged in telemetry).
 
     CEEOptionsRequestV1:
       type: object
@@ -1741,6 +1744,13 @@ components:
                   type: integer
                 sensitivity_suggestions_truncated:
                   type: boolean
+            draft_warnings:
+              type: array
+              description: Optional structural warnings about the draft graph
+              items:
+                $ref: '#/components/schemas/CEEStructuralWarningV1'
+            confidence_flags:
+              $ref: '#/components/schemas/CEEConfidenceFlagsV1'
             guidance:
               $ref: '#/components/schemas/CEEGuidanceV1'
 
@@ -1827,6 +1837,47 @@ components:
         guidance:
           $ref: '#/components/schemas/CEEGuidanceV1'
 
+    CEEStructuralWarningV1:
+      type: object
+      description: Structural issue detected in a draft decision graph
+      required:
+        - id
+        - severity
+      properties:
+        id:
+          type: string
+          description: Stable identifier for this warning type
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome]
+        severity:
+          type: string
+          enum: [low, medium, high]
+        node_ids:
+          type: array
+          description: Related graph node IDs (no labels or free text)
+          items:
+            type: string
+        edge_ids:
+          type: array
+          description: Related graph edge IDs (no labels or free text)
+          items:
+            type: string
+        explanation:
+          type: string
+          description: Short human-readable explanation (not used in telemetry)
+
+    CEEConfidenceFlagsV1:
+      type: object
+      description: Machine-friendly confidence flags for a draft graph
+      properties:
+        uncertain_nodes:
+          type: array
+          description: Graph node IDs with lower structural or coverage confidence
+          items:
+            type: string
+        simplification_applied:
+          type: boolean
+          description: True if structural simplification or response caps were applied
+
     CEEBiasFindingV1:
       type: object
       description: Bias or fairness-related finding detected by CEE
@@ -1852,6 +1903,45 @@ components:
         explanation:
           type: string
           description: Short human-readable explanation (not used in telemetry)
+        code:
+          type: string
+          description: Optional canonical code for this bias (usually matches id)
+        targets:
+          type: object
+          description: Targeted graph elements for this finding
+          properties:
+            node_ids:
+              type: array
+              items:
+                type: string
+            edge_ids:
+              type: array
+              items:
+                type: string
+        structural_pattern:
+          type: string
+          description: Short description of the structural pattern that triggered this bias
+        confidence_band:
+          type: string
+          description: Discrete confidence band for this finding
+          enum: [low, medium, high]
+        micro_intervention:
+          type: object
+          description: Small recommended actions to address this bias
+          properties:
+            steps:
+              type: array
+              items:
+                type: string
+            estimated_minutes:
+              type: integer
+              description: Estimated minutes required to apply this intervention (1-5)
+        mechanism:
+          type: string
+          description: Plain-language description of the bias mechanism
+        citation:
+          type: string
+          description: Short citation to the underlying research source
 
     CEEBiasCheckResponseV1:
       type: object

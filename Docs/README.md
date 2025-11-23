@@ -8,11 +8,11 @@ Welcome to the Olumi Assistants Service documentation! This directory contains c
 
 1. **[Architecture Overview](getting-started/architecture.md)** - What is this service and how does it work?
 2. **[Contributing Guide](contributing.md)** - How to contribute code, tests, and documentation
-3. **[Frontend Integration](FRONTEND_INTEGRATION.md)** - Complete API reference for integrating with clients
+3. **[Frontend Integration](api/FRONTEND_INTEGRATION.md)** - Complete API reference for integrating with clients
 
 **Setting up locally?**
 - See the [Quick Start](../README.md#quick-start) in the root README
-- Read [Staging Setup Instructions](STAGING_SETUP_INSTRUCTIONS.md) for environment configuration
+- Read [Staging Setup Instructions](api/STAGING_SETUP_INSTRUCTIONS.md) for environment configuration
 
 ---
 
@@ -21,10 +21,13 @@ Welcome to the Olumi Assistants Service documentation! This directory contains c
 ### For Developers
 
 #### API & Integration
-- **[Frontend Integration Guide](FRONTEND_INTEGRATION.md)** - Complete API reference with examples
-- **[SSE Streaming API](SSE-RESUME-API.md)** - Server-Sent Events with resume capability
-- **[Provider Configuration](cee/CEE-sandbox-integration.md)** - LLM provider setup (Anthropic, OpenAI)
-- **[OpenAPI Validation](cee/CEE-v1.md)** - API schema and validation
+
+📂 **[Complete API Documentation Index](api/README.md)** - Organized guide to all API docs
+
+- **[Frontend Integration Guide](api/FRONTEND_INTEGRATION.md)** - Complete API reference with examples
+- **[SSE Streaming API](api/SSE-RESUME-API.md)** - Server-Sent Events with resume capability
+- **[Provider Configuration](api/provider-configuration.md)** - LLM provider setup (Anthropic, OpenAI)
+- **[OpenAPI Validation](api/openapi-validation.md)** - API schema and validation
 
 #### CEE (Contextual Evidence Engine)
 The CEE subsystem provides quality assessment and evidence management for AI-generated decisions.
@@ -50,16 +53,20 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 
 #### Development Guides
 - **[Contributing Guide](contributing.md)** - Code style, PR process, testing requirements
-- **[ADR: CEE Streaming v1](ADR-cee/CEE-streaming-v1.md)** - Architecture decision record for streaming
+- **[ADR: CEE Streaming v1](cee/ADR-CEE-streaming-v1.md)** - Architecture decision record for streaming
 
 ### For Operators
 
 #### Operations & Deployment
-- **[Operator Runbook](cee/CEE-ops.md)** - Day-to-day operations guide
-- **[CEE Runbook](cee/CEE-runbook.md)** - CEE-specific operations
-- **[Render Deployment Guide](STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
-- **[Production Grounding Flip Plan](PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
-- **[Release Rollback](RELEASE_ROLLBACK.md)** - How to roll back a release
+
+📂 **[Complete Operations Documentation Index](operations/README.md)** - Organized guide to all operations docs
+
+- **[Operator Runbook](operations/operator-runbook.md)** - Day-to-day operations guide
+- **[CEE Operations Guide](cee/CEE-ops.md)** - CEE-specific operations
+- **[CEE Runbook](cee/CEE-runbook.md)** - CEE operational procedures
+- **[Render Deployment Guide](api/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
+- **[Production Grounding Flip Plan](operations/PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
+- **[Release Rollback](operations/RELEASE_ROLLBACK.md)** - How to roll back a release
 
 #### Incident Response
 - **[CEE Incident Runbook](cee/CEE-incident-runbook.md)** - CEE-specific incident response
@@ -71,7 +78,7 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 #### Monitoring & Observability
 - **[CEE Telemetry Playbook](cee/CEE-telemetry-playbook.md)** - Metrics and monitoring
 - **[CEE Cost Telemetry](cee/CEE-cost-telemetry.md)** - Cost tracking and alerting
-- **[Production Validation (v1.1.1)](PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
+- **[Production Validation (v1.1.1)](operations/PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
 
 ---
 
@@ -79,6 +86,9 @@ The CEE subsystem provides quality assessment and evidence management for AI-gen
 
 ### Subdirectories
 
+- **[api/](api/)** - API and integration documentation
+- **[cee/](cee/)** - CEE (Contextual Evidence Engine) documentation
+- **[operations/](operations/)** - Operations and deployment documentation
 - **[releases/](releases/)** - Release notes and version history
 - **[runbooks/](runbooks/)** - Incident response playbooks for specific failure scenarios
 - **[issues/](issues/)** - Technical investigations and problem analyses
@@ -163,7 +173,7 @@ See [contributing.md](contributing.md) for:
 - **Issues:** Check [issues/](issues/) for known problems
 - **Runbooks:** See [runbooks/](runbooks/) for incident response
 - **Architecture Questions:** Start with [getting-started/architecture.md](getting-started/architecture.md)
-- **API Questions:** See [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)
+- **API Questions:** See [api/FRONTEND_INTEGRATION.md](api/FRONTEND_INTEGRATION.md)
 
 ---
 
