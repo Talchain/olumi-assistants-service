@@ -71,7 +71,7 @@ The rationale:
 - Integrators who want streaming today should continue to use
   `POST /assist/draft-graph/stream` (and `/resume`) and, if needed, layer their
   own CEE-style interpretation on top in the client.
-- The CEE doc (`Docs/CEE-v1.md`) explicitly calls out that:
+- The CEE doc (`v1.md`) explicitly calls out that:
   - CEE v1 is JSON-only.
   - The existing SSE surface remains the source of truth for streaming.
 - The TypeScript SDK exposes CEE helpers (`getCEETrace`, `getCEEQualityOverall`,

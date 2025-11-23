@@ -6,7 +6,7 @@ existing CEE telemetry, without changing any events or payloads.
 This document focuses on `cee.*` telemetry events emitted by the CEE v1
 endpoints. For the full event definitions and fields, see:
 
-- `Docs/CEE-v1.md` – section **4.2 Telemetry** (CEE-specific events).
+- `v1.md` – section **4.2 Telemetry** (CEE-specific events).
 - `src/utils/telemetry.ts` – frozen `TelemetryEvents` enum.
 - `tests/integration/cee.telemetry.test.ts` – end-to-end shape guards.
 
@@ -137,7 +137,7 @@ These diagnostics surfaces are useful for:
   (status/error codes, HTTP status, high-level config).
 - Complementing metric-based dashboards built on top of `cee.*` events.
 
-For operational usage patterns, see `Docs/CEE-ops.md`.
+For operational usage patterns, see `ops.md`.
 
 ---
 
@@ -309,13 +309,13 @@ This means you can:
 - Build dashboards that mirror what users see in the UI without logging
   additional payloads.
 - Reason about system health, truncation, and disagreement using the same
-  semantics documented in `Docs/CEE-v1.md` and implemented in:
+  semantics documented in `v1.md` and implemented in:
   - `sdk/typescript/src/ceeHelpers.ts`
   - `src/cee/guidance/index.ts`
   - `src/cee/team/index.ts`
 
 For concrete steps to take during incidents (rate-limit spikes, validation
-failures, upstream outages), see `Docs/CEE-incident-runbook.md`.
+failures, upstream outages), see `incident-runbook.md`.
 
 ---
 
@@ -364,5 +364,5 @@ These metrics are **metadata-only** and use the same event payloads that are
 already validated in `tests/integration/cee.telemetry.test.ts`. No new events
 or fields are introduced; dashboards should continue to treat the
 `cee.*` family as structured, non-textual signals aligned with
-`Docs/CEE-v1.md`.
+`v1.md`.
 

@@ -2,7 +2,7 @@
 
 **Purpose:** Give ops and on-call engineers a concise checklist for diagnosing and
 responding to CEE incidents in production. This builds on the telemetry and
-helper semantics in `Docs/CEE-v1.md` and `Docs/CEE-telemetry-playbook.md`.
+helper semantics in `v1.md` and `Docs/CEE-telemetry-playbook.md`.
 
 CEE incidents should be handled using **metadata only** – never by logging
 briefs, graphs, or LLM text.
@@ -34,7 +34,7 @@ briefs, graphs, or LLM text.
    - Is it all tenants or a subset?
 
 2. **Check CEE telemetry dashboards**
-   - See `Docs/CEE-telemetry-playbook.md` for field definitions.
+   - See `telemetry-playbook.md` for field definitions.
    - Key metrics:
      - `*.failed` counts by `error_code` and `http_status`.
      - `quality_overall` distributions on `*.succeeded`.
@@ -178,7 +178,7 @@ Prefer configuration changes over code changes when:
 - The system is healthy but rate-limits are overly restrictive.
 - Truncation is clearly too aggressive for typical input sizes.
 
-Example levers (see `Docs/CEE-v1.md` for details):
+Example levers (see `v1.md` for details):
 
 - `CEE_*_RATE_LIMIT_RPM` – adjust per-feature CEE RPM.
 - `COST_MAX_USD` – cost guard for draft responses.
@@ -204,12 +204,12 @@ When escalating, include only **metadata**:
 
 ## 5. Related docs
 
-- `Docs/CEE-v1.md` – specification, judgement policy, and helper semantics.
-- `Docs/CEE-telemetry-playbook.md` – how to turn telemetry into dashboards
+- `v1.md` – specification, judgement policy, and helper semantics.
+- `telemetry-playbook.md` – how to turn telemetry into dashboards
   and alerts.
-- `Docs/CEE-config-rollout.md` (if present) – how to configure CEE per
+- `config-rollout.md` (if present) – how to configure CEE per
   environment and roll changes out safely.
-- `Docs/CEE-troubleshooting.md` (if present) – FAQ-style answers to
+- `troubleshooting.md` (if present) – FAQ-style answers to
   "why is CEE doing X?".
 - `scripts/cee-health-snapshot.ts` – dev-only CLI to summarise CEE envelope
   health (status bands, truncation, completeness) from JSON without printing

@@ -161,6 +161,6 @@ These SSE budgets are **not** part of the CEE v1 public contract but are importa
 
 For more context, see:
 
-- `Docs/CEE-v1.md` – end-to-end CEE v1 contract and behaviours.
-- `Docs/CEE-maintainers-guide.md` – maintainer responsibilities and verification checklist.
-- `Docs/CEE-incident-runbook.md` – incident levers and mitigations.
+- `v1.md` – end-to-end CEE v1 contract and behaviours.
+- `maintainers-guide.md` – maintainer responsibilities and verification checklist.
+- `incident-runbook.md` – incident levers and mitigations.
