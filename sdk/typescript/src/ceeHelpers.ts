@@ -947,6 +947,14 @@ export function buildCeeIntegrationReviewBundle(args: {
   };
 }
 
+// Engine/PLoT-friendly aliases for core CEE decision review types. These are
+// thin type-level wrappers over the existing helpers and do not affect
+// runtime behaviour.
+export type CeeError = CeeErrorView;
+export type CeeTrace = CeeTraceSummary;
+export type CeeDecisionReviewPayloadV1 = CeeDecisionReviewPayload;
+export type CeeReviewResult = CeeIntegrationReviewBundle;
+
 export interface CeeBiasStructureDraftSummary {
   quality_overall?: number;
   quality_band?: CeeQualityBand;
