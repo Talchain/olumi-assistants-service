@@ -451,6 +451,14 @@ export async function finaliseCeeDraftResponse(
     guidance,
   };
 
+  const draftWarningCount = Array.isArray(draftWarnings) ? draftWarnings.length : 0;
+  const uncertainNodeCount =
+    confidenceFlags && Array.isArray((confidenceFlags as any).uncertain_nodes)
+      ? ((confidenceFlags as any).uncertain_nodes as string[]).length
+      : 0;
+  const simplificationAppliedFlag =
+    Boolean(confidenceFlags && (confidenceFlags as any).simplification_applied === true);
+
   const latencyMs = Date.now() - start;
   const hasValidationIssues = validationIssues.length > 0;
   const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
@@ -463,6 +471,9 @@ export async function finaliseCeeDraftResponse(
     graph_edges: Array.isArray(payload.graph?.edges) ? payload.graph.edges.length : 0,
     has_validation_issues: hasValidationIssues,
     any_truncated: anyTruncated,
+    draft_warning_count: draftWarningCount,
+    uncertain_node_count: uncertainNodeCount,
+    simplification_applied: simplificationAppliedFlag,
     cost_usd: typeof cost_usd === "number" && Number.isFinite(cost_usd) ? cost_usd : 0,
     engine_provider: provider,
     engine_model: model,

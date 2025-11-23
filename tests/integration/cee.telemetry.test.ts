@@ -44,6 +44,9 @@ function expectSucceededShape(data: Record<string, any>) {
       "graph_edges",
       "has_validation_issues",
       "any_truncated",
+      "draft_warning_count",
+      "uncertain_node_count",
+      "simplification_applied",
       "cost_usd",
       "engine_provider",
       "engine_model",
@@ -56,7 +59,10 @@ function expectSucceededShape(data: Record<string, any>) {
   expect(typeof data.graph_edges).toBe("number");
   expect(typeof data.has_validation_issues).toBe("boolean");
   expect(typeof data.any_truncated).toBe("boolean");
-   expect(typeof data.cost_usd).toBe("number");
+  expect(typeof data.draft_warning_count).toBe("number");
+  expect(typeof data.uncertain_node_count).toBe("number");
+  expect(typeof data.simplification_applied).toBe("boolean");
+  expect(typeof data.cost_usd).toBe("number");
   expect(typeof data.engine_provider).toBe("string");
   expect(typeof data.engine_model).toBe("string");
 }

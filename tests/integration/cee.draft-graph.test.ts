@@ -16,6 +16,21 @@ vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
 }));
 
+vi.mock("../../src/cee/structure/index.js", () => ({
+  detectStructuralWarnings: vi.fn().mockReturnValue({
+    warnings: [
+      {
+        id: "no_outcome_node",
+        severity: "medium",
+        node_ids: ["n1"],
+        edge_ids: [],
+        explanation: "ignored",
+      },
+    ],
+    uncertainNodeIds: ["n1"],
+  }),
+}));
+
 import { build } from "../../src/server.js";
 
 describe("POST /assist/v1/draft-graph (CEE v1)", () => {
@@ -29,6 +44,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     );
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-model-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "2");
+    vi.stubEnv("CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED", "true");
 
     app = await build();
     await app.ready();
@@ -114,6 +130,29 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     expect(body.archetype).toBeDefined();
     expect(typeof body.archetype.decision_type).toBe("string");
     expect(typeof body.archetype.match).toBe("string");
+  });
+
+  it("emits draft_warnings and confidence_flags when structural warnings are enabled", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/draft-graph",
+      headers: headersKey1,
+      payload: {
+        brief: "A sufficiently long decision brief for CEE structural warnings tests.",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(Array.isArray(body.draft_warnings)).toBe(true);
+    expect(body.draft_warnings.length).toBe(1);
+    expect(body.draft_warnings[0].id).toBe("no_outcome_node");
+
+    expect(body.confidence_flags).toBeDefined();
+    const flags = body.confidence_flags as any;
+    expect(Array.isArray(flags.uncertain_nodes)).toBe(true);
+    expect(flags.uncertain_nodes).toContain("n1");
   });
 
   it("propagates seed and archetype_hint through sanitizer and finaliser", async () => {
