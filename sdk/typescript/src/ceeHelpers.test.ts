@@ -25,6 +25,7 @@ import {
   type CeeIntegrationReviewBundle,
   classifyCeeQuality,
   type CeeQualityBand,
+  buildCeeBiasStructureSnapshot,
 } from "./ceeHelpers.js";
 import { OlumiAPIError, OlumiNetworkError } from "./errors.js";
 import type {
@@ -713,6 +714,145 @@ describe("ceeHelpers", () => {
 
     expect(journey.is_complete).toBe(true);
     expect(journey.missing_envelopes).toEqual([]);
+  });
+
+  it("builds a structural draft summary with counts and confidence flags", () => {
+    const draft: CEEDraftGraphResponseV1 = {
+      trace: { request_id: "r-draft", correlation_id: "r-draft", engine: {} },
+      quality: { overall: 7 } as any,
+      graph: {
+        nodes: [{ id: "n1", kind: "goal", label: "Should not appear" }],
+        edges: [],
+      } as any,
+      draft_warnings: [
+        {
+          id: "no_outcome_node",
+          severity: "medium",
+          node_ids: ["n1"],
+          edge_ids: [],
+          explanation: "This explanation should not appear in summaries",
+        } as any,
+      ],
+      confidence_flags: {
+        uncertain_nodes: ["n1"],
+        simplification_applied: true,
+      } as any,
+    } as any;
+
+    const snapshot = buildCeeBiasStructureSnapshot({ draft });
+
+    expect(snapshot.draft).toBeDefined();
+    expect(snapshot.draft?.quality_overall).toBe(7);
+    expect(typeof snapshot.draft?.quality_band).toBe("string");
+    expect(snapshot.draft?.structural_warning_count).toBe(1);
+
+    const byId = snapshot.draft?.structural_warnings_by_id ?? {};
+    expect(byId["no_outcome_node"]).toBeDefined();
+    expect(byId["no_outcome_node"].count).toBe(1);
+    expect(byId["no_outcome_node"].severity).toBe("medium");
+
+    expect(snapshot.draft?.confidence_flags?.simplification_applied).toBe(true);
+    expect(snapshot.draft?.confidence_flags?.uncertain_node_count).toBe(1);
+  });
+
+  it("builds a bias summary grouped by severity, category, and code", () => {
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-bias", correlation_id: "r-bias", engine: {} },
+      quality: { overall: 6 } as any,
+      bias_findings: [
+        {
+          id: "f1",
+          category: "selection",
+          severity: "high",
+          node_ids: [],
+          explanation: "Missing options",
+          code: "SELECTION_LOW_OPTION_COUNT",
+        } as any,
+        {
+          id: "f2",
+          category: "other",
+          severity: "medium",
+          node_ids: [],
+          explanation: "Confirmation bias",
+          code: "CONFIRMATION_BIAS",
+        } as any,
+        {
+          id: "f3",
+          category: "other",
+          severity: "medium",
+          node_ids: [],
+          explanation: "Sunk cost",
+          code: "SUNK_COST",
+        } as any,
+      ],
+      response_limits: {
+        bias_findings_max: 10,
+        bias_findings_truncated: false,
+      } as any,
+    } as any;
+
+    const snapshot = buildCeeBiasStructureSnapshot({ bias });
+
+    expect(snapshot.bias).toBeDefined();
+    expect(snapshot.bias?.quality_overall).toBe(6);
+    expect(typeof snapshot.bias?.quality_band).toBe("string");
+    expect(snapshot.bias?.total_findings).toBe(3);
+
+    expect(snapshot.bias?.by_severity.high).toBe(1);
+    expect(snapshot.bias?.by_severity.medium).toBe(2);
+
+    expect(snapshot.bias?.by_category.selection).toBe(1);
+    expect(snapshot.bias?.by_category.other).toBe(2);
+
+    expect(snapshot.bias?.by_code["SELECTION_LOW_OPTION_COUNT"]).toBe(1);
+    expect(snapshot.bias?.by_code["CONFIRMATION_BIAS"]).toBe(1);
+    expect(snapshot.bias?.by_code["SUNK_COST"]).toBe(1);
+  });
+
+  it("returns a metadata-only snapshot that does not leak free-text labels", () => {
+    const SECRET = "CEE_HELPERS_SECRET_DO_NOT_LEAK";
+
+    const draft: CEEDraftGraphResponseV1 = {
+      trace: { request_id: "r-secret", correlation_id: "r-secret", engine: {} },
+      quality: { overall: 5 } as any,
+      graph: {
+        nodes: [{ id: "n1", kind: "goal", label: `Goal ${SECRET}` }],
+        edges: [],
+      } as any,
+      draft_warnings: [
+        {
+          id: "no_outcome_node",
+          severity: "medium",
+          node_ids: ["n1"],
+          edge_ids: [],
+          explanation: `Explanation ${SECRET}`,
+        } as any,
+      ],
+    } as any;
+
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-bias-secret", correlation_id: "r-bias-secret", engine: {} },
+      quality: { overall: 6 } as any,
+      bias_findings: [
+        {
+          id: "f1",
+          category: "selection",
+          severity: "high",
+          node_ids: ["n1"],
+          explanation: `Bias explanation ${SECRET}`,
+          code: "SELECTION_LOW_OPTION_COUNT",
+        } as any,
+      ],
+      response_limits: {
+        bias_findings_max: 10,
+        bias_findings_truncated: false,
+      } as any,
+    } as any;
+
+    const snapshot = buildCeeBiasStructureSnapshot({ draft, bias });
+
+    const serialized = JSON.stringify(snapshot).toLowerCase();
+    expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
   });
 
   it("derives UI flags for a healthy, complete journey", () => {

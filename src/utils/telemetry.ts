@@ -788,6 +788,27 @@ export function emit(event: string, data: Event) {
               model: String((eventData.engine_model as string) || "unknown"),
             });
           }
+
+          if (typeof eventData.draft_warning_count === "number") {
+            datadogClient.histogram(
+              "cee.draft_graph.structural_warning_count",
+              eventData.draft_warning_count as number,
+            );
+          }
+
+          if (typeof eventData.uncertain_node_count === "number") {
+            datadogClient.histogram(
+              "cee.draft_graph.uncertain_node_count",
+              eventData.uncertain_node_count as number,
+            );
+          }
+
+          if ("simplification_applied" in (eventData as Record<string, unknown>)) {
+            datadogClient.increment("cee.draft_graph.simplification_applied", 1, {
+              value: String((eventData as any).simplification_applied === true),
+            });
+          }
+
           break;
         }
 
@@ -851,6 +872,14 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CeeBiasCheckSucceeded: {
           datadogClient.increment("cee.bias_check.succeeded", 1);
+
+          if (typeof eventData.bias_count === "number") {
+            datadogClient.histogram(
+              "cee.bias_check.bias_count",
+              eventData.bias_count as number,
+            );
+          }
+
           break;
         }
 
