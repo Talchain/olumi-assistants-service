@@ -132,13 +132,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Centralized configuration module replacing scattered `process.env` usage
     - Zod schema validation for all 72 environment variables
     - Custom boolean coercion handling string "true"/"false" correctly
+    - Custom URL validation handling empty strings and undefined values
     - Type-safe access with full IntelliSense support
     - Organized into logical groups: server, auth, llm, features, redis, sse, cee, isl, graph, validation, performance, pii, share
   - **Configuration Benefits:**
     - **Type Safety**: All config values have proper TypeScript types
     - **Validation**: Invalid configurations fail fast at startup with clear error messages
     - **Testability**: Easy to mock and override in tests
-    - **Defaults**: Sensible defaults for all optional values
+    - **Defaults**: Sensible defaults for all optional values (corrected to match actual usage)
     - **Documentation**: Single source of truth for configuration
   - **Environment Detection Helpers:**
     - `isProduction()` - Check if running in production
@@ -148,11 +149,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 16 unit tests for configuration module
     - Tests for type coercion, validation, defaults, array transformation
     - Tests for environment detection and error handling
+    - Tests for optional URL validation with empty strings
   - **Migration Documentation:**
     - Complete migration guide in `src/config/README.md`
+    - **Migration Strategy section** documenting singleton initialization challenges
+    - Guidance on safe vs. unsafe files to migrate based on import graph position
+    - Recommended phased migration approach starting with route handlers
     - Before/after examples for common patterns
     - Testing strategies and best practices
     - Step-by-step migration instructions
+  - **Phase 3 Improvements:**
+    - Fixed optional URL validation (BASE_URL, ISL_BASE_URL, ENGINE_BASE_URL)
+    - Corrected rate limit defaults (defaultRpm: 60→120, sseRpm: optional→20)
+    - Documented migration blocker: Singleton pattern incompatible with test architecture
+    - **Migration Status**: Infrastructure complete, awaiting architectural decision on initialization pattern
 
 ### Fixed
 
