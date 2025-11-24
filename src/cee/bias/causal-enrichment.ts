@@ -17,6 +17,7 @@ import type {
   CausalValidation,
   EvidenceStrength,
 } from '../../adapters/isl/types.js';
+import { causalValidationEnabled } from '../../adapters/isl/config.js';
 import { logger } from '../../utils/simple-logger.js';
 
 type CEEBiasFindingV1 = components['schemas']['CEEBiasFindingV1'];
@@ -111,17 +112,6 @@ function recordIslFailure(): void {
       resume_at: new Date(circuitBreaker.pausedUntil).toISOString(),
     });
   }
-}
-
-/**
- * Check if causal validation is enabled via feature flag
- */
-export function causalValidationEnabled(): boolean {
-  const flag = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === 'true' || flag === '1';
 }
 
 /**

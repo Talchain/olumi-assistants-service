@@ -128,10 +128,10 @@ export interface ISLClientConfig {
   /** Base URL for ISL service */
   baseUrl: string;
 
-  /** Request timeout in milliseconds (default: 2000ms) */
+  /** Request timeout in milliseconds (default: 5000ms - production canary setting) */
   timeout?: number;
 
-  /** Maximum retry attempts (default: 0) */
+  /** Maximum retry attempts (default: 1 - production canary setting) */
   maxRetries?: number;
 
   /** API key for ISL service (if required) */

@@ -34,7 +34,7 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
-import { createISLClient } from "./adapters/isl/client.js";
+import { getISLConfig } from "./adapters/isl/config.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -299,12 +299,10 @@ app.get("/healthz", async () => {
   const adapter = getAdapter();
   const ceeConfig = buildCeeConfig();
 
-  // ISL configuration
-  const islEnabled = env.CEE_CAUSAL_VALIDATION_ENABLED === "true";
-  const islClient = createISLClient();
-  const islBaseUrl = env.ISL_BASE_URL;
-  const maskedBaseUrl = islBaseUrl
-    ? islBaseUrl.replace(/:\/\/([^:\/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
+  // ISL configuration - use centralized config for consistency
+  const islConfig = getISLConfig();
+  const maskedBaseUrl = islConfig.baseUrl
+    ? islConfig.baseUrl.replace(/:\/\/([^:\/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
     : undefined;
 
   return {
@@ -325,11 +323,11 @@ app.get("/healthz", async () => {
       },
     },
     isl: {
-      enabled: islEnabled,
-      configured: islClient !== null,
+      enabled: islConfig.enabled,
+      configured: islConfig.configured,
       base_url: maskedBaseUrl,
-      timeout_ms: parseInt(env.ISL_TIMEOUT_MS ?? "5000", 10),
-      max_retries: parseInt(env.ISL_MAX_RETRIES ?? "1", 10),
+      timeout_ms: islConfig.timeout,
+      max_retries: islConfig.maxRetries,
     },
   };
 });
