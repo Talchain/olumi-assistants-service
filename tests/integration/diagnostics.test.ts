@@ -48,6 +48,18 @@ describe("GET /diagnostics", () => {
     expect(body.cee).toHaveProperty("recent_errors");
     expect(Array.isArray(body.cee.recent_errors)).toBe(true);
 
+    // ISL circuit breaker diagnostics
+    expect(body).toHaveProperty("isl");
+    expect(body.isl).toHaveProperty("circuit_breaker");
+    const cb = body.isl.circuit_breaker;
+    expect(cb).toHaveProperty("state");
+    expect(["open", "closed"]).toContain(cb.state);
+    expect(typeof cb.consecutive_failures).toBe("number");
+    expect(typeof cb.threshold).toBe("number");
+    expect(typeof cb.pause_ms).toBe("number");
+    expect(typeof cb.reset_ms).toBe("number");
+    expect(cb.paused_until === null || typeof cb.paused_until === "string").toBe(true);
+
     // Ensure diagnostics payload does not contain obvious secrets or headers
     expectNoBannedSubstrings(body as Record<string, any>);
   });

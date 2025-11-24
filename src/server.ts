@@ -35,6 +35,7 @@ import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
 import { getISLConfig } from "./adapters/isl/config.js";
+import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -369,6 +370,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         model: adapter.model,
         config: ceeConfig,
         recent_errors: recentErrors,
+      },
+      isl: {
+        circuit_breaker: getIslCircuitBreakerStatusForDiagnostics(),
       },
     };
   });
