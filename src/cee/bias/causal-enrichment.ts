@@ -308,3 +308,21 @@ export function __resetIslCircuitBreakerForTests(): void {
   circuitBreaker.pausedUntil = null;
   circuitBreaker.lastFailureTime = 0;
 }
+
+export function getIslCircuitBreakerStatusForDiagnostics() {
+  const now = Date.now();
+  const isOpen =
+    circuitBreaker.pausedUntil !== null && now < circuitBreaker.pausedUntil;
+
+  return {
+    state: isOpen ? 'open' : 'closed',
+    consecutive_failures: circuitBreaker.consecutiveFailures,
+    threshold: CIRCUIT_BREAKER_THRESHOLD,
+    pause_ms: CIRCUIT_BREAKER_PAUSE_MS,
+    reset_ms: CIRCUIT_BREAKER_RESET_MS,
+    paused_until:
+      circuitBreaker.pausedUntil !== null
+        ? new Date(circuitBreaker.pausedUntil).toISOString()
+        : null,
+  };
+}
