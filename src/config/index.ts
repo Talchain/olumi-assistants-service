@@ -133,8 +133,8 @@ const ConfigSchema = z.object({
 
   // Rate Limiting
   rateLimits: z.object({
-    defaultRpm: z.coerce.number().int().positive().default(60),
-    sseRpm: z.coerce.number().int().positive().optional(),
+    defaultRpm: z.coerce.number().int().positive().default(120),
+    sseRpm: z.coerce.number().int().positive().default(20),
   }),
 
   // Redis Configuration
