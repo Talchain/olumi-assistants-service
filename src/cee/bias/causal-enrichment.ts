@@ -302,3 +302,9 @@ export async function enrichBiasFindings(
     return biasFindings as CEEBiasFindingWithCausalValidation[];
   }
 }
+
+export function __resetIslCircuitBreakerForTests(): void {
+  circuitBreaker.consecutiveFailures = 0;
+  circuitBreaker.pausedUntil = null;
+  circuitBreaker.lastFailureTime = 0;
+}
