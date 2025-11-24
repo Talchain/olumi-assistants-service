@@ -11,7 +11,7 @@ describe('GET /healthz', () => {
   beforeAll(async () => {
     app = Fastify();
 
-    // Replicate the healthz endpoint from server.ts
+    // Replicate the healthz endpoint from server.ts (including cee.timeouts)
     app.get("/healthz", async () => {
       const adapter = getAdapter();
       const ceeRateDefault = 5;
@@ -65,6 +65,11 @@ describe('GET /healthz', () => {
         cee: {
           diagnostics_enabled: process.env.CEE_DIAGNOSTICS_ENABLED === "true",
           config: ceeConfig,
+          timeouts: {
+            route_ms: 115000,
+            http_client_ms: 110000,
+            retry_delay_ms: 800,
+          },
         },
       };
     });
@@ -192,5 +197,26 @@ describe('GET /healthz', () => {
     expect(config).toHaveProperty('draft_graph');
     expect(config).toHaveProperty('options');
     expect(config).toHaveProperty('bias_check');
+  });
+
+  it('includes CEE timeout configuration', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/healthz'
+    });
+
+    const body = JSON.parse(response.body);
+
+    expect(body).toHaveProperty('cee');
+    expect(body.cee).toHaveProperty('timeouts');
+
+    const timeouts = body.cee.timeouts;
+    expect(typeof timeouts).toBe('object');
+    expect(timeouts).toHaveProperty('route_ms');
+    expect(timeouts).toHaveProperty('http_client_ms');
+    expect(timeouts).toHaveProperty('retry_delay_ms');
+    expect(typeof timeouts.route_ms).toBe('number');
+    expect(typeof timeouts.http_client_ms).toBe('number');
+    expect(typeof timeouts.retry_delay_ms).toBe('number');
   });
 });

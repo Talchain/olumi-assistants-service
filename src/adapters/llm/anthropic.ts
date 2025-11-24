@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
+import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -103,15 +104,14 @@ const apiKey = process.env.ANTHROPIC_API_KEY;
 
 // V04: Undici dispatcher with production-grade timeouts
 // - connectTimeout: 3s (fail fast on connection issues)
-// - headersTimeout: 65s (align with 65s deadline)
-// - bodyTimeout: 60s (budget for LLM response)
+// - headers/body timeout: HTTP_CLIENT_TIMEOUT_MS (central config)
 // Note: Anthropic SDK uses fetch API, so we set global undici dispatcher
 const undiciAgent = new Agent({
   connect: {
     timeout: 3000, // 3s
   },
-  headersTimeout: 65000, // 65s
-  bodyTimeout: 60000, // 60s
+  headersTimeout: HTTP_CLIENT_TIMEOUT_MS,
+  bodyTimeout: HTTP_CLIENT_TIMEOUT_MS,
 });
 
 // Set global dispatcher for fetch API (affects all fetch calls in this module)
@@ -130,7 +130,7 @@ function getClient(): Anthropic {
   return client;
 }
 
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 function isAnthropicPromptCacheEnabled(): boolean {
   return process.env.ANTHROPIC_PROMPT_CACHE_ENABLED !== "false";
 }

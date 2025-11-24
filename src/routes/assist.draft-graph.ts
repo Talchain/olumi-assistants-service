@@ -27,6 +27,8 @@ import {
   SSE_DEGRADED_REDIS_REASON,
   SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
 } from "../utils/degraded-mode.js";
+import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
+import type { DraftGraphResult } from "../adapters/llm/types.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -313,25 +315,48 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const llmStartTime = Date.now();
   emit(TelemetryEvents.Stage, { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name, correlation_id: correlationId });
 
-  // V04: Telemetry for upstream calls
-  let draftResult;
+  // V04: Telemetry for upstream calls with single retry on timeout
+  let draftResult: DraftGraphResult | undefined;
   let upstreamStatusCode = 200; // Default to success
-  try {
-    draftResult = await draftAdapter.draftGraph(
-      { brief: input.brief, docs, seed: 17 },
-      { requestId: `draft_${Date.now()}`, timeoutMs: 15000 }
-    );
-  } catch (error) {
-    const llmDuration = Date.now() - llmStartTime;
-    // Determine status code from error (timeout vs other failures)
-    upstreamStatusCode = error instanceof Error && error.name === "UpstreamTimeoutError" ? 504 : 500;
-    emit(TelemetryEvents.DraftUpstreamError, {
-      status_code: upstreamStatusCode,
-      latency_ms: llmDuration,
-      provider: draftAdapter.name,
-      correlation_id: correlationId,
-    });
-    throw error; // Re-throw to let outer handler deal with it
+  let attempt = 0;
+
+  while (attempt < 2) {
+    attempt += 1;
+    const requestId = attempt === 1 ? `draft_${Date.now()}` : `draft_retry_${Date.now()}`;
+
+    try {
+      draftResult = await draftAdapter.draftGraph(
+        { brief: input.brief, docs, seed: 17 },
+        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS }
+      );
+      break;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error("unexpected error");
+      const isTimeout = err.name === "UpstreamTimeoutError";
+
+      if (!isTimeout || attempt >= 2) {
+        const llmDuration = Date.now() - llmStartTime;
+        upstreamStatusCode = isTimeout ? 504 : 500;
+        emit(TelemetryEvents.DraftUpstreamError, {
+          status_code: upstreamStatusCode,
+          latency_ms: llmDuration,
+          provider: draftAdapter.name,
+          correlation_id: correlationId,
+        });
+        throw err;
+      }
+
+      const delayMs = getJitteredRetryDelayMs();
+      log.warn(
+        { provider: draftAdapter.name, correlation_id: correlationId, delay_ms: delayMs },
+        "Upstream draft_graph timeout, retrying once",
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  if (!draftResult) {
+    throw new Error("draft_graph_missing_result");
   }
 
   const { graph, rationales, usage: draftUsage } = draftResult;
