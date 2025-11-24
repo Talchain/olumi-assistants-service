@@ -12,6 +12,9 @@ The ISL integration enriches bias detection findings with causal validation anal
    - HTTP client for communicating with ISL service
    - Handles timeouts, retries, and error handling
    - Supports optional API key authentication
+   - **Retry conditions**: Retries only on specific network errors (`ECONNREFUSED`, `ETIMEDOUT`)
+     - Conservative approach: other errors (DNS failures, TLS handshake issues, 5xx responses) are not retried
+     - Design rationale: Avoids retry storms on persistent failures; ISL errors should be investigated rather than masked
 
 2. **Causal Enrichment** ([src/cee/bias/causal-enrichment.ts](../../src/cee/bias/causal-enrichment.ts))
    - Orchestrates ISL validation requests
@@ -171,6 +174,12 @@ event: "isl.circuit_breaker.reset"
 - Reduces unnecessary network calls during outages
 - Allows ISL service to recover without constant retries
 - Bias-check endpoint remains fast and stable during ISL issues
+
+**Circuit Breaker Scope:**
+- **Global per process**: Single circuit breaker instance shared across all requests, tenants, and API keys
+- **Implication**: A single noisy consumer (e.g., repeatedly sending invalid graphs) can trigger the circuit and disable ISL enrichment for all requests on that process for 90 seconds
+- **Design rationale**: Protects the service and ISL backend from overload; prioritizes stability over per-tenant isolation
+- **Future consideration**: If noisy-neighbor issues emerge, consider per-API-key or per-tenant circuit breaker scoping
 
 ### Telemetry Events
 

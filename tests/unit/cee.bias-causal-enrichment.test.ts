@@ -5,7 +5,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { enrichBiasFindings, causalValidationEnabled } from '../../src/cee/bias/causal-enrichment.js';
+import { enrichBiasFindings } from '../../src/cee/bias/causal-enrichment.js';
+import { causalValidationEnabled } from '../../src/adapters/isl/config.js';
 import type { components } from '../../src/generated/openapi.d.ts';
 import type { GraphV1 } from '../../src/contracts/plot/engine.js';
 
