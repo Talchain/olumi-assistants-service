@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Olumi Assistants Service API
-  version: 1.2.1
+  version: 1.11.1
   description: |
     AI-powered decision graph drafting service that transforms natural language briefs into structured,
     executable decision models with provenance tracking and validation.
@@ -2563,13 +2563,17 @@ components:
               limit_bytes: 1048576
 
     RateLimited:
-      description: Rate limit exceeded (10 requests per minute per IP)
+      description: |
+        Rate limit exceeded. Default limits:
+        - Global: 120 requests/minute per IP (configurable via GLOBAL_RATE_LIMIT_RPM)
+        - Per-key: 120 requests/minute (configurable via RATE_LIMIT_RPM)
+        - SSE endpoints: 20 requests/minute (configurable via SSE_RATE_LIMIT_RPM)
       headers:
         X-RateLimit-Limit:
           description: Request limit per window
           schema:
             type: integer
-            example: 10
+            example: 120
         X-RateLimit-Remaining:
           description: Requests remaining in current window
           schema:
@@ -2588,7 +2592,7 @@ components:
             code: "RATE_LIMITED"
             message: "Rate limit exceeded"
             details:
-              max: 10
+              max: 120
               window_ms: 60000
 
     InternalError:
@@ -2746,10 +2750,19 @@ security:
   - apiKey: []
 
 x-rate-limits:
-  draft-graph:
-    limit: 10
+  global:
+    limit: 120
     window: 60s
     per: ip
+    note: "Configurable via GLOBAL_RATE_LIMIT_RPM"
+  per-key:
+    limit: 120
+    window: 60s
+    note: "Standard endpoints, configurable via RATE_LIMIT_RPM"
+  sse:
+    limit: 20
+    window: 60s
+    note: "SSE endpoints, configurable via SSE_RATE_LIMIT_RPM"
 
 x-body-limits:
   max-size: 1MB

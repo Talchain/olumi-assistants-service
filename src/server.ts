@@ -5,6 +5,7 @@ import { env } from "node:process";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import compress from "@fastify/compress";
 import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
 import clarifyRoute from "./routes/assist.clarify-brief.js";
@@ -33,6 +34,7 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
+import { createISLClient } from "./adapters/isl/client.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -89,6 +91,14 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+  });
+
+  // Response compression: Enable for JSON (SSE streams auto-skipped)
+  await app.register(compress, {
+    threshold: 1024, // Only compress responses > 1KB
+    encodings: ['gzip', 'deflate'],
+    // Plugin automatically skips compression for text/event-stream
+    customTypes: /^(application\/json|text\/plain)$/,
   });
 
 // Rate limiting: Global + SSE-specific limits
@@ -288,6 +298,15 @@ function buildCeeConfig() {
 app.get("/healthz", async () => {
   const adapter = getAdapter();
   const ceeConfig = buildCeeConfig();
+
+  // ISL configuration
+  const islEnabled = env.CEE_CAUSAL_VALIDATION_ENABLED === "true";
+  const islClient = createISLClient();
+  const islBaseUrl = env.ISL_BASE_URL;
+  const maskedBaseUrl = islBaseUrl
+    ? islBaseUrl.replace(/:\/\/([^:\/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
+    : undefined;
+
   return {
     ok: true,
     service: "assistants",
@@ -304,6 +323,13 @@ app.get("/healthz", async () => {
         http_client_ms: HTTP_CLIENT_TIMEOUT_MS,
         retry_delay_ms: UPSTREAM_RETRY_DELAY_MS,
       },
+    },
+    isl: {
+      enabled: islEnabled,
+      configured: islClient !== null,
+      base_url: maskedBaseUrl,
+      timeout_ms: parseInt(env.ISL_TIMEOUT_MS ?? "5000", 10),
+      max_retries: parseInt(env.ISL_MAX_RETRIES ?? "1", 10),
     },
   };
 });

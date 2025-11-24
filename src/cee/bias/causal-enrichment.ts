@@ -33,6 +33,87 @@ export interface CEEBiasFindingWithCausalValidation extends CEEBiasFindingV1 {
 }
 
 /**
+ * Circuit breaker state for ISL integration
+ */
+interface CircuitBreakerState {
+  consecutiveFailures: number;
+  pausedUntil: number | null;
+  lastFailureTime: number;
+}
+
+const circuitBreaker: CircuitBreakerState = {
+  consecutiveFailures: 0,
+  pausedUntil: null,
+  lastFailureTime: 0,
+};
+
+const CIRCUIT_BREAKER_THRESHOLD = 3; // Open circuit after 3 consecutive failures
+const CIRCUIT_BREAKER_PAUSE_MS = 90000; // Pause for 90 seconds (60-120s range)
+const CIRCUIT_BREAKER_RESET_MS = 60000; // Reset counter if no failures for 60s
+
+/**
+ * Check if circuit breaker is open (paused)
+ */
+function isCircuitBreakerOpen(): boolean {
+  if (circuitBreaker.pausedUntil === null) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (now < circuitBreaker.pausedUntil) {
+    return true;
+  }
+
+  // Circuit breaker pause expired, reset state
+  logger.info({
+    event: 'isl.circuit_breaker.closed',
+    pause_duration_ms: CIRCUIT_BREAKER_PAUSE_MS,
+  });
+  circuitBreaker.consecutiveFailures = 0;
+  circuitBreaker.pausedUntil = null;
+  return false;
+}
+
+/**
+ * Record ISL success - reset circuit breaker
+ */
+function recordIslSuccess(): void {
+  if (circuitBreaker.consecutiveFailures > 0) {
+    logger.info({
+      event: 'isl.circuit_breaker.reset',
+      previous_failures: circuitBreaker.consecutiveFailures,
+    });
+  }
+  circuitBreaker.consecutiveFailures = 0;
+  circuitBreaker.pausedUntil = null;
+}
+
+/**
+ * Record ISL failure - increment circuit breaker counter
+ */
+function recordIslFailure(): void {
+  const now = Date.now();
+
+  // Reset counter if last failure was too long ago
+  if (now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
+    circuitBreaker.consecutiveFailures = 0;
+  }
+
+  circuitBreaker.consecutiveFailures++;
+  circuitBreaker.lastFailureTime = now;
+
+  if (circuitBreaker.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreaker.pausedUntil = now + CIRCUIT_BREAKER_PAUSE_MS;
+    logger.warn({
+      event: 'isl.circuit_breaker.opened',
+      consecutive_failures: circuitBreaker.consecutiveFailures,
+      pause_ms: CIRCUIT_BREAKER_PAUSE_MS,
+      resume_at: new Date(circuitBreaker.pausedUntil).toISOString(),
+    });
+  }
+}
+
+/**
  * Check if causal validation is enabled via feature flag
  */
 export function causalValidationEnabled(): boolean {
@@ -76,9 +157,11 @@ export async function enrichBiasFindings(
 ): Promise<CEEBiasFindingWithCausalValidation[]> {
   // Early return if feature disabled
   if (!causalValidationEnabled()) {
+    const flagValue = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     logger.debug({
       event: 'cee.bias.causal_validation.disabled',
-      reason: 'CEE_CAUSAL_VALIDATION_ENABLED not set',
+      reason: flagValue === undefined ? 'not_configured' : 'disabled',
+      flag_value: flagValue,
     });
     return biasFindings as CEEBiasFindingWithCausalValidation[];
   }
@@ -94,6 +177,15 @@ export async function enrichBiasFindings(
     logger.warn({
       event: 'cee.bias.causal_validation.no_client',
       reason: 'ISL_BASE_URL not configured',
+    });
+    return biasFindings as CEEBiasFindingWithCausalValidation[];
+  }
+
+  // Check circuit breaker
+  if (isCircuitBreakerOpen()) {
+    logger.warn({
+      event: 'cee.bias.causal_validation.circuit_open',
+      reason: 'Circuit breaker paused due to consecutive failures',
     });
     return biasFindings as CEEBiasFindingWithCausalValidation[];
   }
@@ -129,6 +221,9 @@ export async function enrichBiasFindings(
     // Call ISL for validation
     const response = await islClient.validateBias(request);
 
+    // Record success - reset circuit breaker
+    recordIslSuccess();
+
     const latency = Date.now() - startTime;
 
     // Merge validations into findings
@@ -156,20 +251,26 @@ export async function enrichBiasFindings(
     const identifiableCount = response.validations.filter(
       (v) => v.causal_validation.identifiable,
     ).length;
-    const avgStrength =
-      response.validations.reduce(
-        (sum, v) => sum + v.causal_validation.strength,
-        0,
-      ) / response.validations.length;
 
-    logger.info({
+    const logData: Record<string, any> = {
       event: 'cee.bias.causal_validation.success',
       validated_count: response.validations.length,
       identifiable_count: identifiableCount,
-      avg_strength: avgStrength.toFixed(3),
       isl_latency_ms: response.latency_ms,
       total_latency_ms: latency,
-    });
+    };
+
+    // Only compute avg_strength if there are validations
+    if (response.validations.length > 0) {
+      const avgStrength =
+        response.validations.reduce(
+          (sum, v) => sum + v.causal_validation.strength,
+          0,
+        ) / response.validations.length;
+      logData.avg_strength = avgStrength.toFixed(3);
+    }
+
+    logger.info(logData);
 
     return enrichedFindings;
   } catch (error) {
@@ -177,6 +278,7 @@ export async function enrichBiasFindings(
 
     // Handle timeouts gracefully
     if (error instanceof ISLTimeoutError) {
+      recordIslFailure();
       logger.warn({
         event: 'cee.bias.causal_validation.timeout',
         latency_ms: latency,
@@ -187,6 +289,7 @@ export async function enrichBiasFindings(
 
     // Handle validation errors gracefully
     if (error instanceof ISLValidationError) {
+      recordIslFailure();
       logger.warn({
         event: 'cee.bias.causal_validation.error',
         error_code: error.errorCode,
@@ -198,6 +301,7 @@ export async function enrichBiasFindings(
     }
 
     // Handle unexpected errors
+    recordIslFailure();
     logger.error({
       event: 'cee.bias.causal_validation.failed',
       latency_ms: latency,
