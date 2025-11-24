@@ -76,9 +76,11 @@ export async function enrichBiasFindings(
 ): Promise<CEEBiasFindingWithCausalValidation[]> {
   // Early return if feature disabled
   if (!causalValidationEnabled()) {
+    const flagValue = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     logger.debug({
       event: 'cee.bias.causal_validation.disabled',
-      reason: 'CEE_CAUSAL_VALIDATION_ENABLED not set',
+      reason: flagValue === undefined ? 'not_configured' : 'disabled',
+      flag_value: flagValue,
     });
     return biasFindings as CEEBiasFindingWithCausalValidation[];
   }
@@ -156,20 +158,26 @@ export async function enrichBiasFindings(
     const identifiableCount = response.validations.filter(
       (v) => v.causal_validation.identifiable,
     ).length;
-    const avgStrength =
-      response.validations.reduce(
-        (sum, v) => sum + v.causal_validation.strength,
-        0,
-      ) / response.validations.length;
 
-    logger.info({
+    const logData: Record<string, any> = {
       event: 'cee.bias.causal_validation.success',
       validated_count: response.validations.length,
       identifiable_count: identifiableCount,
-      avg_strength: avgStrength.toFixed(3),
       isl_latency_ms: response.latency_ms,
       total_latency_ms: latency,
-    });
+    };
+
+    // Only compute avg_strength if there are validations
+    if (response.validations.length > 0) {
+      const avgStrength =
+        response.validations.reduce(
+          (sum, v) => sum + v.causal_validation.strength,
+          0,
+        ) / response.validations.length;
+      logData.avg_strength = avgStrength.toFixed(3);
+    }
+
+    logger.info(logData);
 
     return enrichedFindings;
   } catch (error) {
