@@ -45,7 +45,7 @@ POST /assist/v1/bias-check
 | `CEE_CAUSAL_VALIDATION_ENABLED` | No | `false` | Enable/disable ISL integration |
 | `ISL_BASE_URL` | Yes* | - | ISL service base URL (e.g., `http://localhost:8888`) |
 | `ISL_TIMEOUT_MS` | No | `5000` | Request timeout in milliseconds |
-| `ISL_MAX_RETRIES` | No | `2` | Maximum retry attempts on failure |
+| `ISL_MAX_RETRIES` | No | `1` | Maximum retry attempts on failure (canary default) |
 | `ISL_API_KEY` | No | - | Optional API key for ISL authentication |
 
 \* Required only when `CEE_CAUSAL_VALIDATION_ENABLED=true`
@@ -130,6 +130,47 @@ The integration is designed to **never break** the bias-check endpoint:
 - **Feature disabled**: Skips ISL call entirely
 
 All failures are logged with structured telemetry but do not affect the 200 response.
+
+### Circuit Breaker
+
+To prevent cascading failures when ISL is experiencing issues, the integration includes an automatic circuit breaker:
+
+**Behavior:**
+- Tracks consecutive ISL failures (timeouts, errors, service unavailable)
+- After **3 consecutive failures**, circuit opens and pauses ISL calls for **90 seconds**
+- During pause, bias-check returns unenriched findings immediately (no ISL calls)
+- After pause expires, circuit closes and ISL calls resume
+- Single successful ISL call resets the failure counter
+- Failure counter resets if no failures occur for 60 seconds
+
+**Telemetry:**
+```typescript
+// Circuit opens (ISL calls paused)
+event: "isl.circuit_breaker.opened"
+{
+  consecutive_failures: number,
+  pause_ms: 90000,
+  resume_at: string  // ISO timestamp
+}
+
+// Circuit closes (ISL calls resume)
+event: "isl.circuit_breaker.closed"
+{
+  pause_duration_ms: 90000
+}
+
+// Failure counter reset after success
+event: "isl.circuit_breaker.reset"
+{
+  previous_failures: number
+}
+```
+
+**Operational Impact:**
+- Prevents request pile-up when ISL is down
+- Reduces unnecessary network calls during outages
+- Allows ISL service to recover without constant retries
+- Bias-check endpoint remains fast and stable during ISL issues
 
 ### Telemetry Events
 
@@ -251,23 +292,91 @@ grep "cee.bias.causal_validation" logs/*.json | jq -r '.event'
 
 ## Rollout Strategy
 
-### Phase 1: Internal Testing
-```bash
-CEE_CAUSAL_VALIDATION_ENABLED=true
-ISL_BASE_URL=http://internal-isl:8888
-```
-
-### Phase 2: Canary (10% traffic)
-Use feature flag or API key routing to enable for subset of users.
-
-### Phase 3: Full Rollout
-Monitor metrics, gradually increase to 100%.
-
-### Rollback
+### Initial Deployment (Feature Disabled)
+Deploy with ISL integration **disabled** by default:
 ```bash
 CEE_CAUSAL_VALIDATION_ENABLED=false
 ```
-Service immediately stops calling ISL (no restart needed).
+This ensures existing bias-check functionality remains unchanged.
+
+### Canary Rollout
+
+**Step 1: Enable ISL for Single Test User**
+```bash
+# Set environment variables
+export CEE_CAUSAL_VALIDATION_ENABLED=true
+export ISL_BASE_URL=https://isl-service.production.example.com
+export ISL_TIMEOUT_MS=5000
+export ISL_MAX_RETRIES=1
+export ISL_API_KEY=your-secret-key
+
+# Restart service
+pm2 restart assistants-service
+```
+
+**Step 2: Monitor Key Metrics (5-10 minutes)**
+```bash
+# Check ISL integration health
+curl https://your-service.com/healthz | jq '.isl'
+
+# Monitor logs for ISL events
+tail -f logs/*.json | grep "isl\|cee.bias.causal_validation"
+
+# Watch for circuit breaker events (should be rare)
+grep "circuit_breaker" logs/*.json
+```
+
+**Step 3: Validate Enrichment**
+- Send test bias-check request
+- Verify response includes `causal_validation` and `evidence_strength` fields
+- Confirm metrics: enrichment rate > 95%, timeout rate < 1%
+
+**Step 4: Gradual Expansion**
+- Expand to 10% of production traffic
+- Monitor for 24 hours
+- If stable, expand to 50%, then 100%
+
+### Emergency Rollback
+
+**One-Line Rollback (takes effect immediately, no restart required):**
+```bash
+export CEE_CAUSAL_VALIDATION_ENABLED=false
+```
+
+**Verification:**
+```bash
+# Confirm ISL is disabled
+curl https://your-service.com/healthz | jq '.isl.enabled'
+# Should return: false
+
+# Verify no ISL calls in logs
+tail -f logs/*.json | grep "isl.bias_validate"
+# Should show no new events
+```
+
+**When to Rollback:**
+- ISL error rate > 5% for 5+ minutes
+- ISL timeout rate > 10%
+- Circuit breaker opens repeatedly (> 3 times in 10 minutes)
+- Bias-check p99 latency exceeds SLA
+- ISL service unavailable for > 5 minutes
+
+### Monitoring Dashboard
+
+**Key Telemetry Events:**
+```bash
+# Success rate
+grep "cee.bias.causal_validation.success" logs/*.json | wc -l
+
+# Error patterns
+grep "cee.bias.causal_validation" logs/*.json | jq -r '.event' | sort | uniq -c
+
+# Circuit breaker status
+grep "isl.circuit_breaker" logs/*.json | jq '{event, time: .timestamp}'
+
+# Average enrichment latency
+grep "cee.bias.causal_validation.success" logs/*.json | jq '.total_latency_ms' | awk '{sum+=$1; count++} END {print sum/count}'
+```
 
 ## Future Enhancements
 

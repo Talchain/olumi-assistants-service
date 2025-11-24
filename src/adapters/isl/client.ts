@@ -231,7 +231,7 @@ export function createISLClient(): ISLClient | null {
   return new ISLClient({
     baseUrl,
     timeout: parseTimeout(process.env.ISL_TIMEOUT_MS, 5000),
-    maxRetries: parseMaxRetries(process.env.ISL_MAX_RETRIES, 2),
+    maxRetries: parseMaxRetries(process.env.ISL_MAX_RETRIES, 1),
     apiKey: process.env.ISL_API_KEY,
   });
 }

@@ -50,6 +50,8 @@ describe('enrichBiasFindings', () => {
     delete process.env.ISL_BASE_URL;
 
     mockGraph = {
+      version: '1',
+      default_seed: 17,
       nodes: [
         { id: 'goal1', kind: 'goal', label: 'Main Goal' } as any,
         { id: 'evidence1', kind: 'evidence', label: 'Evidence 1' } as any,
@@ -57,14 +59,21 @@ describe('enrichBiasFindings', () => {
       edges: [
         { id: 'e1', source: 'evidence1', target: 'goal1' } as any,
       ],
+      meta: {
+        roots: [],
+        leaves: [],
+        suggested_positions: {},
+        source: 'fixtures' as const,
+      },
     };
 
     mockFindings = [
       {
+        id: 'CONFIRMATION_BIAS',
         code: 'CONFIRMATION_BIAS',
-        title: 'Confirmation Bias Detected',
-        description: 'Evidence may be selectively chosen',
+        category: 'selection',
         severity: 'high',
+        explanation: 'Evidence may be selectively chosen',
         targets: {
           node_ids: ['evidence1'],
         },
@@ -163,9 +172,10 @@ describe('enrichBiasFindings', () => {
 
     const findingsWithoutCode = [
       {
-        title: 'Unknown Bias',
-        description: 'No code',
+        id: 'UNKNOWN_BIAS',
+        category: 'other',
         severity: 'low',
+        explanation: 'No code',
       } as CEEBiasFindingV1,
     ];
 
@@ -236,6 +246,8 @@ describe('enrichBiasFindings', () => {
     process.env.ISL_BASE_URL = 'http://localhost:8080';
 
     const graphWithMultipleEvidenceTypes = {
+      version: '1',
+      default_seed: 17,
       nodes: [
         { id: 'goal1', kind: 'goal', label: 'Goal' } as any,
         { id: 'evidence1', kind: 'evidence', label: 'Evidence' } as any,
@@ -245,6 +257,12 @@ describe('enrichBiasFindings', () => {
         { id: 'option1', kind: 'option', label: 'Option' } as any,
       ],
       edges: [],
+      meta: {
+        roots: [],
+        leaves: [],
+        suggested_positions: {},
+        source: 'fixtures' as const,
+      },
     };
 
     global.fetch = vi.fn().mockResolvedValue({
