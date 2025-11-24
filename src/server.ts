@@ -24,6 +24,7 @@ import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
+import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter } from "./adapters/llm/router.js";
 import { SERVICE_VERSION } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -148,6 +149,9 @@ await app.register(rateLimit, {
 
   // Observability: Structured logging with sampling and redaction
   await app.register(observabilityPlugin);
+
+  // Performance Monitoring: Track request latency and emit metrics
+  await app.register(performanceMonitoring);
 
   // Auth: API key authentication with per-key quotas (v1.3.0)
   await app.register(authPlugin);
@@ -345,16 +349,24 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     : null;
 
   app.get("/diagnostics", async (request, reply) => {
-    if (diagnosticsKeyIds && diagnosticsKeyIds.size > 0) {
-      const keyId = getRequestKeyId(request);
-      if (!keyId || !diagnosticsKeyIds.has(keyId)) {
-        reply.code(403);
-        return reply.send({
-          schema: "error.v1",
-          code: "FORBIDDEN",
-          message: "Diagnostics access denied.",
-        });
-      }
+    // Security: Diagnostics access requires explicit key ID allowlist
+    if (!diagnosticsKeyIds || diagnosticsKeyIds.size === 0) {
+      reply.code(403);
+      return reply.send({
+        schema: "error.v1",
+        code: "FORBIDDEN",
+        message: "Diagnostics endpoint requires CEE_DIAGNOSTICS_KEY_IDS configuration.",
+      });
+    }
+
+    const keyId = getRequestKeyId(request);
+    if (!keyId || !diagnosticsKeyIds.has(keyId)) {
+      reply.code(403);
+      return reply.send({
+        schema: "error.v1",
+        code: "FORBIDDEN",
+        message: "Diagnostics access denied.",
+      });
     }
 
     const adapter = getAdapter();

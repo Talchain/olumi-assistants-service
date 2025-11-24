@@ -80,3 +80,53 @@ describe("GET /diagnostics", () => {
     expect(body.code).toBe("FORBIDDEN");
   });
 });
+
+describe("GET /diagnostics - Security: Mandatory Authentication", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    vi.stubEnv("ASSIST_API_KEYS", "test-key");
+    vi.stubEnv("CEE_DIAGNOSTICS_ENABLED", "true");
+    // Intentionally NOT setting CEE_DIAGNOSTICS_KEY_IDS to test mandatory auth
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
+
+    app = await build();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns 403 when CEE_DIAGNOSTICS_KEY_IDS is not configured", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/diagnostics",
+      headers: {
+        "X-Olumi-Assist-Key": "test-key",
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+
+    expect(body.schema).toBe("error.v1");
+    expect(body.code).toBe("FORBIDDEN");
+    expect(body.message).toContain("CEE_DIAGNOSTICS_KEY_IDS");
+  });
+
+  it("returns 401 without any authentication headers (caught by auth plugin)", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/diagnostics",
+    });
+
+    // Auth plugin rejects before reaching diagnostics endpoint
+    expect(res.statusCode).toBe(401);
+    const body = JSON.parse(res.body);
+
+    expect(body.schema).toBe("error.v1");
+    expect(body.code).toBe("FORBIDDEN"); // Auth plugin uses FORBIDDEN for missing auth
+  });
+});

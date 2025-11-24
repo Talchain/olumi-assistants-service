@@ -47,6 +47,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive documentation with JSDoc comments, usage examples, and error handling guide
   - **SDK Publishing Status:** Ready for npm publication (requires org access and version strategy approval)
 
+- **Performance Monitoring (Phase 2.3):**
+  - **New Performance Monitoring Plugin** (`src/plugins/performance-monitoring.ts`)
+    - Tracks request latency and duration for all routes
+    - Calculates p99 latency per route (rolling 1000-sample window)
+    - Detects slow requests (>30s threshold, configurable)
+    - Emits StatsD metrics for Datadog integration
+    - Automatic alerts on p99 threshold violations
+  - **Enhanced /v1/status Endpoint**
+    - Added `performance` section with metrics:
+      - Total requests and slow request count/rate
+      - Top 10 routes by traffic with avg duration and p99
+    - Enables real-time performance monitoring without external tools
+  - **Configurable Thresholds**
+    - `PERF_SLOW_THRESHOLD_MS` (default: 30000ms)
+    - `PERF_P99_THRESHOLD_MS` (default: 30000ms)
+    - `PERF_METRICS_ENABLED` (default: true)
+
+### Security
+
+- **Diagnostics Endpoint Hardening (Security Fix):**
+  - **FIXED: Information disclosure vulnerability** in `/diagnostics` endpoint
+  - Made authentication **mandatory** for diagnostics access
+  - Now requires `CEE_DIAGNOSTICS_KEY_IDS` configuration
+  - Returns 403 Forbidden if key ID allowlist not configured
+  - Added comprehensive test coverage for unauthorized access scenarios
+  - **Impact**: Prevents exposure of internal state to unauthorized clients
+
+- **Automated Security Scanning Infrastructure:**
+  - **GitHub CodeQL Analysis** - Static code analysis for security vulnerabilities
+    - Runs on every PR and push to main/staging
+    - Weekly scheduled scans
+    - Automatic upload to GitHub Security tab
+  - **Snyk Vulnerability Scanning** - Dependency and code vulnerability detection
+    - Integrated with GitHub Security
+    - Severity threshold: High/Critical
+    - SARIF report generation
+  - **Dependency Review** - Automated license and security review
+    - Runs on all pull requests
+    - Blocks incompatible licenses (GPL-2.0, GPL-3.0)
+    - Fails on moderate+ severity vulnerabilities
+  - **Auto-Comment on PRs** - Security scan summary posted to pull requests
+  - **Documentation**: Comprehensive setup guide in `Docs/SECURITY_SCANNING.md`
+  - **README Badge**: Added security scanning status badge
+
+### Added
+
+- Security scanning workflow (`.github/workflows/security-scanning.yml`)
+- Security scanning documentation (`Docs/SECURITY_SCANNING.md`)
+- Performance monitoring plugin with StatsD integration
+- Performance metrics endpoint in `/v1/status`
+
 ### Fixed
 
 - **Test Compatibility:**
