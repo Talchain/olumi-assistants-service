@@ -5,6 +5,7 @@ import { env } from "node:process";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import compress from "@fastify/compress";
 import draftRoute from "./routes/assist.draft-graph.js";
 import suggestRoute from "./routes/assist.suggest-options.js";
 import clarifyRoute from "./routes/assist.clarify-brief.js";
@@ -89,6 +90,14 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+  });
+
+  // Response compression: Enable for JSON (SSE streams auto-skipped)
+  await app.register(compress, {
+    threshold: 1024, // Only compress responses > 1KB
+    encodings: ['gzip', 'deflate'],
+    // Plugin automatically skips compression for text/event-stream
+    customTypes: /^(application\/json|text\/plain)$/,
   });
 
 // Rate limiting: Global + SSE-specific limits
