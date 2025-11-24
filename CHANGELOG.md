@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Documented 5-phase improvement plan with Phase 1 (Critical Security) now complete
   - Integrated Windsurf feedback for CEE-specific improvements
 
+- **TypeScript SDK Improvements (Phase 2.2):**
+  - Updated SDK to Vitest 4.0.13 (aligned with main project)
+  - Verified comprehensive API coverage: 13/15 core endpoints supported
+    - ✅ All Assistants API endpoints (draft-graph, suggest-options, clarify-brief, critique-graph, explain-diff, evidence-pack)
+    - ✅ All CEE v1 endpoints (draft-graph, options, explain-graph, evidence-helper, bias-check, sensitivity-coach, team-perspectives)
+    - ✅ Health check endpoint
+  - Package validation: 106 files, 656KB compressed, dual-format build (CommonJS + ESM)
+  - All 142 SDK tests passing with updated dependencies
+  - Comprehensive documentation with JSDoc comments, usage examples, and error handling guide
+  - **SDK Publishing Status:** Ready for npm publication (requires org access and version strategy approval)
+
 ### Fixed
 
 - **Test Compatibility:**
