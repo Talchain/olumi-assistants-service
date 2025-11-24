@@ -32,6 +32,7 @@ import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
+import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -72,7 +73,6 @@ export async function build() {
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
-  const REQUEST_TIMEOUT_MS = Number(env.REQUEST_TIMEOUT_MS) || 60000; // 60 seconds
   const GLOBAL_RATE_LIMIT_RPM = Number(env.GLOBAL_RATE_LIMIT_RPM) || 120; // requests per minute per IP
   const _SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20; // SSE-specific limit
   const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
@@ -80,8 +80,8 @@ export async function build() {
   const app = Fastify({
     logger: true,
     bodyLimit: BODY_LIMIT_BYTES,
-    connectionTimeout: REQUEST_TIMEOUT_MS,
-    requestTimeout: REQUEST_TIMEOUT_MS,
+    connectionTimeout: ROUTE_TIMEOUT_MS,
+    requestTimeout: ROUTE_TIMEOUT_MS,
   });
 
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
@@ -299,6 +299,11 @@ app.get("/healthz", async () => {
     cee: {
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
       config: ceeConfig,
+      timeouts: {
+        route_ms: ROUTE_TIMEOUT_MS,
+        http_client_ms: HTTP_CLIENT_TIMEOUT_MS,
+        retry_delay_ms: UPSTREAM_RETRY_DELAY_MS,
+      },
     },
   };
 });
@@ -394,6 +399,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         body_limit_mb: (BODY_LIMIT_BYTES / 1024 / 1024).toFixed(1),
         cors_origins: allowedOrigins,
         engine_url: env.ENGINE_BASE_URL || 'not set',
+        route_timeout_ms: ROUTE_TIMEOUT_MS,
+        http_client_timeout_ms: HTTP_CLIENT_TIMEOUT_MS,
+        upstream_retry_delay_ms: UPSTREAM_RETRY_DELAY_MS,
       }, '🚀 Olumi Assistants Service starting');
 
       await app.listen({ port, host: "0.0.0.0" });

@@ -99,6 +99,40 @@ Fields:
 - Rollout safety checks (e.g. verifying provider/model before enabling CEE in
   PLoT).
 
+### 2.2 Timeouts & resilience
+
+The Assistants service applies central, time-boxed limits to both HTTP and
+LLM calls. These are configured via environment variables on the service:
+
+- `HTTP_CLIENT_TIMEOUT_MS`
+  - End-to-end HTTP timeout for upstream LLM/provider clients.
+  - Default: `110000` (110s), clamped between 5s and 5 minutes.
+- `ROUTE_TIMEOUT_MS`
+  - Fastify `connectionTimeout` / `requestTimeout` for all routes.
+  - Default: `115000` (115s), clamped between 5s and 5 minutes.
+- `UPSTREAM_RETRY_DELAY_MS`
+  - Base delay (in ms) before a single retry on upstream LLM timeouts in the
+    draft graph pipeline.
+  - Default: `800`. The actual sleep uses ±25% jitter around this value.
+
+For observability, `/healthz` exposes these values in a metadata-only block:
+
+```jsonc
+"cee": {
+  "diagnostics_enabled": false,
+  "config": { /* ... */ },
+  "timeouts": {
+    "route_ms": 115000,
+    "http_client_ms": 110000,
+    "retry_delay_ms": 800
+  }
+}
+```
+
+Operator checks should treat these as **configuration hints only**; the
+service may clamp or override invalid values while keeping public contracts
+unchanged.
+
 ## 3. Suggested monitoring
 
 Minimal checks for staging / production:
