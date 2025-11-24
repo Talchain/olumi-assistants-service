@@ -97,18 +97,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security scanning documentation (`Docs/SECURITY_SCANNING.md`)
 - Performance monitoring plugin with StatsD integration
 - Performance metrics endpoint in `/v1/status`
+- **E2E Testing Infrastructure (Phase 2.4):**
+  - **Playwright E2E Test Framework** (`tests/e2e/`)
+    - Installed Playwright 1.56.1 and @playwright/test for browser-based testing
+    - Configured Playwright with optimized settings for local development and CI
+    - Created comprehensive test suite for SSE streaming (`sse-streaming.spec.ts`)
+    - Implemented fetch()-based SSE client (EventSource doesn't support custom headers)
+    - Test server startup script with proper environment configuration
+  - **Test Coverage:**
+    - 8 comprehensive E2E test scenarios covering SSE streaming
+    - Authentication failure handling (401)
+    - Invalid endpoint handling (404)
+    - Manual connection close
+    - Complete workflow with multiple messages
+    - Rapid successive connections
+    - Large response streams
+    - Connection abortion
+  - **Package.json Scripts:**
+    - `pnpm test:e2e` - Run E2E tests with Playwright
+    - `pnpm test:e2e:ui` - Run with interactive UI for debugging
+    - `pnpm test:e2e:headed` - Run in headed mode (visible browser)
+    - `pnpm test:e2e:report` - View HTML test report
+  - **Configuration:**
+    - E2E tests excluded from Vitest to prevent test runner conflicts
+    - Test server configured to use fixtures adapter for deterministic testing
+    - Automatic server startup/shutdown for E2E test execution
+  - **Documentation:**
+    - Comprehensive E2E testing guide in `tests/e2e/README.md`
+    - Known issues and next steps documented
+    - Debugging instructions and common troubleshooting
 
 ### Fixed
 
 - **Test Compatibility:**
   - Fixed `vi.fn` type signature for Vitest 4.x in `tests/unit/validateClientWithCache.test.ts`
-  - All 1242 tests passing (544 test files) with new dependency versions
+  - Fixed Vitest configuration to exclude Playwright E2E tests from Vitest runner
+  - All 1,244 tests passing (133 test files) with new dependency versions
 
 ### Testing
 
 - Full test suite validated after major dependency updates (Vitest 4.x, ESLint 9.x)
+- E2E testing infrastructure established with Playwright
 - TypeScript compilation clean with updated tooling
-- Performance baseline maintained (test duration <6s)
+- Performance baseline maintained (test duration <7s)
 
 ## [1.11.1] - 2025-11-22
 
