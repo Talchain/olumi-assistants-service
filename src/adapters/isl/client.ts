@@ -168,51 +168,6 @@ export class ISLTimeoutError extends Error {
     this.name = 'ISLTimeoutError';
   }
 }
-/**
- * Parse and validate timeout from env, with fallback and clamping
- */
-function parseTimeout(envValue: string | undefined, defaultValue: number): number {
-  if (!envValue) {
-    return defaultValue;
-  }
-
-  const parsed = parseInt(envValue, 10);
-  if (isNaN(parsed) || parsed <= 0) {
-    logger.warn({
-      event: 'isl.config.invalid_timeout',
-      value: envValue,
-      using_default: defaultValue,
-    });
-    return defaultValue;
-  }
-
-  // Clamp to reasonable range: 100ms to 30s
-  const MIN_TIMEOUT = 100;
-  const MAX_TIMEOUT = 30000;
-  return Math.max(MIN_TIMEOUT, Math.min(MAX_TIMEOUT, parsed));
-}
-
-/**
- * Parse and validate max retries from env, with fallback
- */
-function parseMaxRetries(envValue: string | undefined, defaultValue: number): number {
-  if (!envValue) {
-    return defaultValue;
-  }
-
-  const parsed = parseInt(envValue, 10);
-  if (isNaN(parsed) || parsed < 0) {
-    logger.warn({
-      event: 'isl.config.invalid_max_retries',
-      value: envValue,
-      using_default: defaultValue,
-    });
-    return defaultValue;
-  }
-
-  // Clamp to reasonable range: 0 to 5
-  return Math.min(5, parsed);
-}
 
 /**
  * Create ISL client from environment configuration
