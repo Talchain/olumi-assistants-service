@@ -1,0 +1,73 @@
+# Dependabot Configuration for Olumi Assistants Service
+#
+# Automatically creates pull requests for dependency updates to keep the
+# project secure and up-to-date. Runs weekly on Mondays at 9:00 AM UTC.
+#
+# See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+
+    # Limit the number of open pull requests to avoid overwhelming maintainers
+    open-pull-requests-limit: 10
+
+    # Group dependency updates for cleaner PR management
+    groups:
+      # Production dependencies: group minor and patch updates together
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Development dependencies: group minor and patch updates together
+      development-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Labels for easy filtering
+    labels:
+      - "dependencies"
+      - "automated"
+
+    # Auto-assign reviewers
+    reviewers:
+      - "paulslee"
+
+    # Commit message configuration
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+    # Allow direct updates for security patches
+    # Major version updates will be individual PRs for careful review
+    versioning-strategy: increase
+
+    # Rebase strategy to keep branches up to date
+    rebase-strategy: "auto"
+
+  # Monitor GitHub Actions workflows for updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+
+    labels:
+      - "github-actions"
+      - "dependencies"
+      - "automated"
+
+    commit-message:
+      prefix: "ci"
