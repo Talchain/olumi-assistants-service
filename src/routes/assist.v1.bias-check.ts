@@ -10,6 +10,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { enrichBiasFindings } from "../cee/bias/causal-enrichment.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -177,11 +178,13 @@ export default async function route(app: FastifyInstance) {
       const findings = detectBiases(graph, (input as any).archetype ?? null);
       const sortedFindings = sortBiasFindings(findings, input.seed);
 
+      const enrichedFindings = await enrichBiasFindings(graph, sortedFindings as any);
+
       const BIAS_FINDINGS_MAX = 10;
       let biasFindingsTruncated = false;
-      let cappedFindings = sortedFindings;
-      if (sortedFindings.length > BIAS_FINDINGS_MAX) {
-        cappedFindings = sortedFindings.slice(0, BIAS_FINDINGS_MAX);
+      let cappedFindings = enrichedFindings;
+      if (enrichedFindings.length > BIAS_FINDINGS_MAX) {
+        cappedFindings = enrichedFindings.slice(0, BIAS_FINDINGS_MAX);
         biasFindingsTruncated = true;
       }
 

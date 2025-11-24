@@ -1942,6 +1942,72 @@ components:
         citation:
           type: string
           description: Short citation to the underlying research source
+        causal_validation:
+          $ref: '#/components/schemas/CausalValidationV1'
+        evidence_strength:
+          type: array
+          description: Evidence strength analysis from causal inference
+          items:
+            $ref: '#/components/schemas/EvidenceStrengthV1'
+
+    CausalValidationV1:
+      type: object
+      description: Causal validation result from ISL (Inference & Structure Learning)
+      required:
+        - identifiable
+        - strength
+        - confidence
+      properties:
+        identifiable:
+          type: boolean
+          description: Whether the bias effect is causally identifiable in the graph
+        strength:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Strength of causal impact (0-1 scale)
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          description: Confidence level in the validation
+        details:
+          type: object
+          description: Detailed causal analysis
+          properties:
+            affected_paths:
+              type: array
+              description: Causal paths identified in the graph
+              items:
+                type: string
+            counterfactual_delta:
+              type: object
+              description: Counterfactual impact measurement
+              properties:
+                metric:
+                  type: string
+                  description: Metric being measured (e.g., "outcome_range")
+                change_percent:
+                  type: number
+                  description: Percentage change (e.g., 30 = "widens by 30%")
+
+    EvidenceStrengthV1:
+      type: object
+      description: Evidence strength classification for a graph node
+      required:
+        - node_id
+        - causal_support
+      properties:
+        node_id:
+          type: string
+          description: Node ID being analyzed
+        causal_support:
+          type: string
+          enum: [none, weak, moderate, strong]
+          description: Level of causal support this evidence provides
+        reasoning:
+          type: string
+          description: Optional reasoning for the classification
 
     CEEBiasCheckResponseV1:
       type: object
