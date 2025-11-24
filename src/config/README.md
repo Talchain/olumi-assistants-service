@@ -209,6 +209,95 @@ if (!redisUrl) {
 // but you can add runtime checks where needed
 ```
 
+## Migration Strategy
+
+### Singleton Initialization Challenge
+
+The config module is a **singleton** - it parses environment variables once on first import. This creates challenges when migrating files that are imported early in the module dependency graph, especially in test environments.
+
+### Safe vs. Unsafe Files to Migrate
+
+**✅ Safe to Migrate** (low in import graph):
+- Route handlers (`src/routes/**`)
+- Service layer (`src/services/**`)
+- Adapters (`src/adapters/**`)
+- Utility functions called at runtime (not at module initialization)
+- CEE modules (`src/cee/**`)
+
+**⚠️ Caution Required** (early in import graph):
+- `src/utils/simple-logger.ts` - Imported by many modules including test infrastructure
+- `src/version.ts` - Has special package.json fallback logic
+- `src/plugins/**` - Registered during server initialization
+- Any file that executes code at module initialization time
+
+**❌ Do Not Migrate** (causes test failures):
+- Files that create singletons at module scope using config values
+- Files imported before test environment setup (e.g., test utilities)
+- Files with complex fallback logic beyond simple env var reads
+
+### Recommended Migration Approach
+
+1. **Start with route handlers**: These are only imported when the server is built (after test setup)
+
+   ```typescript
+   // src/routes/assist.draft-graph.ts
+   import { config } from "../config/index.js";
+
+   // Replace process.env usage
+   if (config.features.grounding) {
+     // Enable grounding
+   }
+   ```
+
+2. **Move to adapters and services**: These are typically lazy-loaded
+
+   ```typescript
+   // src/adapters/llm/anthropic.ts
+   import { config } from "../config/index.js";
+
+   const apiKey = config.llm.anthropicApiKey;
+   ```
+
+3. **Handle CEE modules**: Safe to migrate as they're only used within routes
+
+   ```typescript
+   // src/cee/bias/index.ts
+   import { config } from "../config/index.js";
+
+   const biasCheckEnabled = config.cee.biasCheckFeatureVersion !== undefined;
+   ```
+
+4. **Skip or carefully handle early imports**: For files like simple-logger, either:
+   - Keep using `process.env` directly
+   - Use lazy initialization pattern
+   - Ensure all tests set required env vars before ANY imports
+
+### Testing Migrated Files
+
+After migrating a file, verify it doesn't break tests:
+
+```bash
+# Run full test suite
+pnpm test
+
+# Check for config-related failures
+pnpm test 2>&1 | grep "Configuration validation failed"
+```
+
+If tests fail with "Invalid configuration" errors, the file is too early in the import graph and should either:
+- Be reverted to use `process.env`
+- Have its config usage moved to lazy initialization
+- Have affected tests updated to set required env vars before imports
+
+### Migration Progress Tracking
+
+Create issues/PRs for each logical group:
+- [ ] Phase 1: Route handlers (10-15 files)
+- [ ] Phase 2: Adapters (5-8 files)
+- [ ] Phase 3: Services (3-5 files)
+- [ ] Phase 4: CEE modules (6-10 files)
+- [ ] Phase 5: Remaining safe files
+
 ## Testing
 
 ### Mocking Configuration in Tests
