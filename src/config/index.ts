@@ -32,6 +32,29 @@ const booleanString = z
   });
 
 /**
+ * Optional URL string that treats empty/undefined as undefined, validates otherwise
+ */
+const optionalUrl = z
+  .union([z.string(), z.undefined()])
+  .transform((val, ctx) => {
+    // Handle undefined, null, or empty string
+    if (val === undefined || val === null || val === "") {
+      return undefined;
+    }
+    // Validate URL format
+    try {
+      new URL(val);
+      return val;
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid url`,
+      });
+      return z.NEVER;
+    }
+  });
+
+/**
  * Environment enum
  */
 const Environment = z.enum(["development", "test", "production"]);
@@ -61,7 +84,7 @@ const ConfigSchema = z.object({
     nodeEnv: Environment.default("development"),
     logLevel: LogLevel.default("info"),
     version: z.string().default("1.0.0"),
-    baseUrl: z.string().url().optional(),
+    baseUrl: optionalUrl,
   }),
 
   // Authentication
@@ -156,7 +179,7 @@ const ConfigSchema = z.object({
 
   // ISL (Inference Service Layer) Configuration
   isl: z.object({
-    baseUrl: z.string().url().optional(),
+    baseUrl: optionalUrl,
     apiKey: z.string().optional(),
     timeoutMs: z.coerce.number().int().positive().default(30000),
     maxRetries: z.coerce.number().int().nonnegative().default(3),
@@ -173,7 +196,7 @@ const ConfigSchema = z.object({
 
   // Validation Configuration
   validation: z.object({
-    engineBaseUrl: z.string().url().optional(),
+    engineBaseUrl: optionalUrl,
     cacheEnabled: booleanString.default(false),
     cacheMaxSize: z.coerce.number().int().positive().default(500),
     cacheTtlMs: z.coerce.number().int().positive().default(3600000), // 1 hour
