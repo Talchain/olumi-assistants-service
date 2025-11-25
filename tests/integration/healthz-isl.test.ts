@@ -60,6 +60,12 @@ describe('GET /healthz (ISL integration)', () => {
     // Defaults from getISLConfig: 5000ms timeout, 1 retry
     expect(isl.timeout_ms).toBe(5000);
     expect(isl.max_retries).toBe(1);
+
+    // Config sources should indicate defaults
+    expect(isl.config_sources).toEqual({
+      timeout: 'default',
+      max_retries: 'default',
+    });
   });
 
   it('reports ISL configuration when enabled with base URL and custom timeout/retries', async () => {
@@ -85,6 +91,12 @@ describe('GET /healthz (ISL integration)', () => {
 
     expect(isl.timeout_ms).toBe(8000);
     expect(isl.max_retries).toBe(3);
+
+    // Config sources should indicate env
+    expect(isl.config_sources).toEqual({
+      timeout: 'env',
+      max_retries: 'env',
+    });
   });
 
   it('applies clamping/defaults for invalid timeout and retries and exposes them in /healthz', async () => {
@@ -108,5 +120,11 @@ describe('GET /healthz (ISL integration)', () => {
     // Values should match getISLConfig output
     expect(isl.timeout_ms).toBe(30000);
     expect(isl.max_retries).toBe(1);
+
+    // Config sources should indicate clamped/default
+    expect(isl.config_sources).toEqual({
+      timeout: 'clamped',     // Value was clamped from 999999 to 30000
+      max_retries: 'default', // Invalid -5 fell back to default 1
+    });
   });
 });

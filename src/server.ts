@@ -333,6 +333,10 @@ app.get("/healthz", async () => {
       base_url: maskedBaseUrl,
       timeout_ms: islConfig.timeout,
       max_retries: islConfig.maxRetries,
+      config_sources: {
+        timeout: islConfig.sources.timeout,
+        max_retries: islConfig.sources.maxRetries,
+      },
     },
   };
 });

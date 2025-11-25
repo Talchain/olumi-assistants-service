@@ -530,6 +530,92 @@ See `src/config/index.ts` for the complete mapping of environment variables to c
 - No runtime overhead compared to `process.env` access
 - Validation happens only at startup, not on every access
 
+## Observability and Diagnostics
+
+### Config Source Tracking
+
+ISL configuration exposes where values came from in the `/healthz` endpoint:
+
+```json
+{
+  "isl": {
+    "enabled": true,
+    "configured": true,
+    "base_url": "http://localhost:***",
+    "timeout_ms": 8000,
+    "max_retries": 2,
+    "config_sources": {
+      "timeout": "env",       // "env" | "default" | "clamped"
+      "max_retries": "env"
+    }
+  }
+}
+```
+
+Source values:
+- `env`: Value configured via environment variable
+- `default`: Using default value (no env var set)
+- `clamped`: Value was adjusted to stay within safe range
+
+### Telemetry Events
+
+Invalid or clamped ISL configuration values emit telemetry events:
+
+| Event | Description |
+|-------|-------------|
+| `isl.config.invalid_timeout` | ISL_TIMEOUT_MS had invalid value, using default |
+| `isl.config.invalid_max_retries` | ISL_MAX_RETRIES had invalid value, using default |
+| `isl.config.timeout_clamped` | ISL_TIMEOUT_MS was clamped to [100ms, 30s] range |
+| `isl.config.retries_clamped` | ISL_MAX_RETRIES was clamped to [0, 5] range |
+
+These events appear in structured logs and can be monitored for configuration issues.
+
+### Pre-deployment Validation
+
+Run configuration validation before deployment:
+
+```bash
+# Basic validation (warnings allowed)
+pnpm config:validate
+
+# Strict validation (warnings block deployment)
+pnpm config:validate:strict
+```
+
+The validation script checks:
+- ISL configuration (URL validity, timeout/retries sources)
+- LLM provider and API keys
+- Authentication keys
+
+Example output:
+```
+=== Pre-deployment Configuration Validation ===
+
+--- ISL Configuration ---
+✅ ISL_BASE_URL = http://localhost:***: Valid URL configured
+✅ ISL_TIMEOUT_MS = 8000 [source: env]: Configured from environment
+✅ ISL_MAX_RETRIES = 2 [source: env]: Configured from environment
+
+--- LLM Configuration ---
+✅ LLM_PROVIDER = anthropic: Provider configured
+✅ ANTHROPIC_API_KEY = ***redacted***: API key configured
+
+--- Authentication Configuration ---
+✅ ASSIST_API_KEYS: 3 API key(s) configured
+
+=== Validation Summary ===
+✅ Passed: 6
+⚠️  Warnings: 0
+❌ Failed: 0
+
+✅ ALL VALIDATIONS PASSED
+```
+
+Exit codes:
+- `0`: All validations passed
+- `1`: Critical validation failed (deployment blocked)
+- `2`: Warnings detected with `--strict` flag
+
 ## Future Enhancements
 
 - [ ] Runtime configuration reloading (for non-critical values)
