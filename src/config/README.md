@@ -175,11 +175,15 @@ if (config.features.grounding) {
 
 ```typescript
 // Before
-const timeout = parseInt(process.env.ISL_TIMEOUT_MS || "30000", 10);
+const timeout = parseInt(process.env.GRAPH_MAX_NODES || "100", 10);
 
 // After
-const timeout = config.isl.timeoutMs;
+const timeout = config.graph.maxNodes;
 ```
+
+> **Note on ISL Configuration:** The ISL adapter uses specialized parsing functions
+> (`parseTimeout()`, `parseMaxRetries()`) that handle validation, clamping, and logging
+> for invalid values. See `src/adapters/isl/config.ts` for details.
 
 #### Comma-Separated Lists
 
@@ -313,78 +317,163 @@ Create issues/PRs for each logical group:
 
 ## Testing
 
+### Test Helpers
+
+The project provides centralized test helpers in `tests/helpers/env-setup.ts`:
+
+```typescript
+import { cleanBaseUrl, cleanCEEFlags, cleanTestEnv } from "../helpers/env-setup.js";
+
+// Clean BASE_URL before building app (prevents config validation errors)
+cleanBaseUrl();
+
+// Clean all CEE feature flags
+cleanCEEFlags();
+
+// Clean both BASE_URL and CEE flags
+cleanTestEnv();
+```
+
 ### Mocking Configuration in Tests
 
-With lazy initialization, you have two approaches for testing with custom configuration:
+With lazy initialization, you have three approaches for testing with custom configuration:
 
-**Approach 1: Set environment variables before first config access** (Recommended)
+**Approach 1: Use test helpers + `_resetConfigCache()`** (Recommended for integration tests)
 
 ```typescript
-import { describe, it, expect } from "vitest";
-import { config, _resetConfigCache } from "./config/index.js";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("My Feature", () => {
-  it("should work with custom config", () => {
-    // Set environment before first config access
-    process.env.GROUNDING_ENABLED = "false";
+  let app;
 
-    // Reset cache to force re-parsing
-    _resetConfigCache();
+  beforeAll(async () => {
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
+    cleanBaseUrl(); // Prevents "Invalid url" validation errors
+    app = await build();
+  });
 
-    // Now access config
-    expect(config.features.grounding).toBe(false);
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
   });
 });
 ```
 
-**Approach 2: Use vi.resetModules() for complete isolation** (Legacy, still supported)
+**Approach 2: Dynamic imports with config reset** (Required for tests that change env mid-test)
 
 ```typescript
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
-describe("My Feature", () => {
-  it("should work with custom config", async () => {
-    // Clear module cache
+describe("Config-dependent tests", () => {
+  beforeEach(async () => {
     vi.resetModules();
+    cleanBaseUrl();
+    // Reset config cache AFTER vi.resetModules()
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
 
-    // Set environment before importing
+  it("should respect CEE_CAUSAL_VALIDATION_ENABLED flag", async () => {
+    process.env.CEE_CAUSAL_VALIDATION_ENABLED = "true";
+    process.env.ISL_BASE_URL = "http://localhost:8080";
+
+    // Dynamic import to get fresh module with new env vars
+    const { causalValidationEnabled } = await import("../../src/adapters/isl/config.js");
+    expect(causalValidationEnabled()).toBe(true);
+  });
+});
+```
+
+**Approach 3: Simple config reset** (For unit tests with static imports)
+
+```typescript
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { config, _resetConfigCache } from "./config/index.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
+
+describe("My Feature", () => {
+  beforeEach(async () => {
+    cleanBaseUrl();
+    vi.unstubAllEnvs();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
+
+  it("should work with custom config", () => {
     process.env.GROUNDING_ENABLED = "false";
-
-    // Import after setting env
-    const { config } = await import("./config/index.js");
-
+    _resetConfigCache();
     expect(config.features.grounding).toBe(false);
   });
 });
 ```
 
-### Example Test Patterns
+### When to Use Each Pattern
+
+| Pattern | Use When |
+|---------|----------|
+| Test helpers + `beforeAll` | Integration tests that build the app once |
+| Dynamic imports | Tests that change env vars between test cases |
+| Simple config reset | Unit tests with static imports |
+
+### Common Test Setup Pattern
+
+For integration tests, the recommended pattern is:
 
 ```typescript
-// Pattern 1: Test with minimal config (using _resetConfigCache)
-it("should handle minimal configuration", () => {
-  process.env.NODE_ENV = "test";
-  process.env.LLM_PROVIDER = "fixtures";
-  _resetConfigCache();
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
-  expect(config.llm.provider).toBe("fixtures");
+describe("My Integration Test", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
+    vi.stubEnv("ASSIST_API_KEYS", "test-key");
+    cleanBaseUrl();
+    app = await build();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+  });
+
+  it("should work", async () => {
+    const res = await app.inject({ method: "GET", url: "/healthz" });
+    expect(res.statusCode).toBe(200);
+  });
 });
+```
 
-// Pattern 2: Test with specific feature enabled
-it("should enable PII guard when configured", () => {
-  process.env.PII_GUARD_ENABLED = "true";
+### Troubleshooting Test Failures
+
+**"Invalid configuration. Please check environment variables."**
+
+This usually means config was parsed with stale/invalid env vars. Solutions:
+1. Add `cleanBaseUrl()` before building the app
+2. Use `_resetConfigCache()` after changing env vars
+3. Use dynamic imports for config-dependent code
+
+**"Invalid url" validation error for `server.baseUrl`**
+
+The `BASE_URL` env var may be set to an invalid value from a previous test:
+```typescript
+cleanBaseUrl(); // Add this before building the app
+```
+
+**Config values not updating between tests**
+
+The config is cached after first access. Reset it:
+```typescript
+beforeEach(async () => {
+  const { _resetConfigCache } = await import("../../src/config/index.js");
   _resetConfigCache();
-
-  expect(config.features.piiGuard).toBe(true);
-});
-
-// Pattern 3: Test with module reset (complete isolation)
-it("should handle custom base URL", async () => {
-  vi.resetModules();
-  process.env.BASE_URL = "https://custom.example.com";
-
-  const { config } = await import("./config/index.js");
-  expect(config.server.baseUrl).toBe("https://custom.example.com");
 });
 ```
 
