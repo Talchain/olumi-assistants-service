@@ -17,6 +17,7 @@ describe('GET /healthz (ISL integration)', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

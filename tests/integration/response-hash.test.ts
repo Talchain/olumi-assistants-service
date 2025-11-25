@@ -11,6 +11,7 @@ describe("Response Hash Integration", () => {
     process.env.LLM_PROVIDER = "fixtures";
     process.env.ASSIST_API_KEYS = "test-key-response-hash";
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

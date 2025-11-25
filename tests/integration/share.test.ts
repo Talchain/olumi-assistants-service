@@ -12,6 +12,7 @@ describe("Share Integration", () => {
     vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("ASSIST_API_KEYS", "test-key-share");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

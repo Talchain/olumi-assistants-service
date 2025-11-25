@@ -10,6 +10,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
 
 type CEEExplainGraphResponseV1 = components["schemas"]["CEEExplainGraphResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -72,7 +73,7 @@ function checkCeeExplainLimit(key: string, limit: number): { allowed: boolean; r
 
 export default async function route(app: FastifyInstance) {
   const EXPLAIN_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_EXPLAIN_RATE_LIMIT_RPM");
-  const FEATURE_VERSION = process.env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0";
+  const FEATURE_VERSION = config.cee.explainFeatureVersion || "explain-model-1.0.0";
 
   app.post("/assist/v1/explain-graph", async (req, reply) => {
     const start = Date.now();

@@ -136,6 +136,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "2");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

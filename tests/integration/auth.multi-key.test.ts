@@ -20,6 +20,7 @@ describe("Multi-Key Auth", () => {
     process.env.LLM_PROVIDER = "fixtures";
 
     // Dynamic import after env is set
+    delete process.env.BASE_URL;
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();

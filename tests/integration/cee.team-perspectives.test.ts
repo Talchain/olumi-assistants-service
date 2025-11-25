@@ -20,6 +20,7 @@ describe("POST /assist/v1/team-perspectives (CEE v1)", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-perspectives-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

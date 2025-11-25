@@ -149,6 +149,7 @@ describe("Chaos: Mid-Stream Disconnect", () => {
     delete process.env.ASSIST_API_KEYS;
 
     // Build app
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

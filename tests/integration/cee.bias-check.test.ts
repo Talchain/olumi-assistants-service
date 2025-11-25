@@ -20,6 +20,7 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
     vi.stubEnv("CEE_BIAS_CHECK_FEATURE_VERSION", "bias-check-test");
     vi.stubEnv("CEE_BIAS_CHECK_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

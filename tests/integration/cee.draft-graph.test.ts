@@ -47,6 +47,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     vi.stubEnv("CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED", "true");
     vi.stubEnv("CEE_REFINEMENT_ENABLED", "true");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

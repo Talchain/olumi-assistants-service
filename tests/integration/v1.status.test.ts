@@ -22,6 +22,7 @@ describe("GET /v1/status", () => {
     vi.stubEnv("PROMPT_CACHE_TTL_MS", "60000");
     vi.stubEnv("SHARE_REVIEW_ENABLED", "true");
 
+    delete process.env.BASE_URL;
     app = await build();
   });
 

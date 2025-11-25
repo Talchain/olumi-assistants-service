@@ -38,6 +38,7 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-partial-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

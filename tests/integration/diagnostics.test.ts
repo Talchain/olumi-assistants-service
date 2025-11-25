@@ -15,6 +15,7 @@ describe("GET /diagnostics", () => {
     vi.stubEnv("CEE_DIAGNOSTICS_KEY_IDS", operatorKeyId);
     vi.stubEnv("LLM_PROVIDER", "fixtures");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });
@@ -90,6 +91,7 @@ describe("GET /diagnostics - Security: Mandatory Authentication", () => {
     // Intentionally NOT setting CEE_DIAGNOSTICS_KEY_IDS to test mandatory auth
     vi.stubEnv("LLM_PROVIDER", "fixtures");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

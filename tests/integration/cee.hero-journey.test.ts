@@ -31,6 +31,7 @@ describe("CEE hero journey: draft → options → evidence → bias → team", (
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-hero-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

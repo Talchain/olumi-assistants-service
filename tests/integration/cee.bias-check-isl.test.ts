@@ -17,6 +17,7 @@ describe('POST /assist/v1/bias-check with ISL', () => {
   beforeAll(async () => {
     vi.stubEnv('ASSIST_API_KEYS', 'test-key-isl');
     vi.stubEnv('CEE_BIAS_CHECK_RATE_LIMIT_RPM', '10');
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

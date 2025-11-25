@@ -23,6 +23,7 @@ describe("POST /assist/v1/explain-graph (CEE v1)", () => {
     vi.stubEnv("CEE_EXPLAIN_FEATURE_VERSION", "explain-model-test");
     vi.stubEnv("CEE_EXPLAIN_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

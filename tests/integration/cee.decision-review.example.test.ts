@@ -13,6 +13,7 @@ describe("GET /assist/v1/decision-review/example (enabled)", () => {
     vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("CEE_DECISION_REVIEW_EXAMPLE_ENABLED", "true");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });
@@ -121,6 +122,7 @@ describe("GET /assist/v1/decision-review/example (disabled)", () => {
     // Do not enable the example endpoint; it should not be registered.
     vi.stubEnv("CEE_DECISION_REVIEW_EXAMPLE_ENABLED", "false");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

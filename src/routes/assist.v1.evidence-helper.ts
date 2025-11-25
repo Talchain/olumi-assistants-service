@@ -10,6 +10,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
 
 type CEEEvidenceHelperResponseV1 = components["schemas"]["CEEEvidenceHelperResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -76,7 +77,7 @@ function checkCeeEvidenceLimit(
 export default async function route(app: FastifyInstance) {
   const EVIDENCE_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM");
   const FEATURE_VERSION =
-    process.env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0";
+    config.cee.evidenceHelperFeatureVersion || "evidence-helper-1.0.0";
 
   app.post("/assist/v1/evidence-helper", async (req, reply) => {
     const start = Date.now();

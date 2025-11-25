@@ -10,6 +10,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -77,7 +78,7 @@ function checkCeeSensitivityLimit(
 
 export default async function route(app: FastifyInstance) {
   const SENSITIVITY_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM");
-  const FEATURE_VERSION = process.env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0";
+  const FEATURE_VERSION = config.cee.sensitivityCoachFeatureVersion || "sensitivity-coach-1.0.0";
 
   app.post("/assist/v1/sensitivity-coach", async (req, reply) => {
     const start = Date.now();

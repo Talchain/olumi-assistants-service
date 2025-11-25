@@ -20,6 +20,7 @@ describe("POST /assist/v1/options (CEE v1)", () => {
     vi.stubEnv("CEE_OPTIONS_FEATURE_VERSION", "options-test");
     vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

@@ -98,6 +98,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-golden-telemetry-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "10");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

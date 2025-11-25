@@ -19,6 +19,7 @@ describe("GET /v1/limits", () => {
     vi.stubEnv("RATE_LIMIT_RPM", "120");
     vi.stubEnv("SSE_RATE_LIMIT_RPM", "20");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

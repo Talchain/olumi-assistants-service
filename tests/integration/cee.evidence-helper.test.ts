@@ -16,6 +16,7 @@ describe("POST /assist/v1/evidence-helper (CEE v1)", () => {
     vi.stubEnv("CEE_EVIDENCE_HELPER_FEATURE_VERSION", "evidence-helper-test");
     vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

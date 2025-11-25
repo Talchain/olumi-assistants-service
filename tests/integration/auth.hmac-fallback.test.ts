@@ -23,6 +23,7 @@ describe("HMAC + API Key Fallback", () => {
     process.env.ASSIST_API_KEYS = "fallback-key-1";
     process.env.LLM_PROVIDER = "fixtures";
 
+    delete process.env.BASE_URL;
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
@@ -91,6 +92,7 @@ describe("HMAC-only auth without API keys", () => {
     process.env.HMAC_SECRET = "test-hmac-secret-only";
     process.env.LLM_PROVIDER = "fixtures";
 
+    delete process.env.BASE_URL;
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();

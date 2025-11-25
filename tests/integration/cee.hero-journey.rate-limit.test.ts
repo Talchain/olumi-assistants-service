@@ -32,6 +32,7 @@ describe("CEE hero journey: mid-journey evidence rate limit", () => {
     // Set a low per-feature rate limit so the second evidence call hits CEE_RATE_LIMIT
     vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "1");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });

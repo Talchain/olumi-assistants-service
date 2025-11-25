@@ -20,6 +20,7 @@ describe("POST /assist/v1/sensitivity-coach (CEE v1)", () => {
     vi.stubEnv("CEE_SENSITIVITY_COACH_FEATURE_VERSION", "sensitivity-coach-test");
     vi.stubEnv("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM", "2");
 
+    delete process.env.BASE_URL;
     app = await build();
     await app.ready();
   });
