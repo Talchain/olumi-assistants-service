@@ -9,9 +9,11 @@ export default defineConfig({
       "**/dist/**",
       "**/cypress/**",
       "**/.{idea,git,cache,output,temp}/**",
-      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,playwright}.config.*",
       // Exclude recovered test files
       "_recovered/**",
+      // Exclude E2E tests (run with pnpm test:e2e using Playwright)
+      "tests/e2e/**",
       // Exclude live LLM tests (require LIVE_LLM=1 and API key)
       "tests/integration/adversarial.test.ts",
       "tests/validation/golden-briefs-runner.test.ts",

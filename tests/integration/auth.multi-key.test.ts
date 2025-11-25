@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("Multi-Key Auth", () => {
   let server: FastifyInstance;
@@ -20,6 +21,7 @@ describe("Multi-Key Auth", () => {
     process.env.LLM_PROVIDER = "fixtures";
 
     // Dynamic import after env is set
+    cleanBaseUrl();
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();

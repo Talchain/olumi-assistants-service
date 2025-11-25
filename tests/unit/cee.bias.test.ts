@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
 import { detectBiases, sortBiasFindings } from "../../src/cee/bias/index.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
   const base: any = {
@@ -14,6 +15,20 @@ function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
 }
 
 describe("CEE bias helper - detectBiases", () => {
+  beforeEach(async () => {
+    cleanBaseUrl();
+    vi.unstubAllEnvs();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    cleanBaseUrl();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
+
   it("emits selection bias when there are zero or one options", () => {
     const graphZero = makeGraph({ nodes: [{ id: "g1", kind: "goal" } as any] });
     const zeroFindings = detectBiases(graphZero, null);
@@ -132,6 +147,204 @@ describe("CEE bias helper - detectBiases", () => {
 
       expect(confirmation).toBeDefined();
       expect(confirmation!.node_ids).toEqual(expect.arrayContaining(["opt_a", "opt_b"]));
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits availability bias when recent evidence dominates and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "r1", kind: "risk", label: "Recent incident last week" } as any,
+          { id: "r2", kind: "risk", label: "Latest outage this month" } as any,
+          { id: "o1", kind: "outcome", label: "Today\'s customer feedback" } as any,
+          { id: "o2", kind: "outcome", label: "Historical baseline 2019-2020" } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const availability = findings.find((f: any) => f.code === "AVAILABILITY_BIAS");
+
+      expect(availability).toBeDefined();
+      expect(availability!.node_ids).toEqual(expect.arrayContaining(["r1", "r2", "o1"]));
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits status quo bias when change options carry disproportionate risks and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_keep", kind: "option", label: "Keep current system" } as any,
+          { id: "opt_change", kind: "option", label: "Migrate to new platform" } as any,
+          { id: "r1", kind: "risk", label: "Operational interruption" } as any,
+          { id: "r2", kind: "risk", label: "Migration overrun" } as any,
+          { id: "r3", kind: "risk", label: "Integration failure" } as any,
+        ],
+        edges: [
+          { from: "opt_keep", to: "r1" } as any,
+          { from: "opt_change", to: "r2" } as any,
+          { from: "opt_change", to: "r3" } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const statusQuo = findings.find((f: any) => f.code === "STATUS_QUO_BIAS");
+
+      expect(statusQuo).toBeDefined();
+      expect(statusQuo!.node_ids).toEqual(
+        expect.arrayContaining(["opt_keep", "opt_change"]),
+      );
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits optimism bias when options connect only to outcomes and not to risks and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt1", kind: "option", label: "Launch premium tier" } as any,
+          { id: "opt2", kind: "option", label: "Launch basic tier" } as any,
+          { id: "o1", kind: "outcome", label: "Increase revenue" } as any,
+          { id: "o2", kind: "outcome", label: "Grow user base" } as any,
+        ],
+        edges: [
+          { from: "opt1", to: "o1" } as any,
+          { from: "opt2", to: "o2" } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const optimism = findings.find((f: any) => f.code === "OPTIMISM_BIAS");
+
+      expect(optimism).toBeDefined();
+      expect(optimism!.node_ids).toEqual(
+        expect.arrayContaining(["opt1", "opt2", "o1", "o2"]),
+      );
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits overconfidence bias when beliefs are high and tightly clustered and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt1", kind: "option" } as any,
+          { id: "opt2", kind: "option" } as any,
+          { id: "o1", kind: "outcome" } as any,
+          { id: "o2", kind: "outcome" } as any,
+          { id: "r1", kind: "risk" } as any,
+        ],
+        edges: [
+          { from: "opt1", to: "o1", belief: 0.9 } as any,
+          { from: "opt1", to: "r1", belief: 0.93 } as any,
+          { from: "opt2", to: "o2", belief: 0.95 } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const overconfidence = findings.find((f: any) => f.code === "OVERCONFIDENCE");
+
+      expect(overconfidence).toBeDefined();
+      expect(overconfidence!.node_ids).toEqual(
+        expect.arrayContaining(["opt1", "opt2", "o1", "o2", "r1"]),
+      );
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits authority bias when an authority-labelled node is highly connected and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "n_ceo", kind: "decision", label: "CEO approval" } as any,
+          { id: "opt1", kind: "option" } as any,
+          { id: "opt2", kind: "option" } as any,
+          { id: "opt3", kind: "option" } as any,
+        ],
+        edges: [
+          { from: "n_ceo", to: "opt1" } as any,
+          { from: "n_ceo", to: "opt2" } as any,
+          { from: "n_ceo", to: "opt3" } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const authority = findings.find((f: any) => f.code === "AUTHORITY_BIAS");
+
+      expect(authority).toBeDefined();
+      expect(authority!.node_ids).toEqual(
+        expect.arrayContaining(["n_ceo", "opt1", "opt2", "opt3"]),
+      );
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+      } else {
+        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  it("emits framing effect bias when outcomes share a percentage but mix gain and loss framing and structural flag is enabled", () => {
+    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+    process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+
+    try {
+      const graph = makeGraph({
+        nodes: [
+          { id: "g1", kind: "goal", label: "Treatment decision" } as any,
+          { id: "o_gain", kind: "outcome", label: "70% chance to survive" } as any,
+          { id: "o_loss", kind: "outcome", label: "70% risk of death" } as any,
+        ],
+      });
+
+      const findings = detectBiases(graph, null);
+      const framing = findings.find((f: any) => f.code === "FRAMING_EFFECT");
+
+      expect(framing).toBeDefined();
+      expect(framing!.node_ids).toEqual(
+        expect.arrayContaining(["g1", "o_gain", "o_loss"]),
+      );
     } finally {
       if (originalFlag === undefined) {
         delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;

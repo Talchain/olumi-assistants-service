@@ -1,6 +1,7 @@
 # Olumi Assistants Service
 
 [![Nightly Smoke](https://github.com/Talchain/olumi-assistants-service/actions/workflows/nightly-smoke.yml/badge.svg)](https://github.com/Talchain/olumi-assistants-service/actions/workflows/nightly-smoke.yml)
+[![Security Scanning](https://github.com/Talchain/olumi-assistants-service/actions/workflows/security-scanning.yml/badge.svg)](https://github.com/Talchain/olumi-assistants-service/actions/workflows/security-scanning.yml)
 
 **AI-powered decision-making service for the Olumi platform**
 

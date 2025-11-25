@@ -158,6 +158,12 @@ export const TelemetryEvents = {
   // SSE degraded mode events (v1.11.0)
   SseDegradedMode: "assist.sse.degraded_mode",
 
+  // ISL config events (v1.13.0)
+  IslConfigInvalidTimeout: "isl.config.invalid_timeout",
+  IslConfigInvalidMaxRetries: "isl.config.invalid_max_retries",
+  IslConfigTimeoutClamped: "isl.config.timeout_clamped",
+  IslConfigRetriesClamped: "isl.config.retries_clamped",
+
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
 } as const;

@@ -61,6 +61,8 @@ export {
   buildCeeErrorView,
   buildCeeIntegrationReviewBundle,
   buildCeeBiasStructureSnapshot,
+  buildCeeCausalValidationStats,
+  buildCeeDecisionHealthSnapshot,
 } from "./ceeHelpers.js";
 
 export { applyGraphPatch } from "./applyGraphPatch.js";
@@ -108,4 +110,7 @@ export type {
   CeeBiasStructureDraftSummary,
   CeeBiasStructureBiasSummary,
   CeeBiasStructureSnapshot,
+  CeeCausalValidationStats,
+  CeeCausalCoverageLevel,
+  CeeDecisionHealthSnapshot,
 } from "./ceeHelpers.js";

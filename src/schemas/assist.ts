@@ -18,7 +18,14 @@ export const DraftGraphInput = z.object({
   include_debug: z.boolean().optional(),
   focus_areas: z
     .array(z.enum(["structure", "completeness", "feasibility", "provenance"]))
-    .optional()
+    .optional(),
+  // Optional refinement context for iterative drafting (Phase B)
+  previous_graph: Graph.optional(),
+  refinement_mode: z
+    .enum(["auto", "expand", "prune", "clarify"])
+    .optional(),
+  refinement_instructions: z.string().min(1).max(2000).optional(),
+  preserve_nodes: z.array(z.string()).max(50).optional(),
 });
 
 export const DraftGraphOutput = z.object({

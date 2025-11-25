@@ -1,4 +1,6 @@
 import { logger } from '../../utils/simple-logger.js';
+import { config } from '../../config/index.js';
+import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 /**
  * ISL Configuration Module
@@ -9,11 +11,30 @@ import { logger } from '../../utils/simple-logger.js';
  */
 
 /**
- * Parse and validate timeout from env, with fallback and clamping
+ * Config source tracking for observability
+ */
+export type ConfigSource = 'env' | 'default' | 'clamped';
+
+interface ParseResult<T> {
+  value: T;
+  source: ConfigSource;
+}
+
+/**
+ * Parse and validate timeout from env, with fallback and clamping.
+ * Emits telemetry events for invalid or clamped values.
  */
 export function parseTimeout(envValue: string | undefined, defaultValue: number): number {
+  const result = parseTimeoutWithSource(envValue, defaultValue);
+  return result.value;
+}
+
+/**
+ * Parse timeout with source tracking for diagnostics
+ */
+export function parseTimeoutWithSource(envValue: string | undefined, defaultValue: number): ParseResult<number> {
   if (!envValue) {
-    return defaultValue;
+    return { value: defaultValue, source: 'default' };
   }
 
   const parsed = parseInt(envValue, 10);
@@ -23,21 +44,53 @@ export function parseTimeout(envValue: string | undefined, defaultValue: number)
       value: envValue,
       using_default: defaultValue,
     });
-    return defaultValue;
+    emit(TelemetryEvents.IslConfigInvalidTimeout, {
+      raw_value: envValue,
+      fallback_value: defaultValue,
+    });
+    return { value: defaultValue, source: 'default' };
   }
 
   // Clamp to reasonable range: 100ms to 30s
   const MIN_TIMEOUT = 100;
   const MAX_TIMEOUT = 30000;
-  return Math.max(MIN_TIMEOUT, Math.min(MAX_TIMEOUT, parsed));
+  const clamped = Math.max(MIN_TIMEOUT, Math.min(MAX_TIMEOUT, parsed));
+
+  if (clamped !== parsed) {
+    logger.warn({
+      event: 'isl.config.timeout_clamped',
+      original: parsed,
+      clamped: clamped,
+      min: MIN_TIMEOUT,
+      max: MAX_TIMEOUT,
+    });
+    emit(TelemetryEvents.IslConfigTimeoutClamped, {
+      original_value: parsed,
+      clamped_value: clamped,
+      min_allowed: MIN_TIMEOUT,
+      max_allowed: MAX_TIMEOUT,
+    });
+    return { value: clamped, source: 'clamped' };
+  }
+
+  return { value: parsed, source: 'env' };
 }
 
 /**
- * Parse and validate max retries from env, with fallback
+ * Parse and validate max retries from env, with fallback.
+ * Emits telemetry events for invalid or clamped values.
  */
 export function parseMaxRetries(envValue: string | undefined, defaultValue: number): number {
+  const result = parseMaxRetriesWithSource(envValue, defaultValue);
+  return result.value;
+}
+
+/**
+ * Parse max retries with source tracking for diagnostics
+ */
+export function parseMaxRetriesWithSource(envValue: string | undefined, defaultValue: number): ParseResult<number> {
   if (!envValue) {
-    return defaultValue;
+    return { value: defaultValue, source: 'default' };
   }
 
   const parsed = parseInt(envValue, 10);
@@ -47,24 +100,42 @@ export function parseMaxRetries(envValue: string | undefined, defaultValue: numb
       value: envValue,
       using_default: defaultValue,
     });
-    return defaultValue;
+    emit(TelemetryEvents.IslConfigInvalidMaxRetries, {
+      raw_value: envValue,
+      fallback_value: defaultValue,
+    });
+    return { value: defaultValue, source: 'default' };
   }
 
   // Clamp to reasonable range: 0 to 5
-  return Math.min(5, parsed);
+  const MAX_RETRIES = 5;
+  const clamped = Math.min(MAX_RETRIES, parsed);
+
+  if (clamped !== parsed) {
+    logger.warn({
+      event: 'isl.config.retries_clamped',
+      original: parsed,
+      clamped: clamped,
+      max: MAX_RETRIES,
+    });
+    emit(TelemetryEvents.IslConfigRetriesClamped, {
+      original_value: parsed,
+      clamped_value: clamped,
+      max_allowed: MAX_RETRIES,
+    });
+    return { value: clamped, source: 'clamped' };
+  }
+
+  return { value: parsed, source: 'env' };
 }
 
 /**
  * Check if causal validation is enabled via feature flag
  *
- * Accepts both "true" and "1" as enabled values for flexibility.
+ * Uses type-safe config module for boolean coercion.
  */
 export function causalValidationEnabled(): boolean {
-  const flag = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === 'true' || flag === '1';
+  return config.cee.causalValidationEnabled;
 }
 
 /**
@@ -81,6 +152,11 @@ export interface ISLConfig {
   timeout: number;
   /** Effective max retry attempts (validated and clamped) */
   maxRetries: number;
+  /** Source tracking for diagnostics */
+  sources: {
+    timeout: ConfigSource;
+    maxRetries: ConfigSource;
+  };
 }
 
 /**
@@ -94,12 +170,18 @@ export interface ISLConfig {
  */
 export function getISLConfig(): ISLConfig {
   const baseUrl = process.env.ISL_BASE_URL;
+  const timeoutResult = parseTimeoutWithSource(process.env.ISL_TIMEOUT_MS, 5000);
+  const retriesResult = parseMaxRetriesWithSource(process.env.ISL_MAX_RETRIES, 1);
 
   return {
     enabled: causalValidationEnabled(),
     configured: baseUrl !== undefined && baseUrl.trim().length > 0,
     baseUrl: baseUrl,
-    timeout: parseTimeout(process.env.ISL_TIMEOUT_MS, 5000),
-    maxRetries: parseMaxRetries(process.env.ISL_MAX_RETRIES, 1),
+    timeout: timeoutResult.value,
+    maxRetries: retriesResult.value,
+    sources: {
+      timeout: timeoutResult.source,
+      maxRetries: retriesResult.source,
+    },
   };
 }

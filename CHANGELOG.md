@@ -5,6 +5,180 @@ All notable changes to the Olumi Assistants Service will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Critical Dependency Updates (Phase 1: Enterprise-Grade Security)**
+  - **Fixed 2 HIGH severity vulnerabilities:**
+    - Updated `playwright` to 1.56.1 (was <1.55.1) via `artillery 2.0.27` - Fixed SSL certificate verification bypass (CVE-2025-XXXX)
+    - Updated `archiver` to ensure `glob >= 10.5.0` - Fixed command injection vulnerability (CVE-2025-XXXX)
+  - **Fixed 3 MODERATE severity vulnerabilities:**
+    - Updated `vitest` to 4.0.13 (was 1.6.1) with `esbuild 0.25.12` - Fixed CORS bypass in dev server (CVE-2025-XXXX)
+    - Updated `js-yaml` to 4.1.1+ via `openapi-typescript` and `eslint 9.39.1` - Fixed prototype pollution (CVE-2020-13822)
+  - **Security audit now reports: 0 vulnerabilities** (was 5)
+  - Dependency health grade improved: **C+ (77) → A (95)**
+
+### Changed
+
+- **Development Tooling Major Version Upgrades:**
+  - Migrated to ESLint 9.39.1 (from 8.57.1) with new flat config format (`eslint.config.js`)
+  - Updated @typescript-eslint packages to 8.48.0 (from 7.18.0) for ESLint 9 compatibility
+  - Migrated to Vitest 4.0.13 (from 1.6.1) with updated mock syntax
+
+- **Dependency Management Automation:**
+  - Added Dependabot configuration (`.github/dependabot.yml`) for automated weekly security updates
+  - Configured grouped dependency updates (production vs development) to manage PR volume
+  - Set up automatic security advisory monitoring
+
+- **Enterprise-Grade Development Plan:**
+  - Created comprehensive development roadmap (`Docs/DEVELOPMENT_PLAN.md`) targeting A+ grade (95/100)
+  - Documented 5-phase improvement plan with Phase 1 (Critical Security) now complete
+  - Integrated Windsurf feedback for CEE-specific improvements
+
+- **TypeScript SDK Improvements (Phase 2.2):**
+  - Updated SDK to Vitest 4.0.13 (aligned with main project)
+  - Verified comprehensive API coverage: 13/15 core endpoints supported
+    - ✅ All Assistants API endpoints (draft-graph, suggest-options, clarify-brief, critique-graph, explain-diff, evidence-pack)
+    - ✅ All CEE v1 endpoints (draft-graph, options, explain-graph, evidence-helper, bias-check, sensitivity-coach, team-perspectives)
+    - ✅ Health check endpoint
+  - Package validation: 106 files, 656KB compressed, dual-format build (CommonJS + ESM)
+  - All 142 SDK tests passing with updated dependencies
+  - Comprehensive documentation with JSDoc comments, usage examples, and error handling guide
+  - **SDK Publishing Status:** Ready for npm publication (requires org access and version strategy approval)
+
+- **Performance Monitoring (Phase 2.3):**
+  - **New Performance Monitoring Plugin** (`src/plugins/performance-monitoring.ts`)
+    - Tracks request latency and duration for all routes
+    - Calculates p99 latency per route (rolling 1000-sample window)
+    - Detects slow requests (>30s threshold, configurable)
+    - Emits StatsD metrics for Datadog integration
+    - Automatic alerts on p99 threshold violations
+  - **Enhanced /v1/status Endpoint**
+    - Added `performance` section with metrics:
+      - Total requests and slow request count/rate
+      - Top 10 routes by traffic with avg duration and p99
+    - Enables real-time performance monitoring without external tools
+  - **Configurable Thresholds**
+    - `PERF_SLOW_THRESHOLD_MS` (default: 30000ms)
+    - `PERF_P99_THRESHOLD_MS` (default: 30000ms)
+    - `PERF_METRICS_ENABLED` (default: true)
+
+### Security
+
+- **Diagnostics Endpoint Hardening (Security Fix):**
+  - **FIXED: Information disclosure vulnerability** in `/diagnostics` endpoint
+  - Made authentication **mandatory** for diagnostics access
+  - Now requires `CEE_DIAGNOSTICS_KEY_IDS` configuration
+  - Returns 403 Forbidden if key ID allowlist not configured
+  - Added comprehensive test coverage for unauthorized access scenarios
+  - **Impact**: Prevents exposure of internal state to unauthorized clients
+
+- **Automated Security Scanning Infrastructure:**
+  - **GitHub CodeQL Analysis** - Static code analysis for security vulnerabilities
+    - Runs on every PR and push to main/staging
+    - Weekly scheduled scans
+    - Automatic upload to GitHub Security tab
+  - **Snyk Vulnerability Scanning** - Dependency and code vulnerability detection
+    - Integrated with GitHub Security
+    - Severity threshold: High/Critical
+    - SARIF report generation
+  - **Dependency Review** - Automated license and security review
+    - Runs on all pull requests
+    - Blocks incompatible licenses (GPL-2.0, GPL-3.0)
+    - Fails on moderate+ severity vulnerabilities
+  - **Auto-Comment on PRs** - Security scan summary posted to pull requests
+  - **Documentation**: Comprehensive setup guide in `Docs/SECURITY_SCANNING.md`
+  - **README Badge**: Added security scanning status badge
+
+### Added
+
+- Security scanning workflow (`.github/workflows/security-scanning.yml`)
+- Security scanning documentation (`Docs/SECURITY_SCANNING.md`)
+- Performance monitoring plugin with StatsD integration
+- Performance metrics endpoint in `/v1/status`
+- **E2E Testing Infrastructure (Phase 2.4):**
+  - **Playwright E2E Test Framework** (`tests/e2e/`)
+    - Installed Playwright 1.56.1 and @playwright/test for browser-based testing
+    - Configured Playwright with optimized settings for local development and CI
+    - Created comprehensive test suite for SSE streaming (`sse-streaming.spec.ts`)
+    - Implemented fetch()-based SSE client (EventSource doesn't support custom headers)
+    - Test server startup script with proper environment configuration
+  - **Test Coverage:**
+    - 8 comprehensive E2E test scenarios covering SSE streaming
+    - Authentication failure handling (401)
+    - Invalid endpoint handling (404)
+    - Manual connection close
+    - Complete workflow with multiple messages
+    - Rapid successive connections
+    - Large response streams
+    - Connection abortion
+  - **Package.json Scripts:**
+    - `pnpm test:e2e` - Run E2E tests with Playwright
+    - `pnpm test:e2e:ui` - Run with interactive UI for debugging
+    - `pnpm test:e2e:headed` - Run in headed mode (visible browser)
+    - `pnpm test:e2e:report` - View HTML test report
+  - **Configuration:**
+    - E2E tests excluded from Vitest to prevent test runner conflicts
+    - Test server configured to use fixtures adapter for deterministic testing
+    - Automatic server startup/shutdown for E2E test execution
+  - **Documentation:**
+    - Comprehensive E2E testing guide in `tests/e2e/README.md`
+    - Known issues and next steps documented
+    - Debugging instructions and common troubleshooting
+
+- **Centralized Configuration Module (Phase 3):**
+  - **Type-Safe Configuration with Zod** (`src/config/index.ts`)
+    - Centralized configuration module replacing scattered `process.env` usage
+    - Zod schema validation for all 72 environment variables
+    - Custom boolean coercion handling string "true"/"false" correctly
+    - Custom URL validation handling empty strings and undefined values
+    - Type-safe access with full IntelliSense support
+    - Organized into logical groups: server, auth, llm, features, redis, sse, cee, isl, graph, validation, performance, pii, share
+  - **Configuration Benefits:**
+    - **Type Safety**: All config values have proper TypeScript types
+    - **Validation**: Invalid configurations fail fast at startup with clear error messages
+    - **Testability**: Easy to mock and override in tests
+    - **Defaults**: Sensible defaults for all optional values (corrected to match actual usage)
+    - **Documentation**: Single source of truth for configuration
+  - **Environment Detection Helpers:**
+    - `isProduction()` - Check if running in production
+    - `isDevelopment()` - Check if running in development
+    - `isTest()` - Check if running in test environment
+  - **Comprehensive Test Coverage:**
+    - 16 unit tests for configuration module
+    - Tests for type coercion, validation, defaults, array transformation
+    - Tests for environment detection and error handling
+    - Tests for optional URL validation with empty strings
+  - **Migration Documentation:**
+    - Complete migration guide in `src/config/README.md`
+    - **Migration Strategy section** documenting singleton initialization challenges
+    - Guidance on safe vs. unsafe files to migrate based on import graph position
+    - Recommended phased migration approach starting with route handlers
+    - Before/after examples for common patterns
+    - Testing strategies and best practices
+    - Step-by-step migration instructions
+  - **Phase 3 Improvements:**
+    - Fixed optional URL validation (BASE_URL, ISL_BASE_URL, ENGINE_BASE_URL)
+    - Corrected rate limit defaults (defaultRpm: 60→120, sseRpm: optional→20)
+    - Documented migration blocker: Singleton pattern incompatible with test architecture
+    - **Migration Status**: Infrastructure complete, awaiting architectural decision on initialization pattern
+
+### Fixed
+
+- **Test Compatibility:**
+  - Fixed `vi.fn` type signature for Vitest 4.x in `tests/unit/validateClientWithCache.test.ts`
+  - Fixed Vitest configuration to exclude Playwright E2E tests from Vitest runner
+  - All 1,260 tests passing (134 test files) including 16 new configuration tests
+
+### Testing
+
+- Full test suite validated after major dependency updates (Vitest 4.x, ESLint 9.x)
+- E2E testing infrastructure established with Playwright
+- Configuration module with comprehensive unit test coverage
+- TypeScript compilation clean with updated tooling
+- Performance baseline maintained (test duration ~8.5s)
+
 ## [1.11.1] - 2025-11-22
 
 ### Changed

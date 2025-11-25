@@ -61,4 +61,28 @@ describe("sanitizeDraftGraphInput", () => {
 
     expect(sanitized.focus_areas).toEqual(["structure", "feasibility"]);
   });
+
+  it("preserves refinement fields when present on validated input", () => {
+    const previous_graph = {
+      version: "1",
+      default_seed: 17,
+      nodes: [{ id: "goal_1", kind: "goal", label: "Increase revenue" }],
+      edges: [],
+      meta: { roots: ["goal_1"], leaves: ["goal_1"], suggested_positions: {}, source: "assistant" },
+    } as any;
+
+    const input = makeBaseInput({
+      previous_graph,
+      refinement_mode: "expand",
+      refinement_instructions: "Add missing risks and options.",
+      preserve_nodes: ["goal_1", "keep_this"],
+    });
+
+    const sanitized = sanitizeDraftGraphInput(input) as DraftGraphInputT & Record<string, unknown>;
+
+    expect(sanitized.previous_graph).toEqual(previous_graph);
+    expect(sanitized.refinement_mode).toBe("expand");
+    expect(sanitized.refinement_instructions).toBe("Add missing risks and options.");
+    expect(sanitized.preserve_nodes).toEqual(["goal_1", "keep_this"]);
+  });
 });

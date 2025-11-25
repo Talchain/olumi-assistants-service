@@ -32,6 +32,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
 }));
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   let app: FastifyInstance;
@@ -45,7 +46,9 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-model-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "2");
     vi.stubEnv("CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED", "true");
+    vi.stubEnv("CEE_REFINEMENT_ENABLED", "true");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -175,6 +178,41 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     expect(body.archetype.decision_type).toBe("pricing_decision");
     // With archetype framework enabled and strong pricing signals, match should be exact
     expect(body.archetype.match).toBe("exact");
+  });
+
+  it("accepts refinement fields when refinement flag is enabled", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/draft-graph",
+      headers: headersKey2,
+      payload: {
+        brief: "A sufficiently long decision brief for refinement tests in CEE v1.",
+        previous_graph: {
+          version: "1",
+          default_seed: 17,
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Increase revenue" },
+            { id: "opt_a", kind: "option", label: "Premium pricing" },
+          ],
+          edges: [],
+          meta: { roots: ["goal_1"], leaves: ["opt_a"], suggested_positions: {}, source: "assistant" },
+        },
+        refinement_mode: "expand",
+        refinement_instructions: "Add missing risks and outcomes.",
+        preserve_nodes: ["goal_1"],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    // Core CEEDraftGraphResponseV1 fields still present
+    expect(body.graph).toBeDefined();
+    expect(body.trace).toBeDefined();
+    expect(body.quality).toBeDefined();
+    // Refinement fields are input-only; response shape is unchanged
+    expect(body.previous_graph).toBeUndefined();
+    expect(body.refinement_mode).toBeUndefined();
   });
 
   it("returns CEE_VALIDATION_FAILED for invalid input", async () => {

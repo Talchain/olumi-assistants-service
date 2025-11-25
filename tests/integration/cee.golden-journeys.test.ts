@@ -16,6 +16,7 @@ import {
   type CeeGoldenJourneyFixture,
 } from "../utils/cee-golden-journeys.js";
 import type { CeeJourneyEnvelopes } from "../../sdk/typescript/src/ceeHelpers.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 import {
   buildCeeGoldenJourneySnapshot,
   type CeeGoldenJourneySnapshot,
@@ -134,6 +135,7 @@ describe("CEE golden journeys (fixtures provider)", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-golden-journeys-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "10");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

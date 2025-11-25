@@ -21,6 +21,7 @@ import { build } from "../../src/server.js";
 import { TelemetrySink } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 import {
   loadCeeGoldenJourney,
   CEE_GOLDEN_JOURNEYS,
@@ -98,6 +99,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-golden-telemetry-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "10");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

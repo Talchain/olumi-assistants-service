@@ -20,6 +20,7 @@ import {
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 import {
   buildCeeEngineStatus,
   type CeeEngineStatus,
@@ -34,6 +35,7 @@ describe("CEE hero journey: engine degraded mode", () => {
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-hero-degraded-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "5");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

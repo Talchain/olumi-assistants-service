@@ -10,6 +10,7 @@ vi.stubEnv('LLM_PROVIDER', 'fixtures');
 
 import { build } from '../../src/server.js';
 import type { FastifyInstance } from 'fastify';
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe('POST /assist/v1/bias-check with ISL', () => {
   let app: FastifyInstance;
@@ -17,6 +18,7 @@ describe('POST /assist/v1/bias-check with ISL', () => {
   beforeAll(async () => {
     vi.stubEnv('ASSIST_API_KEYS', 'test-key-isl');
     vi.stubEnv('CEE_BIAS_CHECK_RATE_LIMIT_RPM', '10');
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -26,11 +28,14 @@ describe('POST /assist/v1/bias-check with ISL', () => {
     vi.unstubAllEnvs();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     delete process.env.ISL_BASE_URL;
     delete process.env.ISL_TIMEOUT_MS;
     vi.restoreAllMocks();
+    // Reset config cache so env var changes take effect
+    const { _resetConfigCache } = await import('../../src/config/index.js');
+    _resetConfigCache();
   });
 
   afterEach(() => {
@@ -260,6 +265,9 @@ describe('POST /assist/v1/bias-check with ISL', () => {
   it('should send correct ISL request with evidence nodes', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
     process.env.ISL_BASE_URL = 'http://localhost:8888';
+    // Reset config cache so env var changes take effect
+    const { _resetConfigCache } = await import('../../src/config/index.js');
+    _resetConfigCache();
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("POST /assist/v1/explain-graph (CEE v1)", () => {
   let app: FastifyInstance;
@@ -23,6 +24,7 @@ describe("POST /assist/v1/explain-graph (CEE v1)", () => {
     vi.stubEnv("CEE_EXPLAIN_FEATURE_VERSION", "explain-model-test");
     vi.stubEnv("CEE_EXPLAIN_RATE_LIMIT_RPM", "2");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

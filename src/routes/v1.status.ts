@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getAdapter } from "../adapters/llm/router.js";
 import { getStorageStats } from "../utils/share-storage.js";
 import { SERVICE_VERSION } from "../version.js";
+import { getPerformanceMetrics } from "../plugins/performance-monitoring.js";
 
 // Track service uptime
 const SERVICE_START_TIME = Date.now();
@@ -94,6 +95,19 @@ interface StatusResponse {
     share_review: boolean;
     prompt_cache: boolean;
   };
+
+  // Performance metrics
+  performance: {
+    total_requests: number;
+    slow_requests: number;
+    slow_request_rate: number;
+    top_routes: Array<{
+      route: string;
+      count: number;
+      avg_duration_ms: number;
+      p99_ms: number;
+    }>;
+  };
 }
 
 /**
@@ -131,6 +145,12 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     // Calculate 5xx error rate (true service health metric)
     const errorRate5xx = totalRequests > 0 ? server5xxErrors / totalRequests : 0;
 
+    // Get performance metrics
+    const perfMetrics = getPerformanceMetrics();
+    const slowRequestRate = perfMetrics.totalRequests > 0
+      ? (perfMetrics.slowRequests / perfMetrics.totalRequests) * 100
+      : 0;
+
     const status: StatusResponse = {
       service: "assistants",
       version: SERVICE_VERSION,
@@ -167,6 +187,18 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
         pii_guard: process.env.PII_GUARD_ENABLED === "true",
         share_review: process.env.SHARE_REVIEW_ENABLED === "true",
         prompt_cache: process.env.PROMPT_CACHE_ENABLED === "true",
+      },
+
+      performance: {
+        total_requests: perfMetrics.totalRequests,
+        slow_requests: perfMetrics.slowRequests,
+        slow_request_rate: Math.round(slowRequestRate * 100) / 100, // Percentage with 2 decimals
+        top_routes: perfMetrics.routes.slice(0, 10).map(r => ({
+          route: r.route,
+          count: r.count,
+          avg_duration_ms: Math.round(r.avgDuration * 100) / 100, // 2 decimal places
+          p99_ms: Math.round(r.p99 * 100) / 100, // 2 decimal places
+        })),
       },
     };
 

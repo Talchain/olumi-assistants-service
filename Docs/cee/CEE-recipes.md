@@ -415,3 +415,93 @@ const updated: GraphV1 = applyGraphPatch(storedGraph, incomingPatch);
 These recipes are intentionally minimal; products should extend them with their
 own decision IDs, user identities, and domain-specific metadata while keeping
 CEE data strictly metadata-only.
+
+---
+
+## 11. Recipe: Refinement loop on Draft My Model
+
+**When to use:**
+
+- You already have a validated `Graph` for a decision and want to iteratively
+  improve it instead of drafting from scratch.
+- You want to let users ask for targeted changes ("add more risks", "prune
+  noise") while keeping CEE caps, validation, and telemetry behaviour
+  unchanged.
+
+**Inputs (Draft Graph request):**
+
+- `brief` – as in the standard Draft My Model flow (short description of the
+  decision and what a good model looks like).
+- `previous_graph` – a prior engine-compatible `Graph` to refine.
+- `refinement_mode` – optional enum hint for the refinement strategy:
+  - `"auto"` – let CEE choose a reasonable refinement path.
+  - `"expand"` – bias toward adding more structure (nodes/edges).
+  - `"prune"` – bias toward simplifying or removing low-signal structure.
+  - `"clarify"` – focus on cleaning up ambiguous or underspecified parts.
+- `refinement_instructions` – optional natural-language instructions for how to
+  refine the existing graph (for example, "Add more downside risks and
+  outcomes" or "Clarify the causal chain between decision and outcome"). These
+  instructions are treated as part of the draft prompt and are never logged or
+  emitted in telemetry.
+- `preserve_nodes` – optional list of node IDs that should be preserved during
+  refinement. CEE will avoid removing or renaming these nodes when applying
+  structural changes.
+
+All refinement fields are **optional** and only take effect when
+`CEE_REFINEMENT_ENABLED=true` on the server. When the feature flag is disabled,
+CEE safely ignores the refinement fields and treats the request as a
+"draft-from-scratch" call.
+
+**Pattern:**
+
+1. Start from a canonical graph that already passed engine validation (for
+   example, a previously persisted `Graph` coming back from CEE).
+2. Let the user express how they want to refine it:
+   - Light-touch: set `refinement_mode: "auto"` and skip
+     `refinement_instructions` / `preserve_nodes`.
+   - Targeted: combine `refinement_mode` with a short
+     `refinement_instructions` string.
+   - Conservative: add a small `preserve_nodes` list for key nodes that should
+     not be removed or renamed.
+3. Build a `CEEDraftGraphRequestV1` like:
+
+   ```ts
+   const body: CEEDraftGraphRequestV1 = {
+     brief: "Refine the existing pricing decision model.",
+     previous_graph: existingGraph,
+     refinement_mode: "expand",
+     refinement_instructions: "Add more downside risks and outcomes.",
+     preserve_nodes: ["goal_main", "decision_price_tier"],
+   };
+
+   const draft = await cee.draftGraph(body);
+   ```
+
+4. Treat the resulting `draft.graph` exactly like a normal Draft My Model
+   response:
+   - It still passes through the engine validation and repair pipeline.
+   - CEE still applies the usual caps and cost guards.
+   - You can feed it into the rest of the CEE journey (`options`, `evidence`,
+     `bias`, etc.) or persist it as the next canonical graph.
+
+**Behaviour and safety notes:**
+
+- Refinement only changes how the upstream prompt is constructed; it does **not
+  bypass** engine validation or CEE finalisation.
+- `previous_graph` is used as structured context when building the internal
+  refinement prompt. The final `draft.graph` still goes through the same
+  `validateGraph` / DAG normalisation and CEE response guards as a
+  draft-from-scratch request.
+- When `preserve_nodes` is provided, CEE will avoid removing or renaming those
+  nodes during refinement, but it may still:
+  - Add new nodes/edges around them.
+  - Update other parts of the graph that are not preserved.
+- You remain responsible for choosing which graph becomes the new canonical
+  version in your own product. A common pattern is:
+  - Show the refined graph and CEE `DecisionStorySummary` / `CeeJourneySummary`
+    to the user.
+  - Let them explicitly accept it before persisting as the new baseline.
+
+This refinement pattern keeps the core invariant that **all graphs exposed to
+users still pass through the engine validation pipeline** while giving products
+a simple, typed way to request iterative improvements.

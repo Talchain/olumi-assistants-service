@@ -19,6 +19,7 @@ import {
   type CeeDecisionReviewPayload,
 } from "../../sdk/typescript/src/ceeHelpers.js";
 import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("CEE hero journey: options + team disagreement with low evidence", () => {
   let app: FastifyInstance;
@@ -32,6 +33,7 @@ describe("CEE hero journey: options + team disagreement with low evidence", () =
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-disagreement-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

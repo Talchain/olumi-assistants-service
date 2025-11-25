@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
 import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("GET /assist/v1/decision-review/example (enabled)", () => {
   let app: FastifyInstance;
@@ -13,6 +14,7 @@ describe("GET /assist/v1/decision-review/example (enabled)", () => {
     vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("CEE_DECISION_REVIEW_EXAMPLE_ENABLED", "true");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -121,6 +123,7 @@ describe("GET /assist/v1/decision-review/example (disabled)", () => {
     // Do not enable the example endpoint; it should not be registered.
     vi.stubEnv("CEE_DECISION_REVIEW_EXAMPLE_ENABLED", "false");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

@@ -7,6 +7,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -72,7 +73,7 @@ function checkCeeDraftLimit(key: string, limit: number): { allowed: boolean; ret
 
 export default async function route(app: FastifyInstance) {
   const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
-  const FEATURE_VERSION = process.env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0";
+  const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
   app.post("/assist/v1/draft-graph", async (req, reply) => {
     const start = Date.now();

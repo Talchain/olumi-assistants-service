@@ -122,6 +122,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // v1.11 SSE degraded mode events
         SseDegradedMode: "assist.sse.degraded_mode",
+
+        // ISL config events (v1.13.0)
+        IslConfigInvalidTimeout: "isl.config.invalid_timeout",
+        IslConfigInvalidMaxRetries: "isl.config.invalid_max_retries",
+        IslConfigTimeoutClamped: "isl.config.timeout_clamped",
+        IslConfigRetriesClamped: "isl.config.retries_clamped",
+
         // CEE v1 Draft My Model events (v1.12.0)
         CeeDraftGraphRequested: "cee.draft_graph.requested",
         CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
@@ -181,7 +188,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.|isl\.config\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -395,9 +402,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       );
 
       // Stage events are debug-only and intentionally have no Datadog mappings
+      // ISL config events are logged locally and don't need Datadog counters
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
         TelemetryEvents.CostCalculationUnknownModel,
+        TelemetryEvents.IslConfigInvalidTimeout,
+        TelemetryEvents.IslConfigInvalidMaxRetries,
+        TelemetryEvents.IslConfigTimeoutClamped,
+        TelemetryEvents.IslConfigRetriesClamped,
       ];
 
       for (const event of allEvents) {
@@ -481,6 +493,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // v1.11 SSE degraded mode events
         "assist.sse.degraded_mode",
+
+        // ISL config events (v1.13.0)
+        "isl.config.invalid_timeout",
+        "isl.config.invalid_max_retries",
+        "isl.config.timeout_clamped",
+        "isl.config.retries_clamped",
 
         // CEE v1 Draft My Model events
         "cee.draft_graph.requested",

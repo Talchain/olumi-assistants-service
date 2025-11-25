@@ -26,6 +26,11 @@ import {
   classifyCeeQuality,
   type CeeQualityBand,
   buildCeeBiasStructureSnapshot,
+  buildCeeCausalValidationStats,
+  buildCeeDecisionHealthSnapshot,
+  type CeeCausalValidationStats,
+  type CeeCausalCoverageLevel,
+  type CeeDecisionHealthSnapshot,
 } from "./ceeHelpers.js";
 import { OlumiAPIError, OlumiNetworkError } from "./errors.js";
 import type {
@@ -853,6 +858,146 @@ describe("ceeHelpers", () => {
 
     const serialized = JSON.stringify(snapshot).toLowerCase();
     expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
+  });
+
+  it("builds causal validation stats from bias findings metadata", () => {
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-causal", correlation_id: "r-causal", engine: {} },
+      quality: { overall: 6 } as any,
+      bias_findings: [
+        {
+          id: "f1",
+          category: "selection",
+          severity: "high",
+          code: "SELECTION_LOW_OPTION_COUNT",
+          causal_validation: {
+            identifiable: true,
+            strength: 0.8,
+            confidence: "high",
+          },
+          evidence_strength: [
+            { causal_support: "strong" },
+            { causal_support: "moderate" },
+          ],
+        } as any,
+        {
+          id: "f2",
+          category: "other",
+          severity: "medium",
+          code: "CONFIRMATION_BIAS",
+          causal_validation: {
+            identifiable: false,
+            strength: 0.4,
+            confidence: "medium",
+          },
+          evidence_strength: [{ causal_support: "weak" }],
+        } as any,
+        {
+          id: "f3",
+          category: "other",
+          severity: "low",
+          code: "SUNK_COST",
+          // No causal_validation block; ensures helper skips it safely.
+          evidence_strength: [{ causal_support: "none" }],
+        } as any,
+      ],
+    } as any;
+
+    const stats: CeeCausalValidationStats | null = buildCeeCausalValidationStats({ bias });
+
+    expect(stats).not.toBeNull();
+    expect(stats?.total_bias_findings).toBe(3);
+    expect(stats?.validated_biases).toBe(2);
+    expect(stats?.identifiable_biases).toBe(1);
+    expect(stats?.non_identifiable_biases).toBe(1);
+    expect(stats?.avg_strength).toBeCloseTo((0.8 + 0.4) / 2);
+
+    expect(stats?.by_confidence.high).toBe(1);
+    expect(stats?.by_confidence.medium).toBe(1);
+
+    expect(stats?.evidence_support.strong).toBe(1);
+    expect(stats?.evidence_support.moderate).toBe(1);
+    expect(stats?.evidence_support.weak).toBe(1);
+    expect(stats?.evidence_support.none).toBe(1);
+  });
+
+  it("returns null causal stats when no validated metadata is present", () => {
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-causal-empty", correlation_id: "r-causal-empty", engine: {} },
+      quality: { overall: 5 } as any,
+      bias_findings: [
+        {
+          id: "f1",
+          category: "selection",
+          severity: "high",
+          code: "SELECTION_LOW_OPTION_COUNT",
+          // No causal_validation or evidence_strength blocks.
+        } as any,
+      ],
+    } as any;
+
+    const stats: CeeCausalValidationStats | null = buildCeeCausalValidationStats({ bias });
+    expect(stats).toBeNull();
+  });
+
+  it("builds a combined decision health snapshot from bias and causal metadata", () => {
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-health", correlation_id: "r-health", engine: {} },
+      quality: { overall: 6 } as any,
+      bias_findings: [
+        {
+          id: "f1",
+          category: "selection",
+          severity: "high",
+          code: "SELECTION_LOW_OPTION_COUNT",
+          causal_validation: {
+            identifiable: true,
+            strength: 0.9,
+            confidence: "high",
+          },
+          evidence_strength: [{ causal_support: "strong" }],
+        } as any,
+        {
+          id: "f2",
+          category: "other",
+          severity: "medium",
+          code: "CONFIRMATION_BIAS",
+          causal_validation: {
+            identifiable: false,
+            strength: 0.5,
+            confidence: "medium",
+          },
+          evidence_strength: [{ causal_support: "weak" }],
+        } as any,
+      ],
+    } as any;
+
+    const snapshot: CeeDecisionHealthSnapshot = buildCeeDecisionHealthSnapshot({ bias });
+
+    expect(snapshot.bias_structure).not.toBeNull();
+    expect(snapshot.bias_structure?.bias?.total_findings).toBe(2);
+
+    expect(snapshot.causal_validation).not.toBeNull();
+    expect(snapshot.causal_validation?.total_bias_findings).toBe(2);
+    expect(snapshot.causal_validation?.validated_biases).toBe(2);
+
+    expect(snapshot.has_bias_findings).toBe(true);
+    expect(snapshot.has_causal_validation).toBe(true);
+    expect(snapshot.causal_coverage).toBe<CeeCausalCoverageLevel>("full");
+  });
+
+  it("handles missing bias findings or causal stats defensively in decision health snapshot", () => {
+    const biasEmpty: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-health-empty", correlation_id: "r-health-empty", engine: {} },
+      quality: { overall: 5 } as any,
+      bias_findings: [],
+    } as any;
+
+    const snapshotEmpty: CeeDecisionHealthSnapshot = buildCeeDecisionHealthSnapshot({ bias: biasEmpty });
+
+    expect(snapshotEmpty.has_bias_findings).toBe(false);
+    expect(snapshotEmpty.has_causal_validation).toBe(false);
+    expect(snapshotEmpty.causal_coverage).toBeUndefined();
   });
 
   it("derives UI flags for a healthy, complete journey", () => {

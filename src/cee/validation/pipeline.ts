@@ -19,6 +19,7 @@ import {
 } from "../config/limits.js";
 import { detectStructuralWarnings, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
+import { config } from "../../config/index.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -87,19 +88,11 @@ function applyResponseCaps(payload: any): { cappedPayload: any; limits: Response
 }
 
 function archetypesEnabled(): boolean {
-  const flag = process.env.CEE_DRAFT_ARCHETYPES_ENABLED;
-  if (flag === undefined) {
-    return true;
-  }
-  return flag === "true" || flag === "1";
+  return config.cee.draftArchetypesEnabled;
 }
 
 function structuralWarningsEnabled(): boolean {
-  const flag = process.env.CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === "true" || flag === "1";
+  return config.cee.draftStructuralWarningsEnabled;
 }
 
 export function buildCeeErrorResponse(

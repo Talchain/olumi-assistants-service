@@ -147,11 +147,9 @@ export async function enrichBiasFindings(
 ): Promise<CEEBiasFindingWithCausalValidation[]> {
   // Early return if feature disabled
   if (!causalValidationEnabled()) {
-    const flagValue = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     logger.debug({
       event: 'cee.bias.causal_validation.disabled',
-      reason: flagValue === undefined ? 'not_configured' : 'disabled',
-      flag_value: flagValue,
+      reason: 'feature_disabled',
     });
     return biasFindings as CEEBiasFindingWithCausalValidation[];
   }

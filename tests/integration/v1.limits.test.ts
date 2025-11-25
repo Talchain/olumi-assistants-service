@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 /**
  * /v1/limits Integration Tests
@@ -19,6 +20,7 @@ describe("GET /v1/limits", () => {
     vi.stubEnv("RATE_LIMIT_RPM", "120");
     vi.stubEnv("SSE_RATE_LIMIT_RPM", "20");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

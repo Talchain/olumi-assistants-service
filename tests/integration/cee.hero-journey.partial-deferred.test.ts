@@ -19,6 +19,7 @@ import type { FastifyInstance } from "fastify";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 import {
   buildCeeDecisionReviewPayload,
   type CeeDecisionReviewPayload,
@@ -38,6 +39,7 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-partial-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

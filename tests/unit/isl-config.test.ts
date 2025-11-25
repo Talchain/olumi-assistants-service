@@ -5,27 +5,30 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  parseTimeout,
-  parseMaxRetries,
-  causalValidationEnabled,
-  getISLConfig,
-} from '../../src/adapters/isl/config.js';
+// Only import pure helper functions statically - config-dependent functions use dynamic imports
+import { parseTimeout, parseMaxRetries } from '../../src/adapters/isl/config.js';
 import { logger } from '../../src/utils/simple-logger.js';
 
 describe('ISL config helpers', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     vi.unstubAllEnvs();
     delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     delete process.env.ISL_BASE_URL;
     delete process.env.ISL_TIMEOUT_MS;
     delete process.env.ISL_MAX_RETRIES;
+    delete process.env.BASE_URL;
     vi.restoreAllMocks();
+    // Reset config cache AFTER vi.resetModules, using dynamic import
+    const { _resetConfigCache: resetCache } = await import('../../src/config/index.js');
+    resetCache();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    const { _resetConfigCache: resetCache } = await import('../../src/config/index.js');
+    resetCache();
   });
 
   describe('parseTimeout', () => {
@@ -78,31 +81,40 @@ describe('ISL config helpers', () => {
   });
 
   describe('causalValidationEnabled', () => {
-    it('returns false when flag is undefined', () => {
-      delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
-      expect(causalValidationEnabled()).toBe(false);
+    it('returns false when flag is undefined', async () => {
+      const { causalValidationEnabled: isEnabled } = await import('../../src/adapters/isl/config.js');
+      expect(isEnabled()).toBe(false);
     });
 
-    it('accepts "true" and "1" as enabled values', () => {
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', 'true');
-      expect(causalValidationEnabled()).toBe(true);
-
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', '1');
-      expect(causalValidationEnabled()).toBe(true);
+    it('accepts "true" as enabled value', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
+      const { causalValidationEnabled: isEnabled } = await import('../../src/adapters/isl/config.js');
+      expect(isEnabled()).toBe(true);
     });
 
-    it('treats "false" and "0" as disabled', () => {
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', 'false');
-      expect(causalValidationEnabled()).toBe(false);
+    it('accepts "1" as enabled value', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = '1';
+      const { causalValidationEnabled: isEnabled } = await import('../../src/adapters/isl/config.js');
+      expect(isEnabled()).toBe(true);
+    });
 
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', '0');
-      expect(causalValidationEnabled()).toBe(false);
+    it('treats "false" as disabled', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'false';
+      const { causalValidationEnabled: isEnabled } = await import('../../src/adapters/isl/config.js');
+      expect(isEnabled()).toBe(false);
+    });
+
+    it('treats "0" as disabled', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = '0';
+      const { causalValidationEnabled: isEnabled } = await import('../../src/adapters/isl/config.js');
+      expect(isEnabled()).toBe(false);
     });
   });
 
   describe('getISLConfig', () => {
-    it('returns defaults when ISL is not configured', () => {
-      const cfg = getISLConfig();
+    it('returns defaults when ISL is not configured', async () => {
+      const { getISLConfig: getConfig } = await import('../../src/adapters/isl/config.js');
+      const cfg = getConfig();
 
       expect(cfg.enabled).toBe(false);
       expect(cfg.configured).toBe(false);
@@ -111,13 +123,14 @@ describe('ISL config helpers', () => {
       expect(cfg.maxRetries).toBe(1);
     });
 
-    it('reflects base URL and enabled flag when configured', () => {
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', '1');
-      vi.stubEnv('ISL_BASE_URL', 'http://localhost:8888');
-      vi.stubEnv('ISL_TIMEOUT_MS', '8000');
-      vi.stubEnv('ISL_MAX_RETRIES', '3');
+    it('reflects base URL and enabled flag when configured', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = '1';
+      process.env.ISL_BASE_URL = 'http://localhost:8888';
+      process.env.ISL_TIMEOUT_MS = '8000';
+      process.env.ISL_MAX_RETRIES = '3';
 
-      const cfg = getISLConfig();
+      const { getISLConfig: getConfig } = await import('../../src/adapters/isl/config.js');
+      const cfg = getConfig();
 
       expect(cfg.enabled).toBe(true);
       expect(cfg.configured).toBe(true);
@@ -126,13 +139,14 @@ describe('ISL config helpers', () => {
       expect(cfg.maxRetries).toBe(3);
     });
 
-    it('applies clamping and defaults for invalid timeout and retries', () => {
-      vi.stubEnv('CEE_CAUSAL_VALIDATION_ENABLED', 'true');
-      vi.stubEnv('ISL_BASE_URL', 'http://localhost:8888');
-      vi.stubEnv('ISL_TIMEOUT_MS', '999999'); // too large -> clamp to 30000
-      vi.stubEnv('ISL_MAX_RETRIES', '-1');    // negative -> fallback to default 1
+    it('applies clamping and defaults for invalid timeout and retries', async () => {
+      process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
+      process.env.ISL_BASE_URL = 'http://localhost:8888';
+      process.env.ISL_TIMEOUT_MS = '999999'; // too large -> clamp to 30000
+      process.env.ISL_MAX_RETRIES = '-1';    // negative -> fallback to default 1
 
-      const cfg = getISLConfig();
+      const { getISLConfig: getConfig } = await import('../../src/adapters/isl/config.js');
+      const cfg = getConfig();
 
       expect(cfg.enabled).toBe(true);
       expect(cfg.configured).toBe(true);

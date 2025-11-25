@@ -11,6 +11,7 @@ import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { enrichBiasFindings } from "../cee/bias/causal-enrichment.js";
+import { config } from "../config/index.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -75,7 +76,7 @@ function checkCeeBiasLimit(key: string, limit: number): { allowed: boolean; retr
 
 export default async function route(app: FastifyInstance) {
   const BIAS_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_BIAS_CHECK_RATE_LIMIT_RPM");
-  const FEATURE_VERSION = process.env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0";
+  const FEATURE_VERSION = config.cee.biasCheckFeatureVersion || "bias-check-1.0.0";
 
   app.post("/assist/v1/bias-check", async (req, reply) => {
     const start = Date.now();

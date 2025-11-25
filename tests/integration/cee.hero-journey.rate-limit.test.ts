@@ -14,6 +14,7 @@ import type { FastifyInstance } from "fastify";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 import {
   buildCeeJourneySummary,
   type CeeJourneySummary,
@@ -32,6 +33,7 @@ describe("CEE hero journey: mid-journey evidence rate limit", () => {
     // Set a low per-feature rate limit so the second evidence call hits CEE_RATE_LIMIT
     vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "1");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

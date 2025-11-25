@@ -14,6 +14,7 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
 import { buildDecisionStorySummary } from "../../sdk/typescript/src/ceeHelpers.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("CEE hero journey: draft → options → evidence → bias → team", () => {
   let app: FastifyInstance;
@@ -31,6 +32,7 @@ describe("CEE hero journey: draft → options → evidence → bias → team", (
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-hero-test");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

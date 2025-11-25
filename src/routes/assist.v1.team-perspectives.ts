@@ -10,6 +10,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
 
 type CEETeamPerspectivesResponseV1 = components["schemas"]["CEETeamPerspectivesResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -76,7 +77,7 @@ function checkCeeTeamLimit(
 export default async function route(app: FastifyInstance) {
   const TEAM_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM");
   const FEATURE_VERSION =
-    process.env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0";
+    config.cee.teamPerspectivesFeatureVersion || "team-perspectives-1.0.0";
 
   app.post("/assist/v1/team-perspectives", async (req, reply) => {
     const start = Date.now();

@@ -7,10 +7,35 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { enrichBiasFindings, __resetIslCircuitBreakerForTests } from '../../src/cee/bias/causal-enrichment.js';
 import type { components } from '../../src/generated/openapi.d.ts';
 import type { GraphV1 } from '../../src/contracts/plot/engine.js';
-import { logger } from '../../src/utils/simple-logger.js';
+import { cleanBaseUrl } from '../helpers/env-setup.js';
+
+// Mock logger globally so it works with vi.resetModules()
+// Use explicit type to avoid implicit any
+interface MockLogger {
+  debug: ReturnType<typeof vi.fn>;
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+  fatal: ReturnType<typeof vi.fn>;
+  trace: ReturnType<typeof vi.fn>;
+  child: ReturnType<typeof vi.fn>;
+}
+
+const mockLogger: MockLogger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  fatal: vi.fn(),
+  trace: vi.fn(),
+  child: vi.fn(),
+};
+
+vi.mock('../../src/utils/simple-logger.js', () => ({
+  logger: mockLogger,
+}));
 
 type CEEBiasFindingV1 = components['schemas']['CEEBiasFindingV1'];
 
@@ -22,20 +47,43 @@ const CIRCUIT_BREAKER_RESET_MS = 60000; // 60 seconds
 // Module-level time that persists across tests to handle persistent circuit breaker state
 let mockTime = 1000000000000;
 
+// Dynamic import references for config-dependent functions
+let enrichBiasFindings: typeof import('../../src/cee/bias/causal-enrichment.js').enrichBiasFindings;
+let __resetIslCircuitBreakerForTests: typeof import('../../src/cee/bias/causal-enrichment.js').__resetIslCircuitBreakerForTests;
+
 describe('ISL Circuit Breaker', () => {
   let mockGraph: GraphV1;
   let mockFindings: CEEBiasFindingV1[];
   let realDateNow: typeof Date.now;
 
   beforeEach(async () => {
-    __resetIslCircuitBreakerForTests();
+    // Reset modules and config cache for clean env var state
+    vi.resetModules();
+    cleanBaseUrl();
 
-    // Save real Date.now
+    // Save real Date.now before spying
     realDateNow = Date.now;
 
     // Advance time past any potential circuit breaker pause from previous tests
     // This ensures circuit breaker is in clean state
     mockTime += CIRCUIT_BREAKER_PAUSE_MS + 10000;
+
+    // Enable feature flag and configure ISL BEFORE importing config-dependent modules
+    process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
+    process.env.ISL_BASE_URL = 'http://localhost:8080';
+    process.env.ISL_TIMEOUT_MS = '5000';
+    process.env.ISL_MAX_RETRIES = '0'; // No retries for circuit breaker tests
+
+    // Reset config cache and dynamically import config-dependent functions
+    const { _resetConfigCache } = await import('../../src/config/index.js');
+    _resetConfigCache();
+
+    const causalEnrichment = await import('../../src/cee/bias/causal-enrichment.js');
+    enrichBiasFindings = causalEnrichment.enrichBiasFindings;
+    __resetIslCircuitBreakerForTests = causalEnrichment.__resetIslCircuitBreakerForTests;
+
+    // Reset circuit breaker state
+    __resetIslCircuitBreakerForTests();
 
     // Mock time control
     vi.spyOn(Date, 'now').mockImplementation(() => mockTime);
@@ -45,12 +93,6 @@ describe('ISL Circuit Breaker', () => {
     (global as any).setMockTime = (timestamp: number) => {
       mockTime = timestamp;
     };
-
-    // Enable feature flag and configure ISL
-    process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
-    process.env.ISL_BASE_URL = 'http://localhost:8080';
-    process.env.ISL_TIMEOUT_MS = '5000';
-    process.env.ISL_MAX_RETRIES = '0'; // No retries for circuit breaker tests
 
     // Setup test fixtures
     mockGraph = {
@@ -84,11 +126,11 @@ describe('ISL Circuit Breaker', () => {
       } as CEEBiasFindingV1,
     ];
 
-    // Mock logger to suppress output and track events
-    vi.spyOn(logger, 'debug').mockImplementation(() => {});
-    vi.spyOn(logger, 'info').mockImplementation(() => {});
-    vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    vi.spyOn(logger, 'error').mockImplementation(() => {});
+    // Clear mock logger calls from previous test/setup
+    mockLogger.debug.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
 
     // Mock a successful fetch to ensure circuit breaker closes if it was open
     global.fetch = vi.fn().mockResolvedValue({
@@ -132,13 +174,13 @@ describe('ISL Circuit Breaker', () => {
 
     // First failure
     await enrichBiasFindings(mockGraph, mockFindings);
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
     // Second failure
     await enrichBiasFindings(mockGraph, mockFindings);
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
@@ -146,7 +188,7 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit breaker opened event logged
-    const openedLog = (logger.warn as any).mock.calls.find(
+    const openedLog = mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
@@ -168,12 +210,12 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit opened
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeDefined();
 
     // Clear mock calls
-    (logger.warn as any).mockClear();
+    mockLogger.warn.mockClear();
     (global.fetch as any).mockClear();
 
     // Advance time by 30 seconds (still within 90s pause)
@@ -186,7 +228,7 @@ describe('ISL Circuit Breaker', () => {
     expect(fetch).not.toHaveBeenCalled();
 
     // Verify circuit_open event logged
-    const circuitOpenLog = (logger.warn as any).mock.calls.find(
+    const circuitOpenLog = mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.circuit_open'
     );
     expect(circuitOpenLog).toBeDefined();
@@ -210,13 +252,13 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit opened
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeDefined();
 
     // Clear logger mocks
-    (logger.info as any).mockClear();
-    (logger.warn as any).mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
 
     // Advance time past pause window (90+ seconds)
     (global as any).advanceTime(CIRCUIT_BREAKER_PAUSE_MS + 1000);
@@ -244,7 +286,7 @@ describe('ISL Circuit Breaker', () => {
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit closed event logged
-    const closedLog = (logger.info as any).mock.calls.find(
+    const closedLog = mockLogger.info.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.closed'
     );
     expect(closedLog).toBeDefined();
@@ -265,7 +307,7 @@ describe('ISL Circuit Breaker', () => {
     });
 
     // Verify success event logged
-    const successLog = (logger.info as any).mock.calls.find(
+    const successLog = mockLogger.info.mock.calls.find(
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.success'
     );
     expect(successLog).toBeDefined();
@@ -303,16 +345,16 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit not opened yet
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
     // Third call succeeds
-    (logger.info as any).mockClear();
+    mockLogger.info.mockClear();
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit breaker reset event logged
-    const resetLog = (logger.info as any).mock.calls.find(
+    const resetLog = mockLogger.info.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.reset'
     );
     expect(resetLog).toBeDefined();
@@ -325,7 +367,7 @@ describe('ISL Circuit Breaker', () => {
     expect(result[0]).toHaveProperty('causal_validation');
 
     // Verify success logged
-    const successLog = (logger.info as any).mock.calls.find(
+    const successLog = mockLogger.info.mock.calls.find(
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.success'
     );
     expect(successLog).toBeDefined();
@@ -334,20 +376,20 @@ describe('ISL Circuit Breaker', () => {
     callCount = 0; // Reset for new failure sequence
     global.fetch = vi.fn().mockRejectedValue(new Error('Connection refused'));
 
-    (logger.warn as any).mockClear();
+    mockLogger.warn.mockClear();
 
     await enrichBiasFindings(mockGraph, mockFindings);
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Circuit should not be open yet after 2 failures
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Circuit should open after 3rd failure
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeDefined();
   });
@@ -361,7 +403,7 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit not opened
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
@@ -369,13 +411,13 @@ describe('ISL Circuit Breaker', () => {
     (global as any).advanceTime(CIRCUIT_BREAKER_RESET_MS + 1000);
 
     // Clear logger mocks
-    (logger.warn as any).mockClear();
+    mockLogger.warn.mockClear();
 
     // Trigger another failure
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Circuit should NOT open (counter was reset, this is only the 1st failure)
-    expect((logger.warn as any).mock.calls.find(
+    expect(mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     )).toBeUndefined();
 
@@ -384,7 +426,7 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Now circuit should open (3 consecutive failures)
-    const openedLog = (logger.warn as any).mock.calls.find(
+    const openedLog = mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
@@ -430,13 +472,13 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit opened
-    const openedLog = (logger.warn as any).mock.calls.find(
+    const openedLog = mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
 
     // Verify timeout events logged
-    const timeoutLogs = (logger.warn as any).mock.calls.filter(
+    const timeoutLogs = mockLogger.warn.mock.calls.filter(
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.timeout'
     );
     expect(timeoutLogs).toHaveLength(3);
@@ -461,13 +503,13 @@ describe('ISL Circuit Breaker', () => {
     await enrichBiasFindings(mockGraph, mockFindings);
 
     // Verify circuit opened
-    const openedLog = (logger.warn as any).mock.calls.find(
+    const openedLog = mockLogger.warn.mock.calls.find(
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
 
     // Verify error events logged
-    const errorLogs = (logger.warn as any).mock.calls.filter(
+    const errorLogs = mockLogger.warn.mock.calls.filter(
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.error'
     );
     expect(errorLogs).toHaveLength(3);

@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 // Mock dotenv/config to prevent loading .env file during tests
 vi.mock("dotenv/config", () => ({}));
@@ -30,6 +31,8 @@ describe("Legacy SSE Flag", () => {
       // Disable auth for tests
       delete process.env.ASSIST_API_KEY;
       delete process.env.ASSIST_API_KEYS;
+      // Ensure BASE_URL is either unset or valid for config validation
+      cleanBaseUrl();
 
       // Build server once per test
       const { build } = await import("../../src/server.js");
@@ -112,6 +115,8 @@ describe("Legacy SSE Flag", () => {
       // Disable auth for tests
       delete process.env.ASSIST_API_KEY;
       delete process.env.ASSIST_API_KEYS;
+      // Ensure BASE_URL is either unset or valid for config validation
+      cleanBaseUrl();
 
       // Build server once per test
       const { build } = await import("../../src/server.js");
@@ -172,6 +177,8 @@ describe("Legacy SSE Flag", () => {
       // Disable auth for tests
       delete process.env.ASSIST_API_KEY;
       delete process.env.ASSIST_API_KEYS;
+      // Ensure BASE_URL is either unset or valid for config validation
+      cleanBaseUrl();
 
       // Build server once per test
       const { build } = await import("../../src/server.js");

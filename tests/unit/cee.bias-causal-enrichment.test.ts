@@ -5,39 +5,50 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { enrichBiasFindings } from '../../src/cee/bias/causal-enrichment.js';
-import { causalValidationEnabled } from '../../src/adapters/isl/config.js';
+import { _resetConfigCache } from '../../src/config/index.js';
 import type { components } from '../../src/generated/openapi.d.ts';
 import type { GraphV1 } from '../../src/contracts/plot/engine.js';
 
 type CEEBiasFindingV1 = components['schemas']['CEEBiasFindingV1'];
 
 describe('causalValidationEnabled', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    _resetConfigCache();
     delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
+    delete process.env.BASE_URL;
   });
 
-  it('should return false when flag is undefined', () => {
+  afterEach(() => {
+    _resetConfigCache();
+  });
+
+  it('should return false when flag is undefined', async () => {
+    const { causalValidationEnabled } = await import('../../src/adapters/isl/config.js');
     expect(causalValidationEnabled()).toBe(false);
   });
 
-  it('should return true when flag is "true"', () => {
+  it('should return true when flag is "true"', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
+    const { causalValidationEnabled } = await import('../../src/adapters/isl/config.js');
     expect(causalValidationEnabled()).toBe(true);
   });
 
-  it('should return true when flag is "1"', () => {
+  it('should return true when flag is "1"', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = '1';
+    const { causalValidationEnabled } = await import('../../src/adapters/isl/config.js');
     expect(causalValidationEnabled()).toBe(true);
   });
 
-  it('should return false when flag is "false"', () => {
+  it('should return false when flag is "false"', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'false';
+    const { causalValidationEnabled } = await import('../../src/adapters/isl/config.js');
     expect(causalValidationEnabled()).toBe(false);
   });
 
-  it('should return false when flag is "0"', () => {
+  it('should return false when flag is "0"', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = '0';
+    const { causalValidationEnabled } = await import('../../src/adapters/isl/config.js');
     expect(causalValidationEnabled()).toBe(false);
   });
 });
@@ -47,8 +58,11 @@ describe('enrichBiasFindings', () => {
   let mockFindings: CEEBiasFindingV1[];
 
   beforeEach(() => {
+    vi.resetModules();
+    _resetConfigCache();
     delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     delete process.env.ISL_BASE_URL;
+    delete process.env.BASE_URL;
 
     mockGraph = {
       version: '1',
@@ -91,6 +105,7 @@ describe('enrichBiasFindings', () => {
   it('should return unenriched findings when feature flag is disabled', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'false';
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     expect(result).toEqual(mockFindings);
@@ -102,6 +117,7 @@ describe('enrichBiasFindings', () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
     process.env.ISL_BASE_URL = 'http://localhost:8080';
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, []);
 
     expect(result).toEqual([]);
@@ -111,6 +127,7 @@ describe('enrichBiasFindings', () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
     // ISL_BASE_URL not set
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     expect(result).toEqual(mockFindings);
@@ -157,6 +174,7 @@ describe('enrichBiasFindings', () => {
       }),
     });
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     expect(result).toHaveLength(1);
@@ -189,6 +207,7 @@ describe('enrichBiasFindings', () => {
       }),
     });
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, findingsWithoutCode);
 
     expect(result).toEqual(findingsWithoutCode);
@@ -213,6 +232,7 @@ describe('enrichBiasFindings', () => {
       });
     });
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     // Should return unenriched findings on timeout (graceful degradation)
@@ -235,6 +255,7 @@ describe('enrichBiasFindings', () => {
       }),
     });
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     const result = await enrichBiasFindings(mockGraph, mockFindings);
 
     // Should return unenriched findings on error (graceful degradation)
@@ -275,6 +296,7 @@ describe('enrichBiasFindings', () => {
       }),
     });
 
+    const { enrichBiasFindings } = await import('../../src/cee/bias/causal-enrichment.js');
     await enrichBiasFindings(graphWithMultipleEvidenceTypes, mockFindings);
 
     const fetchCall = (fetch as any).mock.calls[0];

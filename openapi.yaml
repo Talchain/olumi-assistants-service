@@ -934,6 +934,38 @@ components:
           type: boolean
           description: Include debug information in response
           default: false
+        previous_graph:
+          $ref: '#/components/schemas/Graph'
+          description: |
+            Optional previous graph to refine instead of drafting from scratch.
+
+            When `CEE_REFINEMENT_ENABLED=true` and this field is provided, CEE
+            will treat the request as a refinement of the existing graph. The
+            server may apply additional caps and summarisation when building the
+            internal refinement prompt.
+        refinement_mode:
+          type: string
+          description: Optional refinement strategy hint for the draft pipeline
+          enum: [auto, expand, prune, clarify]
+        refinement_instructions:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: |
+            Optional natural language instructions for how to refine the
+            existing graph (e.g. "Add more risks and outcomes"). These
+            instructions are treated as part of the draft prompt and are never
+            logged or emitted in telemetry.
+        preserve_nodes:
+          type: array
+          maxItems: 50
+          description: |
+            Optional list of node IDs that should be preserved during
+            refinement. CEE will avoid removing or renaming these nodes when
+            applying structural changes.
+          items:
+            type: string
+            minLength: 1
       additionalProperties: false
 
     Attachment:

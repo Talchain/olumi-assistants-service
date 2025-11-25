@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("GET /v1/status", () => {
   let app: FastifyInstance;
@@ -22,6 +23,7 @@ describe("GET /v1/status", () => {
     vi.stubEnv("PROMPT_CACHE_TTL_MS", "60000");
     vi.stubEnv("SHARE_REVIEW_ENABLED", "true");
 
+    cleanBaseUrl();
     app = await build();
   });
 

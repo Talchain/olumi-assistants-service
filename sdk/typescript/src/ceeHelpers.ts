@@ -1092,3 +1092,165 @@ export function buildCeeBiasStructureSnapshot(
     bias,
   };
 }
+
+export interface CeeCausalValidationStats {
+  total_bias_findings: number;
+  validated_biases: number;
+  identifiable_biases: number;
+  non_identifiable_biases: number;
+  avg_strength?: number;
+  by_confidence: Record<string, number>;
+  evidence_support: {
+    none: number;
+    weak: number;
+    moderate: number;
+    strong: number;
+  };
+}
+
+export function buildCeeCausalValidationStats(
+  envelopes: CeeJourneyEnvelopes,
+): CeeCausalValidationStats | null {
+  const bias = envelopes.bias as any;
+  if (!bias || typeof bias !== "object") {
+    return null;
+  }
+
+  const findings = Array.isArray(bias.bias_findings)
+    ? (bias.bias_findings as any[])
+    : [];
+
+  const total = findings.length;
+  if (total === 0) {
+    return null;
+  }
+
+  let validated = 0;
+  let identifiable = 0;
+  let strengthSum = 0;
+  let strengthCount = 0;
+
+  const by_confidence: Record<string, number> = {};
+  const evidence_support: CeeCausalValidationStats["evidence_support"] = {
+    none: 0,
+    weak: 0,
+    moderate: 0,
+    strong: 0,
+  };
+
+  for (const f of findings) {
+    if (!f || typeof f !== "object") continue;
+
+    const cv = (f as any).causal_validation as
+      | { identifiable?: boolean; strength?: number; confidence?: string }
+      | undefined;
+
+    if (cv && typeof cv === "object") {
+      validated += 1;
+
+      if (cv.identifiable === true) {
+        identifiable += 1;
+      }
+
+      if (typeof cv.strength === "number" && Number.isFinite(cv.strength)) {
+        strengthSum += cv.strength;
+        strengthCount += 1;
+      }
+
+      const confidence = typeof cv.confidence === "string" ? cv.confidence : undefined;
+      if (confidence) {
+        by_confidence[confidence] = (by_confidence[confidence] ?? 0) + 1;
+      }
+    }
+
+    const evidenceArray = Array.isArray((f as any).evidence_strength)
+      ? ((f as any).evidence_strength as any[])
+      : [];
+
+    for (const es of evidenceArray) {
+      if (!es || typeof es !== "object") continue;
+      const support = (es as any).causal_support as string | undefined;
+      if (support === "none" || support === "weak" || support === "moderate" || support === "strong") {
+        evidence_support[support] = (evidence_support[support] ?? 0) + 1;
+      }
+    }
+  }
+
+  // If no causal_validation objects were present at all, treat as no stats
+  if (validated === 0 && strengthCount === 0) {
+    return null;
+  }
+
+  const non_identifiable = validated - identifiable;
+  const avg_strength = strengthCount > 0 ? strengthSum / strengthCount : undefined;
+
+  return {
+    total_bias_findings: total,
+    validated_biases: validated,
+    identifiable_biases: identifiable,
+    non_identifiable_biases: non_identifiable,
+    avg_strength,
+    by_confidence,
+    evidence_support,
+  };
+}
+
+export type CeeCausalCoverageLevel = "none" | "partial" | "full";
+
+export interface CeeDecisionHealthSnapshot {
+  bias_structure: CeeBiasStructureSnapshot | null;
+  causal_validation: CeeCausalValidationStats | null;
+  has_bias_findings: boolean;
+  has_causal_validation: boolean;
+  causal_coverage?: CeeCausalCoverageLevel;
+}
+
+/**
+ * Compact, metadata-only helper that combines structural bias and causal
+ * validation stats into a single snapshot for dashboards.
+ *
+ * This helper:
+ * - Delegates to buildCeeBiasStructureSnapshot and buildCeeCausalValidationStats.
+ * - Exposes only counts, bands, and coverage-level metadata.
+ * - Never inspects briefs, graphs, labels, or other free-text fields.
+ */
+export function buildCeeDecisionHealthSnapshot(
+  envelopes: CeeJourneyEnvelopes,
+): CeeDecisionHealthSnapshot {
+  const bias_structure = buildCeeBiasStructureSnapshot(envelopes);
+  const causal_validation = buildCeeCausalValidationStats(envelopes);
+
+  const biasSummary = bias_structure.bias;
+  const totalFindings =
+    biasSummary && typeof biasSummary.total_findings === "number"
+      ? biasSummary.total_findings
+      : 0;
+
+  const has_bias_findings = totalFindings > 0;
+  const has_causal_validation = causal_validation !== null;
+
+  let causal_coverage: CeeCausalCoverageLevel | undefined;
+
+  if (causal_validation && has_bias_findings) {
+    const validated = causal_validation.validated_biases;
+
+    if (validated <= 0) {
+      causal_coverage = "none";
+    } else if (validated >= totalFindings) {
+      causal_coverage = "full";
+    } else {
+      causal_coverage = "partial";
+    }
+  } else if (causal_validation && !has_bias_findings) {
+    // Edge case: causal stats present but no bias findings summary; treat as partial.
+    causal_coverage = "partial";
+  }
+
+  return {
+    bias_structure,
+    causal_validation,
+    has_bias_findings,
+    has_causal_validation,
+    causal_coverage,
+  };
+}

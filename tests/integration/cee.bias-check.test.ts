@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("POST /assist/v1/bias-check (CEE v1)", () => {
   let app: FastifyInstance;
@@ -20,6 +21,7 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
     vi.stubEnv("CEE_BIAS_CHECK_FEATURE_VERSION", "bias-check-test");
     vi.stubEnv("CEE_BIAS_CHECK_RATE_LIMIT_RPM", "2");
 
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -131,6 +133,9 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
   it("emits structural confirmation bias with enrichment when CEE_BIAS_STRUCTURAL_ENABLED is true", async () => {
     const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
     process.env.CEE_BIAS_STRUCTURAL_ENABLED = "true";
+    // Reset config cache so the flag change takes effect
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
 
     try {
       const graph = {
@@ -178,6 +183,8 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
       } else {
         process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
       }
+      // Reset config cache after restoring original value
+      _resetConfigCache();
     }
   });
 
