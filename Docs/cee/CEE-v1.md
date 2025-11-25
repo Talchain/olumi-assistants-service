@@ -36,6 +36,18 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
     - CEE-specific passthrough fields:
       - `seed?: string`
       - `archetype_hint?: string` (e.g. `"pricing_decision"`).
+      - `previous_graph?: Graph` – when `CEE_REFINEMENT_ENABLED=true`, an existing graph
+        to refine instead of drafting from scratch. The server may summarise this
+        graph when building the refinement prompt.
+      - `refinement_mode?: "auto" | "expand" | "prune" | "clarify"` – optional hint
+        for how the draft pipeline should treat the previous graph (add options,
+        simplify, clarify labels, etc.).
+      - `refinement_instructions?: string` – short natural-language instructions for how
+        to refine the existing graph. Treated as part of the prompt and never
+        logged or emitted in telemetry.
+      - `preserve_nodes?: string[]` – list of node IDs that should be preserved during
+        refinement (CEE avoids removing or renaming these nodes when applying
+        structural changes).
   - **Response (success)**
     - Schema: `CEEDraftGraphResponseV1` (see `openapi.yaml` + `src/generated/openapi.d.ts`).
     - Extends the existing `DraftGraphOutput` with:
@@ -356,6 +368,8 @@ import {
   buildCeeJourneySummary,
   buildCeeUiFlags,
   buildCeeEngineStatus,
+  buildCeeBiasStructureSnapshot,
+  buildCeeCausalValidationStats,
   type CEEDraftGraphRequestV1,
   type CEEOptionsRequestV1,
   type CEESensitivityCoachRequestV1,
@@ -435,7 +449,8 @@ const engineStatus: CeeEngineStatus | undefined = buildCeeEngineStatus({
 // - uiFlags.has_team_disagreement → show a "Team is split" badge
 // - uiFlags.has_truncation_somewhere → show a "Partial view (capped)" chip
 // - uiFlags.is_journey_complete → show/hide a "Journey incomplete" warning
-```
+// - uiFlags.bias_structure_snapshot → show a "Structural warnings" badge
+// - uiFlags.causal_validation_stats → show a "Causal validation" badge
 
 For a slightly more complete, copy-pastable example that wires the TypeScript
 SDK against a running service, see `sdk/typescript/src/examples/ceeJourneyExample.ts`
@@ -489,6 +504,18 @@ of metadata from the SDK helpers:
   - `has_team_disagreement` → show a "Team is split" indicator and encourage a conversation.
   - `has_truncation_somewhere` → highlight that the view is partial (lists were capped).
   - `is_journey_complete` → drive "Journey incomplete" reminders or disabled actions.
+- **Bias structure & causal validation helpers**
+  - `buildCeeBiasStructureSnapshot`  builds a metadata-only snapshot of draft
+    structural warnings and bias findings (counts grouped by severity, category,
+    and bias code). Suitable for dashboards and structural health views.
+  - `buildCeeCausalValidationStats`  summarises ISL causal validation metadata
+    from `CEEBiasCheckResponseV1` (validated vs identifiable biases, average
+    causal strength, confidence bands, and evidence strength mix). This helper
+    only inspects structured fields such as `causal_validation` and
+    `evidence_strength` and never inspects free-text explanations or labels.
+  - `buildCeeDecisionHealthSnapshot`  combines the structural bias snapshot
+    and causal validation stats into a compact, metadata-only view that is
+    convenient for Decision Health dashboards.
 
 These fields are all derived from quality scores, validation metadata, counts, and
 truncation flags. They never require inspecting user text or LLM outputs, and they

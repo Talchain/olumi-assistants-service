@@ -1,6 +1,14 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { applyBiasDefinition } from "./library.js";
+import {
+  detectAvailabilityBias,
+  detectOptimismBias,
+  detectOverconfidenceBias,
+  detectAuthorityBias,
+  detectFramingEffectBias,
+  detectStatusQuoBias,
+} from "./detectors.js";
 
 type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 type CEEBiasCheckRequestV1 = components["schemas"]["CEEBiasCheckRequestV1"];
@@ -115,6 +123,21 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   }
 
   if (structuralBiasEnabled()) {
+    const structuralDetectors: (CEEBiasFindingV1 | null)[] = [
+      detectAvailabilityBias(graph),
+      detectStatusQuoBias(graph),
+      detectOptimismBias(graph),
+      detectOverconfidenceBias(graph),
+      detectAuthorityBias(graph),
+      detectFramingEffectBias(graph),
+    ];
+
+    for (const finding of structuralDetectors) {
+      if (finding) {
+        findings.push(finding);
+      }
+    }
+
     const edges = Array.isArray((graph as any).edges) ? ((graph as any).edges as any[]) : [];
 
     // Structural confirmation bias: one option has explicit risks/outcomes while others have none.

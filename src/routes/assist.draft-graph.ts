@@ -48,6 +48,99 @@ function isLegacySSEEnabled(): boolean {
 }
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
+function refinementEnabled(): boolean {
+  const flag = process.env.CEE_REFINEMENT_ENABLED;
+  if (flag === undefined) {
+    return false;
+  }
+  return flag === "true" || flag === "1";
+}
+
+function buildRefinementBrief(
+  brief: string,
+  previousGraph: GraphT,
+  options: {
+    mode?: string;
+    instructions?: string | null | undefined;
+    preserveNodes?: string[] | null | undefined;
+  },
+): string {
+  const safeInstructions = typeof options.instructions === "string" ? options.instructions.trim() : "";
+  const preserveIds = Array.isArray(options.preserveNodes)
+    ? options.preserveNodes.filter((id) => typeof id === "string" && id.length > 0)
+    : [];
+
+  let modeLine = "Refine the existing graph to improve clarity, completeness, and structure while preserving the core decision.";
+  const mode = options.mode;
+  if (mode === "expand") {
+    modeLine =
+      "Refine by expanding the graph: add missing options, outcomes, and risks, but avoid removing important nodes.";
+  } else if (mode === "prune") {
+    modeLine =
+      "Refine by pruning and simplifying the graph: merge or remove redundant or low-impact nodes and edges, without changing the core decision.";
+  } else if (mode === "clarify") {
+    modeLine =
+      "Refine by clarifying the existing graph: improve labels and connections for ambiguous nodes, but avoid large structural changes.";
+  }
+
+  const preserveLine = preserveIds.length
+    ? `\n- Preserve these node IDs exactly (do not remove or rename them): ${preserveIds.join(", ")}.`
+    : "";
+
+  const instructionsLine = safeInstructions
+    ? `\n- Follow these refinement instructions: ${safeInstructions}`
+    : "";
+
+  const maxNodes = 12;
+  const maxEdges = 24;
+  const maxLabelLen = 80;
+
+  const nodes = Array.isArray(previousGraph.nodes) ? previousGraph.nodes.slice(0, maxNodes) : [];
+  const edges = Array.isArray(previousGraph.edges) ? previousGraph.edges.slice(0, maxEdges) : [];
+
+  const nodeLines = nodes
+    .map((n) => {
+      const id = typeof (n as any).id === "string" ? (n as any).id : "";
+      const kind = typeof (n as any).kind === "string" ? (n as any).kind : "";
+      const rawLabel = typeof (n as any).label === "string" ? (n as any).label : "";
+      const label = rawLabel.length > maxLabelLen ? `${rawLabel.slice(0, maxLabelLen)}…` : rawLabel;
+      const labelPart = label ? `: ${label}` : "";
+      return `- ${id} [${kind}]${labelPart}`;
+    })
+    .join("\n");
+
+  const edgeLines = edges
+    .map((e) => {
+      const from = typeof (e as any).from === "string" ? (e as any).from : "";
+      const to = typeof (e as any).to === "string" ? (e as any).to : "";
+      return `- ${from} -> ${to}`;
+    })
+    .join("\n");
+
+  const graphSummary = [
+    "Existing graph summary:",
+    nodes.length ? `Nodes (${nodes.length}):\n${nodeLines}` : "Nodes: (none)",
+    edges.length ? `Edges (${edges.length}):\n${edgeLines}` : "Edges: (none)",
+  ].join("\n\n");
+
+  const refinementContext = [
+    "You are refining an existing decision graph instead of drafting from scratch.",
+    modeLine,
+    preserveLine,
+    instructionsLine,
+  ]
+    .filter((line) => line && line.trim().length > 0)
+    .join("\n");
+
+  return [
+    brief,
+    "\n\n---\n\nRefinement context:",
+    refinementContext,
+    "\n\n",
+    graphSummary,
+  ].join(" ");
+}
+
 type SuccessPayload = ReturnType<typeof DraftGraphOutput.parse>;
 type ErrorEnvelope = ReturnType<typeof ErrorV1.parse>;
 
@@ -108,6 +201,10 @@ export function sanitizeDraftGraphInput(
     flags,
     include_debug,
     focus_areas,
+    previous_graph,
+    refinement_mode,
+    refinement_instructions,
+    preserve_nodes,
   } = input;
 
   const base = {
@@ -118,6 +215,10 @@ export function sanitizeDraftGraphInput(
     flags,
     include_debug,
     focus_areas,
+    previous_graph,
+    refinement_mode,
+    refinement_instructions,
+    preserve_nodes,
   };
 
   const passthrough: Record<string, unknown> = {};
@@ -298,13 +399,22 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
 
   const confidence = calcConfidence({ goal: input.brief });
+  const useRefinement = refinementEnabled() && input.previous_graph !== undefined;
+
+  const effectiveBrief = useRefinement
+    ? buildRefinementBrief(input.brief, input.previous_graph as GraphT, {
+        mode: input.refinement_mode,
+        instructions: input.refinement_instructions,
+        preserveNodes: input.preserve_nodes,
+      })
+    : input.brief;
   const clarifier = determineClarifier(confidence);
 
   // Get adapter via router (env-driven or config-based provider selection)
   const draftAdapter = getAdapter('draft_graph');
 
   // Cost guard: check estimated cost before making LLM call
-  const promptChars = input.brief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
+  const promptChars = effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
   const tokensIn = estimateTokens(promptChars);
   const tokensOut = estimateTokens(1200);
 
@@ -326,7 +436,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
     try {
       draftResult = await draftAdapter.draftGraph(
-        { brief: input.brief, docs, seed: 17 },
+        { brief: effectiveBrief, docs, seed: 17 },
         { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS }
       );
       break;

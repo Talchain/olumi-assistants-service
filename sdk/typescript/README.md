@@ -226,6 +226,11 @@ The SDK includes a small, deterministic surface area for CEE v1
 - `buildCeeUiFlags` – UI-ready booleans (high risk, truncation, disagreement, completeness).
 - `buildCeeDecisionReviewPayload` – compact payload suitable for "decision review" APIs.
 - `isRetryableCEEError` – classifies retryable CEE failures.
+- `buildCeeBiasStructureSnapshot` – metadata-only snapshot of structural draft
+  warnings and bias findings (grouped by severity/category/code).
+- `buildCeeCausalValidationStats` – summarises causal validation metadata from
+  Bias Check (validated vs identifiable biases, strength, confidence bands,
+  evidence strength mix) without inspecting any free-text content.
 
 Recommended reading and examples:
 
