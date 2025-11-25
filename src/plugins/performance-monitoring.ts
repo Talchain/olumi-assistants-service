@@ -12,6 +12,7 @@ import { logger } from '../utils/simple-logger.js';
 declare module 'fastify' {
   interface FastifyRequest {
     startTime?: number;
+    routerPath?: string;
   }
 }
 
@@ -170,13 +171,14 @@ export const performanceMonitoring: FastifyPluginAsync = async (app) => {
     // Alert on slow requests
     if (duration > SLOW_REQUEST_THRESHOLD_MS) {
       logger.warn({
+        msg: 'Slow request detected',
         duration_ms: duration,
         route: routeKey,
         method,
         status: statusCode,
         threshold_ms: SLOW_REQUEST_THRESHOLD_MS,
         request_id: reply.getHeader('x-request-id'),
-      }, 'Slow request detected');
+      });
 
       emitMetric('counter', 'request.slow', 1, {
         route: routeKey,
@@ -188,11 +190,12 @@ export const performanceMonitoring: FastifyPluginAsync = async (app) => {
     const currentP99 = calculateP99(routeMetrics.p99);
     if (currentP99 > P99_ALERT_THRESHOLD_MS && routeMetrics.count >= 100) {
       logger.warn({
+        msg: 'Route p99 latency exceeds threshold',
         route: routeKey,
         p99_ms: currentP99,
         threshold_ms: P99_ALERT_THRESHOLD_MS,
         sample_size: routeMetrics.count,
-      }, 'Route p99 latency exceeds threshold');
+      });
 
       emitMetric('gauge', 'request.p99', currentP99, {
         route: routeKey,
@@ -202,16 +205,18 @@ export const performanceMonitoring: FastifyPluginAsync = async (app) => {
     // Log performance metrics periodically (every 100 requests)
     if (metrics.totalRequests % 100 === 0) {
       logger.info({
+        msg: 'Performance metrics snapshot',
         total_requests: metrics.totalRequests,
         slow_requests: metrics.slowRequests,
         slow_request_rate: (metrics.slowRequests / metrics.totalRequests * 100).toFixed(2) + '%',
-      }, 'Performance metrics snapshot');
+      });
     }
   });
 
   logger.info({
+    msg: 'Performance monitoring plugin initialized',
     slow_threshold_ms: SLOW_REQUEST_THRESHOLD_MS,
     p99_threshold_ms: P99_ALERT_THRESHOLD_MS,
     metrics_enabled: METRICS_ENABLED,
-  }, 'Performance monitoring plugin initialized');
+  });
 };
