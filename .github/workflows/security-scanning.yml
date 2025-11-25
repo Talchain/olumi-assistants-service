@@ -87,6 +87,8 @@ jobs:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    # Don't block PRs if Dependency graph isn't enabled (requires GitHub Advanced Security for private repos)
+    continue-on-error: true
 
     steps:
       - name: Checkout repository
