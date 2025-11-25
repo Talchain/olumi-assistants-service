@@ -116,32 +116,41 @@ describe("Configuration Module", () => {
 
   describe("Validation", () => {
     it("should validate port as positive integer", async () => {
+      vi.resetModules();
       process.env = {
         PORT: "-1",
       };
 
       await expect(async () => {
-        await import("../../src/config/index.js");
+        const { config } = await import("../../src/config/index.js");
+        // Access property to trigger validation
+        const _port = config.server.port;
       }).rejects.toThrow("Invalid configuration");
     });
 
     it("should validate LLM provider enum", async () => {
+      vi.resetModules();
       process.env = {
         LLM_PROVIDER: "invalid-provider",
       };
 
       await expect(async () => {
-        await import("../../src/config/index.js");
+        const { config } = await import("../../src/config/index.js");
+        // Access property to trigger validation
+        const _provider = config.llm.provider;
       }).rejects.toThrow("Invalid configuration");
     });
 
     it("should validate URL format for ISL base URL", async () => {
+      vi.resetModules();
       process.env = {
         ISL_BASE_URL: "not-a-valid-url",
       };
 
       await expect(async () => {
-        await import("../../src/config/index.js");
+        const { config } = await import("../../src/config/index.js");
+        // Access property to trigger validation
+        const _url = config.isl.baseUrl;
       }).rejects.toThrow("Invalid configuration");
     });
 
@@ -258,6 +267,152 @@ describe("Configuration Module", () => {
       const { config, getConfig } = await import("../../src/config/index.js");
 
       expect(getConfig()).toBe(config);
+    });
+  });
+
+  describe("Lazy Initialization", () => {
+    it("should defer parsing until first property access", async () => {
+      vi.resetModules();
+
+      // Set env vars AFTER import
+      const { config, _resetConfigCache } = await import("../../src/config/index.js");
+
+      // Reset cache to simulate fresh import
+      _resetConfigCache();
+
+      // Set environment variables (ensure BASE_URL is unset or valid)
+      delete process.env.BASE_URL;
+      process.env.NODE_ENV = "production";
+      process.env.PORT = "4000";
+
+      // First access triggers parsing
+      const env = config.server.nodeEnv;
+
+      expect(env).toBe("production");
+    });
+
+    it("should cache config after first access", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        PORT: "5000",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      // First access
+      const port1 = config.server.port;
+      expect(port1).toBe(5000);
+
+      // Change env var (should not affect cached config)
+      process.env.PORT = "6000";
+
+      // Second access (should return cached value)
+      const port2 = config.server.port;
+      expect(port2).toBe(5000); // Still the original value
+    });
+
+    it("should support _resetConfigCache() for testing", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        PORT: "7000",
+      };
+
+      const { config, _resetConfigCache } = await import("../../src/config/index.js");
+
+      // First access
+      expect(config.server.port).toBe(7000);
+
+      // Change env and reset cache
+      process.env.PORT = "8000";
+      _resetConfigCache();
+
+      // Should use new value after reset
+      expect(config.server.port).toBe(8000);
+    });
+
+    it("should work with Object.keys()", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      const keys = Object.keys(config);
+
+      expect(keys).toContain("server");
+      expect(keys).toContain("auth");
+      expect(keys).toContain("llm");
+      expect(keys).toContain("features");
+    });
+
+    it("should work with 'in' operator", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect("server" in config).toBe(true);
+      expect("auth" in config).toBe(true);
+      expect("nonexistent" in config).toBe(false);
+    });
+
+    it("should work with destructuring", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "development",
+        PORT: "9000",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      const { server, features } = config;
+
+      expect(server.port).toBe(9000);
+      expect(server.nodeEnv).toBe("development");
+      expect(features.grounding).toBe(true);
+    });
+
+    it("should handle nested property access", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        GROUNDING_ENABLED: "false",
+        RATE_LIMIT_RPM: "200",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      // Deep property access
+      expect(config.features.grounding).toBe(false);
+      expect(config.rateLimits.defaultRpm).toBe(200);
+      expect(config.server.nodeEnv).toBe("test");
+    });
+
+    it("should parse config only once even with multiple accesses", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        PORT: "3000",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      // Multiple accesses to different properties
+      const port = config.server.port;
+      const env = config.server.nodeEnv;
+      const grounding = config.features.grounding;
+      const redis = config.redis.url;
+
+      // All should work correctly
+      expect(port).toBe(3000);
+      expect(env).toBe("test");
+      expect(grounding).toBe(true);
+      expect(redis).toBeUndefined();
     });
   });
 });

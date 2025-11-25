@@ -357,18 +357,74 @@ function parseConfig(): Config {
 }
 
 /**
- * Singleton configuration instance
+ * Lazy-initialized configuration using Proxy pattern
  *
- * Initialized once on first import. Use this throughout the application
- * instead of accessing process.env directly.
+ * Defers parsing until first property access. This allows tests
+ * to set environment variables before the config is parsed, solving
+ * the singleton initialization timing issue.
+ *
+ * Usage remains the same:
+ * ```
+ * import { config } from './config/index.js';
+ * const port = config.server.port;
+ * ```
+ *
+ * The config is parsed once on first access and cached thereafter.
  */
-export const config = parseConfig();
+let _cachedConfig: Config | null = null;
+
+export const config = new Proxy({} as Config, {
+  get(_target, prop) {
+    // Initialize on first access
+    if (_cachedConfig === null) {
+      _cachedConfig = parseConfig();
+    }
+
+    return (_cachedConfig as any)[prop];
+  },
+
+  // Support Object.keys(), Object.entries(), spread operator
+  ownKeys(_target) {
+    if (_cachedConfig === null) {
+      _cachedConfig = parseConfig();
+    }
+    return Reflect.ownKeys(_cachedConfig);
+  },
+
+  getOwnPropertyDescriptor(_target, prop) {
+    if (_cachedConfig === null) {
+      _cachedConfig = parseConfig();
+    }
+    return Reflect.getOwnPropertyDescriptor(_cachedConfig, prop);
+  },
+
+  // Support has operator (prop in config)
+  has(_target, prop) {
+    if (_cachedConfig === null) {
+      _cachedConfig = parseConfig();
+    }
+    return prop in _cachedConfig;
+  },
+});
 
 /**
  * Get configuration (for compatibility and testing)
  */
 export function getConfig(): Config {
   return config;
+}
+
+/**
+ * Reset cached configuration (for testing only)
+ *
+ * This function is used by tests to clear the cached configuration
+ * and force a fresh parse on next access. This allows tests to change
+ * environment variables and re-initialize the config.
+ *
+ * @internal
+ */
+export function _resetConfigCache(): void {
+  _cachedConfig = null;
 }
 
 /**

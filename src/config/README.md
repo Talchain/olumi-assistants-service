@@ -211,29 +211,45 @@ if (!redisUrl) {
 
 ## Migration Strategy
 
-### Singleton Initialization Challenge
+### Lazy Initialization Solution ✅
 
-The config module is a **singleton** - it parses environment variables once on first import. This creates challenges when migrating files that are imported early in the module dependency graph, especially in test environments.
+The config module uses **lazy initialization with Proxy pattern** - environment variables are parsed on first property access, not on module import. This solves the singleton initialization timing issue that was blocking migrations.
 
-### Safe vs. Unsafe Files to Migrate
+**How it works:**
+```typescript
+// Config is NOT parsed when you import
+import { config } from "./config/index.js";
 
-**✅ Safe to Migrate** (low in import graph):
-- Route handlers (`src/routes/**`)
-- Service layer (`src/services/**`)
-- Adapters (`src/adapters/**`)
-- Utility functions called at runtime (not at module initialization)
-- CEE modules (`src/cee/**`)
+// Config IS parsed when you first access a property
+const port = config.server.port; // ← Parsing happens here
 
-**⚠️ Caution Required** (early in import graph):
-- `src/utils/simple-logger.ts` - Imported by many modules including test infrastructure
-- `src/version.ts` - Has special package.json fallback logic
-- `src/plugins/**` - Registered during server initialization
-- Any file that executes code at module initialization time
+// Subsequent accesses use the cached config
+const env = config.server.nodeEnv; // ← Fast, no re-parsing
+```
 
-**❌ Do Not Migrate** (causes test failures):
-- Files that create singletons at module scope using config values
-- Files imported before test environment setup (e.g., test utilities)
-- Files with complex fallback logic beyond simple env var reads
+**Benefits:**
+- ✅ Tests can set environment variables before config is accessed
+- ✅ No more "Configuration validation failed" errors from early imports
+- ✅ Fully backward compatible with existing code
+- ✅ All files are now safe to migrate
+
+### All Files Are Safe to Migrate
+
+With lazy initialization, **all files are now safe to migrate** regardless of position in the import graph.
+
+**Migration Priority** (recommended order):
+1. **Route handlers** (`src/routes/**`) - Direct user-facing code
+2. **Adapters** (`src/adapters/**`) - External service integrations
+3. **Services** (`src/services/**`) - Business logic layer
+4. **CEE modules** (`src/cee/**`) - Decision engineering features
+5. **Utilities** (`src/utils/**`) - Even early-imported files
+6. **Plugins** (`src/plugins/**`) - Server initialization code
+
+**Previously Problematic Files** (now safe):
+- ✅ `src/utils/simple-logger.ts` - Can now use config.server.logLevel
+- ✅ `src/version.ts` - Can access config.server.version
+- ✅ `src/plugins/**` - Can use config values during setup
+- ✅ Test utilities - Can import config without initialization errors
 
 ### Recommended Migration Approach
 
@@ -267,10 +283,7 @@ The config module is a **singleton** - it parses environment variables once on f
    const biasCheckEnabled = config.cee.biasCheckFeatureVersion !== undefined;
    ```
 
-4. **Skip or carefully handle early imports**: For files like simple-logger, either:
-   - Keep using `process.env` directly
-   - Use lazy initialization pattern
-   - Ensure all tests set required env vars before ANY imports
+4. **Migrate all remaining files**: With lazy initialization, no file is too early in the import graph
 
 ### Testing Migrated Files
 
@@ -280,14 +293,14 @@ After migrating a file, verify it doesn't break tests:
 # Run full test suite
 pnpm test
 
-# Check for config-related failures
-pnpm test 2>&1 | grep "Configuration validation failed"
+# Check for TypeScript errors
+pnpm typecheck
 ```
 
-If tests fail with "Invalid configuration" errors, the file is too early in the import graph and should either:
-- Be reverted to use `process.env`
-- Have its config usage moved to lazy initialization
-- Have affected tests updated to set required env vars before imports
+With lazy initialization, configuration errors should no longer occur due to import timing. If tests fail:
+- Check that environment variables are set correctly in test setup
+- Use `_resetConfigCache()` in tests that need fresh config parsing
+- Verify the migration didn't introduce logic errors
 
 ### Migration Progress Tracking
 
@@ -302,18 +315,38 @@ Create issues/PRs for each logical group:
 
 ### Mocking Configuration in Tests
 
-Since the config is initialized once on import, use Vitest's module mocking:
+With lazy initialization, you have two approaches for testing with custom configuration:
+
+**Approach 1: Set environment variables before first config access** (Recommended)
 
 ```typescript
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
+import { config, _resetConfigCache } from "./config/index.js";
 
 describe("My Feature", () => {
-  beforeEach(() => {
+  it("should work with custom config", () => {
+    // Set environment before first config access
+    process.env.GROUNDING_ENABLED = "false";
+
+    // Reset cache to force re-parsing
+    _resetConfigCache();
+
+    // Now access config
+    expect(config.features.grounding).toBe(false);
+  });
+});
+```
+
+**Approach 2: Use vi.resetModules() for complete isolation** (Legacy, still supported)
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+
+describe("My Feature", () => {
+  it("should work with custom config", async () => {
     // Clear module cache
     vi.resetModules();
-  });
 
-  it("should work with custom config", async () => {
     // Set environment before importing
     process.env.GROUNDING_ENABLED = "false";
 
@@ -328,25 +361,30 @@ describe("My Feature", () => {
 ### Example Test Patterns
 
 ```typescript
-// Pattern 1: Test with minimal config
-it("should handle minimal configuration", async () => {
-  process.env = {
-    NODE_ENV: "test",
-    LLM_PROVIDER: "fixtures",
-  };
+// Pattern 1: Test with minimal config (using _resetConfigCache)
+it("should handle minimal configuration", () => {
+  process.env.NODE_ENV = "test";
+  process.env.LLM_PROVIDER = "fixtures";
+  _resetConfigCache();
 
-  const { config } = await import("./config/index.js");
   expect(config.llm.provider).toBe("fixtures");
 });
 
 // Pattern 2: Test with specific feature enabled
-it("should enable PII guard when configured", async () => {
-  process.env = {
-    PII_GUARD_ENABLED: "true",
-  };
+it("should enable PII guard when configured", () => {
+  process.env.PII_GUARD_ENABLED = "true";
+  _resetConfigCache();
+
+  expect(config.features.piiGuard).toBe(true);
+});
+
+// Pattern 3: Test with module reset (complete isolation)
+it("should handle custom base URL", async () => {
+  vi.resetModules();
+  process.env.BASE_URL = "https://custom.example.com";
 
   const { config } = await import("./config/index.js");
-  expect(config.features.piiGuard).toBe(true);
+  expect(config.server.baseUrl).toBe("https://custom.example.com");
 });
 ```
 
