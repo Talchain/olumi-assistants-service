@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 const originalEnv = { ...process.env };
 
@@ -23,7 +24,7 @@ describe("HMAC + API Key Fallback", () => {
     process.env.ASSIST_API_KEYS = "fallback-key-1";
     process.env.LLM_PROVIDER = "fixtures";
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
@@ -92,7 +93,7 @@ describe("HMAC-only auth without API keys", () => {
     process.env.HMAC_SECRET = "test-hmac-secret-only";
     process.env.LLM_PROVIDER = "fixtures";
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();

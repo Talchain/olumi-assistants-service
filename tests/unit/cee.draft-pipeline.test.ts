@@ -3,6 +3,7 @@ import type { FastifyRequest } from "fastify";
 import type { DraftGraphInputT } from "../../src/schemas/assist.js";
 import { TelemetrySink } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 // Mocks for underlying draft pipeline, structural helpers, and response guards
 const runDraftGraphPipelineMock = vi.fn();
@@ -50,14 +51,22 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     validateResponseMock.mockReset();
     detectStructuralWarningsMock.mockReset();
 
+    // Clean env vars and reset config cache
+    cleanBaseUrl();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
     telemetrySink = new TelemetrySink();
     await telemetrySink.install();
     telemetrySink.clear();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     telemetrySink.uninstall();
     vi.unstubAllEnvs();
+    cleanBaseUrl();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
   });
 
   it("wraps successful pipeline result with CEE metadata (no raw DraftGraphOutput bypass)", async () => {

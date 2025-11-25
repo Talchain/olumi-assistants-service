@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("POST /assist/v1/evidence-helper (CEE v1)", () => {
   let app: FastifyInstance;
@@ -16,7 +17,7 @@ describe("POST /assist/v1/evidence-helper (CEE v1)", () => {
     vi.stubEnv("CEE_EVIDENCE_HELPER_FEATURE_VERSION", "evidence-helper-test");
     vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "2");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

@@ -12,12 +12,13 @@ import type { FastifyInstance } from 'fastify';
 vi.stubEnv('LLM_PROVIDER', 'fixtures');
 
 import { build } from '../../src/server.js';
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe('GET /healthz (ISL integration)', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -27,12 +28,15 @@ describe('GET /healthz (ISL integration)', () => {
     vi.unstubAllEnvs();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Clear ISL-related env vars between tests
     delete process.env.CEE_CAUSAL_VALIDATION_ENABLED;
     delete process.env.ISL_BASE_URL;
     delete process.env.ISL_TIMEOUT_MS;
     delete process.env.ISL_MAX_RETRIES;
+    // Reset config cache so changes to env vars take effect
+    const { _resetConfigCache } = await import('../../src/config/index.js');
+    _resetConfigCache();
   });
 
   it('reports ISL disabled and defaults when not configured', async () => {

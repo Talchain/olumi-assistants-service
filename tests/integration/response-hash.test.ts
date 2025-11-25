@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
 import { hashResponse } from "../../src/utils/response-hash.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("Response Hash Integration", () => {
   let app: FastifyInstance;
@@ -11,7 +12,7 @@ describe("Response Hash Integration", () => {
     process.env.LLM_PROVIDER = "fixtures";
     process.env.ASSIST_API_KEYS = "test-key-response-hash";
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

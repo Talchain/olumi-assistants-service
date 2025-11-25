@@ -9,6 +9,7 @@ import {
   detectFramingEffectBias,
   detectStatusQuoBias,
 } from "./detectors.js";
+import { config } from "../../config/index.js";
 
 type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 type CEEBiasCheckRequestV1 = components["schemas"]["CEEBiasCheckRequestV1"];
@@ -16,11 +17,7 @@ type CEEBiasCheckRequestV1 = components["schemas"]["CEEBiasCheckRequestV1"];
 type ArchetypeMeta = CEEBiasCheckRequestV1["archetype"];
 
 function structuralBiasEnabled(): boolean {
-  const flag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === "true" || flag === "1";
+  return config.cee.biasStructuralEnabled;
 }
 
 function getNodesByKind(graph: GraphV1 | undefined, kind: string): any[] {

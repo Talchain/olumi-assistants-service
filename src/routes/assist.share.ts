@@ -25,6 +25,7 @@ import {
   calculateRedactedSize,
   SHARE_SIZE_LIMITS,
 } from "../utils/share-redaction.js";
+import { config } from "../config/index.js";
 
 /**
  * Check if share feature is enabled
@@ -133,7 +134,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       // Build share URL
-      const baseUrl = process.env.BASE_URL || "https://olumi-assistants-service.onrender.com";
+      const baseUrl = config.server.baseUrl || "https://olumi-assistants-service.onrender.com";
       const shareUrl = `${baseUrl}/assist/share/${token}`;
 
       return reply.code(201).send({

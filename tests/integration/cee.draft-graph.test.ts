@@ -32,6 +32,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
 }));
 
 import { build } from "../../src/server.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   let app: FastifyInstance;
@@ -47,7 +48,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     vi.stubEnv("CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED", "true");
     vi.stubEnv("CEE_REFINEMENT_ENABLED", "true");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

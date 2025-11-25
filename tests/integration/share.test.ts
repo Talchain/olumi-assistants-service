@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("Share Integration", () => {
   let app: FastifyInstance;
@@ -12,7 +13,7 @@ describe("Share Integration", () => {
     vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("ASSIST_API_KEYS", "test-key-share");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -311,5 +312,54 @@ describe("Share Integration", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("Share Integration with custom BASE_URL", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    // Enable share feature with custom BASE_URL
+    vi.stubEnv("SHARE_REVIEW_ENABLED", "1");
+    vi.stubEnv("SHARE_SECRET", "test-secret-key");
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
+    vi.stubEnv("ASSIST_API_KEYS", "test-key-share");
+    vi.stubEnv("BASE_URL", "https://custom.example.com");
+
+    const { build: buildApp } = await import("../../src/server.js");
+    app = await buildApp();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+  });
+
+  it("should use custom BASE_URL for share URLs when configured", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/assist/share",
+      headers: {
+        "X-Olumi-Assist-Key": "test-key-share",
+      },
+      payload: {
+        graph: {
+          version: "1",
+          default_seed: 17,
+          nodes: [
+            { id: "q1", kind: "goal", label: "Should we launch?" },
+          ],
+          edges: [],
+          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+        },
+        ttl_hours: 24,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.url).toMatch(/^https:\/\/custom\.example\.com\/assist\/share\//);
   });
 });

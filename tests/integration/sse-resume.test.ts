@@ -16,6 +16,7 @@ import { getRedis } from "../../src/platform/redis.js";
 import { randomUUID } from "node:crypto";
 import { createResumeToken } from "../../src/utils/sse-resume-token.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("SSE Resume Integration", () => {
   let app: FastifyInstance;
@@ -37,7 +38,7 @@ describe("SSE Resume Integration", () => {
     delete process.env.ASSIST_API_KEYS;
 
     // Build app
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

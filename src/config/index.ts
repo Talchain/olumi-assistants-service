@@ -165,7 +165,7 @@ const ConfigSchema = z.object({
   // CEE Configuration
   cee: z.object({
     draftFeatureVersion: z.string().optional(),
-    draftArchetypesEnabled: booleanString.default(false),
+    draftArchetypesEnabled: booleanString.default(true), // Default true to match pipeline.ts behavior
     draftStructuralWarningsEnabled: booleanString.default(false),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
@@ -178,11 +178,13 @@ const ConfigSchema = z.object({
   }),
 
   // ISL (Inference Service Layer) Configuration
+  // Note: timeoutMs and maxRetries are stored as strings and validated/clamped
+  // by parseTimeout() and parseMaxRetries() in src/adapters/isl/config.ts
   isl: z.object({
     baseUrl: optionalUrl,
     apiKey: z.string().optional(),
-    timeoutMs: z.coerce.number().int().positive().default(30000),
-    maxRetries: z.coerce.number().int().nonnegative().default(3),
+    timeoutMs: z.string().optional(), // Validated by parseTimeout()
+    maxRetries: z.string().optional(), // Validated by parseMaxRetries()
   }),
 
   // Graph Limits

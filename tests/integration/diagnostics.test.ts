@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
 import { fastHash } from "../../src/utils/hash.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("GET /diagnostics", () => {
   let app: FastifyInstance;
@@ -15,7 +16,7 @@ describe("GET /diagnostics", () => {
     vi.stubEnv("CEE_DIAGNOSTICS_KEY_IDS", operatorKeyId);
     vi.stubEnv("LLM_PROVIDER", "fixtures");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });
@@ -91,7 +92,7 @@ describe("GET /diagnostics - Security: Mandatory Authentication", () => {
     // Intentionally NOT setting CEE_DIAGNOSTICS_KEY_IDS to test mandatory auth
     vi.stubEnv("LLM_PROVIDER", "fixtures");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

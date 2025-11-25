@@ -16,6 +16,7 @@ import { getRedis } from "../../src/platform/redis.js";
 import { TelemetrySink, expectTelemetry } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 interface SseEvent {
   type: string;
@@ -149,7 +150,7 @@ describe("Chaos: Mid-Stream Disconnect", () => {
     delete process.env.ASSIST_API_KEYS;
 
     // Build app
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

@@ -20,6 +20,7 @@ import { build } from "../../src/server.js";
 import { TelemetrySink } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 function expectRequestedShape(data: Record<string, any>) {
   const keys = Object.keys(data).sort();
@@ -136,7 +137,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "2");
     vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "2");
 
-    delete process.env.BASE_URL;
+    cleanBaseUrl();
     app = await build();
     await app.ready();
   });

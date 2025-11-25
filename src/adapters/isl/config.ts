@@ -1,4 +1,5 @@
 import { logger } from '../../utils/simple-logger.js';
+import { config } from '../../config/index.js';
 
 /**
  * ISL Configuration Module
@@ -57,14 +58,10 @@ export function parseMaxRetries(envValue: string | undefined, defaultValue: numb
 /**
  * Check if causal validation is enabled via feature flag
  *
- * Accepts both "true" and "1" as enabled values for flexibility.
+ * Uses type-safe config module for boolean coercion.
  */
 export function causalValidationEnabled(): boolean {
-  const flag = process.env.CEE_CAUSAL_VALIDATION_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === 'true' || flag === '1';
+  return config.cee.causalValidationEnabled;
 }
 
 /**

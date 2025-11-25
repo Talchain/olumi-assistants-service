@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
 import { detectBiases, sortBiasFindings } from "../../src/cee/bias/index.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
   const base: any = {
@@ -14,6 +15,20 @@ function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
 }
 
 describe("CEE bias helper - detectBiases", () => {
+  beforeEach(async () => {
+    cleanBaseUrl();
+    vi.unstubAllEnvs();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    cleanBaseUrl();
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+  });
+
   it("emits selection bias when there are zero or one options", () => {
     const graphZero = makeGraph({ nodes: [{ id: "g1", kind: "goal" } as any] });
     const zeroFindings = detectBiases(graphZero, null);
