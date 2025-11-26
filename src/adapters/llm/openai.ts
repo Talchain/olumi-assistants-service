@@ -718,6 +718,7 @@ export class OpenAIAdapter implements LLMAdapter {
         messages: [{ role: "user", content: prompt }],
         temperature: 0.5, // Slightly lower temp for more consistent questions
         max_tokens: maxTokens,
+        response_format: { type: "json_object" },
         ...(seed !== undefined ? { seed } : {}),
       });
 

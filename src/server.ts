@@ -4,6 +4,7 @@ import "dotenv/config";
 import { env } from "node:process";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import compress from "@fastify/compress";
 import draftRoute from "./routes/assist.draft-graph.js";
@@ -93,6 +94,25 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+  });
+
+  // Security headers: Standard HTTP security headers for defense-in-depth
+  // Note: contentSecurityPolicy disabled - this is a pure API, not serving HTML
+  await app.register(helmet, {
+    contentSecurityPolicy: false, // Not relevant for JSON API
+    crossOriginEmbedderPolicy: false, // Would break CORS for API clients
+    crossOriginOpenerPolicy: false, // Not relevant for API responses
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin API access
+    // The following headers ARE enabled by default:
+    // - X-Content-Type-Options: nosniff
+    // - X-Frame-Options: SAMEORIGIN (prevents clickjacking if ever serving HTML)
+    // - X-DNS-Prefetch-Control: off
+    // - X-Download-Options: noopen
+    // - X-Permitted-Cross-Domain-Policies: none
+    strictTransportSecurity: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+    },
   });
 
   // Response compression: Enable for JSON (SSE streams auto-skipped)

@@ -43,6 +43,7 @@
     "@anthropic-ai/sdk": "^0.68.0",
     "@fastify/compress": "^8.3.0",
     "@fastify/cors": "^10.1.0",
+    "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
     "archiver": "^7.0.1",
     "dotenv": "^17.2.3",

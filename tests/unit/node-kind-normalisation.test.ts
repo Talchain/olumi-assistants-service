@@ -224,4 +224,165 @@ describe("NodeKind Normalisation", () => {
       expect(result.nodes[6].kind).toBe("outcome"); // benefit → outcome
     });
   });
+
+  describe("Malformed response edge cases", () => {
+    it("handles empty nodes array", () => {
+      const input = {
+        nodes: [],
+        edges: [{ from: "n1", to: "n2" }],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.nodes).toEqual([]);
+      expect(result.edges).toHaveLength(1);
+    });
+
+    it("handles empty edges array", () => {
+      const input = {
+        nodes: [{ id: "n1", kind: "goal" }],
+        edges: [],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.nodes).toHaveLength(1);
+      expect(result.edges).toEqual([]);
+    });
+
+    it("skips non-object items in nodes array", () => {
+      const input = {
+        nodes: [
+          { id: "n1", kind: "goal" },
+          null,
+          undefined,
+          "string",
+          123,
+          { id: "n2", kind: "decision" },
+        ],
+        edges: [],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Non-object items pass through unchanged (Zod will reject them later)
+      expect(result.nodes).toHaveLength(6);
+      expect(result.nodes[0].kind).toBe("goal");
+      expect(result.nodes[1]).toBe(null);
+      expect(result.nodes[2]).toBe(undefined);
+      expect(result.nodes[3]).toBe("string");
+      expect(result.nodes[4]).toBe(123);
+      expect(result.nodes[5].kind).toBe("decision");
+    });
+
+    it("skips non-object items in edges array", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", weight: "0.5" },
+          null,
+          undefined,
+          "string",
+          { from: "n2", to: "n3", weight: 0.3 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Non-object items pass through unchanged (Zod will reject them later)
+      expect(result.edges).toHaveLength(5);
+      expect(result.edges[0].weight).toBe(0.5);
+      expect(result.edges[1]).toBe(null);
+      expect(result.edges[2]).toBe(undefined);
+      expect(result.edges[3]).toBe("string");
+      expect(result.edges[4].weight).toBe(0.3);
+    });
+
+    it("handles NaN weight/belief values by coercing to NaN number", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", weight: "invalid", belief: "not_a_number" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Number("invalid") === NaN
+      expect(Number.isNaN(result.edges[0].weight)).toBe(true);
+      expect(Number.isNaN(result.edges[0].belief)).toBe(true);
+    });
+
+    it("handles null/undefined weight/belief values", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", weight: null, belief: undefined },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // null coerced to 0, undefined stays undefined
+      expect(result.edges[0].weight).toBe(0);
+      expect(result.edges[0].belief).toBeUndefined();
+    });
+
+    it("handles deeply nested object without nodes/edges", () => {
+      const input = {
+        meta: {
+          version: "1",
+          source: "llm",
+        },
+        rationales: [{ target: "n1", why: "test" }],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Object passes through without modification
+      expect(result.meta).toEqual({ version: "1", source: "llm" });
+      expect(result.rationales).toHaveLength(1);
+    });
+
+    it("handles node with empty string kind", () => {
+      const input = {
+        nodes: [{ id: "n1", kind: "", label: "Empty kind" }],
+        edges: [],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Empty string is unknown, defaults to 'option'
+      expect(result.nodes[0].kind).toBe("option");
+    });
+
+    it("handles very large weight/belief numbers", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", weight: Number.MAX_SAFE_INTEGER, belief: 999.99 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].weight).toBe(Number.MAX_SAFE_INTEGER);
+      expect(result.edges[0].belief).toBe(999.99);
+    });
+
+    it("handles negative weight/belief values", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", weight: "-0.5", belief: -1 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // Negative values are coerced correctly (Zod will validate constraints later)
+      expect(result.edges[0].weight).toBe(-0.5);
+      expect(result.edges[0].belief).toBe(-1);
+    });
+  });
 });
