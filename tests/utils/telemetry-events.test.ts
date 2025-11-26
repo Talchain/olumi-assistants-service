@@ -163,6 +163,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeTeamPerspectivesRequested: "cee.team_perspectives.requested",
         CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
         CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
+
+        // CEE Preflight events (Phase 2 input validation)
+        PreflightValidationPassed: "cee.preflight.passed",
+        PreflightValidationFailed: "cee.preflight.failed",
+        PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
+        PreflightRejected: "cee.preflight.rejected",
+
+        // LLM Normalization events (Phase 1 NodeKind normalization)
+        NodeKindNormalized: "llm.normalization.node_kind_mapped",
+
+        // CEE Clarification enforcement events (Phase 5)
+        ClarificationRequired: "cee.clarification.required",
+        ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -188,7 +201,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\.|isl\.config\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification)\.|llm\.normalization\.|isl\.config\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -200,10 +213,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Check that no events use camelCase after the prefix
       for (const event of allEvents) {
-        // Remove the namespace prefix (assist.* or cee.*)
+        // Remove the namespace prefix (assist.*, cee.*, llm.*, isl.*)
         const suffix = event
-          .replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse)\./, "")
-          .replace(/^cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives)\./, "");
+          .replace(/^assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\./, "")
+          .replace(/^cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight)\./, "")
+          .replace(/^llm\.normalization\./, "")
+          .replace(/^isl\.config\./, "");
 
         // Should not contain capital letters (camelCase indicator)
         expect(suffix).not.toMatch(/[A-Z]/);
@@ -403,6 +418,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
       // Stage events are debug-only and intentionally have no Datadog mappings
       // ISL config events are logged locally and don't need Datadog counters
+      // Preflight events are diagnostic and logged locally
+      // LLM normalization events are debug-level mapping notifications
+      // Clarification events are diagnostic and logged locally
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
         TelemetryEvents.CostCalculationUnknownModel,
@@ -410,6 +428,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.IslConfigInvalidMaxRetries,
         TelemetryEvents.IslConfigTimeoutClamped,
         TelemetryEvents.IslConfigRetriesClamped,
+        TelemetryEvents.PreflightValidationPassed,
+        TelemetryEvents.PreflightValidationFailed,
+        TelemetryEvents.PreflightReadinessAssessed,
+        TelemetryEvents.PreflightRejected,
+        TelemetryEvents.NodeKindNormalized,
+        TelemetryEvents.ClarificationRequired,
+        TelemetryEvents.ClarificationBypassAllowed,
       ];
 
       for (const event of allEvents) {
@@ -534,6 +559,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.team_perspectives.requested",
         "cee.team_perspectives.succeeded",
         "cee.team_perspectives.failed",
+
+        // CEE Preflight events (Phase 2 input validation)
+        "cee.preflight.passed",
+        "cee.preflight.failed",
+        "cee.preflight.readiness_assessed",
+        "cee.preflight.rejected",
+
+        // LLM Normalization events (Phase 1 NodeKind normalization)
+        "llm.normalization.node_kind_mapped",
+
+        // CEE Clarification enforcement events (Phase 5)
+        "cee.clarification.required",
+        "cee.clarification.bypass_allowed",
 
         // Validation cache events
         "assist.draft.validation_cache_hit",

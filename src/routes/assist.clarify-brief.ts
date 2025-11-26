@@ -3,6 +3,11 @@ import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assis
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import {
+  assessBriefReadiness,
+  findWeakestFactor,
+  compressPreviousAnswers,
+} from "../cee/validation/readiness.js";
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/clarify-brief", async (req, reply) => {
@@ -39,6 +44,13 @@ export default async function route(app: FastifyInstance) {
     try {
       const clarifierStartTime = Date.now();
 
+      // Assess brief readiness before clarification
+      const readinessAssessment = assessBriefReadiness(input.brief);
+      const weakestFactor = findWeakestFactor(readinessAssessment.factors);
+
+      // Compress previous answers for history context
+      const compressedHistory = compressPreviousAnswers(input.previous_answers);
+
       // Get adapter via router (env-driven or config)
       const adapter = getAdapter('clarify_brief');
 
@@ -47,6 +59,9 @@ export default async function route(app: FastifyInstance) {
         brief_chars: input.brief.length,
         has_previous_answers: !!input.previous_answers?.length,
         provider: adapter.name,
+        readiness_score: readinessAssessment.score,
+        readiness_level: readinessAssessment.level,
+        weakest_factor: weakestFactor,
       });
 
       const result = await adapter.clarifyBrief(
@@ -61,6 +76,15 @@ export default async function route(app: FastifyInstance) {
           timeoutMs: 10000, // 10s timeout for clarification
         }
       );
+
+      // Log compressed history for debugging (available for future adapter enhancements)
+      if (compressedHistory) {
+        log.debug({
+          round: input.round,
+          compressed_history_length: compressedHistory.length,
+          event: "cee.clarify.history_compressed",
+        }, "Compressed previous answers for clarification round");
+      }
 
       const clarifierDuration = Date.now() - clarifierStartTime;
 
@@ -96,6 +120,13 @@ export default async function route(app: FastifyInstance) {
         confidence: result.confidence,
         should_continue: shouldContinue,
         round: input.round,
+        // Include readiness assessment for UI to display factor scores
+        readiness: {
+          score: readinessAssessment.score,
+          level: readinessAssessment.level,
+          factors: readinessAssessment.factors,
+          weakest_factor: weakestFactor,
+        },
       });
 
       return reply.send(output);

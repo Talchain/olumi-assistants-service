@@ -8,11 +8,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getAdapter, resetAdapterCache } from "../../src/adapters/llm/router.js";
 import { FailoverAdapter } from "../../src/adapters/llm/failover.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router - Failover Configuration", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     resetAdapterCache();
+    cleanBaseUrl(); // Prevent config validation failures
   });
 
   afterEach(() => {

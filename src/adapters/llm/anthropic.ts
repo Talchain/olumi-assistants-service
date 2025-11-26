@@ -12,11 +12,14 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
+import { normaliseNodeKind, normaliseDraftResponse } from "./normalisation.js";
+import { getMaxTokensFromConfig } from "./router.js";
 
 export type DraftArgs = {
   brief: string;
   docs: DocPreview[];
   seed: number;
+  model?: string;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -162,7 +165,8 @@ const DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes (goal, decision, option, outcome)
+- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
+  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
 - ≤${GRAPH_MAX_EDGES} edges
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
@@ -343,12 +347,14 @@ export async function draftGraphWithAnthropic(
   args: DraftArgs
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildDraftPrompt(args);
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, idempotency_key: idempotencyKey }, "calling Anthropic for draft");
+  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for draft");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -359,8 +365,8 @@ export async function draftGraphWithAnthropic(
       async () =>
         apiClient.messages.create(
           {
-            model: "claude-3-5-sonnet-20241022",
-            max_tokens: 4096,
+            model,
+            max_tokens: maxTokens,
             temperature: 0,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
@@ -372,7 +378,7 @@ export async function draftGraphWithAnthropic(
         ),
       {
         adapter: "anthropic",
-        model: "claude-3-5-sonnet-20241022",
+        model,
         operation: "draft_graph",
       }
     );
@@ -393,13 +399,29 @@ export async function draftGraphWithAnthropic(
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    // Parse and validate with Zod
+    // Parse, normalise non-standard node kinds, then validate with Zod
     const rawJson = JSON.parse(jsonText);
-    const parseResult = AnthropicDraftResponse.safeParse(rawJson);
+    const normalised = normaliseDraftResponse(rawJson);
+    const parseResult = AnthropicDraftResponse.safeParse(normalised);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten() }, "Anthropic response failed schema validation");
-      throw new Error("anthropic_response_invalid_schema");
+      const flatErrors = parseResult.error.flatten();
+      log.error({
+        errors: flatErrors,
+        raw_node_kinds: Array.isArray(rawJson?.nodes)
+          ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
+          : [],
+        event: 'llm.validation.schema_failed'
+      }, "Anthropic response failed schema validation after normalisation");
+
+      // Build detailed error message for debugging
+      const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
+        .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+        .join('; ');
+      const formIssues = (flatErrors.formErrors || []).join('; ');
+      const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+      throw new Error(`anthropic_response_invalid_schema: ${details || 'unknown validation error'}`);
     }
 
     const parsed = parseResult.data;
@@ -536,8 +558,11 @@ export async function suggestOptionsWithAnthropic(args: {
   goal: string;
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
+  model?: string;
 }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
   const prompt = buildSuggestPrompt(args);
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -552,8 +577,8 @@ export async function suggestOptionsWithAnthropic(args: {
       async () =>
         apiClient.messages.create(
           {
-            model: "claude-3-5-sonnet-20241022",
-            max_tokens: 2048,
+            model,
+            max_tokens: maxTokens,
             temperature: 0.1, // Low temperature for more deterministic output
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
@@ -565,7 +590,7 @@ export async function suggestOptionsWithAnthropic(args: {
         ),
       {
         adapter: "anthropic",
-        model: "claude-3-5-sonnet-20241022",
+        model,
         operation: "suggest_options",
       }
     );
@@ -690,6 +715,7 @@ export async function suggestOptionsWithAnthropic(args: {
 export type RepairArgs = {
   graph: GraphT;
   violations: string[];
+  model?: string;
 };
 
 const REPAIR_SYSTEM_PROMPT = `You are an expert at fixing decision graph violations.
@@ -753,12 +779,14 @@ export async function repairGraphWithAnthropic(
   args: RepairArgs
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = buildRepairPrompt(args);
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = getMaxTokensFromConfig('repair_graph') ?? 4096;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ violation_count: args.violations.length, idempotency_key: idempotencyKey }, "calling Anthropic for graph repair");
+  log.info({ violation_count: args.violations.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for graph repair");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -769,8 +797,8 @@ export async function repairGraphWithAnthropic(
       async () =>
         apiClient.messages.create(
           {
-            model: "claude-3-5-sonnet-20241022",
-            max_tokens: 4096,
+            model,
+            max_tokens: maxTokens,
             temperature: 0,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
@@ -782,7 +810,7 @@ export async function repairGraphWithAnthropic(
         ),
       {
         adapter: "anthropic",
-        model: "claude-3-5-sonnet-20241022",
+        model,
         operation: "repair_graph",
       }
     );
@@ -804,13 +832,30 @@ export async function repairGraphWithAnthropic(
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    // Parse and validate with Zod
+    // Parse, normalise non-standard node kinds, then validate with Zod
     const rawJson = JSON.parse(jsonText);
-    const parseResult = AnthropicDraftResponse.safeParse(rawJson);
+    const normalised = normaliseDraftResponse(rawJson);
+    const parseResult = AnthropicDraftResponse.safeParse(normalised);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten(), fallback_reason: "schema_validation_failed", quality_tier: "failed" }, "Anthropic repair response failed schema validation");
-      throw new Error("anthropic_repair_invalid_schema");
+      const flatErrors = parseResult.error.flatten();
+      log.error({
+        errors: flatErrors,
+        raw_node_kinds: Array.isArray(rawJson?.nodes)
+          ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
+          : [],
+        event: 'llm.validation.repair_schema_failed',
+        fallback_reason: "schema_validation_failed",
+        quality_tier: "failed"
+      }, "Anthropic repair response failed schema validation after normalisation");
+
+      const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
+        .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+        .join('; ');
+      const formIssues = (flatErrors.formErrors || []).join('; ');
+      const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+      throw new Error(`anthropic_repair_invalid_schema: ${details || 'unknown validation error'}`);
     }
 
     const parsed = parseResult.data;
@@ -1000,6 +1045,7 @@ export async function clarifyBriefWithAnthropic(
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
   const prompt = buildClarifyPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -1017,7 +1063,7 @@ export async function clarifyBriefWithAnthropic(
         apiClient.messages.create(
           {
             model,
-            max_tokens: 2048,
+            max_tokens: maxTokens,
             temperature: args.seed ? 0 : 0.1,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
@@ -1210,6 +1256,7 @@ export async function critiqueGraphWithAnthropic(
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
   const prompt = buildCritiquePrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -1227,7 +1274,7 @@ export async function critiqueGraphWithAnthropic(
         apiClient.messages.create(
           {
             model,
-            max_tokens: 2048,
+            max_tokens: maxTokens,
             temperature: 0,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
@@ -1354,6 +1401,8 @@ export async function explainDiffWithAnthropic(
   args: { patch: any; brief?: string; graph_summary?: { node_count: number; edge_count: number }; model?: string }
 ): Promise<{ rationales: Array<{ target: string; why: string; provenance_source?: string }>; usage: UsageMetrics }> {
   const model = args.model || "claude-3-5-sonnet-20241022";
+  // No specific config key for explain_diff, use default
+  const maxTokens = 2048;
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -1392,7 +1441,7 @@ Return ONLY valid JSON in this format:
         apiClient.messages.create(
           {
             model,
-            max_tokens: 2048,
+            max_tokens: maxTokens,
             temperature: 0,
             messages: [{ role: "user", content: prompt }],
           },
@@ -1512,11 +1561,12 @@ export class AnthropicAdapter implements LLMAdapter {
   async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
 
-    // Call existing function with compatible args
+    // Call existing function with compatible args, passing model from adapter
     const result = await draftGraphWithAnthropic({
       brief,
       docs,
       seed,
+      model: this.model,
     });
 
     return {
@@ -1527,7 +1577,10 @@ export class AnthropicAdapter implements LLMAdapter {
   }
 
   async suggestOptions(args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
-    const result = await suggestOptionsWithAnthropic(args);
+    const result = await suggestOptionsWithAnthropic({
+      ...args,
+      model: this.model,
+    });
 
     return {
       options: result.options,
@@ -1541,6 +1594,7 @@ export class AnthropicAdapter implements LLMAdapter {
     const result = await repairGraphWithAnthropic({
       graph,
       violations,
+      model: this.model,
     });
 
     return {

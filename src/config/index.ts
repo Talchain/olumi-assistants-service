@@ -175,6 +175,40 @@ const ConfigSchema = z.object({
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
     causalValidationEnabled: booleanString.default(false),
+    // Preflight validation settings
+    preflightEnabled: booleanString.default(true), // Enable input validation before draft
+    preflightStrict: booleanString.default(false), // If true, reject on preflight failure
+    preflightReadinessThreshold: z.coerce.number().min(0).max(1).default(0.4), // Min readiness score to proceed
+    // Mandatory clarification settings (Phase 5)
+    clarificationEnforced: booleanString.default(false), // If true, require clarification based on thresholds
+    clarificationThresholdAllowDirect: z.coerce.number().min(0).max(1).default(0.8), // >= this = allow direct draft
+    clarificationThresholdOneRound: z.coerce.number().min(0).max(1).default(0.4), // >= this = require 1 round, < this = require 2+ rounds
+    // Pre-decision checklist and framing nudges (Phase 6)
+    preDecisionChecksEnabled: booleanString.default(false), // If true, include pre-decision checks in draft response
+    // Bias detection confidence thresholding (Phase 6)
+    biasConfidenceThreshold: z.coerce.number().min(0).max(1).default(0.3), // Minimum confidence to report bias finding
+    // Response caching (Phase 7)
+    cacheResponseEnabled: booleanString.default(false), // If true, cache draft-graph responses
+    cacheResponseTtlMs: z.coerce.number().min(0).default(300000), // Cache TTL in milliseconds (default 5 min)
+    cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
+    // Per-operation model selection (Phase 4 tiered models)
+    models: z.object({
+      draft: z.string().default("gpt-4o"),
+      clarification: z.string().default("gpt-4o-mini"),
+      validation: z.string().default("gpt-4o-mini"),
+      repair: z.string().default("gpt-4o-mini"),
+      options: z.string().default("gpt-4o-mini"),
+      critique: z.string().default("gpt-4o"),
+    }),
+    // Per-operation token limits
+    maxTokens: z.object({
+      draft: z.coerce.number().int().positive().default(4096),
+      clarification: z.coerce.number().int().positive().default(1500),
+      validation: z.coerce.number().int().positive().default(1000),
+      repair: z.coerce.number().int().positive().default(2048),
+      options: z.coerce.number().int().positive().default(2048),
+      critique: z.coerce.number().int().positive().default(2048),
+    }),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -310,6 +344,39 @@ function parseConfig(): Config {
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
       causalValidationEnabled: env.CEE_CAUSAL_VALIDATION_ENABLED,
+      preflightEnabled: env.CEE_PREFLIGHT_ENABLED,
+      preflightStrict: env.CEE_PREFLIGHT_STRICT,
+      preflightReadinessThreshold: env.CEE_PREFLIGHT_READINESS_THRESHOLD,
+      // Mandatory clarification settings
+      clarificationEnforced: env.CEE_CLARIFICATION_ENFORCED,
+      clarificationThresholdAllowDirect: env.CEE_CLARIFICATION_THRESHOLD_ALLOW_DIRECT,
+      clarificationThresholdOneRound: env.CEE_CLARIFICATION_THRESHOLD_ONE_ROUND,
+      // Pre-decision checklist and framing nudges
+      preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
+      // Bias detection confidence thresholding
+      biasConfidenceThreshold: env.CEE_BIAS_CONFIDENCE_THRESHOLD,
+      // Response caching
+      cacheResponseEnabled: env.CEE_CACHE_RESPONSE_ENABLED,
+      cacheResponseTtlMs: env.CEE_CACHE_RESPONSE_TTL_MS,
+      cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
+      // Per-operation model selection
+      models: {
+        draft: env.CEE_MODEL_DRAFT,
+        clarification: env.CEE_MODEL_CLARIFICATION,
+        validation: env.CEE_MODEL_VALIDATION,
+        repair: env.CEE_MODEL_REPAIR,
+        options: env.CEE_MODEL_OPTIONS,
+        critique: env.CEE_MODEL_CRITIQUE,
+      },
+      // Per-operation token limits
+      maxTokens: {
+        draft: env.CEE_MAX_TOKENS_DRAFT,
+        clarification: env.CEE_MAX_TOKENS_CLARIFICATION,
+        validation: env.CEE_MAX_TOKENS_VALIDATION,
+        repair: env.CEE_MAX_TOKENS_REPAIR,
+        options: env.CEE_MAX_TOKENS_OPTIONS,
+        critique: env.CEE_MAX_TOKENS_CRITIQUE,
+      },
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

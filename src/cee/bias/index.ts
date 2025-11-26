@@ -16,6 +16,39 @@ type CEEBiasCheckRequestV1 = components["schemas"]["CEEBiasCheckRequestV1"];
 
 type ArchetypeMeta = CEEBiasCheckRequestV1["archetype"];
 
+// Extended finding type with confidence score
+type BiasAndingWithConfidence = CEEBiasFindingV1 & {
+  confidence?: number; // 0-1 confidence score
+};
+
+/**
+ * Calculate confidence score based on severity and evidence strength
+ */
+function calculateConfidence(severity: string, evidenceStrength: number): number {
+  const severityMultiplier: Record<string, number> = {
+    high: 0.9,
+    medium: 0.7,
+    low: 0.5,
+  };
+  const mult = severityMultiplier[severity] || 0.5;
+  return Math.min(1, Math.max(0, mult * evidenceStrength));
+}
+
+/**
+ * Filter findings below confidence threshold
+ */
+export function filterByConfidence(
+  findings: CEEBiasFindingV1[],
+  threshold?: number
+): CEEBiasFindingV1[] {
+  const minConfidence = threshold ?? config.cee.biasConfidenceThreshold;
+  return findings.filter((finding) => {
+    const withConf = finding as BiasAndingWithConfidence;
+    // If no confidence, assume it passes (legacy findings)
+    return (withConf.confidence ?? 1.0) >= minConfidence;
+  });
+}
+
 function structuralBiasEnabled(): boolean {
   return config.cee.biasStructuralEnabled;
 }
@@ -52,6 +85,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   // Selection bias: zero or one option defined in the graph
   if (optionCount <= 1) {
     const severity: "low" | "medium" | "high" = optionCount === 0 ? "high" : "medium";
+    // High confidence when zero options, medium when single option
+    const evidenceStrength = optionCount === 0 ? 1.0 : 0.7;
 
     findings.push({
       id: "selection_low_option_count",
@@ -66,11 +101,15 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       targets: {
         node_ids: optionIds,
       },
-    } as CEEBiasFindingV1);
+      confidence: calculateConfidence(severity, evidenceStrength),
+    } as BiasAndingWithConfidence);
   }
 
   // Measurement bias: missing risks or outcomes
   if (riskCount === 0 || outcomeCount === 0) {
+    // Stronger evidence when both are missing
+    const evidenceStrength = riskCount === 0 && outcomeCount === 0 ? 0.9 : 0.6;
+
     findings.push({
       id: "measurement_missing_risks_or_outcomes",
       category: "measurement",
@@ -82,13 +121,15 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       targets: {
         node_ids: [...goalIds, ...riskIds, ...outcomeIds],
       },
-    } as CEEBiasFindingV1);
+      confidence: calculateConfidence("medium", evidenceStrength),
+    } as BiasAndingWithConfidence);
   }
 
   const decisionType = (archetype as any)?.decision_type as string | undefined;
 
   // Optimisation bias: pricing decisions with multiple options but no risks
   if (decisionType === "pricing_decision" && optionCount >= 2 && riskCount === 0) {
+    // Medium confidence - specific to pricing decisions
     findings.push({
       id: "optimisation_pricing_no_risks",
       category: "optimisation",
@@ -100,11 +141,14 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       targets: {
         node_ids: [...goalIds, ...optionIds],
       },
-    } as CEEBiasFindingV1);
+      confidence: calculateConfidence("medium", 0.7),
+    } as BiasAndingWithConfidence);
   }
 
   // Framing bias: single goal with multiple options and no risks
+  // Reduced confidence to reduce false positives (common in simple decisions)
   if (goalNodes.length === 1 && optionCount >= 2 && riskCount === 0) {
+    // Low confidence - this pattern is common and may not indicate bias
     findings.push({
       id: "framing_single_goal_no_risks",
       category: "framing",
@@ -116,7 +160,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       targets: {
         node_ids: [...goalIds, ...optionIds],
       },
-    } as CEEBiasFindingV1);
+      confidence: calculateConfidence("low", 0.5), // Lower confidence to reduce false positives
+    } as BiasAndingWithConfidence);
   }
 
   if (structuralBiasEnabled()) {
@@ -174,6 +219,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
 
       if (optionsWithEvidence.length === 1 && optionsWithoutEvidence.length >= 1) {
         const relatedNodeIds = [...optionsWithEvidence, ...optionsWithoutEvidence];
+        // Higher confidence when more options lack evidence
+        const evidenceStrength = Math.min(1, 0.5 + optionsWithoutEvidence.length * 0.15);
         findings.push({
           id: "confirmation_unbalanced_evidence",
           category: "other",
@@ -185,7 +232,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
           targets: {
             node_ids: relatedNodeIds,
           },
-        } as CEEBiasFindingV1);
+          confidence: calculateConfidence("medium", evidenceStrength),
+        } as BiasAndingWithConfidence);
       }
     }
 
@@ -197,6 +245,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
     if (optionCount === 1 && actionCount >= 3) {
       const soleOptionId = optionIds[0];
       const relatedNodeIds = [soleOptionId, ...actionIds];
+      // Higher confidence with more actions attached to single option
+      const evidenceStrength = Math.min(1, 0.4 + (actionCount - 3) * 0.1 + 0.3);
 
       findings.push({
         id: "sunk_cost_single_option_actions",
@@ -209,7 +259,8 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
         targets: {
           node_ids: relatedNodeIds,
         },
-      } as CEEBiasFindingV1);
+        confidence: calculateConfidence("medium", evidenceStrength),
+      } as BiasAndingWithConfidence);
     }
   }
 
