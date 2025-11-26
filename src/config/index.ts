@@ -176,7 +176,7 @@ const ConfigSchema = z.object({
     teamPerspectivesFeatureVersion: z.string().optional(),
     causalValidationEnabled: booleanString.default(false),
     // Preflight validation settings
-    preflightEnabled: booleanString.default(true), // Enable input validation before draft
+    preflightEnabled: booleanString.default(false), // Enable input validation before draft
     preflightStrict: booleanString.default(false), // If true, reject on preflight failure
     preflightReadinessThreshold: z.coerce.number().min(0).max(1).default(0.4), // Min readiness score to proceed
     // Mandatory clarification settings (Phase 5)
@@ -191,24 +191,6 @@ const ConfigSchema = z.object({
     cacheResponseEnabled: booleanString.default(false), // If true, cache draft-graph responses
     cacheResponseTtlMs: z.coerce.number().min(0).default(300000), // Cache TTL in milliseconds (default 5 min)
     cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
-    // Per-operation model selection (Phase 4 tiered models)
-    models: z.object({
-      draft: z.string().default("gpt-4o"),
-      clarification: z.string().default("gpt-4o-mini"),
-      validation: z.string().default("gpt-4o-mini"),
-      repair: z.string().default("gpt-4o-mini"),
-      options: z.string().default("gpt-4o-mini"),
-      critique: z.string().default("gpt-4o"),
-    }),
-    // Per-operation token limits
-    maxTokens: z.object({
-      draft: z.coerce.number().int().positive().default(4096),
-      clarification: z.coerce.number().int().positive().default(1500),
-      validation: z.coerce.number().int().positive().default(1000),
-      repair: z.coerce.number().int().positive().default(2048),
-      options: z.coerce.number().int().positive().default(2048),
-      critique: z.coerce.number().int().positive().default(2048),
-    }),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -359,24 +341,6 @@ function parseConfig(): Config {
       cacheResponseEnabled: env.CEE_CACHE_RESPONSE_ENABLED,
       cacheResponseTtlMs: env.CEE_CACHE_RESPONSE_TTL_MS,
       cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
-      // Per-operation model selection
-      models: {
-        draft: env.CEE_MODEL_DRAFT,
-        clarification: env.CEE_MODEL_CLARIFICATION,
-        validation: env.CEE_MODEL_VALIDATION,
-        repair: env.CEE_MODEL_REPAIR,
-        options: env.CEE_MODEL_OPTIONS,
-        critique: env.CEE_MODEL_CRITIQUE,
-      },
-      // Per-operation token limits
-      maxTokens: {
-        draft: env.CEE_MAX_TOKENS_DRAFT,
-        clarification: env.CEE_MAX_TOKENS_CLARIFICATION,
-        validation: env.CEE_MAX_TOKENS_VALIDATION,
-        repair: env.CEE_MAX_TOKENS_REPAIR,
-        options: env.CEE_MAX_TOKENS_OPTIONS,
-        critique: env.CEE_MAX_TOKENS_CRITIQUE,
-      },
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
