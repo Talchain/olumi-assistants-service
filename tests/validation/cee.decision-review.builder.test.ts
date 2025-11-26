@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import type { CeeDecisionReviewPayloadV1 } from "../../src/contracts/cee/decision-review.js";
+import type { CeeDecisionReviewBundle } from "../../src/contracts/cee/decision-review.js";
 import {
   buildCeeDecisionReviewPayload,
   type CeeDecisionReviewPayload,
@@ -14,8 +14,8 @@ import type {
   CEETeamPerspectivesResponseV1,
 } from "../../sdk/typescript/src/ceeTypes.js";
 
-describe("CEE Decision Review v1 builder compatibility", () => {
-  it("emits a payload compatible with CeeDecisionReviewPayloadV1", () => {
+describe("CEE Decision Review Bundle builder compatibility", () => {
+  it("emits a payload compatible with CeeDecisionReviewBundle", () => {
     const draft: CEEDraftGraphResponseV1 = {
       trace: { request_id: "r-dr-v1", correlation_id: "r-dr-v1", engine: {} },
       quality: { overall: 7 } as any,
@@ -57,20 +57,20 @@ describe("CEE Decision Review v1 builder compatibility", () => {
 
     const review: CeeDecisionReviewPayload = buildCeeDecisionReviewPayload(envelopes);
 
-    // Type-level compatibility between SDK helper type and server contract.
-    type _SdkToV1 = CeeDecisionReviewPayload extends CeeDecisionReviewPayloadV1 ? true : never;
-    type _V1ToSdk = CeeDecisionReviewPayloadV1 extends CeeDecisionReviewPayload ? true : never;
+    // Type-level compatibility between SDK helper type and server contract bundle type.
+    type _SdkToBundle = CeeDecisionReviewPayload extends CeeDecisionReviewBundle ? true : never;
+    type _BundleToSdk = CeeDecisionReviewBundle extends CeeDecisionReviewPayload ? true : never;
 
-    const _sdkToV1: _SdkToV1 = true;
-    const _v1ToSdk: _V1ToSdk = true;
-    void _sdkToV1;
-    void _v1ToSdk;
+    const _sdkToBundle: _SdkToBundle = true;
+    const _bundleToSdk: _BundleToSdk = true;
+    void _sdkToBundle;
+    void _bundleToSdk;
 
-    const v1Review: CeeDecisionReviewPayloadV1 = review;
+    const bundleReview: CeeDecisionReviewBundle = review;
 
-    expect(v1Review.story).toBeDefined();
-    expect(v1Review.journey).toBeDefined();
-    expect(v1Review.uiFlags).toBeDefined();
-    expect(v1Review.trace?.request_id).toBe("r-dr-v1");
+    expect(bundleReview.story).toBeDefined();
+    expect(bundleReview.journey).toBeDefined();
+    expect(bundleReview.uiFlags).toBeDefined();
+    expect(bundleReview.trace?.request_id).toBe("r-dr-v1");
   });
 });

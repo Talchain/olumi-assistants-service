@@ -1,207 +1,135 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://olumi.io/schemas/cee-decision-review.v1.json",
-  "title": "CeeDecisionReviewPayloadV1",
-  "description": "Compact, metadata-only Decision Review payload (story, journey, uiFlags, trace). Frozen v1 contract for PLoT/UI consumption.",
+  "$id": "https://olumi.ai/schemas/cee-decision-review.v1.json",
+  "title": "CeeDecisionReviewPayload",
+  "description": "Frozen v1 contract for CEE decision review. Additive-only evolution.",
   "type": "object",
-  "required": ["story", "journey", "uiFlags"],
-  "additionalProperties": false,
+  "required": ["schema", "version", "decision_id", "review"],
   "properties": {
-    "story": {
-      "$ref": "#/$defs/DecisionStorySummaryV1"
+    "schema": {
+      "const": "cee.decision-review.v1"
     },
-    "journey": {
-      "$ref": "#/$defs/CeeJourneySummaryV1"
+    "version": {
+      "const": "1.0.0"
     },
-    "uiFlags": {
-      "$ref": "#/$defs/CeeUiFlagsV1"
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario_id": {
+      "type": ["string", "null"]
+    },
+    "review": {
+      "$ref": "#/definitions/Review"
     },
     "trace": {
-      "type": "object",
-      "description": "Optional trace identifiers (request/correlation IDs only).",
-      "properties": {
-        "request_id": {
-          "type": "string"
-        },
-        "correlation_id": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/definitions/Trace"
+    },
+    "meta": {
+      "$ref": "#/definitions/Meta"
     }
   },
-  "$defs": {
-    "DecisionStorySummaryV1": {
+  "definitions": {
+    "Review": {
       "type": "object",
-      "description": "High-level decision story summary derived from CEE envelopes.",
-      "required": ["headline", "key_drivers", "risks_and_gaps", "next_actions", "any_truncated"],
-      "additionalProperties": true,
+      "required": ["summary", "confidence", "recommendations"],
       "properties": {
-        "headline": {
+        "summary": {
           "type": "string",
-          "description": "Short narrative summary of the decision and CEE judgement."
+          "description": "Plain-English summary of decision quality"
         },
-        "key_drivers": {
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quality_band": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "recommendations": {
           "type": "array",
-          "description": "Concise, content-free drivers behind the decision posture.",
-          "items": {
-            "type": "string"
-          }
+          "items": { "$ref": "#/definitions/Recommendation" }
         },
-        "risks_and_gaps": {
+        "bias_findings": {
           "type": "array",
-          "description": "High-level risks or gaps surfaced by CEE (no user text).",
-          "items": {
-            "type": "string"
-          }
+          "items": { "$ref": "#/definitions/BiasFinding" }
         },
-        "next_actions": {
+        "structural_issues": {
           "type": "array",
-          "description": "Suggested next actions to improve confidence in the decision.",
-          "items": {
-            "type": "string"
-          }
+          "items": { "$ref": "#/definitions/StructuralIssue" }
         },
-        "any_truncated": {
-          "type": "boolean",
-          "description": "True when any underlying CEE envelope applied deterministic caps."
-        },
-        "quality_overall": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10,
-          "description": "Optional overall quality score (1-10)."
+        "strengths": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },
-    "CeeJourneySummaryV1": {
+    "Recommendation": {
       "type": "object",
-      "description": "Combined decision story and health summary for a CEE journey.",
-      "required": ["story", "health", "is_complete", "missing_envelopes", "has_team_disagreement"],
-      "additionalProperties": false,
+      "required": ["id", "priority", "message"],
       "properties": {
-        "story": {
-          "$ref": "#/$defs/DecisionStorySummaryV1"
-        },
-        "health": {
-          "$ref": "#/$defs/CeeJourneyHealthV1"
-        },
-        "is_complete": {
-          "type": "boolean"
-        },
-        "missing_envelopes": {
+        "id": { "type": "string" },
+        "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+        "message": { "type": "string" },
+        "action": { "type": "string" },
+        "affected_nodes": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["draft", "explain", "evidence", "bias", "options", "sensitivity", "team"]
-          }
-        },
-        "has_team_disagreement": {
-          "type": "boolean"
+          "items": { "type": "string" }
         }
       }
     },
-    "CeeJourneyHealthV1": {
+    "BiasFinding": {
       "type": "object",
-      "description": "Health summary for a CEE journey across all envelopes.",
-      "required": ["overallStatus", "overallTone", "any_truncated", "has_validation_issues"],
-      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
       "properties": {
-        "perEnvelope": {
+        "code": { "type": "string" },
+        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "message": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "affected_node_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "micro_intervention": {
           "type": "object",
           "properties": {
-            "draft": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "explain": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "evidence": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "bias": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "options": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "sensitivity": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            },
-            "team": {
-              "$ref": "#/$defs/CeeHealthSummaryV1"
-            }
-          },
-          "additionalProperties": false
-        },
-        "overallStatus": {
-          "type": "string",
-          "enum": ["ok", "warning", "risk"]
-        },
-        "overallTone": {
-          "type": "string",
-          "enum": ["success", "warning", "danger"]
-        },
-        "any_truncated": {
-          "type": "boolean"
-        },
-        "has_validation_issues": {
-          "type": "boolean"
-        }
-      }
-    },
-    "CeeHealthSummaryV1": {
-      "type": "object",
-      "description": "Health summary for a single CEE envelope.",
-      "required": ["status", "reasons", "any_truncated", "has_validation_issues"],
-      "additionalProperties": true,
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": ["ok", "warning", "risk"]
-        },
-        "reasons": {
-          "type": "array",
-          "items": {
-            "type": "string"
+            "steps": { "type": "array", "items": { "type": "string" } },
+            "estimated_minutes": { "type": "integer" }
           }
-        },
-        "any_truncated": {
-          "type": "boolean"
-        },
-        "has_validation_issues": {
-          "type": "boolean"
-        },
-        "quality_overall": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10
-        },
-        "source": {
-          "type": "string",
-          "enum": ["draft", "explain", "evidence", "bias", "options", "sensitivity", "team"]
         }
       }
     },
-    "CeeUiFlagsV1": {
+    "StructuralIssue": {
       "type": "object",
-      "description": "High-level UI flags derived from the journey summary.",
-      "required": ["has_high_risk_envelopes", "has_team_disagreement", "has_truncation_somewhere", "is_journey_complete"],
-      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
       "properties": {
-        "has_high_risk_envelopes": {
-          "type": "boolean"
-        },
-        "has_team_disagreement": {
-          "type": "boolean"
-        },
-        "has_truncation_somewhere": {
-          "type": "boolean"
-        },
-        "is_journey_complete": {
-          "type": "boolean"
+        "code": { "type": "string" },
+        "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+        "message": { "type": "string" },
+        "affected_node_ids": {
+          "type": "array",
+          "items": { "type": "string" }
         }
+      }
+    },
+    "Trace": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "correlation_id": { "type": "string" },
+        "latency_ms": { "type": "integer" },
+        "model_version": { "type": "string" }
+      }
+    },
+    "Meta": {
+      "type": "object",
+      "properties": {
+        "created_at": { "type": "string", "format": "date-time" },
+        "graph_hash": { "type": "string" },
+        "seed": { "type": "integer" }
       }
     }
-  }
+  },
+  "additionalProperties": false
 }

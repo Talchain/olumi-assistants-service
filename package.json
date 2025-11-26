@@ -69,6 +69,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
+    "ajv-formats": "^3.0.1",
     "artillery": "^2.0.27",
     "eslint": "^9.39.1",
     "openapi-typescript": "^7.10.1",

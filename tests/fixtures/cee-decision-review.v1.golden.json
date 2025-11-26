@@ -1,0 +1,67 @@
+{
+  "schema": "cee.decision-review.v1",
+  "version": "1.0.0",
+  "decision_id": "dec_abc123",
+  "scenario_id": "scn_xyz789",
+  "review": {
+    "summary": "This decision model is well-structured with clear options and outcomes. Consider adding risk factors for Option B.",
+    "confidence": 0.78,
+    "quality_band": "medium",
+    "recommendations": [
+      {
+        "id": "rec_001",
+        "priority": "high",
+        "message": "Option B lacks risk assessment",
+        "action": "Add at least one risk node connected to Option B",
+        "affected_nodes": ["n_option_b"]
+      },
+      {
+        "id": "rec_002",
+        "priority": "medium",
+        "message": "Evidence is one-sided",
+        "action": "Consider adding contradicting evidence",
+        "affected_nodes": ["n_evidence_1", "n_evidence_2"]
+      }
+    ],
+    "bias_findings": [
+      {
+        "code": "CONFIRMATION_BIAS",
+        "severity": "medium",
+        "message": "4 of 5 evidence nodes support only Option A",
+        "confidence": 0.72,
+        "affected_node_ids": ["n_evidence_1", "n_evidence_2", "n_evidence_3", "n_evidence_4"],
+        "micro_intervention": {
+          "steps": [
+            "List one scenario where Option A fails",
+            "Find evidence that supports Option B"
+          ],
+          "estimated_minutes": 3
+        }
+      }
+    ],
+    "structural_issues": [
+      {
+        "code": "ORPHAN_NODE",
+        "severity": "warning",
+        "message": "Node 'n_factor_x' has no connections",
+        "affected_node_ids": ["n_factor_x"]
+      }
+    ],
+    "strengths": [
+      "Clear decision goal identified",
+      "Multiple options considered",
+      "Outcomes linked to options with weights"
+    ]
+  },
+  "trace": {
+    "request_id": "req_7f8g9h0i",
+    "correlation_id": "corr_1a2b3c4d",
+    "latency_ms": 1247,
+    "model_version": "cee-review-1.0.0"
+  },
+  "meta": {
+    "created_at": "2025-11-26T10:30:00Z",
+    "graph_hash": "sha256:abc123def456",
+    "seed": 42
+  }
+}

@@ -114,3 +114,25 @@ export type {
   CeeCausalCoverageLevel,
   CeeDecisionHealthSnapshot,
 } from "./ceeHelpers.js";
+
+// CEE Decision Review v1 Contract Types (frozen)
+export type {
+  CeeDecisionReviewPayloadV1 as CeeDecisionReviewV1,
+  CeeDecisionReview,
+  Review as CeeReview,
+  Recommendation as CeeRecommendation,
+  RecommendationPriority as CeeRecommendationPriority,
+  BiasFinding as CeeBiasFinding,
+  BiasSeverity as CeeBiasSeverity,
+  MicroIntervention as CeeMicroIntervention,
+  StructuralIssue as CeeStructuralIssue,
+  StructuralIssueSeverity as CeeStructuralIssueSeverity,
+  QualityBand as CeeQualityBand,
+  Trace as CeeReviewTrace,
+  Meta as CeeReviewMeta,
+} from "./types/cee-decision-review.js";
+
+export {
+  isCeeDecisionReviewPayloadV1,
+  createMinimalReviewPayload,
+} from "./types/cee-decision-review.js";

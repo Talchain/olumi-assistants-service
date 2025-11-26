@@ -24,7 +24,7 @@ describe("GET /assist/v1/decision-review/example (enabled)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns a CeeDecisionReviewPayloadV1-like payload and remains metadata-only", async () => {
+  it("returns a CeeDecisionReviewBundle payload and remains metadata-only", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/assist/v1/decision-review/example",
@@ -38,7 +38,7 @@ describe("GET /assist/v1/decision-review/example (enabled)", () => {
 
     const body = res.json() as Record<string, unknown>;
 
-    // Structural spot-checks against CeeDecisionReviewPayloadV1
+    // Structural spot-checks against CeeDecisionReviewBundle (story/journey/uiFlags)
     expect(body.story).toBeDefined();
     const story = body.story as Record<string, unknown>;
     expect(typeof story.headline).toBe("string");

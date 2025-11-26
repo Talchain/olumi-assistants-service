@@ -90,6 +90,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^8.48.0
         version: 8.48.0(eslint@9.39.1)(typescript@5.9.3)
+      ajv-formats:
+        specifier: ^3.0.1
+        version: 3.0.1(ajv@8.17.1)
       artillery:
         specifier: ^2.0.27
         version: 2.0.27(@types/node@20.19.24)

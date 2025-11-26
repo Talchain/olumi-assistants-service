@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import type { CeeDecisionReviewPayloadV1 } from "../../src/contracts/cee/decision-review.js";
+import type { CeeDecisionReviewBundle } from "../../src/contracts/cee/decision-review.js";
 import { loadCeeDecisionReviewFixture } from "../utils/cee-decision-review.js";
 import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 
-describe("CEE Decision Review v1 golden fixture", () => {
-  it("conforms to CeeDecisionReviewPayloadV1 and remains metadata-only", async () => {
-    const fixture: CeeDecisionReviewPayloadV1 = await loadCeeDecisionReviewFixture();
+describe("CEE Decision Review Bundle golden fixture", () => {
+  it("conforms to CeeDecisionReviewBundle and remains metadata-only", async () => {
+    const fixture: CeeDecisionReviewBundle = await loadCeeDecisionReviewFixture();
 
     // Basic structural checks matching the v1 contract
     expect(fixture.story).toBeDefined();
