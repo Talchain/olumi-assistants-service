@@ -895,58 +895,90 @@ For v1, the decision to stay JSON-only is recorded in
 
 ## 7. Frozen Contracts
 
-### 7.1 CeeDecisionReviewPayloadV1
+### 7.1 CeeDecisionReviewPayload v1 (Frozen)
 
-The `CeeDecisionReviewPayloadV1` contract is **frozen** for PLoT and UI consumption.
-This payload provides a compact, metadata-only view of a CEE journey suitable for
-decision review dashboards and summaries.
+**Schema:** `schemas/cee-decision-review.v1.json`
+**Status:** Frozen. Additive-only changes permitted.
+
+The `CeeDecisionReviewPayload` contract is **frozen** for PLoT and UI consumption.
+This payload provides a structured view of a CEE decision review with recommendations,
+bias findings, and structural issues.
 
 **Artifacts:**
 
 - **JSON Schema:** `schemas/cee-decision-review.v1.json`
-- **Golden Fixture:** `tests/fixtures/cee/cee-decision-review.v1.json`
-- **TypeScript Type:** `CeeDecisionReviewPayloadV1` (derived from OpenAPI)
-- **Contract Location:** `src/contracts/cee/decision-review.ts`
+- **Golden Fixture:** `tests/fixtures/cee-decision-review.v1.golden.json`
+- **TypeScript Type:** `CeeDecisionReviewPayloadV1` (from `sdk/typescript/src/types/cee-decision-review.ts`)
+
+**Contract Guarantees:**
+
+- `schema` field always equals `"cee.decision-review.v1"`
+- `version` field always equals `"1.0.0"`
+- Required fields: `decision_id`, `review.summary`, `review.confidence`, `review.recommendations`
+- All other fields optional
 
 **Schema Structure:**
 
 ```
-CeeDecisionReviewPayloadV1
-├── story: DecisionStorySummaryV1 (required)
-│   ├── headline: string
-│   ├── key_drivers: string[]
-│   ├── risks_and_gaps: string[]
-│   ├── next_actions: string[]
-│   ├── any_truncated: boolean
-│   └── quality_overall?: number (1-10)
-├── journey: CeeJourneySummaryV1 (required)
-│   ├── story: DecisionStorySummaryV1
-│   ├── health: CeeJourneyHealthV1
-│   │   ├── perEnvelope: { draft?, explain?, evidence?, bias?, options?, sensitivity?, team? }
-│   │   ├── overallStatus: "ok" | "warning" | "risk"
-│   │   ├── overallTone: "success" | "warning" | "danger"
-│   │   ├── any_truncated: boolean
-│   │   └── has_validation_issues: boolean
-│   ├── is_complete: boolean
-│   ├── missing_envelopes: ("draft" | "explain" | "evidence" | "bias" | "options" | "sensitivity" | "team")[]
-│   └── has_team_disagreement: boolean
-├── uiFlags: CeeUiFlagsV1 (required)
-│   ├── has_high_risk_envelopes: boolean
-│   ├── has_team_disagreement: boolean
-│   ├── has_truncation_somewhere: boolean
-│   └── is_journey_complete: boolean
-└── trace?: { request_id?: string, correlation_id?: string }
+CeeDecisionReviewPayload
+├── schema: "cee.decision-review.v1" (const, required)
+├── version: "1.0.0" (const, required)
+├── decision_id: string (required)
+├── scenario_id?: string | null
+├── review: Review (required)
+│   ├── summary: string (required)
+│   ├── confidence: number 0-1 (required)
+│   ├── quality_band?: "high" | "medium" | "low"
+│   ├── recommendations: Recommendation[] (required)
+│   │   ├── id: string (required)
+│   │   ├── priority: "high" | "medium" | "low" (required)
+│   │   ├── message: string (required)
+│   │   ├── action?: string
+│   │   └── affected_nodes?: string[]
+│   ├── bias_findings?: BiasFinding[]
+│   │   ├── code: string (required)
+│   │   ├── severity: "critical" | "high" | "medium" | "low" (required)
+│   │   ├── message: string (required)
+│   │   ├── confidence?: number 0-1
+│   │   ├── affected_node_ids?: string[]
+│   │   └── micro_intervention?: { steps: string[], estimated_minutes: number }
+│   ├── structural_issues?: StructuralIssue[]
+│   │   ├── code: string (required)
+│   │   ├── severity: "error" | "warning" | "info" (required)
+│   │   ├── message: string (required)
+│   │   └── affected_node_ids?: string[]
+│   └── strengths?: string[]
+├── trace?: Trace
+│   ├── request_id?: string
+│   ├── correlation_id?: string
+│   ├── latency_ms?: integer
+│   └── model_version?: string
+└── meta?: Meta
+    ├── created_at?: string (ISO 8601)
+    ├── graph_hash?: string
+    └── seed?: integer
 ```
+
+**For PLoT Integration:**
+
+- Validate responses against schema before processing
+- Handle missing optional fields gracefully
+- Use `trace.request_id` for debugging
+
+**For UI Integration:**
+
+- Display `review.summary` as primary feedback
+- Render `recommendations` as actionable items
+- Show `bias_findings` in Insights tab
+- Highlight `affected_node_ids` on canvas
 
 **Evolution Policy:**
 
 - **Additive only:** New optional fields may be added to any schema.
 - **No removals:** Required fields and structure cannot be removed in v1.
-- **No type changes:** Field types are frozen (e.g., `headline` stays `string`).
+- **No type changes:** Field types are frozen.
 - **Breaking changes:** Require a new major version (v2).
 
 **Validation Tests:**
 
 - `tests/validation/cee.decision-review.schema.test.ts` – validates fixture against JSON Schema
-- `tests/validation/cee.decision-review.fixture.test.ts` – structural checks and privacy validation
-- `tests/validation/cee.decision-review.builder.test.ts` – SDK helper type compatibility

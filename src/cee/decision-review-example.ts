@@ -1,6 +1,10 @@
-import type { CeeDecisionReviewPayloadV1 } from "../contracts/cee/decision-review.js";
+import type { CeeDecisionReviewBundle } from "../contracts/cee/decision-review.js";
 
-const CEE_DECISION_REVIEW_EXAMPLE_V1_CANONICAL: CeeDecisionReviewPayloadV1 = {
+/**
+ * Canonical Decision Review Bundle example (story/journey/uiFlags).
+ * This is a UI-friendly summary, not the v1 wire contract.
+ */
+const CEE_DECISION_REVIEW_BUNDLE_EXAMPLE_CANONICAL: CeeDecisionReviewBundle = {
   story: {
     headline:
       "CEE currently rates overall model quality at 7/10 (high). The model includes 2 explicit decision options. Team input from 3 participants has been summarised. Some response lists were capped; review risks and next actions before treating this as final.",
@@ -108,15 +112,21 @@ const CEE_DECISION_REVIEW_EXAMPLE_V1_CANONICAL: CeeDecisionReviewPayloadV1 = {
   },
 };
 
-export const CEE_DECISION_REVIEW_EXAMPLE_V1 = Object.freeze(
-  CEE_DECISION_REVIEW_EXAMPLE_V1_CANONICAL,
-) as Readonly<CeeDecisionReviewPayloadV1>;
+export const CEE_DECISION_REVIEW_BUNDLE_EXAMPLE = Object.freeze(
+  CEE_DECISION_REVIEW_BUNDLE_EXAMPLE_CANONICAL,
+) as Readonly<CeeDecisionReviewBundle>;
 
 /**
- * Return a fresh deep copy of the canonical Decision Review example payload.
+ * Return a fresh deep copy of the canonical Decision Review Bundle example.
  * This avoids callers mutating the shared template across requests/tests.
  */
-export function getCeeDecisionReviewExampleV1(): CeeDecisionReviewPayloadV1 {
+export function getCeeDecisionReviewBundleExample(): CeeDecisionReviewBundle {
   // Payload is plain JSON; a JSON round-trip is sufficient for a deep clone.
-  return JSON.parse(JSON.stringify(CEE_DECISION_REVIEW_EXAMPLE_V1_CANONICAL)) as CeeDecisionReviewPayloadV1;
+  return JSON.parse(JSON.stringify(CEE_DECISION_REVIEW_BUNDLE_EXAMPLE_CANONICAL)) as CeeDecisionReviewBundle;
 }
+
+// Legacy aliases for backwards compatibility
+/** @deprecated Use CEE_DECISION_REVIEW_BUNDLE_EXAMPLE instead */
+export const CEE_DECISION_REVIEW_EXAMPLE_V1 = CEE_DECISION_REVIEW_BUNDLE_EXAMPLE;
+/** @deprecated Use getCeeDecisionReviewBundleExample instead */
+export const getCeeDecisionReviewExampleV1 = getCeeDecisionReviewBundleExample;

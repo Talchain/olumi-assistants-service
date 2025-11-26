@@ -1,22 +1,25 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import Ajv from "ajv";
+import addFormats from "ajv-formats";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-describe("CeeDecisionReviewPayloadV1 JSON Schema", () => {
+describe("CeeDecisionReviewPayload v1 Schema", () => {
   let schema: Record<string, unknown>;
-  let fixture: Record<string, unknown>;
+  let goldenFixture: Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ajv: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let validate: any;
 
   beforeAll(async () => {
     const schemaPath = join(__dirname, "../../schemas/cee-decision-review.v1.json");
-    const fixturePath = join(__dirname, "../fixtures/cee/cee-decision-review.v1.json");
+    const fixturePath = join(__dirname, "../fixtures/cee-decision-review.v1.golden.json");
 
-    [schema, fixture] = await Promise.all([
+    [schema, goldenFixture] = await Promise.all([
       readFile(schemaPath, "utf-8").then(JSON.parse),
       readFile(fixturePath, "utf-8").then(JSON.parse),
     ]);
@@ -24,101 +27,252 @@ describe("CeeDecisionReviewPayloadV1 JSON Schema", () => {
     // Handle ESM/CJS interop
     const AjvConstructor = Ajv.default || Ajv;
     ajv = new AjvConstructor({ strict: false, allErrors: true });
+
+    // Add formats support for date-time validation
+    const addFormatsFunc = addFormats.default || addFormats;
+    addFormatsFunc(ajv);
+
+    validate = ajv.compile(schema);
   });
 
-  it("schema is valid JSON Schema draft-07", () => {
-    expect(schema.$schema).toBe("http://json-schema.org/draft-07/schema#");
-    expect(schema.title).toBe("CeeDecisionReviewPayloadV1");
-  });
-
-  it("golden fixture validates against schema", () => {
-    const validate = ajv.compile(schema);
-    const valid = validate(fixture);
-
+  it("validates golden fixture", () => {
+    const valid = validate(goldenFixture);
     if (!valid) {
       console.error("Validation errors:", JSON.stringify(validate.errors, null, 2));
     }
-
     expect(valid).toBe(true);
+    expect(validate.errors).toBeNull();
   });
 
-  it("schema rejects payload missing required fields", () => {
-    const validate = ajv.compile(schema);
+  it("rejects missing required fields", () => {
+    const invalid = { schema: "cee.decision-review.v1" };
+    expect(validate(invalid)).toBe(false);
+  });
 
-    // Missing 'story'
-    const invalidMissingStory = {
-      journey: fixture.journey,
-      uiFlags: fixture.uiFlags,
+  it("rejects invalid schema version", () => {
+    const invalid = { ...goldenFixture, schema: "cee.decision-review.v2" };
+    expect(validate(invalid)).toBe(false);
+  });
+
+  it("rejects additional properties", () => {
+    const invalid = { ...goldenFixture, unexpected_field: "value" };
+    expect(validate(invalid)).toBe(false);
+  });
+
+  it("accepts minimal valid payload", () => {
+    const minimal = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+      },
     };
-    expect(validate(invalidMissingStory)).toBe(false);
+    expect(validate(minimal)).toBe(true);
+  });
 
-    // Missing 'uiFlags'
-    const invalidMissingUiFlags = {
-      story: fixture.story,
-      journey: fixture.journey,
+  it("validates recommendation structure", () => {
+    const withInvalidRecommendation = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [
+          { id: "rec_1" }, // Missing required 'priority' and 'message'
+        ],
+      },
     };
-    expect(validate(invalidMissingUiFlags)).toBe(false);
+    expect(validate(withInvalidRecommendation)).toBe(false);
   });
 
-  it("schema rejects invalid enum values", () => {
-    const validate = ajv.compile(schema);
-
-    const invalidStatus = JSON.parse(JSON.stringify(fixture));
-    invalidStatus.journey.health.overallStatus = "invalid_status";
-
-    expect(validate(invalidStatus)).toBe(false);
+  it("validates bias_finding structure", () => {
+    const withValidBiasFinding = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+        bias_findings: [
+          {
+            code: "CONFIRMATION_BIAS",
+            severity: "medium",
+            message: "One-sided evidence",
+          },
+        ],
+      },
+    };
+    expect(validate(withValidBiasFinding)).toBe(true);
   });
 
-  it("schema allows optional trace field", () => {
-    const validate = ajv.compile(schema);
-
-    const withoutTrace = JSON.parse(JSON.stringify(fixture));
-    delete withoutTrace.trace;
-
-    expect(validate(withoutTrace)).toBe(true);
+  it("validates structural_issue structure", () => {
+    const withValidStructuralIssue = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+        structural_issues: [
+          {
+            code: "ORPHAN_NODE",
+            severity: "warning",
+            message: "Disconnected node found",
+          },
+        ],
+      },
+    };
+    expect(validate(withValidStructuralIssue)).toBe(true);
   });
 
-  it("defines all required sub-schemas", () => {
-    const defs = schema.$defs as Record<string, unknown>;
-
-    expect(defs).toBeDefined();
-    expect(defs.DecisionStorySummaryV1).toBeDefined();
-    expect(defs.CeeJourneySummaryV1).toBeDefined();
-    expect(defs.CeeJourneyHealthV1).toBeDefined();
-    expect(defs.CeeHealthSummaryV1).toBeDefined();
-    expect(defs.CeeUiFlagsV1).toBeDefined();
+  it("rejects invalid severity enum values", () => {
+    const withInvalidSeverity = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+        bias_findings: [
+          {
+            code: "TEST",
+            severity: "invalid_severity",
+            message: "Test",
+          },
+        ],
+      },
+    };
+    expect(validate(withInvalidSeverity)).toBe(false);
   });
 
-  it("frozen fields match golden fixture structure", () => {
-    // This test ensures the schema and fixture stay in sync
-    // If the fixture changes, this test will remind us to update the schema
+  it("validates confidence range (0-1)", () => {
+    const withInvalidConfidence = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 1.5, // Invalid: > 1
+        recommendations: [],
+      },
+    };
+    expect(validate(withInvalidConfidence)).toBe(false);
+  });
 
-    // Required top-level keys
-    expect(fixture).toHaveProperty("story");
-    expect(fixture).toHaveProperty("journey");
-    expect(fixture).toHaveProperty("uiFlags");
+  it("allows null scenario_id", () => {
+    const withNullScenario = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      scenario_id: null,
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+      },
+    };
+    expect(validate(withNullScenario)).toBe(true);
+  });
 
-    // Story required fields
-    const story = fixture.story as Record<string, unknown>;
-    expect(story).toHaveProperty("headline");
-    expect(story).toHaveProperty("key_drivers");
-    expect(story).toHaveProperty("risks_and_gaps");
-    expect(story).toHaveProperty("next_actions");
-    expect(story).toHaveProperty("any_truncated");
+  it("validates trace and meta fields", () => {
+    const withTraceAndMeta = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        recommendations: [],
+      },
+      trace: {
+        request_id: "req_123",
+        correlation_id: "corr_456",
+        latency_ms: 500,
+        model_version: "v1.0.0",
+      },
+      meta: {
+        created_at: "2025-11-26T10:30:00Z",
+        graph_hash: "sha256:abc123",
+        seed: 42,
+      },
+    };
+    expect(validate(withTraceAndMeta)).toBe(true);
+  });
 
-    // Journey required fields
-    const journey = fixture.journey as Record<string, unknown>;
-    expect(journey).toHaveProperty("story");
-    expect(journey).toHaveProperty("health");
-    expect(journey).toHaveProperty("is_complete");
-    expect(journey).toHaveProperty("missing_envelopes");
-    expect(journey).toHaveProperty("has_team_disagreement");
+  it("validates quality_band enum values", () => {
+    const withValidQualityBand = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        quality_band: "high",
+        recommendations: [],
+      },
+    };
+    expect(validate(withValidQualityBand)).toBe(true);
 
-    // UI flags required fields
-    const uiFlags = fixture.uiFlags as Record<string, unknown>;
-    expect(uiFlags).toHaveProperty("has_high_risk_envelopes");
-    expect(uiFlags).toHaveProperty("has_team_disagreement");
-    expect(uiFlags).toHaveProperty("has_truncation_somewhere");
-    expect(uiFlags).toHaveProperty("is_journey_complete");
+    const withInvalidQualityBand = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test summary",
+        confidence: 0.5,
+        quality_band: "excellent", // Invalid
+        recommendations: [],
+      },
+    };
+    expect(validate(withInvalidQualityBand)).toBe(false);
+  });
+
+  it("validates recommendation priority enum values", () => {
+    const validPriorities = ["high", "medium", "low"];
+    for (const priority of validPriorities) {
+      const payload = {
+        schema: "cee.decision-review.v1",
+        version: "1.0.0",
+        decision_id: "dec_123",
+        review: {
+          summary: "Test",
+          confidence: 0.5,
+          recommendations: [{ id: "r1", priority, message: "Test" }],
+        },
+      };
+      expect(validate(payload)).toBe(true);
+    }
+  });
+
+  it("validates micro_intervention structure", () => {
+    const withMicroIntervention = {
+      schema: "cee.decision-review.v1",
+      version: "1.0.0",
+      decision_id: "dec_123",
+      review: {
+        summary: "Test",
+        confidence: 0.5,
+        recommendations: [],
+        bias_findings: [
+          {
+            code: "TEST_BIAS",
+            severity: "low",
+            message: "Test bias",
+            micro_intervention: {
+              steps: ["Step 1", "Step 2"],
+              estimated_minutes: 5,
+            },
+          },
+        ],
+      },
+    };
+    expect(validate(withMicroIntervention)).toBe(true);
   });
 });

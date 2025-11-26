@@ -449,11 +449,11 @@ paths:
       x-internal: true
       responses:
         '200':
-          description: Example CEE Decision Review v1 payload
+          description: Example CEE Decision Review Bundle (story/journey/uiFlags)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CeeDecisionReviewPayloadV1'
+                $ref: '#/components/schemas/CeeDecisionReviewBundle'
 
   /assist/v1/team-perspectives:
     post:
@@ -2481,9 +2481,11 @@ components:
         is_journey_complete:
           type: boolean
 
-    CeeDecisionReviewPayloadV1:
+    CeeDecisionReviewBundle:
       type: object
-      description: Compact, metadata-only Decision Review payload (story, journey, uiFlags, trace).
+      description: |
+        UI-friendly bundle summarising CEE envelopes as story/journey/uiFlags.
+        This is a derived view for frontend consumption, not the wire contract.
       required:
         - story
         - journey
@@ -2503,6 +2505,166 @@ components:
               type: string
             correlation_id:
               type: string
+
+    CeeDecisionReviewPayloadV1:
+      type: object
+      description: |
+        Frozen v1 contract for CEE decision review. Additive-only evolution.
+        See schemas/cee-decision-review.v1.json for the authoritative JSON Schema.
+      required:
+        - schema
+        - version
+        - decision_id
+        - review
+      properties:
+        schema:
+          type: string
+          enum: [cee.decision-review.v1]
+        version:
+          type: string
+          enum: ['1.0.0']
+        decision_id:
+          type: string
+          minLength: 1
+        scenario_id:
+          type: string
+          nullable: true
+        review:
+          $ref: '#/components/schemas/CeeReviewV1'
+        trace:
+          $ref: '#/components/schemas/CeeReviewTraceV1'
+        meta:
+          $ref: '#/components/schemas/CeeReviewMetaV1'
+
+    CeeReviewV1:
+      type: object
+      description: The review section of a CEE Decision Review payload.
+      required:
+        - summary
+        - confidence
+        - recommendations
+      properties:
+        summary:
+          type: string
+          description: Plain-English summary of decision quality.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        quality_band:
+          type: string
+          enum: [high, medium, low]
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CeeRecommendationV1'
+        bias_findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CeeBiasFindingV1'
+        structural_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CeeStructuralIssueV1'
+        strengths:
+          type: array
+          items:
+            type: string
+
+    CeeRecommendationV1:
+      type: object
+      required:
+        - id
+        - priority
+        - message
+      properties:
+        id:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        message:
+          type: string
+        action:
+          type: string
+        affected_nodes:
+          type: array
+          items:
+            type: string
+
+    CeeBiasFindingV1:
+      type: object
+      required:
+        - code
+        - severity
+        - message
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [critical, high, medium, low]
+        message:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        affected_node_ids:
+          type: array
+          items:
+            type: string
+        micro_intervention:
+          type: object
+          properties:
+            steps:
+              type: array
+              items:
+                type: string
+            estimated_minutes:
+              type: integer
+
+    CeeStructuralIssueV1:
+      type: object
+      required:
+        - code
+        - severity
+        - message
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning, info]
+        message:
+          type: string
+        affected_node_ids:
+          type: array
+          items:
+            type: string
+
+    CeeReviewTraceV1:
+      type: object
+      properties:
+        request_id:
+          type: string
+        correlation_id:
+          type: string
+        latency_ms:
+          type: integer
+        model_version:
+          type: string
+
+    CeeReviewMetaV1:
+      type: object
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        graph_hash:
+          type: string
+        seed:
+          type: integer
 
     SSEStream:
       type: object
@@ -2639,15 +2801,15 @@ components:
             code: "INTERNAL"
             message: "internal server error"
 
-    CeeDecisionReviewPayloadV1Example:
+    CeeDecisionReviewBundleExample:
       description: |
-        Example CEE Decision Review v1 payload (metadata-only). Intended for
+        Example CEE Decision Review Bundle (story/journey/uiFlags). Intended for
         engine/PLoT documentation and SDK alignment; not exposed as a runtime
-        HTTP response.
+        HTTP response. This is a UI-friendly summary, not the wire contract.
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/CeeDecisionReviewPayloadV1'
+            $ref: '#/components/schemas/CeeDecisionReviewBundle'
           example:
             story:
               headline: "CEE currently rates overall model quality at 7/10 (high). The model includes 2 explicit decision options. Team input from 3 participants has been summarised. Some response lists were capped; review risks and next actions before treating this as final."
