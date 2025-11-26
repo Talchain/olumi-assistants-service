@@ -44,7 +44,6 @@ function generateChecks(graph: Graph, brief: string): PreDecisionCheck[] {
   // Count node types
   const optionNodes = graph.nodes.filter(n => n.kind === "option");
   const riskNodes = graph.nodes.filter(n => n.kind === "risk");
-  const outcomeNodes = graph.nodes.filter(n => n.kind === "outcome");
   const actionNodes = graph.nodes.filter(n => n.kind === "action");
 
   // Check 1: Completeness - Are there enough options?

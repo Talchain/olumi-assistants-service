@@ -8,7 +8,7 @@
  * - Character validation (non-printable, excessive symbols)
  */
 
-import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Configuration
@@ -159,7 +159,6 @@ function calculateDictionaryCoverage(text: string): number {
  */
 function calculateDecisionRelevance(text: string): number {
   let score = 0;
-  const maxScore = DECISION_PATTERNS.length;
 
   for (const pattern of DECISION_PATTERNS) {
     if (pattern.test(text)) {

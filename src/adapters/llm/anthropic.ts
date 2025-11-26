@@ -12,7 +12,7 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseNodeKind, normaliseDraftResponse } from "./normalisation.js";
+import { normaliseDraftResponse } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
 
 export type DraftArgs = {
