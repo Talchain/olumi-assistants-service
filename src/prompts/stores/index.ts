@@ -6,3 +6,4 @@
 
 export * from './interface.js';
 export { FilePromptStore } from './file.js';
+export { PostgresPromptStore } from './postgres.js';

@@ -8,19 +8,21 @@
  */
 
 import { FilePromptStore } from './stores/file.js';
-import type { IPromptStore, FileStoreConfig } from './stores/interface.js';
+import { PostgresPromptStore } from './stores/postgres.js';
+import type { IPromptStore, FileStoreConfig, PostgresStoreConfig } from './stores/interface.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 // Re-export types and interfaces for backward compatibility
 export { FilePromptStore } from './stores/file.js';
+export { PostgresPromptStore } from './stores/postgres.js';
 export type { IPromptStore, PromptListFilter, GetCompiledOptions, ActivePromptResult } from './stores/interface.js';
 
 /**
  * @deprecated Use FileStoreConfig from './stores/interface.js'
  * Kept for backward compatibility
  */
-export type PromptStoreConfig = Omit<FileStoreConfig, 'type'>;
+export type PromptStoreConfig = Omit<FileStoreConfig, 'type'> | Omit<PostgresStoreConfig, 'type'>;
 
 /**
  * @deprecated Use FilePromptStore directly
@@ -40,21 +42,37 @@ let storeHealthy = false;
 
 /**
  * Get the default prompt store instance
- * Currently always returns FilePromptStore.
- * Future: will select implementation based on config.prompts.storeType
+ * Selects implementation based on config.prompts.storeType:
+ * - 'file' (default): FilePromptStore with JSON file backend
+ * - 'postgres': PostgresPromptStore with database backend
  *
- * @param overrideConfig - Optional configuration overrides
+ * @param overrideConfig - Optional configuration overrides (for testing)
  */
 export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPromptStore {
   if (!defaultStore) {
-    // Future: check config.prompts.storeType to select implementation
-    // For now, always use FilePromptStore
-    const storeConfig = {
-      filePath: overrideConfig?.filePath ?? config.prompts?.storePath ?? DEFAULT_STORE_PATH,
-      backupEnabled: overrideConfig?.backupEnabled ?? config.prompts?.backupEnabled ?? true,
-      maxBackups: overrideConfig?.maxBackups ?? config.prompts?.maxBackups ?? 10,
-    };
-    defaultStore = new FilePromptStore(storeConfig);
+    const storeType = config.prompts?.storeType ?? 'file';
+
+    if (storeType === 'postgres') {
+      const connectionString = config.prompts?.postgresUrl;
+      if (!connectionString) {
+        throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');
+      }
+      defaultStore = new PostgresPromptStore({
+        connectionString,
+        poolSize: config.prompts?.postgresPoolSize ?? 10,
+        ssl: config.prompts?.postgresSsl ?? false,
+      });
+      log.info({ storeType: 'postgres' }, 'Using PostgreSQL prompt store');
+    } else {
+      // Default to file store
+      const storeConfig = {
+        filePath: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.filePath ?? config.prompts?.storePath ?? DEFAULT_STORE_PATH,
+        backupEnabled: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.backupEnabled ?? config.prompts?.backupEnabled ?? true,
+        maxBackups: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.maxBackups ?? config.prompts?.maxBackups ?? 10,
+      };
+      defaultStore = new FilePromptStore(storeConfig);
+      log.info({ storeType: 'file', path: storeConfig.filePath }, 'Using file-based prompt store');
+    }
   }
   return defaultStore;
 }
@@ -115,16 +133,25 @@ export function getPromptStoreStatus(): {
   initialized: boolean;
   healthy: boolean;
   enabled: boolean;
-  storePath: string;
   storeType: string;
+  storePath?: string;
+  postgresConnected?: boolean;
 } {
-  return {
+  const storeType = config.prompts?.storeType ?? 'file';
+  const status: ReturnType<typeof getPromptStoreStatus> = {
     initialized: storeInitialized,
     healthy: storeHealthy,
     enabled: config.prompts?.enabled ?? false,
-    storePath: config.prompts?.storePath ?? DEFAULT_STORE_PATH,
-    storeType: 'file', // Future: read from config
+    storeType,
   };
+
+  if (storeType === 'file') {
+    status.storePath = config.prompts?.storePath ?? DEFAULT_STORE_PATH;
+  } else if (storeType === 'postgres') {
+    status.postgresConnected = storeHealthy;
+  }
+
+  return status;
 }
 
 /**
