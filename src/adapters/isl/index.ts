@@ -12,11 +12,29 @@ export {
 } from './client.js';
 
 export type {
+  // Bias validation types
   ISLBiasValidateRequest,
   ISLBiasValidateResponse,
-  ISLClientConfig,
-  ISLError,
   CausalValidation,
   EvidenceStrength,
   ValidatedBiasFinding,
+  // Sensitivity analysis types
+  ISLSensitivityRequest,
+  ISLSensitivityResponse,
+  NodeSensitivity,
+  // Contrastive explanation types
+  ISLContrastiveRequest,
+  ISLContrastiveResponse,
+  ContrastPoint,
+  // Conformal prediction types
+  ISLConformalRequest,
+  ISLConformalResponse,
+  PredictionInterval,
+  // Validation strategies types
+  ISLValidationStrategiesRequest,
+  ISLValidationStrategiesResponse,
+  ValidationStrategy,
+  // Config and error types
+  ISLClientConfig,
+  ISLError,
 } from './types.js';

@@ -14,6 +14,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { getSystemPrompt } from "./prompt-loader.js";
 
 export type DraftArgs = {
   brief: string;
@@ -242,8 +243,11 @@ function buildDraftPrompt(args: DraftArgs): { system: AnthropicSystemBlock[]; us
 
   const userContent = `## Brief\n${args.brief}${docContext}`;
 
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = getSystemPrompt('draft_graph');
+
   return {
-    system: buildSystemBlocks(DRAFT_SYSTEM_PROMPT, { operation: "draft_graph" }),
+    system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
     userContent,
   };
 }
@@ -290,8 +294,11 @@ function buildSuggestPrompt(args: {
 
   const userContent = `## Goal\n${args.goal}${constraintsContext}${existingContext}`;
 
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = getSystemPrompt('suggest_options');
+
   return {
-    system: buildSystemBlocks(SUGGEST_SYSTEM_PROMPT, { operation: "suggest_options" }),
+    system: buildSystemBlocks(systemPrompt, { operation: "suggest_options" }),
     userContent,
   };
 }
@@ -769,8 +776,11 @@ ${graphJson}
 ## Violations Found
 ${violationsText}`;
 
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = getSystemPrompt('repair_graph');
+
   return {
-    system: buildSystemBlocks(REPAIR_SYSTEM_PROMPT, { operation: "repair_graph" }),
+    system: buildSystemBlocks(systemPrompt, { operation: "repair_graph" }),
     userContent,
   };
 }
@@ -1034,8 +1044,11 @@ function buildClarifyPrompt(args: ClarifyArgs): { system: AnthropicSystemBlock[]
 ${args.brief}
 ${previousContext}`;
 
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = getSystemPrompt('clarify_brief');
+
   return {
-    system: buildSystemBlocks(CLARIFY_SYSTEM_PROMPT, { operation: "clarify_brief" }),
+    system: buildSystemBlocks(systemPrompt, { operation: "clarify_brief" }),
     userContent,
   };
 }
@@ -1245,8 +1258,11 @@ function buildCritiquePrompt(args: CritiqueArgs): { system: AnthropicSystemBlock
 ${graphJson}
 ${briefContext}${focusContext}`;
 
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = getSystemPrompt('critique_graph');
+
   return {
-    system: buildSystemBlocks(CRITIQUE_SYSTEM_PROMPT, { operation: "critique_graph" }),
+    system: buildSystemBlocks(systemPrompt, { operation: "critique_graph" }),
     userContent,
   };
 }

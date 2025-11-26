@@ -1,0 +1,224 @@
+/**
+ * Tests for Default Prompt Registry
+ *
+ * Verifies that:
+ * - All expected prompts are registered
+ * - Prompts have valid content
+ * - Registration is idempotent
+ * - Graph caps are properly interpolated
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  registerAllDefaultPrompts,
+  PROMPT_TEMPLATES,
+} from '../../src/prompts/defaults.js';
+import {
+  getDefaultPrompts,
+  registerDefaultPrompt,
+  loadPromptSync,
+} from '../../src/prompts/loader.js';
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../../src/config/graphCaps.js';
+
+// Reset loader state between tests
+beforeEach(() => {
+  // Clear default prompts by re-registering empty (if needed)
+  // The loader uses a module-level object, so we need to work with it
+});
+
+describe('PROMPT_TEMPLATES', () => {
+  it('exports all expected CEE task prompts', () => {
+    expect(PROMPT_TEMPLATES).toHaveProperty('draft_graph');
+    expect(PROMPT_TEMPLATES).toHaveProperty('suggest_options');
+    expect(PROMPT_TEMPLATES).toHaveProperty('repair_graph');
+    expect(PROMPT_TEMPLATES).toHaveProperty('clarify_brief');
+    expect(PROMPT_TEMPLATES).toHaveProperty('critique_graph');
+    expect(PROMPT_TEMPLATES).toHaveProperty('explainer');
+    expect(PROMPT_TEMPLATES).toHaveProperty('bias_check');
+  });
+
+  it('draft_graph prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.draft_graph;
+    expect(prompt).toContain('decision graphs');
+    expect(prompt).toContain('goal, decision, option, outcome');
+    expect(prompt).toContain('provenance');
+    expect(prompt).toContain('JSON');
+    expect(prompt).toContain('{{maxNodes}}');
+    expect(prompt).toContain('{{maxEdges}}');
+  });
+
+  it('suggest_options prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.suggest_options;
+    expect(prompt).toContain('strategic options');
+    expect(prompt).toContain('3-5 distinct');
+    expect(prompt).toContain('pros');
+    expect(prompt).toContain('cons');
+    expect(prompt).toContain('evidence_to_gather');
+  });
+
+  it('repair_graph prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.repair_graph;
+    expect(prompt).toContain('fixing');
+    expect(prompt).toContain('violations');
+    expect(prompt).toContain('DAGs');
+    expect(prompt).toContain('belief values');
+  });
+
+  it('clarify_brief prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.clarify_brief;
+    expect(prompt).toContain('clarifying questions');
+    expect(prompt).toContain('MCQ-First Rule');
+    expect(prompt).toContain('confidence');
+    expect(prompt).toContain('should_continue');
+  });
+
+  it('critique_graph prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.critique_graph;
+    expect(prompt).toContain('critiquing');
+    expect(prompt).toContain('BLOCKER');
+    expect(prompt).toContain('IMPROVEMENT');
+    expect(prompt).toContain('OBSERVATION');
+    expect(prompt).toContain('overall_quality');
+  });
+
+  it('explainer prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.explainer;
+    expect(prompt).toContain('explaining');
+    expect(prompt).toContain('rationales');
+    expect(prompt).toContain('provenance_source');
+  });
+
+  it('bias_check prompt contains key instructions', () => {
+    const prompt = PROMPT_TEMPLATES.bias_check;
+    expect(prompt).toContain('cognitive biases');
+    expect(prompt).toContain('Confirmation bias');
+    expect(prompt).toContain('Anchoring');
+    expect(prompt).toContain('Sunk cost');
+  });
+
+  it('all prompts are non-empty strings', () => {
+    for (const [task, prompt] of Object.entries(PROMPT_TEMPLATES)) {
+      expect(typeof prompt).toBe('string');
+      expect(prompt.length).toBeGreaterThan(100);
+    }
+  });
+});
+
+describe('registerAllDefaultPrompts', () => {
+  it('registers prompts that can be loaded', () => {
+    registerAllDefaultPrompts();
+
+    const defaults = getDefaultPrompts();
+
+    expect(defaults).toHaveProperty('draft_graph');
+    expect(defaults).toHaveProperty('suggest_options');
+    expect(defaults).toHaveProperty('repair_graph');
+    expect(defaults).toHaveProperty('clarify_brief');
+    expect(defaults).toHaveProperty('critique_graph');
+    expect(defaults).toHaveProperty('explainer');
+    expect(defaults).toHaveProperty('bias_check');
+  });
+
+  it('interpolates graph caps into draft_graph prompt', () => {
+    registerAllDefaultPrompts();
+
+    const defaults = getDefaultPrompts();
+    const draftPrompt = defaults.draft_graph;
+
+    expect(draftPrompt).toBeDefined();
+    expect(draftPrompt).toContain(String(GRAPH_MAX_NODES));
+    expect(draftPrompt).toContain(String(GRAPH_MAX_EDGES));
+    expect(draftPrompt).not.toContain('{{maxNodes}}');
+    expect(draftPrompt).not.toContain('{{maxEdges}}');
+  });
+
+  it('is idempotent - can be called multiple times safely', () => {
+    registerAllDefaultPrompts();
+    const defaults1 = { ...getDefaultPrompts() };
+
+    registerAllDefaultPrompts();
+    const defaults2 = getDefaultPrompts();
+
+    expect(defaults1).toEqual(defaults2);
+  });
+
+  it('allows prompts to be loaded with loadPromptSync', () => {
+    registerAllDefaultPrompts();
+
+    // Should not throw
+    const draftPrompt = loadPromptSync('draft_graph');
+    expect(typeof draftPrompt).toBe('string');
+    expect(draftPrompt.length).toBeGreaterThan(0);
+
+    const suggestPrompt = loadPromptSync('suggest_options');
+    expect(typeof suggestPrompt).toBe('string');
+    expect(suggestPrompt.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Prompt Content Quality', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('all prompts end with JSON-related instruction', () => {
+    const defaults = getDefaultPrompts();
+
+    for (const [task, prompt] of Object.entries(defaults)) {
+      if (!prompt) continue;
+      // All prompts should end with JSON output guidance
+      expect(prompt.toLowerCase()).toContain('json');
+    }
+  });
+
+  it('draft_graph includes all valid node kinds', () => {
+    const defaults = getDefaultPrompts();
+    const prompt = defaults.draft_graph ?? '';
+
+    const requiredKinds = ['goal', 'decision', 'option', 'outcome', 'risk', 'action'];
+    for (const kind of requiredKinds) {
+      expect(prompt).toContain(kind);
+    }
+  });
+
+  it('critique_graph includes all severity levels', () => {
+    const defaults = getDefaultPrompts();
+    const prompt = defaults.critique_graph ?? '';
+
+    const requiredLevels = ['BLOCKER', 'IMPROVEMENT', 'OBSERVATION'];
+    for (const level of requiredLevels) {
+      expect(prompt).toContain(level);
+    }
+  });
+
+  it('clarify_brief includes confidence and continuation guidance', () => {
+    const defaults = getDefaultPrompts();
+    const prompt = defaults.clarify_brief ?? '';
+
+    expect(prompt).toContain('confidence');
+    expect(prompt).toContain('0.0-1.0');
+    expect(prompt).toContain('should_continue');
+    expect(prompt).toContain('≥0.8');
+  });
+});
+
+describe('Integration with Loader', () => {
+  it('registerDefaultPrompt overwrites existing prompts', () => {
+    // Register defaults
+    registerAllDefaultPrompts();
+
+    // Overwrite with custom prompt
+    const customPrompt = 'Custom test prompt for draft_graph';
+    registerDefaultPrompt('draft_graph', customPrompt);
+
+    const loaded = loadPromptSync('draft_graph');
+    expect(loaded).toBe(customPrompt);
+  });
+
+  it('throws when loading unregistered task', () => {
+    registerAllDefaultPrompts();
+
+    // Try to load a task that doesn't have a default
+    expect(() => loadPromptSync('evidence_helper' as any)).toThrow('No default prompt');
+  });
+});

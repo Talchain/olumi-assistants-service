@@ -137,3 +137,332 @@ export interface ISLClientConfig {
   /** API key for ISL service (if required) */
   apiKey?: string;
 }
+
+// ============================================================================
+// Sensitivity Analysis Types
+// ============================================================================
+
+/**
+ * Request for detailed sensitivity analysis
+ */
+export interface ISLSensitivityRequest {
+  /** Canonical graph structure from Engine */
+  graph: GraphV1;
+
+  /** Node IDs to analyze for sensitivity */
+  target_nodes: string[];
+
+  /** Optional configuration */
+  config?: {
+    /** Include causal path analysis */
+    include_paths?: boolean;
+    /** Threshold for high sensitivity (0-1, default 0.7) */
+    high_threshold?: number;
+  };
+}
+
+/**
+ * Sensitivity analysis for a single node
+ */
+export interface NodeSensitivity {
+  /** Node ID */
+  node_id: string;
+
+  /** Overall sensitivity score (0-1) */
+  sensitivity_score: number;
+
+  /** Classification based on threshold */
+  classification: 'low' | 'medium' | 'high';
+
+  /** Factors contributing to sensitivity */
+  contributing_factors: Array<{
+    /** Factor type (e.g., "evidence_gap", "assumption_chain") */
+    type: string;
+    /** Impact on sensitivity (0-1) */
+    impact: number;
+    /** Human-readable description */
+    description: string;
+  }>;
+
+  /** Causal paths affected (if requested) */
+  affected_paths?: string[];
+}
+
+/**
+ * Response from sensitivity analysis
+ */
+export interface ISLSensitivityResponse {
+  /** Sensitivity results for each target node */
+  sensitivities: NodeSensitivity[];
+
+  /** Overall graph sensitivity summary */
+  summary: {
+    /** Average sensitivity across analyzed nodes */
+    avg_sensitivity: number;
+    /** Count of high sensitivity nodes */
+    high_sensitivity_count: number;
+    /** Most critical node */
+    most_critical_node?: string;
+  };
+
+  /** Request ID for tracing */
+  request_id: string;
+
+  /** Processing time in milliseconds */
+  latency_ms: number;
+}
+
+// ============================================================================
+// Contrastive Explanation Types
+// ============================================================================
+
+/**
+ * Request for contrastive explanation
+ */
+export interface ISLContrastiveRequest {
+  /** Canonical graph structure from Engine */
+  graph: GraphV1;
+
+  /** The decision/conclusion node to explain */
+  decision_node_id: string;
+
+  /** Alternative outcome to contrast against */
+  alternative?: {
+    /** Description of the alternative outcome */
+    outcome: string;
+    /** Key differences from actual decision */
+    key_differences?: string[];
+  };
+
+  /** Optional configuration */
+  config?: {
+    /** Maximum number of contrast points to return */
+    max_contrasts?: number;
+    /** Include counterfactual analysis */
+    include_counterfactuals?: boolean;
+  };
+}
+
+/**
+ * A single contrast point explaining why decision differs from alternative
+ */
+export interface ContrastPoint {
+  /** Type of contrast (e.g., "evidence", "assumption", "weighting") */
+  type: 'evidence' | 'assumption' | 'weighting' | 'methodology';
+
+  /** Node ID most relevant to this contrast */
+  node_id: string;
+
+  /** Why the actual decision was made */
+  actual_reason: string;
+
+  /** What would need to change for alternative */
+  alternative_condition: string;
+
+  /** Confidence in this contrast point */
+  confidence: number;
+
+  /** Counterfactual scenario (if requested) */
+  counterfactual?: {
+    /** What would change */
+    change: string;
+    /** Predicted impact on outcome */
+    predicted_impact: string;
+  };
+}
+
+/**
+ * Response from contrastive explanation
+ */
+export interface ISLContrastiveResponse {
+  /** The decision node being explained */
+  decision_node_id: string;
+
+  /** Main contrast points */
+  contrasts: ContrastPoint[];
+
+  /** Summary explanation */
+  summary: {
+    /** One-sentence explanation */
+    explanation: string;
+    /** Key differentiating factors */
+    key_factors: string[];
+  };
+
+  /** Request ID for tracing */
+  request_id: string;
+
+  /** Processing time in milliseconds */
+  latency_ms: number;
+}
+
+// ============================================================================
+// Conformal Prediction Types
+// ============================================================================
+
+/**
+ * Request for conformal prediction intervals
+ */
+export interface ISLConformalRequest {
+  /** Canonical graph structure from Engine */
+  graph: GraphV1;
+
+  /** Node IDs containing quantitative predictions */
+  prediction_nodes: string[];
+
+  /** Desired confidence level (0-1, default 0.9) */
+  confidence_level?: number;
+
+  /** Optional configuration */
+  config?: {
+    /** Method for interval calculation */
+    method?: 'quantile' | 'conformalized' | 'adaptive';
+    /** Historical calibration data ID (if available) */
+    calibration_id?: string;
+  };
+}
+
+/**
+ * Conformal prediction interval for a single node
+ */
+export interface PredictionInterval {
+  /** Node ID */
+  node_id: string;
+
+  /** Point estimate (if available) */
+  point_estimate?: number;
+
+  /** Lower bound of interval */
+  lower_bound: number;
+
+  /** Upper bound of interval */
+  upper_bound: number;
+
+  /** Confidence level for this interval */
+  confidence_level: number;
+
+  /** Interval width (upper - lower) */
+  interval_width: number;
+
+  /** Whether interval is well-calibrated based on historical data */
+  well_calibrated: boolean;
+
+  /** Factors affecting interval width */
+  width_factors?: Array<{
+    /** Factor name */
+    factor: string;
+    /** Contribution to width (percentage) */
+    contribution: number;
+  }>;
+}
+
+/**
+ * Response from conformal prediction
+ */
+export interface ISLConformalResponse {
+  /** Prediction intervals for each node */
+  intervals: PredictionInterval[];
+
+  /** Calibration quality metrics */
+  calibration: {
+    /** Overall calibration score (0-1) */
+    score: number;
+    /** Whether results are reliable */
+    is_reliable: boolean;
+    /** Warning if calibration is poor */
+    warning?: string;
+  };
+
+  /** Request ID for tracing */
+  request_id: string;
+
+  /** Processing time in milliseconds */
+  latency_ms: number;
+}
+
+// ============================================================================
+// Validation Strategies Types
+// ============================================================================
+
+/**
+ * Request for validation strategy recommendations
+ */
+export interface ISLValidationStrategiesRequest {
+  /** Canonical graph structure from Engine */
+  graph: GraphV1;
+
+  /** Specific areas of concern (optional) */
+  areas_of_concern?: Array<{
+    /** Node IDs in this area */
+    node_ids: string[];
+    /** Type of concern */
+    concern_type: 'evidence_quality' | 'logic_gap' | 'assumption_risk' | 'data_quality';
+  }>;
+
+  /** Optional configuration */
+  config?: {
+    /** Maximum number of strategies to return */
+    max_strategies?: number;
+    /** Prioritize by effort level */
+    prioritize_by?: 'impact' | 'effort' | 'coverage';
+  };
+}
+
+/**
+ * A recommended validation strategy
+ */
+export interface ValidationStrategy {
+  /** Unique strategy ID */
+  id: string;
+
+  /** Human-readable title */
+  title: string;
+
+  /** Detailed description */
+  description: string;
+
+  /** Priority level */
+  priority: 'low' | 'medium' | 'high' | 'critical';
+
+  /** Estimated effort */
+  effort: 'minimal' | 'moderate' | 'significant';
+
+  /** Expected impact on decision confidence */
+  expected_impact: number;
+
+  /** Node IDs this strategy addresses */
+  target_nodes: string[];
+
+  /** Specific actions to take */
+  actions: Array<{
+    /** Action description */
+    action: string;
+    /** Action type */
+    type: 'gather_data' | 'expert_review' | 'sensitivity_test' | 'alternative_analysis';
+  }>;
+
+  /** Success criteria */
+  success_criteria: string;
+}
+
+/**
+ * Response from validation strategies
+ */
+export interface ISLValidationStrategiesResponse {
+  /** Recommended strategies ordered by priority */
+  strategies: ValidationStrategy[];
+
+  /** Coverage analysis */
+  coverage: {
+    /** Percentage of graph nodes addressed by strategies */
+    node_coverage: number;
+    /** Percentage of high-risk areas addressed */
+    risk_coverage: number;
+  };
+
+  /** Request ID for tracing */
+  request_id: string;
+
+  /** Processing time in milliseconds */
+  latency_ms: number;
+}

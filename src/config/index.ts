@@ -280,6 +280,19 @@ const ConfigSchema = z.object({
   testing: z.object({
     isVitest: booleanString.default(false),
   }),
+
+  // Prompt Management
+  prompts: z.object({
+    enabled: booleanString.default(false), // Master switch for prompt management
+    storePath: z.string().default("data/prompts.json"), // Path to prompts JSON file
+    backupEnabled: booleanString.default(true), // Create backups before writes
+    maxBackups: z.coerce.number().int().positive().default(10), // Max backup files to keep
+    braintrustEnabled: booleanString.default(false), // Enable Braintrust experiment tracking
+    braintrustProject: z.string().default("olumi-prompts"), // Braintrust project name
+    adminApiKey: z.string().optional(), // Admin API key for prompt management (full access)
+    adminApiKeyRead: z.string().optional(), // Read-only admin API key
+    adminAllowedIPs: z.string().optional(), // Comma-separated list of allowed IPs (empty = all allowed)
+  }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -451,6 +464,17 @@ function parseConfig(): Config {
     },
     testing: {
       isVitest: env.VITEST,
+    },
+    prompts: {
+      enabled: env.PROMPTS_ENABLED,
+      storePath: env.PROMPTS_STORE_PATH,
+      backupEnabled: env.PROMPTS_BACKUP_ENABLED,
+      maxBackups: env.PROMPTS_MAX_BACKUPS,
+      braintrustEnabled: env.PROMPTS_BRAINTRUST_ENABLED,
+      braintrustProject: env.BRAINTRUST_PROJECT,
+      adminApiKey: env.ADMIN_API_KEY,
+      adminApiKeyRead: env.ADMIN_API_KEY_READ,
+      adminAllowedIPs: env.ADMIN_ALLOWED_IPS,
     },
   };
 

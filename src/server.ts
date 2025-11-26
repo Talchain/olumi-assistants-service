@@ -38,6 +38,11 @@ import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
+import { adminPromptRoutes } from "./routes/admin.prompts.js";
+import { adminUIRoutes } from "./routes/admin.ui.js";
+import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
+import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
+import { config } from "./config/index.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -75,6 +80,10 @@ export async function build() {
   if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
   }
+
+  // Register default prompts (fallbacks for prompt management system)
+  // This must happen before routes are registered so prompts are available
+  registerAllDefaultPrompts();
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
@@ -330,8 +339,14 @@ app.get("/healthz", async () => {
     ? islConfig.baseUrl.replace(/:\/\/([^:\/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
     : undefined;
 
+  // Prompt store health (degraded if unhealthy but not critical)
+  const promptStoreStatus = getPromptStoreStatus();
+  const promptStoreHealthy = isPromptStoreHealthy();
+  const isDegraded = promptStoreStatus.enabled && !promptStoreHealthy;
+
   return {
     ok: true,
+    degraded: isDegraded,
     service: "assistants",
     version: SERVICE_VERSION,
     provider: adapter.name,
@@ -357,6 +372,11 @@ app.get("/healthz", async () => {
         timeout: islConfig.sources.timeout,
         max_retries: islConfig.sources.maxRetries,
       },
+    },
+    prompts: {
+      enabled: promptStoreStatus.enabled,
+      healthy: promptStoreHealthy,
+      degraded_reason: isDegraded ? 'prompt_store_unhealthy' : undefined,
     },
   };
 });
@@ -396,6 +416,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     const adapter = getAdapter();
     const ceeConfig = buildCeeConfig();
     const recentErrors = getRecentCeeErrors(20);
+    const promptStoreStatus = getPromptStoreStatus();
+    const activeExperiments = getActiveExperiments();
+
     return {
       service: "assistants",
       version: SERVICE_VERSION,
@@ -409,6 +432,11 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       },
       isl: {
         circuit_breaker: getIslCircuitBreakerStatusForDiagnostics(),
+      },
+      prompts: {
+        store: promptStoreStatus,
+        active_experiments: activeExperiments,
+        experiment_count: activeExperiments.length,
       },
     };
   });
@@ -433,6 +461,20 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeTeamPerspectivesRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
+  }
+
+  // Admin routes for prompt management (enabled via config)
+  if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+    await initializePromptStore();
+    await adminPromptRoutes(app);
+    await adminUIRoutes(app);
+    app.log.info('Admin prompt management routes registered');
+
+    // Initialize Braintrust experiment tracking if enabled
+    if (config.prompts?.braintrustEnabled) {
+      const braintrust = getBraintrustManager();
+      await braintrust.initialize();
+    }
   }
 
   return app;
