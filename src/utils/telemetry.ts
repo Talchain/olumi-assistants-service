@@ -76,6 +76,17 @@ export const TelemetryEvents = {
   RepairPartial: "assist.draft.repair_partial",
   RepairFallback: "assist.draft.repair_fallback",
 
+  // Preflight validation events (v1.13)
+  PreflightValidationPassed: "cee.preflight.passed",
+  PreflightValidationFailed: "cee.preflight.failed",
+  PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
+  PreflightRejected: "cee.preflight.rejected",
+  NodeKindNormalized: "llm.normalization.node_kind_mapped",
+
+  // Clarification enforcement events (v1.14 - Phase 5)
+  ClarificationRequired: "cee.clarification.required",
+  ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
+
   // Clarifier events (v04)
   ClarifierRoundStart: "assist.clarifier.round_start",
   ClarifierRoundComplete: "assist.clarifier.round_complete",

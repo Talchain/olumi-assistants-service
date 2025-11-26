@@ -26,6 +26,8 @@ export const DraftGraphInput = z.object({
     .optional(),
   refinement_instructions: z.string().min(1).max(2000).optional(),
   preserve_nodes: z.array(z.string()).max(50).optional(),
+  // Clarification enforcement (Phase 5)
+  clarification_rounds_completed: z.number().int().min(0).max(3).optional(),
 });
 
 export const DraftGraphOutput = z.object({
@@ -86,16 +88,32 @@ export const ClarifyBriefInput = z.object({
   flags: z.record(z.boolean()).optional() // Feature flags (per-request overrides)
 }).strict();
 
+export const ReadinessFactors = z.object({
+  length_score: z.number().min(0).max(1),
+  clarity_score: z.number().min(0).max(1),
+  decision_relevance_score: z.number().min(0).max(1),
+  specificity_score: z.number().min(0).max(1),
+  context_score: z.number().min(0).max(1),
+});
+
 export const ClarifyBriefOutput = z.object({
   questions: z.array(z.object({
     question: z.string().min(10),
     choices: z.array(z.string()).optional(),
     why_we_ask: z.string().min(20),
-    impacts_draft: z.string().min(20)
+    impacts_draft: z.string().min(20),
+    targets_factor: z.enum(["length", "clarity", "decision_relevance", "specificity", "context"]).optional()
   })).min(1).max(5),
   confidence: z.number().min(0).max(1),
   should_continue: z.boolean(),
-  round: z.number().int().min(0).max(2)
+  round: z.number().int().min(0).max(2),
+  // Enhanced readiness assessment (Phase 5)
+  readiness: z.object({
+    score: z.number().min(0).max(1),
+    level: z.enum(["ready", "needs_clarification", "not_ready"]),
+    factors: ReadinessFactors,
+    weakest_factor: z.enum(["length", "clarity", "decision_relevance", "specificity", "context"]).optional()
+  }).optional()
 });
 
 export const CritiqueGraphInput = z.object({

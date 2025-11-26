@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
-import { detectBiases, sortBiasFindings } from "../../src/cee/bias/index.js";
+import { detectBiases, sortBiasFindings, filterByConfidence } from "../../src/cee/bias/index.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 function makeGraph(overrides: Partial<GraphV1> = {}): GraphV1 {
@@ -425,5 +425,70 @@ describe("CEE bias helper - detectBiases", () => {
         process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
       }
     }
+  });
+});
+
+describe("filterByConfidence", () => {
+  it("filters out findings below threshold", () => {
+    const findings: any[] = [
+      { id: "low", category: "selection", severity: "low", node_ids: [], confidence: 0.2 },
+      { id: "high", category: "measurement", severity: "high", node_ids: [], confidence: 0.8 },
+    ];
+
+    const filtered = filterByConfidence(findings, 0.5);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("high");
+  });
+
+  it("keeps findings at exactly threshold", () => {
+    const findings: any[] = [
+      { id: "exact", category: "selection", severity: "medium", node_ids: [], confidence: 0.3 },
+    ];
+
+    const filtered = filterByConfidence(findings, 0.3);
+    expect(filtered).toHaveLength(1);
+  });
+
+  it("keeps findings without confidence score", () => {
+    const findings: any[] = [
+      { id: "no_conf", category: "selection", severity: "medium", node_ids: [] },
+      { id: "with_conf", category: "measurement", severity: "low", node_ids: [], confidence: 0.1 },
+    ];
+
+    const filtered = filterByConfidence(findings, 0.5);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("no_conf");
+  });
+
+  it("uses config threshold when none provided", () => {
+    // Default config threshold is 0.3
+    const findings: any[] = [
+      { id: "low", category: "selection", severity: "low", node_ids: [], confidence: 0.2 },
+      { id: "high", category: "measurement", severity: "high", node_ids: [], confidence: 0.5 },
+    ];
+
+    const filtered = filterByConfidence(findings);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("high");
+  });
+
+  it("returns empty array when all findings are below threshold", () => {
+    const findings: any[] = [
+      { id: "a", category: "selection", severity: "low", node_ids: [], confidence: 0.1 },
+      { id: "b", category: "measurement", severity: "low", node_ids: [], confidence: 0.2 },
+    ];
+
+    const filtered = filterByConfidence(findings, 0.5);
+    expect(filtered).toHaveLength(0);
+  });
+
+  it("returns all findings when threshold is 0", () => {
+    const findings: any[] = [
+      { id: "a", category: "selection", severity: "low", node_ids: [], confidence: 0.1 },
+      { id: "b", category: "measurement", severity: "low", node_ids: [], confidence: 0.01 },
+    ];
+
+    const filtered = filterByConfidence(findings, 0);
+    expect(filtered).toHaveLength(2);
   });
 });

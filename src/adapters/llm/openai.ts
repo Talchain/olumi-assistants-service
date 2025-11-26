@@ -6,12 +6,15 @@ import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
+import { normaliseDraftResponse } from "./normalisation.js";
+import { getMaxTokensFromConfig } from "./router.js";
 
+// ============================================================================
 // Zod schemas for OpenAI response validation (same as Anthropic)
 const OpenAINode = z.object({
   id: z.string().min(1),
@@ -45,6 +48,19 @@ const OpenAIOptionsResponse = z.object({
       evidence_to_gather: z.array(z.string()).min(2).max(3),
     })
   ),
+});
+
+const OpenAIClarifyResponse = z.object({
+  questions: z.array(
+    z.object({
+      question: z.string().min(10),
+      choices: z.array(z.string()).optional(),
+      why_we_ask: z.string().min(20),
+      impacts_draft: z.string().min(20),
+    })
+  ).min(1).max(5),
+  confidence: z.number().min(0).max(1),
+  should_continue: z.boolean(),
 });
 
 const apiKey = process.env.OPENAI_API_KEY;
@@ -97,7 +113,8 @@ ${docContext}
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes (goal, decision, option, outcome)
+- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
+  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
 - ≤${GRAPH_MAX_EDGES} edges
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
@@ -196,6 +213,72 @@ Return ONLY valid JSON:
 Return ONLY the JSON object, no markdown formatting`;
 }
 
+function buildClarifyBriefPrompt(
+  brief: string,
+  round: number,
+  previousAnswers?: Array<{ question: string; answer: string }>
+): string {
+  const previousContext = previousAnswers?.length
+    ? `\n\n## Previous Q&A (Round ${round - 1})\n${previousAnswers
+        .map((qa, i) => `Q${i + 1}: ${qa.question}\nA${i + 1}: ${qa.answer}`)
+        .join("\n\n")}`
+    : "";
+
+  const roundContext = round > 1
+    ? `This is clarification round ${round}. Build on previous answers to deepen understanding.`
+    : "This is the first round of clarification.";
+
+  return `You are an expert decision coach helping to clarify a decision brief before drafting a decision graph.
+
+## User's Brief
+${brief}
+${previousContext}
+
+## Context
+${roundContext}
+
+## Your Task
+Generate 1-5 clarifying questions to help understand:
+1. The decision context and constraints
+2. Key stakeholders and their interests
+3. Success criteria and priorities
+4. Available options and alternatives
+5. Risks and uncertainties
+
+For each question:
+- question: A clear, specific question (at least 10 characters)
+- choices: Optional array of 2-4 suggested answers (if applicable)
+- why_we_ask: Explain why this information matters (at least 20 characters)
+- impacts_draft: How the answer will improve the decision graph (at least 20 characters)
+
+Also assess:
+- confidence: 0-1 score indicating how well you understand the decision (1.0 = fully clear)
+- should_continue: boolean - true if more rounds are needed, false if ready to draft
+
+## Guidelines
+- Ask specific questions, not vague ones
+- Prioritize questions that will most impact the decision graph quality
+- If confidence is high (>0.8) or after round 3, set should_continue to false
+- Avoid repeating questions already answered
+
+## Output Format (JSON)
+Return ONLY valid JSON:
+{
+  "questions": [
+    {
+      "question": "What is your primary goal?",
+      "choices": ["Increase revenue", "Reduce costs", "Improve quality", "Other"],
+      "why_we_ask": "Understanding the primary goal helps prioritize options",
+      "impacts_draft": "This determines which outcomes to optimize for in the graph"
+    }
+  ],
+  "confidence": 0.5,
+  "should_continue": true
+}
+
+Return ONLY the JSON object, no markdown formatting`;
+}
+
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
   const nodesSorted = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -247,6 +330,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
     try {
       const apiClient = getClient();
+      const maxTokens = getMaxTokensFromConfig('draft_graph');
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
@@ -254,6 +338,7 @@ export class OpenAIAdapter implements LLMAdapter {
           temperature: 0,
           response_format: { type: "json_object" },
           seed: seed, // OpenAI supports deterministic seed
+          ...(maxTokens ? { max_tokens: maxTokens } : {}),
         },
         {
           signal: abortController.signal as any,
@@ -270,13 +355,29 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      // Parse and validate with Zod
+      // Parse, normalise non-standard node kinds, then validate with Zod
       const rawJson = JSON.parse(content);
-      const parseResult = OpenAIDraftResponse.safeParse(rawJson);
+      const normalised = normaliseDraftResponse(rawJson);
+      const parseResult = OpenAIDraftResponse.safeParse(normalised);
 
       if (!parseResult.success) {
-        log.error({ errors: parseResult.error.flatten() }, "OpenAI response failed schema validation");
-        throw new Error("openai_response_invalid_schema");
+        const flatErrors = parseResult.error.flatten();
+        log.error({
+          errors: flatErrors,
+          raw_node_kinds: Array.isArray(rawJson?.nodes)
+            ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
+            : [],
+          event: 'llm.validation.schema_failed'
+        }, "OpenAI response failed schema validation after normalisation");
+
+        // Build detailed error message for debugging
+        const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
+          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+          .join('; ');
+        const formIssues = (flatErrors.formErrors || []).join('; ');
+        const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+        throw new Error(`openai_response_invalid_schema: ${details || 'unknown validation error'}`);
       }
 
       const parsed = parseResult.data;
@@ -383,12 +484,14 @@ export class OpenAIAdapter implements LLMAdapter {
 
     try {
       const apiClient = getClient();
+      const maxTokens = getMaxTokensFromConfig('suggest_options');
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.7, // Slightly higher for creativity in options
           response_format: { type: "json_object" },
+          ...(maxTokens ? { max_tokens: maxTokens } : {}),
         },
         {
           signal: abortController.signal as any,
@@ -478,12 +581,14 @@ export class OpenAIAdapter implements LLMAdapter {
 
     try {
       const apiClient = getClient();
+      const maxTokens = getMaxTokensFromConfig('repair_graph');
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0,
           response_format: { type: "json_object" },
+          ...(maxTokens ? { max_tokens: maxTokens } : {}),
         },
         {
           signal: abortController.signal as any,
@@ -500,12 +605,28 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
+      // Parse, normalise non-standard node kinds, then validate with Zod
       const rawJson = JSON.parse(content);
-      const parseResult = OpenAIDraftResponse.safeParse(rawJson);
+      const normalised = normaliseDraftResponse(rawJson);
+      const parseResult = OpenAIDraftResponse.safeParse(normalised);
 
       if (!parseResult.success) {
-        log.error({ errors: parseResult.error.flatten() }, "OpenAI repair response failed schema validation");
-        throw new Error("openai_repair_invalid_schema");
+        const flatErrors = parseResult.error.flatten();
+        log.error({
+          errors: flatErrors,
+          raw_node_kinds: Array.isArray(rawJson?.nodes)
+            ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
+            : [],
+          event: 'llm.validation.repair_schema_failed'
+        }, "OpenAI repair response failed schema validation after normalisation");
+
+        const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
+          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+          .join('; ');
+        const formIssues = (flatErrors.formErrors || []).join('; ');
+        const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+        throw new Error(`openai_repair_invalid_schema: ${details || 'unknown validation error'}`);
       }
 
       const parsed = parseResult.data;
@@ -579,10 +700,152 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 
-  async clarifyBrief(_args: import("./types.js").ClarifyBriefArgs, _opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
-    // OpenAI provider does not yet support clarifyBrief
-    // Switch to LLM_PROVIDER=anthropic to use this feature
-    throw new Error("openai_clarify_not_supported: Clarifier endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  async clarifyBrief(args: import("./types.js").ClarifyBriefArgs, opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
+    const { brief, round, previous_answers, seed } = args;
+    const requestId = opts.requestId || `clarify-${Date.now()}`;
+    const start = Date.now();
+
+    log.info({ request_id: requestId, round, previous_answers_count: previous_answers?.length ?? 0 }, "Starting OpenAI clarify brief");
+
+    const prompt = buildClarifyBriefPrompt(brief, round, previous_answers);
+
+    const client = getClient();
+
+    try {
+      const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
+      const response = await client.chat.completions.create({
+        model: this.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.5, // Slightly lower temp for more consistent questions
+        max_tokens: maxTokens,
+        ...(seed !== undefined ? { seed } : {}),
+      });
+
+      const content = response.choices[0]?.message?.content?.trim() || "";
+      const elapsedMs = Date.now() - start;
+
+      const inputTokens = response.usage?.prompt_tokens ?? 0;
+      const outputTokens = response.usage?.completion_tokens ?? 0;
+
+      emit(TelemetryEvents.ClarifierRoundComplete, {
+        request_id: requestId,
+        round,
+        provider: "openai",
+        model: this.model,
+        duration_ms: elapsedMs,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+      });
+
+      // Parse and validate response
+      let rawJson: unknown;
+      let jsonText = content;
+
+      // Strip markdown code fences if present
+      if (jsonText.startsWith("```json")) {
+        jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
+      } else if (jsonText.startsWith("```")) {
+        jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
+      }
+
+      try {
+        rawJson = JSON.parse(jsonText);
+      } catch (parseError) {
+        log.error({ error: parseError, content: jsonText.slice(0, 500) }, "Failed to parse OpenAI clarify response as JSON");
+        throw new Error("openai_clarify_invalid_json: Response was not valid JSON");
+      }
+
+      const parseResult = OpenAIClarifyResponse.safeParse(rawJson);
+
+      if (!parseResult.success) {
+        const flatErrors = parseResult.error.flatten();
+        log.error({
+          errors: flatErrors,
+          event: "llm.validation.clarify_schema_failed",
+        }, "OpenAI clarify response failed schema validation");
+
+        const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
+          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+          .join("; ");
+        const formIssues = (flatErrors.formErrors || []).join("; ");
+        const details = [fieldIssues, formIssues].filter(Boolean).join(" | ");
+
+        throw new Error(`openai_clarify_invalid_schema: ${details || "unknown validation error"}`);
+      }
+
+      const parsed = parseResult.data;
+
+      // Build result with properly typed questions
+      const questions: import("./types.js").ClarificationQuestion[] = parsed.questions.map(q => ({
+        question: q.question,
+        choices: q.choices,
+        why_we_ask: q.why_we_ask,
+        impacts_draft: q.impacts_draft,
+      }));
+
+      const result: import("./types.js").ClarifyBriefResult = {
+        questions,
+        confidence: parsed.confidence,
+        should_continue: parsed.should_continue,
+        round,
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+        },
+      };
+
+      log.info({
+        request_id: requestId,
+        round,
+        question_count: questions.length,
+        confidence: parsed.confidence,
+        should_continue: parsed.should_continue,
+        elapsed_ms: elapsedMs,
+      }, "OpenAI clarify brief completed");
+
+      return result;
+    } catch (error) {
+      const elapsedMs = Date.now() - start;
+
+      if (error instanceof Error && "status" in error) {
+        const apiError = error as Error & { status?: number; code?: string; type?: string };
+        const isTimeout = apiError.code === "ETIMEDOUT" || apiError.message?.includes("timeout");
+
+        if (isTimeout) {
+          log.warn(
+            { request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI clarify call timed out"
+          );
+          throw new UpstreamTimeoutError(
+            `OpenAI clarify timed out after ${elapsedMs}ms`,
+            "openai",
+            "clarify_brief",
+            "body",
+            elapsedMs,
+            error
+          );
+        }
+
+        if (apiError.status && apiError.status >= 400) {
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI clarify_brief failed: ${apiError.message || "unknown error"}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
+      }
+
+      log.error({ error }, "OpenAI clarify call failed");
+      throw error;
+    }
   }
 
   async critiqueGraph(_args: import("./types.js").CritiqueGraphArgs, _opts: CallOpts): Promise<import("./types.js").CritiqueGraphResult> {

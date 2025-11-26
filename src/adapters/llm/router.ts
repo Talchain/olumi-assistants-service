@@ -12,11 +12,65 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
 import type { LLMAdapter } from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
+
+/**
+ * Map task names to CEE model config keys.
+ * Used to look up per-operation model from config.cee.models.*
+ */
+const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
+  'draft_graph': 'draft',
+  'suggest_options': 'options',
+  'repair_graph': 'repair',
+  'clarify_brief': 'clarification',
+  'critique_graph': 'critique',
+  'validate': 'validation',
+};
+
+/**
+ * Get the model for a given task from CEE config.
+ * Returns undefined if task is not mapped or config doesn't specify a model.
+ * Safely handles config validation failures (e.g., in test environments).
+ */
+function getModelFromConfig(task?: string): string | undefined {
+  if (!task) return undefined;
+
+  const configKey = TASK_TO_CONFIG_KEY[task];
+  if (!configKey) return undefined;
+
+  try {
+    const model = config.cee.models[configKey];
+    return model || undefined;
+  } catch {
+    // Config validation failed (e.g., invalid BASE_URL in test environment)
+    // Fall back to default model selection
+    return undefined;
+  }
+}
+
+/**
+ * Get the max tokens for a given task from CEE config.
+ * Safely handles config validation failures (e.g., in test environments).
+ */
+export function getMaxTokensFromConfig(task?: string): number | undefined {
+  if (!task) return undefined;
+
+  const configKey = TASK_TO_CONFIG_KEY[task];
+  if (!configKey) return undefined;
+
+  try {
+    return config.cee.maxTokens[configKey];
+  } catch {
+    // Config validation failed (e.g., invalid BASE_URL in test environment)
+    // Fall back to default token limits
+    return undefined;
+  }
+}
 
 // Default configuration (OpenAI for cost-effectiveness)
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
@@ -346,7 +400,7 @@ export function getAdapter(task?: string): LLMAdapter {
   let selectedProvider: 'anthropic' | 'openai' | 'fixtures' = envProvider;
   let selectedModel: string | undefined = envModel === 'auto' ? undefined : envModel;
 
-  // Check for task-specific override in config
+  // Check for task-specific override in config file (providers.json)
   if (config && task && config.overrides?.[task]) {
     const override = config.overrides[task];
     selectedProvider = override.provider;
@@ -358,7 +412,7 @@ export function getAdapter(task?: string): LLMAdapter {
       "Using task-specific provider override"
     );
   }
-  // Check for config defaults
+  // Check for config file defaults
   else if (config?.defaults) {
     selectedProvider = config.defaults.provider;
     if (config.defaults.model) {
@@ -375,6 +429,17 @@ export function getAdapter(task?: string): LLMAdapter {
       { provider: selectedProvider, model: selectedModel, source: 'environment' },
       "Using provider from environment"
     );
+  }
+
+  // CEE tiered model selection: override model based on task if configured
+  // This allows per-operation model selection (e.g., gpt-4o for draft, gpt-4o-mini for clarification)
+  const ceeModel = getModelFromConfig(task);
+  if (ceeModel && selectedModel !== ceeModel) {
+    log.info(
+      { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_config' },
+      "Using CEE task-specific model"
+    );
+    selectedModel = ceeModel;
   }
 
   // Reuse cached wrapper to preserve cache state across requests

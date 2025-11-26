@@ -5,9 +5,10 @@ import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validati
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId } from "../plugins/auth.js";
-import { emit, TelemetryEvents } from "../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
+import { assessBriefReadiness } from "../cee/validation/readiness.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -168,6 +169,149 @@ export default async function route(app: FastifyInstance) {
       seed?: string;
       archetype_hint?: string;
     };
+
+    // Preflight validation - check brief readiness before LLM call
+    if (config.cee.preflightEnabled) {
+      const readiness = assessBriefReadiness(baseInput.brief);
+
+      // Log readiness assessment
+      log.info({
+        request_id: requestId,
+        readiness_score: readiness.score,
+        readiness_level: readiness.level,
+        preflight_valid: readiness.preflight.valid,
+        factors: readiness.factors,
+        event: "cee.preflight.assessed",
+      }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
+
+      // If strict mode and readiness below threshold, reject with guidance
+      if (config.cee.preflightStrict && readiness.score < config.cee.preflightReadinessThreshold) {
+        const errorBody = buildCeeErrorResponse(
+          "CEE_VALIDATION_FAILED",
+          readiness.summary,
+          {
+            retryable: true,
+            requestId,
+            details: {
+              rejection_reason: "preflight_rejected",
+              readiness_score: readiness.score,
+              readiness_level: readiness.level,
+              factors: readiness.factors,
+              suggested_questions: readiness.suggested_questions,
+              preflight_issues: readiness.preflight.issues,
+              hint: "Please provide a clearer decision statement or answer the suggested questions",
+            },
+          }
+        );
+
+        emit(TelemetryEvents.PreflightRejected, {
+          request_id: requestId,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          factors: readiness.factors,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_PREFLIGHT_REJECTED",
+          httpStatus: 400,
+        });
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.header("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.code(400);
+        return reply.send(errorBody);
+      }
+
+      // If readiness is low but not strict mode, log warning and continue
+      if (readiness.level === "not_ready" || readiness.level === "needs_clarification") {
+        log.warn({
+          request_id: requestId,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          suggested_questions: readiness.suggested_questions,
+          event: "cee.preflight.low_readiness",
+        }, `Proceeding with low readiness brief (strict mode disabled): ${readiness.summary}`);
+      }
+
+      // Clarification enforcement (Phase 5)
+      // Check if clarification rounds are required based on readiness score
+      if (config.cee.clarificationEnforced) {
+        const allowDirectThreshold = config.cee.clarificationThresholdAllowDirect;
+        const oneRoundThreshold = config.cee.clarificationThresholdOneRound;
+        const completedRounds = parsed.data.clarification_rounds_completed ?? 0;
+
+        // Calculate required rounds based on readiness score
+        let requiredRounds = 0;
+        if (readiness.score < allowDirectThreshold) {
+          if (readiness.score >= oneRoundThreshold) {
+            requiredRounds = 1; // 0.4 - 0.8 = 1 round required
+          } else {
+            requiredRounds = 2; // < 0.4 = 2+ rounds required
+          }
+        }
+
+        if (requiredRounds > completedRounds) {
+          const errorBody = buildCeeErrorResponse(
+            "CEE_CLARIFICATION_REQUIRED",
+            "Brief requires clarification before drafting",
+            {
+              retryable: true,
+              requestId,
+              details: {
+                readiness_score: readiness.score,
+                readiness_level: readiness.level,
+                required_rounds: requiredRounds,
+                completed_rounds: completedRounds,
+                suggested_questions: readiness.suggested_questions,
+                clarification_endpoint: "/assist/clarify-brief",
+                hint: `Complete ${requiredRounds - completedRounds} more clarification round(s) before drafting`,
+              },
+            }
+          );
+
+          emit(TelemetryEvents.ClarificationRequired, {
+            request_id: requestId,
+            latency_ms: Date.now() - start,
+            readiness_score: readiness.score,
+            readiness_level: readiness.level,
+            required_rounds: requiredRounds,
+            completed_rounds: completedRounds,
+          });
+
+          logCeeCall({
+            requestId,
+            capability: "cee_draft_graph",
+            latencyMs: Date.now() - start,
+            status: "error",
+            errorCode: "CEE_CLARIFICATION_REQUIRED",
+            httpStatus: 400,
+          });
+
+          reply.header("X-CEE-API-Version", "v1");
+          reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+          reply.header("X-CEE-Request-ID", requestId);
+          reply.header("X-CEE-Readiness-Score", readiness.score.toString());
+          reply.code(400);
+          return reply.send(errorBody);
+        }
+
+        // Log when direct draft is allowed despite enforced clarification
+        if (requiredRounds === 0) {
+          emit(TelemetryEvents.ClarificationBypassAllowed, {
+            request_id: requestId,
+            readiness_score: readiness.score,
+            readiness_level: readiness.level,
+          });
+        }
+      }
+    }
 
     const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
 

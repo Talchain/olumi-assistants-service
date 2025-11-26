@@ -687,6 +687,11 @@ Key environment variables relevant to CEE v1:
 - `COST_MAX_USD` – maximum allowed cost per draft response (shared guard).
 - `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` – when `true`, enables structural draft warnings (`draft_warnings`) and confidence flags (`confidence_flags`) on `CEEDraftGraphResponseV1`. Default: `false`.
 - `CEE_BIAS_STRUCTURAL_ENABLED` – when `true`, enables additional graph-structural bias detectors (e.g. confirmation bias and sunk cost) inside Bias Check. Default: `false`.
+- `CEE_PRE_DECISION_CHECKS_ENABLED` – when `true`, includes pre-decision checklist and framing nudges in draft responses. Default: `false`.
+- `CEE_BIAS_CONFIDENCE_THRESHOLD` – minimum confidence score (0–1) for bias findings to be reported. Findings below this threshold are filtered out. Default: `0.3`.
+- `CEE_CACHE_RESPONSE_ENABLED` – when `true`, enables in-memory caching for draft-graph responses. Default: `false`.
+- `CEE_CACHE_RESPONSE_TTL_MS` – cache entry TTL in milliseconds. Default: `300000` (5 minutes).
+- `CEE_CACHE_RESPONSE_MAX_SIZE` – maximum number of cache entries. Default: `100`.
 
 ### 4.2 CEE response headers
 
@@ -715,16 +720,153 @@ Consumers should:
   systems that primarily see HTTP metadata.
 
 
+### 4.4 Enhanced Clarification Flow
+
+The clarification flow (`/assist/clarify-brief`) now includes readiness assessment
+to help determine if a brief is ready for drafting. When enabled, clarification
+responses include:
+
+- **Readiness factors** – five numeric scores (0–1) for:
+  - `length_score` – adequate length for meaningful analysis.
+  - `clarity_score` – clear language without excessive ambiguity.
+  - `decision_relevance_score` – actually relates to a decision.
+  - `specificity_score` – concrete details vs. vague statements.
+  - `context_score` – sufficient background information.
+- **Readiness level** – derived from the overall score:
+  - `ready` (score ≥ 0.7) – proceed to drafting.
+  - `needs_clarification` (0.4 ≤ score < 0.7) – ask targeted questions.
+  - `not_ready` (score < 0.4) – requires substantial clarification.
+- **Weakest factor** – identifies which factor to focus on.
+- **Targeted questions** – auto-generated based on weakest factors.
+
+Configuration:
+
+- `CEE_PREFLIGHT_ENABLED` – enables preflight validation. Default: `false`.
+- `CEE_PREFLIGHT_STRICT` – reject briefs that fail preflight. Default: `false`.
+- `CEE_PREFLIGHT_READINESS_THRESHOLD` – minimum readiness score. Default: `0.4`.
+
+Implementation: `src/cee/validation/readiness.ts`, `src/routes/assist.clarify-brief.ts`.
+
+### 4.5 Pre-Decision Checklist and Framing Nudges
+
+When `CEE_PRE_DECISION_CHECKS_ENABLED=true`, draft responses include contextual
+pre-decision checks and framing nudges derived from graph structure:
+
+**Pre-Decision Checks** (max 5):
+
+- Categories: `completeness`, `bias`, `scope`, `stakeholders`, `reversibility`.
+- Each check includes:
+  - `id` – unique identifier (e.g. `check_options_count`).
+  - `question` – the check question.
+  - `why_it_matters` – brief rationale.
+  - `suggested_action` – optional next step.
+
+**Framing Nudges** (max 3):
+
+- Types: `anchoring_warning`, `scope_prompt`, `alternatives_prompt`, `time_pressure`, `sunk_cost`.
+- Each nudge includes:
+  - `id` – unique identifier.
+  - `type` – nudge category.
+  - `message` – the nudge text.
+  - `severity` – `info` or `warning`.
+
+Example checks generated:
+
+- Too few options (< 3) → prompts for alternatives.
+- No risks identified → suggests identifying risks.
+- Unbalanced analysis → warns about confirmation bias.
+- Complex graph → suggests scope clarification.
+
+Implementation: `src/cee/validation/pre-decision-checks.ts`.
+
+### 4.6 Bias Confidence Scoring
+
+Bias findings now include confidence scores to reduce false positives.
+
+**How it works:**
+
+- Each bias finding is assigned a `confidence` score (0–1).
+- Confidence is calculated from severity and evidence strength.
+- Findings below `CEE_BIAS_CONFIDENCE_THRESHOLD` are filtered out.
+
+**Confidence calculation:**
+
+- Severity multiplier: `high` = 0.9, `medium` = 0.7, `low` = 0.5.
+- Evidence strength varies by finding type (e.g., more options lacking evidence = higher confidence for confirmation bias).
+- Final confidence = `severity_multiplier × evidence_strength`, clamped to [0, 1].
+
+**Filtering:**
+
+```ts
+import { filterByConfidence } from "./src/cee/bias/index.js";
+
+const filtered = filterByConfidence(findings, 0.5); // Only findings with confidence ≥ 0.5
+```
+
+Implementation: `src/cee/bias/index.ts`.
+
+### 4.7 Response Caching
+
+When `CEE_CACHE_RESPONSE_ENABLED=true`, draft-graph responses are cached in memory
+to reduce redundant LLM calls for identical briefs.
+
+**Cache behaviour:**
+
+- Keys are generated from normalized brief text (lowercase, collapsed whitespace).
+- Context (if provided) is included in the cache key.
+- Cache is TTL-based with LRU eviction when at capacity.
+
+**Configuration:**
+
+- `CEE_CACHE_RESPONSE_ENABLED` – enable/disable caching. Default: `false`.
+- `CEE_CACHE_RESPONSE_TTL_MS` – TTL in milliseconds. Default: `300000` (5 min).
+- `CEE_CACHE_RESPONSE_MAX_SIZE` – max entries. Default: `100`.
+
+**Usage:**
+
+```ts
+import { getOrCompute, isCachingEnabled, resetCache } from "./src/cee/cache/index.js";
+
+const result = await getOrCompute(brief, context, async () => {
+  // Expensive computation
+  return await generateDraftGraph(brief);
+});
+
+if (result.cached) {
+  console.log("Cache hit!");
+}
+```
+
+**Cache stats:**
+
+```ts
+import { getDraftGraphCache } from "./src/cee/cache/index.js";
+
+const stats = getDraftGraphCache().getStats();
+// { size, hits, misses, evictions, hitRate }
+```
+
+Implementation: `src/cee/cache/index.ts`.
+
 ## 5. Where to Look in the Codebase
 
 - Endpoint wiring: `src/routes/assist.v1.draft-graph.ts`.
 - CEE finaliser and failure-mode mapping: `src/cee/validation/pipeline.ts`.
 - OpenAPI contracts: `openapi.yaml` (plus `src/generated/openapi.d.ts`).
 - Telemetry events: `src/utils/telemetry.ts`.
+- Readiness assessment: `src/cee/validation/readiness.ts`.
+- Pre-decision checks: `src/cee/validation/pre-decision-checks.ts`.
+- Bias detection: `src/cee/bias/index.ts`.
+- Response caching: `src/cee/cache/index.ts`.
+- Clarify-brief route: `src/routes/assist.clarify-brief.ts`.
 - Tests:
   - `tests/unit/cee.draft-pipeline.test.ts`
   - `tests/integration/cee.draft-graph.test.ts`
   - `tests/integration/cee.telemetry.test.ts`
+  - `tests/unit/cee.readiness-assessment.test.ts`
+  - `tests/unit/cee.pre-decision-checks.test.ts`
+  - `tests/unit/cee.bias.test.ts`
+  - `tests/unit/cee.cache.test.ts`
 
 For guidance on evolving CEE safely (invariants, key surfaces, tests, and
 common pitfalls), see `maintainers-guide.md`.
@@ -749,3 +891,62 @@ If and when CEE streaming is introduced, it will be specified explicitly in
 OpenAPI (new path + event schema) and wired through the same CEE finaliser.
 For v1, the decision to stay JSON-only is recorded in
 `Docs/ADR-CEE-streaming-v1.md`.
+
+
+## 7. Frozen Contracts
+
+### 7.1 CeeDecisionReviewPayloadV1
+
+The `CeeDecisionReviewPayloadV1` contract is **frozen** for PLoT and UI consumption.
+This payload provides a compact, metadata-only view of a CEE journey suitable for
+decision review dashboards and summaries.
+
+**Artifacts:**
+
+- **JSON Schema:** `schemas/cee-decision-review.v1.json`
+- **Golden Fixture:** `tests/fixtures/cee/cee-decision-review.v1.json`
+- **TypeScript Type:** `CeeDecisionReviewPayloadV1` (derived from OpenAPI)
+- **Contract Location:** `src/contracts/cee/decision-review.ts`
+
+**Schema Structure:**
+
+```
+CeeDecisionReviewPayloadV1
+├── story: DecisionStorySummaryV1 (required)
+│   ├── headline: string
+│   ├── key_drivers: string[]
+│   ├── risks_and_gaps: string[]
+│   ├── next_actions: string[]
+│   ├── any_truncated: boolean
+│   └── quality_overall?: number (1-10)
+├── journey: CeeJourneySummaryV1 (required)
+│   ├── story: DecisionStorySummaryV1
+│   ├── health: CeeJourneyHealthV1
+│   │   ├── perEnvelope: { draft?, explain?, evidence?, bias?, options?, sensitivity?, team? }
+│   │   ├── overallStatus: "ok" | "warning" | "risk"
+│   │   ├── overallTone: "success" | "warning" | "danger"
+│   │   ├── any_truncated: boolean
+│   │   └── has_validation_issues: boolean
+│   ├── is_complete: boolean
+│   ├── missing_envelopes: ("draft" | "explain" | "evidence" | "bias" | "options" | "sensitivity" | "team")[]
+│   └── has_team_disagreement: boolean
+├── uiFlags: CeeUiFlagsV1 (required)
+│   ├── has_high_risk_envelopes: boolean
+│   ├── has_team_disagreement: boolean
+│   ├── has_truncation_somewhere: boolean
+│   └── is_journey_complete: boolean
+└── trace?: { request_id?: string, correlation_id?: string }
+```
+
+**Evolution Policy:**
+
+- **Additive only:** New optional fields may be added to any schema.
+- **No removals:** Required fields and structure cannot be removed in v1.
+- **No type changes:** Field types are frozen (e.g., `headline` stays `string`).
+- **Breaking changes:** Require a new major version (v2).
+
+**Validation Tests:**
+
+- `tests/validation/cee.decision-review.schema.test.ts` – validates fixture against JSON Schema
+- `tests/validation/cee.decision-review.fixture.test.ts` – structural checks and privacy validation
+- `tests/validation/cee.decision-review.builder.test.ts` – SDK helper type compatibility

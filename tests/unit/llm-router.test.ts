@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getAdapter, getAdapterForProvider, resetAdapterCache } from "../../src/adapters/llm/router.js";
+import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router", () => {
   const originalEnv = { ...process.env };
@@ -7,6 +8,7 @@ describe("LLM Router", () => {
   beforeEach(() => {
     resetAdapterCache();
     vi.clearAllMocks();
+    cleanBaseUrl(); // Prevent config validation failures
   });
 
   afterEach(() => {
