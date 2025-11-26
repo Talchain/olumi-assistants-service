@@ -200,6 +200,11 @@ export const TelemetryEvents = {
   DecisionReviewRequested: "cee.decision_review.requested",
   DecisionReviewSucceeded: "cee.decision_review.succeeded",
   DecisionReviewFailed: "cee.decision_review.failed",
+
+  // Prompt Store Cache events (v2.0 Phase 4.3)
+  PromptStoreCacheHit: "prompt.store.cache.hit",
+  PromptStoreCacheMiss: "prompt.store.cache.miss",
+  PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
 } as const;
 
 /**
@@ -1123,6 +1128,29 @@ export function emit(event: string, data: Event) {
         case TelemetryEvents.DecisionReviewIslFallback: {
           datadogClient.increment("cee.decision_review.isl_fallback", 1, {
             reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        // Prompt Store Cache metrics (v2.0 Phase 4.3)
+        case TelemetryEvents.PromptStoreCacheHit: {
+          datadogClient.increment("prompt.store.cache.hit", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheMiss: {
+          datadogClient.increment("prompt.store.cache.miss", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheInvalidated: {
+          datadogClient.increment("prompt.store.cache.invalidated", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            task_id: String((eventData.taskId as string) || "all"),
           });
           break;
         }

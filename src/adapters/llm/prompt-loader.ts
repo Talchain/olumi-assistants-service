@@ -16,7 +16,7 @@
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
 import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
-import { log, emit } from '../../utils/telemetry.js';
+import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash } from 'node:crypto';
 
 // Flag to track if defaults have been initialized in this module instance
@@ -91,8 +91,15 @@ export function getSystemPrompt(
 
   // Return cached value if still fresh
   if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
+    emit(TelemetryEvents.PromptStoreCacheHit, { taskId });
     return cached.content;
   }
+
+  // Cache miss - log the reason
+  emit(TelemetryEvents.PromptStoreCacheMiss, {
+    taskId,
+    reason: cached ? 'expired' : 'not_cached',
+  });
 
   // Load from prompt system
   try {
@@ -121,6 +128,36 @@ export function getSystemPrompt(
 export function clearPromptCache(): void {
   promptCache.clear();
   defaultsInitialized = false;
+}
+
+/**
+ * Invalidate cache for a specific task or all tasks
+ *
+ * Called by admin routes when prompts are updated to ensure
+ * the next request loads fresh data from the store.
+ *
+ * @param taskId - Optional task ID to invalidate; if omitted, invalidates all
+ * @param reason - Reason for invalidation (for telemetry)
+ */
+export function invalidatePromptCache(
+  taskId?: CeeTaskId,
+  reason: string = 'admin_update',
+): void {
+  if (taskId) {
+    const wasPresent = promptCache.has(taskId);
+    promptCache.delete(taskId);
+    if (wasPresent) {
+      emit(TelemetryEvents.PromptStoreCacheInvalidated, { taskId, reason });
+      log.info({ taskId, reason }, 'Prompt cache invalidated for task');
+    }
+  } else {
+    const size = promptCache.size;
+    promptCache.clear();
+    if (size > 0) {
+      emit(TelemetryEvents.PromptStoreCacheInvalidated, { taskId: 'all', reason });
+      log.info({ entriesCleared: size, reason }, 'Prompt cache fully invalidated');
+    }
+  }
 }
 
 /**

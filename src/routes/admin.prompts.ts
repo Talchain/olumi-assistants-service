@@ -43,6 +43,7 @@ import {
   logExperimentEnded,
 } from '../prompts/index.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
+import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
 import { log, emit } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
@@ -377,6 +378,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         promptId: prompt.id,
       });
 
+      // Invalidate cache for the task to ensure fresh prompt is loaded
+      invalidatePromptCache(prompt.taskId, 'prompt_created');
+
       return reply.status(201).send(prompt);
     } catch (error) {
       if (error instanceof Error && error.message.includes('already exists')) {
@@ -486,6 +490,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         promptId: params.data.id,
       });
 
+      // Invalidate cache for the task to ensure fresh prompt is loaded
+      invalidatePromptCache(prompt.taskId, 'prompt_updated');
+
       return reply.status(200).send(prompt);
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
@@ -526,12 +533,22 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const store = getPromptStore();
+
+      // Get taskId before deletion for cache invalidation
+      const prompt = await store.get(params.data.id);
+      const taskId = prompt?.taskId;
+
       await store.delete(params.data.id, hardDelete);
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: hardDelete ? 'hard_delete' : 'archive',
         promptId: params.data.id,
       });
+
+      // Invalidate cache for the task
+      if (taskId) {
+        invalidatePromptCache(taskId, hardDelete ? 'prompt_deleted' : 'prompt_archived');
+      }
 
       return reply.status(204).send();
     } catch (error) {
@@ -591,6 +608,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         promptId: params.data.id,
         version: newVersion,
       });
+
+      // Invalidate cache for the task to ensure fresh prompt is loaded
+      invalidatePromptCache(prompt.taskId, 'version_created');
 
       return reply.status(201).send(prompt);
     } catch (error) {
@@ -659,6 +679,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         targetVersion: body.data.targetVersion,
         reason: body.data.reason,
       });
+
+      // Invalidate cache for the task to ensure fresh prompt is loaded
+      invalidatePromptCache(prompt.taskId, 'version_rollback');
 
       return reply.status(200).send(prompt);
     } catch (error) {

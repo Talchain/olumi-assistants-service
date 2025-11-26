@@ -199,6 +199,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DecisionReviewRequested: "cee.decision_review.requested",
         DecisionReviewSucceeded: "cee.decision_review.succeeded",
         DecisionReviewFailed: "cee.decision_review.failed",
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        PromptStoreCacheHit: "prompt.store.cache.hit",
+        PromptStoreCacheMiss: "prompt.store.cache.miss",
+        PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -224,7 +229,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -452,6 +457,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.succeeded": [TelemetryEvents.DecisionReviewGenerated, TelemetryEvents.DecisionReviewSucceeded],
         "cee.decision_review.failed": [TelemetryEvents.DecisionReviewFailed],
         "cee.decision_review.isl_fallback": [TelemetryEvents.DecisionReviewIslFallback],
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
+        "prompt.store.cache.miss": [TelemetryEvents.PromptStoreCacheMiss],
+        "prompt.store.cache.invalidated": [TelemetryEvents.PromptStoreCacheInvalidated],
       };
 
       // Verify all events are documented, except debug-only events
@@ -650,6 +660,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.requested",
         "cee.decision_review.succeeded",
         "cee.decision_review.failed",
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        "prompt.store.cache.hit",
+        "prompt.store.cache.miss",
+        "prompt.store.cache.invalidated",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
