@@ -176,6 +176,29 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // CEE Clarification enforcement events (Phase 5)
         ClarificationRequired: "cee.clarification.required",
         ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
+
+        // Prompt Management events (v2.0)
+        PromptStoreError: "prompt.store_error",
+        PromptLoaderError: "prompt.loader.error",
+        PromptLoadedFromStore: "prompt.loader.store",
+        PromptLoadedFromDefault: "prompt.loader.default",
+        PromptCompiled: "prompt.compiled",
+        PromptHashMismatch: "prompt.hash_mismatch",
+        AdminPromptAccess: "admin.prompt.access",
+        AdminExperimentAccess: "admin.experiment.access",
+        AdminAuthFailed: "admin.auth.failed",
+        AdminIPBlocked: "admin.ip.blocked",
+
+        // Prompt Experiment events (v2.0)
+        PromptExperimentAssigned: "prompt.experiment.assigned",
+        PromptStagingUsed: "prompt.staging.used",
+
+        // Decision Review events (v2.0)
+        DecisionReviewGenerated: "cee.decision_review.generated",
+        DecisionReviewIslFallback: "cee.decision_review.isl_fallback",
+        DecisionReviewRequested: "cee.decision_review.requested",
+        DecisionReviewSucceeded: "cee.decision_review.succeeded",
+        DecisionReviewFailed: "cee.decision_review.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -201,7 +224,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification)\.|llm\.normalization\.|isl\.config\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
