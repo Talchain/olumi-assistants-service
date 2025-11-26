@@ -249,7 +249,7 @@ function computeExperimentBucket(
   // Use the first available identifier, preferring userId for stability
   const id = identifiers.userId ?? identifiers.keyId ?? identifiers.requestId ?? 'anonymous';
   const hashInput = `${experimentName}:${id}`;
-  const hash = createHash('md5').update(hashInput).digest('hex');
+  const hash = createHash('sha256').update(hashInput).digest('hex');
   // Take first 4 hex chars and convert to number (0-65535), then mod 100
   const num = parseInt(hash.substring(0, 4), 16);
   return num % 100;

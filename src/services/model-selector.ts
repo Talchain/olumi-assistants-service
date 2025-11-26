@@ -6,10 +6,9 @@
  * telemetry for debugging and monitoring.
  */
 
-import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
+import { log, emit } from "../utils/telemetry.js";
 import {
   getModelConfig,
-  isModelEnabled,
   MODEL_REGISTRY,
   type ModelConfig,
   type ModelTier,
@@ -19,7 +18,6 @@ import {
   type CeeTask,
   getDefaultModelForTask,
   isQualityRequired,
-  isValidCeeTask,
   isTierShortcut,
   type TierShortcut,
 } from "../config/model-routing.js";

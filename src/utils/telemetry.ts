@@ -186,6 +186,9 @@ export const TelemetryEvents = {
   PromptCompiled: "prompt.compiled",
   PromptHashMismatch: "prompt.hash_mismatch",
   AdminPromptAccess: "admin.prompt.access",
+  AdminExperimentAccess: "admin.experiment.access",
+  AdminAuthFailed: "admin.auth.failed",
+  AdminIPBlocked: "admin.ip.blocked",
 
   // Prompt Experiment events (v2.0)
   PromptExperimentAssigned: "prompt.experiment.assigned",
@@ -1045,6 +1048,25 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("admin.prompt.access", 1, {
             action: String((eventData.action as string) || "unknown"),
           });
+          break;
+        }
+
+        case TelemetryEvents.AdminExperimentAccess: {
+          datadogClient.increment("admin.experiment.access", 1, {
+            action: String((eventData.action as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminAuthFailed: {
+          datadogClient.increment("admin.auth.failed", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminIPBlocked: {
+          datadogClient.increment("admin.ip.blocked", 1);
           break;
         }
 

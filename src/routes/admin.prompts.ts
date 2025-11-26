@@ -24,6 +24,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
 import {
   getPromptStore,
@@ -268,6 +269,29 @@ const ExperimentNameParamsSchema = z.object({
 // =========================================================================
 
 export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
+  // =========================================================================
+  // Rate Limiting
+  // =========================================================================
+
+  /**
+   * Apply rate limiting to all admin endpoints
+   * - 100 requests per 15 minutes per API key/IP combination
+   * - Prevents brute-force attacks and abuse
+   */
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: 15 * 60 * 1000, // 15 minutes
+    keyGenerator: (request) => {
+      // Rate limit by admin key + IP for granular control
+      const adminKey = request.headers['x-admin-key'] as string ?? '';
+      return `${adminKey.slice(0, 8)}:${request.ip}`;
+    },
+    errorResponseBuilder: () => ({
+      error: 'rate_limit_exceeded',
+      message: 'Too many requests. Please try again later.',
+    }),
+  });
+
   // =========================================================================
   // Prompt CRUD
   // =========================================================================

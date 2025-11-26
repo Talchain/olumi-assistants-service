@@ -408,6 +408,27 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.team_perspectives.requested": [TelemetryEvents.CeeTeamPerspectivesRequested],
         "cee.team_perspectives.succeeded": [TelemetryEvents.CeeTeamPerspectivesSucceeded],
         "cee.team_perspectives.failed": [TelemetryEvents.CeeTeamPerspectivesFailed],
+
+        // Prompt Management events (v2.0)
+        "prompt.store.error": [TelemetryEvents.PromptStoreError],
+        "prompt.loader.error": [TelemetryEvents.PromptLoaderError],
+        "prompt.loader.source": [TelemetryEvents.PromptLoadedFromStore, TelemetryEvents.PromptLoadedFromDefault],
+        "prompt.compiled": [TelemetryEvents.PromptCompiled],
+        "prompt.hash_mismatch": [TelemetryEvents.PromptHashMismatch],
+        "admin.prompt.access": [TelemetryEvents.AdminPromptAccess],
+        "admin.experiment.access": [TelemetryEvents.AdminExperimentAccess],
+        "admin.auth.failed": [TelemetryEvents.AdminAuthFailed],
+        "admin.ip.blocked": [TelemetryEvents.AdminIPBlocked],
+
+        // Prompt Experiment events (v2.0)
+        "prompt.experiment.assigned": [TelemetryEvents.PromptExperimentAssigned],
+        "prompt.staging.used": [TelemetryEvents.PromptStagingUsed],
+
+        // Decision Review events (v2.0)
+        "cee.decision_review.requested": [TelemetryEvents.DecisionReviewRequested],
+        "cee.decision_review.succeeded": [TelemetryEvents.DecisionReviewGenerated, TelemetryEvents.DecisionReviewSucceeded],
+        "cee.decision_review.failed": [TelemetryEvents.DecisionReviewFailed],
+        "cee.decision_review.isl_fallback": [TelemetryEvents.DecisionReviewIslFallback],
       };
 
       // Verify all events are documented, except debug-only events
@@ -583,6 +604,29 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Cost calculation guardrails
         "assist.cost_calculation.unknown_model",
+
+        // Prompt Management events (v2.0)
+        "prompt.store_error",
+        "prompt.loader.error",
+        "prompt.loader.store",
+        "prompt.loader.default",
+        "prompt.compiled",
+        "prompt.hash_mismatch",
+        "admin.prompt.access",
+        "admin.experiment.access",
+        "admin.auth.failed",
+        "admin.ip.blocked",
+
+        // Prompt Experiment events (v2.0)
+        "prompt.experiment.assigned",
+        "prompt.staging.used",
+
+        // Decision Review events (v2.0)
+        "cee.decision_review.generated",
+        "cee.decision_review.isl_fallback",
+        "cee.decision_review.requested",
+        "cee.decision_review.succeeded",
+        "cee.decision_review.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
