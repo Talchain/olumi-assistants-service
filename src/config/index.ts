@@ -209,6 +209,27 @@ const ConfigSchema = z.object({
       critique: z.coerce.number().int().positive().optional(),
       validation: z.coerce.number().int().positive().optional(),
     }).default({}),
+    // Tiered model selection (Phase: Model Selection)
+    modelSelection: z.object({
+      enabled: booleanString.default(false), // Master switch for tiered model selection
+      overrideAllowed: booleanString.default(true), // Allow X-CEE-Model-Override header
+      fallbackEnabled: booleanString.default(true), // Enable fallback to higher tier on failure
+      qualityGateEnabled: booleanString.default(true), // Prevent downgrade of quality-required tasks
+      latencyAnomalyThresholdMs: z.coerce.number().int().positive().default(10000), // Alert threshold
+      // Per-task model defaults (override TASK_MODEL_DEFAULTS from model-routing.ts)
+      taskModels: z.object({
+        clarification: z.string().optional(),
+        preflight: z.string().optional(),
+        draftGraph: z.string().optional(),
+        biasCheck: z.string().optional(),
+        evidenceHelper: z.string().optional(),
+        sensitivityCoach: z.string().optional(),
+        options: z.string().optional(),
+        explainer: z.string().optional(),
+        repairGraph: z.string().optional(),
+        critiqueGraph: z.string().optional(),
+      }).default({}),
+    }).default({}),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -376,6 +397,26 @@ function parseConfig(): Config {
         clarification: env.CEE_MAX_TOKENS_CLARIFICATION,
         critique: env.CEE_MAX_TOKENS_CRITIQUE,
         validation: env.CEE_MAX_TOKENS_VALIDATION,
+      },
+      // Tiered model selection
+      modelSelection: {
+        enabled: env.CEE_MODEL_SELECTION_ENABLED,
+        overrideAllowed: env.CEE_MODEL_OVERRIDE_ALLOWED,
+        fallbackEnabled: env.CEE_MODEL_FALLBACK_ENABLED,
+        qualityGateEnabled: env.CEE_MODEL_QUALITY_GATE_ENABLED,
+        latencyAnomalyThresholdMs: env.CEE_MODEL_LATENCY_ANOMALY_THRESHOLD_MS,
+        taskModels: {
+          clarification: env.CEE_MODEL_TASK_CLARIFICATION,
+          preflight: env.CEE_MODEL_TASK_PREFLIGHT,
+          draftGraph: env.CEE_MODEL_TASK_DRAFT_GRAPH,
+          biasCheck: env.CEE_MODEL_TASK_BIAS_CHECK,
+          evidenceHelper: env.CEE_MODEL_TASK_EVIDENCE_HELPER,
+          sensitivityCoach: env.CEE_MODEL_TASK_SENSITIVITY_COACH,
+          options: env.CEE_MODEL_TASK_OPTIONS,
+          explainer: env.CEE_MODEL_TASK_EXPLAINER,
+          repairGraph: env.CEE_MODEL_TASK_REPAIR_GRAPH,
+          critiqueGraph: env.CEE_MODEL_TASK_CRITIQUE_GRAPH,
+        },
       },
     },
     isl: {

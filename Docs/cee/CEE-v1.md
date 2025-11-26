@@ -982,3 +982,177 @@ CeeDecisionReviewPayload
 **Validation Tests:**
 
 - `tests/validation/cee.decision-review.schema.test.ts` – validates fixture against JSON Schema
+
+
+## 8. Model Selection (Tiered Model Routing)
+
+CEE v1 supports intelligent model selection to optimize cost and latency while
+maintaining quality for critical tasks. This feature is **disabled by default**
+and must be explicitly enabled via feature flag.
+
+### 8.1 Overview
+
+The model selection system routes CEE tasks to different LLM models based on:
+
+1. **Task complexity** – Simple tasks (clarification, preflight) use fast models;
+   complex tasks (draft_graph, bias_check) use quality models.
+2. **User override** – Power users can request specific models via the
+   `X-CEE-Model-Override` header.
+3. **Quality gates** – Critical tasks cannot be downgraded even if explicitly
+   requested.
+
+### 8.2 Model Tiers
+
+| Tier     | Model         | Use Cases                           | Latency | Cost      |
+|----------|---------------|-------------------------------------|---------|-----------|
+| fast     | gpt-4o-mini   | clarification, preflight, explainer | ~800ms  | $0.15/1k  |
+| quality  | gpt-4o        | draft_graph, bias_check, options    | ~1500ms | $2.50/1k  |
+| premium  | claude-sonnet | Reserved for future use             | ~2000ms | $3.00/1k  |
+
+### 8.3 Task-to-Model Defaults
+
+```typescript
+const TASK_MODEL_DEFAULTS = {
+  clarification: "gpt-4o-mini",    // Fast tier
+  preflight: "gpt-4o-mini",        // Fast tier
+  draft_graph: "gpt-4o",           // Quality tier (protected)
+  bias_check: "gpt-4o",            // Quality tier (protected)
+  evidence_helper: "gpt-4o-mini",  // Fast tier
+  sensitivity_coach: "gpt-4o",     // Quality tier
+  options: "gpt-4o",               // Quality tier
+  explainer: "gpt-4o-mini",        // Fast tier
+  repair_graph: "gpt-4o",          // Quality tier
+  critique_graph: "gpt-4o",        // Quality tier
+};
+```
+
+### 8.4 User Override via Header
+
+Power users can request a specific model using the `X-CEE-Model-Override` header:
+
+```bash
+# Request fast tier for all eligible tasks
+curl -X POST /assist/v1/draft-graph \
+  -H "X-CEE-Model-Override: _fast" \
+  -d '{"brief": "..."}'
+
+# Request specific model
+curl -X POST /assist/v1/evidence-helper \
+  -H "X-CEE-Model-Override: gpt-4o-mini" \
+  -d '{"evidence": [...]}'
+```
+
+**Supported override values:**
+
+| Value       | Behaviour                                      |
+|-------------|------------------------------------------------|
+| `_default`  | Use task default model                         |
+| `_fast`     | Use fast tier (gpt-4o-mini) for eligible tasks |
+| `_quality`  | Use quality tier (gpt-4o) for all tasks        |
+| `gpt-4o`    | Request specific model                         |
+| `gpt-4o-mini` | Request specific model                       |
+
+### 8.5 Quality Gates
+
+Certain tasks are **protected** and cannot be downgraded to fast tier via user
+override:
+
+- `draft_graph` – Core value delivery, must use quality model
+- `bias_check` – Safety-critical, must use quality model
+
+If a user requests `_fast` or `gpt-4o-mini` for these tasks, the system:
+
+1. Ignores the override
+2. Uses the quality-tier default
+3. Adds a warning to response headers
+
+**Important:** Quality gates apply to **user overrides only** (via
+`X-CEE-Model-Override` header). Server-side configuration via `CEE_MODEL_TASK_*`
+environment variables is trusted and not gated. Operators should take care when
+setting per-task overrides for quality-required tasks.
+
+### 8.6 Response Headers
+
+CEE responses include debugging headers showing model selection:
+
+| Header                      | Description                              |
+|-----------------------------|------------------------------------------|
+| `X-CEE-Model-Used`          | Actual model used (e.g., `gpt-4o-mini`)  |
+| `X-CEE-Model-Tier`          | Model tier (`fast`, `quality`, `premium`)|
+| `X-CEE-Model-Source`        | How model was selected                   |
+| `X-CEE-Model-Warnings`      | Any warnings (e.g., override rejected)   |
+| `X-CEE-Model-Original-Request` | Original request if fallback occurred |
+
+**Source values:**
+
+- `default` – Used task default model
+- `override` – User override was accepted
+- `env` – Task-specific env var override
+- `fallback` – Primary model unavailable, used fallback
+- `legacy` – Feature disabled, using legacy behaviour
+
+### 8.7 Configuration
+
+| Environment Variable               | Default | Description                        |
+|------------------------------------|---------|------------------------------------|
+| `CEE_MODEL_SELECTION_ENABLED`      | `false` | Enable model selection feature     |
+| `CEE_MODEL_OVERRIDE_ALLOWED`       | `true`  | Allow user override via header     |
+| `CEE_MODEL_FALLBACK_ENABLED`       | `true`  | Enable automatic fallback          |
+| `CEE_MODEL_QUALITY_GATE_ENABLED`   | `true`  | Enforce quality gates              |
+| `CEE_MODEL_LATENCY_ANOMALY_MS`     | `10000` | Latency anomaly threshold          |
+
+**Per-task overrides (optional):**
+
+```bash
+CEE_MODEL_CLARIFICATION=gpt-4o        # Override clarification default
+CEE_MODEL_DRAFT_GRAPH=gpt-4o          # Override draft_graph default
+CEE_MODEL_BIAS_CHECK=gpt-4o           # Override bias_check default
+```
+
+### 8.8 Telemetry Events
+
+Model selection emits structured telemetry events (log-only; no StatsD mapping
+yet):
+
+| Event                          | Description                        |
+|--------------------------------|------------------------------------|
+| `cee.model.selected`           | Model selection completed          |
+| `cee.model.override_accepted`  | User override was applied          |
+| `cee.model.override_rejected`  | User override was rejected         |
+| `cee.model.quality_gate_applied` | Quality gate prevented downgrade |
+| `cee.model.fallback_applied`   | Fallback model was used            |
+| `cee.llm.call.latency_anomaly` | Latency exceeded threshold         |
+
+These events are useful for debugging model selection decisions. Future work may
+add StatsD counters for operational dashboards.
+
+### 8.9 Implementation Details
+
+**Key files:**
+
+- Model registry: `src/config/models.ts`
+- Task routing: `src/config/model-routing.ts`
+- Selection service: `src/services/model-selector.ts`
+- LLM adapter integration: `src/adapters/llm/router.ts`
+- Configuration: `src/config/index.ts` (modelSelection section)
+
+**Tests:**
+
+- Unit tests: `tests/unit/model-selector.test.ts` (52 tests)
+- Routing tests: `tests/unit/model-routing.test.ts` (29 tests)
+
+### 8.10 Rollout Strategy
+
+Model selection is feature-flagged for safe rollout:
+
+1. **Phase 1:** Disabled by default (`CEE_MODEL_SELECTION_ENABLED=false`)
+   - All requests use legacy behaviour (gpt-4o for everything)
+   - Response headers show `source: "legacy"`
+
+2. **Phase 2:** Opt-in enablement
+   - Enable for specific environments or tenants
+   - Monitor latency and quality metrics
+
+3. **Phase 3:** Default enablement
+   - Enable for all traffic once validated
+   - Keep quality gates enforced
