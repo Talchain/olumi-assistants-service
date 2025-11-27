@@ -158,30 +158,25 @@ Advanced decision quality features:
 
 ## 📚 Documentation
 
+| Document | Description |
+|----------|-------------|
+| **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** | Quick-start for new developers |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Technical specification |
+| **[Docs/README.md](Docs/README.md)** | Full documentation index |
+
 ### For Developers
 
-**Getting Started:**
 - **[Architecture Overview](Docs/getting-started/architecture.md)** - System design and components
+- **[Developer Onboarding](Docs/getting-started/onboarding.md)** - Local setup guide
+- **[API Reference](Docs/api/FRONTEND_INTEGRATION.md)** - Complete API documentation
+- **[CEE Documentation](Docs/cee/CEE-v1.md)** - Contextual Evidence Engine details
 - **[Contributing Guide](Docs/contributing.md)** - Development workflow and standards
-- **[API Reference](Docs/FRONTEND_INTEGRATION.md)** - Complete API documentation
-
-**Development:**
-- **[Testing Strategy](Docs/contributing.md#testing)** - How to write and run tests
-- **[CEE Documentation](Docs/CEE-v1.md)** - Contextual Evidence Engine details
-- **[Performance Baselines](Docs/baseline-performance-report.md)** - Performance targets
 
 ### For Operators
 
-**Operations:**
-- **[Operator Runbook](Docs/CEE-ops.md)** - Day-to-day operations guide
-- **[Deployment Guide](Docs/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
+- **[Operator Runbook](Docs/operations/operator-runbook.md)** - Day-to-day operations
+- **[CEE Operations](Docs/cee/CEE-ops.md)** - CEE-specific operations
 - **[Incident Runbooks](Docs/runbooks/)** - Troubleshooting playbooks
-
-**Monitoring:**
-- **[Diagnostics Guide](Docs/CEE-runbook.md)** - Health checks and diagnostics
-- **[Telemetry Playbook](Docs/CEE-telemetry-playbook.md)** - Metrics and observability
-
-📖 **[Full Documentation Index](Docs/README.md)**
 
 ---
 
@@ -241,15 +236,15 @@ We welcome contributions! Please see our [Contributing Guide](Docs/contributing.
 
 **Quick Links:**
 - [Architecture Overview](Docs/getting-started/architecture.md)
-- [API Reference](Docs/FRONTEND_INTEGRATION.md)
-- [CEE Documentation](Docs/CEE-v1.md)
+- [API Reference](Docs/api/FRONTEND_INTEGRATION.md)
+- [CEE Documentation](Docs/cee/CEE-v1.md)
 
 ---
 
 ## 📞 Getting Help
 
 - **Documentation:** [Docs/README.md](Docs/README.md)
-- **Issues:** Check [Docs/issues/](Docs/issues/) for known problems
+- **Developer Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)
 - **Runbooks:** See [Docs/runbooks/](Docs/runbooks/) for incident response
 - **Questions:** Open a GitHub issue
 
@@ -295,5 +290,5 @@ To disable scheduled runs, either delete the variable or set its value to `false
 ---
 
 **Maintained by:** Olumi Engineering Team
-**Last Updated:** 2025-11-22
+**Last Updated:** 2025-11-27
 **Service Version:** 1.11.1

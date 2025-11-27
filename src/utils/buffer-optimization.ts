@@ -28,49 +28,130 @@ export enum EventPriority {
 }
 
 /**
+ * Determine event priority from pre-parsed data (avoids redundant JSON.parse)
+ */
+export function getEventPriorityFromParsed(
+  eventType: string,
+  parsedData: Record<string, unknown> | null
+): EventPriority {
+  if (eventType === "heartbeat" || eventType === "trace") {
+    return EventPriority.LOW;
+  }
+
+  if (!parsedData) {
+    return EventPriority.MEDIUM;
+  }
+
+  // COMPLETE and ERROR are critical
+  if (parsedData.stage === "COMPLETE" || parsedData.stage === "ERROR") {
+    return EventPriority.CRITICAL;
+  }
+
+  // Resume tokens are critical
+  if (eventType === "resume") {
+    return EventPriority.CRITICAL;
+  }
+
+  // Stage events with significant graph changes are high priority
+  const payload = parsedData.payload as Record<string, unknown> | undefined;
+  if (eventType === "stage" && payload?.graph) {
+    return EventPriority.HIGH;
+  }
+
+  // Other stage events are medium priority
+  if (eventType === "stage") {
+    return EventPriority.MEDIUM;
+  }
+
+  return EventPriority.MEDIUM;
+}
+
+/**
  * Determine event priority based on type and content
  */
 export function getEventPriority(event: {
   type: string;
   data: string;
 }): EventPriority {
-  if (event.type === "heartbeat") {
-    return EventPriority.LOW;
-  }
-
-  if (event.type === "trace") {
+  if (event.type === "heartbeat" || event.type === "trace") {
     return EventPriority.LOW;
   }
 
   // Parse data to check for critical events
   try {
     const data = JSON.parse(event.data);
-
-    // COMPLETE and ERROR are critical
-    if (data.stage === "COMPLETE" || data.stage === "ERROR") {
-      return EventPriority.CRITICAL;
-    }
-
-    // Resume tokens are critical
-    if (event.type === "resume") {
-      return EventPriority.CRITICAL;
-    }
-
-    // Stage events with significant graph changes are high priority
-    if (event.type === "stage" && data.payload?.graph) {
-      return EventPriority.HIGH;
-    }
-
-    // Other stage events are medium priority
-    if (event.type === "stage") {
-      return EventPriority.MEDIUM;
-    }
+    return getEventPriorityFromParsed(event.type, data);
   } catch {
     // Unparseable events are medium priority by default
     return EventPriority.MEDIUM;
   }
+}
 
-  return EventPriority.MEDIUM;
+/**
+ * Trim pre-parsed event payload (avoids redundant JSON.parse)
+ * Returns null if the event should not be trimmed (critical/graph events)
+ */
+function trimParsedPayload(data: Record<string, unknown>): Record<string, unknown> | null {
+  // Don't trim critical events or any event that already includes a full graph payload.
+  // This keeps resumable streams lossless for graph-carrying events while still
+  // allowing trimming for lightweight progress/telemetry stages.
+  const payload = data.payload as Record<string, unknown> | undefined;
+  if (
+    data.stage === "COMPLETE" ||
+    data.stage === "ERROR" ||
+    (payload && payload.graph)
+  ) {
+    return null; // Signal: don't trim
+  }
+
+  // Trim payload fields
+  const trimmed: Record<string, unknown> = {
+    stage: data.stage,
+    correlation_id: data.correlation_id,
+  };
+
+  // Preserve essential payload fields
+  if (payload) {
+    const trimmedPayload: Record<string, unknown> = {};
+
+    // Keep progress indicators
+    if (typeof payload.progress === "number") {
+      trimmedPayload.progress = payload.progress;
+    }
+
+    // Keep status
+    if (payload.status) {
+      trimmedPayload.status = payload.status;
+    }
+
+    // Trim graph to just counts
+    if (payload.graph) {
+      const graph = payload.graph as Record<string, unknown>;
+      trimmedPayload.graph = {
+        node_count: Array.isArray(graph.nodes) ? graph.nodes.length : 0,
+        edge_count: Array.isArray(graph.edges) ? graph.edges.length : 0,
+      };
+    }
+
+    // Keep error details
+    if (payload.error) {
+      trimmedPayload.error = payload.error;
+    }
+
+    // Keep telemetry but trim verbose fields
+    if (payload.telemetry) {
+      const telemetry = payload.telemetry as Record<string, unknown>;
+      trimmedPayload.telemetry = {
+        duration_ms: telemetry.duration_ms,
+        tokens: telemetry.tokens,
+        buffer_trimmed: telemetry.buffer_trimmed,
+      };
+    }
+
+    trimmed.payload = trimmedPayload;
+  }
+
+  return trimmed;
 }
 
 /**
@@ -95,69 +176,29 @@ export function trimEventPayload(eventData: string): string {
 
   try {
     const data = JSON.parse(eventData);
-
-    // Don't trim critical events or any event that already includes a full graph payload.
-    // This keeps resumable streams lossless for graph-carrying events while still
-    // allowing trimming for lightweight progress/telemetry stages.
-    if (
-      data.stage === "COMPLETE" ||
-      data.stage === "ERROR" ||
-      (data.payload && data.payload.graph)
-    ) {
-      return eventData;
-    }
-
-    // Trim payload fields
-    const trimmed: Record<string, unknown> = {
-      stage: data.stage,
-      correlation_id: data.correlation_id,
-    };
-
-    // Preserve essential payload fields
-    if (data.payload) {
-      const trimmedPayload: Record<string, unknown> = {};
-
-      // Keep progress indicators
-      if (typeof data.payload.progress === "number") {
-        trimmedPayload.progress = data.payload.progress;
-      }
-
-      // Keep status
-      if (data.payload.status) {
-        trimmedPayload.status = data.payload.status;
-      }
-
-      // Trim graph to just counts
-      if (data.payload.graph) {
-        trimmedPayload.graph = {
-          node_count: data.payload.graph.nodes?.length || 0,
-          edge_count: data.payload.graph.edges?.length || 0,
-        };
-      }
-
-      // Keep error details
-      if (data.payload.error) {
-        trimmedPayload.error = data.payload.error;
-      }
-
-      // Keep telemetry but trim verbose fields
-      if (data.payload.telemetry) {
-        trimmedPayload.telemetry = {
-          duration_ms: data.payload.telemetry.duration_ms,
-          tokens: data.payload.telemetry.tokens,
-          buffer_trimmed: data.payload.telemetry.buffer_trimmed,
-        };
-      }
-
-      trimmed.payload = trimmedPayload;
-    }
-
-    return JSON.stringify(trimmed);
+    const trimmed = trimParsedPayload(data);
+    return trimmed ? JSON.stringify(trimmed) : eventData;
   } catch (error) {
     // If trimming fails, return original
     log.warn({ error }, "Failed to trim event payload, using original");
     return eventData;
   }
+}
+
+/**
+ * Trim event payload from pre-parsed data (optimized path)
+ * Use this when you already have the parsed JSON object
+ */
+export function trimEventPayloadFromParsed(
+  eventData: string,
+  parsedData: Record<string, unknown>
+): string {
+  if (!SSE_BUFFER_TRIM_PAYLOADS) {
+    return eventData;
+  }
+
+  const trimmed = trimParsedPayload(parsedData);
+  return trimmed ? JSON.stringify(trimmed) : eventData;
 }
 
 /**
@@ -226,17 +267,40 @@ export function calculateSavings(
 }
 
 /**
+ * Event with cached parsed data for efficient processing
+ */
+export interface ParsedEvent {
+  seq: number;
+  type: string;
+  data: string;
+  priority: EventPriority;
+  /** Pre-parsed JSON data (null if parse failed) */
+  _parsed: Record<string, unknown> | null;
+}
+
+/**
  * Sort events by priority for trimming decisions
  * Returns events ordered from lowest to highest priority (trim lowest first)
+ * Caches parsed JSON to avoid redundant parsing in subsequent operations
  */
 export function sortEventsByPriority(
   events: Array<{ seq: number; type: string; data: string }>
-): Array<{ seq: number; type: string; data: string; priority: EventPriority }> {
+): ParsedEvent[] {
   return events
-    .map((event) => ({
-      ...event,
-      priority: getEventPriority(event),
-    }))
+    .map((event) => {
+      // Parse once, reuse for priority determination and later trimming
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(event.data);
+      } catch {
+        // Keep null for unparseable events
+      }
+      return {
+        ...event,
+        priority: getEventPriorityFromParsed(event.type, parsed),
+        _parsed: parsed,
+      };
+    })
     .sort((a, b) => {
       // Sort by priority (higher priority value = trim first)
       if (a.priority !== b.priority) {

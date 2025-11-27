@@ -45,6 +45,22 @@ function getCacheEnabled(): boolean {
   return process.env.PROMPT_CACHE_ENABLED === "true";
 }
 
+/**
+ * Sorted JSON replacer for deterministic cache keys (module-level for efficiency)
+ * Ensures consistent cache keys regardless of property order
+ */
+function sortedReplacer(_key: string, value: unknown): unknown {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.keys(value as object)
+      .sort()
+      .reduce((sorted: Record<string, unknown>, key) => {
+        sorted[key] = (value as Record<string, unknown>)[key];
+        return sorted;
+      }, {});
+  }
+  return value;
+}
+
 function getRedisCacheEnabled(): boolean {
   return process.env.REDIS_PROMPT_CACHE_ENABLED === "true";
 }
@@ -63,7 +79,8 @@ function getCacheTtlMs(): number {
 export class CachingAdapter implements LLMAdapter {
   readonly name: string;
   readonly model: string;
-  private readonly cache: LruTtlCache<string, any>;
+  /** Cache stores stringified JSON (like Redis) for efficient single-parse on read */
+  private readonly cache: LruTtlCache<string, string>;
   private readonly enabled: boolean;
   private readonly redisEnabled: boolean;
 
@@ -112,21 +129,9 @@ export class CachingAdapter implements LLMAdapter {
    * Key pattern: pc:{operation}:{hash16}
    * (Redis keyPrefix will prepend namespace, e.g., "olumi:pc:draft_graph:a3f5c7d1...")
    */
-  private getCacheKey(operation: string, args: any): string {
+  private getCacheKey(operation: string, args: unknown): string {
     // Create deterministic key from operation + args + model
-    // Use sorted replacer to ensure consistent cache keys even with different property order
-    const sortedReplacer = (_key: string, value: any) => {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        return Object.keys(value)
-          .sort()
-          .reduce((sorted: any, key) => {
-            sorted[key] = value[key];
-            return sorted;
-          }, {});
-      }
-      return value;
-    };
-
+    // Uses module-level sortedReplacer for efficiency
     const keyData = JSON.stringify({ operation, args, model: this.model }, sortedReplacer);
     const hash = fastHash(keyData, 16);
 
@@ -212,17 +217,17 @@ export class CachingAdapter implements LLMAdapter {
     }
 
     // Fallback to LRU cache (either Redis disabled or Redis unavailable/error)
-    const cached = this.cache.get(cacheKey);
-    if (cached !== undefined) {
-      // LRU hit
+    // LRU stores stringified JSON (like Redis) for efficient single-parse on read
+    const cachedJson = this.cache.get(cacheKey);
+    if (cachedJson !== undefined) {
+      // LRU hit - single parse (no double clone)
       emit(TelemetryEvents.PromptCacheHit, {
         operation,
         provider: this.adapter.name,
         backend: "memory",
       });
 
-      // Deep clone to prevent mutation leakage
-      return JSON.parse(JSON.stringify(cached));
+      return JSON.parse(cachedJson);
     }
 
     // LRU miss - call underlying adapter
@@ -234,8 +239,8 @@ export class CachingAdapter implements LLMAdapter {
 
     const result = await fn();
 
-    // Store in LRU cache (deep clone to prevent mutations from affecting cache)
-    this.cache.set(cacheKey, JSON.parse(JSON.stringify(result)));
+    // Store stringified JSON in LRU (single stringify, matches Redis behavior)
+    this.cache.set(cacheKey, JSON.stringify(result));
 
     return result;
   }
