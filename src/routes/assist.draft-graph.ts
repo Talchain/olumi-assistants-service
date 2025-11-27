@@ -41,6 +41,11 @@ const SSE_HEADERS = {
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
 const DEPRECATION_SUNSET = env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
 const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
+
+/**
+ * Dangerous prototype keys that should never be set dynamically
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // v1.3.0: Legacy SSE flag (read at request time for testability)
 // Use process.env directly to avoid module-level caching issues in tests
 function isLegacySSEEnabled(): boolean {
@@ -246,9 +251,16 @@ export function sanitizeDraftGraphInput(
 
   for (const [key, value] of Object.entries(extrasSource)) {
     if (!key.startsWith("sim_")) continue;
+    // Skip unsafe keys to prevent prototype pollution
+    if (UNSAFE_KEYS.has(key)) continue;
     const valueType = typeof value;
     if (valueType === "string" || valueType === "number" || valueType === "boolean") {
-      passthrough[key] = value;
+      Object.defineProperty(passthrough, key, {
+        value,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
     }
   }
 

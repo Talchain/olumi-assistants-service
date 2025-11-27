@@ -16,6 +16,27 @@ const MAX_QUOTE_LENGTH = 100;
 const REDACTED_MARKER = '[REDACTED]';
 
 /**
+ * Dangerous prototype keys that should never be set dynamically
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Safely set a property on an object, preventing prototype pollution
+ */
+function safeSetProperty<T>(obj: Record<string, T>, key: string, value: T): void {
+  if (UNSAFE_KEYS.has(key)) {
+    return; // Skip dangerous keys
+  }
+  // Use Object.defineProperty to avoid prototype pollution
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/**
  * Truncate long strings to max length with ellipsis
  */
 function truncateString(str: string, maxLength: number): string {
@@ -41,9 +62,9 @@ export function redactAttachments(payload: Record<string, unknown>): Record<stri
     for (const [key, value] of Object.entries(payloads)) {
       if (typeof value === 'string') {
         // Replace with hash prefix for tracking
-        redactedPayloads[key] = `${REDACTED_MARKER}:${fastHash(value, 8)}`;
+        safeSetProperty(redactedPayloads, key, `${REDACTED_MARKER}:${fastHash(value, 8)}`);
       } else {
-        redactedPayloads[key] = REDACTED_MARKER;
+        safeSetProperty(redactedPayloads, key, REDACTED_MARKER);
       }
     }
 
@@ -87,6 +108,11 @@ export function redactCsvData(obj: unknown): unknown {
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(obj)) {
+    // Skip unsafe keys to prevent prototype pollution
+    if (UNSAFE_KEYS.has(key)) {
+      continue;
+    }
+
     // Keep safe statistical fields
     if (
       key === 'count' ||
@@ -101,7 +127,7 @@ export function redactCsvData(obj: unknown): unknown {
       key === 'std' ||
       key === 'variance'
     ) {
-      result[key] = value;
+      safeSetProperty(result, key, value);
       continue;
     }
 
@@ -113,9 +139,9 @@ export function redactCsvData(obj: unknown): unknown {
 
     // Recurse for nested objects
     if (typeof value === 'object' && value !== null) {
-      result[key] = redactCsvData(value);
+      safeSetProperty(result, key, redactCsvData(value));
     } else {
-      result[key] = value;
+      safeSetProperty(result, key, value);
     }
   }
 
@@ -137,12 +163,17 @@ export function truncateQuotes(obj: unknown): unknown {
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(obj)) {
+    // Skip unsafe keys to prevent prototype pollution
+    if (UNSAFE_KEYS.has(key)) {
+      continue;
+    }
+
     if (key === 'quote' && typeof value === 'string') {
-      result[key] = truncateString(value, MAX_QUOTE_LENGTH);
+      safeSetProperty(result, key, truncateString(value, MAX_QUOTE_LENGTH));
     } else if (typeof value === 'object' && value !== null) {
-      result[key] = truncateQuotes(value);
+      safeSetProperty(result, key, truncateQuotes(value));
     } else {
-      result[key] = value;
+      safeSetProperty(result, key, value);
     }
   }
 
@@ -165,9 +196,11 @@ export function redactHeaders(headers: Record<string, unknown>): Record<string, 
   ];
 
   for (const [key, value] of Object.entries(headers)) {
-    if (!sensitiveKeys.includes(key.toLowerCase())) {
-      redacted[key] = value;
+    // Skip sensitive keys and unsafe keys
+    if (sensitiveKeys.includes(key.toLowerCase()) || UNSAFE_KEYS.has(key)) {
+      continue;
     }
+    safeSetProperty(redacted, key, value);
   }
 
   return redacted;
@@ -226,7 +259,11 @@ export function safeLog(obj: unknown): unknown {
       // Recurse into all properties
       const result: any = {};
       for (const [key, val] of Object.entries(value)) {
-        result[key] = recursiveRedact(val);
+        // Skip unsafe keys to prevent prototype pollution
+        if (UNSAFE_KEYS.has(key)) {
+          continue;
+        }
+        safeSetProperty(result, key, recursiveRedact(val));
       }
       return result;
     }
