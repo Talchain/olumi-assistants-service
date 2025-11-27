@@ -4,7 +4,8 @@ import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
 import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
-import { getRequestKeyId } from "../plugins/auth.js";
+import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
@@ -111,9 +112,11 @@ export default async function route(app: FastifyInstance) {
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
+    const callerCtx = getRequestCallerContext(req);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
 
     emit(TelemetryEvents.CeeDraftGraphRequested, {
-      request_id: requestId,
+      ...telemetryCtx,
       feature: "cee_draft_graph",
       has_seed: hasSeed,
       has_archetype_hint: hasArchetypeHint,
@@ -131,7 +134,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       emit(TelemetryEvents.CeeDraftGraphFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_RATE_LIMIT",
         http_status: 429,
@@ -163,7 +166,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       emit(TelemetryEvents.CeeDraftGraphFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
         http_status: 400,
@@ -226,7 +229,7 @@ export default async function route(app: FastifyInstance) {
         );
 
         emit(TelemetryEvents.PreflightRejected, {
-          request_id: requestId,
+          ...telemetryCtx,
           latency_ms: Date.now() - start,
           readiness_score: readiness.score,
           readiness_level: readiness.level,
@@ -298,7 +301,7 @@ export default async function route(app: FastifyInstance) {
           );
 
           emit(TelemetryEvents.ClarificationRequired, {
-            request_id: requestId,
+            ...telemetryCtx,
             latency_ms: Date.now() - start,
             readiness_score: readiness.score,
             readiness_level: readiness.level,
@@ -326,7 +329,7 @@ export default async function route(app: FastifyInstance) {
         // Log when direct draft is allowed despite enforced clarification
         if (requiredRounds === 0) {
           emit(TelemetryEvents.ClarificationBypassAllowed, {
-            request_id: requestId,
+            ...telemetryCtx,
             readiness_score: readiness.score,
             readiness_level: readiness.level,
           });

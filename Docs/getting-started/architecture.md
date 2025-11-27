@@ -382,6 +382,59 @@ See [Frontend Integration Guide](../FRONTEND_INTEGRATION.md#authentication) for 
 
 ---
 
+### Request Context (CallerContext)
+
+**Purpose:** Propagate authentication and telemetry context through the request lifecycle
+
+**Location:** `src/context/`
+
+**CallerContext Interface:**
+```typescript
+interface CallerContext {
+  requestId: string;       // Unique request identifier
+  keyId: string;           // API key identifier (hashed)
+  correlationId?: string;  // Distributed tracing ID
+  timestamp: string;       // ISO 8601 timestamp
+  timestampMs: number;     // Unix milliseconds
+  hmacAuth: boolean;       // Whether HMAC auth was used
+  sourceIp?: string;       // Client IP (for audit logs)
+  userAgent?: string;      // Client user agent
+}
+```
+
+**Usage in Handlers:**
+```typescript
+import { getRequestCallerContext } from '../plugins/auth.js';
+import { contextToTelemetry } from '../context/index.js';
+
+app.post('/endpoint', async (req, reply) => {
+  const ctx = getRequestCallerContext(req);
+  if (ctx) {
+    // Include context in telemetry
+    emit(TelemetryEvents.SomeEvent, {
+      ...contextToTelemetry(ctx),
+      custom_field: 'value',
+    });
+  }
+});
+```
+
+**Lifecycle:**
+1. Auth plugin authenticates request
+2. `attachCallerContext()` attaches context to request
+3. Route handlers retrieve via `getRequestCallerContext()`
+4. Context propagated through service calls
+5. Telemetry events include context via `contextToTelemetry()`
+
+**Test Utilities:**
+```typescript
+import { createTestContext } from '../context/index.js';
+
+const ctx = createTestContext({ keyId: 'test-key' });
+```
+
+---
+
 ### PII Protection
 
 **Automatic Redaction:**
@@ -507,5 +560,5 @@ See [Baseline Performance Report](../baseline-performance-report.md) for current
 
 **Questions?** See [Docs/README.md](../README.md) for full documentation index.
 
-**Last Updated:** 2025-11-22
+**Last Updated:** 2025-11-27
 **Maintained By:** Olumi Engineering Team
