@@ -572,72 +572,83 @@ CEE v1 emits structured, privacy-safe telemetry events for each CEE endpoint (se
 `src/utils/telemetry.ts` and `tests/integration/cee.telemetry.test.ts`). Event names are
 frozen in `TelemetryEvents` and enforced by tests.
 
+**CallerContext enrichment:** When requests are authenticated, all telemetry events
+automatically include:
+
+- `key_id: string` – API key identifier (derived from CallerContext).
+- `correlation_id?: string` – Optional correlation ID for cross-service tracing.
+
+These fields are added via `contextToTelemetry(callerCtx)` spread at the start of each
+emit call. Unauthenticated requests fall back to `{ request_id }` only.
+
 - **Draft My Model** (`/assist/v1/draft-graph`)
   - `cee.draft_graph.requested` (`CeeDraftGraphRequested`)
-    - Fields: `request_id`, `feature`, `has_seed`, `has_archetype_hint`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `has_seed`, `has_archetype_hint`, `api_key_present`.
   - `cee.draft_graph.succeeded` (`CeeDraftGraphSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `graph_nodes`, `graph_edges`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `graph_nodes`, `graph_edges`,
       `has_validation_issues`, `any_truncated`, `engine_provider`, `engine_model`.
   - `cee.draft_graph.failed` (`CeeDraftGraphFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Explain My Model** (`/assist/v1/explain-graph`)
   - `cee.explain_graph.requested` (`CeeExplainGraphRequested`)
-    - Fields: `request_id`, `feature`, `has_context_id`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `has_context_id`, `api_key_present`.
   - `cee.explain_graph.succeeded` (`CeeExplainGraphSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `target_count`, `driver_count`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `target_count`, `driver_count`,
       `engine_provider`, `engine_model`, `has_validation_issues`.
   - `cee.explain_graph.failed` (`CeeExplainGraphFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Evidence Helper** (`/assist/v1/evidence-helper`)
   - `cee.evidence_helper.requested` (`CeeEvidenceHelperRequested`)
-    - Fields: `request_id`, `feature`, `evidence_count`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `evidence_count`, `api_key_present`.
   - `cee.evidence_helper.succeeded` (`CeeEvidenceHelperSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `evidence_count`, `strong_count`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `evidence_count`, `strong_count`,
       `any_unsupported_types`, `any_truncated`, `has_validation_issues`.
   - `cee.evidence_helper.failed` (`CeeEvidenceHelperFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Bias Check** (`/assist/v1/bias-check`)
   - `cee.bias_check.requested` (`CeeBiasCheckRequested`)
-    - Fields: `request_id`, `feature`, `has_archetype`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `has_archetype`, `api_key_present`.
   - `cee.bias_check.succeeded` (`CeeBiasCheckSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `bias_count`, `any_truncated`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `bias_count`, `any_truncated`,
       `has_validation_issues`.
   - `cee.bias_check.failed` (`CeeBiasCheckFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Options Helper** (`/assist/v1/options`)
   - `cee.options.requested` (`CeeOptionsRequested`)
-    - Fields: `request_id`, `feature`, `has_archetype`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `has_archetype`, `api_key_present`.
   - `cee.options.succeeded` (`CeeOptionsSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `option_count`, `any_truncated`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `option_count`, `any_truncated`,
       `has_validation_issues`.
   - `cee.options.failed` (`CeeOptionsFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Sensitivity Coach** (`/assist/v1/sensitivity-coach`)
   - `cee.sensitivity_coach.requested` (`CeeSensitivityCoachRequested`)
-    - Fields: `request_id`, `feature`, `has_inference`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `has_inference`, `api_key_present`.
   - `cee.sensitivity_coach.succeeded` (`CeeSensitivityCoachSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `driver_count`, `any_truncated`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `driver_count`, `any_truncated`,
       `has_validation_issues`.
   - `cee.sensitivity_coach.failed` (`CeeSensitivityCoachFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 - **Team Perspectives** (`/assist/v1/team-perspectives`)
   - `cee.team_perspectives.requested` (`CeeTeamPerspectivesRequested`)
-    - Fields: `request_id`, `feature`, `participant_count`, `api_key_present`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `feature`, `participant_count`, `api_key_present`.
   - `cee.team_perspectives.succeeded` (`CeeTeamPerspectivesSucceeded`)
-    - Fields: `request_id`, `latency_ms`, `quality_overall`, `participant_count`,
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `quality_overall`, `participant_count`,
       `disagreement_score`, `has_validation_issues`.
   - `cee.team_perspectives.failed` (`CeeTeamPerspectivesFailed`)
-    - Fields: `request_id`, `latency_ms`, `error_code`, `http_status`.
+    - Fields: `request_id`, `key_id?`, `correlation_id?`, `latency_ms`, `error_code`, `http_status`.
 
 All `*.failed` events share the same minimal error shape validated in tests:
 
 - `request_id: string`
+- `key_id?: string` (when authenticated)
+- `correlation_id?: string` (when provided via CallerContext)
 - `latency_ms: number`
 - `error_code: string` (CEE error code, e.g. `CEE_RATE_LIMIT`, `CEE_VALIDATION_FAILED`).
 - `http_status: number` (400/429/500 etc.).

@@ -182,17 +182,18 @@ await app.register(rateLimit, {
   // Performance Monitoring: Track request latency and emit metrics
   await app.register(performanceMonitoring);
 
-  // Auth: API key authentication with per-key quotas (v1.3.0)
-  await app.register(authPlugin);
-
-  // Response hash: Add X-Olumi-Response-Hash header (v1.5 PR N)
-  await app.register(responseHashPlugin);
-
-  // Request ID tracking: attach to every request
+  // Request ID tracking: attach FIRST (before auth) to ensure CallerContext has correct ID
   app.addHook("onRequest", async (request, _reply) => {
     attachRequestId(request);
     incrementRequestCount();
   });
+
+  // Auth: API key authentication with per-key quotas (v1.3.0)
+  // Note: authPlugin uses getRequestId() which now has correct ID from above hook
+  await app.register(authPlugin);
+
+  // Response hash: Add X-Olumi-Response-Hash header (v1.5 PR N)
+  await app.register(responseHashPlugin);
 
   // Response hook: Add X-Request-Id header to every response
   app.addHook("onSend", async (request, reply, payload) => {

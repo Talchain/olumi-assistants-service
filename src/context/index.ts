@@ -11,6 +11,8 @@
 
 export {
   type CallerContext,
+  type CallerTelemetry,
+  CallerContextError,
   getCallerContext,
   requireCallerContext,
   attachCallerContext,

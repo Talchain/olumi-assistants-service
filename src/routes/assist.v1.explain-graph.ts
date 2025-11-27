@@ -7,7 +7,8 @@ import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
-import { getRequestKeyId } from "../plugins/auth.js";
+import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
@@ -85,9 +86,11 @@ export default async function route(app: FastifyInstance) {
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
+    const callerCtx = getRequestCallerContext(req);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
 
     emit(TelemetryEvents.CeeExplainGraphRequested, {
-      request_id: requestId,
+      ...telemetryCtx,
       feature: "cee_explain_graph",
       has_context_id: hasContextId,
       api_key_present: apiKeyPresent,
@@ -107,7 +110,7 @@ export default async function route(app: FastifyInstance) {
       );
 
       emit(TelemetryEvents.CeeExplainGraphFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_RATE_LIMIT",
         http_status: 429,
@@ -139,7 +142,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       emit(TelemetryEvents.CeeExplainGraphFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
         http_status: 400,
@@ -220,7 +223,7 @@ export default async function route(app: FastifyInstance) {
       const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
 
       emit(TelemetryEvents.CeeExplainGraphSucceeded, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: latencyMs,
         quality_overall: quality.overall,
         target_count: explanation.targets ? Object.keys(explanation.targets).length : 0,
@@ -250,7 +253,7 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error("internal error");
 
       emit(TelemetryEvents.CeeExplainGraphFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR",
         http_status: 500,

@@ -7,7 +7,8 @@ import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
-import { getRequestKeyId } from "../plugins/auth.js";
+import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
@@ -91,9 +92,11 @@ export default async function route(app: FastifyInstance) {
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
+    const callerCtx = getRequestCallerContext(req);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
 
     emit(TelemetryEvents.CeeTeamPerspectivesRequested, {
-      request_id: requestId,
+      ...telemetryCtx,
       feature: "cee_team_perspectives",
       participant_count: participantCountRaw,
       api_key_present: apiKeyPresent,
@@ -113,7 +116,7 @@ export default async function route(app: FastifyInstance) {
       );
 
       emit(TelemetryEvents.CeeTeamPerspectivesFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_RATE_LIMIT",
         http_status: 429,
@@ -145,7 +148,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       emit(TelemetryEvents.CeeTeamPerspectivesFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
         http_status: 400,
@@ -234,7 +237,7 @@ export default async function route(app: FastifyInstance) {
       const latencyMs = Date.now() - start;
 
       emit(TelemetryEvents.CeeTeamPerspectivesSucceeded, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: latencyMs,
         quality_overall: quality.overall,
         participant_count: summary.participant_count,
@@ -260,7 +263,7 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error("internal error");
 
       emit(TelemetryEvents.CeeTeamPerspectivesFailed, {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR",
         http_status: 500,

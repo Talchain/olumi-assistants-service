@@ -12,7 +12,8 @@ import { executeDecisionReview } from '../cee/decision-review/index.js';
 import { formatDecisionReviewSummary } from '../cee/decision-review/templates.js';
 import { buildCeeErrorResponse } from '../cee/validation/pipeline.js';
 import { getRequestId } from '../utils/request-id.js';
-import { getRequestKeyId } from '../plugins/auth.js';
+import { getRequestKeyId, getRequestCallerContext } from '../plugins/auth.js';
+import { contextToTelemetry } from '../context/index.js';
 import { emit } from '../utils/telemetry.js';
 import { logCeeCall } from '../cee/logging.js';
 
@@ -133,9 +134,11 @@ export default async function route(app: FastifyInstance) {
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
+    const callerCtx = getRequestCallerContext(req);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
 
     emit('cee.decision_review.requested', {
-      request_id: requestId,
+      ...telemetryCtx,
       feature: 'cee_enhanced_decision_review',
       api_key_present: apiKeyPresent,
     });
@@ -159,7 +162,7 @@ export default async function route(app: FastifyInstance) {
       );
 
       emit('cee.decision_review.failed', {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: 'CEE_RATE_LIMIT',
         http_status: 429,
@@ -196,7 +199,7 @@ export default async function route(app: FastifyInstance) {
       );
 
       emit('cee.decision_review.failed', {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: 'CEE_VALIDATION_FAILED',
         http_status: 400,
@@ -261,7 +264,7 @@ export default async function route(app: FastifyInstance) {
       }
 
       emit('cee.decision_review.succeeded', {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: latencyMs,
         nodes_analyzed: reviewResult.summary.nodesAnalyzed,
         isl_available: reviewResult.islAvailability.serviceAvailable,
@@ -290,7 +293,7 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error('internal error');
 
       emit('cee.decision_review.failed', {
-        request_id: requestId,
+        ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: 'CEE_INTERNAL_ERROR',
         http_status: 500,

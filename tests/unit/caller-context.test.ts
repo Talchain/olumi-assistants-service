@@ -12,7 +12,9 @@ import {
   requireCallerContext,
   createTestContext,
   contextToTelemetry,
+  CallerContextError,
   type CallerContext,
+  type CallerTelemetry,
 } from "../../src/context/caller.js";
 
 describe("CallerContext", () => {
@@ -144,14 +146,28 @@ describe("CallerContext", () => {
       expect(ctx.keyId).toBe("key-require");
     });
 
-    it("should throw when context is not available", () => {
+    it("should throw CallerContextError when context is not available", () => {
       const mockRequest: any = {
         requestId: "test-require-missing",
       };
 
+      expect(() => requireCallerContext(mockRequest)).toThrow(CallerContextError);
       expect(() => requireCallerContext(mockRequest)).toThrow(
         "Caller context not available"
       );
+    });
+
+    it("should throw CallerContextError with code property", () => {
+      const mockRequest: any = {};
+
+      try {
+        requireCallerContext(mockRequest);
+        expect.fail("Should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(CallerContextError);
+        expect((err as CallerContextError).code).toBe("CALLER_CONTEXT_MISSING");
+        expect((err as CallerContextError).name).toBe("CallerContextError");
+      }
     });
 
     it("should throw with descriptive error message", () => {
@@ -160,6 +176,27 @@ describe("CallerContext", () => {
       expect(() => requireCallerContext(mockRequest)).toThrow(
         /authentication/i
       );
+    });
+  });
+
+  describe("CallerContextError", () => {
+    it("should have correct name and code", () => {
+      const error = new CallerContextError();
+      expect(error.name).toBe("CallerContextError");
+      expect(error.code).toBe("CALLER_CONTEXT_MISSING");
+      expect(error.message).toContain("Caller context not available");
+    });
+
+    it("should accept custom message", () => {
+      const error = new CallerContextError("Custom error message");
+      expect(error.message).toBe("Custom error message");
+      expect(error.code).toBe("CALLER_CONTEXT_MISSING");
+    });
+
+    it("should be instanceof Error", () => {
+      const error = new CallerContextError();
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(CallerContextError);
     });
   });
 
@@ -254,6 +291,26 @@ describe("CallerContext", () => {
       expect((telemetry as any).source_ip).toBeUndefined();
       expect((telemetry as any).userAgent).toBeUndefined();
       expect((telemetry as any).user_agent).toBeUndefined();
+    });
+
+    it("should return CallerTelemetry type for type-safe spreading", () => {
+      const ctx = createTestContext({
+        requestId: "type-test-123",
+        keyId: "type-test-key",
+      });
+
+      // Type assertion to verify return type
+      const telemetry: CallerTelemetry = contextToTelemetry(ctx);
+
+      // Verify it can be spread into objects
+      const event = {
+        ...telemetry,
+        custom_field: "test",
+      };
+
+      expect(event.request_id).toBe("type-test-123");
+      expect(event.key_id).toBe("type-test-key");
+      expect(event.custom_field).toBe("test");
     });
   });
 
