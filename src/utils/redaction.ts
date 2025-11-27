@@ -256,9 +256,9 @@ export function safeLog(obj: unknown): unknown {
           for (const [k, v] of Object.entries(att)) {
             if (UNSAFE_KEYS.has(k)) continue;
             if ((k === 'content' || k === 'data') && typeof v === 'string') {
-              redactedAtt[k] = `${REDACTED_MARKER}:${fastHash(v, 8)}`;
+              safeSetProperty(redactedAtt, k, `${REDACTED_MARKER}:${fastHash(v, 8)}`);
             } else {
-              redactedAtt[k] = redactRecursive(v, k);
+              safeSetProperty(redactedAtt, k, redactRecursive(v, k));
             }
           }
           return redactedAtt;
@@ -283,11 +283,11 @@ export function safeLog(obj: unknown): unknown {
           const redactedPayloads: Record<string, string> = {};
           for (const [pKey, pVal] of Object.entries(val)) {
             if (UNSAFE_KEYS.has(pKey)) continue;
-            redactedPayloads[pKey] = typeof pVal === 'string'
+            safeSetProperty(redactedPayloads, pKey, typeof pVal === 'string'
               ? `${REDACTED_MARKER}:${fastHash(pVal, 8)}`
-              : REDACTED_MARKER;
+              : REDACTED_MARKER);
           }
-          result[key] = redactedPayloads;
+          safeSetProperty(result, key, redactedPayloads);
           continue;
         }
 
@@ -297,26 +297,26 @@ export function safeLog(obj: unknown): unknown {
           for (const [hKey, hVal] of Object.entries(val)) {
             if (UNSAFE_KEYS.has(hKey)) continue;
             if (SENSITIVE_HEADER_KEYS.has(hKey.toLowerCase())) continue;
-            redactedHeaders[hKey] = hVal;
+            safeSetProperty(redactedHeaders, hKey, hVal);
           }
-          result[key] = redactedHeaders;
+          safeSetProperty(result, key, redactedHeaders);
           continue;
         }
 
         // Truncate quotes
         if (key === 'quote' && typeof val === 'string') {
-          result[key] = truncateString(val, MAX_QUOTE_LENGTH);
+          safeSetProperty(result, key, truncateString(val, MAX_QUOTE_LENGTH));
           continue;
         }
 
         // Safe stat keys - keep as-is
         if (SAFE_STAT_KEYS.has(key)) {
-          result[key] = val;
+          safeSetProperty(result, key, val);
           continue;
         }
 
         // Recurse for other values
-        result[key] = redactRecursive(val, key);
+        safeSetProperty(result, key, redactRecursive(val, key));
       }
 
       return result;
