@@ -7,10 +7,10 @@
  * - Snapshot persistence for late resume
  *
  * Environment:
- * - SSE_BUFFER_MAX_EVENTS: Max buffered events per stream (default: 256)
+ * - getBufferMaxEvents(): Max buffered events per stream (default: 256)
  * - SSE_BUFFER_MAX_SIZE_MB: Max buffer size in MB (default: 1.5)
- * - SSE_STATE_TTL_SEC: State TTL in seconds (default: 900 = 15 min)
- * - SSE_SNAPSHOT_TTL_SEC: Snapshot TTL after completion (default: 60)
+ * - getStateTtlSec(): State TTL in seconds (default: 900 = 15 min)
+ * - getSnapshotTtlSec(): Snapshot TTL after completion (default: 60)
  *
  * Redis keys:
  * - sse:state:{request_id} - Stream state JSON
@@ -28,12 +28,21 @@ import {
   getEventPriority,
   EventPriority,
 } from "./buffer-optimization.js";
+import { config } from "../config/index.js";
 
-const SSE_BUFFER_MAX_EVENTS = Number(process.env.SSE_BUFFER_MAX_EVENTS) || 256;
-const SSE_BUFFER_MAX_SIZE_MB = Number(process.env.SSE_BUFFER_MAX_SIZE_MB) || 1.5;
-const SSE_BUFFER_MAX_SIZE_BYTES = SSE_BUFFER_MAX_SIZE_MB * 1024 * 1024;
-const SSE_STATE_TTL_SEC = Number(process.env.SSE_STATE_TTL_SEC) || 900; // 15 min
-const SSE_SNAPSHOT_TTL_SEC = Number(process.env.SSE_SNAPSHOT_TTL_SEC) || 900; // 15 min (matches token TTL)
+// Lazy config access to avoid module-level initialization issues in tests
+function getBufferMaxEvents(): number {
+  return config.sse.bufferMaxEvents;
+}
+function getBufferMaxSizeBytes(): number {
+  return config.sse.bufferMaxSizeMb * 1024 * 1024;
+}
+function getStateTtlSec(): number {
+  return config.sse.stateTtlSec;
+}
+function getSnapshotTtlSec(): number {
+  return config.sse.snapshotTtlSec;
+}
 
 /**
  * Stream state stored in Redis
@@ -120,7 +129,7 @@ export async function initStreamState(requestId: string): Promise<void> {
       getStateKey(requestId),
       JSON.stringify(state),
       "EX",
-      SSE_STATE_TTL_SEC
+      getStateTtlSec()
     );
 
     log.debug({ request_id: requestId }, "Initialized SSE stream state");
@@ -197,8 +206,8 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
 
     // Priority-based trimming when limits are reached using sidecar metadata
     let skipBuffer = false;
-    if (state.buffer_size_bytes + eventSize > SSE_BUFFER_MAX_SIZE_BYTES ||
-        state.buffer_event_count >= SSE_BUFFER_MAX_EVENTS) {
+    if (state.buffer_size_bytes + eventSize > getBufferMaxSizeBytes() ||
+        state.buffer_event_count >= getBufferMaxEvents()) {
       let trimmedMeta: { seq: number; base64: string } | null = null;
       let trimmedPriority: EventPriority | null = null;
 
@@ -233,7 +242,7 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
             request_id: requestId,
             trimmed_seq: trimmedMeta.seq,
             priority: trimmedPriority,
-            reason: state.buffer_size_bytes + eventSize > SSE_BUFFER_MAX_SIZE_BYTES ? "size_limit" : "count_limit",
+            reason: state.buffer_size_bytes + eventSize > getBufferMaxSizeBytes() ? "size_limit" : "count_limit",
           },
           "Trimmed low-priority SSE event"
         );
@@ -243,7 +252,7 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
           trimmed_seq: trimmedMeta.seq,
           trimmed_size_bytes: trimmedSize,
           priority: trimmedPriority,
-          reason: state.buffer_size_bytes + eventSize > SSE_BUFFER_MAX_SIZE_BYTES ? "size_limit" : "count_limit",
+          reason: state.buffer_size_bytes + eventSize > getBufferMaxSizeBytes() ? "size_limit" : "count_limit",
           new_buffer_size_bytes: state.buffer_size_bytes,
           new_buffer_event_count: state.buffer_event_count,
         });
@@ -274,7 +283,7 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
           trimmed_seq: event.seq,
           trimmed_size_bytes: eventSize,
           priority: incomingPriority,
-          reason: state.buffer_size_bytes + eventSize > SSE_BUFFER_MAX_SIZE_BYTES ? "critical_size_limit" : "critical_count_limit",
+          reason: state.buffer_size_bytes + eventSize > getBufferMaxSizeBytes() ? "critical_size_limit" : "critical_count_limit",
           new_buffer_size_bytes: state.buffer_size_bytes,
           new_buffer_event_count: state.buffer_event_count,
           dropped_incoming: true,
@@ -282,7 +291,7 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
 
         state.buffer_trimmed = true;
 
-        await redis.set(stateKey, JSON.stringify(state), "EX", SSE_STATE_TTL_SEC);
+        await redis.set(stateKey, JSON.stringify(state), "EX", getStateTtlSec());
       }
     }
 
@@ -290,13 +299,13 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
       // Store compressed/optimized event (base64 encode for Redis string storage)
       const eventBase64 = eventBuffer.toString("base64");
       await redis.rpush(bufferKey, eventBase64);
-      await redis.expire(bufferKey, SSE_STATE_TTL_SEC);
+      await redis.expire(bufferKey, getStateTtlSec());
 
       if (priority !== EventPriority.CRITICAL) {
         const metaKey = getMetaKey(requestId, priority);
         const meta = JSON.stringify({ seq: event.seq, base64: eventBase64 });
         await redis.rpush(metaKey, meta);
-        await redis.expire(metaKey, SSE_STATE_TTL_SEC);
+        await redis.expire(metaKey, getStateTtlSec());
       }
 
       // Update state only when we actually buffer the event
@@ -308,7 +317,7 @@ export async function bufferEvent(requestId: string, event: SseEvent): Promise<v
         state.last_heartbeat_at = event.timestamp;
       }
 
-      await redis.set(stateKey, JSON.stringify(state), "EX", SSE_STATE_TTL_SEC);
+      await redis.set(stateKey, JSON.stringify(state), "EX", getStateTtlSec());
     }
   } catch (error) {
     log.error({ error, request_id: requestId, seq: event.seq }, "Failed to buffer SSE event");
@@ -406,7 +415,7 @@ export async function markStreamComplete(
     if (stateData) {
       const state: SseStreamState = JSON.parse(stateData);
       state.status = status;
-      await redis.set(stateKey, JSON.stringify(state), "EX", SSE_SNAPSHOT_TTL_SEC);
+      await redis.set(stateKey, JSON.stringify(state), "EX", getSnapshotTtlSec());
     }
 
     // Save snapshot for late resume
@@ -421,7 +430,7 @@ export async function markStreamComplete(
       snapshotKey,
       JSON.stringify(snapshot),
       "EX",
-      SSE_SNAPSHOT_TTL_SEC
+      getSnapshotTtlSec()
     );
 
     log.debug({ request_id: requestId }, "Marked SSE stream complete with snapshot");
@@ -460,12 +469,12 @@ export async function renewSnapshot(requestId: string): Promise<void> {
     const exists = await redis.exists(snapshotKey);
 
     if (exists) {
-      await redis.expire(snapshotKey, SSE_SNAPSHOT_TTL_SEC);
+      await redis.expire(snapshotKey, getSnapshotTtlSec());
       log.debug({ request_id: requestId }, "Renewed snapshot TTL during live streaming");
 
       emit(TelemetryEvents.SseSnapshotRenewed, {
         request_id: requestId,
-        ttl_sec: SSE_SNAPSHOT_TTL_SEC,
+        ttl_sec: getSnapshotTtlSec(),
       });
     }
   } catch (error) {
@@ -487,7 +496,7 @@ export async function cleanupStreamState(requestId: string): Promise<void> {
       getMetaKey(requestId, EventPriority.LOW),
       getMetaKey(requestId, EventPriority.MEDIUM),
       getMetaKey(requestId, EventPriority.HIGH)
-      // Keep snapshot for SSE_SNAPSHOT_TTL_SEC
+      // Keep snapshot for getSnapshotTtlSec()
     );
 
     log.debug({ request_id: requestId }, "Cleaned up SSE stream state");
