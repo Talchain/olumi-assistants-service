@@ -311,6 +311,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    if (!ensureStoreHealthy(reply)) return;
+
     const query = ListPromptsQuerySchema.safeParse(request.query);
     if (!query.success) {
       return reply.status(400).send({
@@ -406,6 +408,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: 'Prompt management is not enabled',
       });
     }
+
+    if (!ensureStoreHealthy(reply)) return;
 
     const params = PromptIdParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -708,6 +712,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: 'Prompt management is not enabled',
       });
     }
+
+    if (!ensureStoreHealthy(reply)) return;
 
     const params = PromptIdParamsSchema.safeParse(request.params);
     if (!params.success) {
