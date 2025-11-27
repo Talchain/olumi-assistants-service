@@ -24,6 +24,22 @@ import type { FastifyRequest } from 'fastify';
 import { getRequestId } from '../utils/request-id.js';
 
 /**
+ * Custom error thrown when CallerContext is required but not available.
+ * Distinguishable from generic errors for better error handling.
+ */
+export class CallerContextError extends Error {
+  /** Error code for programmatic handling */
+  readonly code = 'CALLER_CONTEXT_MISSING';
+
+  constructor(message: string = 'Caller context not available. Ensure route requires authentication.') {
+    super(message);
+    this.name = 'CallerContextError';
+    // Maintain proper stack trace in V8
+    Error.captureStackTrace?.(this, CallerContextError);
+  }
+}
+
+/**
  * Caller context attached to authenticated requests
  */
 export interface CallerContext {
@@ -104,12 +120,12 @@ export function getCallerContext(request: FastifyRequest): CallerContext | undef
  *
  * @param request - Fastify request object
  * @returns Caller context
- * @throws Error if context is not available
+ * @throws CallerContextError if context is not available
  */
 export function requireCallerContext(request: FastifyRequest): CallerContext {
   const ctx = getCallerContext(request);
   if (!ctx) {
-    throw new Error('Caller context not available. Ensure route requires authentication.');
+    throw new CallerContextError();
   }
   return ctx;
 }
@@ -135,14 +151,20 @@ export function createTestContext(
 }
 
 /**
- * Extract context fields for telemetry
- * Returns a subset of fields safe for logging
+ * Telemetry-safe subset of CallerContext fields.
+ * Use this type when spreading context into telemetry events.
  */
-export function contextToTelemetry(ctx: CallerContext): {
+export interface CallerTelemetry {
   request_id: string;
   key_id: string;
   correlation_id?: string;
-} {
+}
+
+/**
+ * Extract context fields for telemetry
+ * Returns a subset of fields safe for logging (excludes PII like sourceIp, userAgent)
+ */
+export function contextToTelemetry(ctx: CallerContext): CallerTelemetry {
   return {
     request_id: ctx.requestId,
     key_id: ctx.keyId,

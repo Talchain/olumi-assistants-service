@@ -63,13 +63,18 @@ curl http://localhost:3101/healthz
 ### Making Your First Request
 
 ```bash
+# Local development (with ASSIST_API_KEY in .env)
 curl -X POST http://localhost:3101/assist/draft-graph \
   -H "Content-Type: application/json" \
+  -H "X-Olumi-Assist-Key: YOUR_API_KEY" \
   -d '{
     "brief": "Should we adopt a four-day work week?",
     "config": {"streaming": false}
   }'
 ```
+
+> **Note:** Authentication via `X-Olumi-Assist-Key` header is required for all
+> `/assist/*` endpoints. See [Deployment](#-deployment) for API key configuration.
 
 ---
 

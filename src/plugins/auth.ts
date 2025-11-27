@@ -16,6 +16,7 @@ import fp from "fastify-plugin";
 import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
 import { tryConsumeToken } from "../utils/quota.js";
 import { verifyHmacSignature } from "../utils/hmac-auth.js";
+import { attachCallerContext, getCallerContext, type CallerContext } from "../context/index.js";
 
 /**
  * Get valid API keys from environment
@@ -234,13 +235,24 @@ async function authPluginImpl(fastify: FastifyInstance) {
       });
     }
 
-    // Auth successful
+    // Auth successful - attach full caller context
+    const hmacAuth = hasSignature !== undefined && process.env.HMAC_SECRET !== undefined;
+    const ctx = attachCallerContext(request, {
+      keyId: keyId!,
+      hmacAuth,
+      sourceIp: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+      correlationId: request.headers["x-correlation-id"] as string | undefined,
+    });
+
     emit(TelemetryEvents.AuthSuccess, {
       key_id: keyId!,
       path: request.url,
+      hmac_auth: hmacAuth,
+      correlation_id: ctx.correlationId,
     });
 
-    // Attach key ID to request for downstream use (e.g., /v1/limits)
+    // Also attach keyId directly for backwards compatibility
     (request as any).keyId = keyId;
   });
 }
@@ -255,7 +267,27 @@ export const authPlugin = fp(authPluginImpl, {
 
 /**
  * Get key ID from request (if authenticated)
+ * @deprecated Use getCallerContext() instead for full context access
  */
 export function getRequestKeyId(request: FastifyRequest): string | null {
   return (request as any).keyId || null;
 }
+
+/**
+ * Get full caller context from request (if authenticated)
+ * Returns undefined for unauthenticated requests or public routes.
+ *
+ * @example
+ * ```typescript
+ * const ctx = getRequestCallerContext(request);
+ * if (ctx) {
+ *   log.info({ ...contextToTelemetry(ctx) }, 'Processing request');
+ * }
+ * ```
+ */
+export function getRequestCallerContext(request: FastifyRequest): CallerContext | undefined {
+  return getCallerContext(request);
+}
+
+// Re-export CallerContext type for convenience
+export type { CallerContext };

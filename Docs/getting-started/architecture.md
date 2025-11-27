@@ -92,13 +92,23 @@ The Olumi Assistants Service is a **backend API service** that provides AI-assis
 HTTP endpoint handlers that define the public API surface.
 
 **Key Routes:**
-- `assist.draft-graph.ts` - Main draft generation endpoint (POST /assist/draft-graph)
-- `assist.stream.ts` - SSE streaming endpoint (GET /assist/stream)
-- `assist.resume.ts` - SSE resume endpoint (POST /assist/resume)
+- `assist.draft-graph.ts` - Main draft generation with SSE streaming and resume:
+  - `POST /assist/draft-graph` - JSON response
+  - `POST /assist/draft-graph/stream` - SSE streaming
+  - `POST /assist/draft-graph/resume` - Resume interrupted streams
 - `assist.share.ts` - Evidence pack sharing (GET /assist/share/:token)
-- `v1.cee.*.ts` - CEE endpoints (bias check, evidence helper, etc.)
-- `health.ts` - Health check endpoint (GET /healthz)
-- `v1.diagnostics.ts` - Operator diagnostics (GET /diagnostics)
+- `assist.v1.*.ts` - CEE v1 endpoints:
+  - `/assist/v1/draft-graph` - CEE-wrapped draft generation
+  - `/assist/v1/bias-check` - Bias detection
+  - `/assist/v1/options` - Option generation
+  - `/assist/v1/explain-graph` - Graph explanation
+  - `/assist/v1/evidence-helper` - Evidence scoring
+  - `/assist/v1/sensitivity-coach` - Sensitivity suggestions
+  - `/assist/v1/team-perspectives` - Team disagreement analysis
+  - `/assist/v1/decision-review/enhanced` - ISL-enhanced decision review
+- Health/diagnostics (defined in `server.ts`):
+  - `GET /healthz` - Health check
+  - `GET /diagnostics` - Debug info (gated by `CEE_DIAGNOSTICS_ENABLED`)
 
 ### 2. **Orchestrator** (`/src/orchestrator/`)
 
@@ -123,7 +133,7 @@ Quality assessment and evidence management subsystem.
 - **Sensitivity Detection** - Flags sensitive decisions
 - **Team Perspectives** - Analyzes team disagreement
 
-See [CEE v1 Overview](../CEE-v1.md) for details.
+See [CEE v1 Overview](../cee/CEE-v1.md) for details.
 
 ### 4. **Services** (`/src/services/`)
 
@@ -294,7 +304,7 @@ If connection drops during streaming:
 - Expiry: 10 minutes
 - Contains: Request params, partial response, checkpoint
 
-See [SSE Resume API](../SSE-RESUME-API.md) for details.
+See [SSE Resume API](../api/SSE-RESUME-API.md) for details.
 
 ---
 
@@ -378,7 +388,60 @@ X-Olumi-Timestamp: <unix-timestamp>
 - Timestamp must be within 5 minutes of server time
 - Prevents replay attacks
 
-See [Frontend Integration Guide](../FRONTEND_INTEGRATION.md#authentication) for details.
+See [Frontend Integration Guide](../api/FRONTEND_INTEGRATION.md#authentication) for details.
+
+---
+
+### Request Context (CallerContext)
+
+**Purpose:** Propagate authentication and telemetry context through the request lifecycle
+
+**Location:** `src/context/`
+
+**CallerContext Interface:**
+```typescript
+interface CallerContext {
+  requestId: string;       // Unique request identifier
+  keyId: string;           // API key identifier (hashed)
+  correlationId?: string;  // Distributed tracing ID
+  timestamp: string;       // ISO 8601 timestamp
+  timestampMs: number;     // Unix milliseconds
+  hmacAuth: boolean;       // Whether HMAC auth was used
+  sourceIp?: string;       // Client IP (for audit logs)
+  userAgent?: string;      // Client user agent
+}
+```
+
+**Usage in Handlers:**
+```typescript
+import { getRequestCallerContext } from '../plugins/auth.js';
+import { contextToTelemetry } from '../context/index.js';
+
+app.post('/endpoint', async (req, reply) => {
+  const ctx = getRequestCallerContext(req);
+  if (ctx) {
+    // Include context in telemetry
+    emit(TelemetryEvents.SomeEvent, {
+      ...contextToTelemetry(ctx),
+      custom_field: 'value',
+    });
+  }
+});
+```
+
+**Lifecycle:**
+1. Auth plugin authenticates request
+2. `attachCallerContext()` attaches context to request
+3. Route handlers retrieve via `getRequestCallerContext()`
+4. Context propagated through service calls
+5. Telemetry events include context via `contextToTelemetry()`
+
+**Test Utilities:**
+```typescript
+import { createTestContext } from '../context/index.js';
+
+const ctx = createTestContext({ keyId: 'test-key' });
+```
 
 ---
 
@@ -495,8 +558,8 @@ See [Baseline Performance Report](../baseline-performance-report.md) for current
 
 ### For Developers
 - **[Contributing Guide](../contributing.md)** - Development workflow
-- **[Frontend Integration](../FRONTEND_INTEGRATION.md)** - API reference
-- **[CEE v1 Overview](../CEE-v1.md)** - CEE subsystem details
+- **[Frontend Integration](../api/FRONTEND_INTEGRATION.md)** - API reference
+- **[CEE v1 Overview](../cee/CEE-v1.md)** - CEE subsystem details
 
 ### For Operators
 - **[Operator Runbook](../CEE-ops.md)** - Day-to-day operations
@@ -507,5 +570,5 @@ See [Baseline Performance Report](../baseline-performance-report.md) for current
 
 **Questions?** See [Docs/README.md](../README.md) for full documentation index.
 
-**Last Updated:** 2025-11-22
+**Last Updated:** 2025-11-27
 **Maintained By:** Olumi Engineering Team
