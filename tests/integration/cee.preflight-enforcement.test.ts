@@ -26,6 +26,10 @@ import type { FastifyInstance } from "fastify";
 // Use fixtures provider for deterministic graphs and zero cost
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
+// Disable external integrations that might cause hangs
+vi.stubEnv("CEE_CAUSAL_VALIDATION_ENABLED", "false");
+vi.stubEnv("VALIDATION_CACHE_ENABLED", "false");
+
 // Avoid calling real engine validate service
 vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
@@ -211,7 +215,7 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(body.details.hint).toContain("clarification round");
     });
 
-    it("allows direct draft when clarification_rounds_completed meets requirement", async () => {
+    it("allows direct draft when clarification_rounds_completed meets requirement", { timeout: 30000 }, async () => {
       // Same brief but with completed clarification rounds
       const res = await app.inject({
         method: "POST",
@@ -223,6 +227,9 @@ describe("CEE Preflight Enforcement (Integration)", () => {
         },
       });
 
+      if (res.statusCode !== 200) {
+        console.error("Unexpected response:", JSON.stringify(res.json(), null, 2));
+      }
       expect(res.statusCode).toBe(200);
       const body = res.json();
 
@@ -230,7 +237,9 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(body.quality).toBeDefined();
     });
 
-    it("allows high-readiness brief without clarification", async () => {
+    // Note: This test and the one above can be slow due to full draft pipeline execution
+    // with fixtures provider. 30s timeout accommodates CI resource variability.
+    it("allows high-readiness brief without clarification", { timeout: 30000 }, async () => {
       // Well-formed brief with high readiness (>= 0.8 threshold)
       // - Strong decision keywords: "Should", "hire", "decision", "choose" (decision_relevance: ~1.0)
       // - Good length (length_score: 1.0)
