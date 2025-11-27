@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build
+        run: pnpm build
+
       - name: Validate telemetry event names
         run: |
           echo "Validating that all emit() calls use frozen event names from TelemetryEvents enum..."

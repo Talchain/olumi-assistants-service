@@ -16,7 +16,6 @@ import fp from "fastify-plugin";
 import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
 import { tryConsumeToken } from "../utils/quota.js";
 import { verifyHmacSignature } from "../utils/hmac-auth.js";
-import { fastHash } from "../utils/hash.js";
 
 /**
  * Get valid API keys from environment
@@ -99,14 +98,8 @@ async function authPluginImpl(fastify: FastifyInstance) {
   if (initialKeys.size === 0) {
     log.warn("No API keys configured (ASSIST_API_KEY or ASSIST_API_KEYS). Auth disabled.");
   } else {
-    const summaries = Array.from(initialKeys).map(key => {
-      const length = key.length;
-      const prefix = key.slice(0, Math.min(4, length));
-      const suffix = length > 4 ? key.slice(-4) : "";
-      return { prefix, suffix, length };
-    });
-
-    log.info({ api_keys: summaries, count: initialKeys.size }, "API keys configured (redacted)");
+    // Only log the count - avoid logging any partial key information
+    log.info({ count: initialKeys.size }, "API keys configured");
   }
 
   fastify.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
@@ -175,7 +168,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
       } else {
         // HMAC auth successful - use HMAC secret as the "API key" for quota tracking
         apiKey = process.env.HMAC_SECRET;
-        keyId = "hmac"; // Special key ID for HMAC-authenticated requests
+        // keyId will be set by tryConsumeToken below
 
         log.info(
           { legacy: hmacResult.legacy, path: request.url },
@@ -216,7 +209,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
       }
 
       apiKey = extractedKey;
-      keyId = fastHash(apiKey, 8);
+      // keyId will be set by tryConsumeToken below
     }
 
     // Check rate limit (dual-mode: Redis + memory fallback)

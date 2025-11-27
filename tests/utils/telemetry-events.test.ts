@@ -176,6 +176,34 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // CEE Clarification enforcement events (Phase 5)
         ClarificationRequired: "cee.clarification.required",
         ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
+
+        // Prompt Management events (v2.0)
+        PromptStoreError: "prompt.store_error",
+        PromptLoaderError: "prompt.loader.error",
+        PromptLoadedFromStore: "prompt.loader.store",
+        PromptLoadedFromDefault: "prompt.loader.default",
+        PromptCompiled: "prompt.compiled",
+        PromptHashMismatch: "prompt.hash_mismatch",
+        AdminPromptAccess: "admin.prompt.access",
+        AdminExperimentAccess: "admin.experiment.access",
+        AdminAuthFailed: "admin.auth.failed",
+        AdminIPBlocked: "admin.ip.blocked",
+
+        // Prompt Experiment events (v2.0)
+        PromptExperimentAssigned: "prompt.experiment.assigned",
+        PromptStagingUsed: "prompt.staging.used",
+
+        // Decision Review events (v2.0)
+        DecisionReviewGenerated: "cee.decision_review.generated",
+        DecisionReviewIslFallback: "cee.decision_review.isl_fallback",
+        DecisionReviewRequested: "cee.decision_review.requested",
+        DecisionReviewSucceeded: "cee.decision_review.succeeded",
+        DecisionReviewFailed: "cee.decision_review.failed",
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        PromptStoreCacheHit: "prompt.store.cache.hit",
+        PromptStoreCacheMiss: "prompt.store.cache.miss",
+        PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -201,7 +229,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification)\.|llm\.normalization\.|isl\.config\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -408,6 +436,32 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.team_perspectives.requested": [TelemetryEvents.CeeTeamPerspectivesRequested],
         "cee.team_perspectives.succeeded": [TelemetryEvents.CeeTeamPerspectivesSucceeded],
         "cee.team_perspectives.failed": [TelemetryEvents.CeeTeamPerspectivesFailed],
+
+        // Prompt Management events (v2.0)
+        "prompt.store.error": [TelemetryEvents.PromptStoreError],
+        "prompt.loader.error": [TelemetryEvents.PromptLoaderError],
+        "prompt.loader.source": [TelemetryEvents.PromptLoadedFromStore, TelemetryEvents.PromptLoadedFromDefault],
+        "prompt.compiled": [TelemetryEvents.PromptCompiled],
+        "prompt.hash_mismatch": [TelemetryEvents.PromptHashMismatch],
+        "admin.prompt.access": [TelemetryEvents.AdminPromptAccess],
+        "admin.experiment.access": [TelemetryEvents.AdminExperimentAccess],
+        "admin.auth.failed": [TelemetryEvents.AdminAuthFailed],
+        "admin.ip.blocked": [TelemetryEvents.AdminIPBlocked],
+
+        // Prompt Experiment events (v2.0)
+        "prompt.experiment.assigned": [TelemetryEvents.PromptExperimentAssigned],
+        "prompt.staging.used": [TelemetryEvents.PromptStagingUsed],
+
+        // Decision Review events (v2.0)
+        "cee.decision_review.requested": [TelemetryEvents.DecisionReviewRequested],
+        "cee.decision_review.succeeded": [TelemetryEvents.DecisionReviewGenerated, TelemetryEvents.DecisionReviewSucceeded],
+        "cee.decision_review.failed": [TelemetryEvents.DecisionReviewFailed],
+        "cee.decision_review.isl_fallback": [TelemetryEvents.DecisionReviewIslFallback],
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
+        "prompt.store.cache.miss": [TelemetryEvents.PromptStoreCacheMiss],
+        "prompt.store.cache.invalidated": [TelemetryEvents.PromptStoreCacheInvalidated],
       };
 
       // Verify all events are documented, except debug-only events
@@ -583,6 +637,34 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Cost calculation guardrails
         "assist.cost_calculation.unknown_model",
+
+        // Prompt Management events (v2.0)
+        "prompt.store_error",
+        "prompt.loader.error",
+        "prompt.loader.store",
+        "prompt.loader.default",
+        "prompt.compiled",
+        "prompt.hash_mismatch",
+        "admin.prompt.access",
+        "admin.experiment.access",
+        "admin.auth.failed",
+        "admin.ip.blocked",
+
+        // Prompt Experiment events (v2.0)
+        "prompt.experiment.assigned",
+        "prompt.staging.used",
+
+        // Decision Review events (v2.0)
+        "cee.decision_review.generated",
+        "cee.decision_review.isl_fallback",
+        "cee.decision_review.requested",
+        "cee.decision_review.succeeded",
+        "cee.decision_review.failed",
+
+        // Prompt Store Cache events (v2.0 Phase 4.3)
+        "prompt.store.cache.hit",
+        "prompt.store.cache.miss",
+        "prompt.store.cache.invalidated",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

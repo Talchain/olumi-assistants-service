@@ -9,7 +9,15 @@ import type {
   ISLBiasValidateRequest,
   ISLBiasValidateResponse,
   ISLClientConfig,
+  ISLConformalRequest,
+  ISLConformalResponse,
+  ISLContrastiveRequest,
+  ISLContrastiveResponse,
   ISLError,
+  ISLSensitivityRequest,
+  ISLSensitivityResponse,
+  ISLValidationStrategiesRequest,
+  ISLValidationStrategiesResponse,
 } from './types.js';
 import { logger } from '../../utils/simple-logger.js';
 import { parseTimeout, parseMaxRetries } from './config.js';
@@ -71,6 +79,207 @@ export class ISLClient {
 
       logger.warn({
         event: 'isl.bias_validate.failed',
+        error: error instanceof Error ? error.message : String(error),
+        latency_ms: latency,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get detailed sensitivity analysis for graph nodes
+   *
+   * @param request - Sensitivity analysis request
+   * @returns Detailed sensitivity scores and contributing factors
+   * @throws ISLError if analysis fails
+   */
+  async getSensitivityDetailed(
+    request: ISLSensitivityRequest,
+  ): Promise<ISLSensitivityResponse> {
+    const startTime = Date.now();
+
+    try {
+      const response = await this.makeRequest<ISLSensitivityResponse>(
+        '/isl/v1/sensitivity',
+        {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { 'X-ISL-API-Key': this.apiKey } : {}),
+          },
+        },
+      );
+
+      const latency = Date.now() - startTime;
+
+      logger.info({
+        event: 'isl.sensitivity.success',
+        request_id: response.request_id,
+        nodes_analyzed: response.sensitivities.length,
+        avg_sensitivity: response.summary.avg_sensitivity,
+        latency_ms: latency,
+        isl_latency_ms: response.latency_ms,
+      });
+
+      return response;
+    } catch (error) {
+      const latency = Date.now() - startTime;
+
+      logger.warn({
+        event: 'isl.sensitivity.failed',
+        error: error instanceof Error ? error.message : String(error),
+        latency_ms: latency,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get contrastive explanation for a decision
+   *
+   * @param request - Contrastive explanation request
+   * @returns Contrast points explaining why decision differs from alternative
+   * @throws ISLError if explanation fails
+   */
+  async getContrastiveExplanation(
+    request: ISLContrastiveRequest,
+  ): Promise<ISLContrastiveResponse> {
+    const startTime = Date.now();
+
+    try {
+      const response = await this.makeRequest<ISLContrastiveResponse>(
+        '/isl/v1/contrastive',
+        {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { 'X-ISL-API-Key': this.apiKey } : {}),
+          },
+        },
+      );
+
+      const latency = Date.now() - startTime;
+
+      logger.info({
+        event: 'isl.contrastive.success',
+        request_id: response.request_id,
+        decision_node: response.decision_node_id,
+        contrast_count: response.contrasts.length,
+        latency_ms: latency,
+        isl_latency_ms: response.latency_ms,
+      });
+
+      return response;
+    } catch (error) {
+      const latency = Date.now() - startTime;
+
+      logger.warn({
+        event: 'isl.contrastive.failed',
+        error: error instanceof Error ? error.message : String(error),
+        latency_ms: latency,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get conformal prediction intervals for quantitative predictions
+   *
+   * @param request - Conformal prediction request
+   * @returns Prediction intervals with calibration metrics
+   * @throws ISLError if prediction fails
+   */
+  async getConformalPrediction(
+    request: ISLConformalRequest,
+  ): Promise<ISLConformalResponse> {
+    const startTime = Date.now();
+
+    try {
+      const response = await this.makeRequest<ISLConformalResponse>(
+        '/isl/v1/conformal',
+        {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { 'X-ISL-API-Key': this.apiKey } : {}),
+          },
+        },
+      );
+
+      const latency = Date.now() - startTime;
+
+      logger.info({
+        event: 'isl.conformal.success',
+        request_id: response.request_id,
+        intervals_count: response.intervals.length,
+        calibration_reliable: response.calibration.is_reliable,
+        latency_ms: latency,
+        isl_latency_ms: response.latency_ms,
+      });
+
+      return response;
+    } catch (error) {
+      const latency = Date.now() - startTime;
+
+      logger.warn({
+        event: 'isl.conformal.failed',
+        error: error instanceof Error ? error.message : String(error),
+        latency_ms: latency,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get recommended validation strategies for the graph
+   *
+   * @param request - Validation strategies request
+   * @returns Prioritized validation strategies with coverage analysis
+   * @throws ISLError if strategy generation fails
+   */
+  async getValidationStrategies(
+    request: ISLValidationStrategiesRequest,
+  ): Promise<ISLValidationStrategiesResponse> {
+    const startTime = Date.now();
+
+    try {
+      const response = await this.makeRequest<ISLValidationStrategiesResponse>(
+        '/isl/v1/validation-strategies',
+        {
+          method: 'POST',
+          body: JSON.stringify(request),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { 'X-ISL-API-Key': this.apiKey } : {}),
+          },
+        },
+      );
+
+      const latency = Date.now() - startTime;
+
+      logger.info({
+        event: 'isl.validation_strategies.success',
+        request_id: response.request_id,
+        strategies_count: response.strategies.length,
+        node_coverage: response.coverage.node_coverage,
+        risk_coverage: response.coverage.risk_coverage,
+        latency_ms: latency,
+        isl_latency_ms: response.latency_ms,
+      });
+
+      return response;
+    } catch (error) {
+      const latency = Date.now() - startTime;
+
+      logger.warn({
+        event: 'isl.validation_strategies.failed',
         error: error instanceof Error ? error.message : String(error),
         latency_ms: latency,
       });

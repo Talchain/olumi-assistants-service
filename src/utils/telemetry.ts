@@ -177,6 +177,34 @@ export const TelemetryEvents = {
 
   // Internal stage events (for debugging)
   Stage: "assist.draft.stage",
+
+  // Prompt Management events (v2.0)
+  PromptStoreError: "prompt.store_error",
+  PromptLoaderError: "prompt.loader.error",
+  PromptLoadedFromStore: "prompt.loader.store",
+  PromptLoadedFromDefault: "prompt.loader.default",
+  PromptCompiled: "prompt.compiled",
+  PromptHashMismatch: "prompt.hash_mismatch",
+  AdminPromptAccess: "admin.prompt.access",
+  AdminExperimentAccess: "admin.experiment.access",
+  AdminAuthFailed: "admin.auth.failed",
+  AdminIPBlocked: "admin.ip.blocked",
+
+  // Prompt Experiment events (v2.0)
+  PromptExperimentAssigned: "prompt.experiment.assigned",
+  PromptStagingUsed: "prompt.staging.used",
+
+  // Decision Review events (v2.0)
+  DecisionReviewGenerated: "cee.decision_review.generated",
+  DecisionReviewIslFallback: "cee.decision_review.isl_fallback",
+  DecisionReviewRequested: "cee.decision_review.requested",
+  DecisionReviewSucceeded: "cee.decision_review.succeeded",
+  DecisionReviewFailed: "cee.decision_review.failed",
+
+  // Prompt Store Cache events (v2.0 Phase 4.3)
+  PromptStoreCacheHit: "prompt.store.cache.hit",
+  PromptStoreCacheMiss: "prompt.store.cache.miss",
+  PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
 } as const;
 
 /**
@@ -969,6 +997,160 @@ export function emit(event: string, data: Event) {
             http_status: String(
               (eventData.http_status as number | string | undefined) || "unknown",
             ),
+          });
+          break;
+        }
+
+        // Prompt Management metrics (v2.0)
+        case TelemetryEvents.PromptStoreError: {
+          datadogClient.increment("prompt.store.error", 1, {
+            operation: String((eventData.operation as string) || "unknown"),
+            error: String((eventData.error as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptLoaderError: {
+          datadogClient.increment("prompt.loader.error", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptLoadedFromStore: {
+          datadogClient.increment("prompt.loader.source", 1, {
+            source: "store",
+            task_id: String((eventData.taskId as string) || "unknown"),
+            version: String((eventData.version as number | undefined) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptLoadedFromDefault: {
+          datadogClient.increment("prompt.loader.source", 1, {
+            source: "default",
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptCompiled: {
+          datadogClient.increment("prompt.compiled", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+            version: String((eventData.version as number | undefined) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptHashMismatch: {
+          datadogClient.increment("prompt.hash_mismatch", 1, {
+            prompt_id: String((eventData.promptId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminPromptAccess: {
+          datadogClient.increment("admin.prompt.access", 1, {
+            action: String((eventData.action as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminExperimentAccess: {
+          datadogClient.increment("admin.experiment.access", 1, {
+            action: String((eventData.action as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminAuthFailed: {
+          datadogClient.increment("admin.auth.failed", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.AdminIPBlocked: {
+          datadogClient.increment("admin.ip.blocked", 1);
+          break;
+        }
+
+        // Prompt Experiment metrics (v2.0)
+        case TelemetryEvents.PromptExperimentAssigned: {
+          datadogClient.increment("prompt.experiment.assigned", 1, {
+            experiment_name: String((eventData.experimentName as string) || "unknown"),
+            task_id: String((eventData.taskId as string) || "unknown"),
+            variant: String((eventData.variant as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStagingUsed: {
+          datadogClient.increment("prompt.staging.used", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        // Decision Review metrics (v2.0)
+        case TelemetryEvents.DecisionReviewRequested: {
+          datadogClient.increment("cee.decision_review.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.DecisionReviewGenerated:
+        case TelemetryEvents.DecisionReviewSucceeded: {
+          datadogClient.increment("cee.decision_review.succeeded", 1, {
+            isl_available: String((eventData.isl_available as boolean | undefined) ?? "unknown"),
+          });
+
+          if (typeof eventData.endpoints_used === "number" || Array.isArray(eventData.endpointsUsed)) {
+            const count = typeof eventData.endpoints_used === "number"
+              ? eventData.endpoints_used
+              : (eventData.endpointsUsed as string[])?.length ?? 0;
+            datadogClient.gauge("cee.decision_review.isl_endpoints_used", count);
+          }
+
+          if (typeof eventData.latency_ms === "number") {
+            datadogClient.histogram("cee.decision_review.latency_ms", eventData.latency_ms as number);
+          }
+          break;
+        }
+
+        case TelemetryEvents.DecisionReviewFailed: {
+          datadogClient.increment("cee.decision_review.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String((eventData.http_status as number | string | undefined) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.DecisionReviewIslFallback: {
+          datadogClient.increment("cee.decision_review.isl_fallback", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
+        // Prompt Store Cache metrics (v2.0 Phase 4.3)
+        case TelemetryEvents.PromptStoreCacheHit: {
+          datadogClient.increment("prompt.store.cache.hit", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheMiss: {
+          datadogClient.increment("prompt.store.cache.miss", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheInvalidated: {
+          datadogClient.increment("prompt.store.cache.invalidated", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            task_id: String((eventData.taskId as string) || "all"),
           });
           break;
         }

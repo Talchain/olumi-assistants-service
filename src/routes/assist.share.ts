@@ -7,6 +7,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { Graph } from "../schemas/graph.js";
 import { buildErrorV1 } from "../utils/errors.js";
@@ -38,6 +39,25 @@ function isShareEnabled(): boolean {
  * Share routes registration
  */
 export default async function route(app: FastifyInstance) {
+  // Rate limiting for share routes to prevent abuse
+  // GET/DELETE routes use token-based auth, so we need explicit rate limiting
+  await app.register(rateLimit, {
+    max: 60,
+    timeWindow: 60 * 1000, // 60 requests per minute
+    keyGenerator: (request) => {
+      // Rate limit by IP for public share routes
+      return `share:${request.ip}`;
+    },
+    errorResponseBuilder: (_, context) => ({
+      schema: "error.v1",
+      code: "RATE_LIMITED",
+      message: "Too many requests. Please try again later.",
+      details: {
+        retry_after_seconds: Math.ceil(context.ttl / 1000),
+      },
+    }),
+  });
+
   /**
    * POST /assist/share
    * Create a signed, redacted share URL
