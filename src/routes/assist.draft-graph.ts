@@ -291,17 +291,26 @@ function determineClarifier(confidence: number): "complete" | "max_rounds" | "co
 /**
  * Write SSE event following RFC 8895 multi-line semantics
  * Each line of the data field must be prefixed with "data: "
+ * Optimized: avoid split/loop for single-line JSON (common case)
  */
 async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const jsonStr = JSON.stringify(event);
-    const lines = jsonStr.split('\n');
 
-    let buffer = `event: ${STAGE_EVENT}\n`;
-    for (const line of lines) {
-      buffer += `data: ${line}\n`;
+    // Optimization: Most JSON is single-line. Skip split/loop overhead.
+    let buffer: string;
+    if (jsonStr.indexOf('\n') === -1) {
+      // Fast path: single-line JSON (no newlines)
+      buffer = `event: ${STAGE_EVENT}\ndata: ${jsonStr}\n\n`;
+    } else {
+      // Slow path: multi-line JSON (rare, only if data contains embedded newlines)
+      const lines = jsonStr.split('\n');
+      buffer = `event: ${STAGE_EVENT}\n`;
+      for (const line of lines) {
+        buffer += `data: ${line}\n`;
+      }
+      buffer += '\n';
     }
-    buffer += '\n';
 
     const ok = reply.raw.write(buffer);
     if (ok) {

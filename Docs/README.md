@@ -1,182 +1,111 @@
 # Olumi Assistants Service Documentation
 
-Welcome to the Olumi Assistants Service documentation! This directory contains comprehensive documentation for developers, operators, and contributors.
+## Quick Start
 
-## 🚀 Getting Started (Start Here!)
-
-**New to the project?** Start with these documents in order:
-
-1. **[Architecture Overview](getting-started/architecture.md)** - What is this service and how does it work?
-2. **[Contributing Guide](contributing.md)** - How to contribute code, tests, and documentation
-3. **[Frontend Integration](api/FRONTEND_INTEGRATION.md)** - Complete API reference for integrating with clients
-
-**Setting up locally?**
-- See the [Quick Start](../README.md#quick-start) in the root README
-- Read [Staging Setup Instructions](api/STAGING_SETUP_INSTRUCTIONS.md) for environment configuration
+| Document | Audience | Description |
+|----------|----------|-------------|
+| [Architecture](getting-started/architecture.md) | All | System overview and data flow |
+| [Developer Onboarding](getting-started/onboarding.md) | Developers | Local setup and development workflow |
+| [Contributing](contributing.md) | Developers | Code style, PR process, testing |
+| [API Reference](api/FRONTEND_INTEGRATION.md) | Developers | Complete API documentation |
 
 ---
 
-## 📚 Documentation by Role
+## Documentation Structure
 
-### For Developers
-
-#### API & Integration
-
-📂 **[Complete API Documentation Index](api/README.md)** - Organized guide to all API docs
-
-- **[Frontend Integration Guide](api/FRONTEND_INTEGRATION.md)** - Complete API reference with examples
-- **[SSE Streaming API](api/SSE-RESUME-API.md)** - Server-Sent Events with resume capability
-- **[Provider Configuration](api/provider-configuration.md)** - LLM provider setup (Anthropic, OpenAI)
-- **[OpenAPI Validation](api/openapi-validation.md)** - API schema and validation
-
-#### CEE (Contextual Evidence Engine)
-The CEE subsystem provides quality assessment and evidence management for AI-generated decisions.
-
-📂 **[Complete CEE Documentation Index](cee/README.md)** - Organized guide to all CEE docs
-
-- **[CEE v1 Overview](cee/CEE-v1.md)** - Core CEE documentation and concepts
-- **[CEE Maintainer's Guide](cee/CEE-maintainers-guide.md)** - Internal architecture and development guide
-- **[CEE Recipes](cee/CEE-recipes.md)** - Common CEE usage patterns
-- **[CEE Calibration](cee/CEE-calibration.md)** - Quality calibration and tuning
-- **[CEE Golden Journeys](cee/CEE-golden-journeys.md)** - Test fixtures for regression testing
-- **[CEE Decision Review Orchestrator](cee/CEE-decision-review-orchestrator.md)** - Request orchestration
-- **[CEE Sandbox Integration](cee/CEE-sandbox-integration.md)** - Integration with Scenario Sandbox
-- **[CEE Limits & Budgets](cee/CEE-limits-and-budgets.md)** - Rate limiting and quotas
-- **[CEE Telemetry Playbook](cee/CEE-telemetry-playbook.md)** - Observability and metrics
-- **[CEE Cost Telemetry](cee/CEE-cost-telemetry.md)** - LLM cost tracking and analysis
-
-#### Testing & Performance
-- **[Baseline Performance Report](baseline-performance-report.md)** - Current performance baselines
-- **[CEE Baseline Performance](cee/CEE-baseline-performance.md)** - CEE-specific performance targets
-- **[Performance Testing Plan](PERFORMANCE-ANALYSIS.md)** - Load testing strategy
-- **[Golden Brief Fixture Strategy](issues/golden-brief-fixture-strategy.md)** - Test data approach
-
-#### Development Guides
-- **[Contributing Guide](contributing.md)** - Code style, PR process, testing requirements
-- **[ADR: CEE Streaming v1](cee/ADR-CEE-streaming-v1.md)** - Architecture decision record for streaming
-
-### For Operators
-
-#### Operations & Deployment
-
-📂 **[Complete Operations Documentation Index](operations/README.md)** - Organized guide to all operations docs
-
-- **[Operator Runbook](operations/operator-runbook.md)** - Day-to-day operations guide
-- **[CEE Operations Guide](cee/CEE-ops.md)** - CEE-specific operations
-- **[CEE Runbook](cee/CEE-runbook.md)** - CEE operational procedures
-- **[Render Deployment Guide](api/STAGING_SETUP_INSTRUCTIONS.md)** - Deploy to Render.com
-- **[Production Grounding Flip Plan](operations/PRODUCTION_GROUNDING_FLIP_PLAN.md)** - Feature flag management
-- **[Release Rollback](operations/RELEASE_ROLLBACK.md)** - How to roll back a release
-
-#### Incident Response
-- **[CEE Incident Runbook](cee/CEE-incident-runbook.md)** - CEE-specific incident response
-- **[LLM Outage/Spike Runbook](runbooks/cee-llm-outage-or-spike.md)** - Handle LLM provider issues
-- **[Buffer Pressure Runbook](runbooks/buffer-pressure.md)** - SSE buffer pressure scenarios
-- **[Redis Incidents Runbook](runbooks/redis-incidents.md)** - Redis failure handling
-- **[Resume Failures Runbook](runbooks/resume-failures.md)** - SSE resume troubleshooting
-
-#### Monitoring & Observability
-- **[CEE Telemetry Playbook](cee/CEE-telemetry-playbook.md)** - Metrics and monitoring
-- **[CEE Cost Telemetry](cee/CEE-cost-telemetry.md)** - Cost tracking and alerting
-- **[Production Validation (v1.1.1)](operations/PROD_VALIDATION_v1.1.1.md)** - Production smoke tests
+```
+Docs/
+├── getting-started/     # Start here
+│   ├── architecture.md  # System design and data flow
+│   └── onboarding.md    # Developer setup guide
+├── api/                 # API documentation
+│   ├── FRONTEND_INTEGRATION.md  # Complete API reference
+│   ├── SSE-RESUME-API.md        # Streaming with resume
+│   └── provider-configuration.md
+├── cee/                 # CEE (Contextual Evidence Engine)
+│   ├── CEE-v1.md        # CEE overview and contracts
+│   ├── CEE-maintainers-guide.md
+│   ├── CEE-recipes.md   # Common usage patterns
+│   └── ...
+├── operations/          # Production operations
+│   ├── operator-runbook.md
+│   ├── observability.md
+│   └── ...
+├── runbooks/            # Incident response
+│   ├── cee-llm-outage-or-spike.md
+│   ├── buffer-pressure.md
+│   └── ...
+├── archive/             # Historical documents
+└── contributing.md      # How to contribute
+```
 
 ---
 
-## 📁 Documentation Organization
+## By Role
 
-### Subdirectories
+### Developers
 
-- **[api/](api/)** - API and integration documentation
-- **[cee/](cee/)** - CEE (Contextual Evidence Engine) documentation
-- **[operations/](operations/)** - Operations and deployment documentation
-- **[releases/](releases/)** - Release notes and version history
-- **[runbooks/](runbooks/)** - Incident response playbooks for specific failure scenarios
-- **[issues/](issues/)** - Technical investigations and problem analyses
-- **[notes/](notes/)** - Development notes and feedback responses
-- **[engine-handovers/](engine-handovers/)** - Legacy coordination docs with engine team
+**Getting Started:**
+1. [Architecture Overview](getting-started/architecture.md) - Understand the system
+2. [Developer Onboarding](getting-started/onboarding.md) - Set up your environment
+3. [Contributing Guide](contributing.md) - Code style and PR process
 
-### By Topic
+**API Integration:**
+- [Frontend Integration](api/FRONTEND_INTEGRATION.md) - Complete API reference
+- [SSE Resume API](api/SSE-RESUME-API.md) - Streaming with resume capability
+- [Provider Configuration](api/provider-configuration.md) - LLM provider setup
 
-#### Release Notes & Version History
+**CEE Development:**
+- [CEE v1 Overview](cee/CEE-v1.md) - CEE contracts and envelopes
+- [CEE Maintainers Guide](cee/CEE-maintainers-guide.md) - Internal architecture
+- [CEE Recipes](cee/CEE-recipes.md) - Common patterns
 
-📂 **[Complete Release Documentation Index](releases/README.md)** - Organized guide to all releases
+### Operators
 
-- **[V1.1.1 Completion Summary](releases/V1.1.1_COMPLETION_SUMMARY.md)**
-- **[Go/No-Go Checklist v1.1.1](releases/GO_NOGO_CHECKLIST_v1.1.1.md)**
-- **[PR-001: Fastify 5 Upgrade](releases/PR-001-fastify-5-upgrade.md)**
-- **[PR-1 Completion Report](releases/PR-1-completion-report.md)**
-- **[PR-1 Production Validation](releases/PR-1-production-validation.md)**
-- **[PR Assistants Proxy v1](releases/PR-ASSISTANTS-PROXY-V1.md)**
-- **[PR Assistants v1.1.1 Ops](releases/PR-ASSISTANTS-v1.1.1-ops.md)**
-- **[PR Assistants v1.3.0 Test Infrastructure](releases/PR-ASSISTANTS-v1.3.0-test-infrastructure.md)**
+**Day-to-Day Operations:**
+- [Operator Runbook](operations/operator-runbook.md) - Standard procedures
+- [CEE Operations](cee/CEE-ops.md) - CEE-specific operations
+- [Observability](operations/observability.md) - Monitoring and metrics
 
-#### Migration & Upgrade Guides
-- **[Fastify 5 Migration Report](releases/fastify-5-migration-report.md)** - Fastify 4 → 5 upgrade details
-
-#### Analysis & Reports
-- **[Comprehensive Assessment Report](releases/COMPREHENSIVE-ASSESSMENT-REPORT.md)** - Detailed system assessment
-- **[Performance Analysis](PERFORMANCE-ANALYSIS.md)** - Performance deep-dive
-- **[Performance Analysis Summary](PERFORMANCE-ANALYSIS-SUMMARY.md)** - Executive summary
-- **[Performance Action Items](PERFORMANCE-ACTION-ITEMS.md)** - Performance improvement tasks
+**Incident Response:**
+- [LLM Outage Runbook](runbooks/cee-llm-outage-or-spike.md)
+- [Buffer Pressure](runbooks/buffer-pressure.md)
+- [Redis Incidents](runbooks/redis-incidents.md)
+- [Resume Failures](runbooks/resume-failures.md)
 
 ---
 
-## 🔍 Quick Reference
+## Common Commands
 
-### Common Tasks
-
-**Run the service locally:**
 ```bash
+# Install dependencies
 pnpm install
+
+# Run tests
+pnpm test
+
+# Run preflight checks
+pnpm preflight
+
+# Start dev server
 pnpm dev
-```
 
-**Run tests:**
-```bash
-pnpm test              # Unit + integration tests
-pnpm test:live         # Live LLM tests (requires API key)
-```
-
-**Build and deploy:**
-```bash
-pnpm build
-pnpm start
-```
-
-**Check service health:**
-```bash
+# Check health
 curl http://localhost:3101/healthz
 ```
 
-### Key Concepts
+---
 
-- **Draft Graph** - AI-generated decision tree with provenance
-- **SSE (Server-Sent Events)** - Streaming protocol with resume capability
-- **CEE** - Contextual Evidence Engine for decision quality assessment
-- **Grounding** - Attachment-based evidence (PDF, CSV, TXT)
-- **Evidence Pack** - Privacy-preserving decision sharing
+## Key Concepts
+
+| Term | Description |
+|------|-------------|
+| **Draft Graph** | AI-generated decision tree with provenance |
+| **CEE** | Contextual Evidence Engine - quality assessment |
+| **SSE** | Server-Sent Events streaming with resume |
+| **Grounding** | Document-based evidence (PDF, CSV, TXT) |
+| **Evidence Pack** | Privacy-preserving decision sharing |
 
 ---
 
-## 🤝 Contributing
-
-See [contributing.md](contributing.md) for:
-- Code style guidelines
-- Testing requirements
-- Pull request process
-- Development workflow
-
----
-
-## 📞 Getting Help
-
-- **Issues:** Check [issues/](issues/) for known problems
-- **Runbooks:** See [runbooks/](runbooks/) for incident response
-- **Architecture Questions:** Start with [getting-started/architecture.md](getting-started/architecture.md)
-- **API Questions:** See [api/FRONTEND_INTEGRATION.md](api/FRONTEND_INTEGRATION.md)
-
----
-
-**Last Updated:** 2025-11-22
-**Service Version:** 1.11.1
-**Maintained By:** Olumi Engineering Team
+**Last Updated:** 2025-11-27

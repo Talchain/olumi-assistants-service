@@ -206,10 +206,23 @@ export function redactHeaders(headers: Record<string, unknown>): Record<string, 
   return redacted;
 }
 
+/** Keys that contain row/raw CSV data to be stripped */
+const CSV_DATA_KEYS = new Set(['rows', 'data', 'values', 'raw_data']);
+
+/** Safe statistical field keys to preserve */
+const SAFE_STAT_KEYS = new Set([
+  'count', 'mean', 'median', 'p50', 'p90', 'p95', 'p99', 'min', 'max', 'std', 'variance'
+]);
+
+/** Sensitive header keys (lowercase) */
+const SENSITIVE_HEADER_KEYS = new Set([
+  'authorization', 'x-api-key', 'api-key', 'x-auth-token', 'cookie', 'set-cookie'
+]);
+
 /**
- * Deep clone and redact object for safe logging
+ * Deep clone and redact object for safe logging (single-pass optimized)
  *
- * Removes:
+ * Removes in ONE recursive pass:
  * - Base64 attachment content
  * - CSV row data
  * - Long quotes (>100 chars)
@@ -227,64 +240,107 @@ export function safeLog(obj: unknown): unknown {
     return obj;
   }
 
-  // Deep clone
-  let cloned: any;
-  try {
-    cloned = JSON.parse(JSON.stringify(obj));
-  } catch {
-    // If serialization fails, return safe placeholder
-    return { error: 'unserializable_object', redacted: true };
-  }
-
-  // Apply redactions recursively to handle nested structures
-  function recursiveRedact(value: any): any {
+  // Single-pass recursive clone and redact
+  function redactRecursive(value: unknown, parentKey?: string): unknown {
     if (value === null || value === undefined) {
       return value;
     }
 
+    // Handle arrays
     if (Array.isArray(value)) {
-      return value.map(item => recursiveRedact(item));
+      // Special case: attachments array
+      if (parentKey === 'attachments') {
+        return value.map((att: unknown) => {
+          if (typeof att !== 'object' || att === null) return att;
+          const redactedAtt: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(att)) {
+            if (UNSAFE_KEYS.has(k)) continue;
+            if ((k === 'content' || k === 'data') && typeof v === 'string') {
+              safeSetProperty(redactedAtt, k, `${REDACTED_MARKER}:${fastHash(v, 8)}`);
+            } else {
+              safeSetProperty(redactedAtt, k, redactRecursive(v, k));
+            }
+          }
+          return redactedAtt;
+        });
+      }
+      return value.map((item) => redactRecursive(item));
     }
 
+    // Handle objects
     if (typeof value === 'object') {
-      // Apply redactions at this level
-      if (value.attachment_payloads || value.attachments) {
-        value = redactAttachments(value);
-      }
+      const result: Record<string, unknown> = {};
 
-      if (value.headers) {
-        value.headers = redactHeaders(value.headers);
-      }
-
-      // Recurse into all properties
-      const result: any = {};
       for (const [key, val] of Object.entries(value)) {
-        // Skip unsafe keys to prevent prototype pollution
-        if (UNSAFE_KEYS.has(key)) {
+        // Skip unsafe keys
+        if (UNSAFE_KEYS.has(key)) continue;
+
+        // Skip CSV row data entirely
+        if (CSV_DATA_KEYS.has(key)) continue;
+
+        // Handle attachment_payloads
+        if (key === 'attachment_payloads' && typeof val === 'object' && val !== null) {
+          const redactedPayloads: Record<string, string> = {};
+          for (const [pKey, pVal] of Object.entries(val)) {
+            if (UNSAFE_KEYS.has(pKey)) continue;
+            safeSetProperty(redactedPayloads, pKey, typeof pVal === 'string'
+              ? `${REDACTED_MARKER}:${fastHash(pVal, 8)}`
+              : REDACTED_MARKER);
+          }
+          safeSetProperty(result, key, redactedPayloads);
           continue;
         }
-        safeSetProperty(result, key, recursiveRedact(val));
+
+        // Handle headers - filter sensitive ones
+        if (key === 'headers' && typeof val === 'object' && val !== null) {
+          const redactedHeaders: Record<string, unknown> = {};
+          for (const [hKey, hVal] of Object.entries(val)) {
+            if (UNSAFE_KEYS.has(hKey)) continue;
+            if (SENSITIVE_HEADER_KEYS.has(hKey.toLowerCase())) continue;
+            safeSetProperty(redactedHeaders, hKey, hVal);
+          }
+          safeSetProperty(result, key, redactedHeaders);
+          continue;
+        }
+
+        // Truncate quotes
+        if (key === 'quote' && typeof val === 'string') {
+          safeSetProperty(result, key, truncateString(val, MAX_QUOTE_LENGTH));
+          continue;
+        }
+
+        // Safe stat keys - keep as-is
+        if (SAFE_STAT_KEYS.has(key)) {
+          safeSetProperty(result, key, val);
+          continue;
+        }
+
+        // Recurse for other values
+        safeSetProperty(result, key, redactRecursive(val, key));
       }
+
       return result;
     }
 
+    // Primitives pass through
     return value;
   }
 
-  cloned = recursiveRedact(cloned);
+  try {
+    // Clone via JSON to break references and handle circular refs
+    const cloned = JSON.parse(JSON.stringify(obj));
+    const redacted = redactRecursive(cloned);
 
-  // Redact CSV data recursively
-  cloned = redactCsvData(cloned);
+    // Add redaction flag for audit trail
+    if (typeof redacted === 'object' && redacted !== null && !Array.isArray(redacted)) {
+      (redacted as Record<string, unknown>).redacted = true;
+    }
 
-  // Truncate quotes
-  cloned = truncateQuotes(cloned);
-
-  // Always add redaction flag for audit trail
-  if (typeof cloned === 'object' && cloned !== null && !Array.isArray(cloned)) {
-    cloned.redacted = true;
+    return redacted;
+  } catch {
+    // If serialization fails, return safe placeholder
+    return { error: 'unserializable_object', redacted: true };
   }
-
-  return cloned;
 }
 
 /**

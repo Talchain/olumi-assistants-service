@@ -17,6 +17,8 @@ const WINDOW_MS = 60_000;
 const MAX_BUCKETS = 10_000;
 // Buckets older than this are considered idle and may be evicted when MAX_BUCKETS is exceeded.
 const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
+// Only prune every N requests to amortize O(n) cost
+const PRUNE_INTERVAL = 100;
 
 type BucketState = {
   count: number;
@@ -24,16 +26,35 @@ type BucketState = {
 };
 
 const ceeDraftBuckets = new Map<string, BucketState>();
+let pruneCounter = 0;
+let oldestKnownTimestamp = Date.now();
 
 function pruneBuckets(map: Map<string, BucketState>, now: number): void {
-  if (map.size <= MAX_BUCKETS) return;
+  // Early exit: skip if under threshold and no old buckets exist
+  if (map.size <= MAX_BUCKETS && now - oldestKnownTimestamp <= MAX_BUCKET_AGE_MS) {
+    return;
+  }
+
+  // Amortize pruning: only run expensive iteration every N calls
+  pruneCounter++;
+  if (pruneCounter < PRUNE_INTERVAL && map.size <= MAX_BUCKETS) {
+    return;
+  }
+  pruneCounter = 0;
+
+  // Track new oldest timestamp during iteration
+  let newOldest = now;
 
   // First pass: drop buckets that have been idle for multiple windows.
   for (const [key, state] of map) {
     if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
       map.delete(key);
+    } else if (state.windowStart < newOldest) {
+      newOldest = state.windowStart;
     }
   }
+
+  oldestKnownTimestamp = newOldest;
 
   if (map.size <= MAX_BUCKETS) return;
 
