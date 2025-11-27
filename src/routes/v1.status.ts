@@ -21,6 +21,7 @@ import { getAdapter } from "../adapters/llm/router.js";
 import { getStorageStats } from "../utils/share-storage.js";
 import { SERVICE_VERSION } from "../version.js";
 import { getPerformanceMetrics } from "../plugins/performance-monitoring.js";
+import { config } from "../config/index.js";
 
 // Track service uptime
 const SERVICE_START_TIME = Date.now();
@@ -174,19 +175,19 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       },
 
       share: {
-        enabled: process.env.SHARE_REVIEW_ENABLED === "true",
+        enabled: config.features.shareReview,
         total_shares: shareStats.total,
         active_shares: shareStats.active,
         revoked_shares: shareStats.revoked,
       },
 
       feature_flags: {
-        grounding: process.env.GROUNDING_ENABLED !== "false",
-        critique: process.env.CRITIQUE_ENABLED !== "false",
-        clarifier: process.env.CLARIFIER_ENABLED !== "false",
-        pii_guard: process.env.PII_GUARD_ENABLED === "true",
-        share_review: process.env.SHARE_REVIEW_ENABLED === "true",
-        prompt_cache: process.env.PROMPT_CACHE_ENABLED === "true",
+        grounding: config.features.grounding,
+        critique: config.features.critique,
+        clarifier: config.features.clarifier,
+        pii_guard: config.features.piiGuard,
+        share_review: config.features.shareReview,
+        prompt_cache: config.promptCache.enabled,
       },
 
       performance: {

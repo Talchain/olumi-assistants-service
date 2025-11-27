@@ -160,6 +160,70 @@ X-Olumi-Timestamp: <unix-timestamp>
 | Success Rate | > 99% |
 | Baseline Load | 1 req/sec |
 
+## Runtime Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Node.js | 20.x LTS | ESM modules, native fetch |
+| pnpm | 8.x+ | Package manager |
+| Redis | 6.x+ | Optional: SSE resume, quotas |
+| PostgreSQL | 14+ | Optional: Prompt store |
+
+## Deployment Topologies
+
+### Single-Node (Development/Small Scale)
+
+```
+┌─────────────────────────────────┐
+│  Single Node                    │
+│  ├─ All features enabled        │
+│  ├─ File-based prompt store     │
+│  └─ In-memory SSE state         │
+└─────────────────────────────────┘
+```
+
+**Safe features:** All CEE, streaming, grounding
+**Limitations:** No SSE resume across restarts, no distributed quotas
+
+### Multi-Node with Redis (Production)
+
+```
+┌─────────────────┐  ┌─────────────────┐
+│  Node 1         │  │  Node 2         │
+│  ├─ Stateless   │  │  ├─ Stateless   │
+│  └─ Redis conn  │  │  └─ Redis conn  │
+└────────┬────────┘  └────────┬────────┘
+         │                    │
+         └──────────┬─────────┘
+                    │
+              ┌─────▼─────┐
+              │   Redis   │
+              │  (State)  │
+              └───────────┘
+```
+
+**Enables:** SSE resume, distributed quotas, prompt cache
+**Required env:** `REDIS_URL`
+
+### Enterprise (Multi-Node + PostgreSQL)
+
+```
+┌────────────┐  ┌────────────┐
+│  Node 1    │  │  Node 2    │
+└─────┬──────┘  └─────┬──────┘
+      └───────┬───────┘
+              │
+    ┌─────────┼─────────┐
+    │         │         │
+┌───▼───┐ ┌───▼───┐ ┌───▼────┐
+│ Redis │ │Postgres│ │ LLM    │
+│(state)│ │(prompts)│ │providers│
+└───────┘ └────────┘ └────────┘
+```
+
+**Enables:** Managed prompts with versioning, A/B experiments, audit logs
+**Required env:** `REDIS_URL`, `DATABASE_URL`, `PROMPTS_STORE_TYPE=postgres`
+
 ## Deployment
 
 Production runs on Render.com with auto-deploy from `main` branch.

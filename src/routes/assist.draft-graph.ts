@@ -1,4 +1,3 @@
-import { env } from "node:process";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -29,6 +28,7 @@ import {
 } from "../utils/degraded-mode.js";
 import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
+import { config } from "../config/index.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -39,17 +39,20 @@ const SSE_HEADERS = {
 } as const;
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
-const DEPRECATION_SUNSET = env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
-const COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
+const DEPRECATION_SUNSET = process.env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
+
+// Lazy config access to avoid module-level initialization issues in tests
+function getCostMaxUsd(): number {
+  return config.graph.costMaxUsd;
+}
 
 /**
  * Dangerous prototype keys that should never be set dynamically
  */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // v1.3.0: Legacy SSE flag (read at request time for testability)
-// Use process.env directly to avoid module-level caching issues in tests
 function isLegacySSEEnabled(): boolean {
-  return process.env.ENABLE_LEGACY_SSE === "true";
+  return config.features.enableLegacySSE;
 }
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
@@ -891,7 +894,7 @@ async function handleSseResponse(
     }
 
     // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
-    const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
+    const guardResult = validateResponse(result.payload.graph, result.cost_usd, getCostMaxUsd());
     if (!guardResult.ok) {
       sseEndState = "error"; // V04: Track SSE end state
       const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
@@ -1041,7 +1044,7 @@ async function handleJsonResponse(
   }
 
   // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
-  const guardResult = validateResponse(result.payload.graph, result.cost_usd, COST_MAX_USD);
+  const guardResult = validateResponse(result.payload.graph, result.cost_usd, getCostMaxUsd());
   if (!guardResult.ok) {
     const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
     emit(TelemetryEvents.GuardViolation, {
@@ -1070,10 +1073,10 @@ async function handleJsonResponse(
 
 export default async function route(app: FastifyInstance) {
   // SSE-specific rate limit (lower than global due to long-running connections)
-  const SSE_RATE_LIMIT_RPM = Number(env.SSE_RATE_LIMIT_RPM) || 20;
+  const SSE_RATE_LIMIT_RPM = config.rateLimits.sseRpm;
   // v1.9: Live resume feature flag and rate limit
-  const SSE_RESUME_LIVE_ENABLED = process.env.SSE_RESUME_LIVE_ENABLED === "true";
-  const SSE_RESUME_LIVE_RPM = Number(env.SSE_RESUME_LIVE_RPM) || SSE_RATE_LIMIT_RPM;
+  const SSE_RESUME_LIVE_ENABLED = config.sse.resumeLiveEnabled;
+  const SSE_RESUME_LIVE_RPM = Number(process.env.SSE_RESUME_LIVE_RPM) || SSE_RATE_LIMIT_RPM;
 
   // Dedicated SSE streaming endpoint with stricter rate limiting
   app.post("/assist/draft-graph/stream", {
