@@ -249,7 +249,6 @@ interface CEEErrorResponseV1 {
 These additional fields are **metadata-only** and never include raw briefs,
 graphs, or LLM text. They are safe for PLoT and UI clients to rely on for
 classification, guidance, and retry decisions.
-
 **Error Code Mapping:**
 
 | Condition | HTTP | Code | Retryable |

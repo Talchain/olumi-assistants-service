@@ -659,7 +659,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   if (hadPrunedNodes) {
     structuralMeta.had_pruned_nodes = true;
   }
-
   const nodeCount = Array.isArray((candidate as any).nodes) ? (candidate as any).nodes.length : 0;
   const edgeCount = Array.isArray((candidate as any).edges) ? (candidate as any).edges.length : 0;
 
