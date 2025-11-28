@@ -250,6 +250,56 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     });
   });
 
+  it("rejects empty graphs from pipeline as CEE_GRAPH_INVALID with telemetry context", async () => {
+    const emptyGraph = {
+      version: "1",
+      default_seed: 17,
+      nodes: [],
+      edges: [],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+    } as any;
+
+    runDraftGraphPipelineMock.mockResolvedValueOnce({
+      kind: "success",
+      payload: {
+        graph: emptyGraph,
+        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
+        rationales: [],
+        confidence: 0.8,
+        issues: [],
+      },
+      cost_usd: 0.01,
+      provider: "fixtures",
+      model: "fixture-v1",
+    });
+
+    // Guard should see ok=true so that the empty-graph invariant handles it
+    validateResponseMock.mockReturnValueOnce({ ok: true });
+
+    const input = makeInput();
+    const req = makeRequest();
+
+    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
+    const error = body as any;
+
+    expect(statusCode).toBe(400);
+    expect(error.schema).toBe("cee.error.v1");
+    expect(error.code).toBe("CEE_GRAPH_INVALID");
+    expect(error.retryable).toBe(false);
+    expect(error.details).toMatchObject({
+      reason: "empty_graph",
+      node_count: 0,
+      edge_count: 0,
+    });
+
+    const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
+    expect(failedEvents.length).toBe(1);
+    expect(failedEvents[0].data.error_code).toBe("CEE_GRAPH_INVALID");
+    expect(failedEvents[0].data.http_status).toBe(400);
+    expect(failedEvents[0].data.graph_nodes).toBe(0);
+    expect(failedEvents[0].data.graph_edges).toBe(0);
+  });
+
   it("maps upstream timeout errors to CEE_TIMEOUT and emits failed telemetry", async () => {
     const input = makeInput();
     const req = makeRequest();

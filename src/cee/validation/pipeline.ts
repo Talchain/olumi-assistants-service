@@ -209,10 +209,14 @@ export async function finaliseCeeDraftResponse(
       retryable = true;
     } else {
       switch (envelope.code) {
-        case "BAD_INPUT":
-          ceeCode = "CEE_VALIDATION_FAILED";
+        case "BAD_INPUT": {
+          const reason = (envelope.details as any)?.reason;
+          // Empty draft graphs are treated as graph-level validation errors
+          // so that CEE surfaces CEE_GRAPH_INVALID with reason "empty_graph".
+          ceeCode = reason === "empty_graph" ? "CEE_GRAPH_INVALID" : "CEE_VALIDATION_FAILED";
           retryable = false;
           break;
+        }
         case "RATE_LIMITED":
           ceeCode = "CEE_RATE_LIMIT";
           retryable = true;
@@ -259,8 +263,53 @@ export async function finaliseCeeDraftResponse(
     structural_meta?: StructuralMeta;
   };
 
+  const graph = payload.graph as GraphV1 | undefined;
+  const nodeCount = Array.isArray(graph?.nodes) ? graph!.nodes.length : 0;
+  const edgeCount = Array.isArray(graph?.edges) ? graph!.edges.length : 0;
+
+  // Hard invariant: a successful CEE draft response must include a non-empty graph
+  if (!graph || nodeCount === 0) {
+    const latencyMs = Date.now() - start;
+    const ceeCode: CEEErrorCode = "CEE_GRAPH_INVALID";
+
+    emit(TelemetryEvents.CeeDraftGraphFailed, {
+      request_id: requestId,
+      latency_ms: latencyMs,
+      error_code: ceeCode,
+      http_status: 400,
+      graph_nodes: nodeCount,
+      graph_edges: edgeCount,
+    });
+
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs,
+      status: "error",
+      errorCode: ceeCode,
+      httpStatus: 400,
+      anyTruncated: false,
+      hasValidationIssues: true,
+    });
+
+    return {
+      statusCode: 400,
+      body: buildCeeErrorResponse(ceeCode, "Draft graph is empty; unable to construct model", {
+        retryable: false,
+        requestId,
+        details: {
+          reason: "empty_graph",
+          node_count: nodeCount,
+          edge_count: edgeCount,
+        },
+      }),
+    };
+  }
+
   // Post-response guard: graph caps and cost (CEE must honour the same limits)
-  const guardResult = validateResponse(payload.graph, cost_usd, COST_MAX_USD);
+  const guardResult = (graph
+    ? validateResponse(graph as any, cost_usd, COST_MAX_USD)
+    : { ok: true }) as ReturnType<typeof validateResponse>;
   if (!guardResult.ok) {
     const violation = guardResult.violation;
 
@@ -276,18 +325,24 @@ export async function finaliseCeeDraftResponse(
       details: violation.details as Record<string, unknown> | undefined,
     };
 
+    const latencyMs = Date.now() - start;
+
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
-      latency_ms: Date.now() - start,
+      latency_ms: latencyMs,
       error_code: ceeCode,
       http_status: 400,
+      graph_nodes: nodeCount,
+      graph_edges: edgeCount,
     });
     logCeeCall({
       requestId,
       capability: "cee_draft_graph",
-      latencyMs: Date.now() - start,
+      latencyMs,
       status: "error",
       errorCode: ceeCode,
+      anyTruncated: false,
+      hasValidationIssues: true,
       httpStatus: 400,
     });
 
@@ -382,7 +437,7 @@ export async function finaliseCeeDraftResponse(
   }
 
   const quality: CEEQualityMeta = computeQuality({
-    graph: payload.graph,
+    graph,
     confidence,
     engineIssueCount,
     ceeIssues: validationIssues,
@@ -401,7 +456,7 @@ export async function finaliseCeeDraftResponse(
 
   if (structuralWarningsEnabled()) {
     const structural = detectStructuralWarnings(
-      payload.graph as GraphV1 | undefined,
+      graph,
       structural_meta,
     );
 
@@ -460,8 +515,8 @@ export async function finaliseCeeDraftResponse(
     request_id: requestId,
     latency_ms: latencyMs,
     quality_overall: quality.overall,
-    graph_nodes: Array.isArray(payload.graph?.nodes) ? payload.graph.nodes.length : 0,
-    graph_edges: Array.isArray(payload.graph?.edges) ? payload.graph.edges.length : 0,
+    graph_nodes: nodeCount,
+    graph_edges: edgeCount,
     has_validation_issues: hasValidationIssues,
     any_truncated: anyTruncated,
     draft_warning_count: draftWarningCount,
