@@ -279,6 +279,12 @@ The finaliser maps key failure modes as follows:
   - `code: "CEE_GRAPH_INVALID"` for `CAP_EXCEEDED` / `INVALID_COST`,
     else `"CEE_VALIDATION_FAILED"`.
   - `details.guard_violation` plus `details.validation_issues`.
+- **Empty draft graph**
+  - Trigger: draft pipeline reports `kind: "success"` but the final graph has zero nodes after validation/repair.
+  - HTTP: `400`.
+  - `code: "CEE_GRAPH_INVALID"`, `retryable: false`.
+  - `details.reason === "empty_graph"` and `details.node_count` / `details.edge_count` are populated for debugging and telemetry.
+  - This is a hard invariant: CEE **never** returns a successful `CEEDraftGraphResponseV1` with an empty graph.
 - **Bad input / validation**
   - Underlying `BAD_INPUT` → `CEE_VALIDATION_FAILED` (400, not retryable).
 - **Rate limited**
@@ -469,6 +475,37 @@ The JSON fixture models a small, self-contained bundle combining
 `CeeDecisionReviewPayload`, `CeeTraceSummary`, `CeeEngineStatus`, and an
 optional `CeeErrorView`. It is safe to copy/clone into engine or UI repos as a
 starting point when sketching a `ceeReview`-style contract.
+
+## 4. Troubleshooting empty draft graphs
+
+This section describes how to recognise and investigate the hard invariant that
+CEE never returns a successful draft graph with zero nodes.
+
+- **What clients see**
+  - `/assist/v1/draft-graph` returns HTTP `400`.
+  - Envelope is a CEE error with `code: "CEE_GRAPH_INVALID"` and
+    `retryable: false`.
+  - `error.details.reason === "empty_graph"`.
+  - `error.details.node_count` and `error.details.edge_count` are populated for
+    quick inspection in logs and dashboards.
+- **Telemetry to inspect**
+  - `CeeDraftGraphFailed` event emitted by the finaliser includes
+    `graph_nodes`, `graph_edges` and the `empty_graph` context.
+  - Legacy `/assist/draft-graph` emits a `GuardViolation` /
+    `assist.draft.guard_violation` event with `reason: "empty_graph"` so that
+    empty-graph incidents are visible for both legacy and CEE callers.
+- **Logs to inspect**
+  - `logCeeCall` entries for the request have `status = "error"` and
+    `errorCode = "CEE_GRAPH_INVALID"`.
+  - Graph node/edge counts are included in the log payload, helping separate
+    empty graphs from other validation/guard failures.
+- **Typical remediation steps**
+  - Inspect upstream LLM adapter prompts/fixtures that produced an empty graph
+    and tighten prompts or fixtures as needed.
+  - Check external graph validation rules to ensure they are not unexpectedly
+    normalising to an empty graph.
+  - Confirm that any intermediate repair/stabilisation logic is not dropping
+    all nodes/edges due to overly strict filters.
 
 These fixtures are examples only; the live contract remains the combination of
 OpenAPI, the CEE v1 guide, and the TypeScript SDK types.

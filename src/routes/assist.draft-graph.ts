@@ -626,6 +626,29 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     structuralMeta.had_pruned_nodes = true;
   }
 
+  const nodeCount = Array.isArray((candidate as any).nodes) ? (candidate as any).nodes.length : 0;
+  const edgeCount = Array.isArray((candidate as any).edges) ? (candidate as any).edges.length : 0;
+
+  if (nodeCount === 0) {
+    emit(TelemetryEvents.GuardViolation, {
+      violation_type: "empty_graph",
+    });
+
+    return {
+      kind: "error",
+      statusCode: 400,
+      envelope: buildError(
+        "BAD_INPUT",
+        "Draft graph is empty after validation and repair",
+        {
+          reason: "empty_graph",
+          node_count: nodeCount,
+          edge_count: edgeCount,
+        },
+      ),
+    };
+  }
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
