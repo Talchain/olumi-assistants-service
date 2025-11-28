@@ -25,6 +25,11 @@ import {
   type CeeIntegrationReviewBundle,
   classifyCeeQuality,
   type CeeQualityBand,
+  getCeeErrorCategory,
+  type CeeErrorCategory,
+  isCeeEmptyGraphError,
+  getCeeRecoveryHints,
+  shouldRetry,
   buildCeeBiasStructureSnapshot,
   buildCeeCausalValidationStats,
   buildCeeDecisionHealthSnapshot,
@@ -324,6 +329,121 @@ describe("ceeHelpers", () => {
 
     expect(view.suggestedAction).toBe("fail");
     expect(view.retryable).toBe(false);
+  });
+
+  it("classifies CEE_GRAPH_INVALID empty-graph errors and detects them via helper", () => {
+    const body: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_GRAPH_INVALID" as any,
+      message: "Draft graph is empty",
+      details: {
+        cee_code: "CEE_GRAPH_INVALID",
+        cee_retryable: false,
+        reason: "empty_graph",
+        node_count: 0,
+        edge_count: 0,
+      },
+    };
+
+    const err = new OlumiAPIError(400, body);
+    const category: CeeErrorCategory = getCeeErrorCategory(err);
+
+    expect(category).toBe("empty_graph");
+    expect(isCeeEmptyGraphError(err)).toBe(true);
+    expect(shouldRetry(err)).toBe(false);
+  });
+
+  it("classifies CEE_GRAPH_INVALID incomplete-structure errors distinctly", () => {
+    const body: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_GRAPH_INVALID" as any,
+      message: "Graph does not meet minimum structure requirements",
+      details: {
+        cee_code: "CEE_GRAPH_INVALID",
+        cee_retryable: false,
+        reason: "incomplete_structure",
+        missing_kinds: ["goal"],
+      },
+    };
+
+    const err = new OlumiAPIError(400, body);
+    const category: CeeErrorCategory = getCeeErrorCategory(err);
+
+    expect(category).toBe("incomplete_structure");
+    expect(isCeeEmptyGraphError(err)).toBe(false);
+    expect(shouldRetry(err)).toBe(false);
+  });
+
+  it("exposes recovery hints when present on the error details", () => {
+    const body: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_GRAPH_INVALID" as any,
+      message: "Draft graph is empty",
+      details: {
+        cee_code: "CEE_GRAPH_INVALID",
+        reason: "empty_graph",
+        recovery: {
+          suggestion: "Add more detail to your decision brief before drafting a model.",
+          hints: [
+            "State the specific decision you are trying to make.",
+            "List 2-3 concrete options you are considering.",
+          ],
+          example: "Should we build in-house or outsource?",
+        },
+      },
+    };
+
+    const err = new OlumiAPIError(400, body);
+    const hints = getCeeRecoveryHints(err);
+
+    expect(hints).toBeDefined();
+    expect(hints?.suggestion).toContain("Add more detail");
+    expect(hints?.hints && hints.hints.length).toBeGreaterThan(0);
+    expect(hints?.example).toContain("build in-house or outsource");
+  });
+
+  it("classifies rate/availability errors and aligns shouldRetry with retryable hints", () => {
+    const rateLimitedBody: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_RATE_LIMIT" as any,
+      message: "CEE rate limit",
+      details: { cee_code: "CEE_RATE_LIMIT", cee_retryable: true },
+    };
+    const rateErr = new OlumiAPIError(429, rateLimitedBody);
+    expect(getCeeErrorCategory(rateErr)).toBe("rate_limit");
+    expect(shouldRetry(rateErr)).toBe(true);
+
+    const timeoutBody: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_TIMEOUT" as any,
+      message: "CEE timeout",
+      details: { cee_code: "CEE_TIMEOUT", cee_retryable: true },
+    };
+    const timeoutErr = new OlumiAPIError(504, timeoutBody);
+    expect(getCeeErrorCategory(timeoutErr)).toBe("timeout");
+    expect(shouldRetry(timeoutErr)).toBe(true);
+
+    const svcBody: ErrorResponse = {
+      schema: "error.v1",
+      code: "CEE_SERVICE_UNAVAILABLE" as any,
+      message: "CEE unavailable",
+      details: { cee_code: "CEE_SERVICE_UNAVAILABLE", cee_retryable: true },
+    };
+    const svcErr = new OlumiAPIError(503, svcBody);
+    expect(getCeeErrorCategory(svcErr)).toBe("service_unavailable");
+    expect(shouldRetry(svcErr)).toBe(true);
+  });
+
+  it("classifies generic 429 errors as rate_limit and recommends retry", () => {
+    const body: ErrorResponse = {
+      schema: "error.v1",
+      code: "RATE_LIMITED",
+      message: "Too many requests",
+    };
+
+    const err = new OlumiAPIError(429, body);
+    expect(getCeeErrorCategory(err)).toBe("rate_limit");
+    expect(shouldRetry(err)).toBe(true);
   });
 
   it("builds a coherent decision story from draft + options + evidence + bias + team", () => {

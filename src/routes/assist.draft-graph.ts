@@ -505,6 +505,40 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   });
   emit(TelemetryEvents.Stage, { stage: "llm_complete", nodes: graph.nodes.length, edges: graph.edges.length, duration_ms: llmDuration });
 
+  const initialNodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
+  const initialEdgeCount = Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0;
+
+  if (initialNodeCount === 0) {
+    emit(TelemetryEvents.GuardViolation, {
+      violation_type: "empty_graph",
+    });
+
+    return {
+      kind: "error",
+      statusCode: 400,
+      envelope: buildError(
+        "BAD_INPUT",
+        "Draft graph is empty after validation and repair",
+        {
+          reason: "empty_graph",
+          node_count: initialNodeCount,
+          edge_count: initialEdgeCount,
+          cee_error_code: "CEE_GRAPH_INVALID",
+          recovery: {
+            suggestion: "Add more detail to your decision brief before drafting a model.",
+            hints: [
+              "State the specific decision you are trying to make (e.g., 'Should we X or Y?')",
+              "List 2-3 concrete options you are considering.",
+              "Describe what success looks like for this decision (key outcomes or KPIs).",
+            ],
+            example:
+              "We need to decide whether to build the feature in-house or outsource it. Options are: hire contractors, use an agency, or build with the current team. Success means launching within 3 months under $50k.",
+          },
+        },
+      ),
+    };
+  }
+
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
 
@@ -644,6 +678,17 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           reason: "empty_graph",
           node_count: nodeCount,
           edge_count: edgeCount,
+          cee_error_code: "CEE_GRAPH_INVALID",
+          recovery: {
+            suggestion: "Add more detail to your decision brief before drafting a model.",
+            hints: [
+              "State the specific decision you are trying to make (e.g., 'Should we X or Y?')",
+              "List 2-3 concrete options you are considering.",
+              "Describe what success looks like for this decision (key outcomes or KPIs).",
+            ],
+            example:
+              "We need to decide whether to build the feature in-house or outsource it. Options are: hire contractors, use an agency, or build with the current team. Success means launching within 3 months under $50k.",
+          },
         },
       ),
     };
@@ -920,7 +965,17 @@ async function handleSseResponse(
     const guardResult = validateResponse(result.payload.graph, result.cost_usd, getCostMaxUsd());
     if (!guardResult.ok) {
       sseEndState = "error"; // V04: Track SSE end state
-      const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
+      const violation = guardResult.violation;
+      const baseDetails = (violation.details ?? {}) as Record<string, unknown>;
+      const ceeErrorCode =
+        violation.code === "CAP_EXCEEDED" || violation.code === "INVALID_COST"
+          ? "CEE_GRAPH_INVALID"
+          : "CEE_VALIDATION_FAILED";
+      const guardError = buildError("BAD_INPUT", violation.message, {
+        ...baseDetails,
+        cee_error_code: ceeErrorCode,
+        guard_violation_code: violation.code,
+      });
       const payloadWithTelemetry = await withBufferTrimTelemetry(guardError);
       const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
       const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
@@ -1069,7 +1124,17 @@ async function handleJsonResponse(
   // Post-response guard: validate graph caps and cost (JSON↔SSE parity requirement)
   const guardResult = validateResponse(result.payload.graph, result.cost_usd, getCostMaxUsd());
   if (!guardResult.ok) {
-    const guardError = buildError("BAD_INPUT", guardResult.violation.message, guardResult.violation.details);
+    const violation = guardResult.violation;
+    const baseDetails = (violation.details ?? {}) as Record<string, unknown>;
+    const ceeErrorCode =
+      violation.code === "CAP_EXCEEDED" || violation.code === "INVALID_COST"
+        ? "CEE_GRAPH_INVALID"
+        : "CEE_VALIDATION_FAILED";
+    const guardError = buildError("BAD_INPUT", violation.message, {
+      ...baseDetails,
+      cee_error_code: ceeErrorCode,
+      guard_violation_code: violation.code,
+    });
     emit(TelemetryEvents.GuardViolation, {
       violation_code: guardResult.violation.code,
       violation_message: guardResult.violation.message,

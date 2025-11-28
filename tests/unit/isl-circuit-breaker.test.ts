@@ -192,12 +192,13 @@ describe('ISL Circuit Breaker', () => {
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
-    expect(openedLog[0]).toMatchObject({
+    const openedLogEntry = openedLog as any;
+    expect(openedLogEntry[0]).toMatchObject({
       event: 'isl.circuit_breaker.opened',
       consecutive_failures: CIRCUIT_BREAKER_THRESHOLD,
       pause_ms: CIRCUIT_BREAKER_PAUSE_MS,
     });
-    expect(openedLog[0].resume_at).toBeDefined();
+    expect(openedLogEntry[0].resume_at).toBeDefined();
   });
 
   it('should skip ISL calls when circuit is open and log circuit_open event', async () => {
@@ -232,7 +233,8 @@ describe('ISL Circuit Breaker', () => {
       (call: any) => call[0]?.event === 'cee.bias.causal_validation.circuit_open'
     );
     expect(circuitOpenLog).toBeDefined();
-    expect(circuitOpenLog[0]).toMatchObject({
+    const circuitOpenLogEntry = circuitOpenLog as any;
+    expect(circuitOpenLogEntry[0]).toMatchObject({
       event: 'cee.bias.causal_validation.circuit_open',
       reason: 'Circuit breaker paused due to consecutive failures',
     });
@@ -290,7 +292,8 @@ describe('ISL Circuit Breaker', () => {
       (call: any) => call[0]?.event === 'isl.circuit_breaker.closed'
     );
     expect(closedLog).toBeDefined();
-    expect(closedLog[0]).toMatchObject({
+    const closedLogEntry = closedLog as any;
+    expect(closedLogEntry[0]).toMatchObject({
       event: 'isl.circuit_breaker.closed',
       pause_duration_ms: CIRCUIT_BREAKER_PAUSE_MS,
     });
@@ -358,7 +361,8 @@ describe('ISL Circuit Breaker', () => {
       (call: any) => call[0]?.event === 'isl.circuit_breaker.reset'
     );
     expect(resetLog).toBeDefined();
-    expect(resetLog[0]).toMatchObject({
+    const resetLogEntry = resetLog as any;
+    expect(resetLogEntry[0]).toMatchObject({
       event: 'isl.circuit_breaker.reset',
       previous_failures: 2,
     });
@@ -430,7 +434,8 @@ describe('ISL Circuit Breaker', () => {
       (call: any) => call[0]?.event === 'isl.circuit_breaker.opened'
     );
     expect(openedLog).toBeDefined();
-    expect(openedLog[0]).toMatchObject({
+    const openedLogEntry = openedLog as any;
+    expect(openedLogEntry[0]).toMatchObject({
       event: 'isl.circuit_breaker.opened',
       consecutive_failures: CIRCUIT_BREAKER_THRESHOLD,
     });

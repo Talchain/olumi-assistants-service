@@ -118,8 +118,24 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
         - **Structural confirmation bias** when one option has explicit risks/outcomes connected while alternatives have none.
         - **Structural sunk cost bias** when a single option has multiple attached actions consistent with “keep investing in the current path”.
       - These detectors are additive and **opt-in by env flag**; turning them off does not change existing non-structural findings.
-    - `response_limits: { bias_findings_max, bias_findings_truncated }`.
-    - `guidance?: CEEGuidanceV1` – shared guidance block for this endpoint.
+  - `response_limits: { bias_findings_max, bias_findings_truncated }`.
+  - `guidance?: CEEGuidanceV1` – shared guidance block for this endpoint.
+
+  **How to interpret bias & blind-spots (for UI/engine):**
+
+  - Treat `bias_findings` as **cues for review**, not hard blockers. A high
+    severity finding plus structural issues should typically drive a
+    "Use with caution" banner rather than an outright failure.
+  - Use `guidance` and the SDK helpers
+    (`buildCeeBiasStructureSnapshot`, `buildCeeCausalValidationStats`,
+    `buildCeeDecisionHealthSnapshot`) to surface **metadata-only badges** such as
+    "Structural warnings", "Causal validation", or "Potential confirmation bias".
+  - A reasonable rule of thumb:
+    - When findings are mostly `info`/`warning`, suggest "Consider gathering more
+      evidence" or "Review biases before deciding".
+    - When there are multiple `error`-level findings or strong structural
+      signals (e.g. systematic missing options), show a stronger caution state
+      and encourage **additional research or team review** before committing.
 
 - **Options Helper**
   - `POST /assist/v1/options`
@@ -164,14 +180,13 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
      - Non-positive or invalid weights (e.g. `0`, negative, `NaN`, `Infinity`) are treated as `0` for weighting purposes (no influence), but still count towards `participant_count`.
 
 - **CEE Errors (all endpoints)**
-  - Schema: `CEEErrorResponseV1`.
-  - Keys:
-    - `schema: "cee.error.v1"`
-    - `code: CEEErrorCode` (e.g. `CEE_TIMEOUT`, `CEE_RATE_LIMIT`, `CEE_GRAPH_INVALID`, `CEE_VALIDATION_FAILED`, `CEE_INTERNAL_ERROR`, `CEE_ENGINE_DEGRADED`, `CEE_REPRO_MISMATCH`, `CEE_SERVICE_UNAVAILABLE`).
-    - `message: string` (sanitised, no PII).
-    - `retryable?: boolean`
-    - `trace?: CEETraceMeta`
-    - `details?: Record<string, unknown>`
+  - Schema: `CEEErrorResponseV1` (see CEE-spec §4.4 for the full interface).
+  - On the wire, errors follow the flattened OlumiErrorV1-style shape:
+    - Core fields: `schema: "cee.error.v1"`, `code`, `message`, `retryable`.
+    - Olumi metadata: `source: "cee"`, `request_id`, optional `degraded`.
+    - Domain hints (metadata-only): `reason`, `recovery`, `node_count`, `edge_count`, `missing_kinds`.
+    - Back-compat: `trace` and `details` remain populated; `details` mirrors the key hints above for older clients.
+  - Error code mapping and retryability are centralised in the finaliser; see CEE-spec §2.3 & §4.4 for the canonical table.
 
 ### 1.1 Response caps and `response_limits`
 
@@ -511,15 +526,30 @@ These fixtures are examples only; the live contract remains the combination of
 OpenAPI, the CEE v1 guide, and the TypeScript SDK types.
 
 For backoff and retry policies, you can centralise logic on
-`isRetryableCEEError(error)` which understands:
+`isRetryableCEEError(error)` (low-level) and `shouldRetry(error)` (high-level)
+which understand:
 
-- `OlumiNetworkError` (always retryable).
+- `OlumiNetworkError` (always retryable at the transport level).
 - `OlumiAPIError` when:
   - HTTP status is `429`.
   - CEE error `code === "CEE_RATE_LIMIT"`.
   - The server marks a CEE error as retryable via `retryable` / `cee_retryable`.
     - In practice this covers cases such as `CEE_TIMEOUT` and
       `CEE_SERVICE_UNAVAILABLE` where the finaliser sets `retryable: true`.
+
+Additional SDK helpers for error handling:
+
+- `getCeeErrorCategory(error)` → maps errors into coarse categories such as
+  `empty_graph`, `incomplete_structure`, `validation`, `rate_limit`, `timeout`,
+  `service_unavailable`, `internal`, `network`, etc. Backed by CEE error codes
+  and the `reason` field.
+- `isCeeEmptyGraphError(error)` → returns `true` only for the
+  `CEE_GRAPH_INVALID` + `reason === "empty_graph"` invariant on the draft
+  endpoint.
+- `getCeeRecoveryHints(error)` → extracts structured recovery guidance from
+  `recovery` (when present): `suggestion`, `hints[]`, optional `example`.
+- `shouldRetry(error)` → small wrapper over `buildCeeErrorViewModel` that
+  returns `true` when the suggested action is `"retry"` and `false` otherwise.
 
 ### 3.4 How to interpret CEE at a glance
 

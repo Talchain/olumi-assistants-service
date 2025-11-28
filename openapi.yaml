@@ -1548,6 +1548,44 @@ components:
         message:
           type: string
           description: Human-readable error message
+        source:
+          type: string
+          description: Logical source of the error (always "cee" for CEE endpoints)
+        request_id:
+          type: string
+          description: Stable request identifier for tracing and support
+        degraded:
+          type: boolean
+          description: True when CEE or its dependencies are operating in degraded mode
+        reason:
+          type: string
+          description: Short machine-friendly reason code (e.g. "empty_graph", "incomplete_structure")
+        recovery:
+          type: object
+          description: High-level guidance on how to fix input or proceed
+          properties:
+            suggestion:
+              type: string
+              description: Single high-level suggestion for the user
+            hints:
+              type: array
+              description: Concrete, short hints for remediation
+              items:
+                type: string
+            example:
+              type: string
+              description: Optional example brief or graph description
+        node_count:
+          type: integer
+          description: Graph node count when relevant to the error
+        edge_count:
+          type: integer
+          description: Graph edge count when relevant to the error
+        missing_kinds:
+          type: array
+          description: Node kinds missing from the graph for minimum-structure enforcement
+          items:
+            type: string
         retryable:
           type: boolean
           description: Whether the client may safely retry this request
