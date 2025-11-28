@@ -406,3 +406,193 @@ describe("POST /assist/critique-graph (Edge Cases)", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+describe("POST /assist/critique-graph (Patch Lint - v1.4.0)", () => {
+  let app: ReturnType<typeof Fastify>;
+
+  const validGraph = {
+    version: "1",
+    default_seed: 42,
+    nodes: [
+      { id: "goal_1", kind: "goal", label: "Increase revenue" },
+      { id: "dec_1", kind: "decision", label: "Pricing strategy" },
+    ],
+    edges: [
+      { from: "goal_1", to: "dec_1" },
+    ],
+  };
+
+  beforeAll(async () => {
+    app = Fastify();
+    await critiqueRoute(app);
+  });
+
+  it("accepts critique with valid patch", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [{ id: "opt_a", kind: "option", label: "Premium pricing", provenance: ["llm"] }],
+            edges: [{ from: "dec_1", to: "opt_a", provenance: ["llm"] }],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    if (res.statusCode !== 200) {
+      console.log("Error response:", res.body);
+    }
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.issues).toBeDefined();
+  });
+
+  it("returns patch lint issues for duplicate node additions", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [{ id: "goal_1", kind: "goal", label: "Duplicate", provenance: ["user"] }],
+            edges: [],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.issues).toBeDefined();
+
+    // Should contain patch lint issue about duplicate
+    const duplicateIssue = body.issues.find((i: any) =>
+      i.note.includes("already exists") && i.level === "BLOCKER"
+    );
+    expect(duplicateIssue).toBeDefined();
+  });
+
+  it("returns patch lint issues for invalid edge references", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [],
+            edges: [{ from: "nonexistent", to: "goal_1", provenance: ["llm"] }],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // Should contain issue about non-existent source node
+    const edgeIssue = body.issues.find((i: any) =>
+      i.note.includes("non-existent") && i.level === "BLOCKER"
+    );
+    expect(edgeIssue).toBeDefined();
+  });
+
+  it("returns patch lint issues for missing provenance", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [{ id: "opt_a", kind: "option", label: "Option A" }],
+            edges: [],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // Should contain improvement issue about missing provenance
+    const provIssue = body.issues.find((i: any) =>
+      i.note.includes("missing provenance") && i.level === "IMPROVEMENT"
+    );
+    expect(provIssue).toBeDefined();
+  });
+
+  it("combines patch lint issues with LLM critique issues", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [{ id: "goal_1", kind: "goal", label: "Duplicate" }], // Duplicate + missing provenance
+            edges: [],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // Should have both patch lint issues and potentially LLM issues
+    expect(body.issues.length).toBeGreaterThan(0);
+
+    // Should contain BLOCKER for duplicate
+    const blockerIssues = body.issues.filter((i: any) => i.level === "BLOCKER");
+    expect(blockerIssues.length).toBeGreaterThan(0);
+  });
+
+  it("maintains deterministic issue ordering with patch issues", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+        patch: {
+          adds: {
+            nodes: [
+              { id: "opt_a", kind: "option", label: "A" }, // Missing provenance (IMPROVEMENT)
+              { id: "goal_1", kind: "goal", label: "Dup", provenance: ["user"] }, // Duplicate (BLOCKER)
+            ],
+            edges: [],
+          },
+          updates: [],
+          removes: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // BLOCKERs should come before IMPROVEMENTs
+    if (body.issues.length > 1) {
+      const firstBlockerIndex = body.issues.findIndex((i: any) => i.level === "BLOCKER");
+      const firstImprovementIndex = body.issues.findIndex((i: any) => i.level === "IMPROVEMENT");
+
+      if (firstBlockerIndex >= 0 && firstImprovementIndex >= 0) {
+        expect(firstBlockerIndex).toBeLessThan(firstImprovementIndex);
+      }
+    }
+  });
+});

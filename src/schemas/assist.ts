@@ -119,6 +119,16 @@ export const ClarifyBriefOutput = z.object({
 export const CritiqueGraphInput = z.object({
   graph: Graph,
   brief: z.string().min(30).max(5000).optional(),
+  patch: z
+    .object({
+      adds: z.object({
+        nodes: z.array(z.any()).default([]),
+        edges: z.array(z.any()).default([])
+      }).default({ nodes: [], edges: [] }),
+      updates: z.array(z.any()).default([]),
+      removes: z.array(z.string()).default([])
+    })
+    .optional(),
   attachments: z
     .array(
       z.object({
