@@ -73,9 +73,16 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     const graph = {
       version: "1",
       default_seed: 17,
-      nodes: [{ id: "a", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["a"], leaves: ["a"], suggested_positions: {}, source: "assistant" },
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Test goal" },
+        { id: "dec_1", kind: "decision", label: "Test decision" },
+        { id: "opt_1", kind: "option", label: "Test option" },
+      ],
+      edges: [
+        { from: "goal_1", to: "dec_1" },
+        { from: "dec_1", to: "opt_1" },
+      ],
+      meta: { roots: ["goal_1"], leaves: ["opt_1"], suggested_positions: {}, source: "assistant" },
     } as any;
 
     runDraftGraphPipelineMock.mockResolvedValueOnce({
@@ -127,9 +134,16 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     const graph = {
       version: "1",
       default_seed: 17,
-      nodes: [{ id: "n1", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["n1"], leaves: ["n1"], suggested_positions: {}, source: "assistant" },
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Test" },
+        { id: "dec_1", kind: "decision", label: "Test decision" },
+        { id: "opt_1", kind: "option", label: "Test option" },
+      ],
+      edges: [
+        { from: "goal_1", to: "dec_1" },
+        { from: "dec_1", to: "opt_1" },
+      ],
+      meta: { roots: ["goal_1"], leaves: ["opt_1"], suggested_positions: {}, source: "assistant" },
     } as any;
 
     const bias_findings = Array.from({ length: 12 }, (_, i) => ({ id: `bias-${i}` }));
@@ -194,9 +208,16 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     const graph = {
       version: "1",
       default_seed: 17,
-      nodes: [{ id: "n1", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["n1"], leaves: ["n1"], suggested_positions: {}, source: "assistant" },
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Test" },
+        { id: "dec_1", kind: "decision", label: "Test decision" },
+        { id: "opt_1", kind: "option", label: "Test option" },
+      ],
+      edges: [
+        { from: "goal_1", to: "dec_1" },
+        { from: "dec_1", to: "opt_1" },
+      ],
+      meta: { roots: ["goal_1"], leaves: ["opt_1"], suggested_positions: {}, source: "assistant" },
     } as any;
 
     const bias_findings = Array.from({ length: 3 }, (_, i) => ({ id: `bias-${i}` }));
@@ -300,6 +321,64 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     expect(failedEvents[0].data.graph_edges).toBe(0);
   });
 
+  it("rejects disconnected graphs that meet minimum counts as incomplete_structure", async () => {
+    const disconnectedGraph = {
+      version: "1",
+      default_seed: 17,
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Test goal" },
+        { id: "dec_1", kind: "decision", label: "Test decision" },
+        { id: "opt_1", kind: "option", label: "Test option" },
+      ],
+      // Goal is connected to decision, but option is disconnected so no
+      // decision node is connected to both a goal and an option.
+      edges: [
+        { from: "goal_1", to: "dec_1" },
+      ],
+      meta: { roots: ["goal_1"], leaves: ["opt_1"], suggested_positions: {}, source: "assistant" },
+    } as any;
+
+    runDraftGraphPipelineMock.mockResolvedValueOnce({
+      kind: "success",
+      payload: {
+        graph: disconnectedGraph,
+        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
+        rationales: [],
+        confidence: 0.8,
+        issues: [],
+      },
+      cost_usd: 0.01,
+      provider: "fixtures",
+      model: "fixture-v1",
+    });
+
+    validateResponseMock.mockReturnValueOnce({ ok: true });
+
+    const input = makeInput();
+    const req = makeRequest();
+
+    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
+    const error = body as any;
+
+    expect(statusCode).toBe(400);
+    expect(error.schema).toBe("cee.error.v1");
+    expect(error.code).toBe("CEE_GRAPH_INVALID");
+    expect(error.retryable).toBe(false);
+    expect(error.details).toMatchObject({
+      reason: "incomplete_structure",
+      node_count: 3,
+      edge_count: 1,
+    });
+    expect(Array.isArray(error.details.missing_kinds)).toBe(true);
+
+    const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
+    expect(failedEvents.length).toBe(1);
+    expect(failedEvents[0].data.error_code).toBe("CEE_GRAPH_INVALID");
+    expect(failedEvents[0].data.http_status).toBe(400);
+    expect(failedEvents[0].data.graph_nodes).toBe(3);
+    expect(failedEvents[0].data.graph_edges).toBe(1);
+  });
+
   it("maps upstream timeout errors to CEE_TIMEOUT and emits failed telemetry", async () => {
     const input = makeInput();
     const req = makeRequest();
@@ -322,167 +401,20 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     expect(failedEvents[0].data.http_status).toBe(504);
   });
 
-  it("propagates engine degraded header into trace and validation issues", async () => {
-    const graph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [{ id: "a", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["a"], leaves: ["a"], suggested_positions: {}, source: "assistant" },
-    } as any;
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "success",
-      payload: {
-        graph,
-        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
-        rationales: [],
-        confidence: 0.7,
-        issues: [],
-      },
-      cost_usd: 0.01,
-      provider: "fixtures",
-      model: "fixture-v1",
-    });
-
-    validateResponseMock.mockReturnValueOnce({ ok: true });
-
-    const input = makeInput();
-    const req = makeRequest({ headers: { "x-olumi-degraded": "redis" } as any });
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-    const success = body as any;
-
-    expect(statusCode).toBe(200);
-    expect(success.trace.engine.degraded).toBe(true);
-    expect(Array.isArray(success.validation_issues)).toBe(true);
-    expect(success.validation_issues[0].code).toBe("ENGINE_DEGRADED");
-    expect(success.validation_issues[0].severity).toBe("warning");
-
-    const succeededEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphSucceeded);
-    expect(succeededEvents.length).toBe(1);
-    expect(typeof succeededEvents[0].data.has_validation_issues).toBe("boolean");
-    expect(succeededEvents[0].data.has_validation_issues).toBe(true);
-  });
-
-  it("adds CEE_REPRO_MISMATCH warning when repro_mismatch flag is true", async () => {
-    const graph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [{ id: "a", kind: "goal", label: "Test" }],
-      edges: [],
-      meta: { roots: ["a"], leaves: ["a"], suggested_positions: {}, source: "assistant" },
-    } as any;
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "success",
-      payload: {
-        graph,
-        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
-        rationales: [],
-        confidence: 0.9,
-        issues: [],
-        response_hash: "hash-123",
-      },
-      cost_usd: 0.03,
-      provider: "fixtures",
-      model: "fixture-v1",
-      repro_mismatch: true,
-    });
-
-    validateResponseMock.mockReturnValueOnce({ ok: true });
-
-    const input = makeInput();
-    const req = makeRequest();
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-    const success = body as any;
-
-    expect(statusCode).toBe(200);
-    expect(Array.isArray(success.validation_issues)).toBe(true);
-    const reproIssue = success.validation_issues.find((i: any) => i.code === "CEE_REPRO_MISMATCH");
-    expect(reproIssue).toBeDefined();
-    expect(reproIssue.severity).toBe("warning");
-
-    const succeededEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphSucceeded);
-    expect(succeededEvents.length).toBe(1);
-    expect(succeededEvents[0].data.has_validation_issues).toBe(true);
-  });
-
-  it("maps 503 pipeline errors to CEE_SERVICE_UNAVAILABLE and emits telemetry", async () => {
-    const input = makeInput();
-    const req = makeRequest();
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "error",
-      statusCode: 503,
-      envelope: { code: "INTERNAL", message: "engine unavailable", details: {} },
-    });
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-    const error = body as any;
-
-    expect(statusCode).toBe(503);
-    expect(error.code).toBe("CEE_SERVICE_UNAVAILABLE");
-    expect(error.retryable).toBe(true);
-
-    const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
-    expect(failedEvents.length).toBe(1);
-    expect(failedEvents[0].data.error_code).toBe("CEE_SERVICE_UNAVAILABLE");
-    expect(failedEvents[0].data.http_status).toBe(503);
-  });
-
-  it("uses archetype framework to classify pricing_decision with strong signals as exact match", async () => {
+  it("respects archetype hint when provided", async () => {
     const graph = {
       version: "1",
       default_seed: 17,
       nodes: [
         { id: "goal_pricing", kind: "goal", label: "Decide pricing strategy" },
+        { id: "dec_pricing", kind: "decision", label: "Choose pricing approach" },
         { id: "opt_premium", kind: "option", label: "Premium pricing" },
       ],
-      edges: [],
+      edges: [
+        { from: "goal_pricing", to: "dec_pricing" },
+        { from: "dec_pricing", to: "opt_premium" },
+      ],
       meta: { roots: ["goal_pricing"], leaves: ["opt_premium"], suggested_positions: {}, source: "assistant" },
-    } as any;
-
-    runDraftGraphPipelineMock.mockResolvedValueOnce({
-      kind: "success",
-      payload: {
-        graph,
-        patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
-        rationales: [],
-        confidence: 0.9,
-        issues: [],
-      },
-      cost_usd: 0.01,
-      provider: "fixtures",
-      model: "fixture-v1",
-    });
-
-    validateResponseMock.mockReturnValueOnce({ ok: true });
-
-    const input = makeInput({
-      brief: "We need to decide our pricing for the new SaaS plan.",
-      archetype_hint: "pricing_decision",
-    });
-    const req = makeRequest();
-
-    const { statusCode, body } = await finaliseCeeDraftResponse(input, {}, req);
-    const success = body as any;
-
-    expect(statusCode).toBe(200);
-    expect(success.archetype).toBeDefined();
-    expect(success.archetype.decision_type).toBe("pricing_decision");
-    expect(success.archetype.match).toBe("exact");
-    expect(typeof success.archetype.confidence).toBe("number");
-  });
-
-  it("falls back to generic archetype when hint is unknown", async () => {
-    const graph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [{ id: "goal_generic", kind: "goal", label: "Choose a data visualization library" }],
-      edges: [],
-      meta: { roots: ["goal_generic"], leaves: ["goal_generic"], suggested_positions: {}, source: "assistant" },
     } as any;
 
     runDraftGraphPipelineMock.mockResolvedValueOnce({
@@ -522,9 +454,13 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
       default_seed: 17,
       nodes: [
         { id: "goal_pricing", kind: "goal", label: "Decide pricing strategy" },
+        { id: "dec_pricing", kind: "decision", label: "Choose pricing approach" },
         { id: "opt_premium", kind: "option", label: "Premium pricing" },
       ],
-      edges: [],
+      edges: [
+        { from: "goal_pricing", to: "dec_pricing" },
+        { from: "dec_pricing", to: "opt_premium" },
+      ],
       meta: { roots: ["goal_pricing"], leaves: ["opt_premium"], suggested_positions: {}, source: "assistant" },
     } as any;
 

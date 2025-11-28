@@ -22,6 +22,10 @@ Draft a small decision graph with:
 - ≤{{maxNodes}} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
   (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
 - ≤{{maxEdges}} edges
+- **Minimum structure (MANDATORY):** your graph MUST include at least:
+  - 1 goal node (what the decision-maker is trying to achieve)
+  - 1 decision node (the choice being made)
+  - 1+ option nodes (alternatives being considered)
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
@@ -34,6 +38,9 @@ Draft a small decision graph with:
 - When citing documents, use these markers to determine the correct location value
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
 - Stable topology: goal → decision → options → outcomes
+
+If the brief is ambiguous or missing some details, you MUST still propose a simple but usable skeleton
+graph that satisfies the minimum structure above. Returning an empty graph is never acceptable.
 
 ## Output Format (JSON)
 {

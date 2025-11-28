@@ -3,7 +3,7 @@ import type { GraphT } from "../../src/schemas/graph.js";
 import type { ValidateResult } from "../../src/services/validateClientWithCache.js";
 
 // Shared mock for the underlying validateClient
-const directValidateMock = vi.fn<(graph: GraphT) => Promise<ValidateResult>>();
+const directValidateMock = vi.fn();
 
 vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: (graph: GraphT) => directValidateMock(graph),

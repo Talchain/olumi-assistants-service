@@ -212,17 +212,43 @@ When exceeded, the `*_truncated` flag is set to `true`.
 
 ### 4.4 Error Response
 
+CEE errors use a flattened, OlumiErrorV1-style schema on the wire while keeping
+`trace` and `details` for backward compatibility:
+
 ```typescript
 interface CEEErrorResponseV1 {
   schema: "cee.error.v1";
-  code: CEEErrorCode;  // CEE_TIMEOUT, CEE_RATE_LIMIT, CEE_GRAPH_INVALID, etc.
-  message: string;     // Sanitised, no PII
-  retryable?: boolean;
-  trace?: CEETraceMeta;
-  details?: Record<string, unknown>;
+
+  // Core error fields
+  code: CEEErrorCode;        // CEE_TIMEOUT, CEE_RATE_LIMIT, CEE_GRAPH_INVALID, etc.
+  message: string;           // Sanitised, no PII
+  retryable?: boolean;       // Whether clients may safely retry this request
+
+  // OlumiErrorV1 metadata
+  source: "cee";
+  request_id?: string;       // Mirrors X-CEE-Request-ID
+  degraded?: boolean;        // True when CEE or its dependencies are in degraded mode
+
+  // Domain-level hints (metadata-only, no prompts/graphs/text)
+  reason?: string;           // e.g. "empty_graph", "incomplete_structure"
+  recovery?: {
+    suggestion: string;      // High-level suggestion for how to fix input / proceed
+    hints: string[];         // Short, concrete hints (bulleted in docs, plain strings on wire)
+    example?: string;        // Optional example brief / graph description
+  };
+  node_count?: number;       // Graph node count when relevant
+  edge_count?: number;       // Graph edge count when relevant
+  missing_kinds?: string[];  // e.g. ["goal", "decision"] for incomplete graphs
+
+  // Backward-compat fields (still populated)
+  trace?: CEETraceMeta;      // Request/engine metadata
+  details?: Record<string, unknown>; // Legacy bag; mirrors key fields above
 }
 ```
 
+These additional fields are **metadata-only** and never include raw briefs,
+graphs, or LLM text. They are safe for PLoT and UI clients to rely on for
+classification, guidance, and retry decisions.
 **Error Code Mapping:**
 
 | Condition | HTTP | Code | Retryable |
@@ -539,7 +565,14 @@ if (response.ceeReview) {
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RATE_LIMIT_RPM` | `120` | Global per-key rate limit |
-| `CEE_DRAFT_RATE_LIMIT_RPM` | `5` | Draft endpoint rate limit |
+| `CEE_DRAFT_RATE_LIMIT_RPM` | `5` | Draft My Model (`/assist/v1/draft-graph`) rate limit (RPM) |
+| `CEE_EXPLAIN_RATE_LIMIT_RPM` | `5` | Explain Graph (`/assist/v1/explain-graph`) rate limit (RPM) |
+| `CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM` | `5` | Evidence Helper (`/assist/v1/evidence-helper`) rate limit (RPM) |
+| `CEE_BIAS_CHECK_RATE_LIMIT_RPM` | `5` | Bias Check (`/assist/v1/bias-check`) rate limit (RPM) |
+| `CEE_OPTIONS_RATE_LIMIT_RPM` | `5` | Options Helper (`/assist/v1/options`) rate limit (RPM) |
+| `CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM` | `5` | Sensitivity Coach (`/assist/v1/sensitivity-coach`) rate limit (RPM) |
+| `CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM` | `5` | Team Perspectives (`/assist/v1/team-perspectives`) rate limit (RPM) |
+| `CEE_DECISION_REVIEW_RATE_LIMIT_RPM` | `30` | Enhanced decision review (`/assist/v1/decision-review/enhanced`) rate limit (RPM) |
 | `SSE_RATE_LIMIT_RPM` | `20` | SSE-specific rate limit |
 
 ### 8.4 Cost & Limits

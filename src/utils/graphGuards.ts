@@ -307,6 +307,14 @@ export function enforceGraphCompliance(
 
   let { nodes, edges } = graph;
 
+  // Observability guard: log and return early for empty graphs.
+  // Upstream callers (CEE pipeline and routes) are responsible for enforcing
+  // hard invariants such as rejecting empty or structurally invalid graphs.
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    log.warn({ nodes: nodes?.length ?? 0, edges: edges?.length ?? 0 }, "enforceGraphCompliance called with empty graph; returning as-is");
+    return graph;
+  }
+
   // 1. Cap counts
   if (nodes.length > maxNodes) {
     log.warn({ count: nodes.length, max: maxNodes }, "Capping node count");

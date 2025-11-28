@@ -227,6 +227,159 @@ export function buildCeeErrorViewModel(error: unknown): CeeErrorViewModel {
   };
 }
 
+export type CeeErrorCategory =
+  | "empty_graph"
+  | "incomplete_structure"
+  | "validation"
+  | "rate_limit"
+  | "timeout"
+  | "clarification_required"
+  | "service_unavailable"
+  | "engine_degraded"
+  | "repro_mismatch"
+  | "internal"
+  | "network"
+  | "unknown";
+
+export function getCeeErrorCategory(error: unknown): CeeErrorCategory {
+  if (error instanceof OlumiNetworkError) {
+    return "network";
+  }
+
+  if (!(error instanceof OlumiAPIError)) {
+    return "unknown";
+  }
+
+  const details = (error as any).details as { [key: string]: unknown } | undefined;
+  const ceeCode =
+    (details && typeof (details as any).cee_code === "string"
+      ? ((details as any).cee_code as string)
+      : undefined) ||
+    (typeof (error as any).code === "string" ? ((error as any).code as string) : undefined);
+
+  const reason =
+    details && typeof (details as any).reason === "string"
+      ? ((details as any).reason as string)
+      : undefined;
+
+  switch (ceeCode) {
+    case "CEE_GRAPH_INVALID": {
+      if (reason === "empty_graph") {
+        return "empty_graph";
+      }
+      if (reason === "incomplete_structure") {
+        return "incomplete_structure";
+      }
+      return "validation";
+    }
+    case "CEE_VALIDATION_FAILED":
+      return "validation";
+    case "CEE_RATE_LIMIT":
+      return "rate_limit";
+    case "CEE_TIMEOUT":
+      return "timeout";
+    case "CEE_CLARIFICATION_REQUIRED":
+      return "clarification_required";
+    case "CEE_SERVICE_UNAVAILABLE":
+      return "service_unavailable";
+    case "CEE_ENGINE_DEGRADED":
+      return "engine_degraded";
+    case "CEE_REPRO_MISMATCH":
+      return "repro_mismatch";
+    case "CEE_INTERNAL_ERROR":
+      return "internal";
+    default:
+      break;
+  }
+
+  if (error.statusCode === 429 || (error as any).code === "RATE_LIMITED") {
+    return "rate_limit";
+  }
+
+  if (error.statusCode === 408) {
+    return "timeout";
+  }
+
+  if (error.statusCode >= 500) {
+    return "internal";
+  }
+
+  if (error.statusCode >= 400 && error.statusCode < 500) {
+    return "validation";
+  }
+
+  return "unknown";
+}
+
+export interface CeeRecoveryHints {
+  suggestion?: string;
+  hints?: string[];
+  example?: string;
+}
+
+export function getCeeRecoveryHints(error: unknown): CeeRecoveryHints | undefined {
+  if (!(error instanceof OlumiAPIError)) {
+    return undefined;
+  }
+
+  const details = (error as any).details as { [key: string]: unknown } | undefined;
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+
+  const recovery = (details as any).recovery;
+  if (!recovery || typeof recovery !== "object") {
+    return undefined;
+  }
+
+  const suggestion =
+    typeof (recovery as any).suggestion === "string" && (recovery as any).suggestion.length > 0
+      ? ((recovery as any).suggestion as string)
+      : undefined;
+  const hints = Array.isArray((recovery as any).hints)
+    ? ((recovery as any).hints as unknown[]).filter((h) => typeof h === "string") as string[]
+    : undefined;
+  const example =
+    typeof (recovery as any).example === "string" && (recovery as any).example.length > 0
+      ? ((recovery as any).example as string)
+      : undefined;
+
+  if (!suggestion && (!hints || hints.length === 0) && !example) {
+    return undefined;
+  }
+
+  return { suggestion, hints, example };
+}
+
+export function isCeeEmptyGraphError(error: unknown): boolean {
+  if (!(error instanceof OlumiAPIError)) {
+    return false;
+  }
+
+  const details = (error as any).details as { [key: string]: unknown } | undefined;
+  if (!details || typeof details !== "object") {
+    return false;
+  }
+
+  const ceeCode =
+    typeof (details as any).cee_code === "string"
+      ? ((details as any).cee_code as string)
+      : typeof (error as any).code === "string"
+        ? ((error as any).code as string)
+        : undefined;
+  const reason =
+    typeof (details as any).reason === "string"
+      ? ((details as any).reason as string)
+      : undefined;
+
+  return ceeCode === "CEE_GRAPH_INVALID" && reason === "empty_graph";
+}
+
+export function shouldRetry(error: unknown): boolean {
+  const view = buildCeeErrorViewModel(error);
+  return view.suggestedAction === "retry";
+}
+
 function computeQualityBand(
   qualityOverall: number | undefined,
 ): "low" | "medium" | "high" | undefined {

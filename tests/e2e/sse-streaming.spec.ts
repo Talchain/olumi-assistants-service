@@ -10,6 +10,9 @@
 
 import { test, expect } from "@playwright/test";
 
+// Declare window for TypeScript when running typecheck without DOM lib.
+declare const window: any;
+
 // Helper to create a test page with SSE client using fetch
 async function createSSETestPage(page: any) {
   await page.setContent(`

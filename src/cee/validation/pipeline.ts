@@ -1,6 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
+import type { GraphT } from "../../schemas/graph.js";
 import { runDraftGraphPipeline } from "../../routes/assist.draft-graph.js";
 import { SSE_DEGRADED_HEADER_NAME_LOWER } from "../../utils/degraded-mode.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
@@ -29,6 +30,7 @@ type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
 type CEEConfidenceFlagsV1 = components["schemas"]["CEEConfidenceFlagsV1"];
+type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 
 type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
@@ -47,6 +49,139 @@ type ResponseLimitsMeta = {
   sensitivity_suggestions_max: number;
   sensitivity_suggestions_truncated: boolean;
 };
+
+// Minimum structure requirements for draft graphs.
+// A usable decision model must include at least one goal, one decision, and one option.
+const MINIMUM_STRUCTURE_REQUIREMENT: Readonly<Record<string, number>> = {
+  goal: 1,
+  decision: 1,
+  option: 1,
+};
+
+type MinimumStructureResult = {
+  valid: boolean;
+  missing: string[];
+  counts: Record<string, number>;
+};
+
+function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
+  if (!graph || !Array.isArray(graph.nodes) || !Array.isArray((graph as any).edges)) {
+    return false;
+  }
+
+  const nodes = graph.nodes;
+  const edges = (graph as any).edges as Array<{ from?: string; to?: string }>;
+
+  const kinds = new Map<string, string>();
+  const decisions: string[] = [];
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const node of nodes) {
+    const id = typeof (node as any).id === "string" ? ((node as any).id as string) : undefined;
+    const kind = node.kind as unknown as string | undefined;
+    if (!id || !kind) {
+      continue;
+    }
+
+    kinds.set(id, kind);
+    if (!adjacency.has(id)) {
+      adjacency.set(id, new Set());
+    }
+    if (kind === "decision") {
+      decisions.push(id);
+    }
+  }
+
+  for (const edge of edges) {
+    const from = typeof edge.from === "string" ? (edge.from as string) : undefined;
+    const to = typeof edge.to === "string" ? (edge.to as string) : undefined;
+    if (!from || !to) {
+      continue;
+    }
+
+    if (!adjacency.has(from)) {
+      adjacency.set(from, new Set());
+    }
+    if (!adjacency.has(to)) {
+      adjacency.set(to, new Set());
+    }
+
+    adjacency.get(from)!.add(to);
+    adjacency.get(to)!.add(from);
+  }
+
+  if (decisions.length === 0) {
+    return false;
+  }
+
+  for (const decisionId of decisions) {
+    const visited = new Set<string>();
+    const queue: string[] = [decisionId];
+    let hasGoal = false;
+    let hasOption = false;
+
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      if (visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      const kind = kinds.get(current);
+      if (kind === "goal") {
+        hasGoal = true;
+      } else if (kind === "option") {
+        hasOption = true;
+      }
+
+      if (hasGoal && hasOption) {
+        return true;
+      }
+
+      const neighbours = adjacency.get(current);
+      if (!neighbours) {
+        continue;
+      }
+
+      for (const next of neighbours) {
+        if (!visited.has(next)) {
+          queue.push(next);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function validateMinimumStructure(graph: GraphV1 | undefined): MinimumStructureResult {
+  const counts: Record<string, number> = {};
+
+  if (graph?.nodes) {
+    for (const node of graph.nodes) {
+      const kind = node.kind as unknown as string | undefined;
+      if (typeof kind === "string" && kind.length > 0) {
+        counts[kind] = (counts[kind] ?? 0) + 1;
+      }
+    }
+  }
+
+  const missing: string[] = [];
+  for (const [kind, min] of Object.entries(MINIMUM_STRUCTURE_REQUIREMENT)) {
+    if ((counts[kind] ?? 0) < min) {
+      missing.push(kind);
+    }
+  }
+
+  const hasMinimumCounts = missing.length === 0;
+  const hasConnectivity = hasMinimumCounts ? hasConnectedMinimumStructure(graph) : false;
+
+  return {
+    valid: hasMinimumCounts && hasConnectivity,
+    missing,
+    counts,
+  };
+}
 
 function capList<T>(value: unknown, max: number): { list?: T[]; truncated: boolean } {
   if (!Array.isArray(value)) {
@@ -103,6 +238,15 @@ export function buildCeeErrorResponse(
     requestId?: string;
     details?: Record<string, unknown>;
     engineDegraded?: boolean;
+    reason?: string;
+    recovery?: {
+      hints: string[];
+      suggestion: string;
+      example?: string;
+    };
+    nodeCount?: number;
+    edgeCount?: number;
+    missingKinds?: string[];
   } = {}
 ): CEEErrorResponseV1 {
   const trace: CEETraceMeta = {};
@@ -119,14 +263,72 @@ export function buildCeeErrorResponse(
     };
   }
 
-  return {
+  type CeeErrorDetails = Record<string, unknown> & {
+    reason?: string;
+    node_count?: number;
+    edge_count?: number;
+    missing_kinds?: string[];
+  };
+
+  let baseDetails: CeeErrorDetails | undefined = options.details
+    ? ({ ...options.details } as CeeErrorDetails)
+    : undefined;
+
+  const ensureDetails = (): CeeErrorDetails => {
+    if (!baseDetails) {
+      baseDetails = {} as CeeErrorDetails;
+    }
+    return baseDetails;
+  };
+
+  // Mirror key domain fields into details for backward compatibility with older clients
+  if (options.reason) {
+    const details = ensureDetails();
+    if (details.reason === undefined) {
+      details.reason = options.reason;
+    }
+  }
+  if (typeof options.nodeCount === "number") {
+    const details = ensureDetails();
+    if (details.node_count === undefined) {
+      details.node_count = options.nodeCount;
+    }
+  }
+  if (typeof options.edgeCount === "number") {
+    const details = ensureDetails();
+    if (details.edge_count === undefined) {
+      details.edge_count = options.edgeCount;
+    }
+  }
+  if (Array.isArray(options.missingKinds) && options.missingKinds.length > 0) {
+    const details = ensureDetails();
+    if (details.missing_kinds === undefined) {
+      details.missing_kinds = options.missingKinds;
+    }
+  }
+
+  const response: CEEErrorResponseV1 = {
+    // Backward-compat schema marker used by existing clients
     schema: "cee.error.v1",
+    // OlumiErrorV1 core fields
     code,
     message,
-    retryable: options.retryable,
+    retryable: options.retryable ?? false,
+    source: "cee",
+    request_id: options.requestId,
+    degraded: options.engineDegraded || undefined,
+    // Additional domain-level hints
+    reason: options.reason,
+    recovery: options.recovery,
+    node_count: options.nodeCount,
+    edge_count: options.edgeCount,
+    missing_kinds: options.missingKinds,
+    // Legacy fields
     trace: Object.keys(trace).length ? trace : undefined,
-    details: options.details,
+    details: baseDetails && Object.keys(baseDetails).length ? baseDetails : undefined,
   };
+
+  return response;
 }
 
 export async function finaliseCeeDraftResponse(
@@ -297,10 +499,18 @@ export async function finaliseCeeDraftResponse(
       body: buildCeeErrorResponse(ceeCode, "Draft graph is empty; unable to construct model", {
         retryable: false,
         requestId,
-        details: {
-          reason: "empty_graph",
-          node_count: nodeCount,
-          edge_count: edgeCount,
+        reason: "empty_graph",
+        nodeCount,
+        edgeCount,
+        recovery: {
+          suggestion: "Add more detail to your decision brief before drafting a model.",
+          hints: [
+            "State the specific decision you are trying to make (e.g., 'Should we X or Y?')",
+            "List 2-3 concrete options you are considering.",
+            "Describe what success looks like for this decision (key outcomes or KPIs).",
+          ],
+          example:
+            "We need to decide whether to build the feature in-house or outsource it. Options are: hire contractors, use an agency, or build with the current team. Success means launching within 3 months under $50k.",
         },
       }),
     };
@@ -354,6 +564,67 @@ export async function finaliseCeeDraftResponse(
         details: {
           guard_violation: violation,
           validation_issues: [issue],
+        },
+      }),
+    };
+  }
+
+  // Enforce minimum structure requirements for usable graphs.
+  const structure = validateMinimumStructure(graph);
+  if (!structure.valid) {
+    const latencyMs = Date.now() - start;
+    const ceeCode: CEEErrorCode = "CEE_GRAPH_INVALID";
+
+    emit(TelemetryEvents.CeeDraftGraphFailed, {
+      request_id: requestId,
+      latency_ms: latencyMs,
+      error_code: ceeCode,
+      http_status: 400,
+      graph_nodes: nodeCount,
+      graph_edges: edgeCount,
+    });
+
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs,
+      status: "error",
+      errorCode: ceeCode,
+      httpStatus: 400,
+      anyTruncated: false,
+      hasValidationIssues: true,
+    });
+
+    const missingList = structure.missing.join(", ");
+    const message = structure.missing.length
+      ? `Graph missing required elements: ${missingList}`
+      : "Graph does not meet minimum structure requirements";
+
+    return {
+      statusCode: 400,
+      body: buildCeeErrorResponse(ceeCode, message, {
+        retryable: false,
+        requestId,
+        reason: "incomplete_structure",
+        nodeCount,
+        edgeCount,
+        missingKinds: structure.missing,
+        recovery: {
+          suggestion:
+            "Your description needs to specify the decision being made, the options being considered, and at least one goal.",
+          hints: [
+            "State what choice you're trying to make (the decision).",
+            "List at least one alternative you're considering (options).",
+            "Describe the goal or outcome you are trying to achieve.",
+          ],
+          example:
+            "Should we hire a contractor or build in-house? Options: (1) Hire contractors, (2) Outsource to agency, (3) Build with current team.",
+        },
+        details: {
+          missing_kinds: structure.missing,
+          node_count: nodeCount,
+          edge_count: edgeCount,
+          counts: structure.counts,
         },
       }),
     };

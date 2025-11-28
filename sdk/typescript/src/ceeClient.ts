@@ -218,8 +218,31 @@ function mapToOlumiAPIError(
   if (raw && typeof raw === "object" && (raw as any).schema === "cee.error.v1") {
     const cee = raw as CEEErrorResponseV1;
 
+    const anyCee = cee as any;
+    const baseDetails: Record<string, unknown> =
+      cee.details && typeof cee.details === "object" ? { ...cee.details } : {};
+
+    if (anyCee.reason !== undefined && (baseDetails as any).reason === undefined) {
+      (baseDetails as any).reason = anyCee.reason;
+    }
+    if (anyCee.recovery !== undefined && (baseDetails as any).recovery === undefined) {
+      (baseDetails as any).recovery = anyCee.recovery;
+    }
+    if (typeof anyCee.node_count === "number" && (baseDetails as any).node_count === undefined) {
+      (baseDetails as any).node_count = anyCee.node_count;
+    }
+    if (typeof anyCee.edge_count === "number" && (baseDetails as any).edge_count === undefined) {
+      (baseDetails as any).edge_count = anyCee.edge_count;
+    }
+    if (
+      Array.isArray(anyCee.missing_kinds) &&
+      (baseDetails as any).missing_kinds === undefined
+    ) {
+      (baseDetails as any).missing_kinds = anyCee.missing_kinds;
+    }
+
     const details: Record<string, unknown> = {
-      ...cee.details,
+      ...baseDetails,
       cee_code: cee.code,
       cee_retryable: cee.retryable === true,
       cee_trace: cee.trace,
