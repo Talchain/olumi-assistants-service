@@ -261,7 +261,6 @@ export function getCeeErrorCategory(error: unknown): CeeErrorCategory {
   if (!(error instanceof OlumiAPIError)) {
     return "unknown";
   }
-
   const details = error.details;
 
   let ceeCode: string | undefined;
