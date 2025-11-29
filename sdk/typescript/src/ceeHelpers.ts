@@ -19,6 +19,10 @@ import {
 } from "./ceePolicy.js";
 import { OlumiAPIError, OlumiNetworkError } from "./errors.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
 export type CeeQualityBand = "confident" | "uncertain" | "low_confidence";
 
 export function classifyCeeQuality(
@@ -121,7 +125,7 @@ export function isRetryableCEEError(error: unknown): boolean {
     return true;
   }
 
-  const code = (error as any).code as string | undefined;
+  const code = error.code;
   if (code === "CEE_RATE_LIMIT") {
     return true;
   }
@@ -130,16 +134,18 @@ export function isRetryableCEEError(error: unknown): boolean {
   // available. The OlumiAPIError currently exposes only the details bag, so we
   // look for either a generic retryable flag or the cee_retryable helper flag
   // that the CEE client attaches when mapping CEEErrorResponseV1.
-  const details = (error as any).details as { [key: string]: unknown } | undefined;
-  if (!details || typeof details !== "object") {
+  const details = error.details;
+  if (!isRecord(details)) {
     return false;
   }
 
-  if ((details as any).retryable === true) {
+  const retryableFlag = (details as { retryable?: unknown }).retryable;
+  if (retryableFlag === true) {
     return true;
   }
 
-  if ((details as any).cee_retryable === true) {
+  const ceeRetryableFlag = (details as { cee_retryable?: unknown }).cee_retryable;
+  if (ceeRetryableFlag === true) {
     return true;
   }
 
@@ -163,12 +169,15 @@ export function getCeeErrorMetadata(error: unknown): CeeErrorMetadata {
   let traceId: string | undefined;
 
   if (error instanceof OlumiAPIError) {
-    const details = error.details as { [key: string]: unknown } | undefined;
+    const details = error.details;
 
-    const fromDetails =
-      details && typeof (details as any).cee_code === "string"
-        ? ((details as any).cee_code as string)
-        : undefined;
+    let fromDetails: string | undefined;
+    if (isRecord(details)) {
+      const codeCandidate = (details as { cee_code?: unknown }).cee_code;
+      if (typeof codeCandidate === "string") {
+        fromDetails = codeCandidate;
+      }
+    }
 
     if (fromDetails) {
       ceeCode = fromDetails;
@@ -178,11 +187,14 @@ export function getCeeErrorMetadata(error: unknown): CeeErrorMetadata {
 
     if (typeof error.requestId === "string") {
       traceId = error.requestId;
-    } else if (
-      details &&
-      typeof (details as any).cee_trace?.request_id === "string"
-    ) {
-      traceId = (details as any).cee_trace.request_id as string;
+    } else if (isRecord(details)) {
+      const trace = (details as { cee_trace?: unknown }).cee_trace;
+      if (trace && isRecord(trace)) {
+        const requestIdCandidate = (trace as { request_id?: unknown }).request_id;
+        if (typeof requestIdCandidate === "string") {
+          traceId = requestIdCandidate;
+        }
+      }
     }
   } else if (error instanceof OlumiNetworkError) {
     // Network errors are transport-level only; we expose retryable but no
@@ -249,18 +261,27 @@ export function getCeeErrorCategory(error: unknown): CeeErrorCategory {
   if (!(error instanceof OlumiAPIError)) {
     return "unknown";
   }
+  const details = error.details;
 
-  const details = (error as any).details as { [key: string]: unknown } | undefined;
-  const ceeCode =
-    (details && typeof (details as any).cee_code === "string"
-      ? ((details as any).cee_code as string)
-      : undefined) ||
-    (typeof (error as any).code === "string" ? ((error as any).code as string) : undefined);
+  let ceeCode: string | undefined;
+  if (isRecord(details)) {
+    const fromDetails = (details as { cee_code?: unknown }).cee_code;
+    if (typeof fromDetails === "string") {
+      ceeCode = fromDetails;
+    }
+  }
 
-  const reason =
-    details && typeof (details as any).reason === "string"
-      ? ((details as any).reason as string)
-      : undefined;
+  if (!ceeCode && typeof error.code === "string") {
+    ceeCode = error.code;
+  }
+
+  let reason: string | undefined;
+  if (isRecord(details)) {
+    const reasonCandidate = (details as { reason?: unknown }).reason;
+    if (typeof reasonCandidate === "string") {
+      reason = reasonCandidate;
+    }
+  }
 
   switch (ceeCode) {
     case "CEE_GRAPH_INVALID": {
@@ -292,7 +313,7 @@ export function getCeeErrorCategory(error: unknown): CeeErrorCategory {
       break;
   }
 
-  if (error.statusCode === 429 || (error as any).code === "RATE_LIMITED") {
+  if (error.statusCode === 429 || error.code === "RATE_LIMITED") {
     return "rate_limit";
   }
 
@@ -322,27 +343,29 @@ export function getCeeRecoveryHints(error: unknown): CeeRecoveryHints | undefine
     return undefined;
   }
 
-  const details = (error as any).details as { [key: string]: unknown } | undefined;
-  if (!details || typeof details !== "object") {
+  const details = error.details;
+  if (!isRecord(details)) {
     return undefined;
   }
 
-  const recovery = (details as any).recovery;
-  if (!recovery || typeof recovery !== "object") {
+  const recovery = (details as { recovery?: unknown }).recovery;
+  if (!recovery || !isRecord(recovery)) {
     return undefined;
   }
 
+  const suggestionValue = (recovery as { suggestion?: unknown }).suggestion;
   const suggestion =
-    typeof (recovery as any).suggestion === "string" && (recovery as any).suggestion.length > 0
-      ? ((recovery as any).suggestion as string)
+    typeof suggestionValue === "string" && suggestionValue.length > 0 ? suggestionValue : undefined;
+
+  const hintsValue = (recovery as { hints?: unknown }).hints;
+  const hints =
+    Array.isArray(hintsValue)
+      ? (hintsValue as unknown[]).filter((h): h is string => typeof h === "string")
       : undefined;
-  const hints = Array.isArray((recovery as any).hints)
-    ? ((recovery as any).hints as unknown[]).filter((h) => typeof h === "string") as string[]
-    : undefined;
+
+  const exampleValue = (recovery as { example?: unknown }).example;
   const example =
-    typeof (recovery as any).example === "string" && (recovery as any).example.length > 0
-      ? ((recovery as any).example as string)
-      : undefined;
+    typeof exampleValue === "string" && exampleValue.length > 0 ? exampleValue : undefined;
 
   if (!suggestion && (!hints || hints.length === 0) && !example) {
     return undefined;
@@ -356,21 +379,21 @@ export function isCeeEmptyGraphError(error: unknown): boolean {
     return false;
   }
 
-  const details = (error as any).details as { [key: string]: unknown } | undefined;
-  if (!details || typeof details !== "object") {
+  const details = error.details;
+  if (!isRecord(details)) {
     return false;
   }
 
+  const ceeCodeFromDetails = (details as { cee_code?: unknown }).cee_code;
   const ceeCode =
-    typeof (details as any).cee_code === "string"
-      ? ((details as any).cee_code as string)
-      : typeof (error as any).code === "string"
-        ? ((error as any).code as string)
+    typeof ceeCodeFromDetails === "string"
+      ? ceeCodeFromDetails
+      : typeof error.code === "string"
+        ? error.code
         : undefined;
-  const reason =
-    typeof (details as any).reason === "string"
-      ? ((details as any).reason as string)
-      : undefined;
+
+  const reasonValue = (details as { reason?: unknown }).reason;
+  const reason = typeof reasonValue === "string" ? reasonValue : undefined;
 
   return ceeCode === "CEE_GRAPH_INVALID" && reason === "empty_graph";
 }
