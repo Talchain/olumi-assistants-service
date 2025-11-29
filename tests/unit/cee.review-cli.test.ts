@@ -12,6 +12,8 @@ import {
   type CeeReviewSummary,
   formatCeeReviewSummaryPretty,
 } from "../../scripts/cee-review-cli.js";
+import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
+import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 
 interface GoldenDecisionReviewFixture {
   review: CeeDecisionReviewPayload;
@@ -49,6 +51,10 @@ describe("cee-review-cli helpers", () => {
     expect(["ok", "warning", "risk"]).toContain(summary.health.status);
     expect(typeof summary.journey.is_complete).toBe("boolean");
     expect(Array.isArray(summary.journey.missing_envelopes)).toBe(true);
+
+    // Privacy: summary must remain metadata-only and free of secret-like keys or banned substrings
+    expectNoSecretLikeKeys(summary);
+    expectNoBannedSubstrings(summary as unknown as Record<string, unknown>);
   });
 
   it("builds a stable summary from the golden decision review fixture", () => {
@@ -62,6 +68,10 @@ describe("cee-review-cli helpers", () => {
     expect(summary.any_truncated).toBe(
       Boolean(review.story.any_truncated || review.journey.health.any_truncated),
     );
+
+    // Privacy: golden-based summaries should also be metadata-only
+    expectNoSecretLikeKeys(summary);
+    expectNoBannedSubstrings(summary as unknown as Record<string, unknown>);
   });
 
   it("throws a clear error when given a malformed review", () => {
@@ -84,5 +94,8 @@ describe("cee-review-cli helpers", () => {
     expect(text.toLowerCase()).toContain("headline:");
     expect(text.toLowerCase()).toContain("health:");
     expect(text.toLowerCase()).toContain("journey:");
+
+    // Pretty output should be safe to print in logs/CLIs
+    expectNoBannedSubstrings({ text });
   });
 });
