@@ -88,6 +88,9 @@ describe("POST /assist/v1/explain-graph (CEE v1)", () => {
     expect(body.trace).toBeDefined();
     expect(body.trace.request_id).toBe(ceeRequestId);
     expect(body.trace.correlation_id).toBe(ceeRequestId);
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
 
     // Quality meta
     expect(body.quality).toBeDefined();

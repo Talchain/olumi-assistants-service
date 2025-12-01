@@ -5,7 +5,7 @@
  * and telemetry context through the request lifecycle.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   attachCallerContext,
   getCallerContext,
@@ -13,7 +13,6 @@ import {
   createTestContext,
   contextToTelemetry,
   CallerContextError,
-  type CallerContext,
   type CallerTelemetry,
 } from "../../src/context/caller.js";
 

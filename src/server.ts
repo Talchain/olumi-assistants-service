@@ -22,6 +22,7 @@ import ceeEvidenceHelperRouteV1 from "./routes/assist.v1.evidence-helper.js";
 import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js";
 import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
 import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-example.js";
+import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
@@ -79,6 +80,25 @@ export async function build() {
   }
   if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
+  }
+
+  // Fail-fast: In production, require at least one API key or HMAC secret so
+  // that authentication cannot be accidentally disabled.
+  const nodeEnv = env.NODE_ENV || 'development';
+  const hasApiKeys =
+    Boolean(env.ASSIST_API_KEY && env.ASSIST_API_KEY.trim().length > 0) ||
+    Boolean(
+      env.ASSIST_API_KEYS &&
+        env.ASSIST_API_KEYS
+          .split(',')
+          .some((k) => k.trim().length > 0),
+    );
+  const hasHmacSecret = Boolean(env.HMAC_SECRET && env.HMAC_SECRET.trim().length > 0);
+
+  if (nodeEnv === 'production' && !hasApiKeys && !hasHmacSecret) {
+    throw new Error(
+      'FATAL: In production, at least one ASSIST_API_KEY/ASSIST_API_KEYS or HMAC_SECRET must be configured',
+    );
   }
 
   // Register default prompts (fallbacks for prompt management system)
@@ -337,7 +357,7 @@ app.get("/healthz", async () => {
   // ISL configuration - use centralized config for consistency
   const islConfig = getISLConfig();
   const maskedBaseUrl = islConfig.baseUrl
-    ? islConfig.baseUrl.replace(/:\/\/([^:\/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
+    ? islConfig.baseUrl.replace(/:\/\/([^:/]+)(:\d+)?/, '://$1:***')  // Mask port/credentials
     : undefined;
 
   // Prompt store health (degraded if unhealthy but not critical)
@@ -460,6 +480,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeEvidenceHelperRouteV1(app);
   await ceeSensitivityCoachRouteV1(app);
   await ceeTeamPerspectivesRouteV1(app);
+  await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }

@@ -195,7 +195,7 @@ function withDiagnostics<T extends Record<string, any>>(
   } as T & { diagnostics: Diagnostics };
 }
 
-type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
+type AttachmentPayload = string | { data: string; encoding?: string };
 
 export function sanitizeDraftGraphInput(
   input: DraftGraphInputT,
@@ -374,7 +374,7 @@ async function groundAttachments(
 
     const content = typeof payload === "string"
       ? payload // Already base64 string
-      : Buffer.from(payload.data, payload.encoding ?? "base64");
+      : Buffer.from(payload.data, (payload.encoding ?? "base64") as any);
 
     attachmentInputs.push({
       id: attachment.id,

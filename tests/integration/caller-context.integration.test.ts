@@ -40,7 +40,7 @@ async function createTestApp(): Promise<FastifyInstance> {
   });
 
   // Test route that returns context info
-  app.get("/test/context", async (request, reply) => {
+  app.get("/test/context", async (request, _reply) => {
     const ctx = (request as any).callerContext;
     const requestId = request.headers["x-request-id"] as string || request.id;
 

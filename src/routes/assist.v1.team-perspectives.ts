@@ -12,6 +12,8 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
+import { verificationPipeline } from "../cee/verification/index.js";
+import { CEETeamPerspectivesResponseV1Schema } from "../schemas/ceeResponses.js";
 
 type CEETeamPerspectivesResponseV1 = components["schemas"]["CEETeamPerspectivesResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -234,6 +236,54 @@ export default async function route(app: FastifyInstance) {
         guidance,
       };
 
+      // Verify and enrich the response before returning.
+      let verifiedResponse: CEETeamPerspectivesResponseV1;
+      try {
+        const { response } = await verificationPipeline.verify(
+          ceeResponse,
+          CEETeamPerspectivesResponseV1Schema,
+          {
+            endpoint: "team-perspectives",
+            requiresEngineValidation: false,
+            requestId,
+          },
+        );
+        verifiedResponse = response as CEETeamPerspectivesResponseV1;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("internal error");
+
+        emit(TelemetryEvents.CeeTeamPerspectivesFailed, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          error_code: "CEE_INTERNAL_ERROR",
+          http_status: 500,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_team_perspectives",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_INTERNAL_ERROR",
+          httpStatus: 500,
+        });
+
+        const errorBody = buildCeeErrorResponse(
+          "CEE_INTERNAL_ERROR",
+          err.message || "internal error",
+          {
+            retryable: false,
+            requestId,
+          },
+        );
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.code(500);
+        return reply.send(errorBody);
+      }
+
       const latencyMs = Date.now() - start;
 
       emit(TelemetryEvents.CeeTeamPerspectivesSucceeded, {
@@ -258,7 +308,7 @@ export default async function route(app: FastifyInstance) {
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
       reply.header("X-CEE-Request-ID", requestId);
       reply.code(200);
-      return reply.send(ceeResponse);
+      return reply.send(verifiedResponse);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 

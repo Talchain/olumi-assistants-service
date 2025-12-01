@@ -20,6 +20,7 @@ module.exports = {
     "tests/perf/**/*.js",
     "examples",
     "scripts",
+    "sdk/typescript/dist/**",
     "**/* 2.ts",
     "**/* 3.ts",
     "tests/types/**",

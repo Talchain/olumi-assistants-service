@@ -1,8 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
-import type { GraphT } from "../../schemas/graph.js";
-import { runDraftGraphPipeline } from "../../routes/assist.draft-graph.js";
+import { runCeeDraftPipeline } from "../draft-pipeline-adapter.js";
 import { SSE_DEGRADED_HEADER_NAME_LOWER } from "../../utils/degraded-mode.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
 import { validateResponse } from "../../utils/responseGuards.js";
@@ -12,6 +11,9 @@ import { inferArchetype } from "../archetypes/index.js";
 import { computeQuality } from "../quality/index.js";
 import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
 import { logCeeCall } from "../logging.js";
+import { CEEDraftGraphResponseV1Schema } from "../../schemas/ceeResponses.js";
+import { verificationPipeline } from "../verification/index.js";
+import { createValidationIssue } from "./classifier.js";
 import {
   CEE_BIAS_FINDINGS_MAX,
   CEE_OPTIONS_MAX,
@@ -30,7 +32,6 @@ type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
 type CEEConfidenceFlagsV1 = components["schemas"]["CEEConfidenceFlagsV1"];
-type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 
 type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
@@ -222,6 +223,63 @@ function applyResponseCaps(payload: any): { cappedPayload: any; limits: Response
   return { cappedPayload, limits };
 }
 
+function normaliseCeeGraphVersionAndProvenance(graph: GraphV1 | undefined): GraphV1 | undefined {
+  if (!graph) {
+    return graph;
+  }
+
+  const edges = Array.isArray((graph as any).edges) ? ((graph as any).edges as any[]) : undefined;
+
+  if (!edges) {
+    return {
+      ...graph,
+      version: "1.2",
+    };
+  }
+
+  const normalisedEdges = edges.map((edge: any) => {
+    if (!edge || edge.provenance_source) {
+      return edge;
+    }
+
+    const cloned = { ...edge };
+
+    // If there is no provenance at all, treat this as an engine-originated edge.
+    if (cloned.provenance === undefined || cloned.provenance === null) {
+      cloned.provenance_source = "engine";
+      return cloned;
+    }
+
+    const prov = cloned.provenance;
+
+    // Lightweight inference for hypothesis provenance when structured provenance is present.
+    if (prov && typeof prov === "object" && typeof (prov as any).source === "string") {
+      const src = ((prov as any).source as string).toLowerCase();
+      if (src === "hypothesis") {
+        cloned.provenance_source = "hypothesis";
+      }
+      return cloned;
+    }
+
+    // Legacy string provenance: infer "hypothesis" when clearly marked, otherwise leave undefined.
+    if (typeof prov === "string") {
+      const src = prov.toLowerCase();
+      if (src.includes("hypothesis")) {
+        cloned.provenance_source = "hypothesis";
+      }
+      return cloned;
+    }
+
+    return cloned;
+  });
+
+  return {
+    ...graph,
+    version: "1.2",
+    edges: normalisedEdges as any,
+  };
+}
+
 function archetypesEnabled(): boolean {
   return config.cee.draftArchetypesEnabled;
 }
@@ -345,7 +403,7 @@ export async function finaliseCeeDraftResponse(
 
   let pipelineResult: any;
   try {
-    pipelineResult = await runDraftGraphPipeline(input, rawBody, requestId);
+    pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId);
   } catch (error) {
     const err = error instanceof Error ? error : new Error("unexpected error");
     const isTimeout = err.name === "UpstreamTimeoutError";
@@ -465,7 +523,10 @@ export async function finaliseCeeDraftResponse(
     structural_meta?: StructuralMeta;
   };
 
-  const graph = payload.graph as GraphV1 | undefined;
+  const graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+  if (graph) {
+    payload.graph = graph as any;
+  }
   const nodeCount = Array.isArray(graph?.nodes) ? graph!.nodes.length : 0;
   const edgeCount = Array.isArray(graph?.edges) ? graph!.edges.length : 0;
 
@@ -528,12 +589,12 @@ export async function finaliseCeeDraftResponse(
         ? "CEE_GRAPH_INVALID"
         : "CEE_VALIDATION_FAILED";
 
-    const issue: CEEValidationIssue = {
+    const issue: CEEValidationIssue = createValidationIssue({
       code: violation.code,
-      severity: "error",
       message: violation.message,
       details: violation.details as Record<string, unknown> | undefined,
-    };
+      severityOverride: "error",
+    });
 
     const latencyMs = Date.now() - start;
 
@@ -639,29 +700,33 @@ export async function finaliseCeeDraftResponse(
     },
   };
 
+  const validationIssues: CEEValidationIssue[] = [];
+
   const confidence: number = typeof payload.confidence === "number" ? payload.confidence : 0.7;
   const engineIssueCount = Array.isArray(payload.issues) ? payload.issues.length : 0;
 
-  const validationIssues: CEEValidationIssue[] = [];
-
   if (Array.isArray(payload.issues)) {
     for (const msg of payload.issues as string[]) {
-      validationIssues.push({
-        code: "ENGINE_VALIDATION_WARNING",
-        severity: "warning",
-        message: msg,
-        details: { scope: "engine_validate" },
-      });
+      validationIssues.push(
+        createValidationIssue({
+          code: "ENGINE_VALIDATION_WARNING",
+          message: msg,
+          details: { scope: "engine_validate" },
+          severityOverride: "warning",
+        }),
+      );
     }
   }
 
   if (repro_mismatch) {
-    validationIssues.push({
-      code: "CEE_REPRO_MISMATCH",
-      severity: "warning",
-      message: "Engine reported a reproducibility mismatch for this graph and seed",
-      details: { scope: "engine", hint: "response_hash_mismatch" },
-    });
+    validationIssues.push(
+      createValidationIssue({
+        code: "CEE_REPRO_MISMATCH",
+        message: "Engine reported a reproducibility mismatch for this graph and seed",
+        details: { scope: "engine", hint: "response_hash_mismatch" },
+        severityOverride: "warning",
+      }),
+    );
   }
 
   // Hook: engine degraded mode propagated via header (future engine integration)
@@ -671,12 +736,14 @@ export async function finaliseCeeDraftResponse(
       ...(trace.engine || {}),
       degraded: true,
     };
-    validationIssues.push({
-      code: "ENGINE_DEGRADED",
-      severity: "warning",
-      message: "Engine reported degraded mode",
-      details: { scope: "engine", source: "x-olumi-degraded", hint: degradedHeader },
-    });
+    validationIssues.push(
+      createValidationIssue({
+        code: "ENGINE_DEGRADED",
+        message: "Engine reported degraded mode",
+        details: { scope: "engine", source: "x-olumi-degraded", hint: degradedHeader },
+        severityOverride: "warning",
+      }),
+    );
   }
 
   let archetype: CEEDraftGraphResponseV1["archetype"];
@@ -782,6 +849,51 @@ export async function finaliseCeeDraftResponse(
   const hasValidationIssues = validationIssues.length > 0;
   const engineDegraded = Boolean(trace.engine && (trace.engine as any).degraded);
 
+  // Run the CEE verification pipeline as a final hard guard for successful
+  // draft responses. This ensures the response conforms to the Zod schema and
+  // attaches metadata-only verification information under trace.verification.
+  let verifiedResponse: CEEDraftGraphResponseV1;
+  try {
+    const { response } = await verificationPipeline.verify(
+      ceeResponse,
+      CEEDraftGraphResponseV1Schema,
+      {
+        endpoint: "draft-graph",
+        // Engine validation has already been enforced earlier in the pipeline
+        // via validateClient and response guards.
+        requiresEngineValidation: false,
+        requestId,
+      },
+    );
+    verifiedResponse = response as CEEDraftGraphResponseV1;
+  } catch (error) {
+    const message = error instanceof Error ? error.message || "verification failed" : "verification failed";
+
+    emit(TelemetryEvents.CeeDraftGraphFailed, {
+      request_id: requestId,
+      latency_ms: latencyMs,
+      error_code: "CEE_INTERNAL_ERROR" as CEEErrorCode,
+      http_status: 500,
+    });
+
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      latencyMs,
+      status: "error",
+      errorCode: "CEE_INTERNAL_ERROR",
+      httpStatus: 500,
+    });
+
+    return {
+      statusCode: 500,
+      body: buildCeeErrorResponse("CEE_INTERNAL_ERROR", message, {
+        retryable: false,
+        requestId,
+      }),
+    };
+  }
+
   emit(TelemetryEvents.CeeDraftGraphSucceeded, {
     request_id: requestId,
     latency_ms: latencyMs,
@@ -813,6 +925,6 @@ export async function finaliseCeeDraftResponse(
 
   return {
     statusCode: 200,
-    body: ceeResponse,
+    body: verifiedResponse,
   };
 }

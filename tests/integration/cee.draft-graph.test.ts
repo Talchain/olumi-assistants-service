@@ -100,10 +100,20 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     expect(Array.isArray(body.graph.nodes)).toBe(true);
     expect(Array.isArray(body.graph.edges)).toBe(true);
 
+    // CEE normalisation: graph version and engine provenance
+    expect(body.graph.version).toBe("1.2");
+    for (const edge of body.graph.edges as any[]) {
+      // Fixture graphs have no document/metric/hypothesis provenance; CEE marks them as engine-originated.
+      expect(edge.provenance_source).toBe("engine");
+    }
+
     // Trace metadata
     expect(body.trace).toBeDefined();
     expect(body.trace.request_id).toBe(ceeRequestId);
     expect(body.trace.correlation_id).toBe(ceeRequestId);
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
 
     // Quality meta
     expect(body.quality).toBeDefined();

@@ -493,6 +493,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CEETeamPerspectivesResponseV1'
+
+  /assist/v1/health:
+    get:
+      summary: Summarise CEE service health (v1)
+      description: |
+        Returns a compact, metadata-only summary of CEE service health derived from
+        the existing `/healthz` and CEE diagnostics surfaces.
+
+        This endpoint is authenticated and intended for backend or ops consumers
+        that already integrate with other `/assist/v1/*` routes.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: CEE service health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeeServiceHealthSummaryV1'
         '400':
           description: CEE validation error
           content:
@@ -1437,6 +1456,13 @@ components:
         message:
           type: string
           description: Human-readable description for clients (not logged as telemetry)
+        suggestion:
+          type: string
+          description: High-level suggestion for how to address this issue
+        meta:
+          type: object
+          description: Additional machine-readable metadata for this issue
+          additionalProperties: true
         details:
           type: object
           additionalProperties: true
@@ -1514,6 +1540,16 @@ components:
           type: integer
           minimum: 1
           maximum: 10
+        issues_by_severity:
+          type: object
+          description: Aggregate counts of validation issues by severity
+          properties:
+            error:
+              type: integer
+            warning:
+              type: integer
+            info:
+              type: integer
         details:
           type: object
           additionalProperties: true
@@ -1676,6 +1712,10 @@ components:
         content:
           type: string
           description: Optional raw evidence content (never logged or emitted in telemetry)
+        observed_at:
+          type: string
+          format: date-time
+          description: Optional ISO8601 timestamp when this evidence was observed or last updated
 
     CEEEvidenceItemResponseV1:
       type: object
@@ -1695,6 +1735,14 @@ components:
         relevance:
           type: string
           enum: [low, medium, high]
+        freshness:
+          type: string
+          description: Relative recency of the evidence item based on observed_at when provided
+          enum: [low, medium, high]
+        age_days:
+          type: number
+          format: float
+          description: Approximate age of the evidence item in days, derived from observed_at and server time
 
     CEEEvidenceHelperRequestV1:
       type: object
@@ -2113,6 +2161,29 @@ components:
               description: Whether bias_findings was truncated to the cap
         guidance:
           $ref: '#/components/schemas/CEEGuidanceV1'
+        mitigation_patches:
+          type: array
+          items:
+            $ref: '#/components/schemas/CEEBiasMitigationPatchV1'
+
+    CEEBiasMitigationPatchV1:
+      type: object
+      description: Graph-structural mitigation suggestion for a specific bias finding
+      required:
+        - bias_code
+        - patch
+      properties:
+        bias_code:
+          type: string
+          description: Canonical bias code this mitigation is associated with
+        bias_id:
+          type: string
+          description: Optional identifier for the concrete bias finding instance
+        description:
+          type: string
+          description: Short description of the suggested structural change
+        patch:
+          $ref: '#/components/schemas/GraphPatch'
 
     CEEOptionV1:
       type: object
@@ -2351,6 +2422,65 @@ components:
             True when disagreement_score is above an internal threshold and there are enough
             participants to consider the disagreement material. Exposed as a convenience flag
             for UIs; always derived from existing summary metadata.
+
+    CeeServiceHealthSummaryV1:
+      type: object
+      description: Aggregated CEE service health summary derived from /healthz and diagnostics.
+      required:
+        - diagnostics_enabled
+        - feature_flags
+        - cee_config
+      properties:
+        service:
+          type: string
+          description: Logical service name (usually "assistants").
+        version:
+          type: string
+          description: Service version string from the running deployment.
+        provider:
+          type: string
+          description: Active LLM provider used by the service.
+        model:
+          type: string
+          description: Active LLM model identifier.
+        limits_source:
+          type: string
+          description: Where graph limits are sourced from (engine vs config).
+        diagnostics_enabled:
+          type: boolean
+          description: Whether CEE diagnostics are enabled on this deployment.
+        feature_flags:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Snapshot of all feature flags exposed by the service.
+        cee_config:
+          type: object
+          description: Per-capability CEE configuration (feature versions and RPM limits).
+          additionalProperties:
+            type: object
+            properties:
+              feature_version:
+                type: string
+              rate_limit_rpm:
+                type: integer
+        recent_error_counts:
+          type: object
+          properties:
+            total:
+              type: integer
+            by_capability:
+              type: object
+              additionalProperties:
+                type: integer
+            by_status:
+              type: object
+              additionalProperties:
+                type: integer
+            by_error_code:
+              type: object
+              additionalProperties:
+                type: integer
 
     CEETeamPerspectivesResponseV1:
       type: object

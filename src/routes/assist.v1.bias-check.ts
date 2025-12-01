@@ -13,10 +13,14 @@ import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { enrichBiasFindings } from "../cee/bias/causal-enrichment.js";
 import { config } from "../config/index.js";
+import { verificationPipeline } from "../cee/verification/index.js";
+import { CEEBiasCheckResponseV1Schema } from "../schemas/ceeResponses.js";
+import { buildBiasMitigationPatches } from "../cee/bias/mitigation-patches.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
 type CEEBiasCheckResponseV1 = components["schemas"]["CEEBiasCheckResponseV1"];
+type CEEBiasMitigationPatchV1 = components["schemas"]["CEEBiasMitigationPatchV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
@@ -192,6 +196,14 @@ export default async function route(app: FastifyInstance) {
         biasFindingsTruncated = true;
       }
 
+      let mitigationPatches: CEEBiasMitigationPatchV1[] | undefined;
+      if (config.cee.biasMitigationPatchesEnabled) {
+        const patches = buildBiasMitigationPatches(graph, cappedFindings as any);
+        if (Array.isArray(patches) && patches.length > 0) {
+          mitigationPatches = patches as CEEBiasMitigationPatchV1[];
+        }
+      }
+
       // Heuristic confidence: start moderate and penalise tiny graphs
       let confidence = 0.7;
       const nodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
@@ -228,7 +240,56 @@ export default async function route(app: FastifyInstance) {
         bias_findings: cappedFindings as any,
         response_limits: responseLimits,
         guidance,
+        mitigation_patches: mitigationPatches,
       };
+
+      // Verify and enrich the response before returning.
+      let verifiedResponse: CEEBiasCheckResponseV1;
+      try {
+        const { response } = await verificationPipeline.verify(
+          ceeResponse,
+          CEEBiasCheckResponseV1Schema,
+          {
+            endpoint: "bias-check",
+            requiresEngineValidation: false,
+            requestId,
+          },
+        );
+        verifiedResponse = response as CEEBiasCheckResponseV1;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("internal error");
+
+        emit(TelemetryEvents.CeeBiasCheckFailed, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          error_code: "CEE_INTERNAL_ERROR",
+          http_status: 500,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_bias_check",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_INTERNAL_ERROR",
+          httpStatus: 500,
+        });
+
+        const errorBody = buildCeeErrorResponse(
+          "CEE_INTERNAL_ERROR",
+          err.message || "internal error",
+          {
+            retryable: false,
+            requestId,
+          },
+        );
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.code(500);
+        return reply.send(errorBody);
+      }
 
       const latencyMs = Date.now() - start;
 
@@ -258,7 +319,7 @@ export default async function route(app: FastifyInstance) {
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
       reply.header("X-CEE-Request-ID", requestId);
       reply.code(200);
-      return reply.send(ceeResponse);
+      return reply.send(verifiedResponse);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 

@@ -17,7 +17,10 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "cee-bias-key-1,cee-bias-key-2,cee-bias-key-rate");
+    vi.stubEnv(
+      "ASSIST_API_KEYS",
+      "cee-bias-key-1,cee-bias-key-2,cee-bias-key-rate,cee-bias-key-mitigation",
+    );
     vi.stubEnv("CEE_BIAS_CHECK_FEATURE_VERSION", "bias-check-test");
     vi.stubEnv("CEE_BIAS_CHECK_RATE_LIMIT_RPM", "2");
 
@@ -34,6 +37,7 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
   const headersKey1 = { "X-Olumi-Assist-Key": "cee-bias-key-1" } as const;
   const headersKey2 = { "X-Olumi-Assist-Key": "cee-bias-key-2" } as const;
   const headersRate = { "X-Olumi-Assist-Key": "cee-bias-key-rate" } as const;
+  const headersMitigation = { "X-Olumi-Assist-Key": "cee-bias-key-mitigation" } as const;
 
   function makeGraph() {
     return {
@@ -73,6 +77,9 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
     expect(body.trace).toBeDefined();
     expect(body.trace.request_id).toBe(ceeRequestId);
     expect(body.trace.correlation_id).toBe(ceeRequestId);
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
 
     // Quality meta
     expect(body.quality).toBeDefined();
@@ -184,6 +191,59 @@ describe("POST /assist/v1/bias-check (CEE v1)", () => {
         process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
       }
       // Reset config cache after restoring original value
+      _resetConfigCache();
+    }
+  });
+
+  it("emits mitigation_patches when CEE_BIAS_MITIGATION_PATCHES_ENABLED is true", async () => {
+    const originalFlag = process.env.CEE_BIAS_MITIGATION_PATCHES_ENABLED;
+    process.env.CEE_BIAS_MITIGATION_PATCHES_ENABLED = "true";
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/bias-check",
+        headers: headersMitigation,
+        payload: {
+          graph: makeGraph(),
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      const patches = body.mitigation_patches ?? [];
+      expect(Array.isArray(patches)).toBe(true);
+
+      if (patches.length > 0) {
+        const codes = patches.map((p: any) => p.bias_code);
+        expect(codes.length).toBeGreaterThan(0);
+
+        const measurementPatch = patches.find(
+          (p: any) => p.bias_code === "MEASUREMENT_MISSING_RISKS_OR_OUTCOMES",
+        );
+
+        if (measurementPatch) {
+          expect(measurementPatch.patch).toBeDefined();
+          const patchAdds = measurementPatch.patch.adds ?? {};
+          const nodes = patchAdds.nodes ?? [];
+          expect(Array.isArray(nodes)).toBe(true);
+          if (nodes.length > 0) {
+            const node = nodes[0];
+            expect(typeof node.id).toBe("string");
+            expect(node.kind === "risk" || node.kind === "outcome" || node.kind === "option").toBe(true);
+          }
+        }
+      }
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.CEE_BIAS_MITIGATION_PATCHES_ENABLED;
+      } else {
+        process.env.CEE_BIAS_MITIGATION_PATCHES_ENABLED = originalFlag;
+      }
+      const { _resetConfigCache } = await import("../../src/config/index.js");
       _resetConfigCache();
     }
   });

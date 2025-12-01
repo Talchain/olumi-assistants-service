@@ -712,16 +712,28 @@ export class OpenAIAdapter implements LLMAdapter {
     const client = getClient();
 
     try {
-      const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
-      const response = await client.chat.completions.create({
-        model: this.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.5, // Slightly lower temp for more consistent questions
-        max_tokens: maxTokens,
-        response_format: { type: "json_object" },
-        ...(seed !== undefined ? { seed } : {}),
-      });
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(
+        () => abortController.abort(),
+        opts.timeoutMs || TIMEOUT_MS,
+      );
 
+      const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
+      const response = await client.chat.completions.create(
+        {
+          model: this.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.5, // Slightly lower temp for more consistent questions
+          max_tokens: maxTokens,
+          response_format: { type: "json_object" },
+          ...(seed !== undefined ? { seed } : {}),
+        },
+        {
+          signal: abortController.signal as any,
+        },
+      );
+
+      clearTimeout(timeoutId);
       const content = response.choices[0]?.message?.content?.trim() || "";
       const elapsedMs = Date.now() - start;
 
@@ -808,14 +820,13 @@ export class OpenAIAdapter implements LLMAdapter {
     } catch (error) {
       const elapsedMs = Date.now() - start;
 
-      if (error instanceof Error && "status" in error) {
-        const apiError = error as Error & { status?: number; code?: string; type?: string };
-        const isTimeout = apiError.code === "ETIMEDOUT" || apiError.message?.includes("timeout");
+      if (error instanceof Error) {
+        const isAbort = error.name === "AbortError";
 
-        if (isTimeout) {
+        if (isAbort) {
           log.warn(
             { request_id: requestId, elapsed_ms: elapsedMs },
-            "OpenAI clarify call timed out"
+            "OpenAI clarify call timed out",
           );
           throw new UpstreamTimeoutError(
             `OpenAI clarify timed out after ${elapsedMs}ms`,
@@ -823,24 +834,44 @@ export class OpenAIAdapter implements LLMAdapter {
             "clarify_brief",
             "body",
             elapsedMs,
-            error
+            error,
           );
         }
 
-        if (apiError.status && apiError.status >= 400) {
-          log.error(
-            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
-            "OpenAI API returned non-2xx status"
-          );
-          throw new UpstreamHTTPError(
-            `OpenAI clarify_brief failed: ${apiError.message || "unknown error"}`,
-            "openai",
-            apiError.status,
-            apiError.code || apiError.type,
-            requestId,
-            elapsedMs,
-            error
-          );
+        if ("status" in error) {
+          const apiError = error as Error & { status?: number; code?: string; type?: string };
+          const isTimeout = apiError.code === "ETIMEDOUT" || apiError.message?.includes("timeout");
+
+          if (isTimeout) {
+            log.warn(
+              { request_id: requestId, elapsed_ms: elapsedMs },
+              "OpenAI clarify call timed out",
+            );
+            throw new UpstreamTimeoutError(
+              `OpenAI clarify timed out after ${elapsedMs}ms`,
+              "openai",
+              "clarify_brief",
+              "body",
+              elapsedMs,
+              error,
+            );
+          }
+
+          if (apiError.status && apiError.status >= 400) {
+            log.error(
+              { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+              "OpenAI API returned non-2xx status",
+            );
+            throw new UpstreamHTTPError(
+              `OpenAI clarify_brief failed: ${apiError.message || "unknown error"}`,
+              "openai",
+              apiError.status,
+              apiError.code || apiError.type,
+              requestId,
+              elapsedMs,
+              error,
+            );
+          }
         }
       }
 

@@ -5,6 +5,7 @@ import { generateOptions } from "../cee/options/index.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
+import { createValidationIssue } from "../cee/validation/classifier.js";
 import { resolveCeeRateLimit, CEE_OPTIONS_MAX } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -12,6 +13,8 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
+import { verificationPipeline } from "../cee/verification/index.js";
+import { CEEOptionsResponseV1Schema } from "../schemas/ceeResponses.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -180,12 +183,14 @@ export default async function route(app: FastifyInstance) {
 
       const nodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
       if (nodeCount < 2) {
-        validationIssues.push({
-          code: "trivial_graph",
-          severity: "info",
-          field: "graph",
-          details: { node_count: nodeCount },
-        } as any);
+        validationIssues.push(
+          createValidationIssue({
+            code: "TRIVIAL_GRAPH",
+            field: "graph",
+            details: { node_count: nodeCount },
+            severityOverride: "info",
+          }) as any,
+        );
       }
 
       const options = generateOptions(graph, (input as any).archetype ?? null);
@@ -238,6 +243,54 @@ export default async function route(app: FastifyInstance) {
         guidance,
       };
 
+      // Verify and enrich the response before returning.
+      let verifiedResponse: CEEOptionsResponseV1;
+      try {
+        const { response } = await verificationPipeline.verify(
+          ceeResponse,
+          CEEOptionsResponseV1Schema,
+          {
+            endpoint: "options",
+            requiresEngineValidation: false,
+            requestId,
+          },
+        );
+        verifiedResponse = response as CEEOptionsResponseV1;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("internal error");
+
+        emit(TelemetryEvents.CeeOptionsFailed, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          error_code: "CEE_INTERNAL_ERROR",
+          http_status: 500,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_options",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_INTERNAL_ERROR",
+          httpStatus: 500,
+        });
+
+        const errorBody = buildCeeErrorResponse(
+          "CEE_INTERNAL_ERROR",
+          err.message || "internal error",
+          {
+            retryable: false,
+            requestId,
+          },
+        );
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.code(500);
+        return reply.send(errorBody);
+      }
+
       const latencyMs = Date.now() - start;
 
       emit(TelemetryEvents.CeeOptionsSucceeded, {
@@ -266,7 +319,7 @@ export default async function route(app: FastifyInstance) {
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
       reply.header("X-CEE-Request-ID", requestId);
       reply.code(200);
-      return reply.send(ceeResponse);
+      return reply.send(verifiedResponse);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 

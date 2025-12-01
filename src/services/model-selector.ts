@@ -19,7 +19,6 @@ import {
   getDefaultModelForTask,
   isQualityRequired,
   isTierShortcut,
-  type TierShortcut,
 } from "../config/model-routing.js";
 import { config } from "../config/index.js";
 

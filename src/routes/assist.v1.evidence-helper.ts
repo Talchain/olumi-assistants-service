@@ -5,6 +5,7 @@ import { scoreEvidenceItems } from "../cee/evidence/index.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { buildCeeGuidance, type ResponseLimitsLike } from "../cee/guidance/index.js";
+import { createValidationIssue } from "../cee/validation/classifier.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -12,6 +13,8 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
+import { verificationPipeline } from "../cee/verification/index.js";
+import { CEEEvidenceHelperResponseV1Schema } from "../schemas/ceeResponses.js";
 
 type CEEEvidenceHelperResponseV1 = components["schemas"]["CEEEvidenceHelperResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -189,12 +192,13 @@ export default async function route(app: FastifyInstance) {
 
       const validationIssues: CEEValidationIssue[] = [];
       if (unsupportedTypeIds.length > 0) {
-        validationIssues.push({
-          code: "unsupported_evidence_type",
-          severity: "warning",
-          field: "evidence.type",
-          details: { unsupported_ids: unsupportedTypeIds },
-        } as any);
+        validationIssues.push(
+          createValidationIssue({
+            code: "UNSUPPORTED_EVIDENCE_TYPE",
+            field: "evidence.type",
+            details: { unsupported_ids: unsupportedTypeIds },
+          }) as any,
+        );
       }
 
       const strongCount = cappedItems.filter((i) => (i as any).strength === "strong").length;
@@ -240,6 +244,54 @@ export default async function route(app: FastifyInstance) {
         guidance,
       };
 
+      // Verify and enrich the response before returning.
+      let verifiedResponse: CEEEvidenceHelperResponseV1;
+      try {
+        const { response } = await verificationPipeline.verify(
+          ceeResponse,
+          CEEEvidenceHelperResponseV1Schema,
+          {
+            endpoint: "evidence-helper",
+            requiresEngineValidation: false,
+            requestId,
+          },
+        );
+        verifiedResponse = response as CEEEvidenceHelperResponseV1;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("internal error");
+
+        emit(TelemetryEvents.CeeEvidenceHelperFailed, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          error_code: "CEE_INTERNAL_ERROR",
+          http_status: 500,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_evidence_helper",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_INTERNAL_ERROR",
+          httpStatus: 500,
+        });
+
+        const errorBody = buildCeeErrorResponse(
+          "CEE_INTERNAL_ERROR",
+          err.message || "internal error",
+          {
+            retryable: false,
+            requestId,
+          },
+        );
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.code(500);
+        return reply.send(errorBody);
+      }
+
       emit(TelemetryEvents.CeeEvidenceHelperSucceeded, {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
@@ -271,7 +323,7 @@ export default async function route(app: FastifyInstance) {
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
       reply.header("X-CEE-Request-ID", requestId);
       reply.code(200);
-      return reply.send(ceeResponse);
+      return reply.send(verifiedResponse);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 

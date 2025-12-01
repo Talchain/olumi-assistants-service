@@ -555,6 +555,7 @@ if (response.ceeReview) {
 | `CEE_DRAFT_ARCHETYPES_ENABLED` | `true` | Enable archetype detection |
 | `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` | `false` | Enable structural warnings |
 | `CEE_BIAS_STRUCTURAL_ENABLED` | `false` | Enable structural bias detectors |
+| `CEE_BIAS_MITIGATION_PATCHES_ENABLED` | `false` | Enable deterministic bias mitigation patches on `/assist/v1/bias-check` (adds `mitigation_patches` field). |
 | `CEE_PRE_DECISION_CHECKS_ENABLED` | `false` | Include pre-decision checklist |
 | `CEE_CAUSAL_VALIDATION_ENABLED` | `false` | Enable ISL bias enrichment |
 | `CEE_PREFLIGHT_ENABLED` | `false` | Enable preflight validation |

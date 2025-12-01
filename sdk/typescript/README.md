@@ -231,6 +231,7 @@ The SDK includes a small, deterministic surface area for CEE v1
 - `buildCeeCausalValidationStats` – summarises causal validation metadata from
   Bias Check (validated vs identifiable biases, strength, confidence bands,
   evidence strength mix) without inspecting any free-text content.
+ - `applyGraphPatch` – pure helper to apply a `GraphPatchV1` to a `GraphV1` (used, for example, with CEE bias `mitigation_patches`).
 
 Recommended reading and examples:
 

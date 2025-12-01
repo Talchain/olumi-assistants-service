@@ -136,7 +136,7 @@ async function testA4() {
     const timeoutId = setTimeout(() => ctrl.abort(), timeoutMs);
     const headers = { "content-type": "application/json", "X-Olumi-Assist-Key": RAW_KEY };
     let sawDrafting = false, sawComplete = false;
-    let lastHeartbeat = Date.now();
+    let _lastHeartbeat = Date.now();
 
     try {
       const r = await fetch(`${BASE_URL}/assist/draft-graph/stream`, {

@@ -162,7 +162,7 @@ function buildSystemBlocks(text: string, opts?: { operation?: string }): Anthrop
   ];
 }
 
-const DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
+const _DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
 
 ## Your Task
 Draft a small decision graph with:
@@ -252,7 +252,7 @@ function buildDraftPrompt(args: DraftArgs): { system: AnthropicSystemBlock[]; us
   };
 }
 
-const SUGGEST_SYSTEM_PROMPT = `You are an expert at generating strategic options for decisions.
+const _SUGGEST_SYSTEM_PROMPT = `You are an expert at generating strategic options for decisions.
 
 ## Your Task
 Generate 3-5 distinct, actionable options. For each option provide:
@@ -725,7 +725,7 @@ export type RepairArgs = {
   model?: string;
 };
 
-const REPAIR_SYSTEM_PROMPT = `You are an expert at fixing decision graph violations.
+const _REPAIR_SYSTEM_PROMPT = `You are an expert at fixing decision graph violations.
 
 ## Your Task
 Fix the graph to resolve ALL violations. Common fixes:
@@ -993,7 +993,7 @@ export type ClarifyArgs = {
   model?: string;
 };
 
-const CLARIFY_SYSTEM_PROMPT = `You are an expert at identifying ambiguities in decision briefs and generating clarifying questions.
+const _CLARIFY_SYSTEM_PROMPT = `You are an expert at identifying ambiguities in decision briefs and generating clarifying questions.
 
 ## Your Task
 Analyze this brief and generate 1-5 clarifying questions to refine the decision graph. Focus on:
@@ -1191,7 +1191,7 @@ export type CritiqueArgs = {
   model?: string;
 };
 
-const CRITIQUE_SYSTEM_PROMPT = `You are an expert at critiquing decision graphs for quality and feasibility.
+const _CRITIQUE_SYSTEM_PROMPT = `You are an expert at critiquing decision graphs for quality and feasibility.
 
 ## Your Task
 Analyze this graph and identify issues across these dimensions:

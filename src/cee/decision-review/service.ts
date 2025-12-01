@@ -22,10 +22,6 @@ import type {
   ISLConformalResponse,
   ISLValidationStrategiesRequest,
   ISLValidationStrategiesResponse,
-  NodeSensitivity,
-  ContrastPoint,
-  PredictionInterval,
-  ValidationStrategy,
 } from '../../adapters/isl/types.js';
 import { causalValidationEnabled } from '../../adapters/isl/config.js';
 import { logger } from '../../utils/simple-logger.js';
