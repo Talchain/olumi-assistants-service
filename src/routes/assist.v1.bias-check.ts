@@ -201,6 +201,14 @@ export default async function route(app: FastifyInstance) {
         const patches = buildBiasMitigationPatches(graph, cappedFindings as any);
         if (Array.isArray(patches) && patches.length > 0) {
           mitigationPatches = patches as CEEBiasMitigationPatchV1[];
+
+          // Emit telemetry for patch generation
+          emit(TelemetryEvents.BiasPatchesGenerated, {
+            ...telemetryCtx,
+            findings_count: cappedFindings.length,
+            patches_count: patches.length,
+            patch_types: patches.map((p) => p.patch?.adds?.nodes?.map((n: any) => n.kind) ?? []).flat(),
+          });
         }
       }
 

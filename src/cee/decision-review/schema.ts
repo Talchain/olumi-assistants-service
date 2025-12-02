@@ -275,8 +275,77 @@ export const ISLAvailabilitySummarySchema = z.object({
   validationStrategiesAvailable: z.boolean(),
   /** Overall degradation reason (if any) */
   degradationReason: z.string().optional(),
+  /** Which ISL endpoints were successfully called */
+  endpointsUsed: z.array(z.enum(['sensitivity', 'contrastive', 'conformal', 'validation'])).optional(),
 });
 export type ISLAvailabilitySummary = z.infer<typeof ISLAvailabilitySummarySchema>;
+
+// ============================================================================
+// Plain English Formatters
+// ============================================================================
+
+/**
+ * Assumption warning with plain English explanation
+ */
+export const AssumptionWarningSchema = z.object({
+  variable: z.string(),
+  sensitivity: z.number(),
+  impact: z.string(),
+  plain_english: z.string(),
+});
+export type AssumptionWarning = z.infer<typeof AssumptionWarningSchema>;
+
+/**
+ * Actionable alternative with plain English explanation
+ */
+export const ActionableAlternativeSchema = z.object({
+  change: z.string(),
+  outcome_diff: z.string(),
+  feasibility: z.number(),
+  plain_english: z.string(),
+});
+export type ActionableAlternative = z.infer<typeof ActionableAlternativeSchema>;
+
+/**
+ * Confidence statement with plain English explanation
+ */
+export const ConfidenceStatementSchema = z.object({
+  prediction_interval: z.tuple([z.number(), z.number()]),
+  confidence_level: z.number(),
+  uncertainty_source: z.string(),
+  plain_english: z.string(),
+});
+export type ConfidenceStatement = z.infer<typeof ConfidenceStatementSchema>;
+
+/**
+ * Model improvement with plain English explanation
+ */
+export const ModelImprovementSchema = z.object({
+  type: z.string(),
+  description: z.string(),
+  priority: z.enum(['high', 'medium', 'low']),
+  plain_english: z.string(),
+});
+export type ModelImprovement = z.infer<typeof ModelImprovementSchema>;
+
+/**
+ * ISL-powered enhancements for decision review
+ */
+export const ISLEnhancementsSchema = z.object({
+  /** Assumption warnings from sensitivity analysis */
+  assumption_warnings: z.array(AssumptionWarningSchema).optional(),
+  /** Actionable alternatives from contrastive analysis */
+  actionable_alternatives: z.array(ActionableAlternativeSchema).optional(),
+  /** Confidence statement from conformal prediction */
+  confidence_statement: ConfidenceStatementSchema.optional(),
+  /** Model improvements from validation strategies */
+  model_improvements: z.array(ModelImprovementSchema).optional(),
+  /** Whether ISL was available */
+  isl_available: z.boolean(),
+  /** Which endpoints were successfully used */
+  isl_endpoints_used: z.array(z.string()),
+});
+export type ISLEnhancements = z.infer<typeof ISLEnhancementsSchema>;
 
 /**
  * Enhanced decision review response

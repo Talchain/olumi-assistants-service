@@ -213,6 +213,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DecisionReviewSucceeded: "cee.decision_review.succeeded",
         DecisionReviewFailed: "cee.decision_review.failed",
 
+        // Bias Mitigation events (v2.0)
+        BiasPatchesGenerated: "cee.bias_check.patches_generated",
+        BiasPatchesApplied: "cee.bias_check.patches_applied",
+
         // Prompt Store Cache events (v2.0 Phase 4.3)
         PromptStoreCacheHit: "prompt.store.cache.hit",
         PromptStoreCacheMiss: "prompt.store.cache.miss",
@@ -515,6 +519,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeClarifierConverged,
         TelemetryEvents.CeeClarifierQuestionCached,
         TelemetryEvents.CeeClarifierQuestionRetrieved,
+        // Bias mitigation events (diagnostic only)
+        TelemetryEvents.BiasPatchesGenerated,
+        TelemetryEvents.BiasPatchesApplied,
       ];
 
       for (const event of allEvents) {
@@ -699,6 +706,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.requested",
         "cee.decision_review.succeeded",
         "cee.decision_review.failed",
+
+        // Bias Mitigation events (v2.0)
+        "cee.bias_check.patches_generated",
+        "cee.bias_check.patches_applied",
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit",
