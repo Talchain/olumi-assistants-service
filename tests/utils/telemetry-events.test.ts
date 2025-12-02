@@ -181,6 +181,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         ClarificationRequired: "cee.clarification.required",
         ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
 
+        // CEE Multi-turn Clarifier events (Phase 1)
+        CeeClarifierSessionStart: "cee.clarifier.session_start",
+        CeeClarifierQuestionAsked: "cee.clarifier.question_asked",
+        CeeClarifierAnswerReceived: "cee.clarifier.answer_received",
+        CeeClarifierAnswerIncorporated: "cee.clarifier.answer_incorporated",
+        CeeClarifierConverged: "cee.clarifier.converged",
+        CeeClarifierQuestionCached: "cee.clarifier.question_cached",
+        CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
+
         // Prompt Management events (v2.0)
         PromptStoreError: "prompt.store_error",
         PromptLoaderError: "prompt.loader.error",
@@ -233,7 +242,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review|verification)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -483,6 +492,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // Preflight events are diagnostic and logged locally
       // LLM normalization events are debug-level mapping notifications
       // Clarification events are diagnostic and logged locally
+      // Multi-turn clarifier events are diagnostic and logged locally
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
         TelemetryEvents.CostCalculationUnknownModel,
@@ -497,6 +507,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.ClarificationRequired,
         TelemetryEvents.ClarificationBypassAllowed,
+        // Multi-turn clarifier events (Phase 1 - diagnostic only)
+        TelemetryEvents.CeeClarifierSessionStart,
+        TelemetryEvents.CeeClarifierQuestionAsked,
+        TelemetryEvents.CeeClarifierAnswerReceived,
+        TelemetryEvents.CeeClarifierAnswerIncorporated,
+        TelemetryEvents.CeeClarifierConverged,
+        TelemetryEvents.CeeClarifierQuestionCached,
+        TelemetryEvents.CeeClarifierQuestionRetrieved,
       ];
 
       for (const event of allEvents) {
@@ -634,6 +652,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",
         "cee.clarification.bypass_allowed",
+
+        // Multi-turn clarifier integration events (v1.15)
+        "cee.clarifier.session_start",
+        "cee.clarifier.question_asked",
+        "cee.clarifier.answer_received",
+        "cee.clarifier.answer_incorporated",
+        "cee.clarifier.converged",
+        "cee.clarifier.question_cached",
+        "cee.clarifier.question_retrieved",
 
         // CEE verification events (v1.14)
         "cee.verification.succeeded",

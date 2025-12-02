@@ -985,6 +985,41 @@ components:
           items:
             type: string
             minLength: 1
+        clarifier_response:
+          type: object
+          description: User's answer to a clarifying question from a previous round
+          properties:
+            question_id:
+              type: string
+              description: ID of the question being answered
+            answer:
+              type: string
+              description: User's answer (text or selected option)
+          required:
+            - question_id
+            - answer
+        conversation_history:
+          type: array
+          description: Full Q&A history from previous clarification rounds
+          items:
+            type: object
+            properties:
+              question_id:
+                type: string
+              question:
+                type: string
+              answer:
+                type: string
+            required:
+              - question_id
+              - question
+              - answer
+        max_clarifier_rounds:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 5
+          description: Maximum clarification rounds (0 to skip clarifier)
       additionalProperties: false
 
     Attachment:
@@ -1872,6 +1907,81 @@ components:
               $ref: '#/components/schemas/CEEConfidenceFlagsV1'
             guidance:
               $ref: '#/components/schemas/CEEGuidanceV1'
+            clarifier:
+              $ref: '#/components/schemas/CEEClarifierBlockV1'
+
+    CEEClarifierBlockV1:
+      type: object
+      description: Multi-turn clarifier block for iterative graph refinement
+      required:
+        - needs_clarification
+        - round
+        - question_id
+        - question
+        - question_type
+        - metadata
+      properties:
+        needs_clarification:
+          type: boolean
+          description: Whether clarification is needed before proceeding
+        round:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Current clarification round (1-indexed)
+        question_id:
+          type: string
+          description: Unique identifier for tracking the answer
+        question:
+          type: string
+          description: Natural language clarifying question
+        question_type:
+          type: string
+          enum: [binary, multiple_choice, open_ended]
+          description: Type of question for UI rendering
+        options:
+          type: array
+          items:
+            type: string
+          description: Available options for multiple_choice questions
+        metadata:
+          $ref: '#/components/schemas/CEEClarifierMetadataV1'
+
+    CEEClarifierMetadataV1:
+      type: object
+      description: Metadata about the clarifying question
+      required:
+        - targets_ambiguity
+        - expected_improvement
+        - convergence_confidence
+        - information_gain
+      properties:
+        targets_ambiguity:
+          type: string
+          description: Which aspect of the decision this question resolves
+        expected_improvement:
+          type: number
+          minimum: 0
+          maximum: 10
+          description: Estimated quality gain (0-10 scale)
+        convergence_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: How close to completion (0-1)
+        information_gain:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Expected information gain for telemetry (0-1)
+        convergence_status:
+          type: string
+          enum: [continue, complete, max_rounds, confident]
+          description: Current convergence status (continue = still asking, others = would stop if no question)
+        convergence_reason:
+          type: string
+          enum: [quality_threshold, stability, max_rounds, diminishing_returns, continue]
+          description: Why clarification continues or would stop
 
     CEEExplainGraphResponseV1:
       type: object

@@ -6,7 +6,7 @@ import { SSE_DEGRADED_HEADER_NAME_LOWER } from "../../utils/degraded-mode.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
 import { validateResponse } from "../../utils/responseGuards.js";
 import { getRequestId } from "../../utils/request-id.js";
-import { emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { inferArchetype } from "../archetypes/index.js";
 import { computeQuality } from "../quality/index.js";
 import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
@@ -23,6 +23,17 @@ import {
 import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { config } from "../../config/index.js";
+import {
+  detectAmbiguities,
+  detectConvergence,
+  generateQuestionCandidates,
+  selectBestQuestion,
+  cacheQuestion,
+  retrieveQuestion,
+  incorporateAnswer,
+  type ConversationHistoryEntry,
+} from "../clarifier/index.js";
+import { randomUUID } from "node:crypto";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -282,6 +293,204 @@ function normaliseCeeGraphVersionAndProvenance(graph: GraphV1 | undefined): Grap
 
 function archetypesEnabled(): boolean {
   return config.cee.draftArchetypesEnabled;
+}
+
+function clarifierEnabled(): boolean {
+  return config.cee.clarifierEnabled;
+}
+
+type CEEClarifierBlockV1 = components["schemas"]["CEEClarifierBlockV1"];
+
+interface ClarifierIntegrationResult {
+  clarifier?: CEEClarifierBlockV1;
+  refinedGraph?: GraphV1;
+  previousQuality?: number;
+  /** Convergence status for backward compatibility with clarifier_status field */
+  convergenceStatus?: "complete" | "max_rounds" | "confident";
+}
+
+async function integrateClarifier(
+  input: DraftInputWithCeeExtras,
+  graph: GraphV1,
+  quality: { overall: number },
+  requestId: string,
+  previousGraph?: GraphV1
+): Promise<ClarifierIntegrationResult> {
+  if (!clarifierEnabled()) {
+    return {};
+  }
+
+  // Map conversation history to required format (filter out entries without questions)
+  const conversationHistory: ConversationHistoryEntry[] = (input.conversation_history ?? [])
+    .filter((h): h is typeof h & { question: string; answer: string } =>
+      Boolean(h.question && h.answer))
+    .map((h) => ({
+      question_id: h.question_id,
+      question: h.question,
+      answer: h.answer,
+    }));
+
+  const round = conversationHistory.length + 1;
+  const maxRounds = input.max_clarifier_rounds ?? config.cee.clarifierMaxRoundsDefault;
+
+  // If clarifier_response is provided, incorporate the answer
+  let refinedGraph = graph;
+  let previousQuality: number | undefined;
+  let currentQuality = quality.overall;
+
+  if (input.clarifier_response) {
+    emit(TelemetryEvents.CeeClarifierAnswerReceived, {
+      request_id: requestId,
+      round,
+      question_id: input.clarifier_response.question_id,
+      answer_length: input.clarifier_response.answer.length,
+    });
+
+    const cachedQuestion = await retrieveQuestion(input.clarifier_response.question_id);
+    if (cachedQuestion) {
+      emit(TelemetryEvents.CeeClarifierQuestionRetrieved, {
+        request_id: requestId,
+        question_id: input.clarifier_response.question_id,
+      });
+
+      // Capture quality BEFORE incorporation (Fix 1.1)
+      previousQuality = quality.overall;
+
+      const result = await incorporateAnswer({
+        graph,
+        brief: input.brief,
+        clarifier_response: input.clarifier_response,
+        conversation_history: input.conversation_history,
+        requestId,
+      });
+
+      if (result.refined_graph) {
+        refinedGraph = result.refined_graph;
+
+        // Recompute quality from refined graph (Fix 1.1)
+        const refinedQuality = computeQuality({
+          graph: refinedGraph,
+          confidence: quality.overall / 10, // Approximate original confidence
+          engineIssueCount: 0,
+          ceeIssues: [],
+        });
+        currentQuality = refinedQuality.overall;
+
+        log.debug(
+          {
+            request_id: requestId,
+            previous_quality: previousQuality,
+            current_quality: currentQuality,
+            quality_delta: currentQuality - previousQuality,
+          },
+          "Recomputed quality after answer incorporation"
+        );
+      }
+    }
+  } else if (round === 1) {
+    // First round - emit session start
+    emit(TelemetryEvents.CeeClarifierSessionStart, {
+      request_id: requestId,
+      brief_length: input.brief.length,
+      initial_quality: quality.overall,
+    });
+  }
+
+  // Check convergence with updated quality (Fix 1.1)
+  const convergence = detectConvergence({
+    currentGraph: refinedGraph,
+    previousGraph: previousGraph ?? null,
+    qualityScore: currentQuality,
+    roundCount: round,
+    maxRounds,
+    previousQualityScore: previousQuality,
+  }, {
+    qualityComplete: config.cee.clarifierQualityThreshold,
+    stabilityThreshold: config.cee.clarifierStabilityThreshold,
+    minImprovement: config.cee.clarifierMinImprovementThreshold,
+  });
+
+  if (!convergence.should_continue) {
+    emit(TelemetryEvents.CeeClarifierConverged, {
+      request_id: requestId,
+      total_rounds: round,
+      final_quality: currentQuality,
+      quality_improvement: previousQuality ? currentQuality - previousQuality : 0,
+      reason: convergence.reason,
+      status: convergence.status,
+    });
+
+    // Map convergence status to clarifier_status for backward compatibility (Fix 1.4)
+    const convergenceStatus = convergence.status as "complete" | "max_rounds" | "confident";
+
+    return { refinedGraph, previousQuality, convergenceStatus };
+  }
+
+  // Generate clarifier block if we should continue
+  const ambiguities = detectAmbiguities(refinedGraph, input.brief, currentQuality);
+
+  if (ambiguities.length === 0) {
+    return { refinedGraph, previousQuality };
+  }
+
+  const candidates = await generateQuestionCandidates(
+    ambiguities,
+    refinedGraph,
+    input.brief,
+    conversationHistory,
+    requestId
+  );
+
+  const best = selectBestQuestion(candidates, conversationHistory);
+
+  if (!best) {
+    return { refinedGraph, previousQuality };
+  }
+
+  // Cache the question
+  const questionId = randomUUID();
+  await cacheQuestion(questionId, {
+    question: best.question,
+    question_type: best.question_type,
+    options: best.options,
+    targets_ambiguity: best.targets_ambiguity,
+    generated_at: new Date().toISOString(),
+  }, config.cee.clarifierQuestionCacheTtlSeconds);
+
+  emit(TelemetryEvents.CeeClarifierQuestionCached, {
+    request_id: requestId,
+    question_id: questionId,
+    question_type: best.question_type,
+  });
+
+  emit(TelemetryEvents.CeeClarifierQuestionAsked, {
+    request_id: requestId,
+    round,
+    question_id: questionId,
+    question_type: best.question_type,
+    targets_ambiguity: best.targets_ambiguity,
+    information_gain: best.score / 10, // Normalize score to 0-1
+  });
+
+  const clarifier: CEEClarifierBlockV1 = {
+    needs_clarification: true,
+    round,
+    question_id: questionId,
+    question: best.question,
+    question_type: best.question_type,
+    options: best.options,
+    metadata: {
+      targets_ambiguity: best.targets_ambiguity,
+      expected_improvement: Math.min(best.score, 10),
+      convergence_confidence: convergence.confidence,
+      information_gain: best.score / 10,
+      // Enhancement 3.2: Expose convergence status/reason to clients
+      convergence_status: "continue",
+      convergence_reason: "continue",
+    },
+  };
+
+  return { clarifier, refinedGraph, previousQuality };
 }
 
 function structuralWarningsEnabled(): boolean {
@@ -782,6 +991,43 @@ export async function finaliseCeeDraftResponse(
     ceeIssues: validationIssues,
   });
 
+  // Integrate multi-turn clarifier if enabled
+  let clarifierResult: ClarifierIntegrationResult = {};
+  if (clarifierEnabled()) {
+    try {
+      // Capture pre-clarifier graph for stability detection
+      const preClarifierGraph = graph;
+
+      clarifierResult = await integrateClarifier(
+        input,
+        graph,
+        quality,
+        requestId,
+        preClarifierGraph // Pass previousGraph for stability rule
+      );
+
+      // If clarifier refined the graph, use the refined version and re-normalize
+      if (clarifierResult.refinedGraph) {
+        // Re-apply normalization to the refined graph (Fix 1.2)
+        let refinedGraph = normaliseCeeGraphVersionAndProvenance(clarifierResult.refinedGraph);
+        refinedGraph = normaliseDecisionBranchBeliefs(refinedGraph);
+
+        if (refinedGraph) {
+          graph = refinedGraph;
+          if (payload.graph) {
+            payload.graph = graph as any;
+          }
+        }
+      }
+    } catch (error) {
+      // Log but don't fail the request if clarifier integration fails
+      log.warn(
+        { error, request_id: requestId },
+        "Clarifier integration failed, continuing without clarification"
+      );
+    }
+  }
+
   if (Array.isArray(payload.bias_findings)) {
     payload.bias_findings = sortBiasFindings(payload.bias_findings as any, input.seed);
   }
@@ -824,6 +1070,14 @@ export async function finaliseCeeDraftResponse(
     limits,
   });
 
+  // Determine clarifier_status for backward compatibility (Fix 1.4)
+  // - If clarifier block present with needs_clarification: true → don't set clarifier_status
+  // - If no clarifier block → set clarifier_status from convergence status (or "complete" as default)
+  let clarifierStatus: "complete" | "max_rounds" | "confident" | undefined;
+  if (!clarifierResult.clarifier) {
+    clarifierStatus = clarifierResult.convergenceStatus ?? "complete";
+  }
+
   const ceeResponse: CEEDraftGraphResponseV1 = {
     ...cappedPayload,
     trace,
@@ -836,6 +1090,9 @@ export async function finaliseCeeDraftResponse(
     draft_warnings: draftWarnings,
     confidence_flags: confidenceFlags,
     guidance,
+    clarifier: clarifierResult.clarifier,
+    // Backward compatibility: set clarifier_status when clarification is complete
+    clarifier_status: clarifierStatus,
   };
 
   const draftWarningCount = Array.isArray(draftWarnings) ? draftWarnings.length : 0;

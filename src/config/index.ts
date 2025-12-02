@@ -186,6 +186,13 @@ const ConfigSchema = z.object({
     clarificationThresholdOneRound: z.coerce.number().min(0).max(1).default(0.4), // >= this = require 1 round, < this = require 2+ rounds
     // Pre-decision checklist and framing nudges (Phase 6)
     preDecisionChecksEnabled: booleanString.default(false), // If true, include pre-decision checks in draft response
+    // Multi-turn clarifier integration
+    clarifierEnabled: booleanString.default(false), // If true, enable clarifier integration in draft-graph
+    clarifierMaxRoundsDefault: z.coerce.number().int().min(0).max(10).default(5), // Default max clarifier rounds
+    clarifierQualityThreshold: z.coerce.number().min(0).max(10).default(8.0), // Quality score to stop asking
+    clarifierStabilityThreshold: z.coerce.number().int().min(0).default(2), // Max graph changes for stability
+    clarifierMinImprovementThreshold: z.coerce.number().min(0).max(10).default(0.5), // Min quality improvement per round
+    clarifierQuestionCacheTtlSeconds: z.coerce.number().int().min(0).default(3600), // Question cache TTL
     // Bias detection confidence thresholding (Phase 6)
     biasConfidenceThreshold: z.coerce.number().min(0).max(1).default(0.3), // Minimum confidence to report bias finding
     // Response caching (Phase 7)
@@ -393,6 +400,13 @@ function parseConfig(): Config {
       clarificationThresholdOneRound: env.CEE_CLARIFICATION_THRESHOLD_ONE_ROUND,
       // Pre-decision checklist and framing nudges
       preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
+      // Multi-turn clarifier integration
+      clarifierEnabled: env.CEE_CLARIFIER_ENABLED,
+      clarifierMaxRoundsDefault: env.CEE_CLARIFIER_MAX_ROUNDS_DEFAULT,
+      clarifierQualityThreshold: env.CEE_CLARIFIER_QUALITY_THRESHOLD,
+      clarifierStabilityThreshold: env.CEE_CLARIFIER_STABILITY_THRESHOLD,
+      clarifierMinImprovementThreshold: env.CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD,
+      clarifierQuestionCacheTtlSeconds: env.CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS,
       // Bias detection confidence thresholding
       biasConfidenceThreshold: env.CEE_BIAS_CONFIDENCE_THRESHOLD,
       // Response caching

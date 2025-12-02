@@ -28,6 +28,17 @@ export const DraftGraphInput = z.object({
   preserve_nodes: z.array(z.string()).max(50).optional(),
   // Clarification enforcement (Phase 5)
   clarification_rounds_completed: z.number().int().min(0).max(3).optional(),
+  // Multi-turn clarifier integration
+  clarifier_response: z.object({
+    question_id: z.string(),
+    answer: z.string(),
+  }).optional(),
+  conversation_history: z.array(z.object({
+    question_id: z.string(),
+    question: z.string(),
+    answer: z.string(),
+  })).optional(),
+  max_clarifier_rounds: z.number().int().min(0).max(10).default(5).optional(),
 });
 
 export const DraftGraphOutput = z.object({
