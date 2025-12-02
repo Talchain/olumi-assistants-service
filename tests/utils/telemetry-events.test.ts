@@ -170,6 +170,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
         PreflightRejected: "cee.preflight.rejected",
 
+        // CEE verification events (v1.14)
+        CeeVerificationSucceeded: "cee.verification.succeeded",
+        CeeVerificationFailed: "cee.verification.failed",
+
         // LLM Normalization events (Phase 1 NodeKind normalization)
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
@@ -229,7 +233,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|decision_review|verification)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -437,6 +441,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.team_perspectives.succeeded": [TelemetryEvents.CeeTeamPerspectivesSucceeded],
         "cee.team_perspectives.failed": [TelemetryEvents.CeeTeamPerspectivesFailed],
 
+        // CEE verification events (v1.14)
+        "cee.verification.succeeded": [TelemetryEvents.CeeVerificationSucceeded],
+        "cee.verification.failed": [TelemetryEvents.CeeVerificationFailed],
+
         // Prompt Management events (v2.0)
         "prompt.store.error": [TelemetryEvents.PromptStoreError],
         "prompt.loader.error": [TelemetryEvents.PromptLoaderError],
@@ -626,6 +634,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",
         "cee.clarification.bypass_allowed",
+
+        // CEE verification events (v1.14)
+        "cee.verification.succeeded",
+        "cee.verification.failed",
 
         // Validation cache events
         "assist.draft.validation_cache_hit",

@@ -4,6 +4,7 @@ import { SchemaValidator } from "./validators/schema-validator.js";
 import { EngineValidator } from "./validators/engine-validator.js";
 import { NumericalValidator } from "./validators/numerical-validator.js";
 import { MetadataEnricher } from "./validators/metadata-enricher.js";
+import { BranchProbabilityValidator } from "./validators/branch-probability-validator.js";
 import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 /**
@@ -16,6 +17,7 @@ export class VerificationPipeline {
   private readonly schemaValidator = new SchemaValidator();
   private readonly engineValidator = new EngineValidator();
   private readonly numericalValidator = new NumericalValidator();
+  private readonly branchProbabilityValidator = new BranchProbabilityValidator();
   private readonly metadataEnricher = new MetadataEnricher();
 
   /**
@@ -58,6 +60,9 @@ export class VerificationPipeline {
     // Stage 3: numerical grounding (warning-only PoC)
     const numericalResult = await this.numericalValidator.validate(typed as any, context);
     results.push(numericalResult);
+
+    const branchResult = await this.branchProbabilityValidator.validate(typed as any, context);
+    results.push(branchResult);
 
     // Stage 4: enrich response with verification metadata
     let enriched = this.metadataEnricher.enrich(typed as any, results) as T & {

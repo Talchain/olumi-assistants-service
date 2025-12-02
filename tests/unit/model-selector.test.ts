@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   selectModel,
   validateModelRequest,
@@ -7,6 +7,16 @@ import {
   trackQuality,
   type ModelSelectionConfig,
 } from "../../src/services/model-selector.js";
+
+beforeAll(() => {
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-openai-key";
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-anthropic-key";
+});
+
+afterAll(() => {
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+});
 
 /**
  * Test config with feature enabled

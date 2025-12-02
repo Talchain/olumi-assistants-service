@@ -29,6 +29,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     ],
     uncertainNodeIds: ["n1"],
   }),
+  normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
 }));
 
 import { build } from "../../src/server.js";

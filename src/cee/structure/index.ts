@@ -145,3 +145,88 @@ export function detectStructuralWarnings(
     uncertainNodeIds: Array.from(uncertainNodeIds),
   };
 }
+
+export function normaliseDecisionBranchBeliefs(
+  graph: GraphV1 | undefined,
+): GraphV1 | undefined {
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return graph;
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  const kinds = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof (node as any)?.id === "string" ? ((node as any).id as string) : undefined;
+    const kind = typeof (node as any)?.kind === "string" ? ((node as any).kind as string) : undefined;
+    if (!id || !kind) continue;
+    kinds.set(id, kind);
+  }
+
+  const groups = new Map<string, number[]>();
+  for (let index = 0; index < edges.length; index += 1) {
+    const edge = edges[index] as any;
+    const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
+    const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
+    if (!from || !to) continue;
+
+    const fromKind = kinds.get(from);
+    const toKind = kinds.get(to);
+    if (fromKind === "decision" && toKind === "option") {
+      const existing = groups.get(from);
+      if (existing) {
+        existing.push(index);
+      } else {
+        groups.set(from, [index]);
+      }
+    }
+  }
+
+  if (groups.size === 0) {
+    return graph;
+  }
+
+  const epsilon = 0.01;
+  let mutated = false;
+  const normalisedEdges = edges.map((edge) => ({ ...(edge as any) }));
+
+  for (const indices of groups.values()) {
+    if (indices.length < 2) continue;
+
+    const numericIndices: number[] = [];
+    const values: number[] = [];
+
+    for (const edgeIndex of indices) {
+      const raw = (normalisedEdges[edgeIndex] as any).belief;
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        const clamped = Math.max(0, Math.min(1, raw));
+        numericIndices.push(edgeIndex);
+        values.push(clamped);
+      }
+    }
+
+    if (numericIndices.length < 2) continue;
+
+    const sum = values.reduce((acc, value) => acc + value, 0);
+    if (!(sum > 0)) continue;
+
+    if (Math.abs(sum - 1) <= epsilon) continue;
+
+    mutated = true;
+    for (let i = 0; i < numericIndices.length; i += 1) {
+      const edgeIndex = numericIndices[i];
+      const value = values[i];
+      (normalisedEdges[edgeIndex] as any).belief = value / sum;
+    }
+  }
+
+  if (!mutated) {
+    return graph;
+  }
+
+  return {
+    ...(graph as any),
+    edges: normalisedEdges as any,
+  } as GraphV1;
+}
