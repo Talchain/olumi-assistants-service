@@ -523,12 +523,8 @@ export async function finaliseCeeDraftResponse(
     structural_meta?: StructuralMeta;
   };
 
-<<<<<<< HEAD
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
   graph = normaliseDecisionBranchBeliefs(graph);
-=======
-  const graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
->>>>>>> origin/main
   if (graph) {
     payload.graph = graph as any;
   }
