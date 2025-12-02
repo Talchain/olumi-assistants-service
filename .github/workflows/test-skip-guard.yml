@@ -16,8 +16,8 @@ jobs:
         run: |
           echo "Checking for .skip or it.skip without issue references..."
 
-          # Find all .skip tests in test files
-          SKIPPED_TESTS=$(grep -rn "\.skip\|it\.skip\|describe\.skip" tests/ --include="*.ts" --include="*.js" | grep -v node_modules || true)
+          # Find all .skip tests in test files (only match actual call sites like it.skip(...), describe.skip(...))
+          SKIPPED_TESTS=$(grep -rnE "\.skip\(|it\.skip\(|describe\.skip\(" tests/ --include="*.ts" --include="*.js" | grep -v node_modules || true)
 
           if [ -z "$SKIPPED_TESTS" ]; then
             echo "✅ No skipped tests found"

@@ -376,6 +376,8 @@ interface Graph {
 }
 ```
 
+**Branch probability invariant (CEE v1):** For any decision node with two or more outgoing edges to `option` nodes, the final CEE draft graph ensures that the `belief` values on those decision→option edges form a probability distribution that sums to approximately 1.0 across that set. The LLM prompts are written to enforce this; the CEE finaliser applies a lightweight normalisation pass when upstream output drifts from 1.0, and a verification stage records any unnormalised branches as metadata-only issues under `trace.verification`.
+
 ### 6.2 Quality Model
 
 ```typescript
@@ -623,8 +625,15 @@ Each CEE endpoint emits structured events:
 | `cee.draft_graph.requested` | `request_id`, `key_id?`, `correlation_id?`, `has_seed`, `has_archetype_hint` |
 | `cee.draft_graph.succeeded` | `request_id`, `key_id?`, `latency_ms`, `quality_overall`, `graph_nodes`, `any_truncated` |
 | `cee.draft_graph.failed` | `request_id`, `key_id?`, `latency_ms`, `error_code`, `http_status` |
-
+|
 Similar patterns for `bias_check`, `options`, `evidence_helper`, `sensitivity_coach`, `team_perspectives`, `explain_graph`.
+
+CEE v1 also exposes a small verification pipeline for all CEE envelopes. This emits:
+
+| Event | Fields |
+|-------|--------|
+| `cee.verification.succeeded` | `endpoint`, `request_id`, `verification_latency_ms`, `stages_passed`, `stages_failed` |
+| `cee.verification.failed` | `endpoint`, `request_id`, `error_code`, `stages_completed` |
 
 ### 9.2 CallerContext in Telemetry
 

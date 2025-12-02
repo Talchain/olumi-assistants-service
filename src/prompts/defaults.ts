@@ -26,6 +26,7 @@ Draft a small decision graph with:
   - 1 goal node (what the decision-maker is trying to achieve)
   - 1 decision node (the choice being made)
   - 1+ option nodes (alternatives being considered)
+- For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, your graph is incorrect and you must adjust the belief values so they form a proper probability distribution before responding.
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)

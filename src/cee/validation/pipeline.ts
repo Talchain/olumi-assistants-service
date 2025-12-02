@@ -20,7 +20,7 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, type StructuralMeta } from "../structure/index.js";
+import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { config } from "../../config/index.js";
 
@@ -523,7 +523,8 @@ export async function finaliseCeeDraftResponse(
     structural_meta?: StructuralMeta;
   };
 
-  const graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+  let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+  graph = normaliseDecisionBranchBeliefs(graph);
   if (graph) {
     payload.graph = graph as any;
   }

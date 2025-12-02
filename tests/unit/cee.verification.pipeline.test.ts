@@ -54,6 +54,49 @@ describe("VerificationPipeline", () => {
     expect(typeof trace.verification.verification_latency_ms).toBe("number");
   });
 
+  it("surfaces branch_probabilities warnings in trace.verification when branches are unnormalised", async () => {
+    const payload = buildMinimalDraftResponse();
+
+    (payload.graph as any).nodes.push(
+      { id: "dec_1", kind: "decision" } as any,
+      { id: "opt_1", kind: "option" } as any,
+      { id: "opt_2", kind: "option" } as any,
+    );
+    (payload.graph as any).edges.push(
+      { from: "n1", to: "dec_1" } as any,
+      { from: "dec_1", to: "opt_1", belief: 0.7 } as any,
+      { from: "dec_1", to: "opt_2", belief: 0.7 } as any,
+    );
+
+    const { response, results } = await verificationPipeline.verify(
+      payload,
+      CEEDraftGraphResponseV1Schema,
+      {
+        endpoint: "draft-graph",
+        requiresEngineValidation: false,
+        requestId: "req_branch_prob",
+      },
+    );
+
+    const branchStage = results.find((r) => r.stage === "branch_probabilities");
+    expect(branchStage).toBeDefined();
+    expect(branchStage?.severity).toBe("warning");
+    expect(branchStage?.code).toBe("BRANCH_PROBABILITIES_UNNORMALIZED");
+
+    const verification = (response as any).trace?.verification;
+    expect(verification).toBeDefined();
+    const issues = verification.issues_detected;
+    expect(Array.isArray(issues)).toBe(true);
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "branch_probabilities",
+          code: "BRANCH_PROBABILITIES_UNNORMALIZED",
+          severity: "warning",
+        }),
+      ]),
+    );
+  });
   it("throws on schema violation for missing required fields", async () => {
     // Missing required trace/quality fields
     const invalid: any = {

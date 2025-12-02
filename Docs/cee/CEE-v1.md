@@ -67,6 +67,7 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
       - `guidance?: { summary: string; risks?: string[]; next_actions?: string[]; any_truncated?: boolean }` – a small, heuristic
         guidance block derived from quality, validation_issues, and response_limits. This is meant for UI hints and summaries and
         never includes raw user content.
+    - **Decision branch probabilities** – For each decision node with 2+ option children, CEE expects the upstream draft graph to treat the `belief` values on decision→option edges as a probability distribution that sums to 1.0 across that set (within normal rounding). The finaliser normalises these branch beliefs when they drift from 1.0 and the verification pipeline records any mismatches as metadata-only issues under `trace.verification.issues_detected`.
 
 - **Explain My Model**
   - `POST /assist/v1/explain-graph`
@@ -228,13 +229,14 @@ CEE v1 **must not bypass** the existing draft pipeline. The high-level flow is:
    - Runs the core NL→Graph engine.
    - Produces `graph`, `patch`, `rationales`, `confidence`, `issues`, `cost_usd`, etc.
 3. **CEE finaliser** (`src/cee/validation/pipeline.ts`)
-   - Applies post-response guards via `validateResponse` (graph caps, cost caps).
-   - Maps guard violations to `CEE_GRAPH_INVALID` or `CEE_VALIDATION_FAILED` with
-     structured `validation_issues`.
-   - Builds `trace`, `quality`, `validation_issues`, `archetype`, and `response_limits`.
-   - Applies list caps (`bias_findings`, `options`, `evidence_suggestions`,
-     `sensitivity_suggestions`).
-   - Maps upstream error codes to `CEEErrorResponseV1`.
+  - Applies post-response guards via `validateResponse` (graph caps, cost caps).
+  - Maps guard violations to `CEE_GRAPH_INVALID` or `CEE_VALIDATION_FAILED` with
+    structured `validation_issues`.
+  - Normalises decision→option branch `belief` values into per-decision probability distributions (when necessary) without changing graph structure.
+  - Builds `trace`, `quality`, `validation_issues`, `archetype`, and `response_limits`.
+  - Applies list caps (`bias_findings`, `options`, `evidence_suggestions`,
+    `sensitivity_suggestions`).
+  - Maps upstream error codes to `CEEErrorResponseV1`.
 
 ### 2.1 Quality scoring heuristics
 

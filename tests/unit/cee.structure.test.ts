@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
+
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
-import { detectStructuralWarnings } from "../../src/cee/structure/index.js";
+import { detectStructuralWarnings, normaliseDecisionBranchBeliefs } from "../../src/cee/structure/index.js";
 
 function makeGraph(partial: Partial<GraphV1>): GraphV1 {
   return {
@@ -103,5 +104,58 @@ describe("detectStructuralWarnings", () => {
     expect(w?.node_ids).toEqual(expect.arrayContaining(["out1", "dec1", "opt1"]));
     expect(w?.edge_ids).toEqual(["e1", "e2"]);
     expect(uncertainNodeIds).toEqual(expect.arrayContaining(["out1", "dec1", "opt1"]));
+  });
+});
+
+describe("normaliseDecisionBranchBeliefs", () => {
+  it("renormalises decision-to-option beliefs when their sum differs significantly from 1", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal" } as any,
+        { id: "dec_1", kind: "decision" } as any,
+        { id: "opt_1", kind: "option" } as any,
+        { id: "opt_2", kind: "option" } as any,
+      ],
+      edges: [
+        { from: "goal_1", to: "dec_1" } as any,
+        { from: "dec_1", to: "opt_1", belief: 0.7 } as any,
+        { from: "dec_1", to: "opt_2", belief: 0.7 } as any,
+      ],
+    });
+
+    const normalised = normaliseDecisionBranchBeliefs(graph);
+    expect(normalised).toBeDefined();
+
+    const edges = (normalised as GraphV1).edges as any[];
+    const decisionEdges = edges.filter(
+      (e) => e.from === "dec_1" && (e.to === "opt_1" || e.to === "opt_2"),
+    );
+    const sum = decisionEdges.reduce((acc, e) => acc + (typeof e.belief === "number" ? e.belief : 0), 0);
+    expect(sum).toBeCloseTo(1, 4);
+    for (const edge of decisionEdges) {
+      expect(edge.belief).toBeGreaterThan(0);
+      expect(edge.belief).toBeLessThan(1);
+    }
+  });
+
+  it("leaves beliefs unchanged when branches are already normalised", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal" } as any,
+        { id: "dec_1", kind: "decision" } as any,
+        { id: "opt_1", kind: "option" } as any,
+        { id: "opt_2", kind: "option" } as any,
+      ],
+      edges: [
+        { from: "goal_1", to: "dec_1" } as any,
+        { from: "dec_1", to: "opt_1", belief: 0.6 } as any,
+        { from: "dec_1", to: "opt_2", belief: 0.4 } as any,
+      ],
+    });
+
+    const originalBeliefs = (graph.edges as any[]).map((e) => e.belief);
+    const normalised = normaliseDecisionBranchBeliefs(graph) as GraphV1;
+    const newBeliefs = (normalised.edges as any[]).map((e) => e.belief);
+    expect(newBeliefs).toEqual(originalBeliefs);
   });
 });
