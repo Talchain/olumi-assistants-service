@@ -4,7 +4,7 @@ import { SchemaValidator } from "./validators/schema-validator.js";
 import { EngineValidator } from "./validators/engine-validator.js";
 import { NumericalValidator } from "./validators/numerical-validator.js";
 import { MetadataEnricher } from "./validators/metadata-enricher.js";
-import { emit } from "../../utils/telemetry.js";
+import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 /**
  * VerificationPipeline
@@ -89,7 +89,7 @@ export class VerificationPipeline {
     context: VerificationContext,
   ): void {
     try {
-      emit("cee.verification.failed", {
+      emit(TelemetryEvents.CeeVerificationFailed, {
         endpoint: context.endpoint,
         request_id: context.requestId,
         error_code: errorCode,
@@ -106,7 +106,7 @@ export class VerificationPipeline {
     context: VerificationContext,
   ): void {
     try {
-      emit("cee.verification.succeeded", {
+      emit(TelemetryEvents.CeeVerificationSucceeded, {
         endpoint: context.endpoint,
         request_id: context.requestId,
         verification_latency_ms: latencyMs,

@@ -81,6 +81,11 @@ export const TelemetryEvents = {
   PreflightValidationFailed: "cee.preflight.failed",
   PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
   PreflightRejected: "cee.preflight.rejected",
+
+  // CEE verification events (v1.14)
+  CeeVerificationSucceeded: "cee.verification.succeeded",
+  CeeVerificationFailed: "cee.verification.failed",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
   // Clarification enforcement events (v1.14 - Phase 5)

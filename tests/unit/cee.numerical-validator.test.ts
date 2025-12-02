@@ -10,7 +10,8 @@ describe("NumericalValidator", () => {
     const result = await validator.validate({ summary: "Some text" }, { endpoint: "explain-graph", requiresEngineValidation: false });
 
     expect(result.valid).toBe(true);
-    expect(result.skipped).toBe(true);
+    const { skipped } = result;
+    expect(skipped).toBe(true);
   });
 
   it("emits a warning when numbers are not grounded in inference results", async () => {

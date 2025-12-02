@@ -60,7 +60,6 @@ export function buildBiasMitigationPatches(
   const riskNodes = getNodesByKind(graph, "risk");
   const outcomeNodes = getNodesByKind(graph, "outcome");
 
-  const optionCount = optionNodes.length;
   const riskCount = riskNodes.length;
   const outcomeCount = outcomeNodes.length;
 
