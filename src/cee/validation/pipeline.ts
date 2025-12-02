@@ -365,9 +365,13 @@ async function integrateClarifier(
       });
 
       if (result.refined_graph) {
-        refinedGraph = result.refined_graph;
+        // Normalize refined graph BEFORE quality computation (W's suggestion)
+        // This ensures convergence decisions use the same canonical representation as the final response
+        let normalizedRefinedGraph = normaliseCeeGraphVersionAndProvenance(result.refined_graph);
+        normalizedRefinedGraph = normaliseDecisionBranchBeliefs(normalizedRefinedGraph);
+        refinedGraph = normalizedRefinedGraph ?? result.refined_graph;
 
-        // Recompute quality from refined graph (Fix 1.1)
+        // Recompute quality from normalized refined graph (Fix 1.1 + W's refinement)
         const refinedQuality = computeQuality({
           graph: refinedGraph,
           confidence: quality.overall / 10, // Approximate original confidence
@@ -1025,6 +1029,16 @@ export async function finaliseCeeDraftResponse(
         { error, request_id: requestId },
         "Clarifier integration failed, continuing without clarification"
       );
+
+      // Emit dedicated failure telemetry for ops visibility (W's suggestion)
+      emit(TelemetryEvents.CeeClarifierFailed, {
+        request_id: requestId,
+        error_message: error instanceof Error ? error.message : String(error),
+        error_type: error instanceof Error ? error.name : "unknown",
+        graph_nodes: Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0,
+        graph_edges: Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0,
+        fallback_to_no_clarifier: true,
+      });
     }
   }
 
