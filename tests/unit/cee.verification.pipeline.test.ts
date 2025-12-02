@@ -97,7 +97,6 @@ describe("VerificationPipeline", () => {
       ]),
     );
   });
-
   it("throws on schema violation for missing required fields", async () => {
     // Missing required trace/quality fields
     const invalid: any = {
