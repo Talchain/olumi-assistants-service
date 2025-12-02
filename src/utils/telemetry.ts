@@ -97,6 +97,15 @@ export const TelemetryEvents = {
   ClarifierRoundComplete: "assist.clarifier.round_complete",
   ClarifierRoundFailed: "assist.clarifier.round_failed",
 
+  // Multi-turn clarifier integration events (v1.15)
+  CeeClarifierSessionStart: "cee.clarifier.session_start",
+  CeeClarifierQuestionAsked: "cee.clarifier.question_asked",
+  CeeClarifierAnswerReceived: "cee.clarifier.answer_received",
+  CeeClarifierAnswerIncorporated: "cee.clarifier.answer_incorporated",
+  CeeClarifierConverged: "cee.clarifier.converged",
+  CeeClarifierQuestionCached: "cee.clarifier.question_cached",
+  CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
+
   // Critique events (v04)
   CritiqueStart: "assist.critique.start",
   CritiqueComplete: "assist.critique.complete",

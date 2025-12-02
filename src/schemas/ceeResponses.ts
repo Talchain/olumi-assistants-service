@@ -6,6 +6,30 @@ import { DraftGraphOutput } from "./assist.js";
 // structural fields while allowing additional properties to avoid drift with
 // the OpenAPI contract.
 
+// CEE Clarifier schemas for multi-turn clarification integration
+export const CEEClarifierMetadataV1Schema = z.object({
+  targets_ambiguity: z.string(),
+  expected_improvement: z.number().min(0).max(10),
+  convergence_confidence: z.number().min(0).max(1),
+  information_gain: z.number().min(0).max(1),
+  // Enhancement 3.2: Expose convergence status/reason to clients
+  convergence_status: z.enum(["continue", "complete", "max_rounds", "confident"]).optional(),
+  convergence_reason: z.enum(["quality_threshold", "stability", "max_rounds", "diminishing_returns", "continue"]).optional(),
+});
+
+export const CEEClarifierBlockV1Schema = z.object({
+  needs_clarification: z.boolean(),
+  round: z.number().int().min(1).max(10),
+  question_id: z.string(),
+  question: z.string(),
+  question_type: z.enum(["binary", "multiple_choice", "open_ended"]),
+  options: z.array(z.string()).optional(),
+  metadata: CEEClarifierMetadataV1Schema,
+});
+
+export type CEEClarifierBlockV1T = z.infer<typeof CEEClarifierBlockV1Schema>;
+export type CEEClarifierMetadataV1T = z.infer<typeof CEEClarifierMetadataV1Schema>;
+
 export const CEETraceMetaSchema = z
   .object({
     request_id: z.string().optional(),
@@ -54,6 +78,8 @@ export const CEEDraftGraphResponseV1Schema = DraftGraphOutput.and(
       draft_warnings: z.array(z.record(z.any())).optional(),
       confidence_flags: z.record(z.any()).optional(),
       guidance: z.record(z.any()).optional(),
+      // Multi-turn clarifier integration (Phase 1)
+      clarifier: CEEClarifierBlockV1Schema.optional(),
     })
     .passthrough(),
 );
