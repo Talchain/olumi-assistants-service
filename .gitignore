@@ -7,7 +7,9 @@ src/generated
 .env.local
 
 # Duplicate files (macOS/editor backups)
+* 2
 * 2.*
+.* 2
 tests/perf/_reports/
 
 # Build artifacts

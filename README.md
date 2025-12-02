@@ -174,8 +174,8 @@ Advanced decision quality features:
 
 | Document | Description |
 |----------|-------------|
-| **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** | Quick-start for new developers |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Technical specification |
+| **[DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md)** | Quick-start for new developers |
+| **[ARCHITECTURE.md](Docs/ARCHITECTURE.md)** | Technical specification |
 | **[Docs/README.md](Docs/README.md)** | Full documentation index |
 
 ### For Developers
@@ -258,7 +258,7 @@ We welcome contributions! Please see our [Contributing Guide](Docs/contributing.
 ## 📞 Getting Help
 
 - **Documentation:** [Docs/README.md](Docs/README.md)
-- **Developer Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)
+- **Developer Guide:** [DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md)
 - **Runbooks:** See [Docs/runbooks/](Docs/runbooks/) for incident response
 - **Questions:** Open a GitHub issue
 
