@@ -533,23 +533,30 @@ export async function executeDecisionReview(
   await Promise.allSettled(islPromises);
   const islLatencyMs = Date.now() - islStartTime;
 
-  // Track ISL availability
+  // Track ISL availability and endpoints used
   let sensitivitySuccessCount = 0;
   let contrastiveSuccessCount = 0;
   let conformalSuccessCount = 0;
   let anyIslSuccess = false;
+  const endpointsUsed: Array<'sensitivity' | 'contrastive' | 'conformal' | 'validation'> = [];
 
   if (results.sensitivity?.success) {
     sensitivitySuccessCount = results.sensitivity.data.sensitivities.length;
     anyIslSuccess = true;
+    endpointsUsed.push('sensitivity');
   }
   if (results.contrastive?.success) {
     contrastiveSuccessCount = 1;
     anyIslSuccess = true;
+    endpointsUsed.push('contrastive');
   }
   if (results.conformal?.success) {
     conformalSuccessCount = results.conformal.data.intervals.length;
     anyIslSuccess = true;
+    endpointsUsed.push('conformal');
+  }
+  if (results.validation?.success) {
+    endpointsUsed.push('validation');
   }
 
   // Update circuit breaker based on results
@@ -611,6 +618,7 @@ export async function executeDecisionReview(
     conformalSuccessCount,
     validationStrategiesAvailable: results.validation?.success ?? false,
     degradationReason: anyIslSuccess ? undefined : 'All ISL calls failed',
+    endpointsUsed: endpointsUsed.length > 0 ? endpointsUsed : undefined,
   };
 
   logger.info({

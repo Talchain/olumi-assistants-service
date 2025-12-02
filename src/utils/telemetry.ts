@@ -215,6 +215,10 @@ export const TelemetryEvents = {
   DecisionReviewSucceeded: "cee.decision_review.succeeded",
   DecisionReviewFailed: "cee.decision_review.failed",
 
+  // Bias Mitigation events (v2.0)
+  BiasPatchesGenerated: "cee.bias_check.patches_generated",
+  BiasPatchesApplied: "cee.bias_check.patches_applied",
+
   // Prompt Store Cache events (v2.0 Phase 4.3)
   PromptStoreCacheHit: "prompt.store.cache.hit",
   PromptStoreCacheMiss: "prompt.store.cache.miss",
