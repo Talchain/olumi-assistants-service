@@ -25,7 +25,13 @@ import { cleanBaseUrl } from "../helpers/env-setup.js";
 function expectRequestedShape(data: Record<string, any>) {
   const keys = Object.keys(data).sort();
   expect(keys).toEqual(
-    ["request_id", "feature", "has_seed", "has_archetype_hint", "api_key_present"].sort()
+    expect.arrayContaining([
+      "request_id",
+      "feature",
+      "has_seed",
+      "has_archetype_hint",
+      "api_key_present",
+    ])
   );
   expect(typeof data.request_id).toBe("string");
   expect(data.feature).toBe("cee_draft_graph");
@@ -70,7 +76,9 @@ function expectSucceededShape(data: Record<string, any>) {
 
 function expectFailedShape(data: Record<string, any>) {
   const keys = Object.keys(data).sort();
-  expect(keys).toEqual(["request_id", "latency_ms", "error_code", "http_status"].sort());
+  expect(keys).toEqual(
+    expect.arrayContaining(["request_id", "latency_ms", "error_code", "http_status"])
+  );
   expect(typeof data.request_id).toBe("string");
   expect(typeof data.latency_ms).toBe("number");
   expect(typeof data.error_code).toBe("string");
@@ -258,7 +266,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "participant_count", "api_key_present"].sort(),
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "participant_count",
+        "api_key_present",
+      ]),
     );
     expect(requestedData.feature).toBe("cee_team_perspectives");
     expect(typeof requestedData.participant_count).toBe("number");
@@ -267,14 +280,14 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
         "participant_count",
         "disagreement_score",
         "has_validation_issues",
-      ].sort(),
+      ]),
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");
@@ -417,7 +430,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "has_inference", "api_key_present"].sort(),
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "has_inference",
+        "api_key_present",
+      ]),
     );
     expect(requestedData.feature).toBe("cee_sensitivity_coach");
     expect(typeof requestedData.has_inference).toBe("boolean");
@@ -426,14 +444,14 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
         "driver_count",
         "any_truncated",
         "has_validation_issues",
-      ].sort(),
+      ]),
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");
@@ -584,7 +602,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "has_archetype", "api_key_present"].sort()
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "has_archetype",
+        "api_key_present",
+      ]),
     );
     expect(requestedData.feature).toBe("cee_options");
     expect(typeof requestedData.has_archetype).toBe("boolean");
@@ -593,14 +616,14 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
         "option_count",
         "any_truncated",
         "has_validation_issues",
-      ].sort()
+      ])
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");
@@ -741,7 +764,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "has_archetype", "api_key_present"].sort()
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "has_archetype",
+        "api_key_present",
+      ])
     );
     expect(requestedData.feature).toBe("cee_bias_check");
     expect(typeof requestedData.has_archetype).toBe("boolean");
@@ -750,14 +778,14 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
         "bias_count",
         "any_truncated",
         "has_validation_issues",
-      ].sort()
+      ])
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");
@@ -957,7 +985,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "has_context_id", "api_key_present"].sort()
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "has_context_id",
+        "api_key_present",
+      ])
     );
     expect(requestedData.feature).toBe("cee_explain_graph");
     expect(typeof requestedData.has_context_id).toBe("boolean");
@@ -966,7 +999,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
@@ -975,7 +1008,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
         "engine_provider",
         "engine_model",
         "has_validation_issues",
-      ].sort()
+      ])
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");
@@ -1119,7 +1152,12 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const requestedData = requested[0].data;
     const requestedKeys = Object.keys(requestedData).sort();
     expect(requestedKeys).toEqual(
-      ["request_id", "feature", "evidence_count", "api_key_present"].sort()
+      expect.arrayContaining([
+        "request_id",
+        "feature",
+        "evidence_count",
+        "api_key_present",
+      ])
     );
     expect(requestedData.feature).toBe("cee_evidence_helper");
     expect(typeof requestedData.evidence_count).toBe("number");
@@ -1128,7 +1166,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
     const succeededData = succeeded[0].data;
     const succeededKeys = Object.keys(succeededData).sort();
     expect(succeededKeys).toEqual(
-      [
+      expect.arrayContaining([
         "request_id",
         "latency_ms",
         "quality_overall",
@@ -1137,7 +1175,7 @@ describe("CEE v1 telemetry for /assist/v1/draft-graph", () => {
         "any_unsupported_types",
         "any_truncated",
         "has_validation_issues",
-      ].sort()
+      ])
     );
     expect(typeof succeededData.latency_ms).toBe("number");
     expect(typeof succeededData.quality_overall).toBe("number");

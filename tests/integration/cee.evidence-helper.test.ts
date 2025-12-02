@@ -56,6 +56,9 @@ describe("POST /assist/v1/evidence-helper (CEE v1)", () => {
 
     expect(body.trace).toBeDefined();
     expect(body.trace.request_id).toBe(ceeRequestId);
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
 
     expect(body.quality).toBeDefined();
     expect(typeof body.quality.overall).toBe("number");
@@ -79,6 +82,10 @@ describe("POST /assist/v1/evidence-helper (CEE v1)", () => {
 
     expect(e3.strength).toBe("weak");
     expect(e3.relevance).toBe("low");
+
+    expect(e1.freshness).toBeUndefined();
+    expect(e2.freshness).toBeUndefined();
+    expect(e3.freshness).toBeUndefined();
 
     expect(body.response_limits).toEqual({
       items_max: 20,

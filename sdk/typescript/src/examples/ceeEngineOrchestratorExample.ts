@@ -30,11 +30,11 @@ import type {
   CEEEvidenceHelperRequestV1,
   CEEBiasCheckRequestV1,
   CEETeamPerspectivesRequestV1,
-  CEEDraftGraphResponseV1,
-  CEEOptionsResponseV1,
-  CEEEvidenceHelperResponseV1,
-  CEEBiasCheckResponseV1,
-  CEETeamPerspectivesResponseV1,
+  CEEDraftGraphResponseV1 as _CEEDraftGraphResponseV1,
+  CEEOptionsResponseV1 as _CEEOptionsResponseV1,
+  CEEEvidenceHelperResponseV1 as _CEEEvidenceHelperResponseV1,
+  CEEBiasCheckResponseV1 as _CEEBiasCheckResponseV1,
+  CEETeamPerspectivesResponseV1 as _CEETeamPerspectivesResponseV1,
 } from "../ceeTypes.js";
 
 /**

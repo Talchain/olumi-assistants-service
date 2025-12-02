@@ -51,4 +51,40 @@ describe("CEE evidence helper - scoreEvidenceItems", () => {
     expect(item.strength).toBe("none");
     expect(item.relevance).toBe("low");
   });
+
+  it("computes freshness metadata when observed_at is provided", () => {
+    const recent = new Date().toISOString();
+    const old = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    const input: CEEEvidenceItemRequestV1[] = [
+      { id: "recent", type: "experiment", observed_at: recent },
+      { id: "old", type: "experiment", observed_at: old },
+    ] as any;
+
+    const { items } = scoreEvidenceItems(input);
+
+    const byId = new Map(items.map((i) => [(i as any).id as string, i as any]));
+    const recentItem = byId.get("recent") as any;
+    const oldItem = byId.get("old") as any;
+
+    expect(recentItem.freshness).toBe("high");
+    expect(typeof recentItem.age_days).toBe("number");
+    expect(recentItem.age_days).toBeGreaterThanOrEqual(0);
+
+    expect(oldItem.freshness).toBe("low");
+    expect(typeof oldItem.age_days).toBe("number");
+    expect(oldItem.age_days).toBeGreaterThan(180);
+  });
+
+  it("leaves freshness undefined when observed_at is missing", () => {
+    const input: CEEEvidenceItemRequestV1[] = [
+      { id: "e1", type: "experiment" },
+    ] as any;
+
+    const { items } = scoreEvidenceItems(input);
+    const item = items[0] as any;
+
+    expect(item.freshness).toBeUndefined();
+    expect(item.age_days).toBeUndefined();
+  });
 });

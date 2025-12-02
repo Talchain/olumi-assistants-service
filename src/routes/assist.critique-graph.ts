@@ -3,11 +3,15 @@ import type { FastifyInstance } from "fastify";
 import { CritiqueGraphInput, CritiqueGraphOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { getRequestId } from "../utils/request-id.js";
+import { getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { verificationPipeline } from "../cee/verification/index.js";
 
-type AttachmentPayload = string | { data: string; encoding?: BufferEncoding };
+type AttachmentPayload = string | { data: string; encoding?: string };
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/critique-graph", async (req, reply) => {
@@ -29,6 +33,10 @@ export default async function route(app: FastifyInstance) {
       reply.code(404);
       return reply.send();
     }
+
+    const requestId = getRequestId(req as any);
+    const callerCtx = getRequestCallerContext(req as any);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
 
     try {
       // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
@@ -53,7 +61,7 @@ export default async function route(app: FastifyInstance) {
 
             const content = typeof payload === "string"
               ? payload // Already base64 string
-              : Buffer.from(payload.data, payload.encoding ?? "base64");
+              : Buffer.from(payload.data, (payload.encoding ?? "base64") as any);
 
             attachmentInputs.push({
               id: attachment.id,
@@ -100,6 +108,7 @@ export default async function route(app: FastifyInstance) {
       const adapter = getAdapter('critique_graph');
 
       emit(TelemetryEvents.CritiqueStart, {
+        ...telemetryCtx,
         node_count: input.graph.nodes.length,
         edge_count: input.graph.edges.length,
         has_brief: !!input.brief,
@@ -133,6 +142,7 @@ export default async function route(app: FastifyInstance) {
 
       // Emit telemetry with provider/cost fallbacks (per v04 spec)
       const telemetryData: Record<string, unknown> = {
+        ...telemetryCtx,
         duration_ms: critiqueDuration,
         issue_count: result.issues.length,
         blocker_count: blockerCount,
@@ -167,12 +177,23 @@ export default async function route(app: FastifyInstance) {
         overall_quality: result.overall_quality,
       });
 
-      return reply.send(output);
+      const { response } = await verificationPipeline.verify(
+        output,
+        CritiqueGraphOutput,
+        {
+          endpoint: "critique-graph",
+          requiresEngineValidation: false,
+          requestId,
+        },
+      );
+
+      return reply.send(response);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err, node_count: input.graph.nodes.length }, "critique-graph route failure");
 
       emit(TelemetryEvents.CritiqueFailed, {
+        ...telemetryCtx,
         error: err.message,
       });
 

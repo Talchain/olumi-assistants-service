@@ -43,6 +43,61 @@ const PRICING_KEYWORDS = [
   "costs",
 ];
 
+const NON_PRICING_ARCHETYPES = [
+  "product_decision",
+  "strategy_decision",
+  "market_expansion_decision",
+  "product_strategy_decision",
+  "product_launch_decision",
+  "growth_experiment_decision",
+  "product_portfolio_prioritisation",
+] as const;
+
+type NonPricingArchetypeId = (typeof NON_PRICING_ARCHETYPES)[number];
+
+interface NonPricingPattern {
+  id: NonPricingArchetypeId;
+  keywords: string[];
+}
+
+const NON_PRICING_PATTERNS: NonPricingPattern[] = [
+  {
+    id: "product_decision",
+    keywords: ["product", "feature", "revenue", "retention"],
+  },
+  {
+    id: "strategy_decision",
+    keywords: ["strategy", "strategic", "long-term", "long term", "bet"],
+  },
+  {
+    id: "market_expansion_decision",
+    keywords: ["market", "expand", "expansion", "new market"],
+  },
+  {
+    id: "product_strategy_decision",
+    keywords: ["product strategy", "pivot", "roadmap"],
+  },
+  {
+    id: "product_launch_decision",
+    keywords: ["launch", "ship", "release", "onboarding", "go live"],
+  },
+  {
+    id: "growth_experiment_decision",
+    keywords: ["experiment", "growth", "ab test", "a/b test", "kill", "pivot"],
+  },
+  {
+    id: "product_portfolio_prioritisation",
+    keywords: [
+      "portfolio",
+      "prioritise",
+      "prioritize",
+      "prioritisation",
+      "prioritization",
+      "bets",
+    ],
+  },
+];
+
 function normalize(text: unknown): string {
   return typeof text === "string" ? text.toLowerCase() : "";
 }
@@ -72,6 +127,59 @@ function hasPricingSignalsInGraph(graph: GraphV1): boolean {
   }
 
   return false;
+}
+
+function collectGraphText(graph: GraphV1): string {
+  if (!graph || !Array.isArray(graph.nodes)) return "";
+
+  const parts: string[] = [];
+
+  for (const node of graph.nodes as any[]) {
+    if (typeof node.label === "string") {
+      parts.push(node.label);
+    }
+    if (typeof node.id === "string") {
+      parts.push(node.id);
+    }
+  }
+
+  return normalize(parts.join(" "));
+}
+
+function detectNonPricingArchetype(
+  brief: string | undefined,
+  graph: GraphV1,
+): { id: NonPricingArchetypeId; match: ArchetypeMatch } | null {
+  const briefText = normalize(brief);
+  const graphText = collectGraphText(graph);
+  const combined = `${briefText} ${graphText}`.trim();
+
+  if (!combined) return null;
+
+  let bestId: NonPricingArchetypeId | null = null;
+  let bestScore = 0;
+
+  for (const pattern of NON_PRICING_PATTERNS) {
+    let score = 0;
+
+    for (const kw of pattern.keywords) {
+      if (combined.includes(kw)) {
+        score += 1;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = pattern.id;
+    }
+  }
+
+  if (!bestId || bestScore === 0) {
+    return null;
+  }
+
+  const match: ArchetypeMatch = bestScore >= 3 ? "exact" : "fuzzy";
+  return { id: bestId, match };
 }
 
 /**
@@ -107,8 +215,17 @@ export function inferArchetype(input: ArchetypeInput): ArchetypeResult {
     };
   }
 
-  // Case 2: Strong pricing signal without hint → fuzzy pricing_decision.
-  if (!isPricingHint && hasPricingKeywords && hasPricingGraphSignals) {
+  // Non-pricing archetype detection (brief + graph), used when hint is absent
+  // or when it corresponds to a known non-pricing archetype. This never
+  // overrides custom hints.
+  const nonPricingDetection = detectNonPricingArchetype(brief, graph);
+  const isKnownNonPricingHint = (NON_PRICING_ARCHETYPES as readonly string[]).includes(
+    normalizedHint,
+  );
+
+  // Case 2: Strong pricing signal without hint or with a non-archetype hint → fuzzy pricing_decision.
+  // Known non-pricing hints skip this branch so that caller intent is preserved.
+  if (!isPricingHint && !isKnownNonPricingHint && hasPricingKeywords && hasPricingGraphSignals) {
     return {
       archetype: {
         decision_type: "pricing_decision",
@@ -131,8 +248,31 @@ export function inferArchetype(input: ArchetypeInput): ArchetypeResult {
     };
   }
 
-  // Case 4: Unknown hint → preserve caller's decision_type, generic match.
+  // Case 4: Non-pricing hint → preserve caller's decision_type and only
+  // adjust match when we have a confident, agreeing detection.
   if (hint && !isPricingHint) {
+    if (isKnownNonPricingHint) {
+      if (nonPricingDetection && nonPricingDetection.id === normalizedHint) {
+        return {
+          archetype: {
+            decision_type: hint,
+            match: nonPricingDetection.match,
+            confidence,
+          },
+          issues,
+        };
+      }
+
+      return {
+        archetype: {
+          decision_type: hint,
+          match: "generic",
+          confidence,
+        },
+        issues,
+      };
+    }
+
     return {
       archetype: {
         decision_type: hint,
@@ -143,7 +283,19 @@ export function inferArchetype(input: ArchetypeInput): ArchetypeResult {
     };
   }
 
-  // Case 5: No hint and no strong pricing signals → generic archetype.
+  // Case 5: No hint and non-pricing detection available.
+  if (!hint && nonPricingDetection) {
+    return {
+      archetype: {
+        decision_type: nonPricingDetection.id,
+        match: nonPricingDetection.match,
+        confidence,
+      },
+      issues,
+    };
+  }
+
+  // Case 6: No hint and no strong pricing or non-pricing signals → generic archetype.
   return {
     archetype: {
       decision_type: "generic",

@@ -143,18 +143,27 @@ validate({
   value: llmProvider,
 });
 
-if (llmProvider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
-  validate({
-    name: 'ANTHROPIC_API_KEY',
-    status: llmProvider === 'fixtures' ? 'pass' : 'fail',
-    message: llmProvider === 'fixtures' ? 'Not required for fixtures provider' : 'Missing Anthropic API key',
-  });
-} else if (llmProvider === 'anthropic') {
+if (llmProvider === 'anthropic') {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    validate({
+      name: 'ANTHROPIC_API_KEY',
+      status: 'fail',
+      message: 'Missing Anthropic API key',
+    });
+  } else {
+    validate({
+      name: 'ANTHROPIC_API_KEY',
+      status: 'pass',
+      message: 'API key configured',
+      value: '***redacted***',
+    });
+  }
+} else if (llmProvider === 'fixtures') {
+  // Fixtures provider does not require a real Anthropic key
   validate({
     name: 'ANTHROPIC_API_KEY',
     status: 'pass',
-    message: 'API key configured',
-    value: '***redacted***',
+    message: 'Not required for fixtures provider',
   });
 }
 
@@ -176,19 +185,38 @@ if (llmProvider === 'openai' && !process.env.OPENAI_API_KEY) {
 // Auth Configuration Validation
 console.log('\n--- Authentication Configuration ---');
 
+const nodeEnv = process.env.NODE_ENV || 'development';
 const assistApiKeys = process.env.ASSIST_API_KEYS;
-if (!assistApiKeys && !process.env.ASSIST_API_KEY) {
+const singleApiKey = process.env.ASSIST_API_KEY;
+const hasAnyApiKey =
+  (assistApiKeys && assistApiKeys.split(',').some(k => k.trim().length > 0)) ||
+  !!(singleApiKey && singleApiKey.trim().length > 0);
+const hasHmacSecret = !!(process.env.HMAC_SECRET && process.env.HMAC_SECRET.trim().length > 0);
+
+if (!hasAnyApiKey && !hasHmacSecret) {
   validate({
     name: 'ASSIST_API_KEYS',
-    status: 'warn',
-    message: 'No API keys configured (auth may be disabled)',
+    status: nodeEnv === 'production' ? 'fail' : 'warn',
+    message:
+      nodeEnv === 'production'
+        ? 'No ASSIST_API_KEY(S) or HMAC_SECRET configured; production requires authentication'
+        : 'No ASSIST_API_KEY(S) or HMAC_SECRET configured (auth may be disabled in non-production)',
   });
-} else {
-  const keyCount = assistApiKeys ? assistApiKeys.split(',').filter(k => k.trim()).length : 1;
+} else if (hasAnyApiKey) {
+  const keyCount = assistApiKeys
+    ? assistApiKeys.split(',').filter(k => k.trim().length > 0).length
+    : 1;
   validate({
     name: 'ASSIST_API_KEYS',
     status: 'pass',
     message: `${keyCount} API key(s) configured`,
+  });
+} else {
+  // HMAC-only auth configured
+  validate({
+    name: 'HMAC_SECRET',
+    status: 'pass',
+    message: 'HMAC_SECRET configured (HMAC-only authentication enabled)',
   });
 }
 

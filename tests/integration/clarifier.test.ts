@@ -196,6 +196,24 @@ describe("POST /assist/clarify-brief (Fixtures)", () => {
     const body = JSON.parse(res.body);
     expect(typeof body.should_continue).toBe("boolean");
   });
+
+  it("includes verification metadata under trace", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/clarify-brief",
+      payload: {
+        brief: "Should I invest in renewable energy stocks for long-term growth?",
+        round: 0,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.trace).toBeDefined();
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
+  });
 });
 
 describe("POST /assist/clarify-brief (Error Handling)", () => {

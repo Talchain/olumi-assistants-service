@@ -165,7 +165,7 @@ describe("CEE bias helper - detectBiases", () => {
         nodes: [
           { id: "r1", kind: "risk", label: "Recent incident last week" } as any,
           { id: "r2", kind: "risk", label: "Latest outage this month" } as any,
-          { id: "o1", kind: "outcome", label: "Today\'s customer feedback" } as any,
+          { id: "o1", kind: "outcome", label: "Today's customer feedback" } as any,
           { id: "o2", kind: "outcome", label: "Historical baseline 2019-2020" } as any,
         ],
       });

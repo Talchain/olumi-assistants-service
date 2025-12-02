@@ -221,7 +221,7 @@ export default async function route(app: FastifyInstance) {
       return reply.send(errorBody);
     }
 
-    const input = parsed.data;
+    const input: EnhancedDecisionReviewInput = parsed.data;
 
     try {
       const graph = input.graph as unknown as GraphV1;

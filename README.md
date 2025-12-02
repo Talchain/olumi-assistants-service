@@ -23,6 +23,15 @@ The Assistants Service is a **backend API** that helps teams make better decisio
 
 ---
 
+## 🧭 New to this repo? Start here
+
+- **Developer onboarding** – [Docs/getting-started/onboarding.md](Docs/getting-started/onboarding.md)
+- **Architecture overview** – [Docs/getting-started/architecture.md](Docs/getting-started/architecture.md)
+- **CEE v1 developer guide** – [Docs/cee/CEE-v1.md](Docs/cee/CEE-v1.md)
+- **TypeScript SDK (CEE helpers)** – [sdk/typescript/README.md](sdk/typescript/README.md)
+
+---
+
 ## ⚡ Quick Start
 
 ### Prerequisites

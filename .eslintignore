@@ -1,0 +1,7 @@
+node_modules
+# Built artifacts
+/dist
+sdk/typescript/dist/**
+# Perf and smoke scripts are not part of main CI lint gate
+perf/**
+qa-smoke.mjs

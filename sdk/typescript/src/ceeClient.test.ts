@@ -40,7 +40,7 @@ describe("CEEClient", () => {
 
     expect(result).toEqual(mockResponse);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = global.fetch.mock.calls[0] as [string, RequestInit];
+    const [url, init] = global.fetch.mock.calls[0] as [string, any];
     expect(url).toBe("https://api.example.com/assist/v1/draft-graph");
     expect(init.method).toBe("POST");
     expect((init.headers as any)["X-Olumi-Assist-Key"]).toBe("test-key");

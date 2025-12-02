@@ -44,3 +44,12 @@ Run this only when Redis is intentionally unavailable on staging, then restore `
 ## Other scripts
 
 Existing scripts such as `quick-prod-val.sh`, `validate-staging.sh`, and `wait-for-deploy.sh` remain unchanged and can be used alongside these new v1.11.0 checks.
+
+For CEE review and debugging, a small dev-only CLI is also available:
+
+- `pnpm cee:review` – runs `scripts/cee-review-cli.ts` to read CEE envelopes or a
+  `CeeDecisionReviewPayload` JSON and print a compact, metadata-only summary.
+  When invoked with `--mode envelopes --output pretty --apply-mitigations`, it
+  additionally simulates applying any bias `mitigation_patches` to the draft
+  graph and prints a one-line summary of **added nodes by kind** (e.g.
+  `risk=1, option=1`), without ever emitting full graphs or user content.

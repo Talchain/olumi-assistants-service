@@ -99,7 +99,7 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
       an optional caller-provided `requestedCount`. It never inspects evidence
       content.
 
-- **Bias Check**
+  - **Bias Check**
   - `POST /assist/v1/bias-check`
   - Analyses a graph for structural / content biases.
   - **Request**
@@ -118,6 +118,11 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
         - **Structural confirmation bias** when one option has explicit risks/outcomes connected while alternatives have none.
         - **Structural sunk cost bias** when a single option has multiple attached actions consistent with “keep investing in the current path”.
       - These detectors are additive and **opt-in by env flag**; turning them off does not change existing non-structural findings.
+  - `mitigation_patches?: CEEBiasMitigationPatchV1[]` – optional, **when `CEE_BIAS_MITIGATION_PATCHES_ENABLED=true`**. Each mitigation:
+    - `bias_code` / optional `bias_id` to link back to a finding.
+    - `patch: GraphPatch` – a small, deterministic patch that **only adds structural nodes** (no deletions or free-text changes).
+    - Optional `description` – short, human-readable summary of the suggested structural change.
+    - Callers can apply a mitigation patch locally using the SDK helper `applyGraphPatch(baseGraph, mitigation.patch)` and then re-run CEE if desired.
   - `response_limits: { bias_findings_max, bias_findings_truncated }`.
   - `guidance?: CEEGuidanceV1` – shared guidance block for this endpoint.
 

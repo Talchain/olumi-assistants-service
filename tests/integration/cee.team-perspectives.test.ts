@@ -60,6 +60,9 @@ describe("POST /assist/v1/team-perspectives (CEE v1)", () => {
 
     expect(body.trace).toBeDefined();
     expect(body.trace.request_id).toBe(ceeRequestId);
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
 
     expect(body.quality).toBeDefined();
     expect(typeof body.quality.overall).toBe("number");

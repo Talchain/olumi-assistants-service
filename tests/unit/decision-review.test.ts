@@ -15,8 +15,8 @@ import {
   ISLContrastiveResultSchema,
   ISLConformalResultSchema,
   ValidationSuggestionSchema,
-  ValidationSuggestionsSchema,
-  LLMCritiqueSchema,
+  ValidationSuggestionsSchema as _ValidationSuggestionsSchema,
+  LLMCritiqueSchema as _LLMCritiqueSchema,
   EnhancedNodeCritiqueSchema,
   DecisionReviewRequestSchema,
   DecisionReviewResponseSchema,
@@ -68,7 +68,7 @@ const createTestGraph = (): GraphV1 => ({
   ],
 } as unknown as GraphV1);
 
-const createMockISLClient = () => ({
+const _createMockISLClient = () => ({
   getSensitivityDetailed: vi.fn(),
   getContrastiveExplanation: vi.fn(),
   getConformalPrediction: vi.fn(),

@@ -12,6 +12,9 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
+import { verificationPipeline } from "../cee/verification/index.js";
+import { CEEExplainGraphResponseV1Schema } from "../schemas/ceeResponses.js";
+import type { InferenceResultsV1 } from "../contracts/plot/engine.js";
 
 type CEEExplainGraphResponseV1 = components["schemas"]["CEEExplainGraphResponseV1"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
@@ -216,6 +219,52 @@ export default async function route(app: FastifyInstance) {
         guidance,
       };
 
+      // Run verification pipeline for explain-graph responses to enforce
+      // schema invariants and attach metadata-only verification info.
+      let verifiedResponse: CEEExplainGraphResponseV1;
+      try {
+        const { response } = await verificationPipeline.verify(
+          ceeResponse,
+          CEEExplainGraphResponseV1Schema,
+          {
+            endpoint: "explain-graph",
+            requiresEngineValidation: false,
+            requestId,
+            engineResults: input.inference as InferenceResultsV1,
+          },
+        );
+        verifiedResponse = response as CEEExplainGraphResponseV1;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("internal error");
+
+        emit(TelemetryEvents.CeeExplainGraphFailed, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          error_code: "CEE_INTERNAL_ERROR",
+          http_status: 500,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_explain_graph",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_INTERNAL_ERROR",
+          httpStatus: 500,
+        });
+
+        const errorBody = buildCeeErrorResponse("CEE_INTERNAL_ERROR", err.message || "internal error", {
+          retryable: false,
+          requestId,
+        });
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.code(500);
+        return reply.send(errorBody);
+      }
+
       const latencyMs = Date.now() - start;
       const hasValidationIssues = validationIssues.length > 0;
       const engineProvider = trace.engine?.provider ?? "unknown";
@@ -248,7 +297,7 @@ export default async function route(app: FastifyInstance) {
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
       reply.header("X-CEE-Request-ID", requestId);
       reply.code(200);
-      return reply.send(ceeResponse);
+      return reply.send(verifiedResponse);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 

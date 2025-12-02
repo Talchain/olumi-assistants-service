@@ -4,13 +4,17 @@ import type {
   CEEOptionsResponseV1,
   CEEEvidenceHelperResponseV1,
 } from "../../sdk/typescript/src/ceeTypes.js";
-import type { CeeDecisionReviewPayload } from "../../sdk/typescript/src/ceeHelpers.js";
+import type {
+  CeeDecisionReviewPayload,
+  CeeJourneyEnvelopes,
+} from "../../sdk/typescript/src/ceeHelpers.js";
 import golden from "../../sdk/typescript/src/examples/cee-decision-review.v1.example.json";
 import {
   buildCeeReviewSummaryFromEnvelopes,
   buildCeeReviewSummaryFromReview,
   type CeeReviewSummary,
   formatCeeReviewSummaryPretty,
+  simulateBiasMitigationEffect,
 } from "../../scripts/cee-review-cli.js";
 import { expectNoSecretLikeKeys } from "../utils/no-secret-like-keys.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
@@ -97,5 +101,59 @@ describe("cee-review-cli helpers", () => {
 
     // Pretty output should be safe to print in logs/CLIs
     expectNoBannedSubstrings({ text });
+  });
+
+  it("simulates bias mitigation effect as metadata-only counts", () => {
+    const envelopes: CeeJourneyEnvelopes = {
+      draft: {
+        trace: { request_id: "r-env", correlation_id: "r-env", engine: {} },
+        quality: { overall: 7 } as any,
+        graph: {
+          version: "1.2",
+          nodes: [{ id: "goal-1", kind: "goal" }],
+          edges: [],
+        } as any,
+      } as any,
+      bias: {
+        trace: { request_id: "r-env", correlation_id: "r-env", engine: {} },
+        quality: { overall: 7 } as any,
+        bias_findings: [],
+        response_limits: {
+          bias_findings_max: 10,
+          bias_findings_truncated: false,
+        } as any,
+        mitigation_patches: [
+          {
+            bias_code: "TEST_CODE",
+            patch: {
+              adds: {
+                nodes: [{ id: "new-risk", kind: "risk" }],
+              },
+            },
+          },
+        ] as any,
+      } as any,
+    };
+
+    const effect = simulateBiasMitigationEffect(envelopes);
+
+    expect(effect.applied).toBe(true);
+    expect(effect.addedNodesByKind.risk).toBe(1);
+
+    // Privacy: effect summary must remain metadata-only
+    expectNoSecretLikeKeys(effect);
+    expectNoBannedSubstrings(effect as unknown as Record<string, unknown>);
+  });
+
+  it("returns no mitigation effect when there is no draft graph or bias envelope", () => {
+    const envelopes: CeeJourneyEnvelopes = {} as any;
+
+    const effect = simulateBiasMitigationEffect(envelopes);
+
+    expect(effect.applied).toBe(false);
+    expect(effect.addedNodesByKind).toEqual({});
+
+    expectNoSecretLikeKeys(effect);
+    expectNoBannedSubstrings(effect as unknown as Record<string, unknown>);
   });
 });

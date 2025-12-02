@@ -293,7 +293,7 @@ export class ISLClient {
    */
   private async makeRequest<T>(
     path: string,
-    options: RequestInit,
+    options: globalThis.RequestInit,
     attempt = 0,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;

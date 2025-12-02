@@ -92,6 +92,7 @@ function emitMetric(
 
   // Try to use existing statsd client from telemetry if available
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { statsd } = require('../utils/telemetry.js');
     if (statsd) {
       const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);

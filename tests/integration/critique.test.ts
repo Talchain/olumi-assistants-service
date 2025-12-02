@@ -179,6 +179,23 @@ describe("POST /assist/critique-graph (Fixtures)", () => {
     // Input graph should be unchanged
     expect(validGraph).toEqual(originalGraph);
   });
+
+  it("includes verification metadata under trace", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/critique-graph",
+      payload: {
+        graph: validGraph,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.trace).toBeDefined();
+    expect(body.trace.verification).toBeDefined();
+    expect(body.trace.verification.schema_valid).toBe(true);
+    expect(typeof body.trace.verification.total_stages).toBe("number");
+  });
 });
 
 describe("POST /assist/critique-graph (Severity Ordering)", () => {

@@ -8,7 +8,7 @@
  * - Graph caps are properly interpolated
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   registerAllDefaultPrompts,
   PROMPT_TEMPLATES,
@@ -97,7 +97,7 @@ describe('PROMPT_TEMPLATES', () => {
   });
 
   it('all prompts are non-empty strings', () => {
-    for (const [task, prompt] of Object.entries(PROMPT_TEMPLATES)) {
+    for (const [_task, prompt] of Object.entries(PROMPT_TEMPLATES)) {
       expect(typeof prompt).toBe('string');
       expect(prompt.length).toBeGreaterThan(100);
     }
@@ -164,7 +164,7 @@ describe('Prompt Content Quality', () => {
   it('all prompts end with JSON-related instruction', () => {
     const defaults = getDefaultPrompts();
 
-    for (const [task, prompt] of Object.entries(defaults)) {
+    for (const [_task, prompt] of Object.entries(defaults)) {
       if (!prompt) continue;
       // All prompts should end with JSON output guidance
       expect(prompt.toLowerCase()).toContain('json');

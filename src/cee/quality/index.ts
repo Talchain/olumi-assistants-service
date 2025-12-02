@@ -1,5 +1,6 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
+import { summariseValidationIssues } from "../validation/classifier.js";
 
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
@@ -92,7 +93,8 @@ export function computeQuality(inputs: QualityInputs): CEEQualityMeta {
   const coverage = clampScore(coverageBase);
 
   // Safety: start from 8 and subtract up to 3 points for CEE validation issues.
-  const ceeIssueCount = Array.isArray(ceeIssues) ? ceeIssues.length : 0;
+  const summary = summariseValidationIssues(Array.isArray(ceeIssues) ? ceeIssues : []);
+  const ceeIssueCount = summary.error_count + summary.warning_count + summary.info_count;
   const safetyBase = 8 - Math.min(3, ceeIssueCount);
   const safety = clampScore(safetyBase);
 
@@ -105,6 +107,11 @@ export function computeQuality(inputs: QualityInputs): CEEQualityMeta {
     causality,
     coverage,
     safety,
+    issues_by_severity: {
+      error: summary.error_count,
+      warning: summary.warning_count,
+      info: summary.info_count,
+    },
     details: {
       raw_confidence: safeConfidence,
       engine_issue_count: engineIssueCount,

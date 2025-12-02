@@ -202,6 +202,7 @@ function isLikelyGibberish(text: string, entropy: number, coverage: number): boo
  */
 function hasProblematicCharacters(text: string): { valid: boolean; issue?: string } {
   // Check for null bytes or control characters
+  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) {
     return { valid: false, issue: "Contains control characters" };
   }

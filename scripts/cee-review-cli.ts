@@ -32,6 +32,9 @@ import {
   type CeeHealthTone,
   type CeeUiFlags,
 } from "../sdk/typescript/src/ceeHelpers.js";
+import type { CEEBiasCheckResponseV1 } from "../sdk/typescript/src/ceeTypes.js";
+import type { GraphV1 } from "../sdk/typescript/src/graphTypes.js";
+import { applyGraphPatch } from "../sdk/typescript/src/applyGraphPatch.js";
 
 export interface CeeReviewSummary {
   headline: string;
@@ -54,6 +57,77 @@ export interface CeeReviewSummary {
   trace?: CeeTraceSummary;
   engine?: CeeEngineStatus;
   evidenceCoverage?: CeeEvidenceCoverageSummary;
+}
+
+export interface CeeMitigationEffectSummary {
+  applied: boolean;
+  addedNodesByKind: Record<string, number>;
+}
+
+function countNodesByKind(graph: GraphV1 | null | undefined): Record<string, number> {
+  const counts: Record<string, number> = {};
+
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return counts;
+  }
+
+  for (const node of (graph as any).nodes as any[]) {
+    const kind =
+      node && typeof (node as any).kind === "string"
+        ? ((node as any).kind as string)
+        : "unknown";
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+
+  return counts;
+}
+
+/**
+ * Simulate applying bias mitigation patches from the bias envelope to the
+ * draft graph, returning only metadata about how many nodes would be added
+ * by kind. This remains metadata-only and never returns the full graph.
+ */
+export function simulateBiasMitigationEffect(
+  envelopes: CeeJourneyEnvelopes,
+): CeeMitigationEffectSummary {
+  const draft = envelopes.draft as { graph?: GraphV1 } | null | undefined;
+  const bias = envelopes.bias as CEEBiasCheckResponseV1 | null | undefined;
+
+  const baseGraph = draft && typeof draft === "object" ? (draft.graph as GraphV1) : undefined;
+  const patches = (bias as any)?.mitigation_patches;
+
+  if (!baseGraph || !Array.isArray(patches) || patches.length === 0) {
+    return {
+      applied: false,
+      addedNodesByKind: {},
+    };
+  }
+
+  const baseCounts = countNodesByKind(baseGraph);
+
+  let updatedGraph: GraphV1 = baseGraph;
+  for (const mitigation of patches as any[]) {
+    if (!mitigation || typeof mitigation !== "object") continue;
+    const patch = (mitigation as any).patch;
+    if (!patch || typeof patch !== "object") continue;
+    updatedGraph = applyGraphPatch(updatedGraph, patch as any);
+  }
+
+  const updatedCounts = countNodesByKind(updatedGraph);
+  const addedNodesByKind: Record<string, number> = {};
+
+  for (const [kind, newCount] of Object.entries(updatedCounts)) {
+    const oldCount = baseCounts[kind] ?? 0;
+    const diff = newCount - oldCount;
+    if (diff > 0) {
+      addedNodesByKind[kind] = diff;
+    }
+  }
+
+  return {
+    applied: Object.keys(addedNodesByKind).length > 0,
+    addedNodesByKind,
+  };
 }
 
 function buildHealthReasonsFromReview(review: CeeDecisionReviewPayload): string[] {
@@ -226,12 +300,14 @@ interface CliOptions {
   inputPath?: string;
   mode: Mode;
   output: OutputMode;
+  applyMitigations: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
   let inputPath: string | undefined;
   let mode: Mode = "envelopes";
   let output: OutputMode = "pretty";
+   let applyMitigations = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -254,10 +330,12 @@ function parseArgs(argv: string[]): CliOptions {
         throw new Error(`Unknown --output value: ${value}`);
       }
       i += 1;
+    } else if (arg === "--apply-mitigations") {
+      applyMitigations = true;
     }
   }
 
-  return { inputPath, mode, output };
+  return { inputPath, mode, output, applyMitigations };
 }
 
 async function readJsonFromStdin(): Promise<string> {
@@ -345,6 +423,29 @@ async function main() {
     const text = formatCeeReviewSummaryPretty(summary);
     // eslint-disable-next-line no-console
     console.log(text);
+
+    if (options.mode === "envelopes" && options.applyMitigations) {
+      const envelopes = json as CeeJourneyEnvelopes;
+      const effect = simulateBiasMitigationEffect(envelopes);
+
+      // eslint-disable-next-line no-console
+      console.log("");
+
+      if (!effect.applied) {
+        // eslint-disable-next-line no-console
+        console.log(
+          "[cee-review-cli] Mitigation simulation: no mitigation_patches applied or no structural changes.",
+        );
+      } else {
+        const parts = Object.entries(effect.addedNodesByKind).map(
+          ([kind, count]) => `${kind}=${count}`,
+        );
+        // eslint-disable-next-line no-console
+        console.log(
+          `[cee-review-cli] Mitigation simulation: added nodes by kind: ${parts.join(", ")}`,
+        );
+      }
+    }
   }
 }
 

@@ -2,7 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { getRequestId } from "../utils/request-id.js";
+import { getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
+import { verificationPipeline } from "../cee/verification/index.js";
 import {
   assessBriefReadiness,
   findWeakestFactor,
@@ -30,6 +34,10 @@ export default async function route(app: FastifyInstance) {
       return reply.send();
     }
 
+    const requestId = getRequestId(req as any);
+    const callerCtx = getRequestCallerContext(req as any);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
+
     // Check round limit (0-2, max 3 rounds)
     if (input.round > 2) {
       reply.code(400);
@@ -55,6 +63,7 @@ export default async function route(app: FastifyInstance) {
       const adapter = getAdapter('clarify_brief');
 
       emit(TelemetryEvents.ClarifierRoundStart, {
+        ...telemetryCtx,
         round: input.round,
         brief_chars: input.brief.length,
         has_previous_answers: !!input.previous_answers?.length,
@@ -93,6 +102,7 @@ export default async function route(app: FastifyInstance) {
 
       // Emit telemetry with provider/cost fallbacks (per v04 spec)
       emit(TelemetryEvents.ClarifierRoundComplete, {
+        ...telemetryCtx,
         round: input.round,
         question_count: result.questions.length,
         confidence: result.confidence,
@@ -129,12 +139,23 @@ export default async function route(app: FastifyInstance) {
         },
       });
 
-      return reply.send(output);
+      const { response } = await verificationPipeline.verify(
+        output,
+        ClarifyBriefOutput,
+        {
+          endpoint: "clarify-brief",
+          requiresEngineValidation: false,
+          requestId,
+        },
+      );
+
+      return reply.send(response);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       log.error({ err, round: input.round }, "clarify-brief route failure");
 
       emit(TelemetryEvents.ClarifierRoundFailed, {
+        ...telemetryCtx,
         round: input.round,
         error: err.message,
       });
