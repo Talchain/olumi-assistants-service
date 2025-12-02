@@ -2,12 +2,15 @@
 
 ## Quick Start
 
+**New to this codebase?** Start with [Getting Started](GETTING_STARTED.md)
+
 | Document | Audience | Description |
 |----------|----------|-------------|
-| [Architecture](getting-started/architecture.md) | All | System overview and data flow |
-| [Developer Onboarding](getting-started/onboarding.md) | Developers | Local setup and development workflow |
-| [Contributing](contributing.md) | Developers | Code style, PR process, testing |
+| [Getting Started](GETTING_STARTED.md) | New developers | Setup and first steps |
+| [Architecture](ARCHITECTURE.md) | All | System design and technical spec |
+| [Developer Guide](DEVELOPER_GUIDE.md) | Developers | Development workflow |
 | [API Reference](api/FRONTEND_INTEGRATION.md) | Developers | Complete API documentation |
+| [CEE Documentation](cee/CEE-v1.md) | Developers | Decision engine details |
 
 ---
 
@@ -15,9 +18,9 @@
 
 ```
 Docs/
-├── getting-started/     # Start here
-│   ├── architecture.md  # System design and data flow
-│   └── onboarding.md    # Developer setup guide
+├── GETTING_STARTED.md   # New developer entry point
+├── ARCHITECTURE.md      # System design and technical spec
+├── DEVELOPER_GUIDE.md   # Development workflow
 ├── api/                 # API documentation
 │   ├── FRONTEND_INTEGRATION.md  # Complete API reference
 │   ├── SSE-RESUME-API.md        # Streaming with resume
@@ -25,15 +28,10 @@ Docs/
 ├── cee/                 # CEE (Contextual Evidence Engine)
 │   ├── CEE-v1.md        # CEE overview and contracts
 │   ├── CEE-maintainers-guide.md
-│   ├── CEE-recipes.md   # Common usage patterns
-│   └── ...
-├── operations/          # Production operations
-│   ├── operator-runbook.md
-│   ├── observability.md
-│   └── ...
+│   └── CEE-recipes.md   # Common usage patterns
 ├── runbooks/            # Incident response
+│   ├── operator-runbook.md
 │   ├── cee-llm-outage-or-spike.md
-│   ├── buffer-pressure.md
 │   └── ...
 ├── archive/             # Historical documents
 └── contributing.md      # How to contribute
@@ -46,9 +44,10 @@ Docs/
 ### Developers
 
 **Getting Started:**
-1. [Architecture Overview](getting-started/architecture.md) - Understand the system
-2. [Developer Onboarding](getting-started/onboarding.md) - Set up your environment
-3. [Contributing Guide](contributing.md) - Code style and PR process
+1. [Getting Started Guide](GETTING_STARTED.md) - Setup and first steps
+2. [Architecture Overview](ARCHITECTURE.md) - System design
+3. [Developer Guide](DEVELOPER_GUIDE.md) - Development workflow
+4. [Contributing Guide](contributing.md) - Code style and PR process
 
 **API Integration:**
 - [Frontend Integration](api/FRONTEND_INTEGRATION.md) - Complete API reference
@@ -63,9 +62,8 @@ Docs/
 ### Operators
 
 **Day-to-Day Operations:**
-- [Operator Runbook](operations/operator-runbook.md) - Standard procedures
+- [Operator Runbook](runbooks/operator-runbook.md) - Standard procedures
 - [CEE Operations](cee/CEE-ops.md) - CEE-specific operations
-- [Observability](operations/observability.md) - Monitoring and metrics
 
 **Incident Response:**
 - [LLM Outage Runbook](runbooks/cee-llm-outage-or-spike.md)
@@ -108,4 +106,4 @@ curl http://localhost:3101/healthz
 
 ---
 
-**Last Updated:** 2025-11-27
+**Last Updated:** 2025-12-02
