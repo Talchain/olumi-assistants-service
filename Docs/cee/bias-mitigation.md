@@ -187,6 +187,7 @@ Patches generate minimal stub nodes (no labels, no detailed content) because:
 
 Example: `OPTIMISATION_PRICING_NO_RISKS` description says "Add risk node linked to pricing options" but the patch only adds the node—edges must be created by the consumer.
 
+
 ### Why One Patch Per Bias Code?
 
 Deduplication ensures:
@@ -202,6 +203,7 @@ When multiple bias findings share the same code:
 - Only the **first** finding's `bias_id` is attached to the patch
 - Later findings of the same code are not referenced
 - This is a deliberate simplification for deterministic output
+
 
 ## Configuration
 
