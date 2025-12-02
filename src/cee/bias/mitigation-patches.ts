@@ -56,7 +56,7 @@ export function buildBiasMitigationPatches(
   const patches: CEEBiasMitigationPatchV1[] = [];
   const existingNodeIds = collectNodeIds(graph);
 
-  const optionNodes = getNodesByKind(graph, "option");
+  const _optionNodes = getNodesByKind(graph, "option");
   const riskNodes = getNodesByKind(graph, "risk");
   const outcomeNodes = getNodesByKind(graph, "outcome");
 

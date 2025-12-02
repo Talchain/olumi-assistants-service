@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
-import { detectAmbiguities, type Ambiguity } from "../../src/cee/clarifier/ambiguity-detector.js";
+import { detectAmbiguities } from "../../src/cee/clarifier/ambiguity-detector.js";
 
 function makeGraph(
   nodes: Array<{ id: string; kind: string; label?: string; belief?: number }>,
@@ -89,7 +89,7 @@ describe("CEE clarifier ambiguity detector", () => {
         4.0
       );
 
-      const missingAction = ambiguities.find(
+      const _missingAction = ambiguities.find(
         (a) => a.type === "missing_node" && a.description.toLowerCase().includes("action")
       );
       // May or may not detect this depending on implementation
