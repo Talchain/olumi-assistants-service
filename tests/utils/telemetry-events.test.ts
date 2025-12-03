@@ -189,6 +189,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeClarifierConverged: "cee.clarifier.converged",
         CeeClarifierQuestionCached: "cee.clarifier.question_cached",
         CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
+        CeeClarifierFailed: "cee.clarifier.failed",
+        CeeClarifierSkipped: "cee.clarifier.skipped",
 
         // Prompt Management events (v2.0)
         PromptStoreError: "prompt.store_error",
@@ -519,6 +521,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeClarifierConverged,
         TelemetryEvents.CeeClarifierQuestionCached,
         TelemetryEvents.CeeClarifierQuestionRetrieved,
+        TelemetryEvents.CeeClarifierFailed,
+        TelemetryEvents.CeeClarifierSkipped,
         // Bias mitigation events (diagnostic only)
         TelemetryEvents.BiasPatchesGenerated,
         TelemetryEvents.BiasPatchesApplied,
@@ -668,6 +672,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.clarifier.converged",
         "cee.clarifier.question_cached",
         "cee.clarifier.question_retrieved",
+        "cee.clarifier.failed",
+        "cee.clarifier.skipped",
 
         // CEE verification events (v1.14)
         "cee.verification.succeeded",

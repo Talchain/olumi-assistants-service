@@ -177,6 +177,17 @@ Patches generate minimal stub nodes (no labels, no detailed content) because:
 2. **No hallucination risk**: We don't generate content that might be wrong
 3. **Prompt for thinking**: Empty nodes prompt users to consider alternatives
 
+### Disconnected Nodes
+
+**Important**: Patches add nodes **without edges**. This is intentional:
+
+- The system cannot infer correct edge relationships without domain knowledge
+- Some descriptions mention "linked to" but the actual patch creates unconnected nodes
+- Consumers (UI or automation) are expected to wire nodes appropriately
+
+Example: `OPTIMISATION_PRICING_NO_RISKS` description says "Add risk node linked to pricing options" but the patch only adds the node—edges must be created by the consumer.
+
+
 ### Why One Patch Per Bias Code?
 
 Deduplication ensures:
@@ -184,6 +195,15 @@ Deduplication ensures:
 1. **No redundant patches**: Multiple findings of the same type don't create duplicate nodes
 2. **Predictable output**: Consumers can rely on consistent patch counts
 3. **Cleaner UX**: Users aren't overwhelmed with similar suggestions
+
+### First Finding Wins
+
+When multiple bias findings share the same code:
+
+- Only the **first** finding's `bias_id` is attached to the patch
+- Later findings of the same code are not referenced
+- This is a deliberate simplification for deterministic output
+
 
 ## Configuration
 

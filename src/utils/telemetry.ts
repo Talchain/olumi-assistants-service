@@ -105,6 +105,8 @@ export const TelemetryEvents = {
   CeeClarifierConverged: "cee.clarifier.converged",
   CeeClarifierQuestionCached: "cee.clarifier.question_cached",
   CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
+  CeeClarifierFailed: "cee.clarifier.failed",
+  CeeClarifierSkipped: "cee.clarifier.skipped",
 
   // Critique events (v04)
   CritiqueStart: "assist.critique.start",

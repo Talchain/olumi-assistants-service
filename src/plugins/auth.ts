@@ -51,6 +51,7 @@ function isPublicRoute(path: string, method?: string): boolean {
     "/health",
     "/",
     "/v1/status",
+    "/admin", // Admin UI and admin APIs have their own auth via X-Admin-Key
   ];
 
   // Share GET/DELETE are public (token-based auth)
