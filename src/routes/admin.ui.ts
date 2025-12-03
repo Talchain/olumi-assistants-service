@@ -205,7 +205,7 @@ function generateAdminUI(): string {
   </style>
 </head>
 <body>
-  <div x-data="promptAdmin()">
+  <div x-data="promptAdmin()" x-init="init()">
     <header>
       <h1>Olumi Prompt Admin</h1>
       <p>Manage prompts, versions, and experiments</p>
@@ -506,6 +506,15 @@ function generateAdminUI(): string {
           createdBy: 'admin-ui'
         },
 
+        // Initialize - check for saved session
+        init() {
+          const savedKey = sessionStorage.getItem('adminApiKey');
+          if (savedKey) {
+            this.apiKey = savedKey;
+            this.authenticate();
+          }
+        },
+
         async authenticate() {
           this.error = null;
           try {
@@ -514,8 +523,10 @@ function generateAdminUI(): string {
             });
             if (res.ok) {
               this.authenticated = true;
+              sessionStorage.setItem('adminApiKey', this.apiKey);
               this.loadPrompts();
             } else {
+              sessionStorage.removeItem('adminApiKey');
               const data = await res.json();
               this.error = data.message || 'Authentication failed';
             }
