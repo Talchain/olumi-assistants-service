@@ -30,7 +30,8 @@ const ALPINE_CDN_URL = `https://cdn.jsdelivr.net/npm/alpinejs@${ALPINE_VERSION}/
 const CSP_HEADER = [
   "default-src 'self'",
   // Allow Alpine.js from jsdelivr CDN only (pinned domain)
-  `script-src 'self' https://cdn.jsdelivr.net`,
+  // Note: 'unsafe-eval' required for Alpine.js to evaluate x-data expressions
+  `script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net`,
   // Allow inline styles for UI (required for dynamic styling)
   "style-src 'self' 'unsafe-inline'",
   // Prevent loading in frames (clickjacking protection)
