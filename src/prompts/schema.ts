@@ -54,6 +54,30 @@ export const PromptVariableSchema = z.object({
 export type PromptVariable = z.infer<typeof PromptVariableSchema>;
 
 /**
+ * Test case for prompt validation
+ * Golden tests that can be run to verify prompt behavior
+ */
+export const PromptTestCaseSchema = z.object({
+  /** Unique ID for this test case */
+  id: z.string().min(1).max(64),
+  /** Human-readable name */
+  name: z.string().min(1).max(256),
+  /** Test input (brief) */
+  input: z.string().min(1).max(10000),
+  /** Expected output pattern or keywords (for validation) */
+  expectedOutput: z.string().max(10000).optional(),
+  /** Variables to use for this test */
+  variables: z.record(z.union([z.string(), z.number()])).default({}),
+  /** Whether this test is enabled */
+  enabled: z.boolean().default(true),
+  /** Last run result */
+  lastResult: z.enum(['pass', 'fail', 'pending']).optional(),
+  /** Last run timestamp */
+  lastRunAt: z.string().datetime().optional(),
+});
+export type PromptTestCase = z.infer<typeof PromptTestCaseSchema>;
+
+/**
  * Immutable version metadata
  * Each prompt change creates a new version (append-only)
  */
@@ -72,6 +96,14 @@ export const PromptVersionSchema = z.object({
   changeNote: z.string().max(1024).optional(),
   /** Hash of content for integrity verification */
   contentHash: z.string().length(64).optional(),
+  /** Whether this version requires approval before production promotion */
+  requiresApproval: z.boolean().default(false),
+  /** Who approved this version for production (if approval was required) */
+  approvedBy: z.string().min(1).max(128).optional(),
+  /** When this version was approved */
+  approvedAt: z.string().datetime().optional(),
+  /** Golden test cases for this version */
+  testCases: z.array(PromptTestCaseSchema).default([]),
 });
 export type PromptVersion = z.infer<typeof PromptVersionSchema>;
 
@@ -128,6 +160,8 @@ export const CreateVersionRequestSchema = z.object({
   variables: z.array(PromptVariableSchema).default([]),
   createdBy: z.string().min(1).max(128),
   changeNote: z.string().max(1024).optional(),
+  /** Whether this version requires approval before production promotion */
+  requiresApproval: z.boolean().default(false),
 });
 export type CreateVersionRequest = z.infer<typeof CreateVersionRequestSchema>;
 
@@ -156,6 +190,19 @@ export const RollbackRequestSchema = z.object({
   reason: z.string().min(1).max(1024),
 });
 export type RollbackRequest = z.infer<typeof RollbackRequestSchema>;
+
+/**
+ * Approval request for promoting a version to production
+ */
+export const ApprovalRequestSchema = z.object({
+  /** Version to approve */
+  version: z.number().int().positive(),
+  /** Who is approving this version */
+  approvedBy: z.string().min(1).max(128),
+  /** Optional reason/notes for approval */
+  notes: z.string().max(1024).optional(),
+});
+export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 
 /**
  * Compiled prompt ready for use (with variables interpolated)

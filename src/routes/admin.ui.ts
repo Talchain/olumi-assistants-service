@@ -193,6 +193,32 @@ function generateAdminUI(): string {
     .text-muted { color: #6b7280; font-size: 0.85rem; }
     .mt-2 { margin-top: 10px; }
     .mb-2 { margin-bottom: 10px; }
+    /* Toast notifications */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .toast {
+      padding: 12px 20px;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      animation: slideIn 0.3s ease;
+      max-width: 350px;
+    }
+    .toast-success { background: #065f46; color: white; }
+    .toast-error { background: #dc2626; color: white; }
+    .toast-warning { background: #d97706; color: white; }
+    .toast-info { background: #1e40af; color: white; }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .btn-warning { background: #d97706; color: white; }
     pre {
       background: #f3f4f6;
       padding: 15px;
@@ -202,13 +228,89 @@ function generateAdminUI(): string {
       white-space: pre-wrap;
       word-wrap: break-word;
     }
+    /* Test case styles */
+    .test-case-item {
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      background: #fafafa;
+    }
+    .test-case-item:hover {
+      background: #f5f5f5;
+      border-color: #d1d5db;
+    }
+    .test-result-pass { color: #059669; font-weight: 600; }
+    .test-result-fail { color: #dc2626; font-weight: 600; }
+    .test-result-pending { color: #6b7280; }
+    /* Diff comparison styles */
+    .diff-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .diff-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .diff-panel-header {
+      background: #f9fafb;
+      padding: 10px 15px;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+    }
+    .diff-panel-content {
+      padding: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+      background: white;
+    }
+    .diff-panel-content pre {
+      margin: 0;
+      background: transparent;
+      padding: 0;
+    }
+    .diff-stats {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #f9fafb;
+      border-radius: 6px;
+    }
+    .diff-stat {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .diff-stat-positive { color: #059669; }
+    .diff-stat-negative { color: #dc2626; }
+    .diff-stat-neutral { color: #6b7280; }
+    @media (max-width: 768px) {
+      .diff-container { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <div x-data="promptAdmin()" x-init="init()">
+    <!-- Toast Notifications -->
+    <div class="toast-container">
+      <template x-for="toast in toasts" :key="toast.id">
+        <div class="toast" :class="'toast-' + toast.type" x-text="toast.message"></div>
+      </template>
+    </div>
+
     <header>
-      <h1>Olumi Prompt Admin</h1>
-      <p>Manage prompts, versions, and experiments</p>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h1>Olumi Prompt Admin</h1>
+          <p>Manage prompts, versions, and experiments</p>
+        </div>
+        <template x-if="authenticated">
+          <button class="btn btn-secondary" @click="logout()" style="margin-left: auto;">Logout</button>
+        </template>
+      </div>
     </header>
 
     <div class="container">
@@ -232,6 +334,7 @@ function generateAdminUI(): string {
           <!-- Tabs -->
           <div class="tabs">
             <div class="tab" :class="{ active: tab === 'prompts' }" @click="tab = 'prompts'">Prompts</div>
+            <div class="tab" :class="{ active: tab === 'testcases' }" @click="tab = 'testcases'; loadPrompts()">Test Cases</div>
             <div class="tab" :class="{ active: tab === 'experiments' }" @click="tab = 'experiments'">Experiments</div>
           </div>
 
@@ -311,6 +414,75 @@ function generateAdminUI(): string {
                       </template>
                     </tbody>
                   </table>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Test Cases Tab -->
+          <template x-if="tab === 'testcases'">
+            <div>
+              <div class="card">
+                <div class="flex" style="justify-content: space-between; align-items: center;">
+                  <h2>Test Cases</h2>
+                </div>
+                <p class="text-muted mt-2 mb-2">Manage golden tests for prompt versions. Select a prompt to view and edit its test cases. <em>Note: Test results (pass/fail) are session-local and not persisted.</em></p>
+
+                <div class="form-group">
+                  <label>Select Prompt</label>
+                  <select x-model="selectedTestPromptId" @change="loadTestCasesForPrompt()">
+                    <option value="">-- Select a prompt --</option>
+                    <template x-for="prompt in prompts" :key="prompt.id">
+                      <option :value="prompt.id" x-text="prompt.name + ' (' + prompt.id + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+
+                <template x-if="selectedTestPromptId && selectedTestPrompt">
+                  <div>
+                    <div class="flex mb-2" style="justify-content: space-between; align-items: center;">
+                      <div>
+                        <label>Version</label>
+                        <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
+                          <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                            <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                          </template>
+                        </select>
+                      </div>
+                      <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
+                    </div>
+
+                    <template x-if="currentTestCases.length === 0">
+                      <p class="text-muted">No test cases for this version. Add one to get started.</p>
+                    </template>
+
+                    <template x-for="(tc, idx) in currentTestCases" :key="tc.id">
+                      <div class="test-case-item">
+                        <div class="flex" style="justify-content: space-between; align-items: flex-start;">
+                          <div>
+                            <strong x-text="tc.name"></strong>
+                            <span class="text-muted" x-text="' (' + tc.id + ')'"></span>
+                            <template x-if="tc.lastResult">
+                              <span :class="'test-result-' + tc.lastResult" x-text="' [' + tc.lastResult.toUpperCase() + ']'"></span>
+                            </template>
+                          </div>
+                          <div class="flex" style="gap: 5px;">
+                            <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run</button>
+                            <button class="btn btn-secondary btn-sm" @click="editTestCase(tc)">Edit</button>
+                            <button class="btn btn-danger btn-sm" @click="deleteTestCase(idx)">Delete</button>
+                          </div>
+                        </div>
+                        <div class="text-muted mt-2" style="font-size: 0.85rem;">
+                          <strong>Input:</strong> <span x-text="tc.input.substring(0, 100) + (tc.input.length > 100 ? '...' : '')"></span>
+                        </div>
+                        <template x-if="tc.expectedOutput">
+                          <div class="text-muted" style="font-size: 0.85rem;">
+                            <strong>Expected:</strong> <span x-text="tc.expectedOutput.substring(0, 100) + (tc.expectedOutput.length > 100 ? '...' : '')"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
                 </template>
               </div>
             </div>
@@ -418,9 +590,17 @@ function generateAdminUI(): string {
                   </div>
                   <div class="text-muted" x-text="version.changeNote || 'No change note'"></div>
                   <div class="text-muted" x-text="'by ' + version.createdBy"></div>
-                  <template x-if="version.version === selectedPrompt.activeVersion">
-                    <span class="status status-production">Active</span>
-                  </template>
+                  <div class="flex" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
+                    <template x-if="version.version === selectedPrompt.activeVersion">
+                      <span class="status status-production">Active</span>
+                    </template>
+                    <template x-if="version.requiresApproval && version.approvedBy">
+                      <span class="status status-production" x-text="'Approved by ' + version.approvedBy"></span>
+                    </template>
+                    <template x-if="version.requiresApproval && !version.approvedBy">
+                      <span class="status status-draft">Needs Approval</span>
+                    </template>
+                  </div>
                 </div>
               </template>
             </div>
@@ -428,11 +608,19 @@ function generateAdminUI(): string {
             <h3 class="mt-2 mb-2">Content (v<span x-text="selectedVersionNum"></span>)</h3>
             <pre x-text="getVersionContent(selectedVersionNum)"></pre>
 
-            <div class="flex mt-2">
+            <div class="flex mt-2" style="flex-wrap: wrap;">
               <button class="btn btn-secondary" @click="showNewVersionModal = true">+ New Version</button>
+              <template x-if="selectedPrompt.versions.length >= 2">
+                <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
+              </template>
               <template x-if="selectedVersionNum !== selectedPrompt.activeVersion">
-                <button class="btn btn-primary" @click="rollbackToVersion()">
+                <button class="btn btn-warning" @click="rollbackToVersion()">
                   Rollback to v<span x-text="selectedVersionNum"></span>
+                </button>
+              </template>
+              <template x-if="getSelectedVersion()?.requiresApproval && !getSelectedVersion()?.approvedBy">
+                <button class="btn btn-primary" @click="approveSelectedVersion()">
+                  Approve v<span x-text="selectedVersionNum"></span>
                 </button>
               </template>
             </div>
@@ -466,6 +654,145 @@ function generateAdminUI(): string {
           </div>
         </div>
       </template>
+
+      <!-- Approval Modal -->
+      <template x-if="showApprovalModal && pendingApproval">
+        <div class="modal" @click.self="showApprovalModal = false; pendingApproval = null;">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Approval Required</h2>
+              <span class="close" @click="showApprovalModal = false; pendingApproval = null;">&times;</span>
+            </div>
+
+            <div class="alert alert-warning" style="background: #fef3c7; color: #92400e; margin-bottom: 15px;">
+              <strong>This version requires approval before promotion to production.</strong>
+              <p class="mt-2">Version <span x-text="pendingApproval.version"></span> of prompt "<span x-text="pendingApproval.promptId"></span>" is flagged as requiring approval.</p>
+            </div>
+
+            <p class="text-muted mb-2">By approving, you confirm that this prompt version has been reviewed and is safe for production use.</p>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showApprovalModal = false; pendingApproval = null;">Cancel</button>
+              <button class="btn btn-primary" @click="approveVersion()">Approve for Production</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Test Case Modal -->
+      <template x-if="showTestCaseModal">
+        <div class="modal" @click.self="showTestCaseModal = false">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 x-text="editingTestCase ? 'Edit Test Case' : 'Add Test Case'"></h2>
+              <span class="close" @click="showTestCaseModal = false">&times;</span>
+            </div>
+
+            <div class="form-group">
+              <label>Test ID</label>
+              <input type="text" x-model="testCaseForm.id" placeholder="unique-test-id" :disabled="editingTestCase">
+            </div>
+
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" x-model="testCaseForm.name" placeholder="Human-readable test name">
+            </div>
+
+            <div class="form-group">
+              <label>Input (Brief)</label>
+              <textarea x-model="testCaseForm.input" placeholder="Test input/brief content" style="min-height: 100px;"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Expected Output (optional)</label>
+              <textarea x-model="testCaseForm.expectedOutput" placeholder="Expected patterns or keywords in output" style="min-height: 80px;"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Variables (JSON, optional)</label>
+              <input type="text" x-model="testCaseForm.variablesJson" placeholder='{"maxNodes": 50, "maxEdges": 200}'>
+            </div>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showTestCaseModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="saveTestCase()" x-text="editingTestCase ? 'Update Test Case' : 'Add Test Case'"></button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Compare Modal -->
+      <template x-if="showCompareModal && selectedPrompt">
+        <div class="modal" @click.self="showCompareModal = false">
+          <div class="modal-content" style="max-width: 1000px;">
+            <div class="modal-header">
+              <h2>Compare Versions</h2>
+              <span class="close" @click="showCompareModal = false">&times;</span>
+            </div>
+
+            <div class="flex mb-2" style="gap: 20px;">
+              <div class="form-group flex-1">
+                <label>Version A</label>
+                <select x-model="compareVersionA" @change="loadComparison()">
+                  <template x-for="v in selectedPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label>Version B</label>
+                <select x-model="compareVersionB" @change="loadComparison()">
+                  <template x-for="v in selectedPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+
+            <template x-if="comparisonData">
+              <div>
+                <div class="diff-stats">
+                  <div class="diff-stat">
+                    <span>Lines:</span>
+                    <span :class="comparisonData.changes.linesDelta > 0 ? 'diff-stat-positive' : (comparisonData.changes.linesDelta < 0 ? 'diff-stat-negative' : 'diff-stat-neutral')"
+                          x-text="(comparisonData.changes.linesDelta > 0 ? '+' : '') + comparisonData.changes.linesDelta"></span>
+                  </div>
+                  <div class="diff-stat">
+                    <span>Characters:</span>
+                    <span :class="comparisonData.changes.charsDelta > 0 ? 'diff-stat-positive' : (comparisonData.changes.charsDelta < 0 ? 'diff-stat-negative' : 'diff-stat-neutral')"
+                          x-text="(comparisonData.changes.charsDelta > 0 ? '+' : '') + comparisonData.changes.charsDelta"></span>
+                  </div>
+                </div>
+
+                <div class="diff-container">
+                  <div class="diff-panel">
+                    <div class="diff-panel-header">
+                      Version <span x-text="comparisonData.versionA.version"></span>
+                      <span class="text-muted" x-text="' (' + comparisonData.versionA.lineCount + ' lines)'"></span>
+                    </div>
+                    <div class="diff-panel-content">
+                      <pre x-text="comparisonData.contentA"></pre>
+                    </div>
+                  </div>
+                  <div class="diff-panel">
+                    <div class="diff-panel-header">
+                      Version <span x-text="comparisonData.versionB.version"></span>
+                      <span class="text-muted" x-text="' (' + comparisonData.versionB.lineCount + ' lines)'"></span>
+                    </div>
+                    <div class="diff-panel-content">
+                      <pre x-text="comparisonData.contentB"></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showCompareModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -481,6 +808,8 @@ function generateAdminUI(): string {
         loading: false,
         error: null,
         success: null,
+        toasts: [],
+        toastId: 0,
 
         // Prompts
         prompts: [],
@@ -490,6 +819,29 @@ function generateAdminUI(): string {
         showCreateModal: false,
         showNewVersionModal: false,
         showExperimentModal: false,
+        showApprovalModal: false,
+        pendingApproval: null,
+
+        // Test case management
+        showTestCaseModal: false,
+        selectedTestPromptId: '',
+        selectedTestPrompt: null,
+        selectedTestVersionNum: 1,
+        currentTestCases: [],
+        editingTestCase: null,
+        testCaseForm: {
+          id: '',
+          name: '',
+          input: '',
+          expectedOutput: '',
+          variablesJson: '{}',
+        },
+
+        // Compare versions
+        showCompareModal: false,
+        compareVersionA: 1,
+        compareVersionB: 1,
+        comparisonData: null,
 
         // Form data
         newPrompt: {
@@ -504,6 +856,15 @@ function generateAdminUI(): string {
           content: '',
           changeNote: '',
           createdBy: 'admin-ui'
+        },
+
+        // Toast notification system
+        showToast(message, type = 'info', duration = 4000) {
+          const id = ++this.toastId;
+          this.toasts.push({ id, message, type });
+          setTimeout(() => {
+            this.toasts = this.toasts.filter(t => t.id !== id);
+          }, duration);
         },
 
         // Initialize - check for saved session
@@ -524,6 +885,7 @@ function generateAdminUI(): string {
             if (res.ok) {
               this.authenticated = true;
               sessionStorage.setItem('adminApiKey', this.apiKey);
+              this.showToast('Logged in successfully', 'success');
               this.loadPrompts();
             } else {
               sessionStorage.removeItem('adminApiKey');
@@ -533,6 +895,16 @@ function generateAdminUI(): string {
           } catch (e) {
             this.error = 'Failed to connect to server';
           }
+        },
+
+        logout() {
+          sessionStorage.removeItem('adminApiKey');
+          this.authenticated = false;
+          this.apiKey = '';
+          this.prompts = [];
+          this.selectedPrompt = null;
+          this.tab = 'prompts';
+          this.showToast('Logged out', 'info');
         },
 
         async loadPrompts() {
@@ -573,20 +945,20 @@ function generateAdminUI(): string {
             if (res.ok) {
               this.showCreateModal = false;
               this.newPrompt = { id: '', name: '', taskId: 'draft_graph', content: '', changeNote: '', createdBy: 'admin-ui' };
-              this.success = 'Prompt created successfully';
-              setTimeout(() => this.success = null, 3000);
+              this.showToast('Prompt created successfully', 'success');
               this.loadPrompts();
             } else {
               const data = await res.json();
-              this.error = data.message || 'Failed to create prompt';
+              this.showToast(data.message || 'Failed to create prompt', 'error');
             }
           } catch (e) {
-            this.error = 'Failed to create prompt';
+            this.showToast('Failed to create prompt', 'error');
           }
         },
 
         viewPrompt(prompt) {
-          this.selectedPrompt = prompt;
+          // Clone the prompt and store previous status for potential revert
+          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
           this.selectedVersionNum = prompt.activeVersion;
         },
 
@@ -598,14 +970,56 @@ function generateAdminUI(): string {
           this.selectedVersionNum = num;
         },
 
+        getSelectedVersion() {
+          if (!this.selectedPrompt) return null;
+          return this.selectedPrompt.versions.find(v => v.version === this.selectedVersionNum);
+        },
+
         getVersionContent(num) {
           if (!this.selectedPrompt) return '';
           const version = this.selectedPrompt.versions.find(v => v.version === num);
           return version ? version.content : '';
         },
 
+        async approveSelectedVersion() {
+          if (!this.selectedPrompt) return;
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/approve', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.selectedVersionNum,
+                approvedBy: 'admin-ui',
+                notes: 'Approved via admin UI'
+              })
+            });
+            if (res.ok) {
+              this.showToast('Version ' + this.selectedVersionNum + ' approved', 'success');
+              // Reload the prompt to get updated approval status
+              const promptRes = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+                headers: { 'X-Admin-Key': this.apiKey }
+              });
+              if (promptRes.ok) {
+                const updated = await promptRes.json();
+                this.selectedPrompt = { ...updated, _previousStatus: updated.status };
+              }
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to approve version', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to approve version', 'error');
+          }
+        },
+
         async updatePromptStatus() {
           this.error = null;
+          const previousStatus = this.selectedPrompt._previousStatus || this.selectedPrompt.status;
           try {
             const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
               method: 'PATCH',
@@ -616,15 +1030,64 @@ function generateAdminUI(): string {
               body: JSON.stringify({ status: this.selectedPrompt.status })
             });
             if (res.ok) {
-              this.success = 'Status updated';
-              setTimeout(() => this.success = null, 3000);
+              this.showToast('Status updated to ' + this.selectedPrompt.status, 'success');
               this.loadPrompts();
             } else {
               const data = await res.json();
-              this.error = data.message || 'Failed to update status';
+              // Handle approval required error
+              if (data.error === 'approval_required') {
+                this.pendingApproval = {
+                  promptId: this.selectedPrompt.id,
+                  version: this.selectedPrompt.activeVersion,
+                  targetStatus: 'production'
+                };
+                this.showApprovalModal = true;
+                this.showToast('This version requires approval before promotion', 'warning', 6000);
+                // Revert the status in UI
+                this.selectedPrompt.status = previousStatus;
+              } else {
+                this.showToast(data.message || 'Failed to update status', 'error');
+              }
             }
           } catch (e) {
-            this.error = 'Failed to update status';
+            this.showToast('Failed to update status', 'error');
+          }
+        },
+
+        async approveVersion() {
+          if (!this.pendingApproval) return;
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.pendingApproval.promptId + '/approve', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.pendingApproval.version,
+                approvedBy: 'admin-ui',
+                notes: 'Approved via admin UI'
+              })
+            });
+            if (res.ok) {
+              this.showApprovalModal = false;
+              this.showToast('Version ' + this.pendingApproval.version + ' approved! You can now promote to production.', 'success', 5000);
+              // Reload the prompt to get updated approval status
+              const promptRes = await fetch('/admin/prompts/' + this.pendingApproval.promptId, {
+                headers: { 'X-Admin-Key': this.apiKey }
+              });
+              if (promptRes.ok) {
+                this.selectedPrompt = await promptRes.json();
+              }
+              this.pendingApproval = null;
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to approve version', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to approve version', 'error');
           }
         },
 
@@ -645,15 +1108,14 @@ function generateAdminUI(): string {
               this.selectedVersionNum = updated.versions[updated.versions.length - 1].version;
               this.showNewVersionModal = false;
               this.newVersion = { content: '', changeNote: '', createdBy: 'admin-ui' };
-              this.success = 'Version created';
-              setTimeout(() => this.success = null, 3000);
+              this.showToast('Version ' + this.selectedVersionNum + ' created', 'success');
               this.loadPrompts();
             } else {
               const data = await res.json();
-              this.error = data.message || 'Failed to create version';
+              this.showToast(data.message || 'Failed to create version', 'error');
             }
           } catch (e) {
-            this.error = 'Failed to create version';
+            this.showToast('Failed to create version', 'error');
           }
         },
 
@@ -677,15 +1139,232 @@ function generateAdminUI(): string {
             if (res.ok) {
               const updated = await res.json();
               this.selectedPrompt = updated;
-              this.success = 'Rolled back to v' + this.selectedVersionNum;
-              setTimeout(() => this.success = null, 3000);
+              this.showToast('Rolled back to v' + this.selectedVersionNum, 'success');
               this.loadPrompts();
             } else {
               const data = await res.json();
-              this.error = data.message || 'Failed to rollback';
+              this.showToast(data.message || 'Failed to rollback', 'error');
             }
           } catch (e) {
-            this.error = 'Failed to rollback';
+            this.showToast('Failed to rollback', 'error');
+          }
+        },
+
+        // ========== Test Case Management ==========
+        async loadTestCasesForPrompt() {
+          if (!this.selectedTestPromptId) {
+            this.selectedTestPrompt = null;
+            this.currentTestCases = [];
+            return;
+          }
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId, {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.ok) {
+              this.selectedTestPrompt = await res.json();
+              this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
+              this.loadTestCasesForVersion();
+            } else {
+              this.showToast('Failed to load prompt', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to load prompt', 'error');
+          }
+        },
+
+        loadTestCasesForVersion() {
+          if (!this.selectedTestPrompt) return;
+          const version = this.selectedTestPrompt.versions.find(v => v.version === this.selectedTestVersionNum);
+          this.currentTestCases = version?.testCases || [];
+        },
+
+        resetTestCaseForm() {
+          this.editingTestCase = null;
+          this.testCaseForm = {
+            id: '',
+            name: '',
+            input: '',
+            expectedOutput: '',
+            variablesJson: '{}',
+          };
+        },
+
+        editTestCase(tc) {
+          this.editingTestCase = tc;
+          this.testCaseForm = {
+            id: tc.id,
+            name: tc.name,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput || '',
+            variablesJson: JSON.stringify(tc.variables || {}),
+          };
+          this.showTestCaseModal = true;
+        },
+
+        async saveTestCase() {
+          if (!this.testCaseForm.id || !this.testCaseForm.name || !this.testCaseForm.input) {
+            this.showToast('ID, Name, and Input are required', 'error');
+            return;
+          }
+
+          let variables = {};
+          try {
+            variables = JSON.parse(this.testCaseForm.variablesJson || '{}');
+          } catch (e) {
+            this.showToast('Invalid JSON for variables', 'error');
+            return;
+          }
+
+          const newTestCase = {
+            id: this.testCaseForm.id,
+            name: this.testCaseForm.name,
+            input: this.testCaseForm.input,
+            expectedOutput: this.testCaseForm.expectedOutput || undefined,
+            variables,
+            enabled: true,
+          };
+
+          // Update the test cases array
+          let updatedTestCases;
+          if (this.editingTestCase) {
+            updatedTestCases = this.currentTestCases.map(tc =>
+              tc.id === this.editingTestCase.id ? newTestCase : tc
+            );
+          } else {
+            // Check for duplicate ID
+            if (this.currentTestCases.some(tc => tc.id === newTestCase.id)) {
+              this.showToast('Test case ID already exists', 'error');
+              return;
+            }
+            updatedTestCases = [...this.currentTestCases, newTestCase];
+          }
+
+          // Save to backend
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test-cases', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.selectedTestVersionNum,
+                testCases: updatedTestCases,
+              })
+            });
+            if (res.ok) {
+              this.currentTestCases = updatedTestCases;
+              this.showTestCaseModal = false;
+              this.showToast(this.editingTestCase ? 'Test case updated' : 'Test case added', 'success');
+              // Reload the prompt to get updated data
+              await this.loadTestCasesForPrompt();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to save test case', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to save test case', 'error');
+          }
+        },
+
+        async deleteTestCase(idx) {
+          if (!confirm('Delete this test case?')) return;
+
+          const updatedTestCases = this.currentTestCases.filter((_, i) => i !== idx);
+
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test-cases', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.selectedTestVersionNum,
+                testCases: updatedTestCases,
+              })
+            });
+            if (res.ok) {
+              this.currentTestCases = updatedTestCases;
+              this.showToast('Test case deleted', 'success');
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to delete test case', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to delete test case', 'error');
+          }
+        },
+
+        async runSingleTestCase(tc) {
+          this.showToast('Running test...', 'info');
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.selectedTestVersionNum,
+                input: { brief: tc.input },
+                variables: tc.variables || {},
+                dry_run: true,
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.validation.valid) {
+                tc.lastResult = 'pass';
+                this.showToast('Test passed - ' + data.char_count + ' chars compiled', 'success');
+              } else {
+                tc.lastResult = 'fail';
+                this.showToast('Test failed: ' + (data.validation.issues || []).join(', '), 'error');
+              }
+            } else {
+              tc.lastResult = 'fail';
+              const data = await res.json();
+              this.showToast(data.message || 'Test failed', 'error');
+            }
+          } catch (e) {
+            tc.lastResult = 'fail';
+            this.showToast('Test execution failed', 'error');
+          }
+        },
+
+        // ========== Version Comparison ==========
+        openCompareModal() {
+          if (!this.selectedPrompt || this.selectedPrompt.versions.length < 2) {
+            this.showToast('Need at least 2 versions to compare', 'warning');
+            return;
+          }
+          this.compareVersionA = this.selectedPrompt.versions[0].version;
+          this.compareVersionB = this.selectedPrompt.activeVersion;
+          this.comparisonData = null;
+          this.showCompareModal = true;
+          this.loadComparison();
+        },
+
+        async loadComparison() {
+          if (!this.selectedPrompt || this.compareVersionA === this.compareVersionB) {
+            this.comparisonData = null;
+            return;
+          }
+          try {
+            const res = await fetch(
+              '/admin/prompts/' + this.selectedPrompt.id + '/diff?versionA=' + this.compareVersionA + '&versionB=' + this.compareVersionB,
+              { headers: { 'X-Admin-Key': this.apiKey } }
+            );
+            if (res.ok) {
+              this.comparisonData = await res.json();
+            } else {
+              this.showToast('Failed to load comparison', 'error');
+              this.comparisonData = null;
+            }
+          } catch (e) {
+            this.showToast('Failed to load comparison', 'error');
+            this.comparisonData = null;
           }
         },
 

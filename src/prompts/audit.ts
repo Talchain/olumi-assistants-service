@@ -20,6 +20,7 @@ export type AuditAction =
   | 'prompt.archived'
   | 'version.created'
   | 'version.rollback'
+  | 'version.approved'
   | 'status.changed'
   | 'experiment.started'
   | 'experiment.ended'
@@ -409,6 +410,25 @@ export async function logExperimentEnded(
     resourceType: 'experiment',
     resourceId: experimentName,
     metadata: results,
+  });
+}
+
+/**
+ * Log a version approval event
+ */
+export async function logVersionApproved(
+  logger: AuditLogger,
+  promptId: string,
+  version: number,
+  actor: string,
+  notes?: string
+): Promise<AuditEntry> {
+  return logger.log({
+    action: 'version.approved',
+    actor,
+    resourceType: 'version',
+    resourceId: `${promptId}:v${version}`,
+    metadata: { promptId, version, notes },
   });
 }
 

@@ -258,6 +258,7 @@ describe('Prompt Management', () => {
         variables: [],
         createdBy: 'test',
         changeNote: 'Updated content',
+        requiresApproval: false,
       });
 
       expect(updated.versions.length).toBe(2);
@@ -312,6 +313,7 @@ describe('Prompt Management', () => {
         content: 'Version 2 content - updated version for rollback test',
         variables: [],
         createdBy: 'test',
+        requiresApproval: false,
       });
 
       await store.update('test-rollback', { activeVersion: 2 });
