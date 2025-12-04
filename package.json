@@ -37,6 +37,8 @@
     "cee:diagnostics": "tsx scripts/cee-diagnostics.ts",
     "config:validate": "tsx scripts/validate-config.ts",
     "config:validate:strict": "tsx scripts/validate-config.ts --strict",
+    "prompts:migrate": "tsx scripts/migrate-prompts.ts",
+    "prompts:migrate:execute": "tsx scripts/migrate-prompts.ts --execute",
     "openapi:validate": "swagger-cli validate openapi.yaml",
     "openapi:generate": "openapi-typescript openapi.yaml -o src/generated/openapi.d.ts",
     "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'",

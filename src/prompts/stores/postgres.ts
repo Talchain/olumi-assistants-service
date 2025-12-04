@@ -20,7 +20,9 @@ import type {
   CreateVersionRequest,
   UpdatePromptRequest,
   RollbackRequest,
+  ApprovalRequest,
   CompiledPrompt,
+  PromptTestCase,
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
@@ -49,6 +51,10 @@ interface VersionRow {
   created_at: Date | string;
   change_note: string | null;
   content_hash: string;
+  requires_approval: boolean | null;
+  approved_by: string | null;
+  approved_at: Date | string | null;
+  test_cases: string | object[] | null;
 }
 
 /**
@@ -149,7 +155,7 @@ export class PostgresPromptStore implements IPromptStore {
         `;
 
         await tx`
-          INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash)
+          INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, test_cases)
           VALUES (
             ${request.id},
             1,
@@ -158,7 +164,9 @@ export class PostgresPromptStore implements IPromptStore {
             ${request.createdBy ?? null},
             ${now},
             ${request.changeNote ?? null},
-            ${contentHash}
+            ${contentHash},
+            ${(request as any).requiresApproval ?? false},
+            ${JSON.stringify([])}
           )
         `;
       });
@@ -191,7 +199,8 @@ export class PostgresPromptStore implements IPromptStore {
 
       const prompt = prompts[0];
       const versions = await sql<VersionRow[]>`
-        SELECT version, content, variables, created_by, created_at, change_note, content_hash
+        SELECT version, content, variables, created_by, created_at, change_note, content_hash,
+               requires_approval, approved_by, approved_at, test_cases
         FROM prompt_versions
         WHERE prompt_id = ${id}
         ORDER BY version ASC
@@ -253,7 +262,8 @@ export class PostgresPromptStore implements IPromptStore {
       const results: PromptDefinition[] = [];
       for (const prompt of prompts) {
         const versions = await sql<VersionRow[]>`
-          SELECT version, content, variables, created_by, created_at, change_note, content_hash
+          SELECT version, content, variables, created_by, created_at, change_note, content_hash,
+                 requires_approval, approved_by, approved_at, test_cases
           FROM prompt_versions
           WHERE prompt_id = ${prompt.id}
           ORDER BY version ASC
@@ -351,7 +361,7 @@ export class PostgresPromptStore implements IPromptStore {
       const now = new Date().toISOString();
 
       await sql`
-        INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash)
+        INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, test_cases)
         VALUES (
           ${id},
           ${newVersion},
@@ -360,7 +370,9 @@ export class PostgresPromptStore implements IPromptStore {
           ${request.createdBy ?? null},
           ${now},
           ${request.changeNote ?? null},
-          ${contentHash}
+          ${contentHash},
+          ${request.requiresApproval ?? false},
+          ${JSON.stringify([])}
         )
       `;
 
@@ -411,6 +423,109 @@ export class PostgresPromptStore implements IPromptStore {
     } catch (error) {
       emit(TelemetryEvents.PromptStoreError, {
         operation: 'rollback',
+        error: String(error),
+      });
+      throw error;
+    }
+  }
+
+  async approveVersion(id: string, request: ApprovalRequest): Promise<PromptDefinition> {
+    const sql = this.ensureInitialized();
+
+    try {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new Error(`Prompt '${id}' not found`);
+      }
+
+      const version = existing.versions.find((v) => v.version === request.version);
+      if (!version) {
+        throw new Error(`Version ${request.version} not found for prompt '${id}'`);
+      }
+
+      if (!version.requiresApproval) {
+        throw new Error(`Version ${request.version} does not require approval`);
+      }
+
+      if (version.approvedBy) {
+        throw new Error(`Version ${request.version} was already approved by ${version.approvedBy}`);
+      }
+
+      const now = new Date().toISOString();
+
+      // Update version in database with approval info
+      await sql`
+        UPDATE prompt_versions
+        SET approved_by = ${request.approvedBy},
+            approved_at = ${now}
+        WHERE prompt_id = ${id} AND version = ${request.version}
+      `;
+
+      // Also update prompt's updated_at
+      await sql`
+        UPDATE prompts SET updated_at = NOW()
+        WHERE id = ${id}
+      `;
+
+      log.info(
+        {
+          promptId: id,
+          version: request.version,
+          approvedBy: request.approvedBy,
+        },
+        'Prompt version approved'
+      );
+
+      return this.get(id) as Promise<PromptDefinition>;
+    } catch (error) {
+      emit(TelemetryEvents.PromptStoreError, {
+        operation: 'approveVersion',
+        error: String(error),
+      });
+      throw error;
+    }
+  }
+
+  async updateTestCases(id: string, version: number, testCases: PromptTestCase[]): Promise<PromptDefinition> {
+    const sql = this.ensureInitialized();
+
+    try {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new Error(`Prompt '${id}' not found`);
+      }
+
+      const versionData = existing.versions.find((v) => v.version === version);
+      if (!versionData) {
+        throw new Error(`Version ${version} not found for prompt '${id}'`);
+      }
+
+      // Update version in database with new test cases
+      await sql`
+        UPDATE prompt_versions
+        SET test_cases = ${JSON.stringify(testCases)}
+        WHERE prompt_id = ${id} AND version = ${version}
+      `;
+
+      // Also update prompt's updated_at
+      await sql`
+        UPDATE prompts SET updated_at = NOW()
+        WHERE id = ${id}
+      `;
+
+      log.info(
+        {
+          promptId: id,
+          version,
+          testCaseCount: testCases.length,
+        },
+        'Prompt version test cases updated'
+      );
+
+      return this.get(id) as Promise<PromptDefinition>;
+    } catch (error) {
+      emit(TelemetryEvents.PromptStoreError, {
+        operation: 'updateTestCases',
         error: String(error),
       });
       throw error;
@@ -573,6 +688,10 @@ export class PostgresPromptStore implements IPromptStore {
         createdAt: typeof v.created_at === 'string' ? v.created_at : v.created_at.toISOString(),
         changeNote: v.change_note ?? undefined,
         contentHash: v.content_hash ?? computeContentHash(v.content),
+        requiresApproval: (v as any).requires_approval ?? false,
+        approvedBy: (v as any).approved_by ?? undefined,
+        approvedAt: (v as any).approved_at ?? undefined,
+        testCases: (v as any).test_cases ? (typeof (v as any).test_cases === 'string' ? JSON.parse((v as any).test_cases) : (v as any).test_cases) : [],
       })),
       activeVersion: prompt.active_version,
       stagingVersion: prompt.staging_version ?? undefined,

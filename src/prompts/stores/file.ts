@@ -21,7 +21,9 @@ import type {
   CreateVersionRequest,
   UpdatePromptRequest,
   RollbackRequest,
+  ApprovalRequest,
   CompiledPrompt,
+  PromptTestCase,
 } from '../schema.js';
 import {
   PromptDefinitionSchema,
@@ -271,6 +273,8 @@ export class FilePromptStore implements IPromptStore {
           createdAt: now,
           changeNote: request.changeNote,
           contentHash,
+          requiresApproval: false,
+          testCases: [],
         },
       ],
       activeVersion: 1,
@@ -396,6 +400,8 @@ export class FilePromptStore implements IPromptStore {
       createdAt: now,
       changeNote: request.changeNote,
       contentHash,
+      requiresApproval: request.requiresApproval ?? false,
+      testCases: [],
     };
 
     const updated: PromptDefinition = {
@@ -448,6 +454,107 @@ export class FilePromptStore implements IPromptStore {
         reason: request.reason,
       },
       'Prompt rolled back'
+    );
+
+    return validated;
+  }
+
+  async approveVersion(id: string, request: ApprovalRequest): Promise<PromptDefinition> {
+    const data = this.ensureInitialized();
+    const prompt = data.prompts[id];
+
+    if (!prompt) {
+      throw new Error(`Prompt '${id}' not found`);
+    }
+
+    const versionIndex = prompt.versions.findIndex(v => v.version === request.version);
+    if (versionIndex === -1) {
+      throw new Error(`Version ${request.version} not found for prompt '${id}'`);
+    }
+
+    const version = prompt.versions[versionIndex];
+
+    if (!version.requiresApproval) {
+      throw new Error(`Version ${request.version} does not require approval`);
+    }
+
+    if (version.approvedBy) {
+      throw new Error(`Version ${request.version} was already approved by ${version.approvedBy}`);
+    }
+
+    const now = new Date().toISOString();
+
+    // Update the version with approval info
+    const updatedVersions = [...prompt.versions];
+    updatedVersions[versionIndex] = {
+      ...version,
+      approvedBy: request.approvedBy,
+      approvedAt: now,
+    };
+
+    const updated: PromptDefinition = {
+      ...prompt,
+      versions: updatedVersions,
+      updatedAt: now,
+    };
+
+    const validated = PromptDefinitionSchema.parse(updated);
+    data.prompts[id] = validated;
+
+    await this.save();
+
+    log.info(
+      {
+        promptId: id,
+        version: request.version,
+        approvedBy: request.approvedBy,
+      },
+      'Prompt version approved'
+    );
+
+    return validated;
+  }
+
+  async updateTestCases(id: string, version: number, testCases: PromptTestCase[]): Promise<PromptDefinition> {
+    const data = this.ensureInitialized();
+    const prompt = data.prompts[id];
+
+    if (!prompt) {
+      throw new Error(`Prompt '${id}' not found`);
+    }
+
+    const versionIndex = prompt.versions.findIndex(v => v.version === version);
+    if (versionIndex === -1) {
+      throw new Error(`Version ${version} not found for prompt '${id}'`);
+    }
+
+    const now = new Date().toISOString();
+
+    // Update the version with new test cases
+    const updatedVersions = [...prompt.versions];
+    updatedVersions[versionIndex] = {
+      ...updatedVersions[versionIndex],
+      testCases,
+    };
+
+    const updated: PromptDefinition = {
+      ...prompt,
+      versions: updatedVersions,
+      updatedAt: now,
+    };
+
+    const validated = PromptDefinitionSchema.parse(updated);
+    data.prompts[id] = validated;
+
+    await this.save();
+
+    log.info(
+      {
+        promptId: id,
+        version,
+        testCaseCount: testCases.length,
+      },
+      'Prompt version test cases updated'
     );
 
     return validated;

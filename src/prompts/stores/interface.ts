@@ -12,7 +12,9 @@ import type {
   CreateVersionRequest,
   UpdatePromptRequest,
   RollbackRequest,
+  ApprovalRequest,
   CompiledPrompt,
+  PromptTestCase,
 } from '../schema.js';
 
 /**
@@ -95,6 +97,20 @@ export interface IPromptStore {
    * @throws Error if prompt or version not found
    */
   rollback(id: string, request: RollbackRequest): Promise<PromptDefinition>;
+
+  /**
+   * Approve a version for production promotion
+   * @throws Error if prompt or version not found
+   * @throws Error if version does not require approval
+   * @throws Error if version is already approved
+   */
+  approveVersion(id: string, request: ApprovalRequest): Promise<PromptDefinition>;
+
+  /**
+   * Update test cases for a specific version
+   * @throws Error if prompt or version not found
+   */
+  updateTestCases(id: string, version: number, testCases: PromptTestCase[]): Promise<PromptDefinition>;
 
   /**
    * Delete a prompt (soft delete by default, hard delete optional)

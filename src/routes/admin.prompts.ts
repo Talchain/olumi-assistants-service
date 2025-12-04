@@ -14,6 +14,8 @@
  * - DELETE /admin/prompts/:id     - Delete/archive prompt
  * - POST   /admin/prompts/:id/versions - Create new version
  * - POST   /admin/prompts/:id/rollback - Rollback to version
+ * - POST   /admin/prompts/:id/test     - Test prompt in sandbox
+ * - POST   /admin/prompts/:id/approve  - Approve version for production
  * - GET    /admin/prompts/:id/diff     - Compare versions
  *
  * Experiment routes:
@@ -33,18 +35,22 @@ import {
   CreateVersionRequestSchema,
   UpdatePromptRequestSchema,
   RollbackRequestSchema,
+  ApprovalRequestSchema,
+  PromptTestCaseSchema,
   getAuditLogger,
   logPromptCreated,
   logPromptUpdated,
   logVersionCreated,
   logVersionRollback,
+  logVersionApproved,
   logStatusChanged,
   logExperimentStarted,
   logExperimentEnded,
+  interpolatePrompt,
 } from '../prompts/index.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
-import { log, emit } from '../utils/telemetry.js';
+import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 /**
@@ -265,6 +271,38 @@ const ExperimentNameParamsSchema = z.object({
   name: z.string().min(1),
 });
 
+/**
+ * Test sandbox request schema
+ *
+ * Accepts both structured input (brief, maxNodes, maxEdges) and a generic
+ * variables object for maximum flexibility in testing different prompts.
+ */
+const TestPromptRequestSchema = z.object({
+  version: z.number().int().positive().optional(),
+  input: z.object({
+    /** Test brief content (tracked for testing purposes, not interpolated unless prompt uses it) */
+    brief: z.string().min(1).max(10000).optional(),
+    /** Known variables for convenience */
+    maxNodes: z.number().int().positive().optional(),
+    maxEdges: z.number().int().positive().optional(),
+  }).optional(),
+  /** Generic variables object - merged with input fields, takes precedence */
+  variables: z.record(z.union([z.string(), z.number()])).optional(),
+  dry_run: z.boolean().optional().default(true),
+});
+
+/**
+ * Test cases update schema
+ * Allows updating test cases for a specific version
+ */
+const UpdateTestCasesSchema = z.object({
+  /** Version to update test cases for */
+  version: z.number().int().positive(),
+  /** The test cases array (replaces existing) */
+  testCases: z.array(PromptTestCaseSchema),
+});
+
+
 // =========================================================================
 // Routes
 // =========================================================================
@@ -471,6 +509,40 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     try {
       const store = getPromptStore();
       const beforePrompt = await store.get(params.data.id);
+
+      if (!beforePrompt) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: `Prompt '${params.data.id}' not found`,
+        });
+      }
+
+      // Check for approval requirement when promoting to production
+      const isPromotion = body.data.status === 'production' && beforePrompt.status !== 'production';
+      if (isPromotion) {
+        // Determine which version will be active after the update:
+        // - If body.data.activeVersion is provided, that's being promoted
+        // - Otherwise, the current activeVersion is being promoted
+        const versionBeingPromoted = body.data.activeVersion ?? beforePrompt.activeVersion;
+        const versionData = beforePrompt.versions.find(v => v.version === versionBeingPromoted);
+
+        if (versionData?.requiresApproval && !versionData.approvedBy) {
+          // Emit approval required telemetry
+          emit(TelemetryEvents.PromptApprovalRequired, {
+            promptId: params.data.id,
+            version: versionBeingPromoted,
+            taskId: beforePrompt.taskId,
+          });
+
+          return reply.status(403).send({
+            error: 'approval_required',
+            message: `Version ${versionBeingPromoted} requires approval before promotion to production. Use POST /admin/prompts/${params.data.id}/approve to approve first.`,
+            promptId: params.data.id,
+            version: versionBeingPromoted,
+          });
+        }
+      }
+
       const prompt = await store.update(params.data.id, body.data);
       const actor = getActorFromRequest(request);
 
@@ -480,13 +552,36 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         auditLogger,
         params.data.id,
         actor,
-        { status: beforePrompt?.status, activeVersion: beforePrompt?.activeVersion },
+        { status: beforePrompt.status, activeVersion: beforePrompt.activeVersion },
         { status: prompt.status, activeVersion: prompt.activeVersion }
       );
 
       // Additional audit for status changes
-      if (body.data.status && beforePrompt && beforePrompt.status !== body.data.status) {
+      if (body.data.status && beforePrompt.status !== body.data.status) {
         await logStatusChanged(auditLogger, params.data.id, beforePrompt.status, body.data.status, actor);
+
+        // Emit structured telemetry for status changes (promotion/demotion)
+        const isDemotion = beforePrompt.status === 'production' && body.data.status !== 'production';
+
+        if (isPromotion) {
+          emit(TelemetryEvents.PromptVersionPromoted, {
+            promptId: params.data.id,
+            taskId: prompt.taskId,
+            version: prompt.activeVersion,
+            fromStatus: beforePrompt.status,
+            toStatus: body.data.status,
+            actor,
+          });
+        } else if (isDemotion) {
+          emit(TelemetryEvents.PromptVersionDemoted, {
+            promptId: params.data.id,
+            taskId: prompt.taskId,
+            version: prompt.activeVersion,
+            fromStatus: beforePrompt.status,
+            toStatus: body.data.status,
+            actor,
+          });
+        }
       }
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
@@ -677,6 +772,16 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         body.data.reason
       );
 
+      // Emit structured rollback telemetry
+      emit(TelemetryEvents.PromptRollbackExecuted, {
+        promptId: params.data.id,
+        taskId: prompt.taskId,
+        fromVersion,
+        toVersion: body.data.targetVersion,
+        reason: body.data.reason,
+        actor,
+      });
+
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'rollback',
         promptId: params.data.id,
@@ -689,6 +794,12 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(200).send(prompt);
     } catch (error) {
+      // Emit rollback failure telemetry
+      emit(TelemetryEvents.PromptRollbackFailed, {
+        promptId: params.data.id,
+        targetVersion: body.data.targetVersion,
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (error instanceof Error && (error.message.includes('not found') || error.message.includes('Version'))) {
         return reply.status(404).send({
           error: 'not_found',
@@ -700,10 +811,482 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * POST /admin/prompts/:id/test - Test prompt in sandbox
+   *
+   * Validates prompt interpolation for a specific version without affecting production.
+   * This endpoint performs interpolation-only validation (does not execute CEE pipeline).
+   * Rate limited to 10 requests per minute per admin key.
+   *
+   * Request:
+   * - version: (optional) Specific version to test, defaults to active version
+   * - input: { brief?: string, maxNodes?: number, maxEdges?: number }
+   * - variables: (optional) Generic variables object, merged with input fields
+   * - dry_run: (optional) Reserved for future use; currently all tests are interpolation-only
+   *
+   * Response:
+   * - prompt_id: The prompt ID
+   * - version: The version tested
+   * - task_id: The CEE task ID
+   * - compiled_content: The interpolated prompt content
+   * - variables: Analysis of provided/defined/missing/defaults_used variables
+   * - char_count: Total character count after interpolation
+   * - validation: { valid: boolean, issues?: string[] }
+   */
+  app.post('/admin/prompts/:id/test', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `test:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const params = PromptIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    const body = TestPromptRequestSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: body.error.flatten(),
+      });
+    }
+
+    const start = Date.now();
+
+    try {
+      const store = getPromptStore();
+      const prompt = await store.get(params.data.id);
+
+      if (!prompt) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: `Prompt '${params.data.id}' not found`,
+        });
+      }
+
+      // Find the requested version or use active version
+      const targetVersion = body.data.version ?? prompt.activeVersion;
+      const versionData = prompt.versions.find(v => v.version === targetVersion);
+
+      if (!versionData) {
+        return reply.status(404).send({
+          error: 'version_not_found',
+          message: `Version ${targetVersion} not found for prompt '${params.data.id}'`,
+        });
+      }
+
+      // Build variables from input and explicit variables object
+      // Priority: body.data.variables > body.data.input fields
+      const variables: Record<string, string | number> = {};
+
+      // Add known input fields first (if input is provided)
+      if (body.data.input) {
+        if (body.data.input.maxNodes !== undefined) {
+          variables.maxNodes = body.data.input.maxNodes;
+        }
+        if (body.data.input.maxEdges !== undefined) {
+          variables.maxEdges = body.data.input.maxEdges;
+        }
+        if (body.data.input.brief !== undefined) {
+          variables.brief = body.data.input.brief;
+        }
+      }
+
+      // Merge with explicit variables (takes precedence)
+      if (body.data.variables) {
+        Object.assign(variables, body.data.variables);
+      }
+
+      // Analyze variable requirements from version metadata
+      const versionVariables = versionData.variables ?? [];
+      const variableAnalysis = {
+        defined: versionVariables.map(v => ({
+          name: v.name,
+          required: v.required ?? true,
+          hasDefault: v.defaultValue !== undefined,
+          defaultValue: v.defaultValue,
+        })),
+        provided: Object.keys(variables),
+        missing: [] as string[],
+        defaultsUsed: [] as string[],
+      };
+
+      // Check which variables are missing vs using defaults
+      for (const varDef of versionVariables) {
+        if (variables[varDef.name] === undefined) {
+          if (varDef.defaultValue !== undefined) {
+            variableAnalysis.defaultsUsed.push(varDef.name);
+          } else if (varDef.required !== false) {
+            variableAnalysis.missing.push(varDef.name);
+          }
+        }
+      }
+
+      // Interpolate the prompt - ALIGNED WITH RUNTIME: pass version.variables for defaults
+      let compiledContent: string;
+      const validationIssues: string[] = [];
+
+      try {
+        // This matches runtime behavior in FilePromptStore.getCompiled
+        compiledContent = interpolatePrompt(versionData.content, variables, versionData.variables);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        validationIssues.push(`Interpolation error: ${errorMessage}`);
+        compiledContent = versionData.content; // Return raw content if interpolation fails
+      }
+
+      // Check for any unresolved variables ({{variable}})
+      const unresolvedVariables = compiledContent.match(/\{\{[^}]+\}\}/g);
+      if (unresolvedVariables && unresolvedVariables.length > 0) {
+        validationIssues.push(`Unresolved variables: ${unresolvedVariables.join(', ')}`);
+      }
+
+      // Check for common prompt issues
+      if (compiledContent.length < 100) {
+        validationIssues.push('Warning: Prompt content is very short (< 100 chars)');
+      }
+      if (compiledContent.length > 50000) {
+        validationIssues.push('Warning: Prompt content is very long (> 50k chars)');
+      }
+
+      const latencyMs = Date.now() - start;
+      const isValid = validationIssues.length === 0;
+
+      // Emit structured telemetry events
+      emit(TelemetryEvents.PromptTestExecuted, {
+        promptId: params.data.id,
+        version: targetVersion,
+        taskId: prompt.taskId,
+        dry_run: body.data.dry_run,
+        latency_ms: latencyMs,
+        char_count: compiledContent.length,
+        variables_count: Object.keys(variables).length,
+      });
+
+      if (isValid) {
+        emit(TelemetryEvents.PromptTestValidationPassed, {
+          promptId: params.data.id,
+          version: targetVersion,
+        });
+      } else {
+        emit(TelemetryEvents.PromptTestValidationFailed, {
+          promptId: params.data.id,
+          version: targetVersion,
+          issues: validationIssues,
+        });
+      }
+
+      // Also emit admin access event for audit trail
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'test',
+        promptId: params.data.id,
+        version: targetVersion,
+        dry_run: body.data.dry_run,
+        latency_ms: latencyMs,
+        valid: isValid,
+      });
+
+      log.info({
+        promptId: params.data.id,
+        version: targetVersion,
+        taskId: prompt.taskId,
+        dry_run: body.data.dry_run,
+        latency_ms: latencyMs,
+        valid: isValid,
+      }, 'Prompt test executed');
+
+      return reply.status(200).send({
+        prompt_id: params.data.id,
+        version: targetVersion,
+        task_id: prompt.taskId,
+        status: prompt.status,
+        compiled_content: compiledContent,
+        char_count: compiledContent.length,
+        line_count: compiledContent.split('\n').length,
+        // Detailed variable analysis for debugging
+        variables: {
+          provided: variableAnalysis.provided,
+          defined_in_version: variableAnalysis.defined,
+          missing_required: variableAnalysis.missing,
+          defaults_used: variableAnalysis.defaultsUsed,
+        },
+        validation: {
+          valid: validationIssues.length === 0,
+          issues: validationIssues.length > 0 ? validationIssues : undefined,
+        },
+        test_input: body.data.input,
+        dry_run: body.data.dry_run,
+        latency_ms: latencyMs,
+      });
+    } catch (error) {
+      log.error({ error, promptId: params.data.id }, 'Prompt test failed');
+      return reply.status(500).send({
+        error: 'test_failed',
+        message: error instanceof Error ? error.message : 'Unknown error during test',
+      });
+    }
+  });
+
+  /**
+   * POST /admin/prompts/:id/approve - Approve a version for production promotion
+   *
+   * Approves a specific version that has `requiresApproval: true`.
+   * Once approved, the version can be promoted to production via PATCH.
+   *
+   * Request:
+   * - version: The version number to approve
+   * - approvedBy: Who is approving
+   * - notes: Optional notes/reason for approval
+   */
+  app.post('/admin/prompts/:id/approve', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `approve:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const params = PromptIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    const body = ApprovalRequestSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: body.error.flatten(),
+      });
+    }
+
+    try {
+      const store = getPromptStore();
+
+      // Use explicit store method for approval - handles validation and persistence
+      const prompt = await store.approveVersion(params.data.id, body.data);
+
+      const actor = getActorFromRequest(request);
+      const approvedVersion = prompt.versions.find(v => v.version === body.data.version);
+      const approvedAt = approvedVersion?.approvedAt ?? new Date().toISOString();
+
+      // Audit log
+      const auditLogger = getAuditLogger();
+      await logVersionApproved(
+        auditLogger,
+        params.data.id,
+        body.data.version,
+        body.data.approvedBy,
+        body.data.notes
+      );
+
+      // Emit telemetry
+      emit(TelemetryEvents.PromptApprovalGranted, {
+        promptId: params.data.id,
+        version: body.data.version,
+        taskId: prompt.taskId,
+        approvedBy: body.data.approvedBy,
+        actor,
+      });
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'approve',
+        promptId: params.data.id,
+        version: body.data.version,
+      });
+
+      log.info({
+        promptId: params.data.id,
+        version: body.data.version,
+        approvedBy: body.data.approvedBy,
+      }, 'Prompt version approved');
+
+      return reply.status(200).send({
+        promptId: params.data.id,
+        version: body.data.version,
+        approvedBy: body.data.approvedBy,
+        approvedAt,
+        message: 'Version approved successfully. You can now promote to production.',
+      });
+    } catch (error) {
+      log.error({ error, promptId: params.data.id }, 'Prompt approval failed');
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Map store errors to appropriate HTTP responses
+      if (errorMessage.includes('not found')) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: errorMessage,
+        });
+      }
+      if (errorMessage.includes('does not require approval')) {
+        return reply.status(400).send({
+          error: 'approval_not_required',
+          message: errorMessage,
+        });
+      }
+      if (errorMessage.includes('already approved')) {
+        return reply.status(400).send({
+          error: 'already_approved',
+          message: errorMessage,
+        });
+      }
+
+      emit(TelemetryEvents.PromptApprovalRejected, {
+        promptId: params.data.id,
+        version: body.data.version,
+        error: errorMessage,
+      });
+
+      return reply.status(500).send({
+        error: 'approval_failed',
+        message: errorMessage,
+      });
+    }
+  });
+
+  /**
+   * PATCH /admin/prompts/:id/test-cases - Update test cases for a version
+   *
+   * Updates the test cases array for a specific prompt version.
+   * Test cases are used for golden testing during prompt validation.
+   */
+  app.patch('/admin/prompts/:id/test-cases', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `testcases:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const params = PromptIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    const body = UpdateTestCasesSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: body.error.flatten(),
+      });
+    }
+
+    try {
+      const store = getPromptStore();
+      const prompt = await store.updateTestCases(
+        params.data.id,
+        body.data.version,
+        body.data.testCases
+      );
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'update_test_cases',
+        promptId: params.data.id,
+        version: body.data.version,
+        testCaseCount: body.data.testCases.length,
+      });
+
+      log.info({
+        promptId: params.data.id,
+        version: body.data.version,
+        testCaseCount: body.data.testCases.length,
+      }, 'Test cases updated');
+
+      return reply.status(200).send({
+        prompt,
+        message: `Updated ${body.data.testCases.length} test cases for version ${body.data.version}`,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (errorMessage.includes('not found')) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: errorMessage,
+        });
+      }
+
+      log.error({ error, promptId: params.data.id }, 'Failed to update test cases');
+      return reply.status(500).send({
+        error: 'update_failed',
+        message: errorMessage,
+      });
+    }
+  });
+
+  /**
    * GET /admin/prompts/:id/diff - Compare versions
    * Permission: read
    */
-  app.get('/admin/prompts/:id/diff', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/:id/diff', {
+    config: {
+      rateLimit: {
+        max: 60,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `diff:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
