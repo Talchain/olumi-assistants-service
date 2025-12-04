@@ -21,6 +21,16 @@ vi.mock("../../src/utils/responseGuards.js", () => ({
 vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: (...args: any[]) => detectStructuralWarningsMock(...args),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
+  validateAndFixGraph: (graph: unknown) => ({
+    graph,
+    valid: true,
+    fixes: {
+      singleGoalApplied: false,
+      outcomeBeliefsFilled: 0,
+      decisionBranchesNormalized: false,
+    },
+    warnings: [],
+  }),
 }));
 
 import { finaliseCeeDraftResponse } from "../../src/cee/validation/pipeline.js";

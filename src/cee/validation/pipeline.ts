@@ -20,7 +20,7 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, type StructuralMeta } from "../structure/index.js";
+import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { config } from "../../config/index.js";
 import {
@@ -737,7 +737,34 @@ export async function finaliseCeeDraftResponse(
   };
 
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
-  graph = normaliseDecisionBranchBeliefs(graph);
+
+  // Run graph validation and auto-corrections (single goal, outcome beliefs, decision branches)
+  // Uses checkSizeLimits: false since the pipeline already has size guards downstream
+  const validationResult = validateAndFixGraph(graph, structural_meta, {
+    checkSizeLimits: false, // Pipeline has existing size guards
+  });
+
+  // Emit telemetry for validation results
+  const { fixes } = validationResult;
+  emit(TelemetryEvents.CeeGraphValidation, {
+    request_id: requestId,
+    single_goal_applied: fixes.singleGoalApplied,
+    original_goal_count: fixes.originalGoalCount,
+    outcome_beliefs_filled: fixes.outcomeBeliefsFilled,
+    decision_branches_normalized: fixes.decisionBranchesNormalized,
+    warning_count: validationResult.warnings.length,
+  });
+
+  // Emit specific event if goals were merged
+  if (fixes.singleGoalApplied && fixes.mergedGoalIds) {
+    emit(TelemetryEvents.CeeGraphGoalsMerged, {
+      request_id: requestId,
+      original_goal_count: fixes.originalGoalCount,
+      merged_goal_ids: fixes.mergedGoalIds,
+    });
+  }
+
+  graph = validationResult.graph;
   if (graph) {
     payload.graph = graph as any;
   }

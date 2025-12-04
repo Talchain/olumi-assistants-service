@@ -223,6 +223,27 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PromptStoreCacheHit: "prompt.store.cache.hit",
         PromptStoreCacheMiss: "prompt.store.cache.miss",
         PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+
+        // Prompt Test Sandbox events (v2.1)
+        PromptTestExecuted: "prompt.test.executed",
+        PromptTestValidationPassed: "prompt.test.validation_passed",
+        PromptTestValidationFailed: "prompt.test.validation_failed",
+
+        // Prompt Version Lifecycle events (v2.1)
+        PromptVersionPromoted: "prompt.version.promoted",
+        PromptVersionDemoted: "prompt.version.demoted",
+        PromptRollbackExecuted: "prompt.rollback.executed",
+        PromptRollbackFailed: "prompt.rollback.failed",
+
+        // Prompt Approval Gate events (v2.1)
+        PromptApprovalRequired: "prompt.approval.required",
+        PromptApprovalGranted: "prompt.approval.granted",
+        PromptApprovalRejected: "prompt.approval.rejected",
+
+        // Graph Validation events (v2.2)
+        CeeGraphValidation: "cee.graph.validation",
+        CeeGraphGoalsMerged: "cee.graph.goals_merged",
+        CeeGraphSizeExceeded: "cee.graph.size_exceeded",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -248,7 +269,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -485,6 +506,22 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
         "prompt.store.cache.miss": [TelemetryEvents.PromptStoreCacheMiss],
         "prompt.store.cache.invalidated": [TelemetryEvents.PromptStoreCacheInvalidated],
+
+        // Prompt Test Sandbox events (v2.1)
+        "prompt.test.executed": [TelemetryEvents.PromptTestExecuted],
+        "prompt.test.validation_passed": [TelemetryEvents.PromptTestValidationPassed],
+        "prompt.test.validation_failed": [TelemetryEvents.PromptTestValidationFailed],
+
+        // Prompt Version Lifecycle events (v2.1)
+        "prompt.version.promoted": [TelemetryEvents.PromptVersionPromoted],
+        "prompt.version.demoted": [TelemetryEvents.PromptVersionDemoted],
+        "prompt.rollback.executed": [TelemetryEvents.PromptRollbackExecuted],
+        "prompt.rollback.failed": [TelemetryEvents.PromptRollbackFailed],
+
+        // Prompt Approval Gate events (v2.1)
+        "prompt.approval.required": [TelemetryEvents.PromptApprovalRequired],
+        "prompt.approval.granted": [TelemetryEvents.PromptApprovalGranted],
+        "prompt.approval.rejected": [TelemetryEvents.PromptApprovalRejected],
       };
 
       // Verify all events are documented, except debug-only events
@@ -526,6 +563,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Bias mitigation events (diagnostic only)
         TelemetryEvents.BiasPatchesGenerated,
         TelemetryEvents.BiasPatchesApplied,
+        // Graph Validation events (diagnostic only)
+        TelemetryEvents.CeeGraphValidation,
+        TelemetryEvents.CeeGraphGoalsMerged,
+        TelemetryEvents.CeeGraphSizeExceeded,
       ];
 
       for (const event of allEvents) {
@@ -721,6 +762,27 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.hit",
         "prompt.store.cache.miss",
         "prompt.store.cache.invalidated",
+
+        // Prompt Test Sandbox events (v2.1)
+        "prompt.test.executed",
+        "prompt.test.validation_passed",
+        "prompt.test.validation_failed",
+
+        // Prompt Version Lifecycle events (v2.1)
+        "prompt.version.promoted",
+        "prompt.version.demoted",
+        "prompt.rollback.executed",
+        "prompt.rollback.failed",
+
+        // Prompt Approval Gate events (v2.1)
+        "prompt.approval.required",
+        "prompt.approval.granted",
+        "prompt.approval.rejected",
+
+        // Graph Validation events (v2.2)
+        "cee.graph.validation",
+        "cee.graph.goals_merged",
+        "cee.graph.size_exceeded",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

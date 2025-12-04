@@ -22,6 +22,17 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     warnings: [],
     uncertainNodeIds: [],
   }),
+  normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
+  validateAndFixGraph: (graph: unknown) => ({
+    graph,
+    valid: true,
+    fixes: {
+      singleGoalApplied: false,
+      outcomeBeliefsFilled: 0,
+      decisionBranchesNormalized: false,
+    },
+    warnings: [],
+  }),
 }));
 
 // Force fixtures adapter to return an empty graph

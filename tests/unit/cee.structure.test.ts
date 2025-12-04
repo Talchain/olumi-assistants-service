@@ -1,7 +1,16 @@
 import { describe, it, expect } from "vitest";
 
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
-import { detectStructuralWarnings, normaliseDecisionBranchBeliefs } from "../../src/cee/structure/index.js";
+import {
+  detectStructuralWarnings,
+  normaliseDecisionBranchBeliefs,
+  validateGraphSizeLimits,
+  enforceSingleGoal,
+  fixMissingOutcomeEdgeBeliefs,
+  validateAndFixGraph,
+  type GraphFixOptions,
+  type StructuralMeta,
+} from "../../src/cee/structure/index.js";
 
 function makeGraph(partial: Partial<GraphV1>): GraphV1 {
   return {
@@ -157,5 +166,483 @@ describe("normaliseDecisionBranchBeliefs", () => {
     const normalised = normaliseDecisionBranchBeliefs(graph) as GraphV1;
     const newBeliefs = (normalised.edges as any[]).map((e) => e.belief);
     expect(newBeliefs).toEqual(originalBeliefs);
+  });
+});
+
+describe("validateGraphSizeLimits", () => {
+  it("returns valid for graph within limits", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "d1" } as any,
+      ],
+    });
+
+    const result = validateGraphSizeLimits(graph);
+    expect(result.valid).toBe(true);
+    expect(result.nodeCount).toBe(2);
+    expect(result.edgeCount).toBe(1);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("returns valid for undefined graph", () => {
+    const result = validateGraphSizeLimits(undefined);
+    expect(result.valid).toBe(true);
+    expect(result.nodeCount).toBe(0);
+    expect(result.edgeCount).toBe(0);
+  });
+
+  it("returns invalid when nodes exceed limit", () => {
+    // Create graph with 51 nodes (exceeds default limit of 50)
+    const nodes = Array.from({ length: 51 }, (_, i) => ({
+      id: `n${i}`,
+      kind: "option",
+    }));
+    const graph = makeGraph({ nodes: nodes as any });
+
+    const result = validateGraphSizeLimits(graph);
+    expect(result.valid).toBe(false);
+    expect(result.nodeCount).toBe(51);
+    expect(result.error).toContain("node limit");
+  });
+
+  it("returns invalid when edges exceed limit", () => {
+    // Create graph with 201 edges (exceeds default limit of 200)
+    const nodes = [{ id: "a", kind: "decision" }, { id: "b", kind: "option" }];
+    const edges = Array.from({ length: 201 }, (_, i) => ({
+      id: `e${i}`,
+      from: "a",
+      to: "b",
+    }));
+    const graph = makeGraph({ nodes: nodes as any, edges: edges as any });
+
+    const result = validateGraphSizeLimits(graph);
+    expect(result.valid).toBe(false);
+    expect(result.edgeCount).toBe(201);
+    expect(result.error).toContain("edge limit");
+  });
+});
+
+describe("enforceSingleGoal", () => {
+  it("returns unchanged graph when there is exactly one goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Primary Goal" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+      edges: [{ from: "g1", to: "d1" } as any],
+    });
+
+    const result = enforceSingleGoal(graph);
+    expect(result).toBeDefined();
+    expect(result!.hadMultipleGoals).toBe(false);
+    expect(result!.originalGoalCount).toBe(1);
+    expect(result!.graph).toBe(graph); // Same reference
+  });
+
+  it("merges multiple goals into compound goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Increase Revenue" } as any,
+        { id: "g2", kind: "goal", label: "Reduce Churn" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "d1" } as any,
+        { from: "g2", to: "d1" } as any,
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    expect(result).toBeDefined();
+    expect(result!.hadMultipleGoals).toBe(true);
+    expect(result!.originalGoalCount).toBe(2);
+    expect(result!.mergedGoalIds).toEqual(["g1", "g2"]);
+
+    // Verify merged graph
+    const nodes = result!.graph.nodes as any[];
+    const goalNodes = nodes.filter((n) => n.kind === "goal");
+    expect(goalNodes).toHaveLength(1);
+    expect(goalNodes[0].label).toContain("Compound Goal");
+    expect(goalNodes[0].label).toContain("Increase Revenue");
+    expect(goalNodes[0].label).toContain("Reduce Churn");
+  });
+
+  it("redirects edges from removed goals to primary goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "d1" } as any,
+        { from: "g2", to: "d1" } as any,
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    const edges = result!.graph.edges as any[];
+
+    // All edges should now reference g1 (primary goal)
+    const toD1 = edges.filter((e) => e.to === "d1");
+    expect(toD1.every((e) => e.from === "g1")).toBe(true);
+  });
+
+  it("deduplicates edges after goal merge", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "d1" } as any,
+        { from: "g2", to: "d1" } as any, // Will become duplicate after merge
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    const edges = result!.graph.edges as any[];
+
+    // Should deduplicate to single edge
+    const g1ToD1 = edges.filter((e) => e.from === "g1" && e.to === "d1");
+    expect(g1ToD1).toHaveLength(1);
+  });
+
+  it("returns undefined for undefined graph", () => {
+    const result = enforceSingleGoal(undefined);
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("fixMissingOutcomeEdgeBeliefs", () => {
+  it("adds default belief to option→outcome edges missing belief", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "out1" } as any, // No belief
+      ],
+    });
+
+    const result = fixMissingOutcomeEdgeBeliefs(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(1);
+    expect(result!.fixedEdgeIds).toContain("e1");
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.belief).toBe(0.5);
+  });
+
+  it("does not modify edges that already have beliefs", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "out1", belief: 0.8 } as any,
+      ],
+    });
+
+    const result = fixMissingOutcomeEdgeBeliefs(graph);
+    expect(result).toBeDefined();
+    expect(result!.fixedEdgeCount).toBe(0);
+    expect(result!.graph).toBe(graph); // Same reference (unchanged)
+
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.belief).toBe(0.8);
+  });
+
+  it("only fixes option→outcome edges, not other edge types", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec1", kind: "decision" } as any,
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "dec1", to: "opt1" } as any, // decision→option (should not fix)
+        { id: "e2", from: "opt1", to: "out1" } as any, // option→outcome (should fix)
+      ],
+    });
+
+    const result = fixMissingOutcomeEdgeBeliefs(graph);
+    expect(result!.fixedEdgeCount).toBe(1);
+    expect(result!.fixedEdgeIds).toEqual(["e2"]);
+
+    const edges = result!.graph.edges as any[];
+    const decToOpt = edges.find((e) => e.id === "e1");
+    const optToOut = edges.find((e) => e.id === "e2");
+
+    expect(decToOpt.belief).toBeUndefined(); // Not fixed
+    expect(optToOut.belief).toBe(0.5); // Fixed
+  });
+
+  it("uses custom default belief when provided", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "out1" } as any,
+      ],
+    });
+
+    const result = fixMissingOutcomeEdgeBeliefs(graph, 0.7);
+    const edge = (result!.graph.edges as any[])[0];
+    expect(edge.belief).toBe(0.7);
+  });
+});
+
+describe("validateAndFixGraph", () => {
+  it("returns invalid for undefined graph", () => {
+    const result = validateAndFixGraph(undefined);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("Invalid graph structure");
+    expect(result.graph).toBeUndefined();
+  });
+
+  it("returns invalid when graph exceeds size limits", () => {
+    const nodes = Array.from({ length: 51 }, (_, i) => ({
+      id: `n${i}`,
+      kind: "option",
+    }));
+    const graph = makeGraph({ nodes: nodes as any });
+
+    const result = validateAndFixGraph(graph);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("node limit");
+    expect(result.graph).toBeUndefined();
+  });
+
+  it("applies all fixes in correct order", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any, // Will be merged
+        { id: "dec1", kind: "decision" } as any,
+        { id: "opt1", kind: "option" } as any,
+        { id: "opt2", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "g1", to: "dec1" } as any,
+        { id: "e2", from: "g2", to: "dec1" } as any,
+        { id: "e3", from: "dec1", to: "opt1", belief: 0.6 } as any,
+        { id: "e4", from: "dec1", to: "opt2", belief: 0.6 } as any, // Sum > 1, will normalize
+        { id: "e5", from: "opt1", to: "out1" } as any, // Missing belief, will add 0.5
+      ],
+    });
+
+    const result = validateAndFixGraph(graph);
+
+    expect(result.valid).toBe(true);
+    expect(result.fixes.singleGoalApplied).toBe(true);
+    expect(result.fixes.outcomeBeliefsFilled).toBe(1);
+    expect(result.fixes.decisionBranchesNormalized).toBe(true);
+
+    // Verify single goal
+    const goalNodes = (result.graph!.nodes as any[]).filter((n) => n.kind === "goal");
+    expect(goalNodes).toHaveLength(1);
+    expect(goalNodes[0].label).toContain("Compound Goal");
+
+    // Verify decision branch normalization
+    const decisionEdges = (result.graph!.edges as any[]).filter(
+      (e) => e.from === "dec1" && (e.to === "opt1" || e.to === "opt2")
+    );
+    const sum = decisionEdges.reduce((acc, e) => acc + (e.belief || 0), 0);
+    expect(sum).toBeCloseTo(1, 2);
+
+    // Verify outcome belief filled
+    const optToOut = (result.graph!.edges as any[]).find(
+      (e) => e.from === "opt1" && e.to === "out1"
+    );
+    expect(optToOut.belief).toBe(0.5);
+  });
+
+  it("returns structural warnings after fixes", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "dec1", kind: "decision" } as any,
+        { id: "opt1", kind: "option" } as any,
+        { id: "orphan", kind: "risk" } as any, // Orphan node
+      ],
+      edges: [
+        { from: "g1", to: "dec1" } as any,
+        { from: "dec1", to: "opt1" } as any,
+      ],
+    });
+
+    const result = validateAndFixGraph(graph);
+    expect(result.valid).toBe(true);
+
+    // Should include warning about orphan node
+    const orphanWarning = result.warnings.find((w) => w.id === "orphan_node");
+    expect(orphanWarning).toBeDefined();
+    expect(orphanWarning!.node_ids).toContain("orphan");
+  });
+
+  it("passes StructuralMeta to detectStructuralWarnings for cycle_detected", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "dec1" } as any,
+      ],
+    });
+
+    const meta: StructuralMeta = {
+      had_cycles: true,
+      cycle_node_ids: ["dec1"],
+    };
+
+    const result = validateAndFixGraph(graph, meta);
+    expect(result.valid).toBe(true);
+
+    // Should include cycle_detected warning from meta
+    const cycleWarning = result.warnings.find((w) => w.id === "cycle_detected");
+    expect(cycleWarning).toBeDefined();
+    expect(cycleWarning!.node_ids).toContain("dec1");
+  });
+
+  it("respects options to disable single goal enforcement", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "dec1" } as any,
+        { from: "g2", to: "dec1" } as any,
+      ],
+    });
+
+    const options: GraphFixOptions = {
+      enforceSingleGoal: false,
+    };
+
+    const result = validateAndFixGraph(graph, undefined, options);
+    expect(result.valid).toBe(true);
+    expect(result.fixes.singleGoalApplied).toBe(false);
+
+    // Should still have 2 goal nodes
+    const goalNodes = (result.graph!.nodes as any[]).filter((n) => n.kind === "goal");
+    expect(goalNodes).toHaveLength(2);
+  });
+
+  it("respects options to disable outcome belief fill", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "out1" } as any, // No belief
+      ],
+    });
+
+    const options: GraphFixOptions = {
+      fillOutcomeBeliefs: false,
+    };
+
+    const result = validateAndFixGraph(graph, undefined, options);
+    expect(result.valid).toBe(true);
+    expect(result.fixes.outcomeBeliefsFilled).toBe(0);
+
+    // Edge should not have belief added
+    const edge = (result.graph!.edges as any[])[0];
+    expect(edge.belief).toBeUndefined();
+  });
+
+  it("uses custom default belief when provided", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "out1", kind: "outcome" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "out1" } as any,
+      ],
+    });
+
+    const options: GraphFixOptions = {
+      defaultOutcomeBelief: 0.75,
+    };
+
+    const result = validateAndFixGraph(graph, undefined, options);
+    const edge = (result.graph!.edges as any[])[0];
+    expect(edge.belief).toBe(0.75);
+  });
+
+  it("skips size limit check when disabled", () => {
+    const nodes = Array.from({ length: 51 }, (_, i) => ({
+      id: `n${i}`,
+      kind: "option",
+    }));
+    const graph = makeGraph({ nodes: nodes as any });
+
+    const options: GraphFixOptions = {
+      checkSizeLimits: false,
+    };
+
+    const result = validateAndFixGraph(graph, undefined, options);
+    expect(result.valid).toBe(true); // Would fail with default options
+    expect(result.graph).toBeDefined();
+  });
+});
+
+describe("enforceSingleGoal edge deduplication", () => {
+  it("prefers edges with provenance over edges without", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "g1", to: "dec1" } as any, // No provenance
+        { id: "e2", from: "g2", to: "dec1", provenance: { source: "doc.pdf", quote: "Important finding" } } as any,
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    expect(result!.hadMultipleGoals).toBe(true);
+
+    // After merge, the edge with provenance should be kept
+    const edges = result!.graph.edges as any[];
+    const keptEdge = edges.find((e) => e.to === "dec1");
+    expect(keptEdge.provenance?.source).toBe("doc.pdf");
+    expect(keptEdge.provenance?.quote).toBe("Important finding");
+  });
+
+  it("updates meta.roots after goal merge", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { from: "g1", to: "dec1" } as any,
+        { from: "g2", to: "dec1" } as any,
+      ],
+      meta: { roots: ["g1", "g2"], leaves: ["dec1"], suggested_positions: {}, source: "assistant" },
+    });
+
+    const result = enforceSingleGoal(graph);
+    const meta = (result!.graph as any).meta;
+    expect(meta.roots).toEqual(["g1"]); // Only primary goal
   });
 });
