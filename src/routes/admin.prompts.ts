@@ -1053,7 +1053,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * - approvedBy: Who is approving
    * - notes: Optional notes/reason for approval
    */
-  app.post('/admin/prompts/:id/approve', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/prompts/:id/approve', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `approve:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -1173,7 +1184,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * Updates the test cases array for a specific prompt version.
    * Test cases are used for golden testing during prompt validation.
    */
-  app.patch('/admin/prompts/:id/test-cases', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/admin/prompts/:id/test-cases', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `testcases:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -1248,7 +1270,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/prompts/:id/diff - Compare versions
    * Permission: read
    */
-  app.get('/admin/prompts/:id/diff', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/:id/diff', {
+    config: {
+      rateLimit: {
+        max: 60,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const adminKey = request.headers['x-admin-key'] as string ?? '';
+          return `diff:${adminKey.slice(0, 8)}:${request.ip}`;
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
