@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Global setup file to reset config cache before each test
+    setupFiles: ["./vitest.setup.ts"],
     // Exclude live LLM tests from default run
     // Run these with: pnpm test:live
     exclude: [

@@ -76,8 +76,11 @@ export function getMaxTokensFromConfig(task?: string): number | undefined {
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
 const DEFAULT_MODEL = 'auto'; // Let each adapter choose its default
 
-// Optional config file path
-const CONFIG_PATH = process.env.PROVIDERS_CONFIG_PATH || join(process.cwd(), 'config', 'providers.json');
+// Optional config file path (from centralized config or default)
+// Deferred to function to avoid triggering config validation at module load time
+function getConfigPath(): string {
+  return config.llm.providersConfigPath || join(process.cwd(), 'config', 'providers.json');
+}
 
 /**
  * Provider configuration schema
@@ -97,15 +100,16 @@ interface ProviderConfig {
  * Load provider configuration from file if it exists
  */
 function loadConfig(): ProviderConfig | null {
+  const configPath = getConfigPath();
   try {
-    if (existsSync(CONFIG_PATH)) {
-      const content = readFileSync(CONFIG_PATH, 'utf-8');
-      const config = JSON.parse(content) as ProviderConfig;
-      log.info({ config_path: CONFIG_PATH }, "Loaded provider configuration");
-      return config;
+    if (existsSync(configPath)) {
+      const content = readFileSync(configPath, 'utf-8');
+      const providersCfg = JSON.parse(content) as ProviderConfig;
+      log.info({ config_path: configPath }, "Loaded provider configuration");
+      return providersCfg;
     }
   } catch (error) {
-    log.warn({ error, config_path: CONFIG_PATH }, "Failed to load provider config, using env/defaults");
+    log.warn({ error, config_path: configPath }, "Failed to load provider config, using env/defaults");
   }
   return null;
 }
@@ -311,21 +315,18 @@ function getAdapterInstance(provider: 'anthropic' | 'openai' | 'fixtures', model
  * Returns FailoverAdapter that tries providers in sequence, or null if not configured
  */
 function createFailoverAdapter(task?: string): LLMAdapter | null {
-  const failoverProviders = process.env.LLM_FAILOVER_PROVIDERS;
+  const failoverProviders = config.llm.failoverProviders;
 
-  if (!failoverProviders) {
+  if (!failoverProviders || failoverProviders.length === 0) {
     return null;
   }
 
-  // Parse comma-separated list
-  const providerNames = failoverProviders
-    .split(',')
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
+  // failoverProviders is already parsed as array by config
+  const providerNames = failoverProviders;
 
   if (providerNames.length < 2) {
     log.warn(
-      { LLM_FAILOVER_PROVIDERS: failoverProviders },
+      { LLM_FAILOVER_PROVIDERS: providerNames.join(',') },
       "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring"
     );
     return null;
@@ -391,18 +392,18 @@ export function getAdapter(task?: string): LLMAdapter {
     }
     return wrappedAdapters.get(cacheKey)!;
   }
-  const config = getConfig();
+  const providersConfig = getConfig();
 
-  // Read environment variables dynamically (not cached at module load time)
-  const envProvider = (process.env.LLM_PROVIDER || DEFAULT_PROVIDER) as 'anthropic' | 'openai' | 'fixtures';
-  const envModel = process.env.LLM_MODEL || DEFAULT_MODEL;
+  // Read from centralized config (handles environment variables)
+  const envProvider = config.llm.provider || DEFAULT_PROVIDER;
+  const envModel = config.llm.model || DEFAULT_MODEL;
 
   let selectedProvider: 'anthropic' | 'openai' | 'fixtures' = envProvider;
   let selectedModel: string | undefined = envModel === 'auto' ? undefined : envModel;
 
   // Check for task-specific override in config file (providers.json)
-  if (config && task && config.overrides?.[task]) {
-    const override = config.overrides[task];
+  if (providersConfig && task && providersConfig.overrides?.[task]) {
+    const override = providersConfig.overrides[task];
     selectedProvider = override.provider;
     if (override.model) {
       selectedModel = override.model;
@@ -413,10 +414,10 @@ export function getAdapter(task?: string): LLMAdapter {
     );
   }
   // Check for config file defaults
-  else if (config?.defaults) {
-    selectedProvider = config.defaults.provider;
-    if (config.defaults.model) {
-      selectedModel = config.defaults.model;
+  else if (providersConfig?.defaults) {
+    selectedProvider = providersConfig.defaults.provider;
+    if (providersConfig.defaults.model) {
+      selectedModel = providersConfig.defaults.model;
     }
     log.info(
       { provider: selectedProvider, model: selectedModel, source: 'config_default' },

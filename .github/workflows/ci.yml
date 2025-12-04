@@ -27,6 +27,11 @@ jobs:
         run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
+      - name: Validate config defaults
+        run: pnpm config:validate
+        env:
+          # Minimal env for validation (uses defaults)
+          LLM_PROVIDER: fixtures
       - name: Run unit tests with coverage
         run: pnpm test --coverage --coverage.threshold.lines=90 --coverage.threshold.functions=90 --coverage.threshold.branches=85 --coverage.threshold.statements=90
 

@@ -26,6 +26,7 @@ import { hmacSha256 } from "./hash.js";
 import { getRedis } from "../platform/redis.js";
 import { log } from "./telemetry.js";
 import { LruTtlCache } from "./cache.js";
+import { config } from "../config/index.js";
 
 // In-memory nonce cache (fallback) - LRU with TTL to prevent unbounded growth
 // Lazy initialization to use runtime HMAC_MAX_SKEW_MS config
@@ -41,13 +42,13 @@ function getNonceCache(): LruTtlCache<string, boolean> {
 }
 
 /**
- * Get HMAC configuration from environment (read at runtime for testability)
+ * Get HMAC configuration from centralized config (read at runtime for testability)
  */
 function getHmacConfig() {
   return {
-    secret: process.env.HMAC_SECRET,
-    maxSkewMs: Number(process.env.HMAC_MAX_SKEW_MS) || 300000, // 5 minutes
-    redisNonceEnabled: process.env.REDIS_HMAC_NONCE_ENABLED === "true",
+    secret: config.auth.hmacSecret,
+    maxSkewMs: config.auth.hmacMaxSkewMs,
+    redisNonceEnabled: config.redis.hmacNonceEnabled,
   };
 }
 

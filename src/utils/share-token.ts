@@ -6,6 +6,7 @@
 
 import { randomBytes } from "node:crypto";
 import { hmacSha256, verifyHmacSha256 } from "./hash.js";
+import { config } from "../config/index.js";
 
 export interface ShareTokenPayload {
   share_id: string;
@@ -14,11 +15,11 @@ export interface ShareTokenPayload {
 }
 
 /**
- * Get share signing secret from environment
- * Falls back to ASSIST_API_KEYS if SHARE_SECRET not set
+ * Get share signing secret from centralized config
+ * Falls back to first ASSIST_API_KEYS entry if SHARE_SECRET not set
  */
 function getShareSecret(): string {
-  const secret = process.env.SHARE_SECRET || process.env.ASSIST_API_KEYS?.split(",")[0];
+  const secret = config.auth.shareSecret || config.auth.assistApiKeys?.[0];
   if (!secret) {
     throw new Error("SHARE_SECRET or ASSIST_API_KEYS must be set");
   }

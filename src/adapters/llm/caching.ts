@@ -22,6 +22,7 @@ import { LruTtlCache } from "../../utils/cache.js";
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { fastHash } from "../../utils/hash.js";
 import { getRedis } from "../../platform/redis.js";
+import { config } from "../../config/index.js";
 import type {
   LLMAdapter,
   DraftGraphArgs,
@@ -40,9 +41,9 @@ import type {
   DraftStreamEvent,
 } from "./types.js";
 
-// Cache configuration helpers (read dynamically for testability)
+// Cache configuration helpers (using centralized config)
 function getCacheEnabled(): boolean {
-  return process.env.PROMPT_CACHE_ENABLED === "true";
+  return config.promptCache.enabled;
 }
 
 /**
@@ -62,15 +63,15 @@ function sortedReplacer(_key: string, value: unknown): unknown {
 }
 
 function getRedisCacheEnabled(): boolean {
-  return process.env.REDIS_PROMPT_CACHE_ENABLED === "true";
+  return config.redis.promptCacheEnabled;
 }
 
 function getCacheMaxSize(): number {
-  return Number(process.env.PROMPT_CACHE_MAX_SIZE) || 100;
+  return config.promptCache.maxSize;
 }
 
 function getCacheTtlMs(): number {
-  return Number(process.env.PROMPT_CACHE_TTL_MS) || 3600000; // 1 hour default
+  return config.promptCache.ttlMs;
 }
 
 /**

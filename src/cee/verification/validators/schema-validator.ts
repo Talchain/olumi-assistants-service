@@ -13,7 +13,7 @@ export class SchemaValidator implements VerificationStage<unknown, unknown> {
 
   async validate<T>(
     payload: unknown,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     schemaOrContext?: z.ZodSchema<T> | any,
   ): Promise<VerificationResult<T>> {
     const schema = schemaOrContext as z.ZodSchema<T> | undefined;

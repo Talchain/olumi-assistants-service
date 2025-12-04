@@ -8,20 +8,18 @@ class FakeAbortError extends Error {
   }
 }
 
-const createClientMock = vi.fn().mockImplementation(() => {
-  return {
-    chat: {
+// Mock OpenAI class properly for vitest
+vi.mock("openai", () => {
+  class MockOpenAI {
+    chat = {
       completions: {
         // Always reject with an AbortError to simulate a client-side timeout
         create: vi.fn().mockRejectedValue(new FakeAbortError()),
       },
-    },
-  };
-});
-
-vi.mock("openai", () => {
+    };
+  }
   return {
-    default: createClientMock,
+    default: MockOpenAI,
   };
 });
 

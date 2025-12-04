@@ -6,6 +6,7 @@ export const CEE_SENSITIVITY_SUGGESTIONS_MAX = 10;
 export const CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM = 5;
 
 export function resolveCeeRateLimit(envVarName: string): number {
+  // eslint-disable-next-line no-restricted-syntax -- Dynamic env var lookup by name
   const raw = process.env[envVarName];
   if (raw === undefined) {
     return CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM;

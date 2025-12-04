@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -104,7 +105,10 @@ const AnthropicExplainDiffResponse = z.object({
   ).min(1),
 });
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
+// Use centralized config for API key (lazy access via getter)
+function getApiKey(): string | undefined {
+  return config.llm.anthropicApiKey;
+}
 
 // V04: Undici dispatcher with production-grade timeouts
 // - connectTimeout: 3s (fail fast on connection issues)
@@ -125,6 +129,7 @@ setGlobalDispatcher(undiciAgent);
 let client: Anthropic | null = null;
 
 function getClient(): Anthropic {
+  const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY environment variable is required but not set");
   }
@@ -136,7 +141,7 @@ function getClient(): Anthropic {
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 function isAnthropicPromptCacheEnabled(): boolean {
-  return process.env.ANTHROPIC_PROMPT_CACHE_ENABLED !== "false";
+  return config.promptCache.anthropicEnabled;
 }
 
 function buildSystemBlocks(text: string, opts?: { operation?: string }): AnthropicSystemBlock[] {
@@ -1572,7 +1577,7 @@ export class AnthropicAdapter implements LLMAdapter {
 
   constructor(model?: string) {
     // Default to Claude 3 Haiku for cost-effectiveness
-    this.model = model || process.env.LLM_MODEL || 'claude-3-haiku-20240307';
+    this.model = model || config.llm.model || 'claude-3-haiku-20240307';
   }
 
   async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {

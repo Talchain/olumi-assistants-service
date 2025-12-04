@@ -498,11 +498,11 @@ export function validateModelRequest(
   }
 
   // Check provider available
-  if (modelConfig.provider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
+  if (modelConfig.provider === "anthropic" && !config.llm.anthropicApiKey) {
     return { valid: false, reason: "provider_not_configured" };
   }
 
-  if (modelConfig.provider === "openai" && !process.env.OPENAI_API_KEY) {
+  if (modelConfig.provider === "openai" && !config.llm.openaiApiKey) {
     return { valid: false, reason: "provider_not_configured" };
   }
 

@@ -1,7 +1,15 @@
 import { calculateCost } from "./telemetry.js";
+import { config } from "../config/index.js";
 
 export function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4);
+}
+
+/**
+ * Get cost cap from centralized config (deferred for testability)
+ */
+function getCostCap(): number {
+  return config.graph.costMaxUsd;
 }
 
 /**
@@ -15,6 +23,6 @@ export function estimateTokens(chars: number): number {
  */
 export function allowedCostUSD(tokensIn: number, tokensOut: number, model: string): boolean {
   const cost = calculateCost(model, tokensIn, tokensOut);
-  const cap = Number(process.env.COST_MAX_USD || "1.0");
+  const cap = getCostCap();
   return Number.isFinite(cost) && cost <= cap;
 }

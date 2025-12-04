@@ -1,7 +1,13 @@
 import { request } from "undici";
 import type { GraphT } from "../schemas/graph.js";
+import { config } from "../config/index.js";
 
-const base = process.env.ENGINE_BASE_URL || "http://localhost:3001";
+/**
+ * Get engine base URL from centralized config (deferred for testability)
+ */
+function getEngineBaseUrl(): string {
+  return config.validation.engineBaseUrl || "http://localhost:3001";
+}
 
 type ValidateResponse = {
   ok: boolean;
@@ -13,7 +19,7 @@ export async function validateGraph(
   g: GraphT
 ): Promise<{ ok: boolean; normalized?: GraphT; violations?: string[] }> {
   try {
-    const res = await request(`${base}/v1/validate`, {
+    const res = await request(`${getEngineBaseUrl()}/v1/validate`, {
       method: "POST",
       body: JSON.stringify({ graph: g }),
       headers: { "content-type": "application/json" }
@@ -23,7 +29,7 @@ export async function validateGraph(
       return { ok: true, normalized: json.normalized };
     }
     return { ok: false, violations: json.violations || ["unknown"] };
-  } catch (error) {
+  } catch {
     return { ok: false, violations: ["validate_unreachable"] };
   }
 }

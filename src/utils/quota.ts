@@ -24,6 +24,7 @@
 import { getRedis } from "../platform/redis.js";
 import { log } from "./telemetry.js";
 import { fastHash } from "./hash.js";
+import { config } from "../config/index.js";
 
 /**
  * Lua script for atomic token bucket consumption
@@ -75,12 +76,16 @@ else
 end
 `;
 
-// Rate limits (configurable via environment)
-const RATE_LIMIT_RPM = Number(process.env.RATE_LIMIT_RPM) || 120;
-const SSE_RATE_LIMIT_RPM = Number(process.env.SSE_RATE_LIMIT_RPM) || 20;
-
-// Redis backend toggle
-const REDIS_QUOTA_ENABLED = process.env.REDIS_QUOTA_ENABLED === "true";
+/**
+ * Get rate limits from centralized config (deferred for testability)
+ */
+function getRateLimits() {
+  return {
+    defaultRpm: config.rateLimits.defaultRpm,
+    sseRpm: config.rateLimits.sseRpm,
+    redisEnabled: config.redis.quotaEnabled,
+  };
+}
 
 /**
  * Token bucket state
@@ -116,12 +121,13 @@ function getBucketKey(keyId: string, isSse: boolean): string {
 /**
  * Create a new token bucket
  */
-function createTokenBucket(rpm: number): TokenBucket {
+function createTokenBucket(rpm?: number): TokenBucket {
+  const actualRpm = rpm ?? getRateLimits().defaultRpm;
   return {
-    tokens: rpm,
+    tokens: actualRpm,
     lastRefill: Date.now(),
-    capacity: rpm,
-    refillRate: rpm / 60, // tokens per second
+    capacity: actualRpm,
+    refillRate: actualRpm / 60, // tokens per second
   };
 }
 
@@ -142,9 +148,10 @@ function refillBucket(bucket: TokenBucket): void {
  */
 export async function getKeyQuota(apiKey: string): Promise<KeyQuota> {
   const keyId = fastHash(apiKey, 8);
+  const limits = getRateLimits();
 
   // Try Redis first if enabled
-  if (REDIS_QUOTA_ENABLED) {
+  if (limits.redisEnabled) {
     const redis = await getRedis();
 
     if (redis) {
@@ -165,14 +172,14 @@ export async function getKeyQuota(apiKey: string): Promise<KeyQuota> {
           bucket = JSON.parse(standardData);
         } else {
           // First time seeing this key - initialize
-          bucket = createTokenBucket(RATE_LIMIT_RPM);
+          bucket = createTokenBucket(limits.defaultRpm);
           await redis.set(standardKey, JSON.stringify(bucket), "EX", 3600); // 1 hour TTL
         }
 
         if (sseData) {
           sseBucket = JSON.parse(sseData);
         } else {
-          sseBucket = createTokenBucket(SSE_RATE_LIMIT_RPM);
+          sseBucket = createTokenBucket(limits.sseRpm);
           await redis.set(sseKey, JSON.stringify(sseBucket), "EX", 3600);
         }
 
@@ -198,10 +205,11 @@ export async function getKeyQuota(apiKey: string): Promise<KeyQuota> {
  */
 function getKeyQuotaFromMemory(apiKey: string, keyId: string): KeyQuota {
   if (!memoryQuotas.has(apiKey)) {
+    const limits = getRateLimits();
     memoryQuotas.set(apiKey, {
       keyId,
-      bucket: createTokenBucket(RATE_LIMIT_RPM),
-      sseBucket: createTokenBucket(SSE_RATE_LIMIT_RPM),
+      bucket: createTokenBucket(limits.defaultRpm),
+      sseBucket: createTokenBucket(limits.sseRpm),
       requestCount: 0,
       lastUsed: Date.now(),
     });
@@ -229,10 +237,11 @@ export async function getQuotaSnapshotByKeyId(
   refillRate?: number;
   retryAfterSeconds?: number;
 }> {
-  const rpm = isSse ? SSE_RATE_LIMIT_RPM : RATE_LIMIT_RPM;
+  const limits = getRateLimits();
+  const rpm = isSse ? limits.sseRpm : limits.defaultRpm;
 
   // If Redis backend is enabled, try to read bucket state directly
-  if (REDIS_QUOTA_ENABLED) {
+  if (limits.redisEnabled) {
     const redis = await getRedis();
 
     if (redis) {
@@ -332,13 +341,14 @@ export async function tryConsumeToken(
   const keyId = fastHash(apiKey, 8);
 
   // Try Redis first if enabled
-  if (REDIS_QUOTA_ENABLED) {
+  const limits = getRateLimits();
+  if (limits.redisEnabled) {
     const redis = await getRedis();
 
     if (redis) {
       try {
         const bucketKey = getBucketKey(keyId, isSse);
-        const rpm = isSse ? SSE_RATE_LIMIT_RPM : RATE_LIMIT_RPM;
+        const rpm = isSse ? limits.sseRpm : limits.defaultRpm;
         const refillRate = rpm / 60; // tokens per second
         const now = Date.now();
 
@@ -413,7 +423,7 @@ export function getQuotaStats(): {
 } {
   return {
     total_keys: memoryQuotas.size,
-    backend: REDIS_QUOTA_ENABLED ? "redis" : "memory",
+    backend: getRateLimits().redisEnabled ? "redis" : "memory",
   };
 }
 

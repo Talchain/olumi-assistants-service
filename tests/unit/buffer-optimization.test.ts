@@ -121,12 +121,9 @@ describe("Buffer Optimization", () => {
       const compressed = compressEvent(large);
       const originalSize = Buffer.byteLength(large, "utf-8");
 
-      // Compression should reduce size
-      if (process.env.SSE_BUFFER_COMPRESS === "true") {
-        expect(compressed.length).toBeLessThan(originalSize);
-      } else {
-        expect(compressed.length).toBe(originalSize);
-      }
+      // Compression is enabled by default in config (bufferCompress: true)
+      // So compressed size should be less than original for large payloads
+      expect(compressed.length).toBeLessThan(originalSize);
     });
 
     it("should handle decompression of uncompressed data", () => {

@@ -32,7 +32,7 @@ import { config } from "../config/index.js";
  * Check if share feature is enabled
  */
 function isShareEnabled(): boolean {
-  return process.env.SHARE_REVIEW_ENABLED === "1" || process.env.SHARE_REVIEW_ENABLED === "true";
+  return config.features.shareReview;
 }
 
 /**

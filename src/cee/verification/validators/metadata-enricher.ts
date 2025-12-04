@@ -8,7 +8,7 @@ import type { VerificationResult } from "../types.js";
  * prompts, briefs, or free-text content.
  */
 export class MetadataEnricher {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   enrich<T extends { trace?: any }>(response: T, results: VerificationResult[]): T {
     const trace = response.trace ?? {};
 

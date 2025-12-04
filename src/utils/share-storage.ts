@@ -9,6 +9,7 @@
 import type { GraphT } from "../schemas/graph.js";
 import { getRedis, isRedisAvailable } from "../platform/redis.js";
 import { log } from "./telemetry.js";
+import { config } from "../config/index.js";
 
 export interface ShareData {
   share_id: string;
@@ -23,8 +24,12 @@ export interface ShareData {
 // In-memory fallback store (keyed by share_id)
 const memoryShares = new Map<string, ShareData>();
 
-// Force in-memory mode (for testing or when SHARE_STORAGE_INMEMORY=true)
-const forceInMemory = process.env.SHARE_STORAGE_INMEMORY === "true";
+/**
+ * Check if in-memory mode is forced (deferred for testability)
+ */
+function isForceInMemory(): boolean {
+  return config.share.storageInMemory;
+}
 
 /**
  * Get Redis key for share
@@ -51,7 +56,7 @@ function getAccessKey(shareId: string): string {
  * Store share data
  */
 export async function storeShare(data: ShareData): Promise<void> {
-  const redis = !forceInMemory && (await getRedis());
+  const redis = !isForceInMemory() && (await getRedis());
 
   if (redis) {
     try {
@@ -83,7 +88,7 @@ export async function storeShare(data: ShareData): Promise<void> {
  * Returns null if not found, expired, or revoked
  */
 export async function getShare(shareId: string): Promise<ShareData | null> {
-  const redis = !forceInMemory && (await getRedis());
+  const redis = !isForceInMemory() && (await getRedis());
 
   if (redis) {
     try {
@@ -161,7 +166,7 @@ function getShareFromMemory(shareId: string): ShareData | null {
  * Revoke share (soft delete)
  */
 export async function revokeShare(shareId: string): Promise<boolean> {
-  const redis = !forceInMemory && (await getRedis());
+  const redis = !isForceInMemory() && (await getRedis());
 
   if (redis) {
     try {
@@ -220,7 +225,7 @@ function revokeShareInMemory(shareId: string): boolean {
  * Cleanup expired shares (for memory mode only - Redis uses TTL)
  */
 export function cleanupExpiredShares(): number {
-  if (isRedisAvailable() && !forceInMemory) {
+  if (isRedisAvailable() && !isForceInMemory()) {
     // Redis handles cleanup via TTL
     return 0;
   }
@@ -251,7 +256,7 @@ export async function getStorageStats(): Promise<{
   revoked: number;
   storage: "redis" | "memory";
 }> {
-  const redis = !forceInMemory && (await getRedis());
+  const redis = !isForceInMemory() && (await getRedis());
 
   if (redis) {
     try {
@@ -318,7 +323,7 @@ function getStorageStatsFromMemory(): {
  * Clear all shares (for testing)
  */
 export async function clearAllShares(): Promise<void> {
-  const redis = !forceInMemory && (await getRedis());
+  const redis = !isForceInMemory() && (await getRedis());
 
   if (redis) {
     try {

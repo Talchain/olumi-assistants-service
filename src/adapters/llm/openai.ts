@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -63,7 +64,10 @@ const OpenAIClarifyResponse = z.object({
   should_continue: z.boolean(),
 });
 
-const apiKey = process.env.OPENAI_API_KEY;
+// Use centralized config for API key (lazy access via getter)
+function getApiKey(): string | undefined {
+  return config.llm.openaiApiKey;
+}
 
 // V04: Undici dispatcher with production-grade timeouts
 // - connectTimeout: 3s (fail fast on connection issues)
@@ -84,6 +88,7 @@ setGlobalDispatcher(undiciAgent);
 let client: OpenAI | null = null;
 
 function getClient(): OpenAI {
+  const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY environment variable is required but not set");
   }
@@ -310,7 +315,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
   constructor(model?: string) {
     // Default to GPT-4o-mini for cost efficiency
-    this.model = model || process.env.LLM_MODEL || 'gpt-4o-mini';
+    this.model = model || config.llm.model || 'gpt-4o-mini';
   }
 
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {

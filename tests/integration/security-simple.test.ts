@@ -267,7 +267,7 @@ describe("Security Tests (Simplified)", () => {
         bodyLimit: 1000, // 1 KB for testing
       });
 
-      app.setErrorHandler((error, _request, reply) => {
+      app.setErrorHandler((error: { statusCode?: number; message?: string }, _request, reply) => {
         if (error.statusCode === 413) {
           return reply.status(413).send({
             schema: "error.v1",
@@ -305,7 +305,7 @@ describe("Security Tests (Simplified)", () => {
       const app = Fastify({ logger: false });
 
       // Set up error handler that returns error.v1 format
-      app.setErrorHandler((error, _request, reply) => {
+      app.setErrorHandler((error: { statusCode?: number; message?: string }, _request, reply) => {
         return reply.status(error.statusCode || 500).send({
           schema: "error.v1",
           code: "INTERNAL",
