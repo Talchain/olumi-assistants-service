@@ -365,11 +365,15 @@ async function integrateClarifier(
       });
 
       if (result.refined_graph) {
-        // Normalize refined graph BEFORE quality computation (W's suggestion)
+        // Normalize and validate refined graph BEFORE quality computation (W's suggestion)
         // This ensures convergence decisions use the same canonical representation as the final response
+        // AND maintains all graph invariants (single goal, outcome beliefs, decision branches)
         let normalizedRefinedGraph = normaliseCeeGraphVersionAndProvenance(result.refined_graph);
-        normalizedRefinedGraph = normaliseDecisionBranchBeliefs(normalizedRefinedGraph);
-        refinedGraph = normalizedRefinedGraph ?? result.refined_graph;
+        const refinedValidation = validateAndFixGraph(normalizedRefinedGraph, undefined, {
+          checkSizeLimits: false, // Pipeline has existing size guards
+          enforceSingleGoal: config.cee.enforceSingleGoal,
+        });
+        refinedGraph = refinedValidation.graph ?? result.refined_graph;
 
         // Recompute quality from normalized refined graph (Fix 1.1 + W's refinement)
         const refinedQuality = computeQuality({
@@ -742,6 +746,7 @@ export async function finaliseCeeDraftResponse(
   // Uses checkSizeLimits: false since the pipeline already has size guards downstream
   const validationResult = validateAndFixGraph(graph, structural_meta, {
     checkSizeLimits: false, // Pipeline has existing size guards
+    enforceSingleGoal: config.cee.enforceSingleGoal, // Configurable via CEE_ENFORCE_SINGLE_GOAL
   });
 
   // Emit telemetry for validation results
