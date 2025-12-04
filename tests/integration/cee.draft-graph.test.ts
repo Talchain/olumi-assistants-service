@@ -30,6 +30,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     uncertainNodeIds: ["n1"],
   }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
+  validateAndFixGraph: (graph: unknown) => ({
+    graph,
+    valid: true,
+    fixes: {
+      singleGoalApplied: false,
+      outcomeBeliefsFilled: 0,
+      decisionBranchesNormalized: false,
+    },
+    warnings: [],
+  }),
 }));
 
 import { build } from "../../src/server.js";

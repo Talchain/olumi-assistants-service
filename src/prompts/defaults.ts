@@ -26,7 +26,31 @@ Draft a small decision graph with:
   - 1 goal node (what the decision-maker is trying to achieve)
   - 1 decision node (the choice being made)
   - 1+ option nodes (alternatives being considered)
-- For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, your graph is incorrect and you must adjust the belief values so they form a proper probability distribution before responding.
+
+## GRAPH DESIGN RULES
+
+Follow these rules when constructing your graph. The system will auto-correct some violations, but following them produces better results:
+
+### Rule 1: Single Goal (auto-corrected)
+Prefer exactly ONE goal node (kind="goal"). If the decision has multiple objectives, combine them into a single compound goal with a label like "Achieve X while maintaining Y".
+- The system will merge multiple goals if present, but providing a single goal is cleaner.
+
+### Rule 2: Decision Branch Probabilities (auto-corrected)
+When connecting a decision node to 2+ option nodes, the belief values on those decision→option edges should sum to 1.0 (within ±0.01 tolerance). These are probabilities of selecting each option.
+- Example: decision→opt_A (belief=0.4), decision→opt_B (belief=0.35), decision→opt_C (belief=0.25) ✓
+- If they don't sum to 1.0, the system will normalize them.
+
+### Rule 3: Outcome Edge Beliefs (auto-corrected)
+Every option→outcome edge should have a numeric belief value between 0 and 1.
+- If missing, the system will default to 0.5, but explicit values are better.
+
+### Rule 4: No Disconnected Nodes (warning issued)
+Every node should be connected by at least one edge. Orphan nodes will trigger warnings.
+
+### Rule 5: No Cycles (warning issued)
+The graph must be a directed acyclic graph (DAG). Cycles will be detected and flagged.
+
+## Provenance Requirements
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
@@ -42,6 +66,14 @@ Draft a small decision graph with:
 
 If the brief is ambiguous or missing some details, you MUST still propose a simple but usable skeleton
 graph that satisfies the minimum structure above. Returning an empty graph is never acceptable.
+
+## Self-Check (Before Responding)
+Before outputting JSON, mentally verify:
+□ Exactly 1 goal node exists
+□ All decision→option edge beliefs sum to 1.0 (per decision)
+□ All option→outcome edges have belief values
+□ No orphan nodes (all nodes connected)
+□ No cycles in the graph
 
 ## Output Format (JSON)
 {

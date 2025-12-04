@@ -225,6 +225,27 @@ export const TelemetryEvents = {
   PromptStoreCacheHit: "prompt.store.cache.hit",
   PromptStoreCacheMiss: "prompt.store.cache.miss",
   PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+
+  // Prompt Test Sandbox events (v2.1)
+  PromptTestExecuted: "prompt.test.executed",
+  PromptTestValidationPassed: "prompt.test.validation_passed",
+  PromptTestValidationFailed: "prompt.test.validation_failed",
+
+  // Prompt Version Lifecycle events (v2.1)
+  PromptVersionPromoted: "prompt.version.promoted",
+  PromptVersionDemoted: "prompt.version.demoted",
+  PromptRollbackExecuted: "prompt.rollback.executed",
+  PromptRollbackFailed: "prompt.rollback.failed",
+
+  // Prompt Approval Gate events (v2.1)
+  PromptApprovalRequired: "prompt.approval.required",
+  PromptApprovalGranted: "prompt.approval.granted",
+  PromptApprovalRejected: "prompt.approval.rejected",
+
+  // Graph Validation events (v2.2)
+  CeeGraphValidation: "cee.graph.validation",
+  CeeGraphGoalsMerged: "cee.graph.goals_merged",
+  CeeGraphSizeExceeded: "cee.graph.size_exceeded",
 } as const;
 
 /**
