@@ -645,4 +645,49 @@ describe("enforceSingleGoal edge deduplication", () => {
     const meta = (result!.graph as any).meta;
     expect(meta.roots).toEqual(["g1"]); // Only primary goal
   });
+
+  it("normalizes beliefs on edges leaving compound goal to 1.0", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "g1", to: "dec1", belief: 0.9 } as any,
+        { id: "e2", from: "g2", to: "dec1", belief: 0.1 } as any,
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    expect(result!.hadMultipleGoals).toBe(true);
+
+    // After merge, the compound goal's outgoing edge should have belief = 1.0
+    const edges = result!.graph.edges as any[];
+    const goalToDecision = edges.find((e) => e.from === "g1" && e.to === "dec1");
+    expect(goalToDecision).toBeDefined();
+    expect(goalToDecision.belief).toBe(1.0);
+  });
+
+  it("preserves provenance while normalizing belief to 1.0", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal", label: "Goal 1" } as any,
+        { id: "g2", kind: "goal", label: "Goal 2" } as any,
+        { id: "dec1", kind: "decision" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "g1", to: "dec1", belief: 0.6 } as any,
+        { id: "e2", from: "g2", to: "dec1", belief: 0.4, provenance: { source: "doc.pdf", quote: "Key insight" } } as any,
+      ],
+    });
+
+    const result = enforceSingleGoal(graph);
+    const edges = result!.graph.edges as any[];
+    const goalToDecision = edges.find((e) => e.to === "dec1");
+
+    // Should keep provenance AND normalize belief to 1.0
+    expect(goalToDecision.provenance?.source).toBe("doc.pdf");
+    expect(goalToDecision.belief).toBe(1.0);
+  });
 });
