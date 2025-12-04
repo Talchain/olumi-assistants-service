@@ -520,20 +520,25 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       // Check for approval requirement when promoting to production
       const isPromotion = body.data.status === 'production' && beforePrompt.status !== 'production';
       if (isPromotion) {
-        const activeVersion = beforePrompt.versions.find(v => v.version === beforePrompt.activeVersion);
-        if (activeVersion?.requiresApproval && !activeVersion.approvedBy) {
+        // Determine which version will be active after the update:
+        // - If body.data.activeVersion is provided, that's being promoted
+        // - Otherwise, the current activeVersion is being promoted
+        const versionBeingPromoted = body.data.activeVersion ?? beforePrompt.activeVersion;
+        const versionData = beforePrompt.versions.find(v => v.version === versionBeingPromoted);
+
+        if (versionData?.requiresApproval && !versionData.approvedBy) {
           // Emit approval required telemetry
           emit(TelemetryEvents.PromptApprovalRequired, {
             promptId: params.data.id,
-            version: beforePrompt.activeVersion,
+            version: versionBeingPromoted,
             taskId: beforePrompt.taskId,
           });
 
           return reply.status(403).send({
             error: 'approval_required',
-            message: `Version ${beforePrompt.activeVersion} requires approval before promotion to production. Use POST /admin/prompts/${params.data.id}/approve to approve first.`,
+            message: `Version ${versionBeingPromoted} requires approval before promotion to production. Use POST /admin/prompts/${params.data.id}/approve to approve first.`,
             promptId: params.data.id,
-            version: beforePrompt.activeVersion,
+            version: versionBeingPromoted,
           });
         }
       }

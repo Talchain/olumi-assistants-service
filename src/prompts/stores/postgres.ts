@@ -51,6 +51,10 @@ interface VersionRow {
   created_at: Date | string;
   change_note: string | null;
   content_hash: string;
+  requires_approval: boolean | null;
+  approved_by: string | null;
+  approved_at: Date | string | null;
+  test_cases: string | object[] | null;
 }
 
 /**
@@ -151,7 +155,7 @@ export class PostgresPromptStore implements IPromptStore {
         `;
 
         await tx`
-          INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash)
+          INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, test_cases)
           VALUES (
             ${request.id},
             1,
@@ -160,7 +164,9 @@ export class PostgresPromptStore implements IPromptStore {
             ${request.createdBy ?? null},
             ${now},
             ${request.changeNote ?? null},
-            ${contentHash}
+            ${contentHash},
+            ${(request as any).requiresApproval ?? false},
+            ${JSON.stringify([])}
           )
         `;
       });
@@ -193,7 +199,8 @@ export class PostgresPromptStore implements IPromptStore {
 
       const prompt = prompts[0];
       const versions = await sql<VersionRow[]>`
-        SELECT version, content, variables, created_by, created_at, change_note, content_hash
+        SELECT version, content, variables, created_by, created_at, change_note, content_hash,
+               requires_approval, approved_by, approved_at, test_cases
         FROM prompt_versions
         WHERE prompt_id = ${id}
         ORDER BY version ASC
@@ -255,7 +262,8 @@ export class PostgresPromptStore implements IPromptStore {
       const results: PromptDefinition[] = [];
       for (const prompt of prompts) {
         const versions = await sql<VersionRow[]>`
-          SELECT version, content, variables, created_by, created_at, change_note, content_hash
+          SELECT version, content, variables, created_by, created_at, change_note, content_hash,
+                 requires_approval, approved_by, approved_at, test_cases
           FROM prompt_versions
           WHERE prompt_id = ${prompt.id}
           ORDER BY version ASC
@@ -353,7 +361,7 @@ export class PostgresPromptStore implements IPromptStore {
       const now = new Date().toISOString();
 
       await sql`
-        INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash)
+        INSERT INTO prompt_versions (prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, test_cases)
         VALUES (
           ${id},
           ${newVersion},
@@ -362,7 +370,9 @@ export class PostgresPromptStore implements IPromptStore {
           ${request.createdBy ?? null},
           ${now},
           ${request.changeNote ?? null},
-          ${contentHash}
+          ${contentHash},
+          ${request.requiresApproval ?? false},
+          ${JSON.stringify([])}
         )
       `;
 
