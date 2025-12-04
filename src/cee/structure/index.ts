@@ -398,7 +398,15 @@ export function enforceSingleGoal(
       edgesByKey.set(key, edge);
     }
   }
-  const dedupedEdges = Array.from(edgesByKey.values());
+
+  // Normalize beliefs on edges leaving the compound goal to 1.0
+  // After goal merge, there's only one path from compound goal, so belief should be 100%
+  const dedupedEdges = Array.from(edgesByKey.values()).map((edge) => {
+    if ((edge as any)?.from === primaryId && typeof (edge as any)?.belief === "number") {
+      return { ...edge, belief: 1.0 };
+    }
+    return edge;
+  });
 
   // Update meta.roots to reflect single goal
   const updatedMeta = {
