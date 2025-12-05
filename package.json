@@ -59,7 +59,7 @@
     "ioredis": "^5.8.2",
     "openai": "^6.7.0",
     "papaparse": "^5.4.1",
-    "pdf-parse": "^1.1.1",
+    "pdf-parse": "^2.4.5",
     "pino": "^9.3.1",
     "postgres": "^3.4.7",
     "undici": "^6.19.8",
