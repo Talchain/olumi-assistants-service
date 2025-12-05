@@ -39,7 +39,11 @@ const SSE_HEADERS = {
 } as const;
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
-const DEPRECATION_SUNSET = process.env.DEPRECATION_SUNSET || "2025-12-01"; // Configurable sunset date
+
+// Lazy config access to avoid module-level initialization issues
+function getDeprecationSunset(): string {
+  return config.server.deprecationSunset;
+}
 
 // Lazy config access to avoid module-level initialization issues in tests
 function getCostMaxUsd(): number {
@@ -57,11 +61,7 @@ function isLegacySSEEnabled(): boolean {
 const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
 function refinementEnabled(): boolean {
-  const flag = process.env.CEE_REFINEMENT_ENABLED;
-  if (flag === undefined) {
-    return false;
-  }
-  return flag === "true" || flag === "1";
+  return config.cee.refinementEnabled;
 }
 
 function buildRefinementBrief(
@@ -1013,7 +1013,7 @@ async function handleSseResponse(
     // Add deprecation headers if legacy string provenance detected
     if (result.hasLegacyProvenance) {
       reply.raw.setHeader("X-Deprecated-Provenance-Format", "true");
-      reply.raw.setHeader("X-Deprecation-Sunset", DEPRECATION_SUNSET);
+      reply.raw.setHeader("X-Deprecation-Sunset", getDeprecationSunset());
       reply.raw.setHeader("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
     }
 
@@ -1147,7 +1147,7 @@ async function handleJsonResponse(
   // Add deprecation headers if legacy string provenance detected
   if (result.hasLegacyProvenance) {
     reply.header("X-Deprecated-Provenance-Format", "true");
-    reply.header("X-Deprecation-Sunset", DEPRECATION_SUNSET);
+    reply.header("X-Deprecation-Sunset", getDeprecationSunset());
     reply.header("X-Deprecation-Link", "https://docs.olumi.ai/provenance-migration");
   }
 
@@ -1163,7 +1163,7 @@ export default async function route(app: FastifyInstance) {
   const SSE_RATE_LIMIT_RPM = config.rateLimits.sseRpm;
   // v1.9: Live resume feature flag and rate limit
   const SSE_RESUME_LIVE_ENABLED = config.sse.resumeLiveEnabled;
-  const SSE_RESUME_LIVE_RPM = Number(process.env.SSE_RESUME_LIVE_RPM) || SSE_RATE_LIMIT_RPM;
+  const SSE_RESUME_LIVE_RPM = config.sse.resumeLiveRpm ?? SSE_RATE_LIMIT_RPM;
 
   // Dedicated SSE streaming endpoint with stricter rate limiting
   app.post("/assist/draft-graph/stream", {

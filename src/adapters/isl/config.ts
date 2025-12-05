@@ -169,9 +169,9 @@ export interface ISLConfig {
  * Default values: 5000ms timeout, 1 retry (production canary settings)
  */
 export function getISLConfig(): ISLConfig {
-  const baseUrl = process.env.ISL_BASE_URL;
-  const timeoutResult = parseTimeoutWithSource(process.env.ISL_TIMEOUT_MS, 5000);
-  const retriesResult = parseMaxRetriesWithSource(process.env.ISL_MAX_RETRIES, 1);
+  const baseUrl = config.isl.baseUrl;
+  const timeoutResult = parseTimeoutWithSource(config.isl.timeoutMs, 5000);
+  const retriesResult = parseMaxRetriesWithSource(config.isl.maxRetries, 1);
 
   return {
     enabled: causalValidationEnabled(),

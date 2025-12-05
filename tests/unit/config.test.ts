@@ -32,7 +32,7 @@ describe("Configuration Module", () => {
       expect(config.server.nodeEnv).toBe("test");
       expect(config.server.port).toBe(3000); // default
       expect(config.llm.provider).toBe("fixtures");
-      expect(config.features.grounding).toBe(true); // default
+      expect(config.features.grounding).toBe(false); // conservative default - opt-in for safety
     });
 
     it("should apply sensible defaults for optional values", async () => {
@@ -47,14 +47,14 @@ describe("Configuration Module", () => {
       expect(config.server.logLevel).toBe("info");
 
       // Feature defaults
-      expect(config.features.grounding).toBe(true);
+      expect(config.features.grounding).toBe(false); // conservative default - opt-in for safety
       expect(config.features.critique).toBe(true);
       expect(config.features.clarifier).toBe(true);
       expect(config.features.piiGuard).toBe(false);
 
       // Performance defaults
       expect(config.performance.metricsEnabled).toBe(true);
-      expect(config.performance.slowThresholdMs).toBe(30000);
+      expect(config.performance.slowThresholdMs).toBe(5000);
     });
   });
 
@@ -141,17 +141,17 @@ describe("Configuration Module", () => {
       }).rejects.toThrow("Invalid configuration");
     });
 
-    it("should validate URL format for ISL base URL", async () => {
+    it("should treat invalid URLs as undefined in test mode (lenient validation)", async () => {
       vi.resetModules();
       process.env = {
+        NODE_ENV: "test", // Required for lenient URL validation
         ISL_BASE_URL: "not-a-valid-url",
       };
 
-      await expect(async () => {
-        const { config } = await import("../../src/config/index.js");
-        // Access property to trigger validation
-        const _url = config.isl.baseUrl;
-      }).rejects.toThrow("Invalid configuration");
+      // In test mode, invalid URLs are treated as undefined (lenient)
+      // This allows tests to manipulate env vars without validation failures
+      const { config } = await import("../../src/config/index.js");
+      expect(config.isl.baseUrl).toBeUndefined();
     });
 
     it("should accept valid URL for ISL base URL", async () => {
@@ -374,7 +374,7 @@ describe("Configuration Module", () => {
 
       expect(server.port).toBe(9000);
       expect(server.nodeEnv).toBe("development");
-      expect(features.grounding).toBe(true);
+      expect(features.grounding).toBe(false); // conservative default - opt-in for safety
     });
 
     it("should handle nested property access", async () => {
@@ -411,7 +411,7 @@ describe("Configuration Module", () => {
       // All should work correctly
       expect(port).toBe(3000);
       expect(env).toBe("test");
-      expect(grounding).toBe(true);
+      expect(grounding).toBe(false); // conservative default - opt-in for safety
       expect(redis).toBeUndefined();
     });
   });

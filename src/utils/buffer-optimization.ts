@@ -13,9 +13,17 @@
 
 import { gzipSync, gunzipSync } from "node:zlib";
 import { log } from "./telemetry.js";
+import { config } from "../config/index.js";
 
-const SSE_BUFFER_COMPRESS = process.env.SSE_BUFFER_COMPRESS === "true";
-const SSE_BUFFER_TRIM_PAYLOADS = process.env.SSE_BUFFER_TRIM_PAYLOADS !== "false";
+/**
+ * Get buffer optimization settings from centralized config (deferred for testability)
+ */
+function getBufferConfig() {
+  return {
+    compress: config.sse.bufferCompress,
+    trimPayloads: config.sse.bufferTrimPayloads,
+  };
+}
 
 /**
  * Event priority levels for trimming decisions
@@ -170,7 +178,7 @@ function trimParsedPayload(data: Record<string, unknown>): Record<string, unknow
  * - Critical graph structure (nodes/edges counts)
  */
 export function trimEventPayload(eventData: string): string {
-  if (!SSE_BUFFER_TRIM_PAYLOADS) {
+  if (!getBufferConfig().trimPayloads) {
     return eventData;
   }
 
@@ -193,7 +201,7 @@ export function trimEventPayloadFromParsed(
   eventData: string,
   parsedData: Record<string, unknown>
 ): string {
-  if (!SSE_BUFFER_TRIM_PAYLOADS) {
+  if (!getBufferConfig().trimPayloads) {
     return eventData;
   }
 
@@ -205,7 +213,7 @@ export function trimEventPayloadFromParsed(
  * Compress event data using gzip
  */
 export function compressEvent(eventStr: string): Buffer {
-  if (!SSE_BUFFER_COMPRESS) {
+  if (!getBufferConfig().compress) {
     return Buffer.from(eventStr, "utf-8");
   }
 
@@ -227,7 +235,7 @@ export function decompressEvent(eventBuffer: Buffer | string): string {
     return eventBuffer;
   }
 
-  if (!SSE_BUFFER_COMPRESS) {
+  if (!getBufferConfig().compress) {
     return eventBuffer.toString("utf-8");
   }
 

@@ -17,26 +17,22 @@ import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
 import { tryConsumeToken } from "../utils/quota.js";
 import { verifyHmacSignature } from "../utils/hmac-auth.js";
 import { attachCallerContext, getCallerContext, type CallerContext } from "../context/index.js";
+import { config } from "../config/index.js";
 
 /**
- * Get valid API keys from environment
- * Use process.env directly to avoid module-level caching issues in tests
+ * Get valid API keys from centralized config
  */
 function getValidApiKeys(): Set<string> {
   const keys = new Set<string>();
 
   // Single key (backwards compat)
-  if (process.env.ASSIST_API_KEY) {
-    keys.add(process.env.ASSIST_API_KEY);
+  if (config.auth.assistApiKey) {
+    keys.add(config.auth.assistApiKey);
   }
 
-  // Multiple keys (comma-separated)
-  if (process.env.ASSIST_API_KEYS) {
-    const multiKeys = process.env.ASSIST_API_KEYS.split(",")
-      .map(k => k.trim())
-      .filter(k => k.length > 0);
-
-    multiKeys.forEach(k => keys.add(k));
+  // Multiple keys (already parsed as array)
+  if (config.auth.assistApiKeys) {
+    config.auth.assistApiKeys.forEach(k => keys.add(k));
   }
 
   return keys;
@@ -116,18 +112,18 @@ async function authPluginImpl(fastify: FastifyInstance) {
     const isLegacySSEPath =
       request.url === "/assist/draft-graph" &&
       (request.headers.accept?.includes("text/event-stream") ?? false) &&
-      process.env.ENABLE_LEGACY_SSE !== "true";
+      !config.features.enableLegacySSE;
 
     if (isLegacySSEPath) {
       log.info({ path: request.url, legacy_sse_disabled: true }, "Skipping auth for legacy SSE deprecation path");
       return; // Let route return 426
     }
 
-    // Re-read keys on each request (for testability)
+    // Get valid keys from config
     const validKeys = getValidApiKeys();
 
     // If no keys configured, skip auth
-    if (validKeys.size === 0 && !process.env.HMAC_SECRET) {
+    if (validKeys.size === 0 && !config.auth.hmacSecret) {
       return; // No auth configured
     }
 
@@ -137,7 +133,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
     let apiKey: string | null = null;
     let keyId: string | null = null;
 
-    if (hasSignature && process.env.HMAC_SECRET) {
+    if (hasSignature && config.auth.hmacSecret) {
       // HMAC signature authentication (preferred)
       const body = typeof request.body === "string" ? request.body :
                    request.body ? JSON.stringify(request.body) : undefined;
@@ -169,7 +165,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
         // Otherwise, fall through to API key auth
       } else {
         // HMAC auth successful - use HMAC secret as the "API key" for quota tracking
-        apiKey = process.env.HMAC_SECRET;
+        apiKey = config.auth.hmacSecret!;
         // keyId will be set by tryConsumeToken below
 
         log.info(
@@ -237,7 +233,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
     }
 
     // Auth successful - attach full caller context
-    const hmacAuth = hasSignature !== undefined && process.env.HMAC_SECRET !== undefined;
+    const hmacAuth = hasSignature !== undefined && config.auth.hmacSecret !== undefined;
     const ctx = attachCallerContext(request, {
       keyId: keyId!,
       hmacAuth,

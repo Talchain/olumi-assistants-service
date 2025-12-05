@@ -1,19 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { isFeatureEnabled, getAllFeatureFlags } from '../../src/utils/feature-flags.js';
 
 describe('Feature Flags', () => {
-  const originalEnv = { ...process.env };
-
-  beforeEach(() => {
-    // Clear all feature flag env vars before each test
-    delete process.env.ENABLE_GROUNDING;
-    delete process.env.ENABLE_CRITIQUE;
-    delete process.env.ENABLE_CLARIFIER;
-  });
-
   afterEach(() => {
-    // Restore original env
-    process.env = { ...originalEnv };
+    vi.unstubAllEnvs();
   });
 
   describe('isFeatureEnabled', () => {
@@ -24,45 +14,42 @@ describe('Feature Flags', () => {
     });
 
     it('respects environment variable when set to true', () => {
-      process.env.ENABLE_GROUNDING = 'true';
+      vi.stubEnv('GROUNDING_ENABLED', 'true');
       expect(isFeatureEnabled('grounding')).toBe(true);
     });
 
     it('respects environment variable when set to false', () => {
-      process.env.ENABLE_GROUNDING = 'false';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
       expect(isFeatureEnabled('grounding')).toBe(false);
     });
 
     it('treats "1" as true', () => {
-      process.env.ENABLE_GROUNDING = '1';
+      vi.stubEnv('GROUNDING_ENABLED', '1');
       expect(isFeatureEnabled('grounding')).toBe(true);
     });
 
     it('treats any other value as false', () => {
-      process.env.ENABLE_GROUNDING = '0';
-      expect(isFeatureEnabled('grounding')).toBe(false);
-
-      process.env.ENABLE_GROUNDING = 'yes';
+      vi.stubEnv('GROUNDING_ENABLED', '0');
       expect(isFeatureEnabled('grounding')).toBe(false);
     });
 
     it('per-request flag overrides environment variable', () => {
-      process.env.ENABLE_GROUNDING = 'false';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
 
       const requestFlags = { grounding: true };
       expect(isFeatureEnabled('grounding', requestFlags)).toBe(true);
     });
 
     it('per-request flag can disable when env enables', () => {
-      process.env.ENABLE_GROUNDING = 'true';
+      vi.stubEnv('GROUNDING_ENABLED', 'true');
 
       const requestFlags = { grounding: false };
       expect(isFeatureEnabled('grounding', requestFlags)).toBe(false);
     });
 
     it('per-request flag only affects specified feature', () => {
-      process.env.ENABLE_GROUNDING = 'false';
-      process.env.ENABLE_CRITIQUE = 'true';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
+      vi.stubEnv('CRITIQUE_ENABLED', 'true');
 
       const requestFlags = { grounding: true }; // Only override grounding
 
@@ -88,9 +75,9 @@ describe('Feature Flags', () => {
     });
 
     it('returns all feature flags with environment values', () => {
-      process.env.ENABLE_GROUNDING = 'false';
-      process.env.ENABLE_CRITIQUE = 'true';
-      process.env.ENABLE_CLARIFIER = 'false';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
+      vi.stubEnv('CRITIQUE_ENABLED', 'true');
+      vi.stubEnv('CLARIFIER_ENABLED', 'false');
 
       const flags = getAllFeatureFlags();
 
@@ -102,8 +89,8 @@ describe('Feature Flags', () => {
     });
 
     it('applies request flag overrides to all flags', () => {
-      process.env.ENABLE_GROUNDING = 'true';
-      process.env.ENABLE_CRITIQUE = 'true';
+      vi.stubEnv('GROUNDING_ENABLED', 'true');
+      vi.stubEnv('CRITIQUE_ENABLED', 'true');
 
       const requestFlags = { grounding: false, clarifier: false };
       const flags = getAllFeatureFlags(requestFlags);
@@ -118,12 +105,12 @@ describe('Feature Flags', () => {
 
   describe('Integration with routes', () => {
     it('grounding is disabled when env flag is false', () => {
-      process.env.ENABLE_GROUNDING = 'false';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
       expect(isFeatureEnabled('grounding')).toBe(false);
     });
 
     it('grounding can be re-enabled per-request', () => {
-      process.env.ENABLE_GROUNDING = 'false';
+      vi.stubEnv('GROUNDING_ENABLED', 'false');
 
       const requestFlags = { grounding: true };
       expect(isFeatureEnabled('grounding', requestFlags)).toBe(true);

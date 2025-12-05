@@ -177,11 +177,15 @@ describe("Graph Repair Integration Tests", () => {
         default_seed: 17,
         nodes: Array.from({ length: 15 }, (_, i) => ({
           id: `node_${i}`,
-          kind: "goal",
+          kind: i === 0 ? "goal" : "option",
           label: `Node ${i}`,
         })),
-        edges: [],
-        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+        // Add edges to prevent nodes from being pruned as isolated
+        edges: Array.from({ length: 14 }, (_, i) => ({
+          from: `node_${i}`,
+          to: `node_${i + 1}`,
+        })),
+        meta: { roots: ["node_0"], leaves: ["node_14"], suggested_positions: {}, source: "assistant" },
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
@@ -200,7 +204,7 @@ describe("Graph Repair Integration Tests", () => {
       // LLM repair throws error
       vi.mocked(repairGraphWithAnthropic).mockRejectedValue(new Error("API timeout"));
 
-      // Second validation after simple repair
+      // Second validation after simple repair - should have 12 nodes with 11 edges
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: true,
         violations: [],
@@ -208,8 +212,8 @@ describe("Graph Repair Integration Tests", () => {
           version: "1",
           default_seed: 17,
           nodes: invalidGraph.nodes.slice(0, 12) as any, // Mock data - will be replaced with fixtures in M4
-          edges: [],
-          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
+          edges: invalidGraph.edges.slice(0, 11), // 11 edges connecting 12 nodes
+          meta: { roots: ["node_0"], leaves: ["node_11"], suggested_positions: {}, source: "assistant" as const },
         } as any,
       });
 
@@ -317,11 +321,15 @@ describe("Graph Repair Integration Tests", () => {
         default_seed: 17,
         nodes: Array.from({ length: 20 }, (_, i) => ({
           id: `node_${i}`,
-          kind: "goal",
+          kind: i === 0 ? "goal" : "option",
           label: `Node ${i}`,
         })),
-        edges: [],
-        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+        // Add edges to prevent nodes from being pruned as isolated
+        edges: Array.from({ length: 19 }, (_, i) => ({
+          from: `node_${i}`,
+          to: `node_${i + 1}`,
+        })),
+        meta: { roots: ["node_0"], leaves: ["node_19"], suggested_positions: {}, source: "assistant" },
       };
 
       vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
@@ -340,7 +348,7 @@ describe("Graph Repair Integration Tests", () => {
       // LLM repair fails
       vi.mocked(repairGraphWithAnthropic).mockRejectedValue(new Error("Failed"));
 
-      // Validation succeeds after simple repair
+      // Validation succeeds after simple repair - 12 nodes with 11 edges
       vi.mocked(validateGraph).mockResolvedValueOnce({
         ok: true,
         violations: [],
@@ -348,8 +356,8 @@ describe("Graph Repair Integration Tests", () => {
           version: "1",
           default_seed: 17,
           nodes: largeGraph.nodes.slice(0, 12) as any, // Mock data - will be replaced with fixtures in M4
-          edges: [],
-          meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
+          edges: largeGraph.edges.slice(0, 11), // 11 edges connecting 12 nodes
+          meta: { roots: ["node_0"], leaves: ["node_11"], suggested_positions: {}, source: "assistant" as const },
         } as any,
       });
 

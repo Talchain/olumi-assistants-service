@@ -12,10 +12,7 @@
 
 import { Redis, type RedisOptions } from "ioredis";
 import { log } from "../utils/telemetry.js";
-
-const DEFAULT_NAMESPACE = "olumi";
-const DEFAULT_CONNECT_TIMEOUT = 10000;
-const DEFAULT_COMMAND_TIMEOUT = 5000;
+import { config, isProduction } from "../config/index.js";
 
 /**
  * Singleton Redis client instance
@@ -25,26 +22,22 @@ let isInitialized = false;
 let initializationError: Error | null = null;
 
 /**
- * Get Redis configuration from environment
+ * Get Redis configuration from centralized config
  */
 function getRedisConfig(): RedisOptions | null {
-  const redisUrl = process.env.REDIS_URL;
+  const redisUrl = config.redis.url;
 
   if (!redisUrl) {
     return null;
   }
 
-  // Parse TLS setting (auto-detect from URL or explicit env var)
-  const enableTLS =
-    process.env.REDIS_TLS === "true" ||
-    (process.env.REDIS_TLS !== "false" && redisUrl.startsWith("rediss://"));
+  // Parse TLS setting (auto-detect from URL or explicit config)
+  const enableTLS = config.redis.tls || redisUrl.startsWith("rediss://");
 
-  const config: RedisOptions = {
-    // Connection
-    connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT) ||
-      DEFAULT_CONNECT_TIMEOUT,
-    commandTimeout: Number(process.env.REDIS_COMMAND_TIMEOUT) ||
-      DEFAULT_COMMAND_TIMEOUT,
+  const redisOptions: RedisOptions = {
+    // Connection (use centralized config with defaults)
+    connectTimeout: config.redis.connectTimeout,
+    commandTimeout: config.redis.commandTimeout,
 
     // Reconnection strategy
     retryStrategy(times: number) {
@@ -59,15 +52,15 @@ function getRedisConfig(): RedisOptions | null {
     // TLS
     ...(enableTLS && {
       tls: {
-        rejectUnauthorized: process.env.NODE_ENV === "production",
+        rejectUnauthorized: isProduction(),
       },
     }),
 
     // Key prefix (namespace)
-    keyPrefix: `${process.env.REDIS_NAMESPACE || DEFAULT_NAMESPACE}:`,
+    keyPrefix: `${config.redis.namespace}:`,
   };
 
-  return config;
+  return redisOptions;
 }
 
 /**
@@ -78,17 +71,17 @@ async function initializeRedis(): Promise<Redis | null> {
     return redisClient;
   }
 
-  const config = getRedisConfig();
+  const redisOptions = getRedisConfig();
 
-  if (!config) {
+  if (!redisOptions) {
     log.info("Redis not configured (REDIS_URL not set), using in-memory fallback");
     isInitialized = true;
     return null;
   }
 
   try {
-    const redisUrl = process.env.REDIS_URL!;
-    const client = new Redis(redisUrl, config);
+    const redisUrl = config.redis.url!;
+    const client = new Redis(redisUrl, redisOptions);
 
     // Set up event handlers
     client.on("error", (error: Error) => {
@@ -97,7 +90,7 @@ async function initializeRedis(): Promise<Redis | null> {
 
     client.on("connect", () => {
       log.info(
-        { namespace: config.keyPrefix, tls: !!config.tls },
+        { namespace: redisOptions.keyPrefix, tls: !!redisOptions.tls },
         "Redis connected"
       );
     });
@@ -125,10 +118,10 @@ async function initializeRedis(): Promise<Redis | null> {
 
     log.info(
       {
-        namespace: config.keyPrefix,
-        tls: !!config.tls,
-        connect_timeout: config.connectTimeout,
-        command_timeout: config.commandTimeout,
+        namespace: redisOptions.keyPrefix,
+        tls: !!redisOptions.tls,
+        connect_timeout: redisOptions.connectTimeout,
+        command_timeout: redisOptions.commandTimeout,
       },
       "Redis initialized successfully"
     );

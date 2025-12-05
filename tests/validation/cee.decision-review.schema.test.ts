@@ -10,9 +10,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 describe("CeeDecisionReviewPayload v1 Schema", () => {
   let schema: Record<string, unknown>;
   let goldenFixture: Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let ajv: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let validate: any;
 
   beforeAll(async () => {

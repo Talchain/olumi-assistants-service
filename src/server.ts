@@ -112,7 +112,40 @@ export async function build() {
   const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
   const app = Fastify({
-    logger: true,
+    logger: {
+      level: env.LOG_LEVEL || "info",
+      redact: {
+        paths: [
+          // Auth secrets (at any depth)
+          "*.password",
+          "*.secret",
+          "*.token",
+          "*.apiKey",
+          "*.api_key",
+          "*.apikey",
+          "*.authorization",
+          "*.credentials",
+          "*.accessToken",
+          "*.access_token",
+          "*.refreshToken",
+          "*.refresh_token",
+          "*.privateKey",
+          "*.private_key",
+          // Common header names
+          "*.headers.authorization",
+          "*.headers.x-api-key",
+          "*.headers.x-olumi-assist-key",
+          "*.headers.cookie",
+          // PII fields
+          "*.email",
+          "*.phone",
+          "*.ssn",
+          "*.creditCard",
+          "*.credit_card",
+        ],
+        censor: "[REDACTED]",
+      },
+    },
     bodyLimit: BODY_LIMIT_BYTES,
     connectionTimeout: ROUTE_TIMEOUT_MS,
     requestTimeout: ROUTE_TIMEOUT_MS,

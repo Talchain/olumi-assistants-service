@@ -17,8 +17,8 @@ import critiqueRoute from "../../src/routes/assist.critique-graph.js";
 
 // Use fixtures adapter for deterministic tests without API keys
 vi.stubEnv("LLM_PROVIDER", "fixtures");
-// Enable grounding for these tests (defaults to false in v1.1.0)
-vi.stubEnv("ENABLE_GROUNDING", "true");
+// Enable grounding for these tests (defaults to false)
+vi.stubEnv("GROUNDING_ENABLED", "true");
 
 describe("Grounding: Attachments Integration (v04)", () => {
   let draftApp: ReturnType<typeof Fastify>;

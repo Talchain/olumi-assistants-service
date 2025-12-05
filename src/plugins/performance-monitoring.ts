@@ -7,6 +7,7 @@
 
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { logger } from '../utils/simple-logger.js';
+import { config } from '../config/index.js';
 
 // Extend FastifyRequest to include performance tracking
 declare module 'fastify' {
@@ -18,7 +19,7 @@ declare module 'fastify' {
 
 interface PerformanceMetrics {
   totalRequests: number;
-  slowRequests: number; // > 30s
+  slowRequests: number; // > 5s (configurable via PERF_SLOW_THRESHOLD_MS)
   requestsByRoute: Map<string, { count: number; totalDuration: number; p99: number[] }>;
 }
 
@@ -28,10 +29,10 @@ const metrics: PerformanceMetrics = {
   requestsByRoute: new Map(),
 };
 
-// Performance thresholds (configurable via environment)
-const SLOW_REQUEST_THRESHOLD_MS = parseInt(process.env.PERF_SLOW_THRESHOLD_MS || '30000', 10);
-const P99_ALERT_THRESHOLD_MS = parseInt(process.env.PERF_P99_THRESHOLD_MS || '30000', 10);
-const METRICS_ENABLED = process.env.PERF_METRICS_ENABLED !== 'false';
+// Performance thresholds (from centralized config)
+const SLOW_REQUEST_THRESHOLD_MS = config.performance.slowThresholdMs;
+const P99_ALERT_THRESHOLD_MS = config.performance.p99ThresholdMs;
+const METRICS_ENABLED = config.performance.metricsEnabled;
 
 /**
  * Calculate p99 latency from array of durations
@@ -92,8 +93,10 @@ function emitMetric(
 
   // Try to use existing statsd client from telemetry if available
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { statsd } = require('../utils/telemetry.js');
+    // Dynamic import to avoid circular dependency - telemetry exports statsd client
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const telemetry = require('../utils/telemetry.js');
+    const statsd = telemetry?.statsd;
     if (statsd) {
       const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
 
@@ -109,7 +112,7 @@ function emitMetric(
           break;
       }
     }
-  } catch (error) {
+  } catch {
     // StatsD not configured or not available - metrics will only be tracked in-memory
   }
 }

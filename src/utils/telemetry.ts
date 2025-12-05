@@ -2,7 +2,46 @@ import { env } from "node:process";
 import pino from "pino";
 import { StatsD } from "hot-shots";
 
-export const log = pino({ level: env.LOG_LEVEL || "info" });
+/**
+ * Pino logger with secret/PII redaction
+ *
+ * Redacts sensitive fields to prevent accidental exposure in logs.
+ * Paths use wildcards to match nested objects at any depth.
+ */
+export const log = pino({
+  level: env.LOG_LEVEL || "info",
+  redact: {
+    paths: [
+      // Auth secrets (at any depth)
+      "*.password",
+      "*.secret",
+      "*.token",
+      "*.apiKey",
+      "*.api_key",
+      "*.apikey",
+      "*.authorization",
+      "*.credentials",
+      "*.accessToken",
+      "*.access_token",
+      "*.refreshToken",
+      "*.refresh_token",
+      "*.privateKey",
+      "*.private_key",
+      // Common header names
+      "*.headers.authorization",
+      "*.headers.x-api-key",
+      "*.headers.x-olumi-assist-key",
+      "*.headers.cookie",
+      // PII fields
+      "*.email",
+      "*.phone",
+      "*.ssn",
+      "*.creditCard",
+      "*.credit_card",
+    ],
+    censor: "[REDACTED]",
+  },
+});
 
 /**
  * Test sink for capturing telemetry events in tests (v1.11.0)
@@ -12,7 +51,9 @@ let testSink: ((eventName: string, data: Record<string, any>) => void) | null = 
 
 export function setTestSink(sink: ((eventName: string, data: Record<string, any>) => void) | null): void {
   // Safety check: only allow in test environment
-  if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+  // Use direct env check to avoid circular dependency issues during module initialization
+  const isTestEnv = env.NODE_ENV === 'test' || env.VITEST === 'true' || Boolean(env.VITEST);
+  if (!isTestEnv) {
     throw new Error('setTestSink() can only be used in test environment');
   }
   testSink = sink;
@@ -255,6 +296,7 @@ export const VALID_EVENT_NAMES: Set<string> = new Set(Object.values(TelemetryEve
 
 /**
  * Datadog StatsD client (optional, configured via DD_AGENT_HOST)
+ * Exported as `statsd` for use by performance-monitoring plugin
  */
 let datadogClient: StatsD | null = null;
 
@@ -273,6 +315,9 @@ if (env.DD_AGENT_HOST || env.DD_API_KEY) {
   });
   log.info({ dd_host: env.DD_AGENT_HOST }, "Datadog StatsD client initialized");
 }
+
+/** Exported StatsD client for use by other modules (may be null) */
+export const statsd = datadogClient;
 
 export type TelemetryLeaf = string | number | boolean | null | undefined;
 export type TelemetryShape = {

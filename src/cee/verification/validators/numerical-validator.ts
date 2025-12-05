@@ -84,7 +84,7 @@ export class NumericalValidator implements VerificationStage<unknown, unknown> {
       // Match decimal numbers and percentages such as "0.65" or "65%".
       const regex = /(\d+\.?\d*%?)/g;
       let match: RegExpExecArray | null;
-      // eslint-disable-next-line no-cond-assign
+       
       while ((match = regex.exec(obj)) !== null) {
         const raw = match[1];
         const hasPercent = raw.endsWith("%");

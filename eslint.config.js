@@ -73,6 +73,30 @@ export default [
           varsIgnorePattern: '^_',
         },
       ],
+      // Flag direct process.env access - use centralized config instead
+      // Set to 'warn' for gradual migration; change to 'error' once violations are fixed
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: 'MemberExpression[object.name="process"][property.name="env"]',
+          message:
+            'Direct process.env access is discouraged. Import from src/config/index.ts instead.',
+        },
+      ],
+    },
+  },
+  // Allow process.env in config files, scripts, tests, root config files, and special files
+  {
+    files: [
+      'src/config/**/*.ts',
+      'src/version.ts', // Source of SERVICE_VERSION, intentionally reads from package.json with env override
+      'scripts/**/*.ts',
+      'tests/**/*.ts',
+      'playwright.config.ts',
+      'vitest.config.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   // Apply to JavaScript files (without TypeScript parser)

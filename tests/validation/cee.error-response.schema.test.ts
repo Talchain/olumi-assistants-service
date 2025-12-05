@@ -13,9 +13,9 @@ import { buildCeeErrorResponse } from "../../src/cee/validation/pipeline.js";
  */
 
 describe("CEEErrorResponseV1 OpenAPI schema", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let ajv: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let validate: any;
 
   beforeAll(async () => {
@@ -43,7 +43,7 @@ describe("CEEErrorResponseV1 OpenAPI schema", () => {
   function expectValid(payload: unknown) {
     const valid = validate(payload);
     if (!valid) {
-      // eslint-disable-next-line no-console
+       
       console.error("Validation errors:", JSON.stringify(validate.errors, null, 2));
     }
     expect(valid).toBe(true);

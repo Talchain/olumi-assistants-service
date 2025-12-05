@@ -18,7 +18,7 @@ import type {
   CeeTraceSummary,
   CeeErrorView,
 } from "../index.js";
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 import golden from "./cee-decision-review.v1.example.json";
 
 export interface GoldenDecisionReviewFixture {

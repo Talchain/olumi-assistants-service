@@ -21,6 +21,7 @@ import type {
 } from './types.js';
 import { logger } from '../../utils/simple-logger.js';
 import { parseTimeout, parseMaxRetries } from './config.js';
+import { config } from '../../config/index.js';
 
 /**
  * ISL Client for causal validation
@@ -379,10 +380,10 @@ export class ISLTimeoutError extends Error {
 }
 
 /**
- * Create ISL client from environment configuration
+ * Create ISL client from centralized configuration
  */
 export function createISLClient(): ISLClient | null {
-  const baseUrl = process.env.ISL_BASE_URL;
+  const baseUrl = config.isl.baseUrl;
 
   if (!baseUrl) {
     logger.debug({
@@ -394,8 +395,8 @@ export function createISLClient(): ISLClient | null {
 
   return new ISLClient({
     baseUrl,
-    timeout: parseTimeout(process.env.ISL_TIMEOUT_MS, 5000),
-    maxRetries: parseMaxRetries(process.env.ISL_MAX_RETRIES, 1),
-    apiKey: process.env.ISL_API_KEY,
+    timeout: parseTimeout(config.isl.timeoutMs, 5000),
+    maxRetries: parseMaxRetries(config.isl.maxRetries, 1),
+    apiKey: config.isl.apiKey,
   });
 }

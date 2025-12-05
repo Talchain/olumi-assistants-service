@@ -36,7 +36,7 @@ export interface VerificationResult<T = unknown> {
    * Structured, metadata-only details. This must never contain user content
    * such as briefs, prompts, or graph labels.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   details?: Record<string, any>;
   /** When the stage performs parsing, the strongly-typed parsed data. */
   validated_data?: T;

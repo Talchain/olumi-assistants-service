@@ -11,6 +11,8 @@
  * Per-request overrides can be passed via the `flags` field in request bodies.
  */
 
+import { config } from "../config/index.js";
+
 export type FeatureFlag =
   | 'grounding'
   | 'critique'
@@ -44,15 +46,18 @@ const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagConfig> = {
  * Get the environment-level value for a feature flag
  */
 function getEnvFlag(flag: FeatureFlag): boolean {
-  const config = FEATURE_FLAGS[flag];
-  const envValue = process.env[config.envVar];
-
-  if (envValue === undefined) {
-    return config.defaultValue;
+  // Map flag names to centralized config properties
+  switch (flag) {
+    case 'grounding':
+      return config.features.grounding;
+    case 'critique':
+      return config.features.critique;
+    case 'clarifier':
+      return config.features.clarifier;
   }
-
-  // Parse boolean from string
-  return envValue.toLowerCase() === 'true' || envValue === '1';
+  // Exhaustive check - TypeScript ensures all cases are handled above
+  const _exhaustiveCheck: never = flag;
+  return _exhaustiveCheck;
 }
 
 /**

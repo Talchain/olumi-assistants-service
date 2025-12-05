@@ -95,8 +95,8 @@ config.features.enableLegacySSE // ENABLE_LEGACY_SSE (default: false)
 
 ```typescript
 config.performance.metricsEnabled    // PERF_METRICS_ENABLED (default: true)
-config.performance.slowThresholdMs   // PERF_SLOW_THRESHOLD_MS (default: 30000)
-config.performance.p99ThresholdMs    // PERF_P99_THRESHOLD_MS (default: 30000)
+config.performance.slowThresholdMs   // PERF_SLOW_THRESHOLD_MS (default: 5000)
+config.performance.p99ThresholdMs    // PERF_P99_THRESHOLD_MS (default: 5000)
 ```
 
 ### Redis Configuration

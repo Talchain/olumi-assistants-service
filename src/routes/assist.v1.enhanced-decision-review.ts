@@ -16,6 +16,7 @@ import { getRequestKeyId, getRequestCallerContext } from '../plugins/auth.js';
 import { contextToTelemetry } from '../context/index.js';
 import { emit } from '../utils/telemetry.js';
 import { logCeeCall } from '../cee/logging.js';
+import { config } from '../config/index.js';
 
 // ============================================================================
 // Input Schema
@@ -122,10 +123,7 @@ function checkDecisionReviewLimit(
 // ============================================================================
 
 export default async function route(app: FastifyInstance) {
-  const RATE_LIMIT_RPM = parseInt(
-    process.env.CEE_DECISION_REVIEW_RATE_LIMIT_RPM || '30',
-    10,
-  );
+  const RATE_LIMIT_RPM = config.cee.decisionReviewRateLimitRpm;
   const FEATURE_VERSION = 'decision-review-2.0.0';
 
   app.post('/assist/v1/decision-review/enhanced', async (req, reply) => {

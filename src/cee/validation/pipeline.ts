@@ -49,7 +49,12 @@ type DraftInputWithCeeExtras = DraftGraphInputT & {
   archetype_hint?: string;
 };
 
-const COST_MAX_USD = Number(process.env.COST_MAX_USD) || 1.0;
+/**
+ * Get cost cap from centralized config (deferred for testability)
+ */
+function getCostMaxUsd(): number {
+  return config.graph.costMaxUsd;
+}
 
 type ResponseLimitsMeta = {
   bias_findings_max: number;
@@ -825,7 +830,7 @@ export async function finaliseCeeDraftResponse(
 
   // Post-response guard: graph caps and cost (CEE must honour the same limits)
   const guardResult = (graph
-    ? validateResponse(graph as any, cost_usd, COST_MAX_USD)
+    ? validateResponse(graph as any, cost_usd, getCostMaxUsd())
     : { ok: true }) as ReturnType<typeof validateResponse>;
   if (!guardResult.ok) {
     const violation = guardResult.violation;

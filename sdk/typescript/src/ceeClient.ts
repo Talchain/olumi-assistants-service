@@ -70,7 +70,7 @@ function validateConfig(config: OlumiConfig): InternalConfig {
 
   try {
     // Validate base URL is a well-formed HTTP(S) URL
-    // eslint-disable-next-line no-new
+     
     new URL(baseUrl);
   } catch {
     throw new OlumiConfigError(

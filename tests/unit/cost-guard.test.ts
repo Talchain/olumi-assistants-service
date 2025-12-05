@@ -142,11 +142,18 @@ describe("Cost Guard", () => {
       expect(allowedCostUSD(0, 1000, "gpt-4o-mini")).toBe(true);
     });
 
-    it("handles invalid COST_MAX_USD (falls back to default)", () => {
+    it("rejects invalid COST_MAX_USD at config parsing time", async () => {
+      // With centralized config, invalid values are caught at parse time
+      // This is better than silently using a fallback - fail fast
+      const { vi } = await import("vitest");
+      vi.resetModules();
       process.env.COST_MAX_USD = "invalid";
-      // NaN is not finite, so should reject
-      const allowed = allowedCostUSD(1000, 1000, "claude-3-5-sonnet-20241022");
-      expect(allowed).toBe(false);
+      process.env.NODE_ENV = "production"; // Production mode enforces strict validation
+
+      await expect(async () => {
+        const { allowedCostUSD: fn } = await import("../../src/utils/costGuard.js");
+        fn(1000, 1000, "claude-3-5-sonnet-20241022");
+      }).rejects.toThrow("Invalid configuration");
     });
   });
 });

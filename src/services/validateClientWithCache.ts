@@ -3,6 +3,7 @@ import { LruTtlCache } from "../utils/cache.js";
 import { fastHash } from "../utils/hash.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { validateGraph as validateGraphDirect } from "./validateClient.js";
+import { config } from "../config/index.js";
 
 // Result type mirrored from validateClient.ts
 export type ValidateResult = {
@@ -12,20 +13,15 @@ export type ValidateResult = {
 };
 
 function getCacheEnabled(): boolean {
-  // Default to enabled unless explicitly disabled
-  const raw = process.env.VALIDATION_CACHE_ENABLED;
-  if (raw === "false") return false;
-  return true;
+  return config.validation.cacheEnabled;
 }
 
 function getCacheMaxSize(): number {
-  const raw = Number(process.env.VALIDATION_CACHE_MAX_SIZE);
-  return Number.isFinite(raw) && raw > 0 ? raw : 1000;
+  return config.validation.cacheMaxSize;
 }
 
 function getCacheTtlMs(): number {
-  const raw = Number(process.env.VALIDATION_CACHE_TTL_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000;
+  return config.validation.cacheTtlMs;
 }
 
 let cache: LruTtlCache<string, ValidateResult> | null = null;

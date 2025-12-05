@@ -112,6 +112,7 @@ export class BraintrustManager {
 
     const enabled = config.prompts?.braintrustEnabled === true;
     // API key must still come from environment (not stored in config for security)
+    // eslint-disable-next-line no-restricted-syntax -- Security: API key not stored in config
     const apiKey = process.env.BRAINTRUST_API_KEY;
 
     if (!enabled) {

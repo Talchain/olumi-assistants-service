@@ -5,6 +5,8 @@
  * Protects: emails, phones, API keys, tokens, IPs, URLs, names, addresses
  */
 
+import { config } from "../config/index.js";
+
 export type RedactionMode = "strict" | "standard" | "off";
 
 export interface PIIGuardConfig {
@@ -187,14 +189,10 @@ export function detectPII(text: string, config: PIIGuardConfig = { mode: "standa
 }
 
 /**
- * Get redaction mode from environment
+ * Get redaction mode from centralized config
  */
 export function getRedactionMode(): RedactionMode {
-  const mode = process.env.PII_REDACTION_MODE?.toLowerCase();
-  if (mode === "strict" || mode === "standard" || mode === "off") {
-    return mode;
-  }
-  return "standard"; // Default
+  return config.pii.redactionMode;
 }
 
 /**

@@ -13,14 +13,20 @@
 
 import { hmacSha256, verifyHmacSha256 } from "./hash.js";
 import { log } from "./telemetry.js";
+import { config } from "../config/index.js";
 
-const SSE_RESUME_TTL_MS = Number(process.env.SSE_RESUME_TTL_MS) || 900000; // 15 minutes
+/**
+ * Get SSE resume TTL from centralized config (deferred for testability)
+ */
+function getResumeTtlMs(): number {
+  return config.sse.resumeTtlMs || 900000; // 15 minutes default
+}
 
 /**
  * Get resume secret (falls back to HMAC_SECRET for convenience)
  */
 function getResumeSecret(): string {
-  const secret = process.env.SSE_RESUME_SECRET || process.env.HMAC_SECRET;
+  const secret = config.sse.resumeSecret || config.auth.hmacSecret;
   if (!secret) {
     throw new Error("SSE_RESUME_SECRET or HMAC_SECRET must be configured");
   }
@@ -171,7 +177,7 @@ export function createResumeToken(
   step: string,
   seq: number
 ): string {
-  const expiresAt = Date.now() + SSE_RESUME_TTL_MS;
+  const expiresAt = Date.now() + getResumeTtlMs();
   return generateResumeToken({
     request_id: requestId,
     step,
