@@ -74,9 +74,9 @@ export default [
         },
       ],
       // Flag direct process.env access - use centralized config instead
-      // Set to 'warn' for gradual migration; change to 'error' once violations are fixed
+      // All production code now uses centralized config (src/config/index.ts)
       'no-restricted-syntax': [
-        'warn',
+        'error',
         {
           selector: 'MemberExpression[object.name="process"][property.name="env"]',
           message:
