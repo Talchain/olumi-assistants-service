@@ -50,6 +50,55 @@ Every node should be connected by at least one edge. Orphan nodes will trigger w
 ### Rule 5: No Cycles (warning issued)
 The graph must be a directed acyclic graph (DAG). Cycles will be detected and flagged.
 
+## WEIGHT AND BELIEF DIFFERENTIATION
+
+You MUST assign varied weights and beliefs based on causal strength and certainty.
+Uniform values (all 0.5 or all 1.0) produce uninformative analysis.
+
+### Belief Assignment (certainty of causal relationship)
+
+| Certainty Level | Belief Range | When to Use |
+|-----------------|--------------|-------------|
+| High | 0.85-1.0 | Well-established causal relationships with strong evidence |
+| Moderate | 0.65-0.85 | Reasonable assumptions, industry norms, typical patterns |
+| Low | 0.4-0.65 | Speculative relationships, high uncertainty, confounding factors |
+
+Examples:
+- "Price increase → Revenue decrease" [belief: 0.9] - well-established economics
+- "Marketing spend → Brand awareness" [belief: 0.75] - typical but variable
+- "Weather → Customer satisfaction" [belief: 0.5] - speculative, many factors
+
+NEVER assign all edges belief 0.5 - differentiate based on certainty.
+
+### Weight Assignment (strength of influence)
+
+| Influence Level | Weight Range | When to Use |
+|-----------------|--------------|-------------|
+| Strong amplification | 1.2-1.5 | Critical path edges, multiplier effects, strong correlations |
+| Neutral/moderate | 0.8-1.1 | Standard influence, typical relationships |
+| Dampening | 0.3-0.7 | Weak relationships, opposing forces, market constraints |
+
+Examples:
+- Marketing in consumer brands [weight: 1.3] - proven high ROI
+- Standard operational factors [weight: 1.0] - neutral influence
+- Price elasticity in commodities [weight: 0.6] - dampened impact
+
+NEVER assign all edges weight 1.0 - differentiate based on influence strength.
+
+### Differentiation Examples
+
+❌ BAD - Uniform values (uninformative):
+  decision→opt_A (belief: 0.5), decision→opt_B (belief: 0.5)
+  opt_A→outcome (weight: 1.0, belief: 0.5)
+  opt_B→outcome (weight: 1.0, belief: 0.5)
+
+✅ GOOD - Varied values with reasoning:
+  decision→opt_increase (belief: 0.4) - riskier, less likely chosen
+  decision→opt_maintain (belief: 0.6) - safer default, more likely
+  opt_increase→demand (weight: 0.7, belief: 0.85) - price elasticity dampens demand
+  opt_maintain→demand (weight: 1.0, belief: 0.9) - stable baseline, high confidence
+  demand→revenue (weight: 1.3, belief: 0.9) - strong direct correlation
+
 ## Provenance Requirements
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
@@ -71,9 +120,14 @@ graph that satisfies the minimum structure above. Returning an empty graph is ne
 Before outputting JSON, mentally verify:
 □ Exactly 1 goal node exists
 □ All decision→option edge beliefs sum to 1.0 (per decision)
+□ Decision→option edges have differentiated beliefs (avoid all-equal like 0.33, 0.33, 0.33)
 □ All option→outcome edges have belief values
 □ No orphan nodes (all nodes connected)
 □ No cycles in the graph
+□ Edges have varied beliefs (not all 0.5) - differentiate by certainty
+□ Edges have varied weights (not all 1.0) - differentiate by influence strength
+
+If you answered NO to any weight/belief check, revise your graph before responding.
 
 ## Output Format (JSON)
 {

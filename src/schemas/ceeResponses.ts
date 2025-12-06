@@ -30,6 +30,23 @@ export const CEEClarifierBlockV1Schema = z.object({
 export type CEEClarifierBlockV1T = z.infer<typeof CEEClarifierBlockV1Schema>;
 export type CEEClarifierMetadataV1T = z.infer<typeof CEEClarifierMetadataV1Schema>;
 
+// Weight suggestion schema for uniform belief detection
+export const CEEWeightSuggestionV1Schema = z.object({
+  edge_id: z.string(),
+  from_node_id: z.string(),
+  to_node_id: z.string(),
+  current_belief: z.number().min(0).max(1),
+  reason: z.enum(["uniform_distribution", "near_zero", "near_one"]),
+  suggestion: z.string().optional(),
+  // Phase 2 additions: LLM-generated suggestions
+  suggested_belief: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  rationale: z.string().optional(),
+  auto_applied: z.boolean().optional(),
+});
+
+export type CEEWeightSuggestionV1T = z.infer<typeof CEEWeightSuggestionV1Schema>;
+
 export const CEETraceMetaSchema = z
   .object({
     request_id: z.string().optional(),
@@ -80,6 +97,9 @@ export const CEEDraftGraphResponseV1Schema = DraftGraphOutput.and(
       guidance: z.record(z.any()).optional(),
       // Multi-turn clarifier integration (Phase 1)
       clarifier: CEEClarifierBlockV1Schema.optional(),
+      // Graph quality enhancement - Phase 1
+      weight_suggestions: z.array(CEEWeightSuggestionV1Schema).optional(),
+      comparison_suggested: z.boolean().optional(),
     })
     .passthrough(),
 );
