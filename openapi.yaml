@@ -1909,6 +1909,62 @@ components:
               $ref: '#/components/schemas/CEEGuidanceV1'
             clarifier:
               $ref: '#/components/schemas/CEEClarifierBlockV1'
+            weight_suggestions:
+              type: array
+              description: Suggestions for edge weights that appear uniform/unrefined
+              items:
+                $ref: '#/components/schemas/CEEWeightSuggestionV1'
+            comparison_suggested:
+              type: boolean
+              description: Whether the graph structure suggests comparison analysis would add value
+
+    CEEWeightSuggestionV1:
+      type: object
+      description: A suggestion for refining an edge weight
+      required:
+        - edge_id
+        - from_node_id
+        - to_node_id
+        - current_belief
+        - reason
+      properties:
+        edge_id:
+          type: string
+          description: Edge identifier in the format "from_id->to_node_id"
+        from_node_id:
+          type: string
+          description: Source node identifier
+        to_node_id:
+          type: string
+          description: Target node identifier
+        current_belief:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Current edge belief value (0-1)
+        reason:
+          type: string
+          enum: [uniform_distribution, near_zero, near_one]
+          description: Why this edge was flagged for refinement
+        suggestion:
+          type: string
+          description: Human-readable suggestion for improvement
+        suggested_belief:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: LLM-recommended belief value (only included when confidence >= 0.7)
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence in the suggestion (0-1)
+        rationale:
+          type: string
+          description: Explanation of why this belief should be adjusted
+        auto_applied:
+          type: boolean
+          description: Whether the suggestion was automatically applied (true for high/medium confidence)
 
     CEEClarifierBlockV1:
       type: object
