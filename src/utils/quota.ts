@@ -22,9 +22,19 @@
  */
 
 import { getRedis } from "../platform/redis.js";
-import { log } from "./telemetry.js";
+import { log, emit } from "./telemetry.js";
 import { fastHash } from "./hash.js";
 import { config } from "../config/index.js";
+
+/**
+ * Telemetry events for Redis fallback monitoring
+ * These counters enable alerting on Redis degradation
+ */
+const QuotaTelemetryEvents = {
+  RedisFallbackFetch: "quota.redis_fallback.fetch",
+  RedisFallbackSnapshot: "quota.redis_fallback.snapshot",
+  RedisFallbackConsume: "quota.redis_fallback.consume",
+} as const;
 
 /**
  * Lua script for atomic token bucket consumption
@@ -192,6 +202,10 @@ export async function getKeyQuota(apiKey: string): Promise<KeyQuota> {
         };
       } catch (error) {
         log.warn({ error, key_id: keyId }, "Redis quota fetch failed, using memory fallback");
+        emit(QuotaTelemetryEvents.RedisFallbackFetch, {
+          key_id: keyId,
+          error: String(error),
+        });
       }
     }
   }
@@ -280,6 +294,11 @@ export async function getQuotaSnapshotByKeyId(
         };
       } catch (error) {
         log.warn({ error, key_id: keyId, is_sse: isSse }, "Redis quota snapshot failed, falling back to memory view");
+        emit(QuotaTelemetryEvents.RedisFallbackSnapshot, {
+          key_id: keyId,
+          is_sse: isSse,
+          error: String(error),
+        });
       }
     }
   }
@@ -379,6 +398,11 @@ export async function tryConsumeToken(
           { error, key_id: keyId, is_sse: isSse },
           "Redis quota consumption failed, using memory fallback"
         );
+        emit(QuotaTelemetryEvents.RedisFallbackConsume, {
+          key_id: keyId,
+          is_sse: isSse,
+          error: String(error),
+        });
       }
     }
   }
