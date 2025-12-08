@@ -36,7 +36,7 @@ jobs:
         run: pnpm test --coverage --coverage.threshold.lines=90 --coverage.threshold.functions=90 --coverage.threshold.branches=85 --coverage.threshold.statements=90
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         if: always()
         with:
           files: ./coverage/coverage-final.json
