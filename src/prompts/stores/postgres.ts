@@ -258,18 +258,34 @@ export class PostgresPromptStore implements IPromptStore {
         );
       }
 
-      // Fetch versions for each prompt
-      const results: PromptDefinition[] = [];
-      for (const prompt of prompts) {
-        const versions = await sql<VersionRow[]>`
-          SELECT version, content, variables, created_by, created_at, change_note, content_hash,
-                 requires_approval, approved_by, approved_at, test_cases
-          FROM prompt_versions
-          WHERE prompt_id = ${prompt.id}
-          ORDER BY version ASC
-        `;
-        results.push(this.toPromptDefinition(prompt, versions));
+      // No prompts = early return
+      if (prompts.length === 0) {
+        return [];
       }
+
+      // Fetch all versions for all prompts in a single query (N+1 → 2 queries)
+      const promptIds = prompts.map((p) => p.id);
+      const allVersions = await sql<(VersionRow & { prompt_id: string })[]>`
+        SELECT prompt_id, version, content, variables, created_by, created_at, change_note, content_hash,
+               requires_approval, approved_by, approved_at, test_cases
+        FROM prompt_versions
+        WHERE prompt_id = ANY(${promptIds})
+        ORDER BY prompt_id, version ASC
+      `;
+
+      // Group versions by prompt_id
+      const versionsByPromptId = new Map<string, VersionRow[]>();
+      for (const v of allVersions) {
+        const existing = versionsByPromptId.get(v.prompt_id) ?? [];
+        existing.push(v);
+        versionsByPromptId.set(v.prompt_id, existing);
+      }
+
+      // Build results
+      const results: PromptDefinition[] = prompts.map((prompt) => {
+        const versions = versionsByPromptId.get(prompt.id) ?? [];
+        return this.toPromptDefinition(prompt, versions);
+      });
 
       return results;
     } catch (error) {
