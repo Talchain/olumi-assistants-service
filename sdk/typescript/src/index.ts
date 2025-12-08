@@ -85,6 +85,8 @@ export type {
   CEESensitivityCoachResponseV1,
   CEETeamPerspectivesRequestV1,
   CEETeamPerspectivesResponseV1,
+  CEEGraphReadinessRequestV1,
+  CEEGraphReadinessResponseV1,
 } from "./ceeTypes.js";
 
 export type {

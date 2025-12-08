@@ -245,6 +245,7 @@ describe("ceeGoldenJourneyExample", () => {
       options: vi.fn().mockResolvedValue(options),
       sensitivityCoach: vi.fn(),
       teamPerspectives: vi.fn().mockResolvedValue(team),
+      graphReadiness: vi.fn(),
     };
 
     const input: CeeGoldenJourneyInput = {
@@ -311,6 +312,7 @@ describe("ceeGoldenJourneyExample", () => {
       options: vi.fn(),
       sensitivityCoach: vi.fn(),
       teamPerspectives: vi.fn(),
+      graphReadiness: vi.fn(),
     };
 
     const input: CeeGoldenJourneyInput = {
