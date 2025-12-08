@@ -30,19 +30,32 @@ export const CEEClarifierBlockV1Schema = z.object({
 export type CEEClarifierBlockV1T = z.infer<typeof CEEClarifierBlockV1Schema>;
 export type CEEClarifierMetadataV1T = z.infer<typeof CEEClarifierMetadataV1Schema>;
 
-// Weight suggestion schema for uniform belief detection
+// Weight suggestion schema for uniform belief/weight detection
 export const CEEWeightSuggestionV1Schema = z.object({
   edge_id: z.string(),
   from_node_id: z.string(),
   to_node_id: z.string(),
   current_belief: z.number().min(0).max(1),
-  reason: z.enum(["uniform_distribution", "near_zero", "near_one"]),
+  reason: z.enum([
+    "uniform_distribution",
+    "near_zero",
+    "near_one",
+    // Weight-specific reasons
+    "uniform_weights",
+    "weight_too_low",
+    "weight_too_high",
+  ]),
   suggestion: z.string().optional(),
   // Phase 2 additions: LLM-generated suggestions
   suggested_belief: z.number().min(0).max(1).optional(),
   confidence: z.number().min(0).max(1).optional(),
   rationale: z.string().optional(),
+  // Recommendation flag: true = client should auto-apply without user confirmation (confidence >= 0.7)
+  // false = requires manual review (confidence < 0.7). Server does NOT modify the graph.
   auto_applied: z.boolean().optional(),
+  // Weight-specific fields
+  current_weight: z.number().optional(),
+  suggested_weight: z.number().min(0.3).max(1.5).optional(),
 });
 
 export type CEEWeightSuggestionV1T = z.infer<typeof CEEWeightSuggestionV1Schema>;

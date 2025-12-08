@@ -1246,6 +1246,65 @@ describe("ceeHelpers", () => {
     expect(review.trace?.correlation_id).toBe("r-review");
   });
 
+  it("includes bias_findings from bias envelope in decision review payload", () => {
+    const draft: CEEDraftGraphResponseV1 = {
+      trace: { request_id: "r-bias-test", correlation_id: "r-bias-test", engine: {} },
+      quality: { overall: 7 } as any,
+      graph: {} as any,
+    } as any;
+
+    const bias: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-bias-test", correlation_id: "r-bias-test", engine: {} },
+      quality: { overall: 7 } as any,
+      bias_findings: [
+        {
+          code: "OPTIMISM_BIAS",
+          severity: "warning",
+          message: "The decision model has no risk nodes.",
+          confidence: 0.85,
+          affected_node_ids: ["goal_1"],
+        },
+        {
+          code: "SELECTION_LOW_COUNT",
+          severity: "warning",
+          message: "Only 1 option is defined.",
+          confidence: 0.92,
+        },
+      ],
+    } as any;
+
+    const review = buildCeeDecisionReviewPayload({ draft, bias });
+
+    expect(review.bias_findings).toBeDefined();
+    expect(review.bias_findings).toHaveLength(2);
+    expect(review.bias_findings![0].code).toBe("OPTIMISM_BIAS");
+    expect(review.bias_findings![0].severity).toBe("warning");
+    expect(review.bias_findings![0].confidence).toBe(0.85);
+    expect(review.bias_findings![1].code).toBe("SELECTION_LOW_COUNT");
+  });
+
+  it("omits bias_findings when bias envelope is empty or missing", () => {
+    const draft: CEEDraftGraphResponseV1 = {
+      trace: { request_id: "r-no-bias", correlation_id: "r-no-bias", engine: {} },
+      quality: { overall: 7 } as any,
+      graph: {} as any,
+    } as any;
+
+    // No bias envelope
+    const reviewNoBias = buildCeeDecisionReviewPayload({ draft });
+    expect(reviewNoBias.bias_findings).toBeUndefined();
+
+    // Empty bias_findings array
+    const biasEmpty: CEEBiasCheckResponseV1 = {
+      trace: { request_id: "r-empty-bias", engine: {} },
+      quality: { overall: 7 } as any,
+      bias_findings: [],
+    } as any;
+
+    const reviewEmptyBias = buildCeeDecisionReviewPayload({ draft, bias: biasEmpty });
+    expect(reviewEmptyBias.bias_findings).toBeUndefined();
+  });
+
   it("exposes only metadata in the decision review payload (no raw text leak)", () => {
     const SECRET = "DO_NOT_LEAK_REVIEW";
 

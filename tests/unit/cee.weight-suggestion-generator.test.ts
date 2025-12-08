@@ -512,6 +512,251 @@ describe("WeightSuggestionGenerator", () => {
     });
   });
 
+  describe("weight-related suggestions", () => {
+    it("populates suggested_weight for weight_too_low when confidence >= 0.7", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 0.1, belief: 0.5 } as any],
+      });
+
+      const detections: CEEWeightSuggestionV1T[] = [
+        makeDetection({
+          edge_id: "opt_1->out_1",
+          from_node_id: "opt_1",
+          to_node_id: "out_1",
+          current_belief: 0.5,
+          current_weight: 0.1,
+          reason: "weight_too_low",
+        }),
+      ];
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections,
+        requestId: "test-weight-too-low",
+        numericalGroundingScore: 0.85, // High confidence
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].suggested_weight).toBe(0.5); // Moderate influence
+      expect(results[0].current_weight).toBe(0.1);
+    });
+
+    it("populates suggested_weight for weight_too_high when confidence >= 0.7", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 2.0, belief: 0.5 } as any],
+      });
+
+      const detections: CEEWeightSuggestionV1T[] = [
+        makeDetection({
+          edge_id: "opt_1->out_1",
+          from_node_id: "opt_1",
+          to_node_id: "out_1",
+          current_belief: 0.5,
+          current_weight: 2.0,
+          reason: "weight_too_high",
+        }),
+      ];
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections,
+        requestId: "test-weight-too-high",
+        numericalGroundingScore: 0.85, // High confidence
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].suggested_weight).toBe(1.2); // Strong but not extreme
+      expect(results[0].current_weight).toBe(2.0);
+    });
+
+    it("does not populate suggested_weight for uniform_weights", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [],
+      });
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections: [
+          makeDetection({
+            reason: "uniform_weights",
+            current_weight: 1.0,
+          }),
+        ],
+        requestId: "test-uniform-weights-no-suggested",
+        numericalGroundingScore: 0.9, // Even with high confidence
+      });
+
+      expect(results[0].suggested_weight).toBeUndefined();
+    });
+
+    it("does not populate suggested_weight when confidence < 0.7", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [],
+      });
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections: [
+          makeDetection({
+            reason: "weight_too_low",
+            current_weight: 0.1,
+          }),
+        ],
+        requestId: "test-low-confidence-no-suggested-weight",
+        numericalGroundingScore: 0.3, // Low grounding = low confidence
+      });
+
+      expect(results[0].confidence).toBe(0.5);
+      expect(results[0].suggested_weight).toBeUndefined();
+    });
+
+    it("generates context-aware rationale for uniform_weights", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Strategy A" } as any,
+          { id: "out_1", kind: "outcome", label: "Revenue" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 1.0, belief: 0.5 } as any],
+      });
+
+      const detections: CEEWeightSuggestionV1T[] = [
+        makeDetection({
+          edge_id: "opt_1->out_1",
+          from_node_id: "opt_1",
+          to_node_id: "out_1",
+          current_belief: 0.5,
+          current_weight: 1.0,
+          reason: "uniform_weights",
+        }),
+      ];
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections,
+        requestId: "test-uniform-weights-rationale",
+        numericalGroundingScore: 0.7,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].rationale).toContain("identical weights");
+      expect(results[0].rationale).toContain("Strategy A");
+    });
+
+    it("generates context-aware rationale for weight_too_low", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Budget Plan" } as any,
+          { id: "out_1", kind: "outcome", label: "Cost Savings" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 0.1, belief: 0.5 } as any],
+      });
+
+      const detections: CEEWeightSuggestionV1T[] = [
+        makeDetection({
+          edge_id: "opt_1->out_1",
+          from_node_id: "opt_1",
+          to_node_id: "out_1",
+          current_belief: 0.5,
+          current_weight: 0.1,
+          reason: "weight_too_low",
+        }),
+      ];
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections,
+        requestId: "test-weight-too-low-rationale",
+        numericalGroundingScore: 0.7,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].rationale).toContain("Budget Plan");
+      expect(results[0].rationale).toContain("Cost Savings");
+      expect(results[0].rationale).toContain("0.10");
+      expect(results[0].rationale).toContain("0.3"); // threshold mention
+    });
+
+    it("generates context-aware rationale for weight_too_high", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Aggressive Plan" } as any,
+          { id: "out_1", kind: "outcome", label: "Market Share" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 2.0, belief: 0.5 } as any],
+      });
+
+      const detections: CEEWeightSuggestionV1T[] = [
+        makeDetection({
+          edge_id: "opt_1->out_1",
+          from_node_id: "opt_1",
+          to_node_id: "out_1",
+          current_belief: 0.5,
+          current_weight: 2.0,
+          reason: "weight_too_high",
+        }),
+      ];
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections,
+        requestId: "test-weight-too-high-rationale",
+        numericalGroundingScore: 0.7,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].rationale).toContain("Aggressive Plan");
+      expect(results[0].rationale).toContain("Market Share");
+      expect(results[0].rationale).toContain("2.00");
+      expect(results[0].rationale).toContain("1.5"); // threshold mention
+    });
+
+    it("preserves current_weight in generated suggestions", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [],
+      });
+
+      const detection: CEEWeightSuggestionV1T = {
+        edge_id: "opt_1->out_1",
+        from_node_id: "opt_1",
+        to_node_id: "out_1",
+        current_belief: 0.5,
+        current_weight: 0.15,
+        reason: "weight_too_low",
+        suggestion: "Original suggestion",
+      };
+
+      const results = await generateWeightSuggestions({
+        graph,
+        detections: [detection],
+        requestId: "test-preserve-current-weight",
+        numericalGroundingScore: 0.8,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].current_weight).toBe(0.15);
+    });
+  });
+
   describe("generated suggestion structure", () => {
     it("includes all required Phase 2 fields", async () => {
       const graph = makeGraph({

@@ -134,4 +134,141 @@ describe("WeightSuggestionValidator", () => {
     expect(suggestions.length).toBeLessThanOrEqual(10);
     expect((result.details as any).total_suggestions).toBeGreaterThan(10);
   });
+
+  // Weight detection tests
+  describe("weight detection", () => {
+    it("detects uniform weights on option→outcome edges", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome 1" } as any,
+          { id: "out_2", kind: "outcome", label: "Outcome 2" } as any,
+          { id: "out_3", kind: "outcome", label: "Outcome 3" } as any,
+        ],
+        edges: [
+          { from: "opt_1", to: "out_1", weight: 1.0, belief: 0.5 } as any,
+          { from: "opt_1", to: "out_2", weight: 1.0, belief: 0.6 } as any,
+          { from: "opt_1", to: "out_3", weight: 1.0, belief: 0.7 } as any,
+        ],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const suggestions = (result as any).suggestions;
+      expect(suggestions).toBeDefined();
+      expect(suggestions.length).toBeGreaterThan(0);
+      expect(suggestions.some((s: any) => s.reason === "uniform_weights")).toBe(true);
+      expect(suggestions[0].current_weight).toBe(1.0);
+    });
+
+    it("detects weight below threshold (< 0.3)", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 0.1, belief: 0.5 } as any],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const suggestions = (result as any).suggestions;
+      expect(suggestions).toBeDefined();
+      expect(suggestions.length).toBe(1);
+      expect(suggestions[0].reason).toBe("weight_too_low");
+      expect(suggestions[0].current_weight).toBe(0.1);
+    });
+
+    it("detects weight above threshold (> 1.5)", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome" } as any,
+        ],
+        edges: [{ from: "opt_1", to: "out_1", weight: 2.0, belief: 0.5 } as any],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const suggestions = (result as any).suggestions;
+      expect(suggestions).toBeDefined();
+      expect(suggestions.length).toBe(1);
+      expect(suggestions[0].reason).toBe("weight_too_high");
+      expect(suggestions[0].current_weight).toBe(2.0);
+    });
+
+    it("does not flag weights within valid range", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome 1" } as any,
+          { id: "out_2", kind: "outcome", label: "Outcome 2" } as any,
+        ],
+        edges: [
+          { from: "opt_1", to: "out_1", weight: 0.5, belief: 0.6 } as any,
+          { from: "opt_1", to: "out_2", weight: 1.2, belief: 0.7 } as any,
+        ],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const suggestions = (result as any).suggestions;
+      // No weight issues, no belief issues
+      expect(suggestions.length).toBe(0);
+    });
+
+    it("prioritizes weight extremes before belief extremes", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome 1" } as any,
+          { id: "out_2", kind: "outcome", label: "Outcome 2" } as any,
+        ],
+        edges: [
+          { from: "opt_1", to: "out_1", weight: 0.1, belief: 0.5 } as any, // weight too low
+          { from: "opt_1", to: "out_2", weight: 1.0, belief: 0.01 } as any, // near zero belief
+        ],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const suggestions = (result as any).suggestions;
+      expect(suggestions.length).toBe(2);
+      // Weight issues should come before belief issues
+      expect(suggestions[0].reason).toBe("weight_too_low");
+      expect(suggestions[1].reason).toBe("near_zero");
+    });
+
+    it("includes weight issues in details", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "opt_1", kind: "option", label: "Option A" } as any,
+          { id: "out_1", kind: "outcome", label: "Outcome 1" } as any,
+          { id: "out_2", kind: "outcome", label: "Outcome 2" } as any,
+        ],
+        edges: [
+          { from: "opt_1", to: "out_1", weight: 0.1, belief: 0.5 } as any,
+          { from: "opt_1", to: "out_2", weight: 2.0, belief: 0.5 } as any,
+        ],
+      });
+
+      const validator = new WeightSuggestionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true);
+      const details = result.details as any;
+      expect(details.weight_too_low_edges).toBe(1);
+      expect(details.weight_too_high_edges).toBe(1);
+    });
+  });
 });

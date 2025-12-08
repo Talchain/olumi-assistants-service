@@ -10,6 +10,7 @@ import type {
   CEESensitivityCoachResponseV1,
   CEETeamPerspectivesResponseV1,
 } from "./ceeTypes.js";
+import type { BiasFinding } from "./types/cee-decision-review.js";
 import {
   CEE_QUALITY_HIGH_MIN,
   CEE_QUALITY_MEDIUM_MIN,
@@ -965,6 +966,7 @@ export function buildCeeJourneySummary(envelopes: CeeJourneyEnvelopes): CeeJourn
  * @property {Object} [trace]
  * @property {string} [trace.request_id]
  * @property {string} [trace.correlation_id]
+ * @property {BiasFinding[]} [bias_findings] - Raw bias findings from the bias envelope
  */
 export interface CeeDecisionReviewPayload {
   story: DecisionStorySummary;
@@ -974,6 +976,8 @@ export interface CeeDecisionReviewPayload {
     request_id?: string;
     correlation_id?: string;
   };
+  /** Raw bias findings from the bias envelope, if available */
+  bias_findings?: BiasFinding[];
 }
 
 /**
@@ -1026,11 +1030,18 @@ export function buildCeeDecisionReviewPayload(
         }
       : undefined;
 
+  // Extract bias_findings from the bias envelope if available
+  const rawBiasFindings = (envelopes.bias as any)?.bias_findings;
+  const bias_findings = Array.isArray(rawBiasFindings) && rawBiasFindings.length > 0
+    ? (rawBiasFindings as BiasFinding[])
+    : undefined;
+
   return {
     story: journey.story,
     journey,
     uiFlags,
     trace,
+    ...(bias_findings && { bias_findings }),
   };
 }
 

@@ -5,13 +5,15 @@ import type { VerificationContext, VerificationResult, VerificationStage } from 
 /**
  * WeightSuggestionValidator
  *
- * Analyzes graph edges for uniform/unrefined belief values and generates
+ * Analyzes graph edges for uniform/unrefined belief and weight values and generates
  * suggestions for edges that may benefit from refinement. This validator
  * returns suggestions as data rather than failures.
  *
  * Detection heuristics:
  * - Uniform distribution: All outgoing edges from a decision node have equal beliefs
  * - Near-zero/near-one: Edge beliefs at extreme values (< 0.05 or > 0.95)
+ * - Uniform weights: All outgoing edges from option nodes have identical weights
+ * - Weight too low/high: Edge weights outside recommended range (0.3-1.5)
  */
 export class WeightSuggestionValidator implements VerificationStage<unknown, unknown> {
   readonly name = "weight_suggestions" as const;
@@ -19,6 +21,8 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
   private readonly uniformEpsilon = 0.01;
   private readonly nearZeroThreshold = 0.05;
   private readonly nearOneThreshold = 0.95;
+  private readonly weightLowThreshold = 0.3;
+  private readonly weightHighThreshold = 1.5;
 
   async validate(
     payload: unknown,
@@ -139,11 +143,98 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
       }
     }
 
-    // Prioritize by severity: extremes (near_zero, near_one) before uniform_distribution
+    // Check for uniform weights on option→outcome edges
+    for (const [sourceId, sourceEdges] of edgesBySource) {
+      const sourceKind = kinds.get(sourceId);
+      if (sourceKind !== "option") continue;
+
+      // Filter to only edges pointing to outcome nodes
+      const outcomeEdges = sourceEdges.filter(({ edge }) => {
+        const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
+        return to && kinds.get(to) === "outcome";
+      });
+
+      if (outcomeEdges.length < 3) continue;
+
+      // Check if all weights are equal (uniform weights)
+      const weights = outcomeEdges
+        .map(({ edge }) => edge.weight)
+        .filter((w): w is number => typeof w === "number" && Number.isFinite(w));
+
+      if (weights.length < 3) continue;
+
+      const firstWeight = weights[0];
+      const isUniformWeight = weights.every((w) => Math.abs(w - firstWeight) < this.uniformEpsilon);
+
+      if (isUniformWeight) {
+        // Add suggestion for each uniform weight edge
+        for (const { edge } of outcomeEdges) {
+          const from = edge.from as string;
+          const to = edge.to as string;
+          const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
+          const belief = typeof edge.belief === "number" ? edge.belief : 0.5;
+
+          // Skip if already flagged
+          const edgeId = `${from}->${to}`;
+          if (suggestions.some((s) => s.edge_id === edgeId)) continue;
+
+          suggestions.push({
+            edge_id: edgeId,
+            from_node_id: from,
+            to_node_id: to,
+            current_belief: belief,
+            current_weight: weight,
+            reason: "uniform_weights",
+            suggestion: `All edges from "${labels.get(from) ?? from}" have identical weights (${weight.toFixed(1)}). Vary based on influence strength.`,
+          });
+        }
+      }
+    }
+
+    // Check for extreme weight values (all edges with weights)
+    for (const edge of edges) {
+      const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
+      const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
+      const weight = typeof edge?.weight === "number" ? edge.weight : undefined;
+      const belief = typeof edge?.belief === "number" ? edge.belief : 0.5;
+
+      if (!from || !to || weight === undefined) continue;
+
+      // Skip if already flagged
+      const edgeId = `${from}->${to}`;
+      if (suggestions.some((s) => s.edge_id === edgeId)) continue;
+
+      if (weight < this.weightLowThreshold) {
+        suggestions.push({
+          edge_id: edgeId,
+          from_node_id: from,
+          to_node_id: to,
+          current_belief: belief,
+          current_weight: weight,
+          reason: "weight_too_low",
+          suggestion: `Edge weight (${weight.toFixed(2)}) is below recommended minimum (${this.weightLowThreshold}). Consider 0.5 for moderate influence.`,
+        });
+      } else if (weight > this.weightHighThreshold) {
+        suggestions.push({
+          edge_id: edgeId,
+          from_node_id: from,
+          to_node_id: to,
+          current_belief: belief,
+          current_weight: weight,
+          reason: "weight_too_high",
+          suggestion: `Edge weight (${weight.toFixed(2)}) exceeds recommended maximum (${this.weightHighThreshold}). Consider 1.2 for strong amplification.`,
+        });
+      }
+    }
+
+    // Prioritize by severity: weight extremes and belief extremes first, then uniform patterns
     const severityOrder: Record<string, number> = {
-      near_zero: 0,
-      near_one: 1,
-      uniform_distribution: 2,
+      weight_too_low: 0,
+      weight_too_high: 1,
+      near_zero: 2,
+      near_one: 3,
+      uniform_weights: 4,
+      uniform_distribution: 5,
     };
     suggestions.sort((a, b) => (severityOrder[a.reason] ?? 99) - (severityOrder[b.reason] ?? 99));
 
@@ -157,9 +248,14 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
       details: {
         total_suggestions: suggestions.length,
         suggestions_returned: limitedSuggestions.length,
+        // Belief issues
         uniform_edges: suggestions.filter((s) => s.reason === "uniform_distribution").length,
         near_zero_edges: suggestions.filter((s) => s.reason === "near_zero").length,
         near_one_edges: suggestions.filter((s) => s.reason === "near_one").length,
+        // Weight issues
+        uniform_weight_edges: suggestions.filter((s) => s.reason === "uniform_weights").length,
+        weight_too_low_edges: suggestions.filter((s) => s.reason === "weight_too_low").length,
+        weight_too_high_edges: suggestions.filter((s) => s.reason === "weight_too_high").length,
       },
     };
   }

@@ -226,8 +226,6 @@ const ConfigSchema = z.object({
     cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
     // Graph structure validation (Phase: Graph Validation)
     enforceSingleGoal: booleanString.default(true), // If true, merge multiple goals into compound goal
-    // Weight suggestion generation (Phase 2: Graph Quality)
-    weightSuggestionGenerationEnabled: booleanString.default(false), // If true, generate LLM-powered weight suggestions
     // Per-operation model selection for tiered cost optimization
     models: z.object({
       draft: z.string().optional(),
@@ -448,8 +446,6 @@ function parseConfig(): Config {
       cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
       // Graph structure validation
       enforceSingleGoal: env.CEE_ENFORCE_SINGLE_GOAL,
-      // Weight suggestion generation
-      weightSuggestionGenerationEnabled: env.CEE_WEIGHT_SUGGESTION_GENERATION_ENABLED,
       // Per-operation model selection
       models: {
         draft: env.CEE_MODEL_DRAFT,

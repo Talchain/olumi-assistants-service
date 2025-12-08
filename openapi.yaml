@@ -1920,7 +1920,7 @@ components:
 
     CEEWeightSuggestionV1:
       type: object
-      description: A suggestion for refining an edge weight
+      description: A suggestion for refining an edge weight or belief
       required:
         - edge_id
         - from_node_id
@@ -1942,9 +1942,12 @@ components:
           minimum: 0
           maximum: 1
           description: Current edge belief value (0-1)
+        current_weight:
+          type: number
+          description: Current edge weight value (for weight-related suggestions)
         reason:
           type: string
-          enum: [uniform_distribution, near_zero, near_one]
+          enum: [uniform_distribution, near_zero, near_one, uniform_weights, weight_too_low, weight_too_high]
           description: Why this edge was flagged for refinement
         suggestion:
           type: string
@@ -1954,6 +1957,11 @@ components:
           minimum: 0
           maximum: 1
           description: LLM-recommended belief value (only included when confidence >= 0.7)
+        suggested_weight:
+          type: number
+          minimum: 0.3
+          maximum: 1.5
+          description: Recommended weight value (for weight-related suggestions)
         confidence:
           type: number
           minimum: 0
@@ -1961,10 +1969,13 @@ components:
           description: Confidence in the suggestion (0-1)
         rationale:
           type: string
-          description: Explanation of why this belief should be adjusted
+          description: Explanation of why this value should be adjusted
         auto_applied:
           type: boolean
-          description: Whether the suggestion was automatically applied (true for high/medium confidence)
+          description: >-
+            Indicates whether this suggestion should be auto-applied by the client without user confirmation.
+            True when confidence >= 0.7 (high/medium tier), false when confidence < 0.7 (low tier, requires manual review).
+            This is a recommendation flag, not a status indicator - the server does NOT modify the graph.
 
     CEEClarifierBlockV1:
       type: object

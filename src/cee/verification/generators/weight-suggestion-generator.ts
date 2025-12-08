@@ -17,7 +17,6 @@
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
 import type { CEEWeightSuggestionV1T } from "../../../schemas/ceeResponses.js";
 import { log } from "../../../utils/telemetry.js";
-import { config } from "../../../config/index.js";
 
 /**
  * Context for generating weight suggestions
@@ -37,6 +36,8 @@ export interface WeightSuggestionGeneratorContext {
  */
 export interface GeneratedWeightSuggestion extends CEEWeightSuggestionV1T {
   suggested_belief?: number;
+  suggested_weight?: number;
+  current_weight?: number;
   confidence: number;
   rationale: string;
   auto_applied: boolean;
@@ -111,6 +112,38 @@ function generateSuggestedBelief(
 }
 
 /**
+ * Generate a suggested weight value based on detection reason.
+ *
+ * Only returns a value when confidence >= 0.7 (medium or high tier).
+ */
+function generateSuggestedWeight(
+  detection: CEEWeightSuggestionV1T,
+  confidenceValue: number
+): number | undefined {
+  // Only suggest specific weights when confidence is high enough
+  if (confidenceValue < 0.7) {
+    return undefined;
+  }
+
+  switch (detection.reason) {
+    case "uniform_weights":
+      // For uniform weights, can't suggest without knowing sibling edges
+      return undefined;
+
+    case "weight_too_low":
+      // Suggest moderate influence
+      return 0.5;
+
+    case "weight_too_high":
+      // Suggest strong but not extreme amplification
+      return 1.2;
+
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Generate a deterministic suggestion based on detection type, graph context,
  * and grounding score.
  */
@@ -152,12 +185,32 @@ function generateSuggestion(
         `or whether this near-certainty is justified by strong evidence.`;
       break;
 
+    case "uniform_weights":
+      rationale =
+        `All edges from "${fromLabel}" have identical weights (${(detection.current_weight ?? 1.0).toFixed(2)}). ` +
+        `Vary weights based on influence strength: 1.2-1.5 (strong amplification), 0.8-1.1 (moderate), 0.3-0.7 (weak/dampening).`;
+      break;
+
+    case "weight_too_low":
+      rationale =
+        `The edge from "${fromLabel}" to "${toLabel}" has weight (${(detection.current_weight ?? 0).toFixed(2)}) ` +
+        `below the recommended minimum (0.3). Consider 0.5 for moderate influence.`;
+      break;
+
+    case "weight_too_high":
+      rationale =
+        `The edge from "${fromLabel}" to "${toLabel}" has weight (${(detection.current_weight ?? 0).toFixed(2)}) ` +
+        `exceeding the recommended maximum (1.5). Consider 1.2 for strong amplification without distortion.`;
+      break;
+
     default:
-      rationale = "Consider reviewing this edge's belief value.";
+      rationale = "Consider reviewing this edge's values.";
   }
 
   // Generate suggested belief if confidence is high enough
   const suggestedBelief = generateSuggestedBelief(detection, groundingConfidence.value);
+  // Generate suggested weight if confidence is high enough
+  const suggestedWeight = generateSuggestedWeight(detection, groundingConfidence.value);
 
   return {
     ...detection,
@@ -165,6 +218,8 @@ function generateSuggestion(
     rationale,
     auto_applied: groundingConfidence.autoApplied,
     ...(suggestedBelief !== undefined && { suggested_belief: suggestedBelief }),
+    ...(suggestedWeight !== undefined && { suggested_weight: suggestedWeight }),
+    ...(detection.current_weight !== undefined && { current_weight: detection.current_weight }),
   };
 }
 
@@ -194,19 +249,10 @@ export async function generateWeightSuggestions(
   // Map grounding score to confidence tier
   const groundingConfidence = mapGroundingToConfidence(numericalGroundingScore);
 
-  // Check if feature is enabled (for telemetry purposes)
-  let featureEnabled = false;
-  try {
-    featureEnabled = config.cee.weightSuggestionGenerationEnabled;
-  } catch {
-    // Config not available, default to disabled
-  }
-
   log.debug(
     {
       request_id: requestId,
       detection_count: limitedDetections.length,
-      feature_enabled: featureEnabled,
       grounding_score: numericalGroundingScore,
       confidence_tier: groundingConfidence.tier,
       confidence_value: groundingConfidence.value,
