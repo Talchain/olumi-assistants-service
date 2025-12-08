@@ -15,6 +15,64 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { config } from '../config/index.js';
+import { log, emit } from '../utils/telemetry.js';
+
+/**
+ * Telemetry event for blocked IP access
+ */
+const AdminUIIPBlocked = 'admin.ui.ip.blocked' as const;
+
+/**
+ * Parse and cache allowed IPs from config
+ */
+function getAllowedIPs(): Set<string> | null {
+  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
+  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
+    return null; // No restriction
+  }
+
+  return new Set(
+    allowedIPsConfig
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter((ip) => ip.length > 0)
+  );
+}
+
+/**
+ * Check if request IP is allowed to access admin UI
+ * Returns true if allowed, sends error response if blocked
+ */
+function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
+  const allowedIPs = getAllowedIPs();
+
+  // No IP restriction configured
+  if (!allowedIPs) {
+    return true;
+  }
+
+  const requestIP = request.ip;
+
+  // Check if IP is in allowlist (including localhost variants)
+  const isAllowed =
+    allowedIPs.has(requestIP) ||
+    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
+    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
+
+  if (!isAllowed) {
+    emit(AdminUIIPBlocked, {
+      ip: requestIP,
+      path: request.url,
+      allowedCount: allowedIPs.size,
+    });
+    log.warn({ ip: requestIP, path: request.url }, 'Admin UI access blocked by IP allowlist');
+    reply.status(403).send('Forbidden: IP not allowed');
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * Alpine.js CDN configuration
@@ -1392,8 +1450,13 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
    * - X-Content-Type-Options: Prevents MIME sniffing
    * - X-Frame-Options: Prevents clickjacking
    * - Referrer-Policy: Limits referrer information
+   *
+   * Security: IP allowlist check (same as admin API routes)
    */
-  app.get('/admin', async (_request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin', async (request: FastifyRequest, reply: FastifyReply) => {
+    // Verify IP is allowed before serving admin UI
+    if (!verifyIPAllowed(request, reply)) return;
+
     return reply
       .type('text/html')
       .header('Content-Security-Policy', CSP_HEADER)

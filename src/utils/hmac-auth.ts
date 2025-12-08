@@ -22,11 +22,19 @@
  */
 
 import { createHash } from "node:crypto";
-import { hmacSha256 } from "./hash.js";
+import { verifyHmacSha256 } from "./hash.js";
 import { getRedis } from "../platform/redis.js";
-import { log } from "./telemetry.js";
+import { log, emit } from "./telemetry.js";
 import { LruTtlCache } from "./cache.js";
 import { config } from "../config/index.js";
+
+/**
+ * Telemetry events for Redis fallback monitoring
+ */
+const HmacTelemetryEvents = {
+  RedisFallbackNonceCheck: "hmac.redis_fallback.nonce_check",
+  RedisFallbackNonceStore: "hmac.redis_fallback.nonce_store",
+} as const;
 
 // In-memory nonce cache (fallback) - LRU with TTL to prevent unbounded growth
 // Lazy initialization to use runtime HMAC_MAX_SKEW_MS config
@@ -128,11 +136,8 @@ export async function verifyHmacSignature(
   // Build canonical string
   const canonical = buildCanonicalString(method, path, timestampStr, nonceStr, bodyHash);
 
-  // Compute expected signature
-  const expectedSignature = hmacSha256(canonical, config.secret);
-
-  // Constant-time comparison
-  if (signature !== expectedSignature) {
+  // Constant-time signature verification (prevents timing attacks)
+  if (!verifyHmacSha256(canonical, signature, config.secret)) {
     return { valid: false, error: "INVALID_SIGNATURE" };
   }
 
@@ -185,6 +190,10 @@ async function isNonceUsed(nonce: string): Promise<boolean> {
         return exists === 1;
       } catch (error) {
         log.warn({ error, nonce_prefix: nonce.substring(0, 8) }, "Redis nonce check failed, using memory fallback");
+        emit(HmacTelemetryEvents.RedisFallbackNonceCheck, {
+          nonce_prefix: nonce.substring(0, 8),
+          error: String(error),
+        });
       }
     }
   }
@@ -214,6 +223,10 @@ async function markNonceUsed(nonce: string): Promise<void> {
         return;
       } catch (error) {
         log.warn({ error, nonce_prefix: nonce.substring(0, 8) }, "Redis nonce storage failed, using memory fallback");
+        emit(HmacTelemetryEvents.RedisFallbackNonceStore, {
+          nonce_prefix: nonce.substring(0, 8),
+          error: String(error),
+        });
       }
     }
   }
