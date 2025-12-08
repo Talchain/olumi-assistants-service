@@ -31,3 +31,6 @@ export type CEESensitivityCoachResponseV1 = OpenAPIComponents["schemas"]["CEESen
 
 export type CEETeamPerspectivesRequestV1 = OpenAPIComponents["schemas"]["CEETeamPerspectivesRequestV1"];
 export type CEETeamPerspectivesResponseV1 = OpenAPIComponents["schemas"]["CEETeamPerspectivesResponseV1"];
+
+export type CEEGraphReadinessRequestV1 = OpenAPIComponents["schemas"]["CEEGraphReadinessRequestV1"];
+export type CEEGraphReadinessResponseV1 = OpenAPIComponents["schemas"]["CEEGraphReadinessResponseV1"];
