@@ -60,7 +60,7 @@ jobs:
       - name: Comment size on PR
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        uses: thollander/actions-comment-pull-request@v2
+        uses: thollander/actions-comment-pull-request@v3
         with:
           message: |
             **SDK Build Summary:**
