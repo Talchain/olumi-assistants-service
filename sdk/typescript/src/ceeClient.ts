@@ -13,6 +13,8 @@ import type {
   CEESensitivityCoachResponseV1,
   CEETeamPerspectivesRequestV1,
   CEETeamPerspectivesResponseV1,
+  CEEGraphReadinessRequestV1,
+  CEEGraphReadinessResponseV1,
   CEEErrorResponseV1,
 } from "./ceeTypes.js";
 import type { OlumiConfig, RequestOptions, ErrorResponse } from "./types.js";
@@ -53,6 +55,11 @@ export interface CEEClient {
     body: CEETeamPerspectivesRequestV1,
     options?: RequestOptions,
   ): Promise<CEETeamPerspectivesResponseV1>;
+
+  graphReadiness(
+    body: CEEGraphReadinessRequestV1,
+    options?: RequestOptions,
+  ): Promise<CEEGraphReadinessResponseV1>;
 }
 
 interface InternalConfig {
@@ -338,6 +345,18 @@ class DefaultCEEClient implements CEEClient {
     return requestCEE<CEETeamPerspectivesResponseV1>(
       this.cfg,
       "/assist/v1/team-perspectives",
+      body,
+      options,
+    );
+  }
+
+  graphReadiness(
+    body: CEEGraphReadinessRequestV1,
+    options?: RequestOptions,
+  ): Promise<CEEGraphReadinessResponseV1> {
+    return requestCEE<CEEGraphReadinessResponseV1>(
+      this.cfg,
+      "/assist/v1/graph-readiness",
       body,
       options,
     );
