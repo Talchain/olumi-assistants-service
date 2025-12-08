@@ -749,6 +749,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/graph-readiness:
+    post:
+      summary: Assess graph readiness for analysis (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Graph Readiness** endpoint.
+
+        Evaluates a decision graph's readiness for running inference/analysis.
+        Returns a readiness score (0-100), quality factor breakdown, and
+        actionable recommendations. This endpoint is deterministic, does **not**
+        call any LLMs, and targets sub-50ms latency.
+
+        Use this before running analysis to guide users on graph quality improvements.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEGraphReadinessRequestV1'
+      responses:
+        '200':
+          description: Readiness assessment computed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Graph Readiness feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEGraphReadinessResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Graph Readiness
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/evidence-helper:
     post:
       summary: Score evidence items (CEE v1)
@@ -2361,6 +2432,98 @@ components:
           description: Short description of the suggested structural change
         patch:
           $ref: '#/components/schemas/GraphPatch'
+
+    CEEGraphReadinessRequestV1:
+      type: object
+      description: CEE graph readiness assessment request payload
+      required:
+        - graph
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+
+    CEEGraphReadinessResponseV1:
+      type: object
+      description: Pre-analysis graph readiness assessment
+      required:
+        - readiness_score
+        - readiness_level
+        - confidence_level
+        - confidence_explanation
+        - quality_factors
+        - can_run_analysis
+      properties:
+        readiness_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Overall readiness score (0-100)
+          example: 61
+        readiness_level:
+          type: string
+          enum: [ready, fair, needs_work]
+          description: Categorical readiness assessment
+          example: fair
+        confidence_level:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence in the assessment accuracy
+          example: medium
+        confidence_explanation:
+          type: string
+          description: Plain language explanation for the confidence level
+          example: Your model has sufficient detail for directional insights but needs more causal factors for precise predictions
+        quality_factors:
+          type: array
+          description: Breakdown of quality factors with recommendations
+          items:
+            $ref: '#/components/schemas/CEEQualityFactorV1'
+        can_run_analysis:
+          type: boolean
+          description: Whether the graph meets minimum requirements for analysis
+          example: true
+        blocker_reason:
+          type: string
+          description: Reason analysis is blocked (if can_run_analysis is false)
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEQualityFactorV1:
+      type: object
+      description: Quality factor with score and improvement recommendation
+      required:
+        - factor
+        - current_score
+        - impact
+        - recommendation
+        - potential_improvement
+      properties:
+        factor:
+          type: string
+          enum: [causal_detail, weight_refinement, risk_coverage, outcome_balance, option_diversity]
+          description: Quality factor identifier
+          example: causal_detail
+        current_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Current score for this factor
+          example: 55
+        impact:
+          type: string
+          enum: [high, medium, low]
+          description: Impact of this factor on overall quality
+          example: high
+        recommendation:
+          type: string
+          description: Actionable suggestion to improve this factor
+          example: Add 2-3 causal Factor nodes between Options and Outcomes
+        potential_improvement:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Estimated score gain if recommendation is followed
+          example: 12
 
     CEEOptionV1:
       type: object

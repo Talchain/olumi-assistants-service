@@ -192,3 +192,36 @@ export const CEETeamPerspectivesResponseV1Schema = z
     guidance: z.record(z.any()).optional(),
   })
   .passthrough();
+
+// Graph Readiness Assessment schemas
+
+export const CEEQualityFactorV1Schema = z.object({
+  factor: z.enum([
+    "causal_detail",
+    "weight_refinement",
+    "risk_coverage",
+    "outcome_balance",
+    "option_diversity",
+  ]),
+  current_score: z.number().int().min(0).max(100),
+  impact: z.enum(["high", "medium", "low"]),
+  recommendation: z.string(),
+  potential_improvement: z.number().int().min(0).max(100),
+});
+
+export type CEEQualityFactorV1T = z.infer<typeof CEEQualityFactorV1Schema>;
+
+export const CEEGraphReadinessResponseV1Schema = z
+  .object({
+    readiness_score: z.number().int().min(0).max(100),
+    readiness_level: z.enum(["ready", "fair", "needs_work"]),
+    confidence_level: z.enum(["high", "medium", "low"]),
+    confidence_explanation: z.string(),
+    quality_factors: z.array(CEEQualityFactorV1Schema),
+    can_run_analysis: z.boolean(),
+    blocker_reason: z.string().optional(),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;

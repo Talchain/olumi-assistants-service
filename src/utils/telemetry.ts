@@ -85,6 +85,10 @@ export const TelemetryEvents = {
   CeeBiasCheckSucceeded: "cee.bias_check.succeeded",
   CeeBiasCheckFailed: "cee.bias_check.failed",
 
+  CeeGraphReadinessRequested: "cee.graph_readiness.requested",
+  CeeGraphReadinessCompleted: "cee.graph_readiness.completed",
+  CeeGraphReadinessFailed: "cee.graph_readiness.failed",
+
   CeeOptionsRequested: "cee.options.requested",
   CeeOptionsSucceeded: "cee.options.succeeded",
   CeeOptionsFailed: "cee.options.failed",
@@ -1016,6 +1020,44 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CeeBiasCheckFailed: {
           datadogClient.increment("cee.bias_check.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE v1 Graph Readiness
+        case TelemetryEvents.CeeGraphReadinessRequested: {
+          datadogClient.increment("cee.graph_readiness.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeGraphReadinessCompleted: {
+          datadogClient.increment("cee.graph_readiness.completed", 1);
+
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram(
+              "cee.graph_readiness.latency_ms",
+              latencyMs,
+            );
+          }
+
+          const readinessScore = eventData.readiness_score;
+          if (typeof readinessScore === "number" && Number.isFinite(readinessScore)) {
+            datadogClient.histogram(
+              "cee.graph_readiness.readiness_score",
+              readinessScore,
+            );
+          }
+
+          break;
+        }
+
+        case TelemetryEvents.CeeGraphReadinessFailed: {
+          datadogClient.increment("cee.graph_readiness.failed", 1, {
             error_code: String((eventData.error_code as string) || "unknown"),
             http_status: String(
               (eventData.http_status as number | string | undefined) || "unknown",
