@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Weight Suggestion Generation Always Enabled:**
+  - Removed `CEE_WEIGHT_SUGGESTION_GENERATION_ENABLED` feature flag
+  - Weight suggestion generation now runs automatically when the verification pipeline detects edges with problematic beliefs (uniform, near-zero, near-one) or weights (uniform, too low, too high)
+  - Graceful degradation preserved: generation failures fall back to raw detections
+
 ### Security
 
 - **Critical Dependency Updates (Phase 1: Enterprise-Grade Security)**

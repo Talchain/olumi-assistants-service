@@ -71,9 +71,16 @@ export class NumericalValidator implements VerificationStage<unknown, unknown> {
       };
     }
 
+    // All numbers are grounded - return hallucination_score: 0 so downstream
+    // consumers (weight suggestion generator) can use high confidence (0.9)
     return {
       valid: true,
       stage: this.name,
+      details: {
+        hallucination_score: 0,
+        ungrounded_count: 0,
+        total_numbers: significant.length,
+      },
     };
   }
 
