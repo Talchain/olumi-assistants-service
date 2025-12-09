@@ -17,7 +17,6 @@ import {
   bufferEvent,
   markStreamComplete,
   cleanupStreamState,
-  getStreamState,
 } from "../utils/sse-state.js";
 import { getRedis } from "../platform/redis.js";
 import {
@@ -363,7 +362,7 @@ export default async function route(app: FastifyInstance) {
       }
     }, 10000);
 
-    let sseEndState: "complete" | "timeout" | "aborted" | "error" = "complete";
+    let sseEndState: "complete" | "timeout" | "aborted" | "error";
 
     try {
       // Run the CEE draft pipeline (includes all validations: single goal, outcome beliefs, etc.)
