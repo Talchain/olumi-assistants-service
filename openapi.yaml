@@ -434,6 +434,92 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/draft-graph/stream:
+    post:
+      summary: Draft decision graph with SSE streaming (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Draft My Model** endpoint with
+        Server-Sent Events (SSE) streaming support.
+
+        This endpoint provides real-time streaming of the draft generation process,
+        allowing clients to display progress updates as the graph is being created.
+        It uses the same CEE validation pipeline as `/assist/v1/draft-graph` including:
+        - Single goal enforcement
+        - Preflight brief readiness assessment
+        - Clarification enforcement
+        - Full graph validation and repair
+
+        **SSE Events:**
+        - `stage: DRAFTING` - Initial event indicating draft generation has started
+        - `stage: COMPLETE` - Final event containing the complete response payload
+        - `resume` - Resume token for connection recovery (if Redis available)
+        - Heartbeat comments every 10 seconds to keep connection alive
+
+        **Rate limiting (CEE‑specific):**
+        - Default: 20 requests per 60 seconds per API key (or client IP fallback).
+        - Configurable via `CEE_STREAM_RATE_LIMIT_RPM`.
+        - Exceeding this limit returns an SSE error event with `CEE_RATE_LIMIT`.
+
+        **Degraded Mode:**
+        - If Redis is unavailable, streaming continues but without resume/recovery support.
+        - The `X-SSE-Degraded` header indicates degraded mode.
+      tags:
+        - Draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEDraftGraphRequestV1'
+      responses:
+        '200':
+          description: SSE stream of draft generation events
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Draft Stream feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+            X-SSE-Degraded:
+              description: Present if SSE is operating in degraded mode (no Redis).
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-Sent Events stream. Each event has format:
+                  ```
+                  event: stage
+                  data: {"stage": "DRAFTING"|"COMPLETE", "payload": <CEEDraftGraphResponseV1>}
+                  ```
+        '400':
+          description: CEE validation error (SSE format)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '429':
+          description: CEE rate limit exceeded (SSE format)
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   /assist/v1/decision-review/example:
     get:
       summary: Example Decision Review payload (CEE v1, internal)
