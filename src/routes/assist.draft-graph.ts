@@ -10,6 +10,7 @@ import { getAdapter } from "../adapters/llm/router.js";
 import { validateGraph } from "../services/validateClientWithCache.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
+import { validateAndFixGraph } from "../cee/structure/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
@@ -639,6 +640,23 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
   candidate = enforceStableEdgeIds(candidate);
+
+  // Enforce single goal and other graph invariants (fix for multiple goal nodes bug)
+  const graphValidation = validateAndFixGraph(candidate, undefined, {
+    enforceSingleGoal: config.cee.enforceSingleGoal,
+    checkSizeLimits: false, // Already handled by adapter
+  });
+  if (graphValidation.graph) {
+    candidate = graphValidation.graph as GraphT;
+
+    // Emit telemetry if goals were merged
+    if (graphValidation.fixes.singleGoalApplied) {
+      emit(TelemetryEvents.CeeGraphGoalsMerged, {
+        original_goal_count: graphValidation.fixes.originalGoalCount,
+        merged_goal_ids: graphValidation.fixes.mergedGoalIds,
+      });
+    }
+  }
 
   const finalNodeIds = new Set<string>(candidate.nodes.map((n: any) => (n as any).id as string));
   let hadPrunedNodes = false;
