@@ -17,7 +17,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate");
+    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min");
     vi.stubEnv("CEE_GRAPH_READINESS_RATE_LIMIT_RPM", "3");
 
     cleanBaseUrl();
@@ -33,6 +33,8 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   const headersKey1 = { "X-Olumi-Assist-Key": "readiness-key-1" } as const;
   const headersKey2 = { "X-Olumi-Assist-Key": "readiness-key-2" } as const;
   const headersRate = { "X-Olumi-Assist-Key": "readiness-key-rate" } as const;
+  const headersAlt = { "X-Olumi-Assist-Key": "readiness-key-alt" } as const;
+  const headersMin = { "X-Olumi-Assist-Key": "readiness-key-min" } as const;
 
   function makeGraph() {
     return {
@@ -202,5 +204,58 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     });
 
     expect(res.statusCode).toBe(401);
+  });
+
+  it("accepts edges with source/target format (graph library compatibility)", async () => {
+    // Many graph libraries (D3, Cytoscape, vis.js) use source/target instead of from/to
+    const graphWithSourceTarget = {
+      nodes: [
+        { id: "goal", kind: "goal", label: "Test goal" },
+        { id: "decision", kind: "decision", label: "Test decision" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+      ],
+      edges: [
+        { id: "e1", source: "decision", target: "opt_a" },
+      ],
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersAlt,
+      payload: { graph: graphWithSourceTarget },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(typeof body.readiness_score).toBe("number");
+    expect(["ready", "fair", "needs_work"]).toContain(body.readiness_level);
+  });
+
+  it("accepts minimal graph without version/default_seed/meta (uses defaults)", async () => {
+    // Simpler requests - only nodes and edges required
+    const minimalGraph = {
+      nodes: [
+        { id: "goal", kind: "goal", label: "Simple goal" },
+        { id: "opt", kind: "option", label: "Simple option" },
+      ],
+      edges: [
+        { id: "e1", from: "goal", to: "opt" },
+      ],
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersMin,
+      payload: { graph: minimalGraph },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(typeof body.readiness_score).toBe("number");
+    expect(["ready", "fair", "needs_work"]).toContain(body.readiness_level);
   });
 });

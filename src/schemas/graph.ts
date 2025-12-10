@@ -18,15 +18,42 @@ export const StructuredProvenance = z.object({
   location: z.string().optional(), // "page 3", "row 42", "line 15", etc.
 });
 
-export const Edge = z.object({
+/**
+ * Raw edge input schema - accepts both from/to and source/target formats.
+ * Used for parsing input; see EdgeInput for the flexible input type.
+ */
+const EdgeInput = z.object({
   id: z.string().optional(),
-  from: z.string(),
-  to: z.string(),
+  // Primary format (PLoT convention)
+  from: z.string().optional(),
+  to: z.string().optional(),
+  // Alternative format (common in graph libraries like D3, Cytoscape, vis.js)
+  source: z.string().optional(),
+  target: z.string().optional(),
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
   // Support both structured and legacy string provenance for migration
   provenance: z.union([StructuredProvenance, z.string().min(1)]).optional(),
   provenance_source: ProvenanceSource.optional()
+}).refine(
+  (edge) => (edge.from && edge.to) || (edge.source && edge.target),
+  { message: "Edge must have either from/to or source/target fields" }
+);
+
+/**
+ * Edge schema with normalization - accepts both formats, outputs from/to.
+ *
+ * Many graph libraries use source/target by default, so we accept both
+ * at the API boundary and normalize to from/to internally.
+ */
+export const Edge = EdgeInput.transform((edge) => {
+  // Normalize to from/to, removing source/target from output
+  const { source, target, ...rest } = edge;
+  return {
+    ...rest,
+    from: edge.from ?? source!,
+    to: edge.to ?? target!,
+  };
 });
 
 export const Graph = z.object({
