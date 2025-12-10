@@ -63,10 +63,10 @@ config.server.baseUrl       // BASE_URL
 ```typescript
 config.auth.assistApiKeys   // ASSIST_API_KEYS (array)
 config.auth.assistApiKey    // ASSIST_API_KEY (legacy single key)
-config.auth.hmacSecret      // HMAC_SECRET
+config.auth.hmacSecret      // CEE_HMAC_SECRET ?? HMAC_SECRET
 config.auth.hmacMaxSkewMs   // HMAC_MAX_SKEW_MS (default: 300000)
 config.auth.islApiKey       // ISL_API_KEY
-config.auth.shareSecret     // SHARE_SECRET
+config.auth.shareSecret     // CEE_SHARE_SECRET ?? SHARE_SECRET
 ```
 
 ### LLM Configuration
@@ -83,7 +83,7 @@ config.llm.providersConfigPath // PROVIDERS_CONFIG_PATH
 ### Feature Flags
 
 ```typescript
-config.features.grounding      // GROUNDING_ENABLED (default: true)
+config.features.grounding      // CEE_GROUNDING_ENABLED ?? GROUNDING_ENABLED (default: false)
 config.features.critique       // CRITIQUE_ENABLED (default: true)
 config.features.clarifier      // CLARIFIER_ENABLED (default: true)
 config.features.piiGuard       // PII_GUARD_ENABLED (default: false)

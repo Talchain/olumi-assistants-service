@@ -249,6 +249,26 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeGraphReadinessRequested: "cee.graph_readiness.requested",
         CeeGraphReadinessCompleted: "cee.graph_readiness.completed",
         CeeGraphReadinessFailed: "cee.graph_readiness.failed",
+
+        // Key Insight events (v2.4)
+        CeeKeyInsightRequested: "cee.key_insight.requested",
+        CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
+        CeeKeyInsightFailed: "cee.key_insight.failed",
+
+        // Elicit Belief events (v2.5)
+        CeeElicitBeliefRequested: "cee.elicit_belief.requested",
+        CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
+        CeeElicitBeliefFailed: "cee.elicit_belief.failed",
+
+        // Utility Weight events (v2.5)
+        CeeUtilityWeightRequested: "cee.utility_weight.requested",
+        CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
+        CeeUtilityWeightFailed: "cee.utility_weight.failed",
+
+        // Risk Tolerance events (v2.5)
+        CeeRiskToleranceRequested: "cee.risk_tolerance.requested",
+        CeeRiskToleranceSucceeded: "cee.risk_tolerance.succeeded",
+        CeeRiskToleranceFailed: "cee.risk_tolerance.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -274,7 +294,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -511,6 +531,26 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
         "cee.graph_readiness.completed": [TelemetryEvents.CeeGraphReadinessCompleted],
         "cee.graph_readiness.failed": [TelemetryEvents.CeeGraphReadinessFailed],
+
+        // Key Insight events (v2.4)
+        "cee.key_insight.requested": [TelemetryEvents.CeeKeyInsightRequested],
+        "cee.key_insight.succeeded": [TelemetryEvents.CeeKeyInsightSucceeded],
+        "cee.key_insight.failed": [TelemetryEvents.CeeKeyInsightFailed],
+
+        // Elicit Belief events (v2.5)
+        "cee.elicit_belief.requested": [TelemetryEvents.CeeElicitBeliefRequested],
+        "cee.elicit_belief.succeeded": [TelemetryEvents.CeeElicitBeliefSucceeded],
+        "cee.elicit_belief.failed": [TelemetryEvents.CeeElicitBeliefFailed],
+
+        // Utility Weight events (v2.5)
+        "cee.utility_weight.requested": [TelemetryEvents.CeeUtilityWeightRequested],
+        "cee.utility_weight.succeeded": [TelemetryEvents.CeeUtilityWeightSucceeded],
+        "cee.utility_weight.failed": [TelemetryEvents.CeeUtilityWeightFailed],
+
+        // Risk Tolerance events (v2.5)
+        "cee.risk_tolerance.requested": [TelemetryEvents.CeeRiskToleranceRequested],
+        "cee.risk_tolerance.succeeded": [TelemetryEvents.CeeRiskToleranceSucceeded],
+        "cee.risk_tolerance.failed": [TelemetryEvents.CeeRiskToleranceFailed],
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
@@ -798,6 +838,26 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.graph_readiness.requested",
         "cee.graph_readiness.completed",
         "cee.graph_readiness.failed",
+
+        // Key Insight events (v2.4)
+        "cee.key_insight.requested",
+        "cee.key_insight.succeeded",
+        "cee.key_insight.failed",
+
+        // Elicit Belief events (v2.5)
+        "cee.elicit_belief.requested",
+        "cee.elicit_belief.succeeded",
+        "cee.elicit_belief.failed",
+
+        // Utility Weight events (v2.5)
+        "cee.utility_weight.requested",
+        "cee.utility_weight.succeeded",
+        "cee.utility_weight.failed",
+
+        // Risk Tolerance events (v2.5)
+        "cee.risk_tolerance.requested",
+        "cee.risk_tolerance.succeeded",
+        "cee.risk_tolerance.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

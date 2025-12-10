@@ -589,6 +589,8 @@ paths:
 
         This endpoint is authenticated and intended for backend or ops consumers
         that already integrate with other `/assist/v1/*` routes.
+
+        Note: This endpoint is not rate-limited.
       tags:
         - Health
       responses:
@@ -598,23 +600,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CeeServiceHealthSummaryV1'
-        '400':
-          description: CEE validation error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CEEErrorResponseV1'
-        '429':
-          description: CEE per-feature rate limit exceeded for Team Perspectives
-          headers:
-            Retry-After:
-              description: Seconds until the client may retry this request.
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CEEErrorResponseV1'
         '503':
           description: CEE service unavailable
           content:
@@ -895,6 +880,308 @@ paths:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
         '503':
           description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/key-insight:
+    post:
+      summary: Generate key insight prose from ranked actions (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Key Insight** endpoint.
+
+        Generates clean, human-readable prose summaries from decision analysis
+        results. Takes ranked actions and optional drivers from PLoT inference
+        and produces a headline, primary driver explanation, confidence statement,
+        and optional caveat.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. All label sanitisation (removing question marks,
+        prefixes, etc.) is handled automatically.
+
+        Use this after running inference to generate clean narrative summaries
+        for UI display.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEKeyInsightRequestV1'
+      responses:
+        '200':
+          description: Key insight generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Key Insight feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEKeyInsightResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Key Insight
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '503':
+          description: CEE service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/elicit-belief:
+    post:
+      summary: Convert natural language to probability (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Belief Elicitation** endpoint.
+
+        Converts natural language probability expressions to normalized 0-1 values.
+        Handles qualitative terms ("likely", "probably"), percentages ("70%", "about 80%"),
+        fractions ("3 in 4", "1/2"), and ambiguous expressions that need clarification.
+
+        This endpoint is deterministic, does **not** call any LLMs for known patterns,
+        and targets sub-50ms latency. Ambiguous expressions return a clarifying question
+        with clickable options for the user.
+
+        Use this when eliciting belief values from users for priors or edge weights.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEElicitBeliefRequestV1'
+      responses:
+        '200':
+          description: Belief elicited successfully (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Elicit Belief feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEElicitBeliefResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Elicit Belief
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/suggest-utility-weights:
+    post:
+      summary: Suggest importance weights for outcome nodes (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Utility Weight Suggestions** endpoint.
+
+        Suggests relative importance weights for outcome nodes in a decision graph.
+        Uses semantic analysis of node labels and decision context to infer priorities.
+        Weights are normalized to sum to 1.0.
+
+        This endpoint is deterministic, does **not** call any LLMs when semantic signals
+        are clear, and targets sub-100ms latency. When applicable, provides alternative
+        weighting schemes (e.g., risk-averse, growth-focused, balanced).
+
+        Use this when users need help assigning utility weights to outcomes.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEUtilityWeightRequestV1'
+      responses:
+        '200':
+          description: Utility weight suggestions generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Utility Weight feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEUtilityWeightResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Utility Weight
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/elicit-risk-tolerance:
+    post:
+      summary: Elicit user risk tolerance profile (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Risk Tolerance Elicitation** endpoint.
+
+        Two modes of operation:
+        - `get_questions`: Returns a questionnaire for assessing risk tolerance
+        - `process_responses`: Processes user answers and returns a risk profile
+
+        The risk profile includes:
+        - Profile type: risk_averse, risk_neutral, or risk_seeking
+        - Score (0-100) with breakdown by category
+        - Recommended utility coefficient for decision analysis
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. Questions are context-specific (product or business).
+
+        Use this to calibrate utility functions based on stakeholder risk preferences.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEERiskToleranceRequestV1'
+            examples:
+              get_questions:
+                summary: Get questions for product context
+                value:
+                  mode: get_questions
+                  context: product
+              process_responses:
+                summary: Process user responses
+                value:
+                  mode: process_responses
+                  context: product
+                  responses:
+                    - question_id: q1_feature_launch
+                      option_id: q1_o2
+                    - question_id: q2_mixed_results
+                      option_id: q2_o2
+      responses:
+        '200':
+          description: Risk tolerance assessment (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Risk Tolerance feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/CEERiskToleranceGetQuestionsResponseV1'
+                  - $ref: '#/components/schemas/CEERiskToleranceProcessResponsesResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Risk Tolerance
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -2538,6 +2825,7 @@ components:
         - confidence_explanation
         - quality_factors
         - can_run_analysis
+        - trace
       properties:
         readiness_score:
           type: integer
@@ -2610,6 +2898,532 @@ components:
           maximum: 100
           description: Estimated score gain if recommendation is followed
           example: 12
+
+    RankedActionV1:
+      type: object
+      description: A ranked action from PLoT inference
+      required:
+        - node_id
+        - label
+        - expected_utility
+      properties:
+        node_id:
+          type: string
+          description: Node ID of the option
+          example: opt-1
+        label:
+          type: string
+          description: Label of the option (may contain question marks - will be sanitised)
+          example: Implement time-tracking software?
+        expected_utility:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Expected utility score (higher is better)
+          example: 0.78
+        dominant:
+          type: boolean
+          description: Whether this option is clearly dominant over alternatives
+          example: false
+
+    DriverV1:
+      type: object
+      description: A driver from PLoT inference
+      required:
+        - node_id
+        - label
+      properties:
+        node_id:
+          type: string
+          description: Node ID of the driver node
+          example: drv-1
+        label:
+          type: string
+          description: Label of the driver
+          example: Revenue impact
+        impact_pct:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Impact percentage (0-100)
+          example: 45
+        direction:
+          type: string
+          enum: [positive, negative, neutral]
+          description: Direction of influence
+          example: positive
+
+    CEEKeyInsightRequestV1:
+      type: object
+      description: CEE key insight request payload
+      required:
+        - graph
+        - ranked_actions
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        ranked_actions:
+          type: array
+          description: Ranked actions from PLoT inference (required, min 1)
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RankedActionV1'
+        top_drivers:
+          type: array
+          description: Top drivers from PLoT inference (optional)
+          items:
+            $ref: '#/components/schemas/DriverV1'
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEKeyInsightResponseV1:
+      type: object
+      description: Generated key insight with clean prose
+      required:
+        - headline
+        - primary_driver
+        - confidence_statement
+        - quality
+        - trace
+        - provenance
+      properties:
+        headline:
+          type: string
+          description: Main recommendation headline (sanitised, no question marks)
+          example: Implementing time-tracking software is the stronger option
+        primary_driver:
+          type: string
+          description: Primary driver explanation
+          example: Revenue impact is the dominant factor, accounting for 45% of the outcome.
+        confidence_statement:
+          type: string
+          description: Confidence statement about the recommendation
+          example: This recommendation has high confidence based on the analysis.
+        caveat:
+          type: string
+          description: Optional caveat if the recommendation is close
+          example: Consider that manual tracking is a close second—sensitivity analysis recommended.
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+
+    CEEElicitBeliefRequestV1:
+      type: object
+      description: CEE elicit belief request payload
+      required:
+        - node_id
+        - node_label
+        - user_expression
+        - target_type
+      properties:
+        node_id:
+          type: string
+          description: ID of the node this belief applies to
+          example: n1
+        node_label:
+          type: string
+          description: Human-readable label for the node
+          example: Market expansion succeeds
+        user_expression:
+          type: string
+          description: Natural language probability expression from the user
+          example: pretty likely
+        target_type:
+          type: string
+          enum: [prior, edge_weight]
+          description: Whether this is a prior belief or edge weight
+          example: prior
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEElicitBeliefOptionV1:
+      type: object
+      description: Clickable option for clarification
+      required:
+        - label
+        - value
+      properties:
+        label:
+          type: string
+          description: Human-readable label for the option
+          example: Very likely (85%)
+        value:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Normalized probability value
+          example: 0.85
+
+    CEEElicitBeliefResponseV1:
+      type: object
+      description: Elicited belief result with optional clarification
+      required:
+        - suggested_value
+        - confidence
+        - reasoning
+        - needs_clarification
+        - provenance
+      properties:
+        suggested_value:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Normalized probability value (0-1)
+          example: 0.70
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence in the interpretation
+          example: high
+        reasoning:
+          type: string
+          description: Explanation of how the value was derived
+          example: Interpreted "pretty likely" as approximately 70% probability based on common usage.
+        needs_clarification:
+          type: boolean
+          description: Whether the expression was ambiguous and needs clarification
+          example: false
+        clarifying_question:
+          type: string
+          description: Question to ask the user if clarification is needed
+          example: What probability would you assign to "Market expansion succeeds"?
+        options:
+          type: array
+          description: Clickable options for clarification
+          items:
+            $ref: '#/components/schemas/CEEElicitBeliefOptionV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEUtilityWeightRequestV1:
+      type: object
+      description: CEE utility weight suggestions request payload
+      required:
+        - graph
+        - outcome_node_ids
+      properties:
+        graph:
+          $ref: '#/components/schemas/Graph'
+        outcome_node_ids:
+          type: array
+          description: IDs of outcome nodes to suggest weights for
+          items:
+            type: string
+          example: ["o1", "o2", "o3"]
+        decision_description:
+          type: string
+          description: Optional context about the decision being made
+          example: Choosing a market expansion strategy
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEWeightSuggestionItemV1:
+      type: object
+      description: Individual weight suggestion for an outcome node
+      required:
+        - node_id
+        - node_label
+        - suggested_weight
+        - reasoning
+      properties:
+        node_id:
+          type: string
+          description: ID of the outcome node
+          example: o1
+        node_label:
+          type: string
+          description: Human-readable label of the node
+          example: Revenue growth
+        suggested_weight:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Suggested importance weight (0-1)
+          example: 0.45
+        reasoning:
+          type: string
+          description: Explanation for the suggested weight
+          example: Weight based on high-priority indicator.
+
+    CEEAlternativeWeightingV1:
+      type: object
+      description: Alternative weighting scheme
+      required:
+        - name
+        - description
+        - weights
+      properties:
+        name:
+          type: string
+          description: Name of the alternative weighting scheme
+          example: Risk-averse
+        description:
+          type: string
+          description: Explanation of this weighting approach
+          example: Emphasizes risk mitigation over benefit maximization.
+        weights:
+          type: array
+          description: Weights for each outcome node
+          items:
+            type: object
+            required:
+              - node_id
+              - weight
+            properties:
+              node_id:
+                type: string
+                description: ID of the outcome node
+              weight:
+                type: number
+                format: double
+                minimum: 0
+                maximum: 1
+                description: Weight for this node
+
+    CEEUtilityWeightResponseV1:
+      type: object
+      description: Utility weight suggestions with alternatives
+      required:
+        - suggestions
+        - reasoning
+        - confidence
+        - provenance
+      properties:
+        suggestions:
+          type: array
+          description: Weight suggestions for each outcome node
+          items:
+            $ref: '#/components/schemas/CEEWeightSuggestionItemV1'
+        reasoning:
+          type: string
+          description: Overall reasoning for the weight distribution
+          example: Based on semantic analysis of outcome labels, "Revenue growth" appears most significant.
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence in the weight suggestions
+          example: high
+        alternatives:
+          type: array
+          description: Alternative weighting schemes (risk-averse, growth-focused, balanced)
+          items:
+            $ref: '#/components/schemas/CEEAlternativeWeightingV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEERiskToleranceRequestV1:
+      type: object
+      description: CEE risk tolerance elicitation request payload
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum: [get_questions, process_responses]
+          description: Operation mode - get questions or process user responses
+          example: get_questions
+        context:
+          type: string
+          enum: [product, business]
+          default: product
+          description: Context for questions (product decisions vs business strategy)
+          example: product
+        responses:
+          type: array
+          description: User responses to questions (required for process_responses mode)
+          items:
+            type: object
+            required:
+              - question_id
+              - option_id
+            properties:
+              question_id:
+                type: string
+                description: ID of the question answered
+              option_id:
+                type: string
+                description: ID of the selected option
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEERiskToleranceOptionV1:
+      type: object
+      description: Option for a risk tolerance question
+      required:
+        - id
+        - label
+        - risk_score
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this option
+          example: q1_o1
+        label:
+          type: string
+          description: Short label for the option
+          example: Wait for polish
+        description:
+          type: string
+          description: Detailed description of the option
+          example: Delay launch by 2 weeks to refine UX and fix edge cases
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Risk score (0 = risk averse, 100 = risk seeking)
+          example: 20
+
+    CEERiskToleranceQuestionV1:
+      type: object
+      description: Risk tolerance assessment question
+      required:
+        - id
+        - question
+        - options
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this question
+          example: q1_feature_launch
+        question:
+          type: string
+          description: The question text
+          example: "You're deciding when to launch a new feature. What's your preference?"
+        options:
+          type: array
+          description: Available response options
+          items:
+            $ref: '#/components/schemas/CEERiskToleranceOptionV1'
+
+    CEERiskToleranceGetQuestionsResponseV1:
+      type: object
+      description: Response containing risk tolerance questions
+      required:
+        - questions
+        - provenance
+      properties:
+        questions:
+          type: array
+          description: Questions for risk tolerance assessment
+          items:
+            $ref: '#/components/schemas/CEERiskToleranceQuestionV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEERiskProfileV1:
+      type: object
+      description: User's risk tolerance profile
+      required:
+        - type
+        - score
+        - reasoning
+        - recommended_coefficient
+      properties:
+        type:
+          type: string
+          enum: [risk_averse, risk_neutral, risk_seeking]
+          description: Risk profile category
+          example: risk_neutral
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Overall risk tolerance score
+          example: 50
+        reasoning:
+          type: string
+          description: Explanation of the risk profile assessment
+          example: Your responses indicate a balanced approach to risk.
+        recommended_coefficient:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Recommended utility coefficient for decision analysis
+          example: 0.5
+
+    CEERiskBreakdownV1:
+      type: object
+      description: Risk tolerance breakdown by category
+      required:
+        - certainty
+        - loss_aversion
+        - time_preference
+      properties:
+        certainty:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Preference for certain vs uncertain outcomes
+          example: 50
+        loss_aversion:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Sensitivity to potential losses vs gains
+          example: 45
+        time_preference:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Preference for near-term vs long-term outcomes
+          example: 55
+
+    CEERiskToleranceProcessResponsesResponseV1:
+      type: object
+      description: Response containing processed risk tolerance profile
+      required:
+        - profile
+        - breakdown
+        - confidence
+        - provenance
+      properties:
+        profile:
+          $ref: '#/components/schemas/CEERiskProfileV1'
+        breakdown:
+          $ref: '#/components/schemas/CEERiskBreakdownV1'
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence in the assessment based on response coverage
+          example: high
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
 
     CEEOptionV1:
       type: object

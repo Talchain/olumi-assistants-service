@@ -35,6 +35,15 @@ export interface ModelConfig {
  *
  * Defines all supported models with their characteristics.
  * Models can be enabled/disabled via environment variables.
+ *
+ * MAINTENANCE NOTE:
+ * The costPer1kTokens values should be reviewed quarterly or when providers
+ * announce pricing changes. Current prices as of 2024-12:
+ * - OpenAI: https://openai.com/pricing
+ * - Anthropic: https://www.anthropic.com/pricing
+ *
+ * When adding new models, ensure costPer1kTokens reflects input token pricing
+ * (output pricing is typically higher but we use input for cost estimation).
  */
 export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   "gpt-4o-mini": {

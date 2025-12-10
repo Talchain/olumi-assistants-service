@@ -24,6 +24,10 @@ import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js"
 import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
 import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-example.js";
 import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
+import ceeKeyInsightRouteV1 from "./routes/assist.v1.key-insight.js";
+import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
+import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
+import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
@@ -517,6 +521,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeSensitivityCoachRouteV1(app);
   await ceeTeamPerspectivesRouteV1(app);
   await ceeGraphReadinessRouteV1(app);
+  await ceeKeyInsightRouteV1(app);
+  await ceeElicitBeliefRouteV1(app);
+  await ceeUtilityWeightRouteV1(app);
+  await ceeRiskToleranceRouteV1(app);
   await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);

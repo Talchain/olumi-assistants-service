@@ -31,6 +31,9 @@ export const log = pino({
       "*.headers.authorization",
       "*.headers.x-api-key",
       "*.headers.x-olumi-assist-key",
+      "*.headers.x-admin-key",
+      "*.headers.x-hmac-signature",
+      "*.headers.x-share-token",
       "*.headers.cookie",
       // PII fields
       "*.email",
@@ -100,6 +103,22 @@ export const TelemetryEvents = {
   CeeTeamPerspectivesRequested: "cee.team_perspectives.requested",
   CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
   CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
+
+  CeeKeyInsightRequested: "cee.key_insight.requested",
+  CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
+  CeeKeyInsightFailed: "cee.key_insight.failed",
+
+  CeeElicitBeliefRequested: "cee.elicit_belief.requested",
+  CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
+  CeeElicitBeliefFailed: "cee.elicit_belief.failed",
+
+  CeeUtilityWeightRequested: "cee.utility_weight.requested",
+  CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
+  CeeUtilityWeightFailed: "cee.utility_weight.failed",
+
+  CeeRiskToleranceRequested: "cee.risk_tolerance.requested",
+  CeeRiskToleranceSucceeded: "cee.risk_tolerance.succeeded",
+  CeeRiskToleranceFailed: "cee.risk_tolerance.failed",
 
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
@@ -1121,6 +1140,86 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CeeTeamPerspectivesFailed: {
           datadogClient.increment("cee.team_perspectives.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightRequested: {
+          datadogClient.increment("cee.key_insight.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightSucceeded: {
+          datadogClient.increment("cee.key_insight.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightFailed: {
+          datadogClient.increment("cee.key_insight.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefRequested: {
+          datadogClient.increment("cee.elicit_belief.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefSucceeded: {
+          datadogClient.increment("cee.elicit_belief.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefFailed: {
+          datadogClient.increment("cee.elicit_belief.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightRequested: {
+          datadogClient.increment("cee.utility_weight.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightSucceeded: {
+          datadogClient.increment("cee.utility_weight.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightFailed: {
+          datadogClient.increment("cee.utility_weight.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceRequested: {
+          datadogClient.increment("cee.risk_tolerance.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceSucceeded: {
+          datadogClient.increment("cee.risk_tolerance.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceFailed: {
+          datadogClient.increment("cee.risk_tolerance.failed", 1, {
             error_code: String((eventData.error_code as string) || "unknown"),
             http_status: String(
               (eventData.http_status as number | string | undefined) || "unknown",
