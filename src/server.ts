@@ -51,6 +51,7 @@ import { adminUIRoutes } from "./routes/admin.ui.js";
 import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
 import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
+import { createLoggerConfig } from "./utils/logger-config.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -119,40 +120,7 @@ export async function build() {
   const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
   const app = Fastify({
-    logger: {
-      level: env.LOG_LEVEL || "info",
-      redact: {
-        paths: [
-          // Auth secrets (at any depth)
-          "*.password",
-          "*.secret",
-          "*.token",
-          "*.apiKey",
-          "*.api_key",
-          "*.apikey",
-          "*.authorization",
-          "*.credentials",
-          "*.accessToken",
-          "*.access_token",
-          "*.refreshToken",
-          "*.refresh_token",
-          "*.privateKey",
-          "*.private_key",
-          // Common header names
-          "*.headers.authorization",
-          "*.headers.x-api-key",
-          "*.headers.x-olumi-assist-key",
-          "*.headers.cookie",
-          // PII fields
-          "*.email",
-          "*.phone",
-          "*.ssn",
-          "*.creditCard",
-          "*.credit_card",
-        ],
-        censor: "[REDACTED]",
-      },
-    },
+    logger: createLoggerConfig(env.LOG_LEVEL || "info"),
     bodyLimit: BODY_LIMIT_BYTES,
     connectionTimeout: ROUTE_TIMEOUT_MS,
     requestTimeout: ROUTE_TIMEOUT_MS,

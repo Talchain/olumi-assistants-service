@@ -1,50 +1,18 @@
 import { env } from "node:process";
 import pino from "pino";
 import { StatsD } from "hot-shots";
+import { createLoggerConfig } from "./logger-config.js";
 
 /**
  * Pino logger with secret/PII redaction
  *
  * Redacts sensitive fields to prevent accidental exposure in logs.
  * Paths use wildcards to match nested objects at any depth.
+ *
+ * SECURITY: Redaction paths centralized in src/utils/logger-config.ts
+ * to ensure both Fastify and standalone Pino loggers stay in sync.
  */
-export const log = pino({
-  level: env.LOG_LEVEL || "info",
-  redact: {
-    paths: [
-      // Auth secrets (at any depth)
-      "*.password",
-      "*.secret",
-      "*.token",
-      "*.apiKey",
-      "*.api_key",
-      "*.apikey",
-      "*.authorization",
-      "*.credentials",
-      "*.accessToken",
-      "*.access_token",
-      "*.refreshToken",
-      "*.refresh_token",
-      "*.privateKey",
-      "*.private_key",
-      // Common header names
-      "*.headers.authorization",
-      "*.headers.x-api-key",
-      "*.headers.x-olumi-assist-key",
-      "*.headers.x-admin-key",
-      "*.headers.x-hmac-signature",
-      "*.headers.x-share-token",
-      "*.headers.cookie",
-      // PII fields
-      "*.email",
-      "*.phone",
-      "*.ssn",
-      "*.creditCard",
-      "*.credit_card",
-    ],
-    censor: "[REDACTED]",
-  },
-});
+export const log = pino(createLoggerConfig(env.LOG_LEVEL || "info"));
 
 /**
  * Test sink for capturing telemetry events in tests (v1.11.0)
