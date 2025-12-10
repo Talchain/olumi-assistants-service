@@ -354,10 +354,12 @@ function parseConfig(): Config {
     auth: {
       assistApiKeys: env.ASSIST_API_KEYS,
       assistApiKey: env.ASSIST_API_KEY,
-      hmacSecret: env.HMAC_SECRET,
+      // CEE_HMAC_SECRET preferred; falls back to HMAC_SECRET
+      hmacSecret: env.CEE_HMAC_SECRET ?? env.HMAC_SECRET,
       hmacMaxSkewMs: env.HMAC_MAX_SKEW_MS,
       islApiKey: env.ISL_API_KEY,
-      shareSecret: env.SHARE_SECRET,
+      // CEE_SHARE_SECRET preferred; falls back to SHARE_SECRET
+      shareSecret: env.CEE_SHARE_SECRET ?? env.SHARE_SECRET,
     },
     llm: {
       provider: env.LLM_PROVIDER,
@@ -368,7 +370,8 @@ function parseConfig(): Config {
       providersConfigPath: env.PROVIDERS_CONFIG_PATH,
     },
     features: {
-      grounding: env.GROUNDING_ENABLED,
+      // CEE_GROUNDING_ENABLED preferred; falls back to GROUNDING_ENABLED
+      grounding: env.CEE_GROUNDING_ENABLED ?? env.GROUNDING_ENABLED,
       critique: env.CRITIQUE_ENABLED,
       clarifier: env.CLARIFIER_ENABLED,
       piiGuard: env.PII_GUARD_ENABLED,

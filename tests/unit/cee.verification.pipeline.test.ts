@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import { verificationPipeline } from "../../src/cee/verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../src/schemas/ceeResponses.js";
+import * as telemetry from "../../src/utils/telemetry.js";
 
 // Minimal helper to build a valid CEEDraftGraphResponseV1-like payload for tests.
 function buildMinimalDraftResponse() {
@@ -355,6 +356,211 @@ describe("VerificationPipeline", () => {
       const suggestion = suggestions[0];
       expect(suggestion.rationale).toContain("Market Strategy");
       expect(suggestion.rationale).toContain("equal probability");
+    });
+  });
+
+  describe("telemetry", () => {
+    it("emits only metadata in telemetry (no user text)", async () => {
+      const emitSpy = vi.spyOn(telemetry, "emit");
+
+      const payload = buildMinimalDraftResponse();
+      // Add user-generated content that should NOT appear in telemetry
+      payload.graph.nodes[0] = {
+        id: "n1",
+        kind: "goal",
+        label: "Sensitive user goal about secret project",
+        body: "Private business details about our strategy",
+      } as any;
+
+      await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        {
+          endpoint: "draft-graph",
+          requiresEngineValidation: false,
+          requestId: "req_telemetry_test",
+        },
+      );
+
+      // Verify telemetry was emitted
+      expect(emitSpy).toHaveBeenCalled();
+
+      // Check all telemetry calls - none should contain user text
+      for (const call of emitSpy.mock.calls) {
+        const eventData = JSON.stringify(call[1] ?? {});
+        expect(eventData).not.toContain("Sensitive user goal");
+        expect(eventData).not.toContain("secret project");
+        expect(eventData).not.toContain("Private business details");
+        // Verify it contains only metadata
+        if (call[0] === telemetry.TelemetryEvents.CeeVerificationSucceeded) {
+          const data = call[1] as Record<string, unknown>;
+          expect(data.endpoint).toBe("draft-graph");
+          expect(data.request_id).toBe("req_telemetry_test");
+          expect(typeof data.verification_latency_ms).toBe("number");
+          expect(typeof data.stages_passed).toBe("number");
+        }
+      }
+
+      emitSpy.mockRestore();
+    });
+
+    it("emits CeeVerificationSucceeded on successful verification", async () => {
+      const emitSpy = vi.spyOn(telemetry, "emit");
+      const payload = buildMinimalDraftResponse();
+
+      await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        {
+          endpoint: "draft-graph",
+          requiresEngineValidation: false,
+          requestId: "req_success_event",
+        },
+      );
+
+      expect(emitSpy).toHaveBeenCalledWith(
+        telemetry.TelemetryEvents.CeeVerificationSucceeded,
+        expect.objectContaining({
+          endpoint: "draft-graph",
+          request_id: "req_success_event",
+        }),
+      );
+
+      emitSpy.mockRestore();
+    });
+
+    it("emits CeeVerificationFailed on schema failure", async () => {
+      const emitSpy = vi.spyOn(telemetry, "emit");
+
+      const invalid: any = {
+        graph: { nodes: [], edges: [] },
+        // Missing required trace/quality fields
+      };
+
+      await expect(
+        verificationPipeline.verify(
+          invalid,
+          CEEDraftGraphResponseV1Schema,
+          {
+            endpoint: "draft-graph",
+            requiresEngineValidation: false,
+            requestId: "req_failure_event",
+          },
+        ),
+      ).rejects.toThrow();
+
+      expect(emitSpy).toHaveBeenCalledWith(
+        telemetry.TelemetryEvents.CeeVerificationFailed,
+        expect.objectContaining({
+          endpoint: "draft-graph",
+          request_id: "req_failure_event",
+          error_code: "SCHEMA_INVALID",
+        }),
+      );
+
+      emitSpy.mockRestore();
+    });
+  });
+
+  describe("engine validation", () => {
+    it("skips engine validation when requiresEngineValidation is false", async () => {
+      const payload = buildMinimalDraftResponse();
+
+      const { results } = await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        {
+          endpoint: "draft-graph",
+          requiresEngineValidation: false, // Explicitly disabled
+          requestId: "req_engine_skip",
+        },
+      );
+
+      // Should not have an engine validation result
+      const engineResult = results.find((r) => r.stage === "engine_validation");
+      expect(engineResult).toBeUndefined();
+    });
+
+    it("throws on engine validation when engine is unreachable", async () => {
+      const payload = buildMinimalDraftResponse();
+
+      // When engine validation is enabled but engine is unreachable,
+      // the pipeline should throw an error
+      await expect(
+        verificationPipeline.verify(
+          payload,
+          CEEDraftGraphResponseV1Schema,
+          {
+            endpoint: "draft-graph",
+            requiresEngineValidation: true,
+            requestId: "req_engine_test",
+          },
+        ),
+      ).rejects.toThrow(/Engine validation|unreachable/i);
+    });
+  });
+
+  describe("validation details metadata-only", () => {
+    it("verification results contain only metadata, no user content", async () => {
+      const payload = buildMinimalDraftResponse();
+      // Add user content to graph
+      payload.graph.nodes.push({
+        id: "dec_1",
+        kind: "decision",
+        label: "Private strategic decision about merger",
+        body: "Confidential details about acquisition target",
+      } as any);
+
+      const { results } = await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        {
+          endpoint: "draft-graph",
+          requiresEngineValidation: false,
+          requestId: "req_metadata_only",
+        },
+      );
+
+      // Check all result details for user content
+      for (const result of results) {
+        const detailsStr = JSON.stringify(result.details ?? {});
+        expect(detailsStr).not.toContain("Private strategic decision");
+        expect(detailsStr).not.toContain("Confidential details");
+        expect(detailsStr).not.toContain("merger");
+        expect(detailsStr).not.toContain("acquisition target");
+      }
+    });
+
+    it("weight suggestions contain edge IDs, not full labels in details", async () => {
+      const payload = buildMinimalDraftResponse();
+      (payload.graph as any).nodes.push(
+        { id: "dec_1", kind: "decision", label: "Secret project decision" } as any,
+        { id: "opt_1", kind: "option", label: "Classified option A" } as any,
+        { id: "opt_2", kind: "option", label: "Classified option B" } as any,
+      );
+      (payload.graph as any).edges.push(
+        { from: "n1", to: "dec_1" } as any,
+        { from: "dec_1", to: "opt_1", belief: 0.5 } as any,
+        { from: "dec_1", to: "opt_2", belief: 0.5 } as any,
+      );
+
+      const { response } = await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        {
+          endpoint: "draft-graph",
+          requiresEngineValidation: false,
+          requestId: "req_weight_metadata",
+        },
+      );
+
+      const suggestions = (response as any).weight_suggestions;
+      if (suggestions?.length > 0) {
+        // edge_id should be present (safe metadata)
+        expect(suggestions[0].edge_id).toBeDefined();
+        // edge_id format should be node IDs, not labels
+        expect(suggestions[0].edge_id).toMatch(/^[a-z_0-9]+->[a-z_0-9]+$/i);
+      }
     });
   });
 });

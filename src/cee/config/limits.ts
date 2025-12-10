@@ -20,3 +20,130 @@ export function resolveCeeRateLimit(envVarName: string): number {
 
   return Math.floor(parsed);
 }
+
+/**
+ * Unified per-feature rate limiting for CEE endpoints.
+ *
+ * Uses in-memory token buckets with sliding window. For multi-instance
+ * deployments, consider extending quota.ts with Redis persistence.
+ *
+ * Usage:
+ * ```typescript
+ * const limiter = getCeeFeatureRateLimiter("generate_recommendation");
+ * const result = limiter.tryConsume(keyId);
+ * if (!result.allowed) {
+ *   return reply.status(429).send({ ... });
+ * }
+ * ```
+ */
+
+type BucketState = {
+  count: number;
+  windowStart: number;
+};
+
+const WINDOW_MS = 60_000;
+const MAX_BUCKETS = 10_000;
+const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
+
+// Global feature buckets map: Map<featureName, Map<keyId, BucketState>>
+const featureBuckets = new Map<string, Map<string, BucketState>>();
+
+function pruneBuckets(map: Map<string, BucketState>, now: number): void {
+  if (map.size <= MAX_BUCKETS) return;
+
+  // First pass: remove stale buckets
+  for (const [key, state] of map) {
+    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
+      map.delete(key);
+    }
+  }
+
+  if (map.size <= MAX_BUCKETS) return;
+
+  // Second pass: remove oldest if still over limit
+  let toRemove = map.size - MAX_BUCKETS;
+  for (const key of map.keys()) {
+    if (toRemove <= 0) break;
+    map.delete(key);
+    toRemove -= 1;
+  }
+}
+
+export interface CeeFeatureRateLimiter {
+  feature: string;
+  rpm: number;
+  /**
+   * Try to consume a rate limit token for the given key.
+   * Returns allowed:true if request should proceed.
+   */
+  tryConsume(keyId: string): { allowed: boolean; retryAfterSeconds: number };
+}
+
+/**
+ * Get or create a rate limiter for a CEE feature.
+ *
+ * @param feature - Feature name (e.g., "generate_recommendation")
+ * @param envVarName - Environment variable for RPM config (optional)
+ */
+export function getCeeFeatureRateLimiter(
+  feature: string,
+  envVarName?: string
+): CeeFeatureRateLimiter {
+  const rpm = envVarName
+    ? resolveCeeRateLimit(envVarName)
+    : CEE_DEFAULT_FEATURE_RATE_LIMIT_RPM;
+
+  // Get or create bucket map for this feature
+  if (!featureBuckets.has(feature)) {
+    featureBuckets.set(feature, new Map());
+  }
+  const buckets = featureBuckets.get(feature)!;
+
+  return {
+    feature,
+    rpm,
+    tryConsume(keyId: string): { allowed: boolean; retryAfterSeconds: number } {
+      const now = Date.now();
+      pruneBuckets(buckets, now);
+
+      let state = buckets.get(keyId);
+      if (!state) {
+        state = { count: 0, windowStart: now };
+        buckets.set(keyId, state);
+      }
+
+      // Reset window if expired
+      if (now - state.windowStart >= WINDOW_MS) {
+        state.count = 0;
+        state.windowStart = now;
+      }
+
+      // Check limit
+      if (state.count >= rpm) {
+        const resetAt = state.windowStart + WINDOW_MS;
+        const diffMs = Math.max(0, resetAt - now);
+        const retryAfterSeconds = Math.max(1, Math.ceil(diffMs / 1000));
+        return { allowed: false, retryAfterSeconds };
+      }
+
+      // Consume token
+      state.count += 1;
+      return { allowed: true, retryAfterSeconds: 0 };
+    },
+  };
+}
+
+/**
+ * Reset all rate limit buckets for a feature (for testing)
+ */
+export function resetCeeFeatureRateLimiter(feature: string): void {
+  featureBuckets.get(feature)?.clear();
+}
+
+/**
+ * Reset all rate limit buckets for all features (for testing)
+ */
+export function resetAllCeeFeatureRateLimiters(): void {
+  featureBuckets.clear();
+}

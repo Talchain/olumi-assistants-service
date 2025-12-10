@@ -35,7 +35,7 @@ export class VerificationPipeline {
    */
   async verify<T>(
     payload: unknown,
-    schema: z.ZodSchema<T> | undefined,
+    schema: z.ZodType<T, z.ZodTypeDef, unknown> | undefined,
     context: VerificationContext,
   ): Promise<{ response: T; results: VerificationResult[] }> {
     const start = Date.now();

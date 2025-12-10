@@ -24,6 +24,14 @@ import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js"
 import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
 import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-example.js";
 import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
+import ceeKeyInsightRouteV1 from "./routes/assist.v1.key-insight.js";
+import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
+import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
+import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
+import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js";
+import ceeGenerateRecommendationRouteV1 from "./routes/assist.v1.generate-recommendation.js";
+import ceeNarrateConditionsRouteV1 from "./routes/assist.v1.narrate-conditions.js";
+import ceeExplainPolicyRouteV1 from "./routes/assist.v1.explain-policy.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
@@ -46,6 +54,7 @@ import { adminUIRoutes } from "./routes/admin.ui.js";
 import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
 import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
+import { createLoggerConfig } from "./utils/logger-config.js";
 
 const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -114,40 +123,7 @@ export async function build() {
   const _COST_MAX_USD = Number(env.COST_MAX_USD) || 1.0;
 
   const app = Fastify({
-    logger: {
-      level: env.LOG_LEVEL || "info",
-      redact: {
-        paths: [
-          // Auth secrets (at any depth)
-          "*.password",
-          "*.secret",
-          "*.token",
-          "*.apiKey",
-          "*.api_key",
-          "*.apikey",
-          "*.authorization",
-          "*.credentials",
-          "*.accessToken",
-          "*.access_token",
-          "*.refreshToken",
-          "*.refresh_token",
-          "*.privateKey",
-          "*.private_key",
-          // Common header names
-          "*.headers.authorization",
-          "*.headers.x-api-key",
-          "*.headers.x-olumi-assist-key",
-          "*.headers.cookie",
-          // PII fields
-          "*.email",
-          "*.phone",
-          "*.ssn",
-          "*.creditCard",
-          "*.credit_card",
-        ],
-        censor: "[REDACTED]",
-      },
-    },
+    logger: createLoggerConfig(env.LOG_LEVEL || "info"),
     bodyLimit: BODY_LIMIT_BYTES,
     connectionTimeout: ROUTE_TIMEOUT_MS,
     requestTimeout: ROUTE_TIMEOUT_MS,
@@ -517,6 +493,14 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeSensitivityCoachRouteV1(app);
   await ceeTeamPerspectivesRouteV1(app);
   await ceeGraphReadinessRouteV1(app);
+  await ceeKeyInsightRouteV1(app);
+  await ceeElicitBeliefRouteV1(app);
+  await ceeUtilityWeightRouteV1(app);
+  await ceeRiskToleranceRouteV1(app);
+  await ceeEdgeFunctionRouteV1(app);
+  await ceeGenerateRecommendationRouteV1(app);
+  await ceeNarrateConditionsRouteV1(app);
+  await ceeExplainPolicyRouteV1(app);
   await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);

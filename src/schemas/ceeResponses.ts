@@ -220,8 +220,235 @@ export const CEEGraphReadinessResponseV1Schema = z
     quality_factors: z.array(CEEQualityFactorV1Schema),
     can_run_analysis: z.boolean(),
     blocker_reason: z.string().optional(),
-    trace: CEETraceMetaSchema.optional(),
+    trace: CEETraceMetaSchema,
   })
   .passthrough();
 
 export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;
+
+// Key Insight Response schema
+export const CEEKeyInsightResponseV1Schema = z
+  .object({
+    headline: z.string(),
+    primary_driver: z.string(),
+    confidence_statement: z.string(),
+    caveat: z.string().optional(),
+    quality: CEEQualityMetaSchema,
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEKeyInsightResponseV1T = z.infer<typeof CEEKeyInsightResponseV1Schema>;
+
+// Belief Elicitation Response schema
+export const CEEElicitBeliefOptionSchema = z.object({
+  label: z.string(),
+  value: z.number().min(0).max(1),
+});
+
+export const CEEElicitBeliefResponseV1Schema = z
+  .object({
+    suggested_value: z.number().min(0).max(1),
+    confidence: z.enum(["high", "medium", "low"]),
+    reasoning: z.string(),
+    needs_clarification: z.boolean(),
+    clarifying_question: z.string().optional(),
+    options: z.array(CEEElicitBeliefOptionSchema).optional(),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEEElicitBeliefResponseV1T = z.infer<typeof CEEElicitBeliefResponseV1Schema>;
+
+// Utility Weight Suggestion schemas
+export const CEEWeightSuggestionItemV1Schema = z.object({
+  node_id: z.string(),
+  node_label: z.string(),
+  suggested_weight: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+
+export const CEEAlternativeWeightingV1Schema = z.object({
+  name: z.string(),
+  description: z.string(),
+  weights: z.array(
+    z.object({
+      node_id: z.string(),
+      weight: z.number().min(0).max(1),
+    })
+  ),
+});
+
+export const CEEUtilityWeightResponseV1Schema = z
+  .object({
+    suggestions: z.array(CEEWeightSuggestionItemV1Schema),
+    reasoning: z.string(),
+    confidence: z.enum(["high", "medium", "low"]),
+    alternatives: z.array(CEEAlternativeWeightingV1Schema).optional(),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEEUtilityWeightResponseV1T = z.infer<typeof CEEUtilityWeightResponseV1Schema>;
+
+// Risk Tolerance Elicitation schemas
+
+// Option for a risk tolerance question
+export const CEERiskToleranceOptionV1Schema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  risk_score: z.number().min(0).max(100),
+});
+
+// Question for risk tolerance assessment
+export const CEERiskToleranceQuestionV1Schema = z.object({
+  id: z.string(),
+  question: z.string(),
+  options: z.array(CEERiskToleranceOptionV1Schema),
+});
+
+// Response for get_questions mode
+export const CEERiskToleranceGetQuestionsResponseV1Schema = z
+  .object({
+    questions: z.array(CEERiskToleranceQuestionV1Schema),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+// Risk profile
+export const CEERiskProfileV1Schema = z.object({
+  type: z.enum(["risk_averse", "risk_neutral", "risk_seeking"]),
+  score: z.number().min(0).max(100),
+  reasoning: z.string(),
+  recommended_coefficient: z.number().min(0).max(1),
+});
+
+// Risk breakdown by category
+export const CEERiskBreakdownV1Schema = z.object({
+  certainty: z.number().min(0).max(100),
+  loss_aversion: z.number().min(0).max(100),
+  time_preference: z.number().min(0).max(100),
+});
+
+// Response for process_responses mode
+export const CEERiskToleranceProcessResponsesResponseV1Schema = z
+  .object({
+    profile: CEERiskProfileV1Schema,
+    breakdown: CEERiskBreakdownV1Schema,
+    confidence: z.enum(["high", "medium", "low"]),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEERiskToleranceGetQuestionsResponseV1T = z.infer<
+  typeof CEERiskToleranceGetQuestionsResponseV1Schema
+>;
+export type CEERiskToleranceProcessResponsesResponseV1T = z.infer<
+  typeof CEERiskToleranceProcessResponsesResponseV1Schema
+>;
+
+// Edge Function Suggestion schemas
+
+export const EdgeFunctionTypeSchema = z.enum([
+  "linear",
+  "diminishing_returns",
+  "threshold",
+  "s_curve",
+]);
+
+export const EdgeFunctionParamsSchema = z.object({
+  k: z.number().optional(),
+  threshold: z.number().optional(),
+  slope: z.number().optional(),
+  midpoint: z.number().optional(),
+});
+
+export const EdgeFunctionAlternativeSchema = z.object({
+  function_type: EdgeFunctionTypeSchema,
+  params: EdgeFunctionParamsSchema,
+  reasoning: z.string(),
+});
+
+export const CEEEdgeFunctionSuggestionResponseV1Schema = z
+  .object({
+    suggested_function: EdgeFunctionTypeSchema,
+    suggested_params: EdgeFunctionParamsSchema,
+    reasoning: z.string(),
+    alternatives: z.array(EdgeFunctionAlternativeSchema),
+    confidence: z.enum(["high", "medium", "low"]),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEEEdgeFunctionSuggestionResponseV1T = z.infer<
+  typeof CEEEdgeFunctionSuggestionResponseV1Schema
+>;
+
+// Generate Recommendation Response schema
+export const CEEGenerateRecommendationResponseV1Schema = z
+  .object({
+    headline: z.string(),
+    recommendation_narrative: z.string(),
+    confidence_statement: z.string(),
+    alternatives_summary: z.string().optional(),
+    caveat: z.string().optional(),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEGenerateRecommendationResponseV1T = z.infer<
+  typeof CEEGenerateRecommendationResponseV1Schema
+>;
+
+// Narrate Conditions Response schema
+export const CEEConditionSummaryV1Schema = z.object({
+  condition: z.string(),
+  if_true_action: z.string(),
+  if_false_action: z.string(),
+});
+
+export const CEENarrateConditionsResponseV1Schema = z
+  .object({
+    narrative: z.string(),
+    conditions_summary: z.array(CEEConditionSummaryV1Schema),
+    key_decision_points: z.array(z.string()),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEENarrateConditionsResponseV1T = z.infer<
+  typeof CEENarrateConditionsResponseV1Schema
+>;
+
+// Explain Policy Response schema
+export const CEEStepExplanationV1Schema = z.object({
+  step: z.number().int(),
+  action: z.string(),
+  explanation: z.string(),
+});
+
+export const CEEExplainPolicyResponseV1Schema = z
+  .object({
+    policy_narrative: z.string(),
+    steps_explained: z.array(CEEStepExplanationV1Schema),
+    dependencies_explained: z.string().optional(),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEExplainPolicyResponseV1T = z.infer<
+  typeof CEEExplainPolicyResponseV1Schema
+>;

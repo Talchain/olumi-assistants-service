@@ -1,47 +1,18 @@
 import { env } from "node:process";
 import pino from "pino";
 import { StatsD } from "hot-shots";
+import { createLoggerConfig } from "./logger-config.js";
 
 /**
  * Pino logger with secret/PII redaction
  *
  * Redacts sensitive fields to prevent accidental exposure in logs.
  * Paths use wildcards to match nested objects at any depth.
+ *
+ * SECURITY: Redaction paths centralized in src/utils/logger-config.ts
+ * to ensure both Fastify and standalone Pino loggers stay in sync.
  */
-export const log = pino({
-  level: env.LOG_LEVEL || "info",
-  redact: {
-    paths: [
-      // Auth secrets (at any depth)
-      "*.password",
-      "*.secret",
-      "*.token",
-      "*.apiKey",
-      "*.api_key",
-      "*.apikey",
-      "*.authorization",
-      "*.credentials",
-      "*.accessToken",
-      "*.access_token",
-      "*.refreshToken",
-      "*.refresh_token",
-      "*.privateKey",
-      "*.private_key",
-      // Common header names
-      "*.headers.authorization",
-      "*.headers.x-api-key",
-      "*.headers.x-olumi-assist-key",
-      "*.headers.cookie",
-      // PII fields
-      "*.email",
-      "*.phone",
-      "*.ssn",
-      "*.creditCard",
-      "*.credit_card",
-    ],
-    censor: "[REDACTED]",
-  },
-});
+export const log = pino(createLoggerConfig(env.LOG_LEVEL || "info"));
 
 /**
  * Test sink for capturing telemetry events in tests (v1.11.0)
@@ -100,6 +71,38 @@ export const TelemetryEvents = {
   CeeTeamPerspectivesRequested: "cee.team_perspectives.requested",
   CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
   CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
+
+  CeeKeyInsightRequested: "cee.key_insight.requested",
+  CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
+  CeeKeyInsightFailed: "cee.key_insight.failed",
+
+  CeeElicitBeliefRequested: "cee.elicit_belief.requested",
+  CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
+  CeeElicitBeliefFailed: "cee.elicit_belief.failed",
+
+  CeeUtilityWeightRequested: "cee.utility_weight.requested",
+  CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
+  CeeUtilityWeightFailed: "cee.utility_weight.failed",
+
+  CeeRiskToleranceRequested: "cee.risk_tolerance.requested",
+  CeeRiskToleranceSucceeded: "cee.risk_tolerance.succeeded",
+  CeeRiskToleranceFailed: "cee.risk_tolerance.failed",
+
+  CeeEdgeFunctionRequested: "cee.edge_function.requested",
+  CeeEdgeFunctionCompleted: "cee.edge_function.completed",
+  CeeEdgeFunctionFailed: "cee.edge_function.failed",
+
+  CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
+  CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
+  CeeGenerateRecommendationFailed: "cee.generate_recommendation.failed",
+
+  CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
+  CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
+  CeeNarrateConditionsFailed: "cee.narrate_conditions.failed",
+
+  CeeExplainPolicyRequested: "cee.explain_policy.requested",
+  CeeExplainPolicyCompleted: "cee.explain_policy.completed",
+  CeeExplainPolicyFailed: "cee.explain_policy.failed",
 
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
@@ -1125,6 +1128,207 @@ export function emit(event: string, data: Event) {
             http_status: String(
               (eventData.http_status as number | string | undefined) || "unknown",
             ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightRequested: {
+          datadogClient.increment("cee.key_insight.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightSucceeded: {
+          datadogClient.increment("cee.key_insight.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeKeyInsightFailed: {
+          datadogClient.increment("cee.key_insight.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefRequested: {
+          datadogClient.increment("cee.elicit_belief.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefSucceeded: {
+          datadogClient.increment("cee.elicit_belief.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeElicitBeliefFailed: {
+          datadogClient.increment("cee.elicit_belief.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightRequested: {
+          datadogClient.increment("cee.utility_weight.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightSucceeded: {
+          datadogClient.increment("cee.utility_weight.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeUtilityWeightFailed: {
+          datadogClient.increment("cee.utility_weight.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceRequested: {
+          datadogClient.increment("cee.risk_tolerance.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceSucceeded: {
+          datadogClient.increment("cee.risk_tolerance.succeeded", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeRiskToleranceFailed: {
+          datadogClient.increment("cee.risk_tolerance.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionRequested: {
+          datadogClient.increment("cee.edge_function.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionCompleted: {
+          datadogClient.increment("cee.edge_function.completed", 1, {
+            suggested_function: String((eventData.suggested_function as string) || "unknown"),
+            confidence: String((eventData.confidence as string) || "unknown"),
+          });
+
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.edge_function.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionFailed: {
+          datadogClient.increment("cee.edge_function.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // Phase 4: Recommendation Narratives metrics
+        case TelemetryEvents.CeeGenerateRecommendationRequested: {
+          datadogClient.increment("cee.generate_recommendation.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeGenerateRecommendationCompleted: {
+          datadogClient.increment("cee.generate_recommendation.completed", 1);
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.generate_recommendation.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeGenerateRecommendationFailed: {
+          datadogClient.increment("cee.generate_recommendation.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeNarrateConditionsRequested: {
+          datadogClient.increment("cee.narrate_conditions.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeNarrateConditionsCompleted: {
+          datadogClient.increment("cee.narrate_conditions.completed", 1);
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.narrate_conditions.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeNarrateConditionsFailed: {
+          datadogClient.increment("cee.narrate_conditions.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeExplainPolicyRequested: {
+          datadogClient.increment("cee.explain_policy.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeExplainPolicyCompleted: {
+          datadogClient.increment("cee.explain_policy.completed", 1);
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.explain_policy.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeExplainPolicyFailed: {
+          datadogClient.increment("cee.explain_policy.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        // CEE Verification metrics (v1.14)
+        case TelemetryEvents.CeeVerificationSucceeded: {
+          datadogClient.increment("cee.verification.succeeded", 1, {
+            feature: String((eventData.feature as string) || "unknown"),
+          });
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.verification.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeVerificationFailed: {
+          datadogClient.increment("cee.verification.failed", 1, {
+            feature: String((eventData.feature as string) || "unknown"),
+            stage: String((eventData.stage as string) || "unknown"),
           });
           break;
         }

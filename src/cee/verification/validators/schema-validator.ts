@@ -13,10 +13,10 @@ export class SchemaValidator implements VerificationStage<unknown, unknown> {
 
   async validate<T>(
     payload: unknown,
-     
-    schemaOrContext?: z.ZodSchema<T> | any,
+
+    schemaOrContext?: z.ZodType<T, z.ZodTypeDef, unknown> | any,
   ): Promise<VerificationResult<T>> {
-    const schema = schemaOrContext as z.ZodSchema<T> | undefined;
+    const schema = schemaOrContext as z.ZodType<T, z.ZodTypeDef, unknown> | undefined;
 
     if (!schema) {
       return {
