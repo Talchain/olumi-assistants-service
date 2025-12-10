@@ -590,7 +590,8 @@ paths:
         This endpoint is authenticated and intended for backend or ops consumers
         that already integrate with other `/assist/v1/*` routes.
 
-        Note: This endpoint is not rate-limited.
+        Note: Not subject to CEE per-feature rate limits, but still subject to
+        global IP-based rate limiting (configurable via GLOBAL_RATE_LIMIT_RPM).
       tags:
         - Health
       responses:
@@ -1409,6 +1410,307 @@ paths:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
         '429':
           description: CEE per-feature rate limit exceeded for Explain Graph
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/generate-recommendation:
+    post:
+      summary: Generate recommendation narrative from ranked actions (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Generate Recommendation** endpoint.
+
+        Transforms ranked actions from PLoT inference into a clear, human-readable
+        recommendation narrative. Takes ranked options with scores and produces a
+        headline, recommendation narrative, confidence statement, alternatives summary,
+        and optional caveat.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. All label sanitisation (removing question marks, prefixes,
+        etc.) is handled automatically.
+
+        Use this after running inference to generate polished recommendation prose
+        for UI display.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEGenerateRecommendationRequestV1'
+            examples:
+              clear_winner:
+                summary: Clear winner with significant margin
+                value:
+                  ranked_actions:
+                    - node_id: opt_a
+                      label: Expand to EU market
+                      score: 85
+                      rank: 1
+                    - node_id: opt_b
+                      label: Focus on US growth
+                      score: 62
+                      rank: 2
+                  goal_label: Maximize revenue growth
+                  tone: formal
+              close_call:
+                summary: Close call between options
+                value:
+                  ranked_actions:
+                    - node_id: opt_a
+                      label: Build in-house
+                      score: 72
+                      rank: 1
+                    - node_id: opt_b
+                      label: Buy vendor solution
+                      score: 68
+                      rank: 2
+                  context: Cost-sensitive environment
+      responses:
+        '200':
+          description: Recommendation generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Generate Recommendation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEGenerateRecommendationResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Generate Recommendation
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/narrate-conditions:
+    post:
+      summary: Generate conditional recommendation narratives (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Narrate Conditions** endpoint.
+
+        Generates human-readable conditional recommendation narratives from
+        condition-based decision logic. Takes a set of conditions with their
+        if-true and if-false recommendations and produces prose in the form
+        "If X then Y, otherwise Z".
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. All label sanitisation is handled automatically.
+
+        Use this to explain branching decision logic based on external conditions
+        or assumptions.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEENarrateConditionsRequestV1'
+            examples:
+              budget_condition:
+                summary: Budget-dependent recommendation
+                value:
+                  conditions:
+                    - condition_id: cond_1
+                      condition_label: Budget exceeds $1M
+                      if_true:
+                        recommendation: Proceed with full implementation
+                        confidence: 0.85
+                      if_false:
+                        recommendation: Start with pilot program
+                        confidence: 0.72
+                  primary_recommendation: Implement new CRM system
+              multiple_conditions:
+                summary: Multiple conditions
+                value:
+                  conditions:
+                    - condition_id: cond_1
+                      condition_label: Market conditions favorable
+                      if_true:
+                        recommendation: Launch in Q1
+                        confidence: 0.80
+                      if_false:
+                        recommendation: Delay to Q3
+                        confidence: 0.65
+                    - condition_id: cond_2
+                      condition_label: Resources available
+                      if_true:
+                        recommendation: Full team deployment
+                        confidence: 0.75
+                      if_false:
+                        recommendation: Phased rollout
+                        confidence: 0.70
+      responses:
+        '200':
+          description: Conditional narrative generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Narrate Conditions feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEENarrateConditionsResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Narrate Conditions
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/explain-policy:
+    post:
+      summary: Explain sequential decision policy (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Explain Policy** endpoint.
+
+        Generates human-readable explanations of sequential decision policies.
+        Takes a series of policy steps with their actions, rationales, and
+        dependencies and produces a narrative explaining the decision flow.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. All label sanitisation is handled automatically.
+
+        Use this to explain sequential action plans or multi-step strategies
+        derived from decision analysis.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEExplainPolicyRequestV1'
+            examples:
+              simple_policy:
+                summary: Simple three-step policy
+                value:
+                  policy_steps:
+                    - step_number: 1
+                      action: Conduct market research
+                      rationale: Validate assumptions before committing resources
+                    - step_number: 2
+                      action: Build MVP
+                      rationale: Test core value proposition with minimal investment
+                      depends_on: ["step_1"]
+                    - step_number: 3
+                      action: Scale if metrics positive
+                      rationale: Only expand once product-market fit confirmed
+                      depends_on: ["step_2"]
+                  goal_label: Launch new product successfully
+              contingent_policy:
+                summary: Policy with complex dependencies
+                value:
+                  policy_steps:
+                    - step_number: 1
+                      action: Assess current infrastructure
+                    - step_number: 2
+                      action: Upgrade if capacity below threshold
+                      depends_on: ["step_1"]
+                    - step_number: 3
+                      action: Train team on new systems
+                      depends_on: ["step_2"]
+                    - step_number: 4
+                      action: Migrate production workloads
+                      depends_on: ["step_2", "step_3"]
+      responses:
+        '200':
+          description: Policy explanation generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Explain Policy feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEExplainPolicyResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Explain Policy
           headers:
             Retry-After:
               description: Seconds until the client may retry this request.
@@ -3964,6 +4266,329 @@ components:
           $ref: '#/components/schemas/CEETeamPerspectivesSummaryV1'
         guidance:
           $ref: '#/components/schemas/CEEGuidanceV1'
+
+    CEERankedActionV1:
+      type: object
+      description: A ranked action from PLoT inference
+      required:
+        - node_id
+        - label
+        - score
+        - rank
+      properties:
+        node_id:
+          type: string
+          description: Unique identifier for the action node
+          example: opt_a
+        label:
+          type: string
+          description: Human-readable label for the action
+          example: Expand to EU market
+        score:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Utility score (0-100)
+          example: 85
+        rank:
+          type: integer
+          minimum: 1
+          description: 1-based rank (1 = best)
+          example: 1
+
+    CEEGenerateRecommendationRequestV1:
+      type: object
+      description: CEE generate recommendation request payload
+      required:
+        - ranked_actions
+      properties:
+        ranked_actions:
+          type: array
+          description: Ranked actions from PLoT inference (required, min 1)
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CEERankedActionV1'
+        goal_label:
+          type: string
+          description: Optional goal label for context
+          example: Maximize revenue growth
+        context:
+          type: string
+          description: Additional context for narrative generation
+          example: Cost-sensitive environment
+        tone:
+          type: string
+          enum: [formal, conversational]
+          default: formal
+          description: Narrative tone (formal or conversational)
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEGenerateRecommendationResponseV1:
+      type: object
+      description: Generated recommendation narrative
+      required:
+        - headline
+        - recommendation_narrative
+        - confidence_statement
+        - trace
+        - quality
+        - provenance
+      properties:
+        headline:
+          type: string
+          description: Main recommendation headline (sanitised, no question marks)
+          example: Expanding to EU market is the stronger option
+        recommendation_narrative:
+          type: string
+          description: 2-3 sentence explanation of the recommendation
+          example: Based on the analysis, expanding to EU market scores significantly higher than the alternatives. This option offers the best balance of potential return and manageable risk.
+        confidence_statement:
+          type: string
+          description: Statement about confidence level
+          example: This recommendation has high confidence based on a clear margin between options.
+        alternatives_summary:
+          type: string
+          description: Brief summary of alternative options considered
+          example: Focus on US growth scored 62/100 and remains a viable alternative if EU expansion faces unexpected barriers.
+        caveat:
+          type: string
+          description: Optional caveat if the recommendation is close or uncertain
+          example: The margin between top options is narrow - consider sensitivity analysis before finalising.
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+
+    CEEConditionBranchV1:
+      type: object
+      description: A branch outcome for a condition
+      required:
+        - recommendation
+        - confidence
+      properties:
+        recommendation:
+          type: string
+          description: Recommendation if this branch is taken
+          example: Proceed with full implementation
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence level (0-1)
+          example: 0.85
+
+    CEEConditionV1:
+      type: object
+      description: A condition with if-true and if-false branches
+      required:
+        - condition_id
+        - condition_label
+        - if_true
+        - if_false
+      properties:
+        condition_id:
+          type: string
+          description: Unique identifier for the condition
+          example: cond_1
+        condition_label:
+          type: string
+          description: Human-readable condition description
+          example: Budget exceeds $1M
+        if_true:
+          $ref: '#/components/schemas/CEEConditionBranchV1'
+        if_false:
+          $ref: '#/components/schemas/CEEConditionBranchV1'
+
+    CEENarrateConditionsRequestV1:
+      type: object
+      description: CEE narrate conditions request payload
+      required:
+        - conditions
+      properties:
+        conditions:
+          type: array
+          description: Conditions with if-true/if-false branches
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CEEConditionV1'
+        primary_recommendation:
+          type: string
+          description: Optional primary recommendation for context
+          example: Implement new CRM system
+        context:
+          type: string
+          description: Additional context for narrative generation
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEConditionSummaryV1:
+      type: object
+      description: Summary of a single condition and its branches
+      required:
+        - condition
+        - if_true_action
+        - if_false_action
+      properties:
+        condition:
+          type: string
+          description: The condition being evaluated
+          example: Budget exceeds $1M
+        if_true_action:
+          type: string
+          description: Action if condition is true
+          example: Proceed with full implementation
+        if_false_action:
+          type: string
+          description: Action if condition is false
+          example: Start with pilot program
+
+    CEENarrateConditionsResponseV1:
+      type: object
+      description: Generated conditional narrative
+      required:
+        - narrative
+        - conditions_summary
+        - key_decision_points
+        - trace
+        - quality
+        - provenance
+      properties:
+        narrative:
+          type: string
+          description: Full conditional narrative in prose form
+          example: If budget exceeds $1M, proceed with full implementation (85% confidence). Otherwise, start with pilot program (72% confidence).
+        conditions_summary:
+          type: array
+          description: Summary of each condition
+          items:
+            $ref: '#/components/schemas/CEEConditionSummaryV1'
+        key_decision_points:
+          type: array
+          description: Highlighted decision factors
+          items:
+            type: string
+          example: ["Budget availability", "Resource allocation"]
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+
+    CEEPolicyStepV1:
+      type: object
+      description: A step in a sequential policy
+      required:
+        - step_number
+        - action
+      properties:
+        step_number:
+          type: integer
+          minimum: 1
+          description: 1-based step number
+          example: 1
+        action:
+          type: string
+          description: Action to take in this step
+          example: Conduct market research
+        rationale:
+          type: string
+          description: Optional rationale for this step
+          example: Validate assumptions before committing resources
+        depends_on:
+          type: array
+          description: IDs of steps this step depends on
+          items:
+            type: string
+          example: ["step_1"]
+
+    CEEExplainPolicyRequestV1:
+      type: object
+      description: CEE explain policy request payload
+      required:
+        - policy_steps
+      properties:
+        policy_steps:
+          type: array
+          description: Sequential policy steps
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CEEPolicyStepV1'
+        goal_label:
+          type: string
+          description: Optional goal label for context
+          example: Launch new product successfully
+        context:
+          type: string
+          description: Additional context for narrative generation
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEStepExplanationV1:
+      type: object
+      description: Explanation of a single policy step
+      required:
+        - step
+        - action
+        - explanation
+      properties:
+        step:
+          type: integer
+          description: Step number
+          example: 1
+        action:
+          type: string
+          description: Action to take
+          example: Conduct market research
+        explanation:
+          type: string
+          description: Explanation of why this step is needed
+          example: This establishes the foundation by validating market assumptions.
+
+    CEEExplainPolicyResponseV1:
+      type: object
+      description: Generated policy explanation
+      required:
+        - policy_narrative
+        - steps_explained
+        - trace
+        - quality
+        - provenance
+      properties:
+        policy_narrative:
+          type: string
+          description: Sequential explanation of the policy
+          example: To launch new product successfully, first conduct market research to validate assumptions. Then build MVP to test the core value proposition. Finally, scale if metrics positive once product-market fit is confirmed.
+        steps_explained:
+          type: array
+          description: Detailed explanation of each step
+          items:
+            $ref: '#/components/schemas/CEEStepExplanationV1'
+        dependencies_explained:
+          type: string
+          description: Explanation of dependencies between steps
+          example: Step 2 depends on completing step 1, and step 3 requires both steps 1 and 2 to be finished.
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
 
     DecisionStorySummaryV1:
       type: object

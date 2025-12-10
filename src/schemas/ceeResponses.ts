@@ -390,3 +390,65 @@ export const CEEEdgeFunctionSuggestionResponseV1Schema = z
 export type CEEEdgeFunctionSuggestionResponseV1T = z.infer<
   typeof CEEEdgeFunctionSuggestionResponseV1Schema
 >;
+
+// Generate Recommendation Response schema
+export const CEEGenerateRecommendationResponseV1Schema = z
+  .object({
+    headline: z.string(),
+    recommendation_narrative: z.string(),
+    confidence_statement: z.string(),
+    alternatives_summary: z.string().optional(),
+    caveat: z.string().optional(),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEGenerateRecommendationResponseV1T = z.infer<
+  typeof CEEGenerateRecommendationResponseV1Schema
+>;
+
+// Narrate Conditions Response schema
+export const CEEConditionSummaryV1Schema = z.object({
+  condition: z.string(),
+  if_true_action: z.string(),
+  if_false_action: z.string(),
+});
+
+export const CEENarrateConditionsResponseV1Schema = z
+  .object({
+    narrative: z.string(),
+    conditions_summary: z.array(CEEConditionSummaryV1Schema),
+    key_decision_points: z.array(z.string()),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEENarrateConditionsResponseV1T = z.infer<
+  typeof CEENarrateConditionsResponseV1Schema
+>;
+
+// Explain Policy Response schema
+export const CEEStepExplanationV1Schema = z.object({
+  step: z.number().int(),
+  action: z.string(),
+  explanation: z.string(),
+});
+
+export const CEEExplainPolicyResponseV1Schema = z
+  .object({
+    policy_narrative: z.string(),
+    steps_explained: z.array(CEEStepExplanationV1Schema),
+    dependencies_explained: z.string().optional(),
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEExplainPolicyResponseV1T = z.infer<
+  typeof CEEExplainPolicyResponseV1Schema
+>;

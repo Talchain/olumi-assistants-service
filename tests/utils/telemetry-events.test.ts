@@ -274,6 +274,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEdgeFunctionRequested: "cee.edge_function.requested",
         CeeEdgeFunctionCompleted: "cee.edge_function.completed",
         CeeEdgeFunctionFailed: "cee.edge_function.failed",
+
+        // Phase 4: Recommendation Narratives events
+        CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
+        CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
+        CeeGenerateRecommendationFailed: "cee.generate_recommendation.failed",
+
+        CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
+        CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
+        CeeNarrateConditionsFailed: "cee.narrate_conditions.failed",
+
+        CeeExplainPolicyRequested: "cee.explain_policy.requested",
+        CeeExplainPolicyCompleted: "cee.explain_policy.completed",
+        CeeExplainPolicyFailed: "cee.explain_policy.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -299,7 +312,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|generate_recommendation|narrate_conditions|explain_policy)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -561,6 +574,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.requested": [TelemetryEvents.CeeEdgeFunctionRequested],
         "cee.edge_function.completed": [TelemetryEvents.CeeEdgeFunctionCompleted],
         "cee.edge_function.failed": [TelemetryEvents.CeeEdgeFunctionFailed],
+
+        // Phase 4: Recommendation Narratives events
+        "cee.generate_recommendation.requested": [TelemetryEvents.CeeGenerateRecommendationRequested],
+        "cee.generate_recommendation.completed": [TelemetryEvents.CeeGenerateRecommendationCompleted],
+        "cee.generate_recommendation.failed": [TelemetryEvents.CeeGenerateRecommendationFailed],
+
+        "cee.narrate_conditions.requested": [TelemetryEvents.CeeNarrateConditionsRequested],
+        "cee.narrate_conditions.completed": [TelemetryEvents.CeeNarrateConditionsCompleted],
+        "cee.narrate_conditions.failed": [TelemetryEvents.CeeNarrateConditionsFailed],
+
+        "cee.explain_policy.requested": [TelemetryEvents.CeeExplainPolicyRequested],
+        "cee.explain_policy.completed": [TelemetryEvents.CeeExplainPolicyCompleted],
+        "cee.explain_policy.failed": [TelemetryEvents.CeeExplainPolicyFailed],
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
@@ -873,6 +899,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.requested",
         "cee.edge_function.completed",
         "cee.edge_function.failed",
+
+        // Phase 4: Recommendation Narratives events
+        "cee.generate_recommendation.requested",
+        "cee.generate_recommendation.completed",
+        "cee.generate_recommendation.failed",
+
+        "cee.narrate_conditions.requested",
+        "cee.narrate_conditions.completed",
+        "cee.narrate_conditions.failed",
+
+        "cee.explain_policy.requested",
+        "cee.explain_policy.completed",
+        "cee.explain_policy.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

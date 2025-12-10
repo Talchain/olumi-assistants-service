@@ -236,3 +236,66 @@ export const CEEEdgeFunctionSuggestionInput = z
   .strict();
 
 export type CEEEdgeFunctionSuggestionInputT = z.infer<typeof CEEEdgeFunctionSuggestionInput>;
+
+// Generate Recommendation - ranked actions for narrative generation
+export const CEERankedActionSchema = z.object({
+  node_id: z.string().min(1),
+  label: z.string().min(1),
+  score: z.number().min(0).max(100),
+  rank: z.number().int().min(1),
+});
+
+export const CEEGenerateRecommendationInput = z
+  .object({
+    ranked_actions: z.array(CEERankedActionSchema).min(1),
+    goal_label: z.string().optional(),
+    context: z.string().optional(),
+    tone: z.enum(["formal", "conversational"]).default("formal"),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEGenerateRecommendationInputT = z.infer<typeof CEEGenerateRecommendationInput>;
+
+// Narrate Conditions - conditional logic for recommendations
+export const CEEConditionBranchSchema = z.object({
+  recommendation: z.string().min(1),
+  confidence: z.number().min(0).max(100),
+});
+
+export const CEEConditionSchema = z.object({
+  condition_id: z.string().min(1),
+  condition_label: z.string().min(1),
+  if_true: CEEConditionBranchSchema,
+  if_false: CEEConditionBranchSchema,
+});
+
+export const CEENarrateConditionsInput = z
+  .object({
+    conditions: z.array(CEEConditionSchema).min(1),
+    primary_recommendation: z.string().optional(),
+    context: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEENarrateConditionsInputT = z.infer<typeof CEENarrateConditionsInput>;
+
+// Explain Policy - sequential decision logic
+export const CEEPolicyStepSchema = z.object({
+  step_number: z.number().int().min(1),
+  action: z.string().min(1),
+  rationale: z.string().optional(),
+  depends_on: z.array(z.string()).optional(),
+});
+
+export const CEEExplainPolicyInput = z
+  .object({
+    policy_steps: z.array(CEEPolicyStepSchema).min(1),
+    goal_label: z.string().optional(),
+    context: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEExplainPolicyInputT = z.infer<typeof CEEExplainPolicyInput>;
