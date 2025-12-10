@@ -120,6 +120,10 @@ export const TelemetryEvents = {
   CeeRiskToleranceSucceeded: "cee.risk_tolerance.succeeded",
   CeeRiskToleranceFailed: "cee.risk_tolerance.failed",
 
+  CeeEdgeFunctionRequested: "cee.edge_function.requested",
+  CeeEdgeFunctionCompleted: "cee.edge_function.completed",
+  CeeEdgeFunctionFailed: "cee.edge_function.failed",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",
@@ -1220,6 +1224,34 @@ export function emit(event: string, data: Event) {
 
         case TelemetryEvents.CeeRiskToleranceFailed: {
           datadogClient.increment("cee.risk_tolerance.failed", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            http_status: String(
+              (eventData.http_status as number | string | undefined) || "unknown",
+            ),
+          });
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionRequested: {
+          datadogClient.increment("cee.edge_function.requested", 1);
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionCompleted: {
+          datadogClient.increment("cee.edge_function.completed", 1, {
+            suggested_function: String((eventData.suggested_function as string) || "unknown"),
+            confidence: String((eventData.confidence as string) || "unknown"),
+          });
+
+          const latencyMs = eventData.latency_ms;
+          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
+            datadogClient.histogram("cee.edge_function.latency_ms", latencyMs);
+          }
+          break;
+        }
+
+        case TelemetryEvents.CeeEdgeFunctionFailed: {
+          datadogClient.increment("cee.edge_function.failed", 1, {
             error_code: String((eventData.error_code as string) || "unknown"),
             http_status: String(
               (eventData.http_status as number | string | undefined) || "unknown",

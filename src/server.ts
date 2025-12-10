@@ -28,6 +28,7 @@ import ceeKeyInsightRouteV1 from "./routes/assist.v1.key-insight.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
+import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
@@ -525,6 +526,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeElicitBeliefRouteV1(app);
   await ceeUtilityWeightRouteV1(app);
   await ceeRiskToleranceRouteV1(app);
+  await ceeEdgeFunctionRouteV1(app);
   await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);

@@ -1193,6 +1193,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/suggest-edge-function:
+    post:
+      summary: Suggest edge function type (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Edge Function Suggestion** endpoint.
+
+        Suggests non-linear edge function types based on pattern matching of node
+        labels and relationship descriptions. Supports:
+        - `linear` (default): Output scales proportionally with input
+        - `diminishing_returns`: Initial inputs have strong effects that taper off
+        - `threshold`: Output only activates after input reaches critical level
+        - `s_curve`: Slow start, rapid middle growth, then saturation
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency. Use this to suggest appropriate edge functions for PLoT's
+        non-linear edge modeling feature.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEEdgeFunctionSuggestionRequestV1'
+            examples:
+              cost_relationship:
+                summary: Cost to quality relationship
+                value:
+                  edge_id: e1
+                  source_node:
+                    id: n1
+                    label: Marketing spend
+                    kind: option
+                  target_node:
+                    id: n2
+                    label: Customer acquisition
+                    kind: outcome
+                  relationship_description: "Spending more on marketing leads to diminishing returns over time"
+              threshold_relationship:
+                summary: Compliance threshold
+                value:
+                  edge_id: e2
+                  source_node:
+                    id: n3
+                    label: Security investment
+                    kind: option
+                  target_node:
+                    id: n4
+                    label: Regulatory compliance
+                    kind: outcome
+                  relationship_description: "Must meet minimum security threshold to achieve compliance"
+      responses:
+        '200':
+          description: Edge function suggestion (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Edge Function Suggestion feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEEdgeFunctionSuggestionResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Edge Function Suggestion
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/evidence-helper:
     post:
       summary: Score evidence items (CEE v1)
@@ -3416,6 +3512,132 @@ components:
           type: string
           enum: [high, medium, low]
           description: Confidence in the assessment based on response coverage
+          example: high
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEENodeInfoV1:
+      type: object
+      description: Node information for edge function suggestion
+      required:
+        - id
+        - label
+        - kind
+      properties:
+        id:
+          type: string
+          description: Node identifier
+          example: n1
+        label:
+          type: string
+          description: Human-readable node label
+          example: Marketing spend
+        kind:
+          type: string
+          description: Node kind (goal, decision, option, outcome, risk)
+          example: option
+
+    CEEEdgeFunctionSuggestionRequestV1:
+      type: object
+      description: CEE edge function suggestion request payload
+      required:
+        - edge_id
+        - source_node
+        - target_node
+      properties:
+        edge_id:
+          type: string
+          description: Edge identifier
+          example: e1
+        source_node:
+          $ref: '#/components/schemas/CEENodeInfoV1'
+        target_node:
+          $ref: '#/components/schemas/CEENodeInfoV1'
+        relationship_description:
+          type: string
+          description: Optional natural language description of the relationship
+          example: "Spending more on marketing leads to diminishing returns over time"
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEEdgeFunctionParamsV1:
+      type: object
+      description: Parameters for the suggested edge function
+      properties:
+        k:
+          type: number
+          description: Steepness parameter (for diminishing_returns and s_curve)
+          example: 2.0
+        threshold:
+          type: number
+          description: Threshold value (for threshold function)
+          example: 0.5
+        slope:
+          type: number
+          description: Slope at threshold (for threshold function)
+          example: 1.0
+        midpoint:
+          type: number
+          description: Midpoint for S-curve
+          example: 0.5
+
+    CEEEdgeFunctionAlternativeV1:
+      type: object
+      description: Alternative edge function suggestion
+      required:
+        - function_type
+        - params
+        - reasoning
+      properties:
+        function_type:
+          type: string
+          enum: [linear, diminishing_returns, threshold, s_curve]
+          description: Alternative function type
+          example: threshold
+        params:
+          $ref: '#/components/schemas/CEEEdgeFunctionParamsV1'
+        reasoning:
+          type: string
+          description: Why this alternative might be appropriate
+          example: "The relationship may have a threshold effect"
+
+    CEEEdgeFunctionSuggestionResponseV1:
+      type: object
+      description: CEE edge function suggestion response
+      required:
+        - suggested_function
+        - suggested_params
+        - reasoning
+        - alternatives
+        - confidence
+        - provenance
+      properties:
+        suggested_function:
+          type: string
+          enum: [linear, diminishing_returns, threshold, s_curve]
+          description: Recommended edge function type
+          example: diminishing_returns
+        suggested_params:
+          $ref: '#/components/schemas/CEEEdgeFunctionParamsV1'
+        reasoning:
+          type: string
+          description: Why this function type was suggested
+          example: "Relationship shows diminishing returns pattern - initial inputs have strong effects that taper off"
+        alternatives:
+          type: array
+          description: Alternative function types to consider
+          items:
+            $ref: '#/components/schemas/CEEEdgeFunctionAlternativeV1'
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence in the suggestion based on pattern matching
           example: high
         provenance:
           type: string

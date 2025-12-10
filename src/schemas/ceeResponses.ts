@@ -352,3 +352,41 @@ export type CEERiskToleranceGetQuestionsResponseV1T = z.infer<
 export type CEERiskToleranceProcessResponsesResponseV1T = z.infer<
   typeof CEERiskToleranceProcessResponsesResponseV1Schema
 >;
+
+// Edge Function Suggestion schemas
+
+export const EdgeFunctionTypeSchema = z.enum([
+  "linear",
+  "diminishing_returns",
+  "threshold",
+  "s_curve",
+]);
+
+export const EdgeFunctionParamsSchema = z.object({
+  k: z.number().optional(),
+  threshold: z.number().optional(),
+  slope: z.number().optional(),
+  midpoint: z.number().optional(),
+});
+
+export const EdgeFunctionAlternativeSchema = z.object({
+  function_type: EdgeFunctionTypeSchema,
+  params: EdgeFunctionParamsSchema,
+  reasoning: z.string(),
+});
+
+export const CEEEdgeFunctionSuggestionResponseV1Schema = z
+  .object({
+    suggested_function: EdgeFunctionTypeSchema,
+    suggested_params: EdgeFunctionParamsSchema,
+    reasoning: z.string(),
+    alternatives: z.array(EdgeFunctionAlternativeSchema),
+    confidence: z.enum(["high", "medium", "low"]),
+    provenance: z.literal("cee"),
+    trace: CEETraceMetaSchema.optional(),
+  })
+  .passthrough();
+
+export type CEEEdgeFunctionSuggestionResponseV1T = z.infer<
+  typeof CEEEdgeFunctionSuggestionResponseV1Schema
+>;

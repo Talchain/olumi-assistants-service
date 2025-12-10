@@ -217,3 +217,22 @@ export const CEERiskToleranceInput = z
   );
 
 export type CEERiskToleranceInputT = z.infer<typeof CEERiskToleranceInput>;
+
+// Edge Function Suggestions - suggest non-linear edge function types
+export const NodeInfoSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.string().min(1),
+});
+
+export const CEEEdgeFunctionSuggestionInput = z
+  .object({
+    edge_id: z.string().min(1),
+    source_node: NodeInfoSchema,
+    target_node: NodeInfoSchema,
+    relationship_description: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEEdgeFunctionSuggestionInputT = z.infer<typeof CEEEdgeFunctionSuggestionInput>;

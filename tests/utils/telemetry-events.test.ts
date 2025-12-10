@@ -269,6 +269,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeRiskToleranceRequested: "cee.risk_tolerance.requested",
         CeeRiskToleranceSucceeded: "cee.risk_tolerance.succeeded",
         CeeRiskToleranceFailed: "cee.risk_tolerance.failed",
+
+        // Edge Function Suggestion events (v2.6)
+        CeeEdgeFunctionRequested: "cee.edge_function.requested",
+        CeeEdgeFunctionCompleted: "cee.edge_function.completed",
+        CeeEdgeFunctionFailed: "cee.edge_function.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -294,7 +299,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -551,6 +556,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.risk_tolerance.requested": [TelemetryEvents.CeeRiskToleranceRequested],
         "cee.risk_tolerance.succeeded": [TelemetryEvents.CeeRiskToleranceSucceeded],
         "cee.risk_tolerance.failed": [TelemetryEvents.CeeRiskToleranceFailed],
+
+        // Edge Function Suggestion events (v2.6)
+        "cee.edge_function.requested": [TelemetryEvents.CeeEdgeFunctionRequested],
+        "cee.edge_function.completed": [TelemetryEvents.CeeEdgeFunctionCompleted],
+        "cee.edge_function.failed": [TelemetryEvents.CeeEdgeFunctionFailed],
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
@@ -858,6 +868,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.risk_tolerance.requested",
         "cee.risk_tolerance.succeeded",
         "cee.risk_tolerance.failed",
+
+        // Edge Function Suggestion events (v2.6)
+        "cee.edge_function.requested",
+        "cee.edge_function.completed",
+        "cee.edge_function.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
