@@ -19,13 +19,33 @@ const DRAFT_GRAPH_PROMPT = `You are an expert at drafting small decision graphs 
 
 ## Your Task
 Draft a small decision graph with:
-- ≤{{maxNodes}} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
-  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
+- ≤{{maxNodes}} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
+  (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
 - ≤{{maxEdges}} edges
 - **Minimum structure (MANDATORY):** your graph MUST include at least:
   - 1 goal node (what the decision-maker is trying to achieve)
   - 1 decision node (the choice being made)
   - 1+ option nodes (alternatives being considered)
+
+## NODE KIND DISTINCTIONS
+
+### factor vs action - KEY DISTINCTION
+- **factor**: External variables or uncertainties OUTSIDE the user's control (chance nodes)
+  - Examples: market demand, competitor actions, economic conditions, regulatory changes, weather
+  - Use for things AFFECTING the decision that the user CANNOT control
+
+- **action**: Steps the user CAN take to implement options or mitigate risks (controllable)
+  - Examples: hire contractor, buy insurance, run pilot program, train team, partner with vendor
+  - Use for things the user CAN DO to improve outcomes or reduce risks
+
+### All node kinds:
+- **goal**: The user's objective or what they're trying to achieve
+- **decision**: A choice point the user needs to make
+- **option**: Specific alternatives within a decision
+- **factor**: External variables/uncertainties outside user control
+- **outcome**: Positive end states or results
+- **risk**: Negative end states or potential problems
+- **action**: Controllable steps to implement or mitigate
 
 ## GRAPH DESIGN RULES
 

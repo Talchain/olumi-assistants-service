@@ -47,6 +47,8 @@ export interface Driver {
   impact_pct?: number;
   /** Direction of influence */
   direction?: "positive" | "negative" | "neutral";
+  /** Node kind - helps distinguish factor (external) from action (controllable) */
+  kind?: string;
 }
 
 /**
@@ -180,10 +182,29 @@ function generateDriverStatement(drivers?: Driver[]): string {
 
   const topDriver = drivers[0];
   const driverLabel = sanitiseLabel(topDriver.label);
+  const isExternalFactor = topDriver.kind === "factor";
+  const isControllableAction = topDriver.kind === "action";
 
   if (topDriver.impact_pct !== undefined && topDriver.impact_pct > 0) {
     const impact = Math.round(topDriver.impact_pct);
 
+    // Handle external factors differently - highlight they're outside user control
+    if (isExternalFactor) {
+      if (impact >= 50) {
+        return `External factors like ${driverLabel} significantly influence your outcome (${impact}% impact). Consider how sensitive your decision is to changes in ${driverLabel}.`;
+      }
+      return `${capitalise(driverLabel)} (external factor) accounts for ${impact}% of the outcome—outside your direct control.`;
+    }
+
+    // Handle controllable actions - emphasize user agency
+    if (isControllableAction) {
+      if (impact >= 50) {
+        return `Taking action on ${driverLabel} would most improve your outcome (${impact}% impact).`;
+      }
+      return `${capitalise(driverLabel)} is within your control and has ${impact}% impact on the outcome.`;
+    }
+
+    // Default for other node kinds
     if (impact >= 50) {
       return `${capitalise(driverLabel)} is the dominant factor, accounting for ${impact}% of the outcome.`;
     }
@@ -195,7 +216,15 @@ function generateDriverStatement(drivers?: Driver[]): string {
     return `${capitalise(driverLabel)} is the leading factor among several contributors.`;
   }
 
-  // No impact percentage available
+  // No impact percentage available - use kind-specific messaging
+  if (isExternalFactor) {
+    return `External factor ${driverLabel} significantly influences this decision—consider its uncertainty.`;
+  }
+
+  if (isControllableAction) {
+    return `Taking action on ${driverLabel} could improve your outcome.`;
+  }
+
   if (topDriver.direction === "positive") {
     return `${capitalise(driverLabel)} is the main factor favouring this recommendation.`;
   }

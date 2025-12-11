@@ -2157,7 +2157,7 @@ components:
           example: "goal_1"
         kind:
           type: string
-          enum: [goal, decision, option, outcome, risk, action]
+          enum: [goal, decision, option, outcome, risk, action, factor]
           description: Node type
         label:
           type: string
@@ -3841,7 +3841,7 @@ components:
           example: Marketing spend
         kind:
           type: string
-          description: Node kind (goal, decision, option, outcome, risk)
+          description: Node kind (goal, decision, option, outcome, risk, action, factor)
           example: option
 
     CEEEdgeFunctionSuggestionRequestV1:

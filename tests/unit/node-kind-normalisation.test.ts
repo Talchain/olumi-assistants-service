@@ -25,13 +25,19 @@ describe("NodeKind Normalisation", () => {
 
     it("maps evidence-like kinds to option", () => {
       expect(normaliseNodeKind("evidence")).toBe("option");
-      expect(normaliseNodeKind("factor")).toBe("option");
       expect(normaliseNodeKind("consideration")).toBe("option");
       expect(normaliseNodeKind("alternative")).toBe("option");
       expect(normaliseNodeKind("choice")).toBe("option");
       expect(normaliseNodeKind("input")).toBe("option");
       expect(normaliseNodeKind("criteria")).toBe("option");
       expect(normaliseNodeKind("criterion")).toBe("option");
+    });
+
+    it("preserves factor as canonical kind", () => {
+      // factor is now a canonical kind (external uncertainties), not mapped to option
+      expect(normaliseNodeKind("factor")).toBe("factor");
+      expect(normaliseNodeKind("Factor")).toBe("factor");
+      expect(normaliseNodeKind("FACTOR")).toBe("factor");
     });
 
     it("maps constraint-like kinds to risk", () => {

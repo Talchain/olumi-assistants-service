@@ -144,6 +144,16 @@ const KIND_SIGNALS: Record<string, { functionType: EdgeFunctionType; weight: num
   option: [
     { functionType: "linear", weight: 1 },
   ],
+  // Factor nodes (external uncertainties) often have non-linear effects
+  factor: [
+    { functionType: "s_curve", weight: 3 },       // Market conditions often follow adoption curves
+    { functionType: "threshold", weight: 2 },     // Regulatory factors have threshold effects
+    { functionType: "diminishing_returns", weight: 2 }, // Resource constraints saturate
+  ],
+  action: [
+    { functionType: "diminishing_returns", weight: 2 }, // Repeated actions have diminishing impact
+    { functionType: "linear", weight: 1 },
+  ],
 };
 
 // Label patterns that suggest specific functions
@@ -162,6 +172,14 @@ const LABEL_PATTERNS: { pattern: RegExp; functionType: EdgeFunctionType; weight:
   { pattern: /market share|adoption|growth/i, functionType: "s_curve", weight: 3 },
   { pattern: /viral|network|social/i, functionType: "s_curve", weight: 4 },
   { pattern: /awareness|reputation|brand/i, functionType: "s_curve", weight: 2 },
+
+  // Factor-specific patterns (external uncertainties)
+  { pattern: /market demand|demand level/i, functionType: "diminishing_returns", weight: 3 },
+  { pattern: /competitor|competition/i, functionType: "s_curve", weight: 3 },
+  { pattern: /economic|economy|recession/i, functionType: "s_curve", weight: 3 },
+  { pattern: /regulatory|regulation|policy/i, functionType: "threshold", weight: 4 },
+  { pattern: /weather|climate|seasonal/i, functionType: "threshold", weight: 2 },
+  { pattern: /exchange rate|currency|forex/i, functionType: "linear", weight: 2 },
 ];
 
 /**

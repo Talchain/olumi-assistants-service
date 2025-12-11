@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine"]);
-export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action"]);
+export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor"]);
 export const Position = z.object({ x: z.number(), y: z.number() });
 
 export const Node = z.object({
