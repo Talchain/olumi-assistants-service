@@ -19,16 +19,92 @@ const HIGH_SCORE_GAP = 15; // Clear winner
 const MEDIUM_SCORE_GAP = 5; // Moderate advantage
 
 /**
+ * Patterns that indicate a baseline/status quo option.
+ * These should be framed as "maintaining current state" rather than "negative impact".
+ */
+const BASELINE_PATTERNS = [
+  /^(do\s+)?nothing$/i,
+  /^no\s+action$/i,
+  /^status\s+quo$/i,
+  /^keep\s+(current|existing)/i,
+  /^maintain\s+(current|existing)/i,
+  /^stay\s+(the\s+)?(course|same)/i,
+  /^current\s+(state|approach|strategy)/i,
+  /^don't\s+change/i,
+  /^wait(\s+and\s+see)?$/i,
+  /^defer\s+decision/i,
+  /^hold\s+(off|steady)/i,
+];
+
+/**
+ * Check if an option label represents a baseline/status quo choice.
+ */
+function isBaselineOption(label: string): boolean {
+  const normalised = label.trim().toLowerCase();
+  return BASELINE_PATTERNS.some((pattern) => pattern.test(normalised));
+}
+
+/**
+ * Reframe baseline option label for more neutral phrasing.
+ * "Do nothing" → "Maintaining current state"
+ * "Status quo" → "Current approach"
+ */
+function reframeBaselineLabel(label: string): string {
+  const lower = label.toLowerCase().trim();
+
+  if (/^(do\s+)?nothing$/i.test(lower)) {
+    return "maintaining current state";
+  }
+  if (/^no\s+action$/i.test(lower)) {
+    return "deferring action";
+  }
+  if (/^status\s+quo$/i.test(lower)) {
+    return "the current approach";
+  }
+  if (/^wait(\s+and\s+see)?$/i.test(lower)) {
+    return "waiting for more information";
+  }
+
+  // Return original if no specific reframe
+  return sanitiseLabel(label);
+}
+
+/**
  * Generate a headline for the recommendation.
+ *
+ * IMPORTANT: Checks outcome_quality to avoid contradictory messaging.
+ * If outcome is negative, uses cautionary phrasing instead of recommending.
+ * Baseline options (do nothing, status quo) are reframed neutrally.
  */
 export function generateHeadline(
   winner: RankedAction,
   runnerUp: RankedAction | undefined,
   tone: Tone,
 ): string {
-  const winnerLabel = labelForDisplay(winner.label);
+  // Check if winner is a baseline option - use neutral reframing
+  const winnerIsBaseline = isBaselineOption(winner.label);
+  const winnerLabel = winnerIsBaseline
+    ? capitaliseFirst(reframeBaselineLabel(winner.label))
+    : labelForDisplay(winner.label);
+
   const scoreGap = runnerUp ? winner.score - runnerUp.score : 100;
 
+  // Special handling for baseline winners - avoid negative framing
+  if (winnerIsBaseline) {
+    return generateBaselineHeadline(winnerLabel, runnerUp, scoreGap, tone);
+  }
+
+  // Check for negative outcome - avoid recommending options with poor expected results
+  if (winner.outcome_quality === "negative") {
+    return generateNegativeOutcomeHeadline(winnerLabel, runnerUp, scoreGap, tone);
+  }
+
+  // Check for mixed outcomes with risks
+  if (winner.outcome_quality === "mixed" || winner.has_risks) {
+    return generateCautiousHeadline(winnerLabel, runnerUp, scoreGap, tone);
+  }
+
+  // Standard positive/neutral outcome handling
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
       ? `${winnerLabel} is the recommended course of action`
@@ -48,7 +124,108 @@ export function generateHeadline(
 }
 
 /**
+ * Capitalise first letter of a string.
+ */
+function capitaliseFirst(str: string): string {
+  if (!str) return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Generate headline when winner is a baseline/status quo option.
+ * Frames as "maintaining current state is advisable" rather than "do nothing has impact".
+ */
+function generateBaselineHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is the recommended approach`
+      : `${winnerLabel} is your best move`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is advisable at this time`
+      : `${winnerLabel} makes sense for now`;
+  }
+
+  // Close call - suggest waiting may be appropriate
+  const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
+  return tone === "formal"
+    ? `${winnerLabel} is marginally preferred to ${runnerUpLabel}`
+    : `${winnerLabel} slightly edges out ${runnerUpLabel}`;
+}
+
+/**
+ * Generate headline when winner has negative expected outcome.
+ * Avoids contradictory "proceed with X" when X leads to bad results.
+ */
+function generateNegativeOutcomeHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerLabel} is the only option, though outcomes carry risk`
+      : `${winnerLabel} is your only option, but expect some challenges`;
+  }
+
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} minimises negative impact compared to alternatives`
+      : `${winnerLabel} is the least bad option here`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} offers relatively better outcomes despite risks`
+      : `${winnerLabel} looks better than the alternatives, though neither is great`;
+  }
+
+  return tone === "formal"
+    ? `${winnerLabel} and alternatives both carry significant risk`
+    : `${winnerLabel} edges ahead, but all options have downsides`;
+}
+
+/**
+ * Generate headline when winner has mixed outcomes or known risks.
+ * Uses cautionary phrasing with plain English trade-off descriptions.
+ */
+function generateCautiousHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is recommended, though outcomes are less predictable`
+      : `${winnerLabel} is your best bet, but expect some ups and downs`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} emerges as the stronger option with higher potential but less certainty`
+      : `${winnerLabel} looks better—more upside potential, though less predictable`;
+  }
+
+  const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
+  return tone === "formal"
+    ? `${winnerLabel} holds a slight advantage; both options balance reward against predictability`
+    : `${winnerLabel} edges ahead of ${runnerUpLabel}—both have pros and cons to weigh`;
+}
+
+/**
  * Generate the main recommendation narrative.
+ *
+ * Handles negative outcomes by using cautionary language.
+ * Baseline options are reframed neutrally.
  */
 export function generateNarrative(
   winner: RankedAction,
@@ -56,10 +233,25 @@ export function generateNarrative(
   goalLabel: string | undefined,
   tone: Tone,
 ): string {
-  const winnerAction = labelForSentence(winner.label, "subject");
+  // Check if winner is a baseline option - use neutral reframing
+  const winnerIsBaseline = isBaselineOption(winner.label);
+  const winnerAction = winnerIsBaseline
+    ? capitaliseFirst(reframeBaselineLabel(winner.label))
+    : labelForSentence(winner.label, "subject");
+
   const goalPhrase = goalLabel
     ? ` toward ${sanitiseLabel(goalLabel)}`
     : "";
+
+  // Handle baseline options with neutral framing
+  if (winnerIsBaseline) {
+    return generateBaselineNarrative(winnerAction, runnerUp, goalPhrase, tone);
+  }
+
+  // Handle negative outcomes with appropriate caution
+  if (winner.outcome_quality === "negative") {
+    return generateNegativeOutcomeNarrative(winnerAction, runnerUp, goalPhrase, tone);
+  }
 
   if (!runnerUp) {
     return tone === "formal"
@@ -69,6 +261,11 @@ export function generateNarrative(
 
   const runnerUpLabel = sanitiseLabel(runnerUp.label);
   const scoreGap = winner.score - runnerUp.score;
+
+  // Handle mixed outcomes
+  if (winner.outcome_quality === "mixed" || winner.has_risks) {
+    return generateCautiousNarrative(winnerAction, runnerUpLabel, scoreGap, goalPhrase, tone);
+  }
 
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
@@ -86,6 +283,79 @@ export function generateNarrative(
   return tone === "formal"
     ? `${winnerAction} and ${runnerUpLabel} present comparable value${goalPhrase}. The margin between them is narrow, warranting careful consideration of contextual factors.`
     : `${winnerAction} and ${runnerUpLabel} are neck and neck${goalPhrase}. You'll want to think carefully here.`;
+}
+
+/**
+ * Generate narrative when winner has negative expected outcome.
+ */
+function generateNegativeOutcomeNarrative(
+  winnerAction: string,
+  runnerUp: RankedAction | undefined,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerAction} is the only available option${goalPhrase}, though the analysis indicates challenging outcomes. Proceed with awareness of the risks involved.`
+      : `${winnerAction} is your only option${goalPhrase}, but don't expect smooth sailing. Keep the risks in mind.`;
+  }
+
+  const runnerUpLabel = sanitiseLabel(runnerUp.label);
+  return tone === "formal"
+    ? `${winnerAction} presents fewer downsides than ${runnerUpLabel}${goalPhrase}. While neither option shows strongly positive outcomes, this choice minimises potential negative impact.`
+    : `${winnerAction} is the better of two tough choices compared to ${runnerUpLabel}${goalPhrase}. Neither is great, but this one hurts less.`;
+}
+
+/**
+ * Generate narrative when winner has mixed outcomes or risks.
+ * Uses plain English to explain trade-offs between options.
+ */
+function generateCautiousNarrative(
+  winnerAction: string,
+  runnerUpLabel: string,
+  scoreGap: number,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerAction} outperforms ${runnerUpLabel}${goalPhrase}. It offers higher potential reward but comes with less predictable outcomes. The analysis favors this direction while acknowledging the uncertainty.`
+      : `${winnerAction} beats ${runnerUpLabel}${goalPhrase}. More upside potential here, but the path is less predictable.`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerAction} shows advantages over ${runnerUpLabel}${goalPhrase}. While both options balance reward against predictability, this one offers a better overall profile.`
+      : `${winnerAction} has the edge over ${runnerUpLabel}${goalPhrase}. Better upside, even accounting for the bumpier ride.`;
+  }
+
+  return tone === "formal"
+    ? `${winnerAction} and ${runnerUpLabel} are closely matched${goalPhrase}. Each balances potential reward against predictability differently—${winnerAction} offers slightly more upside but ${runnerUpLabel} provides steadier outcomes.`
+    : `${winnerAction} and ${runnerUpLabel} are neck and neck${goalPhrase}. One's got more upside potential, the other's more predictable—your call.`;
+}
+
+/**
+ * Generate narrative when winner is a baseline/status quo option.
+ * Uses neutral framing: "maintaining current state preserves value" rather than
+ * "do nothing has negative impact".
+ */
+function generateBaselineNarrative(
+  winnerAction: string,
+  runnerUp: RankedAction | undefined,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerAction} represents a stable path${goalPhrase}. Without alternative options requiring change, continuing current operations is appropriate.`
+      : `${winnerAction} keeps things steady${goalPhrase}. No pressing reason to change course here.`;
+  }
+
+  const runnerUpLabel = sanitiseLabel(runnerUp.label);
+
+  return tone === "formal"
+    ? `${winnerAction} is advisable compared to ${runnerUpLabel}${goalPhrase}. The analysis suggests that preserving the current approach offers better value than the proposed changes.`
+    : `${winnerAction} beats ${runnerUpLabel}${goalPhrase}. Sometimes not rocking the boat is the smart move.`;
 }
 
 /**

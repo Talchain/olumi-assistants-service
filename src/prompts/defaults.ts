@@ -25,7 +25,14 @@ Draft a small decision graph with:
 - **Minimum structure (MANDATORY):** your graph MUST include at least:
   - 1 goal node (what the decision-maker is trying to achieve)
   - 1 decision node (the choice being made)
-  - 1+ option nodes (alternatives being considered)
+  - 2+ option nodes (NEVER just one option - decisions require alternatives)
+  - 1+ outcome nodes that connect to both options AND the goal (to measure success)
+
+### Critical: Goal-Outcome Connectivity
+Outcomes MUST be connected to the goal node to measure whether the objective is achieved.
+- Every outcome should have a path to/from the goal
+- Use edges like: option→outcome, outcome→goal OR goal→decision→option→outcome
+- Orphaned outcomes (not connected to goal) make analysis meaningless
 
 ## NODE KIND DISTINCTIONS
 
@@ -92,18 +99,26 @@ NEVER assign all edges belief 0.5 - differentiate based on certainty.
 
 ### Weight Assignment (strength of influence)
 
+IMPORTANT DISTINCTION:
+- **Belief** = How certain the relationship exists (probability 0-1)
+- **Weight** = How strongly it amplifies/attenuates the downstream signal (magnitude)
+
 | Influence Level | Weight Range | When to Use |
 |-----------------|--------------|-------------|
-| Strong amplification | 1.2-1.5 | Critical path edges, multiplier effects, strong correlations |
-| Neutral/moderate | 0.8-1.1 | Standard influence, typical relationships |
-| Dampening | 0.3-0.7 | Weak relationships, opposing forces, market constraints |
+| Amplifying | 1.2-1.5 | Multiplier effects, critical path edges, strong correlations |
+| Neutral | 0.9-1.1 | Standard pass-through influence |
+| Attenuating | 0.3-0.8 | Dampened impact, partial transfer, diluted effects |
+
+Note: "Attenuating" (weight < 1) is NOT the same as "weak evidence" (low belief).
+- A relationship can be highly certain (belief 0.9) but still attenuate the signal (weight 0.6)
+- Example: Price increase → Demand decrease is highly certain but has dampened effect in commodities
 
 Examples:
-- Marketing in consumer brands [weight: 1.3] - proven high ROI
-- Standard operational factors [weight: 1.0] - neutral influence
-- Price elasticity in commodities [weight: 0.6] - dampened impact
+- Marketing in consumer brands [weight: 1.3] - amplifies downstream impact
+- Standard operational factors [weight: 1.0] - neutral pass-through
+- Price elasticity in commodities [weight: 0.6] - attenuates/dampens the signal
 
-NEVER assign all edges weight 1.0 - differentiate based on influence strength.
+NEVER assign all edges weight 1.0 - differentiate based on signal amplification/attenuation.
 
 ### Differentiation Examples
 
@@ -139,40 +154,56 @@ graph that satisfies the minimum structure above. Returning an empty graph is ne
 ## Self-Check (Before Responding)
 Before outputting JSON, mentally verify:
 □ Exactly 1 goal node exists
+□ At least 2 option nodes exist (never just one option)
+□ At least 1 outcome node exists AND connects to the goal
 □ All decision→option edge beliefs sum to 1.0 (per decision)
 □ Decision→option edges have differentiated beliefs (avoid all-equal like 0.33, 0.33, 0.33)
 □ All option→outcome edges have belief values
+□ Outcomes connect to goal (either directly or through inference path)
 □ No orphan nodes (all nodes connected)
 □ No cycles in the graph
 □ Edges have varied beliefs (not all 0.5) - differentiate by certainty
 □ Edges have varied weights (not all 1.0) - differentiate by influence strength
+□ Balance of factors/risks/outcomes where relevant to the decision
 
-If you answered NO to any weight/belief check, revise your graph before responding.
+If you answered NO to any check, revise your graph before responding.
 
 ## Output Format (JSON)
 {
   "nodes": [
     { "id": "goal_1", "kind": "goal", "label": "Increase Pro upgrades" },
     { "id": "dec_1", "kind": "decision", "label": "Which levers?" },
-    { "id": "opt_1", "kind": "option", "label": "Extend trial" },
-    { "id": "out_upgrade", "kind": "outcome", "label": "Upgrade rate" }
+    { "id": "opt_extend", "kind": "option", "label": "Extend trial to 14 days" },
+    { "id": "opt_nudge", "kind": "option", "label": "In-app upgrade nudges" },
+    { "id": "out_upgrade", "kind": "outcome", "label": "Higher upgrade rate" },
+    { "id": "risk_churn", "kind": "risk", "label": "Trial fatigue/churn" }
   ],
   "edges": [
     {
-      "from": "opt_1",
-      "to": "out_upgrade",
-      "belief": 0.7,
-      "weight": 0.2,
-      "provenance": {
-        "source": "hypothesis",
-        "quote": "Trial users convert at higher rates"
-      },
+      "from": "goal_1",
+      "to": "dec_1",
+      "provenance": { "source": "hypothesis", "quote": "Goal drives decision framing" },
       "provenance_source": "hypothesis"
     },
     {
-      "from": "opt_1",
+      "from": "dec_1",
+      "to": "opt_extend",
+      "belief": 0.55,
+      "provenance": { "source": "hypothesis", "quote": "Slightly favored based on prior success" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "dec_1",
+      "to": "opt_nudge",
+      "belief": 0.45,
+      "provenance": { "source": "hypothesis", "quote": "Lower development cost alternative" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "opt_extend",
       "to": "out_upgrade",
       "belief": 0.8,
+      "weight": 1.2,
       "provenance": {
         "source": "metrics.csv",
         "quote": "14-day trial users convert at 23% vs 8% baseline",
@@ -181,20 +212,38 @@ If you answered NO to any weight/belief check, revise your graph before respondi
       "provenance_source": "document"
     },
     {
-      "from": "dec_1",
-      "to": "opt_1",
-      "provenance": {
-        "source": "report.pdf",
-        "quote": "Extended trials show 15% conversion lift",
-        "location": "page 2"
-      },
-      "provenance_source": "document"
+      "from": "opt_nudge",
+      "to": "out_upgrade",
+      "belief": 0.65,
+      "weight": 0.9,
+      "provenance": { "source": "hypothesis", "quote": "Nudges help but less impactful than trial extension" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "opt_extend",
+      "to": "risk_churn",
+      "belief": 0.3,
+      "weight": 0.7,
+      "provenance": { "source": "hypothesis", "quote": "Longer trials may cause engagement fatigue" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "out_upgrade",
+      "to": "goal_1",
+      "belief": 0.9,
+      "weight": 1.0,
+      "provenance": { "source": "hypothesis", "quote": "Upgrade rate directly measures goal achievement" },
+      "provenance_source": "hypothesis"
     }
   ],
   "rationales": [
-    { "target": "edge:opt_1::out_upgrade::0", "why": "Experiential value improves conversion" }
+    { "target": "edge:opt_extend::out_upgrade::0", "why": "Experiential value improves conversion" },
+    { "target": "edge:out_upgrade::goal_1::0", "why": "Outcome connects to goal for measurement" }
   ]
 }
+
+Note: The example shows 2 options with differentiated beliefs (0.55/0.45), varied edge weights,
+AND outcome→goal connectivity so that analysis can measure success against the objective.
 
 Respond ONLY with valid JSON matching this structure.`;
 

@@ -13,6 +13,7 @@ import {
   RISK_COVERAGE_SCORING,
   OUTCOME_BALANCE_SCORING,
   OPTION_DIVERSITY_SCORING,
+  GOAL_OUTCOME_LINKAGE_SCORING,
 } from "./constants.js";
 
 // ============================================================================
@@ -40,6 +41,7 @@ type EdgeLike = {
   weight?: number;
   belief?: number;
   provenance?: unknown;
+  provenance_source?: string;
 } & Record<string, unknown>;
 
 function getNodes(graph: GraphV1 | undefined): NodeLike[] {
@@ -367,6 +369,438 @@ export function scoreOptionDiversity(graph: GraphV1 | undefined): FactorResult {
   return { score: clamp(score, 0, 100), issues };
 }
 
+/**
+ * Score goal-outcome linkage - ensures outcomes connect to goals for meaningful analysis.
+ *
+ * Uses BFS to find paths between goals and outcomes (in either direction).
+ * Outcomes disconnected from goals make analysis meaningless since success
+ * cannot be measured against the objective.
+ *
+ * Heuristics:
+ * - Path existence between goals and outcomes
+ * - Direct linkage bonus
+ * - Orphaned outcome penalty
+ */
+export function scoreGoalOutcomeLinkage(graph: GraphV1 | undefined): FactorResult {
+  const edges = getEdges(graph);
+  const issues: string[] = [];
+  const C = GOAL_OUTCOME_LINKAGE_SCORING;
+
+  const goals = getNodesByKind(graph, "goal");
+  const outcomes = getNodesByKind(graph, "outcome");
+
+  // If no goals or outcomes, can't evaluate linkage
+  if (goals.length === 0 || outcomes.length === 0) {
+    return {
+      score: C.missingDataScore,
+      issues: goals.length === 0
+        ? ["No goal nodes defined - cannot evaluate outcome linkage"]
+        : ["No outcome nodes defined - cannot evaluate goal connectivity"],
+    };
+  }
+
+  let score = C.baseScore;
+  const goalIds = new Set(toIds(goals));
+  const outcomeIds = new Set(toIds(outcomes));
+
+  // Build adjacency list for bidirectional BFS
+  const adjacencyList = buildAdjacencyList(edges);
+
+  // Check connectivity for each outcome to any goal
+  const connectedOutcomes: string[] = [];
+  const orphanedOutcomes: string[] = [];
+  let directLinkages = 0;
+
+  for (const outcome of outcomes) {
+    const outcomeId = outcome.id;
+    if (!outcomeId) continue;
+
+    // Check for direct edge between outcome and any goal
+    const hasDirect = edges.some(
+      (e) =>
+        (e.from === outcomeId && goalIds.has(e.to ?? "")) ||
+        (e.to === outcomeId && goalIds.has(e.from ?? "")),
+    );
+
+    if (hasDirect) {
+      directLinkages++;
+      connectedOutcomes.push(outcomeId);
+      continue;
+    }
+
+    // Use BFS to find path to any goal
+    const hasPath = hasPathToGoal(outcomeId, goalIds, adjacencyList);
+    if (hasPath) {
+      connectedOutcomes.push(outcomeId);
+    } else {
+      orphanedOutcomes.push(outcomeId);
+    }
+  }
+
+  // Apply bonuses and penalties
+  const connectedBonus = Math.min(
+    C.connectedOutcomeMaxBonus,
+    connectedOutcomes.length * C.connectedOutcomeBonus,
+  );
+  score += connectedBonus;
+
+  if (directLinkages > 0) {
+    score += Math.min(15, directLinkages * C.directLinkageBonus);
+  }
+
+  if (orphanedOutcomes.length > 0) {
+    score += orphanedOutcomes.length * C.orphanedOutcomePenalty;
+    const labels = orphanedOutcomes.slice(0, 3).join(", ");
+    issues.push(`Outcomes not connected to goal: ${labels}${orphanedOutcomes.length > 3 ? "..." : ""}`);
+  }
+
+  // Severe penalty if NO outcomes connect to goal
+  if (connectedOutcomes.length === 0) {
+    score += C.noConnectedOutcomesPenalty;
+    issues.push("No outcomes connect to any goal - analysis cannot measure success");
+  }
+
+  return { score: clamp(score, 0, 100), issues };
+}
+
+/**
+ * Build bidirectional adjacency list from edges.
+ */
+function buildAdjacencyList(edges: EdgeLike[]): Map<string, Set<string>> {
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const edge of edges) {
+    const from = edge.from;
+    const to = edge.to;
+    if (!from || !to) continue;
+
+    if (!adjacency.has(from)) adjacency.set(from, new Set());
+    if (!adjacency.has(to)) adjacency.set(to, new Set());
+
+    // Bidirectional (we want path in either direction)
+    adjacency.get(from)!.add(to);
+    adjacency.get(to)!.add(from);
+  }
+
+  return adjacency;
+}
+
+/**
+ * BFS to check if a path exists from start node to any goal.
+ */
+function hasPathToGoal(
+  startId: string,
+  goalIds: Set<string>,
+  adjacency: Map<string, Set<string>>,
+): boolean {
+  const visited = new Set<string>();
+  const queue = [startId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (goalIds.has(current)) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    const neighbors = adjacency.get(current);
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          queue.push(neighbor);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+// ============================================================================
+// Evidence Quality Grading
+// ============================================================================
+
+import type { EvidenceGrade, EvidenceQualityDistribution, KeyAssumption, KeyAssumptionsResult } from "./types.js";
+
+/**
+ * Patterns indicating strong evidence (peer-reviewed, verified data).
+ */
+const STRONG_EVIDENCE_PATTERNS = [
+  /peer[- ]?review/i,
+  /published/i,
+  /verified/i,
+  /official/i,
+  /audit(ed)?/i,
+  /certified/i,
+  /authoritative/i,
+  /research\s+(paper|study|journal)/i,
+  /empirical/i,
+  /validated/i,
+];
+
+/**
+ * Patterns indicating moderate evidence (internal data, credible sources).
+ */
+const MODERATE_EVIDENCE_PATTERNS = [
+  /internal\s+(data|report|analysis)/i,
+  /\.csv$/i,
+  /\.xlsx?$/i,
+  /metrics/i,
+  /analytics/i,
+  /dashboard/i,
+  /document/i,
+  /report/i,
+  /survey/i,
+  /interview/i,
+  /source:/i,
+];
+
+/**
+ * Patterns indicating weak evidence (hypothesis, assumptions).
+ */
+const WEAK_EVIDENCE_PATTERNS = [
+  /hypothesis/i,
+  /assum(e|ption)/i,
+  /specul/i,
+  /estimate/i,
+  /guess/i,
+  /rough/i,
+  /approximate/i,
+  /might|may|could/i,
+  /unclear/i,
+  /uncertain/i,
+];
+
+/**
+ * Grade the evidence quality for a single edge.
+ */
+function gradeEdgeEvidence(edge: EdgeLike): EvidenceGrade {
+  // No provenance at all = none
+  if (!edge.provenance && !edge.provenance_source) {
+    return "none";
+  }
+
+  // Check provenance_source first (most reliable indicator)
+  const provenanceSource = edge.provenance_source?.toLowerCase() ?? "";
+  if (provenanceSource === "hypothesis") {
+    return "weak";
+  }
+  if (provenanceSource === "document" || provenanceSource === "metric") {
+    return "moderate"; // Default for documents, unless patterns indicate otherwise
+  }
+
+  // Extract text from provenance for pattern matching
+  const provenance = edge.provenance;
+  let provenanceText = "";
+  if (typeof provenance === "string") {
+    provenanceText = provenance;
+  } else if (provenance && typeof provenance === "object") {
+    const p = provenance as Record<string, unknown>;
+    provenanceText = [p.source, p.quote, p.citation].filter(Boolean).join(" ");
+  }
+
+  // Check for strong evidence patterns
+  for (const pattern of STRONG_EVIDENCE_PATTERNS) {
+    if (pattern.test(provenanceText)) {
+      return "strong";
+    }
+  }
+
+  // Check for weak evidence patterns (check before moderate)
+  for (const pattern of WEAK_EVIDENCE_PATTERNS) {
+    if (pattern.test(provenanceText)) {
+      return "weak";
+    }
+  }
+
+  // Check for moderate evidence patterns
+  for (const pattern of MODERATE_EVIDENCE_PATTERNS) {
+    if (pattern.test(provenanceText)) {
+      return "moderate";
+    }
+  }
+
+  // Has provenance but doesn't match patterns → moderate (benefit of doubt)
+  return "moderate";
+}
+
+/**
+ * Compute evidence quality distribution across all edges.
+ */
+export function computeEvidenceQualityDistribution(
+  graph: GraphV1 | undefined,
+): EvidenceQualityDistribution {
+  const edges = getEdges(graph);
+
+  const distribution: EvidenceQualityDistribution = {
+    strong: 0,
+    moderate: 0,
+    weak: 0,
+    none: 0,
+    summary: "",
+  };
+
+  if (edges.length === 0) {
+    distribution.summary = "No edges to evaluate";
+    return distribution;
+  }
+
+  // Grade each edge
+  for (const edge of edges) {
+    const grade = gradeEdgeEvidence(edge);
+    distribution[grade]++;
+  }
+
+  // Generate human-readable summary
+  const parts: string[] = [];
+  if (distribution.strong > 0) {
+    parts.push(`${distribution.strong} edge${distribution.strong > 1 ? "s" : ""} backed by strong evidence`);
+  }
+  if (distribution.moderate > 0) {
+    parts.push(`${distribution.moderate} with moderate evidence`);
+  }
+  if (distribution.weak > 0) {
+    parts.push(`${distribution.weak} based on assumptions`);
+  }
+  if (distribution.none > 0) {
+    parts.push(`${distribution.none} without provenance`);
+  }
+
+  distribution.summary = parts.length > 0
+    ? parts.join(", ")
+    : "Evidence quality could not be assessed";
+
+  return distribution;
+}
+
+// ============================================================================
+// Key Assumptions Identification
+// ============================================================================
+
+/**
+ * High belief threshold - edges above this are considered well-grounded.
+ */
+const WELL_GROUNDED_BELIEF_THRESHOLD = 0.8;
+
+/**
+ * Identify key assumptions in the graph that should be validated.
+ *
+ * IMPORTANT: Always returns at least one assumption - never empty.
+ * Priority is computed as: (1 - belief) × weight × connectivity_factor
+ *
+ * If all beliefs are high (>0.8), returns top edge with "well-grounded" framing.
+ */
+export function identifyKeyAssumptions(
+  graph: GraphV1 | undefined,
+): KeyAssumptionsResult {
+  const edges = getEdges(graph);
+  const nodes = getNodes(graph);
+
+  // Build node label lookup
+  const nodeLabels = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.id && node.label) {
+      nodeLabels.set(node.id, node.label);
+    }
+  }
+
+  // No edges means no assumptions to surface
+  if (edges.length === 0) {
+    return {
+      assumptions: [],
+      summary: "No relationships defined in the model",
+      well_grounded: false,
+    };
+  }
+
+  // Score each edge by assumption priority
+  const scoredEdges: Array<{
+    edge: EdgeLike;
+    fromLabel: string;
+    toLabel: string;
+    belief: number;
+    priority: number;
+  }> = [];
+
+  for (const edge of edges) {
+    const from = edge.from ?? "";
+    const to = edge.to ?? "";
+    const belief = typeof edge.belief === "number" ? edge.belief : 0.5; // Default belief
+    const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
+
+    // Priority: Lower belief = higher priority to validate
+    // Also factor in weight (higher weight = more important relationship)
+    const priority = (1 - belief) * Math.abs(weight);
+
+    scoredEdges.push({
+      edge,
+      fromLabel: nodeLabels.get(from) ?? from,
+      toLabel: nodeLabels.get(to) ?? to,
+      belief,
+      priority,
+    });
+  }
+
+  // Sort by priority (highest first)
+  scoredEdges.sort((a, b) => b.priority - a.priority);
+
+  // Check if model is well-grounded (all beliefs > 0.8)
+  const wellGrounded = scoredEdges.every((e) => e.belief >= WELL_GROUNDED_BELIEF_THRESHOLD);
+
+  // Always take top 3 (or all if fewer)
+  const topEdges = scoredEdges.slice(0, 3);
+
+  // Generate assumptions with appropriate framing
+  const assumptions: KeyAssumption[] = topEdges.map((e) => ({
+    edge_id: `${e.edge.from}→${e.edge.to}`,
+    from_label: e.fromLabel,
+    to_label: e.toLabel,
+    belief: e.belief,
+    priority_score: e.priority,
+    plain_english: generateAssumptionPlainEnglish(e.fromLabel, e.toLabel, e.belief, wellGrounded),
+  }));
+
+  // Generate summary
+  const summary = wellGrounded
+    ? `Your model is well-grounded — consider validating "${topEdges[0]?.fromLabel} → ${topEdges[0]?.toLabel}" for additional confidence`
+    : `Key assumptions to validate: ${assumptions.slice(0, 2).map((a) => `"${a.from_label} → ${a.to_label}"`).join(", ")}`;
+
+  return {
+    assumptions,
+    summary,
+    well_grounded: wellGrounded,
+  };
+}
+
+/**
+ * Generate plain English explanation for an assumption.
+ */
+function generateAssumptionPlainEnglish(
+  fromLabel: string,
+  toLabel: string,
+  belief: number,
+  wellGrounded: boolean,
+): string {
+  const beliefPct = Math.round(belief * 100);
+
+  if (wellGrounded) {
+    return `The relationship between "${fromLabel}" and "${toLabel}" is well-grounded (${beliefPct}% confidence). Consider validating this for additional assurance.`;
+  }
+
+  if (belief < 0.4) {
+    return `The link from "${fromLabel}" to "${toLabel}" has low confidence (${beliefPct}%). This is a key assumption that could significantly affect the outcome.`;
+  }
+
+  if (belief < 0.6) {
+    return `The relationship between "${fromLabel}" and "${toLabel}" (${beliefPct}% confidence) merits validation. Strengthening this assumption would improve model reliability.`;
+  }
+
+  if (belief < 0.8) {
+    return `Consider validating the "${fromLabel}" → "${toLabel}" relationship (${beliefPct}% confidence) to increase overall model confidence.`;
+  }
+
+  return `The "${fromLabel}" → "${toLabel}" relationship is reasonably confident (${beliefPct}%) but worth periodic review.`;
+}
+
 // Export for testing
 export const __test_only = {
   clamp,
@@ -375,4 +809,6 @@ export const __test_only = {
   getEdges,
   getNodesByKind,
   toIds,
+  gradeEdgeEvidence,
+  generateAssumptionPlainEnglish,
 };

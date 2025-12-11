@@ -36,7 +36,9 @@ describe("CEE Key Insight Generator", () => {
           ranked_actions: rankedActions,
         });
 
-        expect(result.headline).toBe("Hiring staff is the clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("hiring staff");
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
 
       it("generates clear winner headline when margin is large (>20%)", () => {
@@ -50,7 +52,9 @@ describe("CEE Key Insight Generator", () => {
           ranked_actions: rankedActions,
         });
 
-        expect(result.headline).toBe("Expanding now is the clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("expanding now");
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
 
       it("generates stronger option headline when margin is significant (10-20%)", () => {
@@ -64,7 +68,9 @@ describe("CEE Key Insight Generator", () => {
           ranked_actions: rankedActions,
         });
 
-        expect(result.headline).toBe("Implementing software is the stronger option");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("implementing software");
+        expect(result.headline.toLowerCase()).toMatch(/stronger option|best supports/i);
       });
 
       it("generates close call headline when margin is small (<5%)", () => {
@@ -95,7 +101,9 @@ describe("CEE Key Insight Generator", () => {
         });
 
         expect(result.headline).not.toContain("?");
-        expect(result.headline).toBe("Implementing time-tracking software is the clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("implementing time-tracking software");
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
 
       it("removes question prefixes from labels", () => {
@@ -111,7 +119,9 @@ describe("CEE Key Insight Generator", () => {
 
         expect(result.headline).not.toContain("Should we");
         expect(result.headline).not.toContain("?");
-        expect(result.headline).toBe("Hiring more staff is the clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("hiring more staff");
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
 
       it("removes 'Yes,' prefix from labels", () => {
@@ -126,7 +136,9 @@ describe("CEE Key Insight Generator", () => {
         });
 
         expect(result.headline).not.toContain("Yes,");
-        expect(result.headline).toBe("Implementing software is the clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toContain("implementing software");
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
     });
 
@@ -320,7 +332,8 @@ describe("CEE Key Insight Generator", () => {
         });
 
         expect(result.headline.toLowerCase()).toContain("only option");
-        expect(result.headline.toLowerCase()).toContain("clear best choice");
+        // Headline now includes goal context when goal is present
+        expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       });
 
       it("handles empty ranked actions", () => {
@@ -441,10 +454,9 @@ describe("CEE Key Insight Generator", () => {
       // No "Yes," prefix
       expect(result.headline).not.toContain("Yes,");
 
-      // Clean headline
-      expect(result.headline).toBe(
-        "Implementing time-tracking software is the stronger option"
-      );
+      // Clean headline - now includes goal context when present
+      expect(result.headline.toLowerCase()).toContain("implementing time-tracking software");
+      expect(result.headline.toLowerCase()).toMatch(/stronger option|best supports/i);
     });
 
     it("produces clean output for EU expansion scenario", () => {
@@ -476,9 +488,9 @@ describe("CEE Key Insight Generator", () => {
         top_drivers: drivers,
       });
 
-      expect(result.headline).toBe(
-        "Expanding to eu markets is the clear best choice"
-      );
+      // Headline now includes goal context when present
+      expect(result.headline.toLowerCase()).toContain("expanding to eu markets");
+      expect(result.headline.toLowerCase()).toMatch(/clear best (choice|path)/i);
       expect(result.primary_driver.toLowerCase()).toContain("market size");
       expect(result.primary_driver).toContain("55%");
     });

@@ -188,7 +188,8 @@ function generateSuggestion(
     case "uniform_weights":
       rationale =
         `All edges from "${fromLabel}" have identical weights (${(detection.current_weight ?? 1.0).toFixed(2)}). ` +
-        `Vary weights based on influence strength: 1.2-1.5 (strong amplification), 0.8-1.1 (moderate), 0.3-0.7 (weak/dampening).`;
+        `Vary weights based on signal strength: 1.2-1.5 (amplifying), 0.9-1.1 (neutral), 0.3-0.8 (attenuating). ` +
+        `Note: "attenuating" means the signal is dampened, not that the evidence is weak.`;
       break;
 
     case "weight_too_low":
@@ -200,7 +201,7 @@ function generateSuggestion(
     case "weight_too_high":
       rationale =
         `The edge from "${fromLabel}" to "${toLabel}" has weight (${(detection.current_weight ?? 0).toFixed(2)}) ` +
-        `exceeding the recommended maximum (1.5). Consider 1.2 for strong amplification without distortion.`;
+        `exceeding the recommended maximum (1.5). Consider 1.2-1.3 for amplifying effects without distortion.`;
       break;
 
     default:

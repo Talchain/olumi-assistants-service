@@ -16,6 +16,12 @@ export interface RankedAction {
   label: string;
   score: number; // 0-100
   rank: number; // 1-based
+  /** Optional outcome quality indicator - used to avoid contradictory messaging */
+  outcome_quality?: "positive" | "neutral" | "negative" | "mixed";
+  /** Optional: whether this option has associated risks */
+  has_risks?: boolean;
+  /** Optional: primary outcome label for context */
+  primary_outcome?: string;
 }
 
 export interface GenerateRecommendationInput {
