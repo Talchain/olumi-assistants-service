@@ -32,6 +32,9 @@ import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js"
 import ceeGenerateRecommendationRouteV1 from "./routes/assist.v1.generate-recommendation.js";
 import ceeNarrateConditionsRouteV1 from "./routes/assist.v1.narrate-conditions.js";
 import ceeExplainPolicyRouteV1 from "./routes/assist.v1.explain-policy.js";
+import ceeElicitPreferencesRouteV1 from "./routes/assist.v1.elicit-preferences.js";
+import ceeElicitPreferencesAnswerRouteV1 from "./routes/assist.v1.elicit-preferences-answer.js";
+import ceeExplainTradeoffRouteV1 from "./routes/assist.v1.explain-tradeoff.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
@@ -501,6 +504,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeGenerateRecommendationRouteV1(app);
   await ceeNarrateConditionsRouteV1(app);
   await ceeExplainPolicyRouteV1(app);
+  await ceeElicitPreferencesRouteV1(app);
+  await ceeElicitPreferencesAnswerRouteV1(app);
+  await ceeExplainTradeoffRouteV1(app);
   await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);

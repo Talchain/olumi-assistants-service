@@ -1194,6 +1194,305 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/elicit/preferences:
+    post:
+      summary: Generate preference elicitation questions (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Preference Elicitation** endpoint.
+
+        Generates preference questions based on the user's decision context to capture:
+        - Risk tolerance vs reward trade-offs
+        - Goal prioritisation (multi-goal scenarios)
+        - Loss aversion preferences
+        - Time preference (immediate vs delayed outcomes)
+
+        Questions are prioritised by information gain to efficiently calibrate user preferences.
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+
+        Use with `/assist/v1/elicit/preferences/answer` to process responses incrementally.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEElicitPreferencesRequestV1'
+            examples:
+              basic:
+                summary: Basic preference elicitation
+                value:
+                  graph_id: "graph_123"
+                  goal_ids: ["goal_revenue", "goal_retention"]
+                  options:
+                    - id: "opt_expand"
+                      label: "Expand to US market"
+                      expected_value: 100000
+                    - id: "opt_focus"
+                      label: "Focus on UK market"
+                      expected_value: 50000
+                  max_questions: 3
+              with_existing_preferences:
+                summary: Refine existing preferences
+                value:
+                  graph_id: "graph_456"
+                  goal_ids: ["goal_growth"]
+                  options:
+                    - id: "opt_a"
+                      label: "Option A"
+                  current_preferences:
+                    risk_aversion: 0.6
+                    loss_aversion: 1.8
+                    goal_weights: {}
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 2
+                      last_updated: "2025-01-01T00:00:00Z"
+                  max_questions: 2
+      responses:
+        '200':
+          description: Preference questions generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Preference Elicitation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEElicitPreferencesResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/elicit/preferences/answer:
+    post:
+      summary: Process preference answer (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Preference Answer Processing** endpoint.
+
+        Processes a user's answer to a preference question and returns:
+        - Updated preference profile
+        - Impact statement explaining how recommendations change
+        - Count of remaining questions for full confidence
+        - Optional next question to ask
+
+        Answers incrementally refine the user's preference profile, improving
+        recommendation personalisation with each response.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEElicitPreferencesAnswerRequestV1'
+            examples:
+              risk_answer:
+                summary: Answer to risk/reward question
+                value:
+                  question_id: "pref_risk_1234"
+                  answer: "A"
+                  graph_id: "graph_123"
+              with_existing_preferences:
+                summary: Answer with existing preferences
+                value:
+                  question_id: "pref_loss_5678"
+                  answer: "B"
+                  graph_id: "graph_456"
+                  current_preferences:
+                    risk_aversion: 0.4
+                    loss_aversion: 1.5
+                    goal_weights: {}
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 1
+                      last_updated: "2025-01-01T00:00:00Z"
+      responses:
+        '200':
+          description: Preference answer processed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Preference Elicitation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEElicitPreferencesAnswerResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '404':
+          description: Question not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/explain/tradeoff:
+    post:
+      summary: Explain option trade-offs (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Trade-off Explanation** endpoint.
+
+        Generates plain-language explanations of trade-offs between two options
+        based on the user's preference profile. Returns:
+        - Natural language explanation
+        - Key factors influencing the comparison
+        - Preference alignment scores for each option
+        - Recommendation (A, B, or neutral)
+
+        Use this to help users understand how their preferences affect option rankings.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEExplainTradeoffRequestV1'
+            examples:
+              basic:
+                summary: Compare two options
+                value:
+                  option_a: "Launch now with basic features"
+                  option_b: "Wait 6 months for full feature set"
+                  user_preferences:
+                    risk_aversion: 0.7
+                    loss_aversion: 2.0
+                    goal_weights:
+                      goal_revenue: 0.6
+                      goal_quality: 0.4
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 2
+                      last_updated: "2025-01-01T00:00:00Z"
+              with_context:
+                summary: With goal context
+                value:
+                  option_a: "Expand to US market"
+                  option_b: "Focus on UK market"
+                  user_preferences:
+                    risk_aversion: 0.5
+                    loss_aversion: 1.5
+                    goal_weights: {}
+                    time_discount: 0.05
+                    confidence: "high"
+                    derived_from:
+                      questions_answered: 3
+                      last_updated: "2025-01-01T00:00:00Z"
+                  goal_context: "international expansion"
+      responses:
+        '200':
+          description: Trade-off explanation generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Trade-off Explanation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEExplainTradeoffResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/suggest-edge-function:
     post:
       summary: Suggest edge function type (CEE v1)
@@ -3324,6 +3623,20 @@ components:
           type: boolean
           description: Whether this option is clearly dominant over alternatives
           example: false
+        outcome_quality:
+          type: string
+          enum: [positive, neutral, negative, mixed]
+          description: |
+            Quality of expected outcomes. Affects headline phrasing:
+            - positive: "best path" phrasing
+            - negative: "minimises risk" phrasing
+            - mixed: cautionary language
+            - neutral: standard recommendations
+          example: positive
+        primary_outcome:
+          type: string
+          description: Primary outcome label for context
+          example: Increased revenue
 
     DriverV1:
       type: object
@@ -3352,6 +3665,75 @@ components:
           enum: [positive, negative, neutral]
           description: Direction of influence
           example: positive
+        kind:
+          type: string
+          description: |
+            Node kind - helps distinguish external factors from controllable actions.
+            - factor: External variable outside user control (e.g., market demand)
+            - action: Controllable step the user can take
+          example: factor
+
+    GoalInfoV1:
+      type: object
+      description: Goal information for multi-goal scenarios
+      required:
+        - id
+        - text
+        - type
+        - is_primary
+      properties:
+        id:
+          type: string
+          description: Goal node ID
+          example: goal-1
+        text:
+          type: string
+          description: Goal text for display
+          example: Reach £20k MRR in 12 months
+        type:
+          type: string
+          enum: [binary, continuous, compound]
+          description: |
+            Goal type classification:
+            - binary: Yes/no decision ("Should we...?")
+            - continuous: Optimization goal ("Maximize revenue")
+            - compound: Multiple competing objectives
+          example: continuous
+        is_primary:
+          type: boolean
+          description: Whether this is the primary goal (for multi-goal scenarios)
+          example: true
+
+    IdentifiabilityV1:
+      type: object
+      description: |
+        Identifiability status from ISL causal analysis. Indicates whether
+        causal effects can be identified from the model structure using
+        backdoor, frontdoor, or instrumental variable methods.
+      required:
+        - identifiable
+      properties:
+        identifiable:
+          type: boolean
+          description: Whether causal effects are identifiable from the model structure
+          example: true
+        method:
+          type: string
+          nullable: true
+          description: Method used for identification (e.g., "backdoor", "frontdoor", "instrumental")
+          example: backdoor
+        adjustment_set:
+          type: array
+          nullable: true
+          description: Variables in the adjustment set for causal identification
+          items:
+            type: string
+          example: [age, income, education]
+        explanation:
+          type: string
+          nullable: true
+          description: Human-readable explanation of identifiability status
+          example: Causal effect identified via backdoor criterion adjusting for confounders.
 
     CEEKeyInsightRequestV1:
       type: object
@@ -3376,6 +3758,98 @@ components:
         context_id:
           type: string
           description: Optional context identifier for tracing
+        goal_text:
+          type: string
+          nullable: true
+          description: |
+            Goal text for anchored headlines. When provided, headlines will reference
+            the user's stated goal (e.g., "Your best path to [goal]...").
+          example: Reach £20k MRR in 12 months
+        goal_type:
+          type: string
+          nullable: true
+          enum: [binary, continuous, compound]
+          description: |
+            Goal type classification:
+            - binary: Yes/no decisions → "To [goal], proceed with..."
+            - continuous: Optimization → "[Option] is your best path to [goal]"
+            - compound: Multiple goals → "[Option] best balances [goal1] and [goal2]"
+          example: continuous
+        goal_id:
+          type: string
+          nullable: true
+          description: Goal node ID for reference
+          example: goal-1
+        goals:
+          type: array
+          description: Multiple goals for compound decisions
+          items:
+            $ref: '#/components/schemas/GoalInfoV1'
+        primary_goal_id:
+          type: string
+          description: ID of the primary goal (for multi-goal scenarios)
+        identifiability:
+          $ref: '#/components/schemas/IdentifiabilityV1'
+          description: |
+            Identifiability status from ISL causal analysis. If not provided,
+            the system assumes causal effects are identifiable (default behavior).
+            When identifiable=false, headlines and evidence use exploratory language.
+
+    HeadlineStructuredV1:
+      type: object
+      description: Structured headline data for flexible UI rendering
+      required:
+        - goal_text
+        - action
+        - outcome_type
+        - likelihood
+        - vs_baseline
+        - vs_baseline_direction
+        - ranking_confidence
+        - is_close_race
+      properties:
+        goal_text:
+          type: string
+          nullable: true
+          description: Goal text (null if no goal provided)
+          example: Reach £20k MRR in 12 months
+        action:
+          type: string
+          description: The recommended action label
+          example: Increase price to £59
+        outcome_type:
+          type: string
+          enum: [positive, negative, neutral]
+          description: Outcome type classification
+          example: positive
+        likelihood:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Likelihood of success (0-1)
+          example: 0.75
+        vs_baseline:
+          type: number
+          format: double
+          nullable: true
+          description: Delta vs baseline option (null if no baseline)
+          example: 0.25
+        vs_baseline_direction:
+          type: string
+          nullable: true
+          enum: [better, worse, same]
+          description: Direction compared to baseline
+          example: better
+        ranking_confidence:
+          type: string
+          enum: [low, medium, high]
+          description: Confidence in the ranking
+          example: high
+        is_close_race:
+          type: boolean
+          description: Whether this is a close race between options (margin < 5%)
+          example: false
 
     CEEKeyInsightResponseV1:
       type: object
@@ -3390,8 +3864,13 @@ components:
       properties:
         headline:
           type: string
-          description: Main recommendation headline (sanitised, no question marks)
-          example: Implementing time-tracking software is the stronger option
+          description: |
+            Main recommendation headline (sanitised, no question marks).
+            When goal_text is provided in the request, the headline will reference
+            the user's stated goal for more compelling, contextual recommendations.
+          example: Increase price to £59 is your best path to reach £20k MRR in 12 months — 25% better than alternatives
+        headline_structured:
+          $ref: '#/components/schemas/HeadlineStructuredV1'
         primary_driver:
           type: string
           description: Primary driver explanation
@@ -3404,6 +3883,36 @@ components:
           type: string
           description: Optional caveat if the recommendation is close
           example: Consider that manual tracking is a close second—sensitivity analysis recommended.
+        evidence:
+          type: array
+          description: Evidence points supporting the recommendation
+          items:
+            type: string
+          example:
+            - Expected utility of 75% indicates strong likelihood of success.
+            - Revenue impact accounts for 45% of the outcome.
+        next_steps:
+          type: array
+          description: Suggested next steps (max 3-4 depending on identifiability)
+          items:
+            type: string
+          example:
+            - Validate key assumptions with stakeholders before proceeding.
+            - Define success metrics for measuring progress toward the goal.
+        recommendation_status:
+          type: string
+          enum: [actionable, exploratory]
+          description: |
+            Recommendation status based on causal identifiability:
+            - actionable: Causal effects confirmed, proceed with confidence
+            - exploratory: Treat as scenario analysis, gather more data before committing
+          example: actionable
+        identifiability_note:
+          type: string
+          description: |
+            Human-readable note about identifiability status for transparency.
+            Present when identifiability is provided or when non-identifiable.
+          example: Causal effects confirmed via backdoor criterion.
         quality:
           $ref: '#/components/schemas/CEEQualityMeta'
         trace:
@@ -3815,6 +4324,391 @@ components:
           enum: [high, medium, low]
           description: Confidence in the assessment based on response coverage
           example: high
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    # Preference Elicitation Schemas
+
+    CEEPreferenceQuestionTypeV1:
+      type: string
+      description: Type of preference question
+      enum: [risk_reward, goal_tradeoff, loss_aversion, time_preference]
+
+    CEEPreferenceOptionV1:
+      type: object
+      description: Option in a preference question
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          description: Option identifier (A or B)
+          enum: ["A", "B"]
+          example: "A"
+        label:
+          type: string
+          description: Short label for the option
+          example: "70% chance of £15,000 outcome"
+        description:
+          type: string
+          description: Detailed description of the option
+        outcome_value:
+          type: number
+          description: Monetary value of the outcome
+          example: 15000
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Probability of the outcome
+          example: 0.7
+        timeframe:
+          type: string
+          description: Timeframe for the outcome
+          example: "immediate"
+
+    CEEPreferenceQuestionV1:
+      type: object
+      description: Preference elicitation question
+      required:
+        - id
+        - type
+        - question
+        - options
+        - estimated_value
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this question
+          example: "pref_risk_1734012345678"
+        type:
+          $ref: '#/components/schemas/CEEPreferenceQuestionTypeV1'
+        question:
+          type: string
+          description: The question text
+          example: "Would you prefer:"
+        options:
+          type: array
+          description: Available response options (always 2)
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CEEPreferenceOptionV1'
+        estimated_value:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Estimated information gain from this question
+          example: 0.4
+        context_node_ids:
+          type: array
+          description: IDs of nodes this question relates to (for goal_tradeoff)
+          items:
+            type: string
+
+    CEEUserPreferencesDerivedFromV1:
+      type: object
+      description: Metadata about how preferences were derived
+      required:
+        - questions_answered
+        - last_updated
+      properties:
+        questions_answered:
+          type: integer
+          minimum: 0
+          description: Number of questions answered
+          example: 2
+        last_updated:
+          type: string
+          format: date-time
+          description: When preferences were last updated
+          example: "2025-01-01T00:00:00Z"
+
+    CEEUserPreferencesV1:
+      type: object
+      description: User preference profile
+      required:
+        - risk_aversion
+        - loss_aversion
+        - goal_weights
+        - time_discount
+        - confidence
+        - derived_from
+      properties:
+        risk_aversion:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Risk aversion level (0 = risk seeking, 1 = risk averse)
+          example: 0.5
+        loss_aversion:
+          type: number
+          minimum: 1
+          maximum: 3
+          description: Loss aversion coefficient (1 = neutral, 3 = highly loss averse)
+          example: 1.5
+        goal_weights:
+          type: object
+          additionalProperties:
+            type: number
+          description: Relative importance weights for each goal
+          example:
+            goal_revenue: 0.6
+            goal_quality: 0.4
+        time_discount:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Time discount rate (higher = prefer near-term outcomes)
+          example: 0.1
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          description: Confidence in preference profile
+          example: "medium"
+        derived_from:
+          $ref: '#/components/schemas/CEEUserPreferencesDerivedFromV1'
+
+    CEEElicitPreferencesOptionV1:
+      type: object
+      description: Option context for preference elicitation
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          description: Option identifier
+          example: "opt_expand"
+        label:
+          type: string
+          description: Option label
+          example: "Expand to US market"
+        expected_value:
+          type: number
+          description: Expected monetary value
+          example: 100000
+        risk_level:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Risk level (0 = safe, 1 = risky)
+          example: 0.6
+
+    CEEElicitPreferencesRequestV1:
+      type: object
+      description: Request for preference elicitation questions
+      required:
+        - graph_id
+        - goal_ids
+        - options
+      properties:
+        graph_id:
+          type: string
+          description: Graph identifier
+          example: "graph_123"
+        goal_ids:
+          type: array
+          description: Goal node IDs in the graph
+          items:
+            type: string
+          example: ["goal_revenue", "goal_retention"]
+        options:
+          type: array
+          description: Option context for question generation
+          items:
+            $ref: '#/components/schemas/CEEElicitPreferencesOptionV1'
+        current_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        max_questions:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 3
+          description: Maximum number of questions to return
+          example: 3
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEElicitPreferencesResponseV1:
+      type: object
+      description: Response containing preference elicitation questions
+      required:
+        - questions
+        - estimated_value
+        - provenance
+      properties:
+        questions:
+          type: array
+          description: Preference questions sorted by information gain
+          items:
+            $ref: '#/components/schemas/CEEPreferenceQuestionV1'
+        estimated_value:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Total estimated information gain from all questions
+          example: 0.84
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEElicitPreferencesAnswerRequestV1:
+      type: object
+      description: Request to process a preference answer
+      required:
+        - question_id
+        - answer
+        - graph_id
+      properties:
+        question_id:
+          type: string
+          description: ID of the question being answered
+          example: "pref_risk_1734012345678"
+        answer:
+          type: string
+          enum: ["A", "B"]
+          description: Selected option (A or B)
+          example: "A"
+        graph_id:
+          type: string
+          description: Graph identifier
+          example: "graph_123"
+        current_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEElicitPreferencesAnswerResponseV1:
+      type: object
+      description: Response after processing a preference answer
+      required:
+        - updated_preferences
+        - recommendation_impact
+        - remaining_questions
+        - provenance
+      properties:
+        updated_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        recommendation_impact:
+          type: string
+          description: How this answer affects recommendations
+          example: "You prefer higher potential returns even with uncertainty."
+        remaining_questions:
+          type: integer
+          minimum: 0
+          description: Number of questions needed for full confidence
+          example: 2
+        next_question:
+          $ref: '#/components/schemas/CEEPreferenceQuestionV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEExplainTradeoffRequestV1:
+      type: object
+      description: Request to explain trade-offs between options
+      required:
+        - option_a
+        - option_b
+        - user_preferences
+      properties:
+        option_a:
+          type: string
+          description: First option to compare
+          example: "Launch now with basic features"
+        option_b:
+          type: string
+          description: Second option to compare
+          example: "Wait 6 months for full feature set"
+        user_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        goal_context:
+          type: string
+          description: Optional goal context for the comparison
+          example: "international expansion"
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEKeyFactorV1:
+      type: object
+      description: Key factor influencing the trade-off
+      required:
+        - factor
+        - impact
+      properties:
+        factor:
+          type: string
+          description: Name of the factor
+          example: "Risk preference"
+        impact:
+          type: string
+          description: How this factor affects the comparison
+          example: "You tend to prefer safer options with more certain outcomes."
+
+    CEEPreferenceAlignmentV1:
+      type: object
+      description: Preference alignment scores for options
+      required:
+        - option_a_score
+        - option_b_score
+        - recommended
+      properties:
+        option_a_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Alignment score for option A
+          example: 0.45
+        option_b_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Alignment score for option B
+          example: 0.55
+        recommended:
+          type: string
+          enum: ["A", "B", "neutral"]
+          description: Recommended option based on preferences
+          example: "neutral"
+
+    CEEExplainTradeoffResponseV1:
+      type: object
+      description: Response explaining trade-offs between options
+      required:
+        - explanation
+        - key_factors
+        - preference_alignment
+        - provenance
+      properties:
+        explanation:
+          type: string
+          description: Natural language explanation of the trade-off
+          example: "You're comparing Launch now with basic features against Wait 6 months for full feature set. Your preference for safety suggests..."
+        key_factors:
+          type: array
+          description: Key factors influencing the comparison
+          items:
+            $ref: '#/components/schemas/CEEKeyFactorV1'
+        preference_alignment:
+          $ref: '#/components/schemas/CEEPreferenceAlignmentV1'
         provenance:
           type: string
           enum: [cee]

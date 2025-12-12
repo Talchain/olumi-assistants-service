@@ -287,6 +287,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeExplainPolicyRequested: "cee.explain_policy.requested",
         CeeExplainPolicyCompleted: "cee.explain_policy.completed",
         CeeExplainPolicyFailed: "cee.explain_policy.failed",
+
+        // Phase 5: Preference Elicitation events
+        CeeElicitPreferencesRequested: "cee.elicit_preferences.requested",
+        CeeElicitPreferencesSucceeded: "cee.elicit_preferences.succeeded",
+        CeeElicitPreferencesFailed: "cee.elicit_preferences.failed",
+        CeeElicitPreferencesAnswerRequested: "cee.elicit_preferences_answer.requested",
+        CeeElicitPreferencesAnswerSucceeded: "cee.elicit_preferences_answer.succeeded",
+        CeeElicitPreferencesAnswerFailed: "cee.elicit_preferences_answer.failed",
+        CeeExplainTradeoffRequested: "cee.explain_tradeoff.requested",
+        CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
+        CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -312,7 +323,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|generate_recommendation|narrate_conditions|explain_policy)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -587,6 +598,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_policy.requested": [TelemetryEvents.CeeExplainPolicyRequested],
         "cee.explain_policy.completed": [TelemetryEvents.CeeExplainPolicyCompleted],
         "cee.explain_policy.failed": [TelemetryEvents.CeeExplainPolicyFailed],
+
+        // Phase 5: Preference Elicitation events
+        "cee.elicit_preferences.requested": [TelemetryEvents.CeeElicitPreferencesRequested],
+        "cee.elicit_preferences.succeeded": [TelemetryEvents.CeeElicitPreferencesSucceeded],
+        "cee.elicit_preferences.failed": [TelemetryEvents.CeeElicitPreferencesFailed],
+        "cee.elicit_preferences_answer.requested": [TelemetryEvents.CeeElicitPreferencesAnswerRequested],
+        "cee.elicit_preferences_answer.succeeded": [TelemetryEvents.CeeElicitPreferencesAnswerSucceeded],
+        "cee.elicit_preferences_answer.failed": [TelemetryEvents.CeeElicitPreferencesAnswerFailed],
+        "cee.explain_tradeoff.requested": [TelemetryEvents.CeeExplainTradeoffRequested],
+        "cee.explain_tradeoff.succeeded": [TelemetryEvents.CeeExplainTradeoffSucceeded],
+        "cee.explain_tradeoff.failed": [TelemetryEvents.CeeExplainTradeoffFailed],
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
@@ -912,6 +934,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_policy.requested",
         "cee.explain_policy.completed",
         "cee.explain_policy.failed",
+
+        // Phase 5: Preference Elicitation events
+        "cee.elicit_preferences.requested",
+        "cee.elicit_preferences.succeeded",
+        "cee.elicit_preferences.failed",
+        "cee.elicit_preferences_answer.requested",
+        "cee.elicit_preferences_answer.succeeded",
+        "cee.elicit_preferences_answer.failed",
+        "cee.explain_tradeoff.requested",
+        "cee.explain_tradeoff.succeeded",
+        "cee.explain_tradeoff.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

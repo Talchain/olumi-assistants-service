@@ -6,6 +6,10 @@
  *
  * The Key Insight synthesizes ranked actions and drivers from PLoT inference
  * into a concise recommendation suitable for UI display.
+ *
+ * Goal-Anchored Headlines:
+ * When goal_text is provided, headlines reference the user's stated goal
+ * to create more compelling, contextual recommendations.
  */
 
 import type { GraphV1 } from "../../contracts/plot/engine.js";
@@ -56,6 +60,30 @@ export interface Driver {
 }
 
 /**
+ * Goal information for multi-goal scenarios.
+ */
+export interface GoalInfo {
+  id: string;
+  text: string;
+  type: "binary" | "continuous" | "compound";
+  is_primary: boolean;
+}
+
+/**
+ * Identifiability status from ISL causal analysis.
+ */
+export interface Identifiability {
+  /** Whether causal effects are identifiable from the model structure */
+  identifiable: boolean;
+  /** Method used for identification (e.g., "backdoor", "frontdoor") */
+  method?: string | null;
+  /** Variables in the adjustment set for causal identification */
+  adjustment_set?: string[] | null;
+  /** Human-readable explanation of identifiability status */
+  explanation?: string | null;
+}
+
+/**
  * Input for key insight generation.
  */
 export interface KeyInsightInput {
@@ -65,6 +93,40 @@ export interface KeyInsightInput {
   ranked_actions: RankedAction[];
   /** Top drivers from PLoT inference (optional) */
   top_drivers?: Driver[];
+  /** Goal text for anchored headlines (optional) */
+  goal_text?: string | null;
+  /** Goal type classification (optional) */
+  goal_type?: "binary" | "continuous" | "compound" | null;
+  /** Goal node ID (optional) */
+  goal_id?: string | null;
+  /** Multiple goals for compound decisions (optional) */
+  goals?: GoalInfo[];
+  /** Primary goal ID for multi-goal scenarios (optional) */
+  primary_goal_id?: string;
+  /** Identifiability from ISL - if not provided, assumes identifiable */
+  identifiability?: Identifiability;
+}
+
+/**
+ * Structured headline data for flexible UI rendering.
+ */
+export interface HeadlineStructured {
+  /** Goal text (null if no goal provided) */
+  goal_text: string | null;
+  /** The recommended action label */
+  action: string;
+  /** Outcome type classification */
+  outcome_type: "positive" | "negative" | "neutral";
+  /** Likelihood of success (0-1) */
+  likelihood: number;
+  /** Delta vs baseline option (null if no baseline) */
+  vs_baseline: number | null;
+  /** Direction compared to baseline */
+  vs_baseline_direction: "better" | "worse" | "same" | null;
+  /** Confidence in the ranking */
+  ranking_confidence: "low" | "medium" | "high";
+  /** Whether this is a close race between options */
+  is_close_race: boolean;
 }
 
 /**
@@ -73,12 +135,22 @@ export interface KeyInsightInput {
 export interface KeyInsightOutput {
   /** Main recommendation headline */
   headline: string;
+  /** Structured headline data for UI flexibility */
+  headline_structured?: HeadlineStructured;
   /** Primary driver explanation */
   primary_driver: string;
   /** Confidence statement */
   confidence_statement: string;
   /** Caveat if recommendation is close (optional) */
   caveat?: string;
+  /** Evidence points supporting the recommendation */
+  evidence?: string[];
+  /** Suggested next steps */
+  next_steps?: string[];
+  /** Recommendation status based on identifiability */
+  recommendation_status?: "actionable" | "exploratory";
+  /** Note about identifiability for transparency */
+  identifiability_note?: string;
 }
 
 // ============================================================================
@@ -101,24 +173,8 @@ const CONFIDENCE_THRESHOLDS = {
   MEDIUM: 0.4,
 };
 
-/**
- * Goal type classification.
- * - binary: Yes/no decisions ("Should we...?", "Do we proceed?")
- * - continuous: Optimization goals ("Maximize revenue", "Increase market share")
- */
-type GoalType = "binary" | "continuous";
-
-/**
- * Patterns that indicate binary (yes/no) decision goals.
- */
-const BINARY_GOAL_PATTERNS = [
-  /^should\s+(we|i|the)/i,
-  /^do\s+(we|i|they)\s+(proceed|go|continue|approve|select|choose)/i,
-  /^is\s+(it|this|the)\s+(worth|viable|feasible|possible)/i,
-  /^(proceed|approve|reject|accept|decline)\s/i,
-  /\?$/,  // Questions are often binary
-  /^(yes|no)[\s\/]/i,
-];
+/** Maximum goal text length before truncation */
+const MAX_GOAL_LENGTH = 80;
 
 /**
  * Patterns that indicate a baseline/status quo option.
@@ -182,41 +238,124 @@ function reframeBaselineLabel(label: string): string {
 }
 
 // ============================================================================
-// Goal Type Detection
+// Goal Text Processing
 // ============================================================================
 
 /**
- * Detects the goal type from the graph.
- * Returns "binary" for yes/no decisions, "continuous" for optimization goals.
+ * Truncate goal text intelligently if too long.
+ * Tries to break at word boundaries.
  */
-function detectGoalType(graph: GraphV1): GoalType {
-  // Find goal nodes
-  const nodes = Array.isArray((graph as any).nodes) ? (graph as any).nodes : [];
-  const goalNode = nodes.find((n: any) => n?.kind === "goal");
-
-  if (!goalNode || !goalNode.label) {
-    return "continuous"; // Default to continuous if no goal found
+function truncateGoalText(goalText: string, maxLength: number = MAX_GOAL_LENGTH): string {
+  if (goalText.length <= maxLength) {
+    return goalText;
   }
 
-  const label = goalNode.label as string;
+  // Find last space before maxLength
+  const truncated = goalText.slice(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(" ");
 
-  // Check for binary patterns
-  for (const pattern of BINARY_GOAL_PATTERNS) {
-    if (pattern.test(label)) {
-      return "binary";
-    }
+  if (lastSpace > maxLength * 0.6) {
+    return truncated.slice(0, lastSpace) + "…";
   }
 
-  return "continuous";
+  return truncated + "…";
 }
 
 /**
- * Extracts the goal label from the graph, if present.
+ * Format goal text for use in headlines.
+ * - Removes leading "Goal:" or "Objective:" prefixes
+ * - Lowercases first letter for sentence flow
+ * - Truncates if too long
  */
-function getGoalLabel(graph: GraphV1): string | undefined {
-  const nodes = Array.isArray((graph as any).nodes) ? (graph as any).nodes : [];
-  const goalNode = nodes.find((n: any) => n?.kind === "goal");
-  return goalNode?.label as string | undefined;
+function formatGoalForHeadline(goalText: string): string {
+  let cleaned = goalText
+    .trim()
+    .replace(/\?$/, "")
+    .replace(/^(goal:|objective:)\s*/i, "")
+    .trim();
+
+  // Truncate if needed
+  cleaned = truncateGoalText(cleaned);
+
+  // Lowercase first letter for sentence flow
+  return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+}
+
+/**
+ * Get the primary goal from multi-goal input.
+ */
+function getPrimaryGoal(input: KeyInsightInput): { text: string; type: "binary" | "continuous" | "compound" } | null {
+  // Direct goal_text takes precedence
+  if (input.goal_text) {
+    return {
+      text: input.goal_text,
+      type: input.goal_type || "continuous",
+    };
+  }
+
+  // Check multi-goal array
+  if (input.goals && input.goals.length > 0) {
+    // Find primary goal
+    const primaryGoal = input.primary_goal_id
+      ? input.goals.find((g) => g.id === input.primary_goal_id)
+      : input.goals.find((g) => g.is_primary);
+
+    if (primaryGoal) {
+      return { text: primaryGoal.text, type: primaryGoal.type };
+    }
+
+    // Fall back to first goal
+    return { text: input.goals[0].text, type: input.goals[0].type };
+  }
+
+  return null;
+}
+
+/**
+ * Get secondary goals for compound decisions.
+ */
+function getSecondaryGoals(input: KeyInsightInput): GoalInfo[] {
+  if (!input.goals || input.goals.length <= 1) {
+    return [];
+  }
+
+  const primaryId = input.primary_goal_id || input.goals.find((g) => g.is_primary)?.id || input.goals[0].id;
+  return input.goals.filter((g) => g.id !== primaryId);
+}
+
+// ============================================================================
+// Confidence Calculation
+// ============================================================================
+
+/**
+ * Calculate ranking confidence based on utility and margin.
+ */
+function calculateRankingConfidence(utility: number, margin: number): "low" | "medium" | "high" {
+  if (utility >= CONFIDENCE_THRESHOLDS.HIGH && margin >= MARGIN_THRESHOLDS.SIGNIFICANT) {
+    return "high";
+  }
+  if (utility >= CONFIDENCE_THRESHOLDS.MEDIUM && margin >= MARGIN_THRESHOLDS.CLOSE) {
+    return "medium";
+  }
+  return "low";
+}
+
+// ============================================================================
+// Outcome Type Classification
+// ============================================================================
+
+/**
+ * Determine outcome type from ranked action.
+ */
+function getOutcomeType(winner: RankedAction): "positive" | "negative" | "neutral" {
+  if (winner.outcome_quality === "negative") {
+    return "negative";
+  }
+  if (winner.outcome_quality === "positive") {
+    return "positive";
+  }
+  // Mixed and neutral both map to neutral for headline purposes
+  return "neutral";
 }
 
 // ============================================================================
@@ -230,12 +369,15 @@ function getGoalLabel(graph: GraphV1): string | undefined {
  * @returns Key insight with headline, driver explanation, and confidence
  */
 export function generateKeyInsight(input: KeyInsightInput): KeyInsightOutput {
-  const { ranked_actions, top_drivers } = input;
+  const { ranked_actions, top_drivers, identifiability } = input;
 
   // Validate input
   if (!ranked_actions || ranked_actions.length === 0) {
     return generateNoDataInsight();
   }
+
+  // Determine identifiability - default to true (identifiable) if not provided
+  const isIdentifiable = identifiability?.identifiable ?? true;
 
   // Sort by expected utility (descending)
   const sorted = [...ranked_actions].sort(
@@ -245,157 +387,252 @@ export function generateKeyInsight(input: KeyInsightInput): KeyInsightOutput {
   const winner = sorted[0];
   const runnerUp = sorted.length > 1 ? sorted[1] : null;
 
+  // Find baseline option if present
+  const baselineAction = sorted.find((a) => isBaselineLabel(a.label));
+
   // Calculate margin
   const margin = runnerUp
     ? winner.expected_utility - runnerUp.expected_utility
     : 1.0; // If only one option, it wins by default
 
-  // Detect goal type from graph
-  const goalType = detectGoalType(input.graph);
-  const goalLabel = getGoalLabel(input.graph);
+  // Calculate vs baseline delta
+  const vsBaseline = baselineAction && baselineAction !== winner
+    ? winner.expected_utility - baselineAction.expected_utility
+    : null;
 
-  // Generate components
-  const headline = generateHeadline(winner, runnerUp, margin, goalType, goalLabel);
+  // Get goal info
+  const goal = getPrimaryGoal(input);
+  const secondaryGoals = getSecondaryGoals(input);
+
+  // Determine outcome type
+  const outcomeType = getOutcomeType(winner);
+
+  // Check if all options have negative outcomes
+  const allNegative = sorted.every((a) => a.outcome_quality === "negative");
+
+  // Is this a close race?
+  const isCloseRace = margin < MARGIN_THRESHOLDS.CLOSE;
+
+  // Calculate ranking confidence
+  const rankingConfidence = calculateRankingConfidence(winner.expected_utility, margin);
+
+  // Check if winner is baseline
+  const winnerIsBaseline = isBaselineLabel(winner.label);
+
+  // Build winner label for use in headlines
+  const winnerLabel = winnerIsBaseline
+    ? capitalise(reframeBaselineLabel(winner.label))
+    : labelForSentence(winner.label, "subject");
+
+  // Generate headline based on identifiability and context
+  let headline: string;
+  if (isIdentifiable) {
+    // Identifiable: use confident causal language
+    headline = generateGoalAnchoredHeadline({
+      winner,
+      runnerUp,
+      margin,
+      goal,
+      secondaryGoals,
+      outcomeType,
+      allNegative,
+      isCloseRace,
+      winnerIsBaseline,
+    });
+  } else {
+    // Non-identifiable: use exploratory language
+    headline = generateNonIdentifiableHeadline({
+      winnerLabel,
+      goal,
+      isCloseRace,
+      runnerUp,
+    });
+  }
+
+  // Build structured headline data
+  const headline_structured: HeadlineStructured = {
+    goal_text: goal?.text ?? null,
+    action: winnerLabel,
+    outcome_type: outcomeType,
+    likelihood: winner.expected_utility,
+    vs_baseline: vsBaseline,
+    vs_baseline_direction: vsBaseline === null
+      ? null
+      : vsBaseline > 0.01
+        ? "better"
+        : vsBaseline < -0.01
+          ? "worse"
+          : "same",
+    ranking_confidence: rankingConfidence,
+    is_close_race: isCloseRace,
+  };
+
+  // Generate other components
   const primary_driver = generateDriverStatement(top_drivers);
-  const confidence_statement = generateConfidenceStatement(winner.expected_utility, margin);
-  const caveat = margin < MARGIN_THRESHOLDS.CLOSE ? generateCaveat(winner, runnerUp, margin) : undefined;
+  const confidence_statement = isIdentifiable
+    ? generateConfidenceStatement(winner.expected_utility, margin)
+    : generateNonIdentifiableConfidenceStatement(margin);
+  const caveat = isCloseRace ? generateCaveat(winner, runnerUp, margin) : undefined;
+
+  // Generate evidence and next steps (adjusted for identifiability)
+  const evidence = generateEvidence(winner, top_drivers, goal, isIdentifiable, identifiability);
+  const next_steps = generateNextSteps(winner, outcomeType, isCloseRace, goal, isIdentifiable);
+
+  // Generate recommendation status and identifiability note
+  const recommendation_status: "actionable" | "exploratory" = isIdentifiable ? "actionable" : "exploratory";
+  const identifiability_note = generateIdentifiabilityNote(isIdentifiable, identifiability);
 
   return {
     headline,
+    headline_structured,
     primary_driver,
     confidence_statement,
     caveat,
+    evidence,
+    next_steps,
+    recommendation_status,
+    identifiability_note,
   };
 }
 
+// ============================================================================
+// Goal-Anchored Headline Generation
+// ============================================================================
+
+interface HeadlineContext {
+  winner: RankedAction;
+  runnerUp: RankedAction | null;
+  margin: number;
+  goal: { text: string; type: "binary" | "continuous" | "compound" } | null;
+  secondaryGoals: GoalInfo[];
+  outcomeType: "positive" | "negative" | "neutral";
+  allNegative: boolean;
+  isCloseRace: boolean;
+  winnerIsBaseline: boolean;
+}
+
 /**
- * Generates the main headline based on winner, margin, and goal type.
- *
- * For binary goals (yes/no): Uses "Yes, proceed with X" / "No, do not proceed"
- * For continuous goals: Uses "X is the best path to [goal]"
- *
- * Baseline options (do nothing, status quo) are reframed to neutral phrasing.
+ * Generates a goal-anchored headline based on context.
  */
-function generateHeadline(
-  winner: RankedAction,
-  runnerUp: RankedAction | null,
-  margin: number,
-  goalType: GoalType,
-  goalLabel?: string
-): string {
-  // Check if winner is a baseline option - use neutral reframing
-  const isBaseline = isBaselineLabel(winner.label);
-  const winnerLabel = isBaseline
+function generateGoalAnchoredHeadline(ctx: HeadlineContext): string {
+  const {
+    winner,
+    runnerUp,
+    margin,
+    goal,
+    secondaryGoals,
+    outcomeType,
+    allNegative,
+    isCloseRace,
+    winnerIsBaseline,
+  } = ctx;
+
+  // Get winner label
+  const winnerLabel = winnerIsBaseline
     ? capitalise(reframeBaselineLabel(winner.label))
     : labelForSentence(winner.label, "subject");
-  const winnerLabelLower = winner.label.toLowerCase().trim();
 
-  // Handle binary (yes/no) goal type
-  if (goalType === "binary") {
-    return generateBinaryHeadline(winner, runnerUp, margin, winnerLabel, winnerLabelLower);
+  // Format likelihood as percentage
+  const likelihoodPct = Math.round(winner.expected_utility * 100);
+
+  // No goal provided - fall back to generic headlines
+  if (!goal) {
+    return generateGenericHeadline(winner, runnerUp, margin, winnerLabel, winnerIsBaseline);
   }
 
-  // Handle continuous goal type with goal context
-  return generateContinuousHeadline(winner, runnerUp, margin, winnerLabel, goalLabel);
-}
+  const goalText = formatGoalForHeadline(goal.text);
 
-/**
- * Generates headline for binary yes/no decisions.
- *
- * IMPORTANT: Checks outcome_quality to avoid contradictory messaging.
- * "Proceed with X" should NEVER appear when outcome is negative.
- */
-function generateBinaryHeadline(
-  winner: RankedAction,
-  runnerUp: RankedAction | null,
-  margin: number,
-  winnerLabel: string,
-  winnerLabelLower: string
-): string {
-  // Detect if winner is a "proceed/yes" option
-  const isProceedOption = /^(yes|proceed|go|do it|approve|accept|continue)/i.test(winnerLabelLower);
-  const isDoNotOption = /^(no|don't|do not|reject|decline|cancel|stop)/i.test(winnerLabelLower);
+  // Handle edge cases first
 
-  // Check for negative outcomes - NEVER say "proceed" when outcome is bad
-  const hasNegativeOutcome = winner.outcome_quality === "negative";
-  const hasMixedOutcome = winner.outcome_quality === "mixed";
-
-  // Handle negative outcomes first - use risk-minimising language
-  if (hasNegativeOutcome) {
-    if (!runnerUp) {
-      return `${winnerLabel} is the only option, though outcomes carry risk`;
-    }
-    if (margin >= MARGIN_THRESHOLDS.CLEAR) {
-      return `${winnerLabel} minimises downside risk`;
-    }
-    return `${winnerLabel} offers relatively better outcomes despite risks`;
+  // Case: All options have negative outcomes
+  if (allNegative) {
+    return `All options carry risk to ${goalText} — ${winnerLabel} minimises potential downside`;
   }
 
-  // Handle mixed outcomes with cautionary language
-  if (hasMixedOutcome) {
-    if (margin >= MARGIN_THRESHOLDS.CLEAR) {
-      return `${winnerLabel} is recommended, though outcomes are less predictable`;
-    }
-    return `${winnerLabel} is the stronger option with higher potential but less certainty`;
+  // Case: Baseline is best
+  if (winnerIsBaseline) {
+    return `${winnerLabel} remains your safest path to ${goalText}`;
   }
 
-  // Standard positive/neutral outcome handling below
-
-  // Dominant or clear margin
-  if (winner.dominant || margin >= MARGIN_THRESHOLDS.CLEAR) {
-    if (isProceedOption) {
-      return `Yes, proceed with ${winnerLabel}`;
-    }
-    if (isDoNotOption) {
-      return `No, the analysis does not support proceeding`;
-    }
-    return `${winnerLabel} is the recommended path`;
-  }
-
-  // Significant margin
-  if (margin >= MARGIN_THRESHOLDS.SIGNIFICANT) {
-    if (isProceedOption) {
-      return `The analysis supports proceeding with ${winnerLabel}`;
-    }
-    if (isDoNotOption) {
-      return `The analysis suggests not proceeding`;
-    }
-    return `${winnerLabel} is the stronger option`;
-  }
-
-  // Close call
-  if (runnerUp && margin < MARGIN_THRESHOLDS.CLOSE) {
+  // Case: Close race
+  if (isCloseRace && runnerUp) {
     const runnerUpLabel = labelForComparison(runnerUp.label);
-    return `${winnerLabel} slightly edges out ${runnerUpLabel}`;
+    return `Both ${winnerLabel} and ${runnerUpLabel} have similar paths to ${goalText} — consider other factors`;
   }
 
-  // Default
-  return `${winnerLabel} appears to be the better choice`;
+  // Case: Compound goal with trade-offs
+  if (goal.type === "compound" && secondaryGoals.length > 0) {
+    const secondaryText = truncateGoalText(secondaryGoals[0].text, 40);
+    return `${winnerLabel} best balances ${goalText} and ${secondaryText}`;
+  }
+
+  // Standard goal-anchored headlines based on goal type and outcome
+  if (goal.type === "binary") {
+    return generateBinaryGoalHeadline(winnerLabel, goalText, outcomeType, likelihoodPct, margin);
+  }
+
+  // Continuous or default
+  return generateContinuousGoalHeadline(winnerLabel, goalText, outcomeType, likelihoodPct, margin);
 }
 
 /**
- * Generates headline for continuous/optimization goals.
- *
- * IMPORTANT: Checks outcome_quality to avoid contradictory messaging.
+ * Generate headline for binary (yes/no) goals.
  */
-function generateContinuousHeadline(
+function generateBinaryGoalHeadline(
+  winnerLabel: string,
+  goalText: string,
+  outcomeType: "positive" | "negative" | "neutral",
+  likelihoodPct: number,
+  margin: number
+): string {
+  if (outcomeType === "negative") {
+    return `${winnerLabel} gives you the best chance of ${goalText}`;
+  }
+
+  if (outcomeType === "positive" && margin >= MARGIN_THRESHOLDS.CLEAR) {
+    return `To ${goalText}, proceed with ${winnerLabel} — ${likelihoodPct}% likelihood of success`;
+  }
+
+  // Neutral or moderate margin
+  return `${winnerLabel} gives you the best chance of ${goalText}`;
+}
+
+/**
+ * Generate headline for continuous/optimization goals.
+ */
+function generateContinuousGoalHeadline(
+  winnerLabel: string,
+  goalText: string,
+  outcomeType: "positive" | "negative" | "neutral",
+  likelihoodPct: number,
+  margin: number
+): string {
+  if (outcomeType === "negative") {
+    return `${winnerLabel} minimises risk to achieving ${goalText}`;
+  }
+
+  if (outcomeType === "positive" && margin >= MARGIN_THRESHOLDS.CLEAR) {
+    const marginPct = Math.round(margin * 100);
+    return `${winnerLabel} is your best path to ${goalText} — ${marginPct}% better than alternatives`;
+  }
+
+  // Neutral or moderate margin
+  return `${winnerLabel} is your best path to ${goalText}`;
+}
+
+/**
+ * Generate generic headline when no goal is provided.
+ * Falls back to original behavior.
+ */
+function generateGenericHeadline(
   winner: RankedAction,
   runnerUp: RankedAction | null,
   margin: number,
   winnerLabel: string,
-  goalLabel?: string
+  winnerIsBaseline: boolean
 ): string {
-  // Create goal context phrase
-  const goalContext = goalLabel
-    ? formatGoalContext(goalLabel)
-    : "";
-
-  // Check for negative outcomes - use risk-minimising language
-  const hasNegativeOutcome = winner.outcome_quality === "negative";
-  const hasMixedOutcome = winner.outcome_quality === "mixed";
-
-  // Handle negative outcomes first
-  if (hasNegativeOutcome) {
+  // Check for negative outcomes
+  if (winner.outcome_quality === "negative") {
     if (!runnerUp) {
       return `${winnerLabel} is the only option, though outcomes carry risk`;
     }
@@ -405,29 +642,28 @@ function generateContinuousHeadline(
     return `${winnerLabel} offers relatively better outcomes despite risks`;
   }
 
-  // Handle mixed outcomes with cautionary language
-  if (hasMixedOutcome) {
+  // Check for mixed outcomes
+  if (winner.outcome_quality === "mixed") {
     if (margin >= MARGIN_THRESHOLDS.CLEAR) {
       return `${winnerLabel} is recommended, though outcomes are less predictable`;
     }
     return `${winnerLabel} is the stronger option with higher potential but less certainty`;
   }
 
-  // Standard positive/neutral outcome handling below
-
-  // Dominant option (explicitly marked or very high margin)
-  if (winner.dominant || margin >= MARGIN_THRESHOLDS.CLEAR) {
-    if (goalContext) {
-      return `${winnerLabel} is the clear best path to ${goalContext}`;
+  // Baseline winner
+  if (winnerIsBaseline) {
+    if (margin >= MARGIN_THRESHOLDS.CLEAR) {
+      return `${winnerLabel} is the recommended approach`;
     }
+    return `${winnerLabel} is advisable at this time`;
+  }
+
+  // Standard positive/neutral outcomes
+  if (winner.dominant || margin >= MARGIN_THRESHOLDS.CLEAR) {
     return `${winnerLabel} is the clear best choice`;
   }
 
-  // Significant margin
   if (margin >= MARGIN_THRESHOLDS.SIGNIFICANT) {
-    if (goalContext) {
-      return `${winnerLabel} best supports ${goalContext}`;
-    }
     return `${winnerLabel} is the stronger option`;
   }
 
@@ -437,30 +673,83 @@ function generateContinuousHeadline(
     return `${winnerLabel} edges ahead of ${runnerUpLabel}`;
   }
 
-  // Default moderate advantage
-  if (goalContext) {
-    return `${winnerLabel} appears most likely to ${goalContext}`;
-  }
   return `${winnerLabel} appears to be the better choice`;
 }
 
-/**
- * Formats goal label for use in headline context.
- * Converts "Maximize revenue" → "maximize revenue"
- * Converts "Increase market share" → "increase market share"
- */
-function formatGoalContext(goalLabel: string): string {
-  const label = goalLabel.trim();
+// ============================================================================
+// Non-Identifiable Headline Generation
+// ============================================================================
 
-  // Remove common question marks and prefixes
-  const cleaned = label
-    .replace(/\?$/, "")
-    .replace(/^(goal:|objective:)\s*/i, "")
-    .trim();
-
-  // Convert "Maximize X" → "maximize X" (lowercase first word)
-  return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+interface NonIdentifiableHeadlineContext {
+  winnerLabel: string;
+  goal: { text: string; type: string } | null;
+  isCloseRace: boolean;
+  runnerUp: RankedAction | null;
 }
+
+/**
+ * Generate headline for non-identifiable causal effects.
+ * Uses exploratory language instead of confident causal claims.
+ */
+function generateNonIdentifiableHeadline(ctx: NonIdentifiableHeadlineContext): string {
+  const { winnerLabel, goal, isCloseRace, runnerUp } = ctx;
+
+  // Close race + non-identifiable = strong caution
+  if (isCloseRace && runnerUp) {
+    const runnerUpLabel = labelForComparison(runnerUp.label);
+    if (goal) {
+      const goalText = formatGoalForHeadline(goal.text);
+      return `Options including ${winnerLabel} and ${runnerUpLabel} show similar potential for ${goalText} — but causal effects remain unconfirmed`;
+    }
+    return `${winnerLabel} and ${runnerUpLabel} show similar promise — causal relationship not definitively established`;
+  }
+
+  // Non-identifiable with goal
+  if (goal) {
+    const goalText = formatGoalForHeadline(goal.text);
+    return `Based on current model structure, ${winnerLabel} appears most promising for ${goalText} — but causal effect cannot be confirmed`;
+  }
+
+  // Non-identifiable without goal
+  return `Based on current model structure, ${winnerLabel} appears most promising — but causal effect cannot be confirmed`;
+}
+
+/**
+ * Generate confidence statement for non-identifiable cases.
+ */
+function generateNonIdentifiableConfidenceStatement(margin: number): string {
+  if (margin < MARGIN_THRESHOLDS.CLOSE) {
+    return "Treat as exploratory scenario analysis. The ranking is close and causal effects are not confirmed.";
+  }
+  return "Treat as scenario analysis — consider gathering more data to strengthen causal claims.";
+}
+
+/**
+ * Generate note explaining identifiability status.
+ */
+function generateIdentifiabilityNote(
+  isIdentifiable: boolean,
+  identifiability?: Identifiability
+): string | undefined {
+  if (isIdentifiable) {
+    // When identifiable, optionally note the method used
+    if (identifiability?.method) {
+      return `Causal effects confirmed via ${identifiability.method} criterion.`;
+    }
+    return undefined; // No note needed for standard identifiable cases
+  }
+
+  // Non-identifiable: explain the limitation
+  if (identifiability?.explanation) {
+    return identifiability.explanation;
+  }
+
+  return "Causal relationship not definitively established from current model structure. Consider this exploratory analysis.";
+}
+
+// ============================================================================
+// Driver Statement Generation
+// ============================================================================
 
 /**
  * Generates the primary driver explanation.
@@ -595,6 +884,141 @@ function generateCaveat(
   }
 
   return `${capitalise(runnerUpLabel)} remains a viable alternative.`;
+}
+
+// ============================================================================
+// Evidence and Next Steps Generation
+// ============================================================================
+
+/**
+ * Generate evidence points supporting the recommendation.
+ * Adjusts language based on identifiability of causal effects.
+ */
+function generateEvidence(
+  winner: RankedAction,
+  drivers?: Driver[],
+  goal?: { text: string; type: string } | null,
+  isIdentifiable: boolean = true,
+  identifiability?: Identifiability
+): string[] {
+  const evidence: string[] = [];
+
+  // When non-identifiable, acknowledge the limitation first
+  if (!isIdentifiable) {
+    evidence.push("Note: Causal effects could not be confirmed from the model structure. Treat results as scenario analysis.");
+
+    // Explain what's missing
+    if (identifiability?.explanation) {
+      evidence.push(identifiability.explanation);
+    } else {
+      evidence.push("The model may have unmeasured confounders or insufficient structure for causal identification.");
+    }
+
+    // Suggest remediation
+    evidence.push("Consider gathering additional data or refining the causal model to strengthen conclusions.");
+  }
+
+  // Add utility-based evidence (adjusted language for non-identifiable)
+  const utilityPct = Math.round(winner.expected_utility * 100);
+  if (isIdentifiable) {
+    if (utilityPct >= 70) {
+      evidence.push(`Expected utility of ${utilityPct}% indicates strong likelihood of success.`);
+    } else if (utilityPct >= 50) {
+      evidence.push(`Expected utility of ${utilityPct}% suggests a reasonable chance of success.`);
+    }
+  } else {
+    // Non-identifiable: use scenario language
+    if (utilityPct >= 70) {
+      evidence.push(`Scenario analysis shows ${utilityPct}% expected utility under current assumptions.`);
+    } else if (utilityPct >= 50) {
+      evidence.push(`Model suggests ${utilityPct}% expected utility, though causal relationship is unconfirmed.`);
+    }
+  }
+
+  // Add driver-based evidence
+  if (drivers && drivers.length > 0) {
+    const topDriver = drivers[0];
+    if (topDriver.impact_pct && topDriver.impact_pct >= 30) {
+      const driverLabel = sanitiseLabel(topDriver.label);
+      if (isIdentifiable) {
+        evidence.push(`${capitalise(driverLabel)} accounts for ${Math.round(topDriver.impact_pct)}% of the outcome.`);
+      } else {
+        evidence.push(`${capitalise(driverLabel)} shows ${Math.round(topDriver.impact_pct)}% association with the outcome (correlation, not confirmed causation).`);
+      }
+    }
+  }
+
+  // Add outcome quality evidence
+  if (winner.outcome_quality === "positive") {
+    if (isIdentifiable) {
+      evidence.push("Analysis indicates predominantly positive expected outcomes.");
+    } else {
+      evidence.push("Scenario indicates predominantly positive expected outcomes under current assumptions.");
+    }
+  } else if (winner.outcome_quality === "negative") {
+    if (isIdentifiable) {
+      evidence.push("Analysis indicates challenging expected outcomes; this option minimises downside.");
+    } else {
+      evidence.push("Scenario suggests challenging outcomes; this option appears to minimise potential downside.");
+    }
+  }
+
+  return evidence.length > 0 ? evidence : undefined as unknown as string[];
+}
+
+/**
+ * Generate suggested next steps.
+ * Adjusts recommendations based on identifiability of causal effects.
+ */
+function generateNextSteps(
+  winner: RankedAction,
+  outcomeType: "positive" | "negative" | "neutral",
+  isCloseRace: boolean,
+  goal?: { text: string; type: string } | null,
+  isIdentifiable: boolean = true
+): string[] {
+  const steps: string[] = [];
+
+  // Non-identifiable: prioritize steps to strengthen causal claims
+  if (!isIdentifiable) {
+    steps.push("Gather additional data to strengthen causal claims before committing to this option.");
+    steps.push("Consider running a pilot or experiment to validate the causal relationship.");
+    steps.push("Review the model structure for potential confounders or missing variables.");
+
+    // Still add sensitivity analysis for close races
+    if (isCloseRace) {
+      steps.push("Run sensitivity analysis to test how robust the ranking is to assumption changes.");
+    }
+
+    // Goal-specific step for non-identifiable
+    if (goal) {
+      steps.push(`Monitor early indicators to validate the path toward ${truncateGoalText(goal.text, 50)}.`);
+    }
+
+    return steps.slice(0, 4); // Allow up to 4 steps for non-identifiable cases
+  }
+
+  // Identifiable: standard next steps
+  if (isCloseRace) {
+    steps.push("Run sensitivity analysis to test how assumptions affect the ranking.");
+    steps.push("Consider qualitative factors not captured in the model.");
+  }
+
+  if (outcomeType === "negative") {
+    steps.push("Develop contingency plans for potential adverse outcomes.");
+    steps.push("Identify early warning indicators to monitor.");
+  }
+
+  if (outcomeType === "neutral" || outcomeType === "positive") {
+    steps.push("Validate key assumptions with stakeholders before proceeding.");
+  }
+
+  // Add goal-specific next steps
+  if (goal) {
+    steps.push(`Define success metrics for measuring progress toward ${truncateGoalText(goal.text, 50)}.`);
+  }
+
+  return steps.length > 0 ? steps.slice(0, 3) : undefined as unknown as string[];
 }
 
 /**
