@@ -79,3 +79,22 @@ export {
   explainTradeoff,
   generateTradeoffSummary,
 } from "./tradeoff-explainer.js";
+
+// Utility bridge (CEE preferences → ISL utility specification)
+export type {
+  UtilityTransform,
+  AsymmetricWeights,
+  GraphContext,
+  ExtendedUtilitySpecification,
+  UtilityBridgeResult,
+} from "./utility-bridge.js";
+
+export {
+  deriveUtilityTransform,
+  deriveLossWeights,
+  mapPreferencesToUtility,
+  isPreferenceAdapterAvailable,
+  createDefaultUtilitySpec,
+  applyLossAversion,
+  applyUtilityTransform,
+} from "./utility-bridge.js";
