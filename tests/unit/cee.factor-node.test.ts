@@ -191,14 +191,16 @@ describe("factor node kind", () => {
       expect(result.suggested_function).toBe("diminishing_returns");
     });
 
-    it("suggests s_curve for competitor factor", () => {
+    it("suggests noisy_and_not for competitor factor (preventative relationship)", () => {
+      // Competitor activity inhibits/reduces market share - this is a preventative relationship
       const result = suggestEdgeFunction({
         edge_id: "e1",
         source_node: { id: "f1", label: "Competitor activity", kind: "factor" },
         target_node: { id: "out1", label: "Market share", kind: "outcome" },
       });
 
-      expect(result.suggested_function).toBe("s_curve");
+      // "Competitor" matches preventative source pattern → noisy_and_not
+      expect(result.suggested_function).toBe("noisy_and_not");
     });
   });
 
