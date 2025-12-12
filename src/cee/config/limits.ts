@@ -24,8 +24,20 @@ export function resolveCeeRateLimit(envVarName: string): number {
 /**
  * Unified per-feature rate limiting for CEE endpoints.
  *
- * Uses in-memory token buckets with sliding window. For multi-instance
- * deployments, consider extending quota.ts with Redis persistence.
+ * Uses in-memory token buckets with sliding window.
+ *
+ * ## Multi-Instance Limitation
+ *
+ * **IMPORTANT**: This is a per-process in-memory implementation. In multi-instance
+ * deployments (e.g., Render with 2+ instances, Kubernetes pods), each instance
+ * maintains separate rate limit buckets. This means:
+ * - Effective rate limit is approximately `N × RPM` where N = number of instances
+ * - Users could bypass limits by hitting different instances
+ *
+ * For production multi-instance deployments, consider:
+ * 1. Using Redis-backed rate limiting via `utils/quota.ts`
+ * 2. Implementing distributed rate limiting with Redis INCR + EXPIRE
+ * 3. Using a load balancer with sticky sessions (partial mitigation)
  *
  * Usage:
  * ```typescript
