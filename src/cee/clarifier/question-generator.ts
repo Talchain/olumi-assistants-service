@@ -11,7 +11,19 @@ import {
 } from "./question-selector.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { getAdapter } from "../../adapters/llm/router.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+
+/**
+ * Derive a deterministic seed from request ID and ambiguity context.
+ * This ensures reproducibility: same (requestId, ambiguityKey) pair → same seed.
+ */
+function deriveStableSeed(requestId: string, ambiguityKey: string): number {
+  const hash = createHash("sha256")
+    .update(`${requestId}:question:${ambiguityKey}`)
+    .digest();
+  // Use first 4 bytes as a 32-bit unsigned integer
+  return hash.readUInt32BE(0);
+}
 
 interface GeneratedQuestion {
   question: string;
@@ -193,10 +205,12 @@ export async function generateQuestionCandidates(
       }
     } else {
       // Fallback: use draftGraph and parse the response
+      // Use stable seed derived from requestId + first ambiguity for reproducibility
+      const ambiguityKey = ambiguities[0]?.type || "unknown";
       const response = await adapter.draftGraph(
         {
           brief: userPrompt,
-          seed: Date.now(),
+          seed: deriveStableSeed(reqId, ambiguityKey),
         },
         callOpts
       );

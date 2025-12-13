@@ -222,7 +222,7 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
           current_belief: belief,
           current_weight: weight,
           reason: "weight_too_high",
-          suggestion: `Edge weight (${weight.toFixed(2)}) exceeds recommended maximum (${this.weightHighThreshold}). Consider 1.2 for strong amplification.`,
+          suggestion: `Edge weight (${weight.toFixed(2)}) exceeds recommended maximum (${this.weightHighThreshold}). Consider 1.2-1.3 for amplifying effects.`,
         });
       }
     }

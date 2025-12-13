@@ -65,6 +65,20 @@ const RECOMMENDATION_TEMPLATES: Record<QualityFactorName, Record<string, string>
     "many options":
       "Consider grouping similar options or prioritizing top candidates",
   },
+  goal_outcome_linkage: {
+    "not connected to goal":
+      "Add edges connecting outcomes to the goal node (outcome→goal or via options)",
+    "no outcomes connect":
+      "Create paths from outcomes to goals to enable success measurement",
+    "cannot measure success":
+      "Connect at least one outcome to the goal to define success criteria",
+    "no goal nodes":
+      "Add a goal node defining what the decision aims to achieve",
+    "no outcome nodes":
+      "Add outcome nodes representing the results of options",
+    orphaned:
+      "Connect orphaned outcomes to the goal through direct or indirect edges",
+  },
 };
 
 const DEFAULT_RECOMMENDATIONS: Record<QualityFactorName, string> = {
@@ -78,6 +92,8 @@ const DEFAULT_RECOMMENDATIONS: Record<QualityFactorName, string> = {
     "Ensure each option has connected outcomes for fair comparison",
   option_diversity:
     "Consider adding more alternative options",
+  goal_outcome_linkage:
+    "Connect outcomes to goals so analysis can measure success against objectives",
 };
 
 // ============================================================================

@@ -104,7 +104,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(body.quality_factors.length).toBeGreaterThan(0);
 
     for (const factor of body.quality_factors) {
-      expect(["causal_detail", "weight_refinement", "risk_coverage", "outcome_balance", "option_diversity"])
+      expect(["causal_detail", "weight_refinement", "risk_coverage", "outcome_balance", "option_diversity", "goal_outcome_linkage"])
         .toContain(factor.factor);
       expect(typeof factor.current_score).toBe("number");
       expect(["high", "medium", "low"]).toContain(factor.impact);

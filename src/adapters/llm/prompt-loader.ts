@@ -12,6 +12,24 @@
  *
  * This module caches loaded prompts to avoid repeated file system access
  * while still allowing dynamic updates when prompts change.
+ *
+ * ## Provider Prompt Strategy
+ *
+ * **Anthropic adapter** (`src/adapters/llm/anthropic.ts`):
+ *   Uses this centralized prompt management system via `getSystemPrompt()`.
+ *   Supports A/B experiments, dynamic updates, and prompt versioning.
+ *   Operations: draft_graph, suggest_options, repair_graph, clarify_brief, critique_graph
+ *
+ * **OpenAI adapter** (`src/adapters/llm/openai.ts`):
+ *   Uses inline prompt builders (e.g., `buildDraftPrompt`) with hardcoded prompts.
+ *   This is intentional for the following reasons:
+ *   - OpenAI's API structure (user-only messages vs system+user) differs from Anthropic
+ *   - OpenAI integration is secondary/fallback; Anthropic is primary
+ *   - Prompt management overhead not justified for OpenAI's simpler use cases
+ *   - Operations `critiqueGraph` and `explainDiff` are not implemented for OpenAI
+ *
+ * If you need A/B prompt experimentation on OpenAI, refactor its adapters to use
+ * this prompt loader. For now, the divergence is documented and intentional.
  */
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';

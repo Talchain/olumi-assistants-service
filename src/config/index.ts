@@ -198,6 +198,7 @@ const ConfigSchema = z.object({
     biasCheckFeatureVersion: z.string().optional(),
     biasStructuralEnabled: booleanString.default(false),
     biasMitigationPatchesEnabled: booleanString.default(false),
+    biasLlmDetectionEnabled: booleanString.default(false), // If true, use LLM for nuanced bias detection fallback
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
     causalValidationEnabled: booleanString.default(false),
@@ -422,6 +423,7 @@ function parseConfig(): Config {
       biasCheckFeatureVersion: env.CEE_BIAS_CHECK_FEATURE_VERSION,
       biasStructuralEnabled: env.CEE_BIAS_STRUCTURAL_ENABLED,
       biasMitigationPatchesEnabled: env.CEE_BIAS_MITIGATION_PATCHES_ENABLED,
+      biasLlmDetectionEnabled: env.CEE_BIAS_LLM_DETECTION_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
       causalValidationEnabled: env.CEE_CAUSAL_VALIDATION_ENABLED,

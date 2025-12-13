@@ -104,6 +104,19 @@ export const TelemetryEvents = {
   CeeExplainPolicyCompleted: "cee.explain_policy.completed",
   CeeExplainPolicyFailed: "cee.explain_policy.failed",
 
+  // CEE Preference Elicitation events (Brief 9)
+  CeeElicitPreferencesRequested: "cee.elicit_preferences.requested",
+  CeeElicitPreferencesSucceeded: "cee.elicit_preferences.succeeded",
+  CeeElicitPreferencesFailed: "cee.elicit_preferences.failed",
+
+  CeeElicitPreferencesAnswerRequested: "cee.elicit_preferences_answer.requested",
+  CeeElicitPreferencesAnswerSucceeded: "cee.elicit_preferences_answer.succeeded",
+  CeeElicitPreferencesAnswerFailed: "cee.elicit_preferences_answer.failed",
+
+  CeeExplainTradeoffRequested: "cee.explain_tradeoff.requested",
+  CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
+  CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",

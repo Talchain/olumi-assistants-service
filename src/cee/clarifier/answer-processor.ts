@@ -4,7 +4,19 @@ import { buildAnswerIncorporationPrompt } from "./prompts.js";
 import { retrieveQuestion } from "./question-cache.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { getAdapter } from "../../adapters/llm/router.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+
+/**
+ * Derive a deterministic seed from request and question IDs.
+ * This ensures reproducibility: same (requestId, questionId) pair → same seed.
+ */
+function deriveStableSeed(requestId: string, questionId: string): number {
+  const hash = createHash("sha256")
+    .update(`${requestId}:${questionId}`)
+    .digest();
+  // Use first 4 bytes as a 32-bit unsigned integer
+  return hash.readUInt32BE(0);
+}
 
 export interface AnswerProcessorInput {
   graph: GraphV1;
@@ -163,10 +175,11 @@ export async function incorporateAnswer(
     );
 
     // Call draftGraph with the enhanced brief
+    // Use stable seed derived from requestId + questionId for reproducibility
     const response = await adapter.draftGraph(
       {
         brief: enhancedBrief,
-        seed: Date.now(), // Use current timestamp as seed for some variation
+        seed: deriveStableSeed(requestId, clarifier_response.question_id),
       },
       callOpts
     );

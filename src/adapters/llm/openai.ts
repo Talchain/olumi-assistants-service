@@ -118,8 +118,8 @@ ${docContext}
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
-  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
+- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
+  (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
 - ≤${GRAPH_MAX_EDGES} edges
 - For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, you MUST adjust the belief values so they sum to 1.0 before returning the JSON; a response that does not satisfy this is considered incorrect.
 - Every edge with belief or weight MUST have structured provenance:

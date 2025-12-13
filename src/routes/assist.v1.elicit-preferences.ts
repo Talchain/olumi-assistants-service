@@ -1,11 +1,17 @@
 import type { FastifyInstance } from "fastify";
-import { CEEKeyInsightInput, type CEEKeyInsightInputT } from "../schemas/cee.js";
+import { CEEElicitPreferencesInput, type CEEElicitPreferencesInputT } from "../schemas/cee.js";
 import {
-  CEEKeyInsightResponseV1Schema,
-  type CEEKeyInsightResponseV1T,
+  CEEElicitPreferencesResponseV1Schema,
+  type CEEElicitPreferencesResponseV1T,
 } from "../schemas/ceeResponses.js";
-import { generateKeyInsight, type RankedAction, type Driver, type GoalInfo, type Identifiability } from "../cee/key-insight/index.js";
-import { computeQuality } from "../cee/quality/index.js";
+import {
+  selectQuestions,
+  calculateTotalEstimatedValue,
+  frameQuestionsInContext,
+  buildQuestionContext,
+  estimateDecisionScale,
+} from "../cee/preference-elicitation/index.js";
+import type { SelectionContext } from "../cee/preference-elicitation/types.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -13,7 +19,6 @@ import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
-import type { GraphV1 } from "../contracts/plot/engine.js";
 
 type BucketState = {
   count: number;
@@ -23,7 +28,7 @@ type BucketState = {
 const WINDOW_MS = 60_000;
 const MAX_BUCKETS = 10_000;
 const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
-const ceeKeyInsightBuckets = new Map<string, BucketState>();
+const ceeElicitPreferencesBuckets = new Map<string, BucketState>();
 
 function pruneBuckets(map: Map<string, BucketState>, now: number): void {
   if (map.size <= MAX_BUCKETS) return;
@@ -44,17 +49,17 @@ function pruneBuckets(map: Map<string, BucketState>, now: number): void {
   }
 }
 
-function checkCeeKeyInsightLimit(
+function checkCeeElicitPreferencesLimit(
   key: string,
   limit: number
 ): { allowed: boolean; retryAfterSeconds: number } {
   const now = Date.now();
-  pruneBuckets(ceeKeyInsightBuckets, now);
-  let state = ceeKeyInsightBuckets.get(key);
+  pruneBuckets(ceeElicitPreferencesBuckets, now);
+  let state = ceeElicitPreferencesBuckets.get(key);
 
   if (!state) {
     state = { count: 0, windowStart: now };
-    ceeKeyInsightBuckets.set(key, state);
+    ceeElicitPreferencesBuckets.set(key, state);
   }
 
   if (now - state.windowStart >= WINDOW_MS) {
@@ -74,10 +79,10 @@ function checkCeeKeyInsightLimit(
 }
 
 export default async function route(app: FastifyInstance) {
-  const KEY_INSIGHT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_KEY_INSIGHT_RATE_LIMIT_RPM") ?? 30;
-  const FEATURE_VERSION = "key-insight-1.0.0";
+  const ELICIT_PREFERENCES_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_ELICIT_PREFERENCES_RATE_LIMIT_RPM") ?? 10;
+  const FEATURE_VERSION = "elicit-preferences-1.0.0";
 
-  app.post("/assist/v1/key-insight", async (req, reply) => {
+  app.post("/assist/v1/elicit/preferences", async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 
@@ -88,23 +93,23 @@ export default async function route(app: FastifyInstance) {
       ? contextToTelemetry(callerCtx)
       : { request_id: requestId };
 
-    emit(TelemetryEvents.CeeKeyInsightRequested, {
+    emit(TelemetryEvents.CeeElicitPreferencesRequested, {
       ...telemetryCtx,
-      feature: "cee_key_insight",
+      feature: "cee_elicit_preferences",
       api_key_present: apiKeyPresent,
     });
 
     // Rate limiting
     const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = checkCeeKeyInsightLimit(
+    const { allowed, retryAfterSeconds } = checkCeeElicitPreferencesLimit(
       rateKey,
-      KEY_INSIGHT_RATE_LIMIT_RPM
+      ELICIT_PREFERENCES_RATE_LIMIT_RPM
     );
 
     if (!allowed) {
       const errorBody = buildCeeErrorResponse(
         "CEE_RATE_LIMIT",
-        "CEE Key Insight rate limit exceeded",
+        "CEE Elicit Preferences rate limit exceeded",
         {
           retryable: true,
           requestId,
@@ -112,7 +117,7 @@ export default async function route(app: FastifyInstance) {
         }
       );
 
-      emit(TelemetryEvents.CeeKeyInsightFailed, {
+      emit(TelemetryEvents.CeeElicitPreferencesFailed, {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_RATE_LIMIT",
@@ -121,7 +126,7 @@ export default async function route(app: FastifyInstance) {
 
       logCeeCall({
         requestId,
-        capability: "cee_key_insight",
+        capability: "cee_elicit_preferences",
         latencyMs: Date.now() - start,
         status: "limited",
         errorCode: "CEE_RATE_LIMIT",
@@ -137,7 +142,7 @@ export default async function route(app: FastifyInstance) {
     }
 
     // Input validation
-    const parsed = CEEKeyInsightInput.safeParse(req.body);
+    const parsed = CEEElicitPreferencesInput.safeParse(req.body);
     if (!parsed.success) {
       const errorBody = buildCeeErrorResponse(
         "CEE_VALIDATION_FAILED",
@@ -149,7 +154,7 @@ export default async function route(app: FastifyInstance) {
         }
       );
 
-      emit(TelemetryEvents.CeeKeyInsightFailed, {
+      emit(TelemetryEvents.CeeElicitPreferencesFailed, {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
@@ -158,7 +163,7 @@ export default async function route(app: FastifyInstance) {
 
       logCeeCall({
         requestId,
-        capability: "cee_key_insight",
+        capability: "cee_elicit_preferences",
         latencyMs: Date.now() - start,
         status: "error",
         errorCode: "CEE_VALIDATION_FAILED",
@@ -172,78 +177,45 @@ export default async function route(app: FastifyInstance) {
       return reply.send(errorBody);
     }
 
-    const input = parsed.data as CEEKeyInsightInputT;
+    const input = parsed.data as CEEElicitPreferencesInputT;
 
     try {
-      // Map input to key insight types
-      const rankedActions: RankedAction[] = input.ranked_actions.map((a) => ({
-        node_id: a.node_id,
-        label: a.label,
-        expected_utility: a.expected_utility,
-        dominant: a.dominant,
-        outcome_quality: a.outcome_quality,
-        primary_outcome: a.primary_outcome,
-      }));
+      // Estimate decision scale from options
+      const decisionScale = estimateDecisionScale(input.options);
 
-      const topDrivers: Driver[] | undefined = input.top_drivers?.map((d) => ({
-        node_id: d.node_id,
-        label: d.label,
-        impact_pct: d.impact_pct,
-        direction: d.direction,
-        kind: d.kind,
-      }));
+      // Build selection context
+      const selectionCtx: SelectionContext = {
+        currentPreferences: input.current_preferences,
+        graphGoals: input.goal_ids,
+        graphOptions: input.options.map((o) => o.id),
+        decisionScale,
+      };
 
-      // Map goals if provided
-      const goals: GoalInfo[] | undefined = input.goals?.map((g) => ({
-        id: g.id,
-        text: g.text,
-        type: g.type,
-        is_primary: g.is_primary,
-      }));
+      // Select questions based on information gain
+      const questions = selectQuestions(selectionCtx, input.max_questions);
 
-      // Map identifiability if provided
-      const identifiability: Identifiability | undefined = input.identifiability
-        ? {
-            identifiable: input.identifiability.identifiable,
-            method: input.identifiability.method,
-            adjustment_set: input.identifiability.adjustment_set,
-            explanation: input.identifiability.explanation,
-          }
-        : undefined;
+      // Build question context for framing
+      const questionCtx = buildQuestionContext(
+        input.goal_ids,
+        input.goal_ids, // Use IDs as labels if not provided
+        input.options.map((o) => o.id),
+        input.options.map((o) => o.label),
+        decisionScale
+      );
 
-      // Generate key insight with goal context and identifiability
-      const insight = generateKeyInsight({
-        graph: input.graph as GraphV1,
-        ranked_actions: rankedActions,
-        top_drivers: topDrivers,
-        goal_text: input.goal_text,
-        goal_type: input.goal_type,
-        goal_id: input.goal_id,
-        goals,
-        primary_goal_id: input.primary_goal_id,
-        identifiability,
-      });
+      // Frame questions in context
+      const framedQuestions = frameQuestionsInContext(questions, questionCtx);
 
-      // Compute quality
-      const quality = computeQuality({
-        graph: input.graph as GraphV1,
-        confidence: rankedActions[0]?.expected_utility ?? 0.5,
-        engineIssueCount: 0,
-        ceeIssues: [],
-      });
+      // Calculate total estimated value
+      const estimatedValue = calculateTotalEstimatedValue(
+        framedQuestions,
+        input.current_preferences
+      );
 
       // Build response
-      const response: CEEKeyInsightResponseV1T = {
-        headline: insight.headline,
-        headline_structured: insight.headline_structured,
-        primary_driver: insight.primary_driver,
-        confidence_statement: insight.confidence_statement,
-        caveat: insight.caveat,
-        evidence: insight.evidence,
-        next_steps: insight.next_steps,
-        recommendation_status: insight.recommendation_status,
-        identifiability_note: insight.identifiability_note,
-        quality,
+      const response: CEEElicitPreferencesResponseV1T = {
+        questions: framedQuestions,
+        estimated_value: estimatedValue,
         trace: {
           request_id: requestId,
           correlation_id: requestId,
@@ -253,29 +225,27 @@ export default async function route(app: FastifyInstance) {
       };
 
       // Validate response schema
-      const validationResult = CEEKeyInsightResponseV1Schema.safeParse(response);
+      const validationResult = CEEElicitPreferencesResponseV1Schema.safeParse(response);
       if (!validationResult.success) {
         log.error(
           { error: validationResult.error, request_id: requestId },
-          "Key insight response schema validation failed"
+          "Elicit preferences response schema validation failed"
         );
         throw new Error("Internal response validation failed");
       }
 
       const latencyMs = Date.now() - start;
 
-      emit(TelemetryEvents.CeeKeyInsightSucceeded, {
+      emit(TelemetryEvents.CeeElicitPreferencesSucceeded, {
         ...telemetryCtx,
         latency_ms: latencyMs,
-        quality_overall: quality.overall,
-        has_caveat: Boolean(insight.caveat),
-        ranked_action_count: rankedActions.length,
-        driver_count: topDrivers?.length ?? 0,
+        question_count: framedQuestions.length,
+        estimated_value: estimatedValue,
       });
 
       logCeeCall({
         requestId,
-        capability: "cee_key_insight",
+        capability: "cee_elicit_preferences",
         latencyMs,
         status: "ok",
         httpStatus: 200,
@@ -289,7 +259,7 @@ export default async function route(app: FastifyInstance) {
     } catch (error) {
       const err = error instanceof Error ? error : new Error("internal error");
 
-      emit(TelemetryEvents.CeeKeyInsightFailed, {
+      emit(TelemetryEvents.CeeElicitPreferencesFailed, {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR",
@@ -298,7 +268,7 @@ export default async function route(app: FastifyInstance) {
 
       logCeeCall({
         requestId,
-        capability: "cee_key_insight",
+        capability: "cee_elicit_preferences",
         latencyMs: Date.now() - start,
         status: "error",
         errorCode: "CEE_INTERNAL_ERROR",

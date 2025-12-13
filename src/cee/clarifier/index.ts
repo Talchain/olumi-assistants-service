@@ -1,5 +1,23 @@
-// CEE Multi-Turn Clarifier Integration
-// Enables iterative graph refinement through strategic questioning
+/**
+ * CEE Multi-Turn Clarifier Integration
+ *
+ * Enables iterative graph refinement through strategic questioning.
+ *
+ * ## Known Limitations / Coupling Risks
+ *
+ * **Prompt Coupling**: The clarifier currently reuses existing LLM operations:
+ * - Question generation uses `clarify_brief` operation (round: 0)
+ * - Answer incorporation uses `draft_graph` operation with a special brief
+ *
+ * This means changes to `clarify_brief` or `draft_graph` prompts can
+ * inadvertently break clarifier behavior. A future improvement would be
+ * to introduce dedicated operations/task IDs:
+ * - `clarifier_question_generation` - For generating clarifying questions
+ * - `clarifier_answer_incorporation` - For incorporating answers into graph
+ *
+ * This would decouple the clarifier from the core draft/clarify prompts
+ * and allow independent prompt tuning.
+ */
 
 export {
   detectConvergence,

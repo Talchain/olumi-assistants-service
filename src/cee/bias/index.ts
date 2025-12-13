@@ -72,15 +72,21 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   const riskNodes = getNodesByKind(graph, "risk");
   const outcomeNodes = getNodesByKind(graph, "outcome");
   const goalNodes = getNodesByKind(graph, "goal");
+  const factorNodes = getNodesByKind(graph, "factor");
+  const actionNodes = getNodesByKind(graph, "action");
 
   const optionIds = optionNodes.map((n) => (n as any).id as string).filter(Boolean);
   const riskIds = riskNodes.map((n) => (n as any).id as string).filter(Boolean);
   const outcomeIds = outcomeNodes.map((n) => (n as any).id as string).filter(Boolean);
   const goalIds = goalNodes.map((n) => (n as any).id as string).filter(Boolean);
+  const factorIds = factorNodes.map((n) => (n as any).id as string).filter(Boolean);
+  const actionIds = actionNodes.map((n) => (n as any).id as string).filter(Boolean);
 
   const optionCount = optionNodes.length;
   const riskCount = riskNodes.length;
   const outcomeCount = outcomeNodes.length;
+  const factorCount = factorNodes.length;
+  const actionCount = actionNodes.length;
 
   // Selection bias: zero or one option defined in the graph
   if (optionCount <= 1) {
@@ -238,10 +244,6 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
     }
 
     // Structural sunk cost bias: single option with multiple actions attached.
-    const actionNodes = getNodesByKind(graph, "action");
-    const actionIds = actionNodes.map((n) => (n as any).id as string).filter(Boolean);
-    const actionCount = actionNodes.length;
-
     if (optionCount === 1 && actionCount >= 3) {
       const soleOptionId = optionIds[0];
       const relatedNodeIds = [soleOptionId, ...actionIds];
@@ -260,6 +262,27 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
           node_ids: relatedNodeIds,
         },
         confidence: calculateConfidence("medium", evidenceStrength),
+      } as BiasAndingWithConfidence);
+    }
+
+    // Illusion of control bias: many action nodes but few/no factor nodes
+    // Suggests user may be treating external uncertainties as controllable
+    if (actionCount >= 3 && factorCount === 0) {
+      // Higher confidence when action count is much higher
+      const evidenceStrength = Math.min(1, 0.5 + (actionCount - 3) * 0.1);
+
+      findings.push({
+        id: "illusion_of_control",
+        category: "other",
+        severity: "low",
+        node_ids: actionIds,
+        explanation:
+          "Graph has many controllable actions but no external factors; this may indicate illusion of control bias—underestimating the influence of external uncertainties.",
+        code: "ILLUSION_OF_CONTROL",
+        targets: {
+          node_ids: actionIds,
+        },
+        confidence: calculateConfidence("low", evidenceStrength),
       } as BiasAndingWithConfidence);
     }
   }

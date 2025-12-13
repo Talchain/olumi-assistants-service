@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DraftGraphOutput } from "./assist.js";
+import { PreferenceQuestionSchema, UserPreferencesSchema } from "./cee.js";
 
 // Minimal Zod schemas for CEE response envelopes used by the verification
 // pipeline. These are intentionally conservative and focus on required
@@ -226,13 +227,36 @@ export const CEEGraphReadinessResponseV1Schema = z
 
 export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;
 
+// Headline structured data for flexible UI rendering
+export const CEEHeadlineStructuredV1Schema = z.object({
+  goal_text: z.string().nullable(),
+  action: z.string(),
+  outcome_type: z.enum(["positive", "negative", "neutral"]),
+  likelihood: z.number().min(0).max(1),
+  vs_baseline: z.number().nullable(),
+  vs_baseline_direction: z.enum(["better", "worse", "same"]).nullable(),
+  ranking_confidence: z.enum(["low", "medium", "high"]),
+  is_close_race: z.boolean(),
+});
+
+export type CEEHeadlineStructuredV1T = z.infer<typeof CEEHeadlineStructuredV1Schema>;
+
 // Key Insight Response schema
 export const CEEKeyInsightResponseV1Schema = z
   .object({
     headline: z.string(),
+    headline_structured: CEEHeadlineStructuredV1Schema.optional(),
     primary_driver: z.string(),
     confidence_statement: z.string(),
     caveat: z.string().optional(),
+    evidence: z.array(z.string()).optional(),
+    next_steps: z.array(z.string()).optional(),
+    // Recommendation status based on identifiability
+    // actionable = causal effects confirmed, proceed with confidence
+    // exploratory = treat as scenario analysis, gather more data
+    recommendation_status: z.enum(["actionable", "exploratory"]).optional(),
+    // Identifiability acknowledgement for transparency
+    identifiability_note: z.string().optional(),
     quality: CEEQualityMetaSchema,
     trace: CEETraceMetaSchema,
     provenance: z.literal("cee"),
@@ -451,4 +475,70 @@ export const CEEExplainPolicyResponseV1Schema = z
 
 export type CEEExplainPolicyResponseV1T = z.infer<
   typeof CEEExplainPolicyResponseV1Schema
+>;
+
+// ============================================================================
+// Preference Elicitation Response Schemas
+// ============================================================================
+
+// Elicit Preferences Response
+export const CEEElicitPreferencesResponseV1Schema = z
+  .object({
+    questions: z.array(PreferenceQuestionSchema),
+    estimated_value: z.number().min(0).max(1),
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEElicitPreferencesResponseV1T = z.infer<
+  typeof CEEElicitPreferencesResponseV1Schema
+>;
+
+// Elicit Preferences Answer Response
+export const CEEElicitPreferencesAnswerResponseV1Schema = z
+  .object({
+    updated_preferences: UserPreferencesSchema,
+    recommendation_impact: z.string(),
+    remaining_questions: z.number().int().min(0),
+    next_question: PreferenceQuestionSchema.optional(),
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEElicitPreferencesAnswerResponseV1T = z.infer<
+  typeof CEEElicitPreferencesAnswerResponseV1Schema
+>;
+
+// Key Factor for trade-off explanation
+export const CEEKeyFactorV1Schema = z.object({
+  factor: z.string(),
+  impact: z.string(),
+});
+
+export type CEEKeyFactorV1T = z.infer<typeof CEEKeyFactorV1Schema>;
+
+// Preference Alignment for trade-off explanation
+export const CEEPreferenceAlignmentV1Schema = z.object({
+  option_a_score: z.number(),
+  option_b_score: z.number(),
+  recommended: z.enum(["A", "B", "neutral"]),
+});
+
+export type CEEPreferenceAlignmentV1T = z.infer<typeof CEEPreferenceAlignmentV1Schema>;
+
+// Explain Tradeoff Response
+export const CEEExplainTradeoffResponseV1Schema = z
+  .object({
+    explanation: z.string(),
+    key_factors: z.array(CEEKeyFactorV1Schema),
+    preference_alignment: CEEPreferenceAlignmentV1Schema,
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEExplainTradeoffResponseV1T = z.infer<
+  typeof CEEExplainTradeoffResponseV1Schema
 >;

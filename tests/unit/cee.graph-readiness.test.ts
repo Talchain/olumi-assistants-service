@@ -40,39 +40,47 @@ describe("CEE Graph Readiness Assessment", () => {
   describe("assessGraphReadiness", () => {
     describe("ready graphs", () => {
       it("marks well-structured graph as ready", () => {
-        // Rich graph: 3 options, 3 risks (ratio 1.0 for +20), 6 outcomes (avg 2 per option for +20)
+        // Rich graph: goal, 3 options, 3 risks (ratio 1.0 for +20), 6 outcomes (avg 2 per option for +20)
+        // Includes goal-outcome connectivity for goal_outcome_linkage factor
         const graph = makeGraph(
           [
-            "decision",        // node-0
-            "option",          // node-1
+            "goal",            // node-0 - goals need outcomes connected to them
+            "decision",        // node-1
             "option",          // node-2
             "option",          // node-3
-            "risk",            // node-4
+            "option",          // node-4
             "risk",            // node-5
             "risk",            // node-6
-            "outcome",         // node-7
+            "risk",            // node-7
             "outcome",         // node-8
             "outcome",         // node-9
             "outcome",         // node-10
             "outcome",         // node-11
             "outcome",         // node-12
+            "outcome",         // node-13
           ],
           [
+            // Goal -> Decision
+            { from: "node-0", to: "node-1", belief: 0.9 },
             // Decision -> Options
-            { from: "node-0", to: "node-1", belief: 0.8 },
-            { from: "node-0", to: "node-2", belief: 0.6 },
-            { from: "node-0", to: "node-3", belief: 0.4 },
+            { from: "node-1", to: "node-2", belief: 0.8 },
+            { from: "node-1", to: "node-3", belief: 0.6 },
+            { from: "node-1", to: "node-4", belief: 0.4 },
             // Options -> Risks (each option has 1 risk)
-            { from: "node-1", to: "node-4", belief: 0.3 },
-            { from: "node-2", to: "node-5", belief: 0.45 },
-            { from: "node-3", to: "node-6", belief: 0.35 },
+            { from: "node-2", to: "node-5", belief: 0.3 },
+            { from: "node-3", to: "node-6", belief: 0.45 },
+            { from: "node-4", to: "node-7", belief: 0.35 },
             // Options -> Outcomes (each option has 2 outcomes)
-            { from: "node-1", to: "node-7", belief: 0.7 },
-            { from: "node-1", to: "node-8", belief: 0.65 },
-            { from: "node-2", to: "node-9", belief: 0.55 },
-            { from: "node-2", to: "node-10", belief: 0.5 },
-            { from: "node-3", to: "node-11", belief: 0.6 },
-            { from: "node-3", to: "node-12", belief: 0.75 },
+            { from: "node-2", to: "node-8", belief: 0.7 },
+            { from: "node-2", to: "node-9", belief: 0.65 },
+            { from: "node-3", to: "node-10", belief: 0.55 },
+            { from: "node-3", to: "node-11", belief: 0.5 },
+            { from: "node-4", to: "node-12", belief: 0.6 },
+            { from: "node-4", to: "node-13", belief: 0.75 },
+            // Outcomes -> Goal (goal-outcome linkage)
+            { from: "node-8", to: "node-0", belief: 0.85 },
+            { from: "node-10", to: "node-0", belief: 0.8 },
+            { from: "node-12", to: "node-0", belief: 0.75 },
           ],
         );
 

@@ -11,7 +11,7 @@ import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 // Types
 // ============================================================================
 
-export type CanonicalNodeKind = 'goal' | 'decision' | 'option' | 'outcome' | 'risk' | 'action';
+export type CanonicalNodeKind = 'goal' | 'decision' | 'option' | 'outcome' | 'risk' | 'action' | 'factor';
 
 // ============================================================================
 // Mappings
@@ -30,10 +30,10 @@ export const NODE_KIND_MAP: Record<string, CanonicalNodeKind> = {
   'outcome': 'outcome',
   'risk': 'risk',
   'action': 'action',
+  'factor': 'factor',
 
   // Synonyms that map to 'option'
   'evidence': 'option',
-  'factor': 'option',
   'consideration': 'option',
   'alternative': 'option',
   'choice': 'option',

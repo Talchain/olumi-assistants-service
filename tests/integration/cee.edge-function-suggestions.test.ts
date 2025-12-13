@@ -161,8 +161,9 @@ describe("POST /assist/v1/suggest-edge-function (CEE v1)", () => {
       headers: headersKey2,
       payload: {
         edge_id: "e5",
-        source_node: { id: "n1", label: "Generic Input", kind: "option" },
-        target_node: { id: "n2", label: "Generic Output", kind: "outcome" },
+        // Use node kinds without signals to get linear default
+        source_node: { id: "n1", label: "X", kind: "unknown" },
+        target_node: { id: "n2", label: "Y", kind: "unknown" },
       },
     });
 
@@ -173,9 +174,17 @@ describe("POST /assist/v1/suggest-edge-function (CEE v1)", () => {
     expect(body.confidence).toBe("low");
     expect(body.alternatives.length).toBeGreaterThan(0);
 
-    // Verify alternative structure
+    // Verify alternative structure - now includes new function types
     for (const alt of body.alternatives) {
-      expect(["linear", "diminishing_returns", "threshold", "s_curve"]).toContain(alt.function_type);
+      expect([
+        "linear",
+        "diminishing_returns",
+        "threshold",
+        "s_curve",
+        "noisy_or",
+        "noisy_and_not",
+        "logistic",
+      ]).toContain(alt.function_type);
       expect(typeof alt.params).toBe("object");
       expect(typeof alt.reasoning).toBe("string");
     }

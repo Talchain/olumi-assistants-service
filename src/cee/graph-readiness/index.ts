@@ -32,26 +32,41 @@ import {
   scoreRiskCoverage,
   scoreOutcomeBalance,
   scoreOptionDiversity,
+  scoreGoalOutcomeLinkage,
   computeGraphStats,
+  computeEvidenceQualityDistribution,
+  identifyKeyAssumptions,
 } from "./factors.js";
 import {
   generateRecommendation,
   estimatePotentialImprovement,
   generateConfidenceExplanation,
 } from "./recommendations.js";
+import { checkDomainCompleteness } from "./domain-completeness.js";
+import { analyzeGoalConflicts } from "./goal-conflict.js";
 
 // ============================================================================
 // Main Assessment Function
 // ============================================================================
 
 /**
+ * Options for graph readiness assessment.
+ */
+export interface AssessGraphReadinessOptions {
+  /** Decision brief text for domain detection */
+  brief?: string;
+}
+
+/**
  * Assess graph readiness for analysis.
  *
  * @param graph - Decision graph to evaluate
+ * @param options - Optional assessment options including brief for domain detection
  * @returns GraphReadinessAssessment with score, factors, and recommendations
  */
 export function assessGraphReadiness(
   graph: GraphV1 | undefined,
+  options?: AssessGraphReadinessOptions,
 ): GraphReadinessAssessment {
   // Compute graph statistics
   const stats = computeGraphStats(graph);
@@ -69,6 +84,7 @@ export function assessGraphReadiness(
     risk_coverage: scoreRiskCoverage(graph),
     outcome_balance: scoreOutcomeBalance(graph),
     option_diversity: scoreOptionDiversity(graph),
+    goal_outcome_linkage: scoreGoalOutcomeLinkage(graph),
   };
 
   // Extract scores for weighted calculation
@@ -78,6 +94,7 @@ export function assessGraphReadiness(
     risk_coverage: factorResults.risk_coverage.score,
     outcome_balance: factorResults.outcome_balance.score,
     option_diversity: factorResults.option_diversity.score,
+    goal_outcome_linkage: factorResults.goal_outcome_linkage.score,
   };
 
   // Calculate overall readiness score (weighted average)
@@ -95,6 +112,18 @@ export function assessGraphReadiness(
   // Build quality factors with recommendations
   const qualityFactors = buildQualityFactors(factorResults);
 
+  // Compute evidence quality distribution
+  const evidenceQuality = computeEvidenceQualityDistribution(graph);
+
+  // Identify key assumptions to validate (always present, never empty)
+  const keyAssumptions = identifyKeyAssumptions(graph);
+
+  // Check domain-specific completeness
+  const domainCompleteness = checkDomainCompleteness(graph, options?.brief);
+
+  // Analyze goal conflicts (when multiple goals exist)
+  const goalConflicts = analyzeGoalConflicts(graph);
+
   return {
     readiness_score: readinessScore,
     readiness_level: readinessLevel,
@@ -102,6 +131,10 @@ export function assessGraphReadiness(
     confidence_explanation: confidenceExplanation,
     quality_factors: qualityFactors,
     can_run_analysis: true,
+    evidence_quality: evidenceQuality,
+    key_assumptions: keyAssumptions,
+    domain_completeness: domainCompleteness,
+    goal_conflicts: goalConflicts,
   };
 }
 
@@ -250,9 +283,18 @@ export type {
   QualityFactorName,
   ReadinessLevel,
   ConfidenceLevel,
+  DomainType,
+  DomainCompletenessResult,
+  MissingFactor,
+  GoalRelationship,
+  GoalPair,
+  TradeOffGuidance,
+  GoalConflictAnalysis,
 } from "./types.js";
 
 export { computeGraphStats } from "./factors.js";
+export { checkDomainCompleteness, detectDomain } from "./domain-completeness.js";
+export { analyzeGoalConflicts } from "./goal-conflict.js";
 
 // Export for testing
 export const __test_only = {
