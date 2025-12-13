@@ -744,7 +744,7 @@ Fix the graph to resolve ALL violations. Common fixes:
 - Remove isolated nodes (all nodes must be connected)
 - Ensure edge endpoints reference valid node IDs
 - Ensure belief values are between 0 and 1
-- Ensure node kinds are valid (goal, decision, option, outcome)
+- Ensure node kinds are valid (goal, decision, option, outcome, risk, action, factor)
 - Maintain graph topology where possible
 
 ## Output Format (JSON)
