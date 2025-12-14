@@ -307,6 +307,14 @@ export const TelemetryEvents = {
   CeeGraphValidation: "cee.graph.validation",
   CeeGraphGoalsMerged: "cee.graph.goals_merged",
   CeeGraphSizeExceeded: "cee.graph.size_exceeded",
+
+  // Factor Extraction events (v2.3)
+  FactorExtractionComplete: "cee.factor_extraction.complete",
+
+  // ISL Synthesis events (v2.3)
+  IslSynthesisRequested: "cee.isl_synthesis.requested",
+  IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
+  IslSynthesisFailed: "cee.isl_synthesis.failed",
 } as const;
 
 /**

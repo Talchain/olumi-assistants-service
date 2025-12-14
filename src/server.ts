@@ -35,6 +35,7 @@ import ceeExplainPolicyRouteV1 from "./routes/assist.v1.explain-policy.js";
 import ceeElicitPreferencesRouteV1 from "./routes/assist.v1.elicit-preferences.js";
 import ceeElicitPreferencesAnswerRouteV1 from "./routes/assist.v1.elicit-preferences-answer.js";
 import ceeExplainTradeoffRouteV1 from "./routes/assist.v1.explain-tradeoff.js";
+import ceeIslSynthesisRouteV1 from "./routes/assist.v1.isl-synthesis.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
@@ -507,6 +508,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeElicitPreferencesRouteV1(app);
   await ceeElicitPreferencesAnswerRouteV1(app);
   await ceeExplainTradeoffRouteV1(app);
+  await ceeIslSynthesisRouteV1(app);
   await ceeHealthRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);

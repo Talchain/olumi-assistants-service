@@ -542,3 +542,26 @@ export const CEEExplainTradeoffResponseV1Schema = z
 export type CEEExplainTradeoffResponseV1T = z.infer<
   typeof CEEExplainTradeoffResponseV1Schema
 >;
+
+// ============================================================================
+// ISL Synthesis Response Schema
+// ============================================================================
+
+export const CEEIslSynthesisResponseV1Schema = z
+  .object({
+    // Generated narratives
+    robustness_narrative: z.string().optional(),
+    sensitivity_narrative: z.string().optional(),
+    voi_narrative: z.string().optional(),
+    tipping_narrative: z.string().optional(),
+    executive_summary: z.string(),
+    // Metadata
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEIslSynthesisResponseV1T = z.infer<
+  typeof CEEIslSynthesisResponseV1Schema
+>;

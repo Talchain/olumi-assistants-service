@@ -438,3 +438,70 @@ export const CEEExplainTradeoffInput = z
   .strict();
 
 export type CEEExplainTradeoffInputT = z.infer<typeof CEEExplainTradeoffInput>;
+
+// =============================================================================
+// ISL Synthesis Input Schema
+// =============================================================================
+
+// Sensitivity analysis result from ISL
+export const ISLSensitivityResultSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  sensitivity: z.number(),
+  direction: z.enum(["positive", "negative"]).optional(),
+  impact_description: z.string().optional(),
+});
+
+// Value of Information result from ISL
+export const ISLVoIResultSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  voi: z.number(),
+  recommended_research: z.string().optional(),
+});
+
+// Tipping point result from ISL
+export const ISLTippingPointSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  threshold_value: z.number(),
+  current_value: z.number().optional(),
+  optimal_before: z.string().optional(),
+  optimal_after: z.string().optional(),
+});
+
+// Robustness result from ISL
+export const ISLRobustnessResultSchema = z.object({
+  recommendation_id: z.string(),
+  recommendation_label: z.string().optional(),
+  robustness_score: z.number().min(0).max(1),
+  scenarios_tested: z.number().optional(),
+  scenarios_dominant: z.number().optional(),
+});
+
+// ISL Synthesis Input
+export const CEEIslSynthesisInput = z
+  .object({
+    // Required: at least one analysis type
+    sensitivity: z.array(ISLSensitivityResultSchema).optional(),
+    voi: z.array(ISLVoIResultSchema).optional(),
+    tipping_points: z.array(ISLTippingPointSchema).optional(),
+    robustness: z.array(ISLRobustnessResultSchema).optional(),
+    // Context
+    goal_label: z.string().optional(),
+    recommendation_label: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict()
+  .refine(
+    (data) =>
+      data.sensitivity?.length ||
+      data.voi?.length ||
+      data.tipping_points?.length ||
+      data.robustness?.length,
+    {
+      message: "At least one analysis result (sensitivity, voi, tipping_points, or robustness) is required",
+    }
+  );
+
+export type CEEIslSynthesisInputT = z.infer<typeof CEEIslSynthesisInput>;

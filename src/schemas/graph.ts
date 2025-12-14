@@ -4,11 +4,31 @@ export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "eng
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor"]);
 export const Position = z.object({ x: z.number(), y: z.number() });
 
+/**
+ * Quantitative data for factor nodes.
+ * Enables ISL sensitivity, VoI, and tipping point analysis.
+ */
+export const FactorData = z.object({
+  /** Current or proposed value */
+  value: z.number(),
+  /** Baseline/original value (e.g., "from X to Y" → baseline is X) */
+  baseline: z.number().optional(),
+  /** Unit of measurement (£, $, %, etc.) */
+  unit: z.string().optional(),
+  /** Valid range for sensitivity analysis */
+  range: z.object({
+    min: z.number(),
+    max: z.number()
+  }).optional()
+});
+
 export const Node = z.object({
   id: z.string().min(1),
   kind: NodeKind,
   label: z.string().optional(),
-  body: z.string().max(200).optional()
+  body: z.string().max(200).optional(),
+  /** Quantitative data for factor nodes (used by ISL) */
+  data: FactorData.optional()
 });
 
 // Structured provenance for production trust and traceability
@@ -74,6 +94,7 @@ export const Graph = z.object({
 export type GraphT = z.infer<typeof Graph>;
 export type EdgeT = z.infer<typeof Edge>;
 export type NodeT = z.infer<typeof Node>;
+export type FactorDataT = z.infer<typeof FactorData>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
 
 /**

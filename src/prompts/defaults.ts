@@ -245,6 +245,44 @@ If you answered NO to any check, revise your graph before responding.
 Note: The example shows 2 options with differentiated beliefs (0.55/0.45), varied edge weights,
 AND outcome→goal connectivity so that analysis can measure success against the objective.
 
+## QUANTITATIVE FACTOR EXTRACTION
+
+When the brief contains numeric values, create factor nodes with structured data for ISL analysis.
+
+### Pattern Recognition
+Look for:
+- Currency values: £49, $100, €50
+- Percentages: 5%, 3.5%, "ten percent"
+- From-to transitions: "from £49 to £59", "from 3% to 5%"
+- Change language: "increase from 10 to 20", "reduce by 15%"
+
+### Factor Node Format with Data
+When numeric values are present, include a \`data\` field:
+{
+  "id": "factor_price",
+  "kind": "factor",
+  "label": "Pro Plan Price",
+  "data": {
+    "value": 59,        // Current or proposed value
+    "baseline": 49,     // Original value (from "from X to Y")
+    "unit": "£"         // Unit of measurement
+  }
+}
+
+### Conversion Rules
+- Percentages → decimals: 5% → 0.05, 3.5% → 0.035
+- Identify baseline vs. proposed: "from £49 to £59" → baseline: 49, value: 59
+- Preserve units: £, $, €, %
+
+### Example Brief
+"Should I raise the Pro plan price from £49 to £59? Worried about churn increasing from 3% to maybe 5%."
+
+Required factor nodes:
+- { "kind": "factor", "label": "Pro Plan Price", "data": { "value": 59, "baseline": 49, "unit": "£" }}
+- { "kind": "factor", "label": "Churn Rate", "data": { "value": 0.05, "baseline": 0.03, "unit": "%" }}
+
+These factor nodes enable ISL sensitivity analysis, VoI calculations, and tipping point detection.
+
 Respond ONLY with valid JSON matching this structure.`;
 
 // ============================================================================
@@ -472,6 +510,67 @@ For each potential bias found:
 Respond ONLY with valid JSON.`;
 
 // ============================================================================
+// ISL Synthesis Prompt
+// ============================================================================
+
+const ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
+
+## Your Task
+Given ISL (Inference & Structure Learning) analysis results, generate human-readable narratives that explain the findings to decision-makers.
+
+## Input Structure
+You will receive JSON with some or all of these fields:
+- sensitivity: Sensitivity analysis showing how changes in factors affect outcomes
+- voi: Value of Information analysis showing which uncertainties matter most
+- tipping_points: Critical thresholds where optimal decisions change
+- robustness: How stable the recommendation is across parameter variations
+
+## Required Outputs
+Generate narratives for each analysis type present:
+
+### 1. robustness_narrative
+Explain how confident we can be in the recommendation:
+- Is the best option clearly dominant or narrowly winning?
+- Under what conditions might the recommendation change?
+- What parameters have the largest impact?
+
+### 2. sensitivity_narrative
+Explain which factors matter most:
+- Which inputs have the strongest influence on outcomes?
+- Are there surprising sensitivities?
+- What should the decision-maker monitor closely?
+
+### 3. voi_narrative (if VoI data present)
+Explain what information is worth gathering:
+- Which uncertainties, if resolved, would most improve the decision?
+- Is further research justified before deciding?
+- What's the expected benefit of learning more?
+
+### 4. tipping_narrative (if tipping point data present)
+Explain critical thresholds:
+- At what parameter values does the optimal choice change?
+- How close is the current situation to a tipping point?
+- What events could trigger a change in recommendation?
+
+## Output Format (JSON)
+{
+  "robustness_narrative": "The recommendation to [option] is robust across most scenarios...",
+  "sensitivity_narrative": "The outcome is most sensitive to [factor], with a 10% change producing...",
+  "voi_narrative": "Resolving uncertainty about [factor] could improve expected value by...",
+  "tipping_narrative": "If [factor] exceeds [threshold], the optimal choice shifts from...",
+  "executive_summary": "One-paragraph synthesis for busy executives"
+}
+
+## Guidelines
+- Use concrete numbers from the analysis (e.g., "a 15% increase" not "a moderate increase")
+- Write for business decision-makers, not data scientists
+- Highlight actionable insights over technical details
+- Be direct about uncertainty and limitations
+- Keep each narrative to 2-4 sentences maximum
+
+Respond ONLY with valid JSON.`;
+
+// ============================================================================
 // Registration Function
 // ============================================================================
 
@@ -492,6 +591,7 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);
   registerDefaultPrompt('explainer', EXPLAINER_PROMPT);
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
+  registerDefaultPrompt('isl_synthesis', ISL_SYNTHESIS_PROMPT);
 
   // Note: These tasks don't have LLM prompts yet:
   // - evidence_helper: Uses ISL/external service
@@ -510,4 +610,5 @@ export const PROMPT_TEMPLATES = {
   critique_graph: CRITIQUE_GRAPH_PROMPT,
   explainer: EXPLAINER_PROMPT,
   bias_check: BIAS_CHECK_PROMPT,
+  isl_synthesis: ISL_SYNTHESIS_PROMPT,
 } as const;

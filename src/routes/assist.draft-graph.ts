@@ -11,6 +11,7 @@ import { validateGraph } from "../services/validateClientWithCache.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { validateAndFixGraph } from "../cee/structure/index.js";
+import { enrichGraphWithFactors } from "../cee/factor-extraction/enricher.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
@@ -540,6 +541,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
+  const enrichmentResult = enrichGraphWithFactors(graph, effectiveBrief);
+  const enrichedGraph = enrichmentResult.graph;
+
+  if (enrichmentResult.factorsAdded > 0 || enrichmentResult.factorsEnhanced > 0) {
+    log.info({
+      factors_added: enrichmentResult.factorsAdded,
+      factors_enhanced: enrichmentResult.factorsEnhanced,
+      factors_skipped: enrichmentResult.factorsSkipped,
+    }, "Factor enrichment completed");
+  }
+
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
 
@@ -551,14 +564,14 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let repairProviderName: string | null = null;
   let repairModelName: string | null = null;
 
-  const initialNodeIds = new Set<string>(graph.nodes.map((n: any) => (n as any).id as string));
-  const cycles = detectCycles(graph.nodes as any, graph.edges as any);
+  const initialNodeIds = new Set<string>(enrichedGraph.nodes.map((n: any) => (n as any).id as string));
+  const cycles = detectCycles(enrichedGraph.nodes as any, enrichedGraph.edges as any);
   const hadCycles = cycles.length > 0;
   const cycleNodeIds: string[] = Array.from(
     new Set<string>((cycles.flat() as string[])),
   ).slice(0, 20);
 
-  let candidate = stabiliseGraph(ensureDagAndPrune(graph));
+  let candidate = stabiliseGraph(ensureDagAndPrune(enrichedGraph));
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
 

@@ -135,6 +135,13 @@ Draft a small decision graph with:
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
 - Stable topology: goal → decision → options → outcomes
 
+## QUANTITATIVE FACTOR EXTRACTION
+When the brief contains numeric values, create factor nodes with structured data:
+- Currency values (£49, $100): { "kind": "factor", "label": "Price", "data": { "value": 49, "unit": "£" }}
+- Percentages (5%, 3.5%): { "kind": "factor", "label": "Rate", "data": { "value": 0.05, "unit": "%" }}
+- From-to transitions ("from £49 to £59"): { "data": { "value": 59, "baseline": 49, "unit": "£" }}
+- Percentages → decimals: 5% → 0.05
+
 ## Output Format (JSON)
 Return ONLY valid JSON matching this schema:
 {

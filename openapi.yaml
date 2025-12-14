@@ -1823,6 +1823,111 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/isl-synthesis:
+    post:
+      summary: Synthesize ISL analysis into human-readable narratives (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **ISL Synthesis** endpoint.
+
+        Converts ISL (Inference & Structure Learning) quantitative analysis results
+        into human-readable narratives. Takes sensitivity, VoI (Value of Information),
+        tipping point, and robustness data and generates clear explanations for
+        decision-makers.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency.
+
+        Use this after running ISL analysis to generate narrative explanations
+        suitable for executive presentation.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEIslSynthesisRequestV1'
+            examples:
+              full_analysis:
+                summary: Full ISL analysis with all components
+                value:
+                  sensitivity:
+                    - factor_id: factor_price
+                      factor_label: Pro Plan Price
+                      sensitivity: 0.85
+                      direction: negative
+                    - factor_id: factor_churn
+                      factor_label: Churn Rate
+                      sensitivity: 0.72
+                      direction: negative
+                  robustness:
+                    - recommendation_id: opt_raise_price
+                      recommendation_label: Raise price to £59
+                      robustness_score: 0.78
+                      scenarios_tested: 100
+                      scenarios_dominant: 78
+                  tipping_points:
+                    - factor_id: factor_churn
+                      factor_label: Churn Rate
+                      threshold_value: 0.08
+                      current_value: 0.05
+                      optimal_before: Raise price
+                      optimal_after: Maintain price
+                  goal_label: Maximize revenue
+                  recommendation_label: Raise price to £59
+              sensitivity_only:
+                summary: Sensitivity analysis only
+                value:
+                  sensitivity:
+                    - factor_id: factor_1
+                      factor_label: Market Growth
+                      sensitivity: 0.92
+                      direction: positive
+      responses:
+        '200':
+          description: ISL synthesis generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE ISL Synthesis feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEIslSynthesisResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for ISL Synthesis
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/narrate-conditions:
     post:
       summary: Generate conditional recommendation narratives (CEE v1)
@@ -2443,6 +2548,33 @@ components:
               enum: [assistant, fixtures]
               description: Origin of this graph
 
+    FactorData:
+      type: object
+      description: Quantitative data for factor nodes (enables ISL sensitivity, VoI, and tipping point analysis)
+      required:
+        - value
+      properties:
+        value:
+          type: number
+          description: Current or proposed value
+          example: 59
+        baseline:
+          type: number
+          description: Baseline/original value (e.g., from "from X to Y" language)
+          example: 49
+        unit:
+          type: string
+          description: Unit of measurement (£, $, %, etc.)
+          example: "£"
+        range:
+          type: object
+          description: Valid range for sensitivity analysis
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+
     Node:
       type: object
       required:
@@ -2466,6 +2598,9 @@ components:
           type: string
           maxLength: 200
           description: Optional detailed description
+        data:
+          $ref: '#/components/schemas/FactorData'
+          description: Quantitative data for factor nodes (used by ISL)
 
     Edge:
       type: object
@@ -5250,6 +5385,193 @@ components:
           type: string
           description: Optional caveat if the recommendation is close or uncertain
           example: The margin between top options is narrow - consider sensitivity analysis before finalising.
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+
+    ISLSensitivityResult:
+      type: object
+      description: Sensitivity analysis result for a factor
+      required:
+        - factor_id
+        - sensitivity
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_price
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Pro Plan Price
+        sensitivity:
+          type: number
+          description: Sensitivity score (0-1)
+          example: 0.85
+        direction:
+          type: string
+          enum: [positive, negative]
+          description: Direction of correlation
+        impact_description:
+          type: string
+          description: Description of impact
+
+    ISLVoIResult:
+      type: object
+      description: Value of Information result for a factor
+      required:
+        - factor_id
+        - voi
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_churn
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Churn Rate
+        voi:
+          type: number
+          description: Expected value of resolving this uncertainty
+          example: 12.5
+        recommended_research:
+          type: string
+          description: Suggested way to gather more information
+
+    ISLTippingPoint:
+      type: object
+      description: Tipping point where optimal decision changes
+      required:
+        - factor_id
+        - threshold_value
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_churn
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Churn Rate
+        threshold_value:
+          type: number
+          description: Value at which optimal decision changes
+          example: 0.08
+        current_value:
+          type: number
+          description: Current value for proximity calculation
+          example: 0.05
+        optimal_before:
+          type: string
+          description: Optimal choice below threshold
+          example: Raise price
+        optimal_after:
+          type: string
+          description: Optimal choice above threshold
+          example: Maintain price
+
+    ISLRobustnessResult:
+      type: object
+      description: Robustness analysis for a recommendation
+      required:
+        - recommendation_id
+        - robustness_score
+      properties:
+        recommendation_id:
+          type: string
+          description: ID of the recommendation/option
+          example: opt_raise_price
+        recommendation_label:
+          type: string
+          description: Human-readable label
+          example: Raise price to £59
+        robustness_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of scenarios where this option is optimal
+          example: 0.78
+        scenarios_tested:
+          type: number
+          description: Total scenarios tested
+          example: 100
+        scenarios_dominant:
+          type: number
+          description: Scenarios where this option dominated
+          example: 78
+
+    CEEIslSynthesisRequestV1:
+      type: object
+      description: CEE ISL synthesis request payload
+      properties:
+        sensitivity:
+          type: array
+          description: Sensitivity analysis results
+          items:
+            $ref: '#/components/schemas/ISLSensitivityResult'
+        voi:
+          type: array
+          description: Value of Information results
+          items:
+            $ref: '#/components/schemas/ISLVoIResult'
+        tipping_points:
+          type: array
+          description: Tipping point analysis results
+          items:
+            $ref: '#/components/schemas/ISLTippingPoint'
+        robustness:
+          type: array
+          description: Robustness analysis results
+          items:
+            $ref: '#/components/schemas/ISLRobustnessResult'
+        goal_label:
+          type: string
+          description: Goal context for narrative
+          example: Maximize revenue
+        recommendation_label:
+          type: string
+          description: Current recommendation for context
+          example: Raise price to £59
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEIslSynthesisResponseV1:
+      type: object
+      description: Generated ISL narrative synthesis
+      required:
+        - executive_summary
+        - trace
+        - quality
+        - provenance
+      properties:
+        robustness_narrative:
+          type: string
+          description: Narrative explaining robustness analysis
+          example: The recommendation to raise price to £59 is highly robust with a 78% confidence score across 100 tested scenarios.
+        sensitivity_narrative:
+          type: string
+          description: Narrative explaining sensitivity analysis
+          example: The outcome is most sensitive to Pro Plan Price and Churn Rate. Small changes in these factors could significantly impact the expected value.
+        voi_narrative:
+          type: string
+          description: Narrative explaining value of information
+          example: Resolving uncertainty about Churn Rate has the highest expected value of information.
+        tipping_narrative:
+          type: string
+          description: Narrative explaining tipping points
+          example: If Churn Rate exceeds 8%, the optimal choice shifts from Raise price to Maintain price.
+        executive_summary:
+          type: string
+          description: One-paragraph executive summary
+          example: "Goal: Maximize revenue. Recommended action: Raise price to £59. Robustness: 78%."
         trace:
           $ref: '#/components/schemas/CEETraceMeta'
         quality:
