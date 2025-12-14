@@ -5,7 +5,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance, FactorData } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
@@ -22,6 +22,7 @@ const OpenAINode = z.object({
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  data: FactorData.optional(), // Quantitative data for factor nodes (ISL integration)
 });
 
 const OpenAIEdge = z.object({

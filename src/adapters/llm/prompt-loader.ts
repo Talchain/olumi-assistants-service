@@ -65,6 +65,7 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   critique_graph: 'critique_graph',
   explainer: 'explainer',
   bias_check: 'bias_check',
+  // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 
 /**

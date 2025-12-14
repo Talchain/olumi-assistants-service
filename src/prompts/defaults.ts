@@ -591,9 +591,9 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);
   registerDefaultPrompt('explainer', EXPLAINER_PROMPT);
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
-  registerDefaultPrompt('isl_synthesis', ISL_SYNTHESIS_PROMPT);
 
-  // Note: These tasks don't have LLM prompts yet:
+  // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
+  // - isl_synthesis: Uses template-based narrative generation (no LLM)
   // - evidence_helper: Uses ISL/external service
   // - sensitivity_coach: Uses ISL/external service
   // - preflight: Uses algorithmic validation (no LLM)
@@ -610,5 +610,5 @@ export const PROMPT_TEMPLATES = {
   critique_graph: CRITIQUE_GRAPH_PROMPT,
   explainer: EXPLAINER_PROMPT,
   bias_check: BIAS_CHECK_PROMPT,
-  isl_synthesis: ISL_SYNTHESIS_PROMPT,
+  // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
