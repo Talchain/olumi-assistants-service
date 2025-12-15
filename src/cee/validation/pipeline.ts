@@ -22,6 +22,7 @@ import {
 } from "../config/limits.js";
 import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
+import { enrichGraphWithFactors } from "../factor-extraction/enricher.js";
 import { config } from "../../config/index.js";
 import {
   detectAmbiguities,
@@ -746,6 +747,27 @@ export async function finaliseCeeDraftResponse(
   };
 
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+
+  // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
+  // This runs after LLM graph generation but before validation, matching the legacy endpoint's order.
+  // Ensures factor nodes have value/baseline/unit data for ISL sensitivity analysis.
+  if (graph) {
+    const enrichmentResult = enrichGraphWithFactors(graph as any, input.brief);
+    graph = enrichmentResult.graph as GraphV1;
+    payload.graph = graph as any;
+
+    if (enrichmentResult.factorsAdded > 0 || enrichmentResult.factorsEnhanced > 0) {
+      log.debug(
+        {
+          request_id: requestId,
+          factors_added: enrichmentResult.factorsAdded,
+          factors_enhanced: enrichmentResult.factorsEnhanced,
+          factors_skipped: enrichmentResult.factorsSkipped,
+        },
+        "Factor enrichment applied to graph"
+      );
+    }
+  }
 
   // Run graph validation and auto-corrections (single goal, outcome beliefs, decision branches)
   // Uses checkSizeLimits: false since the pipeline already has size guards downstream
