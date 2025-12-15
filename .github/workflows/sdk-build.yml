@@ -43,7 +43,7 @@ jobs:
           cat size-report.txt
 
       - name: Upload size snapshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sdk-size-snapshot
           path: sdk/typescript/size-report.txt

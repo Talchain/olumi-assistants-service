@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload generated types as artifact
         if: steps.changes.outputs.relevant_changes == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: openapi-types
           path: src/generated/openapi.d.ts
