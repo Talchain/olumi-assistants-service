@@ -6,6 +6,7 @@
  *
  * Patterns detected:
  * - Currency values: £49, $100, €50
+ * - Currency with multipliers: $1 million, £2.5m, €500k, $1B
  * - Percentages: 5%, 3.5%
  * - From-to transitions: "from £49 to £59", "from 3% to 5%"
  * - Increase/decrease language: "increase from 10 to 20"
@@ -35,8 +36,38 @@ const CURRENCY_MAP: Record<string, string> = {
   "€": "EUR",
 };
 
+// Multiplier values for k, m, b, million, billion, etc.
+const MULTIPLIER_MAP: Record<string, number> = {
+  "k": 1_000,
+  "K": 1_000,
+  "m": 1_000_000,
+  "M": 1_000_000,
+  "million": 1_000_000,
+  "Million": 1_000_000,
+  "b": 1_000_000_000,
+  "B": 1_000_000_000,
+  "billion": 1_000_000_000,
+  "Billion": 1_000_000_000,
+  "t": 1_000_000_000_000,
+  "T": 1_000_000_000_000,
+  "trillion": 1_000_000_000_000,
+  "Trillion": 1_000_000_000_000,
+};
+
+/**
+ * Parse a multiplier string (k, m, million, etc.) to its numeric value
+ */
+function parseMultiplier(multiplier: string | undefined): number {
+  if (!multiplier) return 1;
+  return MULTIPLIER_MAP[multiplier.trim()] ?? 1;
+}
+
 // Regex patterns for quantitative language
 const PATTERNS = {
+  // Currency with multiplier: $1 million, £2.5m, €500k, $1B, $1.5 billion
+  currencyWithMultiplier:
+    /(?<currency>[£$€])(?<amount>\d+(?:\.\d+)?)\s*(?<multiplier>k|m|b|t|million|billion|trillion)\b/gi,
+
   // Currency with optional decimals: £49, $100.50, €50
   currency: /(?<currency>[£$€])(?<amount>\d+(?:\.\d+)?)/g,
 
@@ -201,6 +232,27 @@ export function extractFactors(brief: string): ExtractedFactor[] {
         value: normalizedValue,
         unit,
         confidence: 0.7,
+        matchedText: match[0],
+      });
+    }
+  }
+
+  // Extract currency with multipliers: $1 million, £2.5m, €500k (higher priority than plain currency)
+  const currencyMultiplierRegex = new RegExp(PATTERNS.currencyWithMultiplier.source, "gi");
+  while ((match = currencyMultiplierRegex.exec(brief)) !== null) {
+    const currency = match.groups?.currency || "";
+    const baseAmount = parseFloat(match.groups?.amount || "0");
+    const multiplier = parseMultiplier(match.groups?.multiplier);
+    const amount = baseAmount * multiplier;
+    const key = `${amount}-${currency}`;
+
+    if (!seenValues.has(key)) {
+      seenValues.add(key);
+      factors.push({
+        label: inferLabel(brief, match.index, match[0]),
+        value: amount,
+        unit: currency,
+        confidence: 0.85, // Higher confidence than plain currency
         matchedText: match[0],
       });
     }
