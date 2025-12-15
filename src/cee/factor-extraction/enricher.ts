@@ -129,8 +129,11 @@ export function enrichGraphWithFactors(
     );
 
     if (existingNode) {
-      // Enhance existing factor with data if it doesn't have any
-      if (!existingNode.data) {
+      // Enhance existing factor with data if it doesn't have meaningful values
+      // Check for actual numeric data, not just existence of data object
+      const hasFactorData = existingNode.data?.value !== undefined ||
+                            existingNode.data?.baseline !== undefined;
+      if (!hasFactorData) {
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
           const factorData: FactorDataT = {
