@@ -147,6 +147,10 @@ export const TelemetryEvents = {
   CeeVerificationSucceeded: "cee.verification.succeeded",
   CeeVerificationFailed: "cee.verification.failed",
 
+  // Edge direction validation events (Brief G)
+  EdgeDirectionViolationDetected: "cee.edge_direction.violation_detected",
+  EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
   // Clarification enforcement events (v1.14 - Phase 5)

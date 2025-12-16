@@ -275,6 +275,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEdgeFunctionCompleted: "cee.edge_function.completed",
         CeeEdgeFunctionFailed: "cee.edge_function.failed",
 
+        // Edge Direction Validation events (Brief G)
+        EdgeDirectionViolationDetected: "cee.edge_direction.violation_detected",
+        EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
+
         // Phase 4: Recommendation Narratives events
         CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
         CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
@@ -298,6 +302,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeExplainTradeoffRequested: "cee.explain_tradeoff.requested",
         CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
         CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
+
+        // Factor Extraction events (v2.3)
+        FactorExtractionComplete: "cee.factor_extraction.complete",
+
+        // ISL Synthesis events (v2.3)
+        IslSynthesisRequested: "cee.isl_synthesis.requested",
+        IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
+        IslSynthesisFailed: "cee.isl_synthesis.failed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -323,7 +335,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|isl_synthesis)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -586,6 +598,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.completed": [TelemetryEvents.CeeEdgeFunctionCompleted],
         "cee.edge_function.failed": [TelemetryEvents.CeeEdgeFunctionFailed],
 
+        // Edge Direction Validation events (Brief G)
+        "cee.edge_direction.violation_detected": [TelemetryEvents.EdgeDirectionViolationDetected],
+        "cee.edge_direction.validation_passed": [TelemetryEvents.EdgeDirectionValidationPassed],
+
         // Phase 4: Recommendation Narratives events
         "cee.generate_recommendation.requested": [TelemetryEvents.CeeGenerateRecommendationRequested],
         "cee.generate_recommendation.completed": [TelemetryEvents.CeeGenerateRecommendationCompleted],
@@ -609,6 +625,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_tradeoff.requested": [TelemetryEvents.CeeExplainTradeoffRequested],
         "cee.explain_tradeoff.succeeded": [TelemetryEvents.CeeExplainTradeoffSucceeded],
         "cee.explain_tradeoff.failed": [TelemetryEvents.CeeExplainTradeoffFailed],
+
+        // Factor Extraction events (v2.3)
+        "cee.factor_extraction.complete": [TelemetryEvents.FactorExtractionComplete],
+
+        // ISL Synthesis events (v2.3)
+        "cee.isl_synthesis.requested": [TelemetryEvents.IslSynthesisRequested],
+        "cee.isl_synthesis.succeeded": [TelemetryEvents.IslSynthesisSucceeded],
+        "cee.isl_synthesis.failed": [TelemetryEvents.IslSynthesisFailed],
 
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
@@ -922,6 +946,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.completed",
         "cee.edge_function.failed",
 
+        // Edge Direction Validation events (Brief G)
+        "cee.edge_direction.violation_detected",
+        "cee.edge_direction.validation_passed",
+
         // Phase 4: Recommendation Narratives events
         "cee.generate_recommendation.requested",
         "cee.generate_recommendation.completed",
@@ -945,6 +973,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_tradeoff.requested",
         "cee.explain_tradeoff.succeeded",
         "cee.explain_tradeoff.failed",
+
+        // Factor Extraction events (v2.3)
+        "cee.factor_extraction.complete",
+
+        // ISL Synthesis events (v2.3)
+        "cee.isl_synthesis.requested",
+        "cee.isl_synthesis.succeeded",
+        "cee.isl_synthesis.failed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

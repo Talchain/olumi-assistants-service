@@ -134,6 +134,32 @@ NEVER assign all edges weight 1.0 - differentiate based on signal amplification/
   opt_maintain→demand (weight: 1.0, belief: 0.9) - stable baseline, high confidence
   demand→revenue (weight: 1.3, belief: 0.9) - strong direct correlation
 
+## Effect Direction (REQUIRED)
+
+Every edge MUST include an \`effect_direction\` field indicating whether the causal relationship is positive or negative:
+
+| Effect Direction | Meaning | When to Use |
+|------------------|---------|-------------|
+| "positive" | Increasing source INCREASES target | Most causal relationships, supportive effects |
+| "negative" | Increasing source DECREASES target | Inverse relationships, detracting effects |
+
+### Effect Direction Examples
+
+- Price → Demand: **"negative"** (higher price reduces demand)
+- Marketing → Revenue: **"positive"** (more marketing increases revenue)
+- Risk → Success: **"negative"** (higher risk reduces success probability)
+- Quality → Satisfaction: **"positive"** (higher quality increases satisfaction)
+- Cost → Profit: **"negative"** (higher cost reduces profit)
+- Churn → Revenue: **"negative"** (higher churn reduces revenue)
+- Efficiency → Output: **"positive"** (higher efficiency increases output)
+
+### Effect Direction Rules
+
+1. Most option→outcome edges are "positive" (choosing option improves outcome)
+2. Risk→goal edges are typically "negative" (risks detract from goals)
+3. Cost/price factors are often "negative" when connected to positive outcomes
+4. All edges MUST have explicit effect_direction - never omit this field
+
 ## Provenance Requirements
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
@@ -146,7 +172,55 @@ NEVER assign all edges weight 1.0 - differentiate based on signal amplification/
   - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
 - When citing documents, use these markers to determine the correct location value
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
-- Stable topology: goal → decision → options → outcomes
+
+## GRAPH TOPOLOGY (CRITICAL — READ CAREFULLY)
+
+Edges represent CAUSAL influence: the "from" node CAUSES or INFLUENCES the "to" node.
+
+### The Golden Rule
+The GOAL node must be a TERMINAL SINK — edges flow INTO it, never out of it.
+
+### Correct Causal Structure
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│  decision ──→ option_A ──→ outcome_positive ──→ goal       │
+│           └─→ option_B ──→ outcome_stable ───→ goal        │
+│                        └─→ risk_negative ────→ goal        │
+│                                                             │
+│  factor_external ──→ outcome_positive                       │
+│                  └─→ risk_negative                          │
+└─────────────────────────────────────────────────────────────┘
+
+Reading: "Decision frames options. Choosing option_A causes
+outcome_positive, which contributes to achieving goal."
+\`\`\`
+
+### Edge Direction Rules
+
+| From Node | To Node | Meaning |
+|-----------|---------|---------|
+| decision | option | "Decision frames these options" |
+| option | outcome | "Choosing this option leads to this outcome" |
+| option | risk | "Choosing this option carries this risk" |
+| outcome | goal | "This outcome contributes to goal achievement" |
+| risk | goal | "This risk detracts from goal achievement" (negative weight) |
+| factor | outcome | "This external factor influences the outcome" |
+| factor | risk | "This external factor influences the risk" |
+| action | outcome | "Taking this action improves the outcome" |
+| action | risk | "Taking this action mitigates the risk" |
+
+### WRONG Direction (DO NOT GENERATE)
+\`\`\`
+goal → decision → options → outcomes  ❌ WRONG
+
+This implies "goal causes decision" which is semantically backwards.
+The goal is what we're trying to ACHIEVE, not what CAUSES our choices.
+\`\`\`
+
+### Why This Matters
+The analysis engine calculates P(goal achieved | do(option)) by tracing causal
+paths FROM your intervention (the option you choose) TO the goal. If edges
+point the wrong way, this calculation fails completely.
 
 If the brief is ambiguous or missing some details, you MUST still propose a simple but usable skeleton
 graph that satisfies the minimum structure above. Returning an empty graph is never acceptable.
@@ -154,16 +228,21 @@ graph that satisfies the minimum structure above. Returning an empty graph is ne
 ## Self-Check (Before Responding)
 Before outputting JSON, mentally verify:
 □ Exactly 1 goal node exists
+□ Goal node is a SINK (only incoming edges, NO outgoing edges)
 □ At least 2 option nodes exist (never just one option)
-□ At least 1 outcome node exists AND connects to the goal
+□ Options have outgoing edges TO outcomes/risks (not FROM them)
+□ At least 1 outcome node exists with edge TO the goal
+□ All paths flow: decision → options → outcomes/risks → goal
 □ All decision→option edge beliefs sum to 1.0 (per decision)
 □ Decision→option edges have differentiated beliefs (avoid all-equal like 0.33, 0.33, 0.33)
 □ All option→outcome edges have belief values
-□ Outcomes connect to goal (either directly or through inference path)
 □ No orphan nodes (all nodes connected)
 □ No cycles in the graph
 □ Edges have varied beliefs (not all 0.5) - differentiate by certainty
 □ Edges have varied weights (not all 1.0) - differentiate by influence strength
+□ Every edge has effect_direction ("positive" or "negative")
+□ Risk→goal edges have effect_direction: "negative"
+□ No edges originate FROM the goal node
 □ Balance of factors/risks/outcomes where relevant to the decision
 
 If you answered NO to any check, revise your graph before responding.
@@ -172,23 +251,19 @@ If you answered NO to any check, revise your graph before responding.
 {
   "nodes": [
     { "id": "goal_1", "kind": "goal", "label": "Increase Pro upgrades" },
-    { "id": "dec_1", "kind": "decision", "label": "Which levers?" },
+    { "id": "dec_1", "kind": "decision", "label": "Which growth lever?" },
     { "id": "opt_extend", "kind": "option", "label": "Extend trial to 14 days" },
     { "id": "opt_nudge", "kind": "option", "label": "In-app upgrade nudges" },
     { "id": "out_upgrade", "kind": "outcome", "label": "Higher upgrade rate" },
-    { "id": "risk_churn", "kind": "risk", "label": "Trial fatigue/churn" }
+    { "id": "out_engagement", "kind": "outcome", "label": "Increased engagement" },
+    { "id": "risk_churn", "kind": "risk", "label": "Trial fatigue and churn" }
   ],
   "edges": [
-    {
-      "from": "goal_1",
-      "to": "dec_1",
-      "provenance": { "source": "hypothesis", "quote": "Goal drives decision framing" },
-      "provenance_source": "hypothesis"
-    },
     {
       "from": "dec_1",
       "to": "opt_extend",
       "belief": 0.55,
+      "effect_direction": "positive",
       "provenance": { "source": "hypothesis", "quote": "Slightly favored based on prior success" },
       "provenance_source": "hypothesis"
     },
@@ -196,35 +271,35 @@ If you answered NO to any check, revise your graph before responding.
       "from": "dec_1",
       "to": "opt_nudge",
       "belief": 0.45,
-      "provenance": { "source": "hypothesis", "quote": "Lower development cost alternative" },
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Lower confidence, less tested" },
       "provenance_source": "hypothesis"
     },
     {
       "from": "opt_extend",
       "to": "out_upgrade",
-      "belief": 0.8,
+      "belief": 0.75,
       "weight": 1.2,
-      "provenance": {
-        "source": "metrics.csv",
-        "quote": "14-day trial users convert at 23% vs 8% baseline",
-        "location": "row 42"
-      },
-      "provenance_source": "document"
-    },
-    {
-      "from": "opt_nudge",
-      "to": "out_upgrade",
-      "belief": 0.65,
-      "weight": 0.9,
-      "provenance": { "source": "hypothesis", "quote": "Nudges help but less impactful than trial extension" },
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Extended trials typically improve conversion" },
       "provenance_source": "hypothesis"
     },
     {
       "from": "opt_extend",
       "to": "risk_churn",
       "belief": 0.3,
-      "weight": 0.7,
-      "provenance": { "source": "hypothesis", "quote": "Longer trials may cause engagement fatigue" },
+      "weight": 0.6,
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Some users may disengage during longer trial" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "opt_nudge",
+      "to": "out_engagement",
+      "belief": 0.65,
+      "weight": 1.0,
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Nudges increase feature discovery" },
       "provenance_source": "hypothesis"
     },
     {
@@ -232,18 +307,38 @@ If you answered NO to any check, revise your graph before responding.
       "to": "goal_1",
       "belief": 0.9,
       "weight": 1.0,
-      "provenance": { "source": "hypothesis", "quote": "Upgrade rate directly measures goal achievement" },
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Upgrades directly achieve growth goal" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "out_engagement",
+      "to": "goal_1",
+      "belief": 0.7,
+      "weight": 0.8,
+      "effect_direction": "positive",
+      "provenance": { "source": "hypothesis", "quote": "Engagement correlates with eventual upgrade" },
+      "provenance_source": "hypothesis"
+    },
+    {
+      "from": "risk_churn",
+      "to": "goal_1",
+      "belief": 0.8,
+      "weight": 0.5,
+      "effect_direction": "negative",
+      "provenance": { "source": "hypothesis", "quote": "Churn detracts from upgrade goal" },
       "provenance_source": "hypothesis"
     }
   ],
   "rationales": [
-    { "target": "edge:opt_extend::out_upgrade::0", "why": "Experiential value improves conversion" },
-    { "target": "edge:out_upgrade::goal_1::0", "why": "Outcome connects to goal for measurement" }
+    { "target": "edge:opt_extend::out_upgrade::0", "why": "Extended trial builds experiential value improving conversion" },
+    { "target": "edge:risk_churn::goal_1::0", "why": "Churn has negative weight as it detracts from achieving upgrade goal" }
   ]
 }
 
-Note: The example shows 2 options with differentiated beliefs (0.55/0.45), varied edge weights,
-AND outcome→goal connectivity so that analysis can measure success against the objective.
+Note: The example shows CORRECT causal direction: decision → options → outcomes/risks → goal.
+The goal node (goal_1) is a SINK with only incoming edges — NO edges originate from the goal.
+Risk edges to goal have negative weight to indicate detraction from goal achievement.
 
 ## QUANTITATIVE FACTOR EXTRACTION
 
@@ -331,22 +426,34 @@ Fix the graph to resolve ALL violations. Common fixes:
 - Ensure node kinds are valid (goal, decision, option, outcome, risk, action, factor)
 - Maintain graph topology where possible
 
+## CRITICAL: Edge Direction Rules
+Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
+
+**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
+
+Correct edge directions:
+- decision → option (decision frames these options)
+- option → outcome (choosing option leads to outcome)
+- outcome → goal (outcome contributes to goal achievement)
+- factor → option (factor affects option viability)
+- risk → goal (risk detracts from goal - use negative weight)
+
+**WRONG directions to FIX:**
+- goal → anything (goals don't cause anything, they receive results)
+- outcome → option (outcomes don't cause options)
+
 ## Output Format (JSON)
 {
   "nodes": [
     { "id": "goal_1", "kind": "goal", "label": "..." },
-    { "id": "dec_1", "kind": "decision", "label": "..." }
+    { "id": "dec_1", "kind": "decision", "label": "..." },
+    { "id": "opt_1", "kind": "option", "label": "..." },
+    { "id": "out_1", "kind": "outcome", "label": "..." }
   ],
   "edges": [
-    {
-      "from": "goal_1",
-      "to": "dec_1",
-      "provenance": {
-        "source": "hypothesis",
-        "quote": "..."
-      },
-      "provenance_source": "hypothesis"
-    }
+    { "from": "dec_1", "to": "opt_1", "belief": 0.5, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" },
+    { "from": "opt_1", "to": "out_1", "belief": 0.7, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" },
+    { "from": "out_1", "to": "goal_1", "belief": 0.8, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" }
   ],
   "rationales": []
 }

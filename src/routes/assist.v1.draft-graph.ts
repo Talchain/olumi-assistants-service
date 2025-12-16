@@ -10,6 +10,7 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -339,7 +340,10 @@ export default async function route(app: FastifyInstance) {
 
     const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
 
-    reply.header("X-CEE-API-Version", "v1");
+    // Check for v2 schema request via query parameter
+    const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
+
+    reply.header("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
     reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
     reply.header("X-CEE-Request-ID", requestId);
 
@@ -350,6 +354,14 @@ export default async function route(app: FastifyInstance) {
     }
 
     reply.code(statusCode);
+
+    // Transform to v2 schema if requested and response is successful
+    if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
+      const v2Body = transformResponseToV2(body as any);
+      log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
+      return reply.send(v2Body);
+    }
+
     return reply.send(body);
   });
 }

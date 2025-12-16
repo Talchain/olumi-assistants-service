@@ -2624,8 +2624,25 @@ components:
           type: number
           minimum: 0
           maximum: 1
-          description: Confidence in this connection
+          description: Confidence in this connection (maps to exists_probability in v2.2)
           example: 0.85
+        effect_direction:
+          type: string
+          enum: [positive, negative]
+          description: |
+            Direction of causal effect (v2.2).
+            - positive: increasing parent increases child
+            - negative: increasing parent decreases child
+          example: positive
+        strength_std:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: |
+            Standard deviation of effect magnitude for parametric uncertainty (v2.2).
+            Used by ISL for Monte Carlo sampling.
+            If absent, derived from belief and provenance_source.
+          example: 0.15
         provenance:
           oneOf:
             - $ref: '#/components/schemas/StructuredProvenance'

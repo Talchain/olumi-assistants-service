@@ -134,7 +134,30 @@ Draft a small decision graph with:
   - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
 - When citing documents, use these markers to determine the correct location value
 - Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
-- Stable topology: goal → decision → options → outcomes
+
+## GRAPH TOPOLOGY (CRITICAL)
+Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
+
+**The Golden Rule:** The GOAL node must be a TERMINAL SINK — edges flow INTO it, never out.
+
+### Correct Edge Directions:
+| From → To | Meaning |
+|-----------|---------|
+| decision → option | "Decision frames these options" |
+| option → outcome | "Choosing this option leads to this outcome" |
+| outcome → goal | "This outcome contributes to goal achievement" |
+| factor → option | "This factor affects option viability" |
+| risk → goal | "This risk detracts from goal achievement" (negative weight) |
+| action → outcome | "This action helps achieve this outcome" |
+
+### WRONG (Anti-Pattern):
+- goal → decision (WRONG: goals don't cause decisions, decisions pursue goals)
+- goal → outcome (WRONG: goals don't cause outcomes, outcomes achieve goals)
+
+### Self-Check Before Responding:
+□ Goal node has ZERO outgoing edges (it's a sink)
+□ All paths lead TO the goal, not FROM it
+□ decision→option→outcome→goal flow is maintained
 
 ## QUANTITATIVE FACTOR EXTRACTION
 When the brief contains numeric values, create factor nodes with structured data:
@@ -146,9 +169,18 @@ When the brief contains numeric values, create factor nodes with structured data
 ## Output Format (JSON)
 Return ONLY valid JSON matching this schema:
 {
-  "nodes": [{"id": "goal_1", "kind": "goal", "label": "Your goal here", "body": "Optional description"}],
-  "edges": [{"from": "goal_1", "to": "dec_1", "belief": 0.8, "provenance": {"source": "hypothesis", "quote": "reasoning here"}, "provenance_source": "hypothesis"}],
-  "rationales": [{"target": "node_id", "why": "explanation"}] // optional
+  "nodes": [
+    {"id": "goal_1", "kind": "goal", "label": "Increase revenue"},
+    {"id": "dec_1", "kind": "decision", "label": "Which strategy?"},
+    {"id": "opt_a", "kind": "option", "label": "Option A"},
+    {"id": "out_1", "kind": "outcome", "label": "Higher sales"}
+  ],
+  "edges": [
+    {"from": "dec_1", "to": "opt_a", "belief": 0.6, "provenance": {"source": "hypothesis", "quote": "Primary option"}, "provenance_source": "hypothesis"},
+    {"from": "opt_a", "to": "out_1", "belief": 0.75, "provenance": {"source": "hypothesis", "quote": "Leads to sales increase"}, "provenance_source": "hypothesis"},
+    {"from": "out_1", "to": "goal_1", "belief": 0.9, "provenance": {"source": "hypothesis", "quote": "Sales contribute to revenue"}, "provenance_source": "hypothesis"}
+  ],
+  "rationales": [{"target": "goal_1", "why": "Primary business objective"}]
 }
 
 IMPORTANT:
@@ -173,6 +205,22 @@ Fix ALL violations while preserving as much structure as possible:
 - Cap at ${GRAPH_MAX_NODES} nodes and ${GRAPH_MAX_EDGES} edges
 - Maintain structured provenance on all edges
 - Keep stable node IDs (don't change IDs unless necessary)
+
+## CRITICAL: Edge Direction Rules
+Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
+
+**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
+
+Correct directions:
+- decision → option (frames options)
+- option → outcome (leads to outcome)
+- outcome → goal (contributes to goal)
+- factor → option (affects viability)
+- risk → goal (detracts from goal)
+
+**WRONG directions to FIX:**
+- goal → anything (reverse these edges or remove)
+- outcome → option (reverse or remove)
 
 ## Output Format (JSON)
 Return ONLY the repaired graph as valid JSON:

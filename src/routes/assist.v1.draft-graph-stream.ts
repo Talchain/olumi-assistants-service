@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { DraftGraphInput, type DraftGraphInputT } from "../schemas/assist.js";
+import { DraftGraphInput } from "../schemas/assist.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
 import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -11,6 +11,7 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
 import { createResumeToken } from "../utils/sse-resume-token.js";
 import {
   initStreamState,
@@ -136,6 +137,9 @@ export default async function route(app: FastifyInstance) {
     const keyId = getRequestKeyId(req);
     const callerContext = getRequestCallerContext(req);
     const telemetryCtx = callerContext ? contextToTelemetry(callerContext) : { request_id: requestId };
+
+    // Check for v2 schema request via query parameter
+    const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
 
     // Rate limiting (per API key or per IP)
     const rateLimitKey = keyId ?? req.ip ?? "anonymous";
@@ -306,7 +310,7 @@ export default async function route(app: FastifyInstance) {
     }
 
     // Initialize SSE response
-    reply.raw.setHeader("X-CEE-API-Version", "v1");
+    reply.raw.setHeader("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
     reply.raw.setHeader("X-CEE-Feature-Version", FEATURE_VERSION);
     reply.raw.setHeader("X-CEE-Request-ID", requestId);
     reply.raw.writeHead(200, SSE_HEADERS);
@@ -388,8 +392,15 @@ export default async function route(app: FastifyInstance) {
         sseEndState = "complete";
       }
 
+      // Transform to v2 schema if requested and response is successful
+      let responseBody: unknown = body;
+      if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
+        responseBody = transformResponseToV2(body as any);
+        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed stream response to v2 schema");
+      }
+
       // Send complete event with payload
-      await writeStage(reply, { stage: "COMPLETE", payload: body });
+      await writeStage(reply, { stage: "COMPLETE", payload: responseBody });
 
       // Buffer complete event for resume
       if (!degradedMode) {
@@ -397,10 +408,10 @@ export default async function route(app: FastifyInstance) {
           await bufferEvent(requestId, {
             seq: eventSeq++,
             type: "stage",
-            data: JSON.stringify({ stage: "COMPLETE", payload: body }),
+            data: JSON.stringify({ stage: "COMPLETE", payload: responseBody }),
             timestamp: Date.now(),
           });
-          await markStreamComplete(requestId, body, sseEndState === "complete" ? "complete" : "error");
+          await markStreamComplete(requestId, responseBody, sseEndState === "complete" ? "complete" : "error");
           emit(TelemetryEvents.SseSnapshotCreated, { request_id: requestId, status: sseEndState });
         } catch (bufferError) {
           log.debug({ error: bufferError, request_id: requestId }, "Buffer/snapshot skipped");
