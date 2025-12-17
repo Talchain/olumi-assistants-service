@@ -48,9 +48,10 @@ function getRedisConfig(): RedisOptions | null {
 
     // Reconnection strategy with jittered exponential backoff
     retryStrategy(times: number) {
-      // Cap at 30s with jitter to prevent thundering herd
-      const baseDelay = Math.min(times * 100, 30000);
-      const jitter = Math.random() * 1000; // 0-1s jitter
+      // Exponential backoff: 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s, ... capped at 30s
+      // Formula: min(2^times * 100, 30000) + jitter
+      const baseDelay = Math.min(Math.pow(2, times) * 100, 30000);
+      const jitter = Math.random() * 1000; // 0-1s jitter to prevent thundering herd
       const delay = baseDelay + jitter;
 
       // Rate-limit reconnect logging to prevent log storms

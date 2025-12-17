@@ -342,7 +342,7 @@ export class ISLClient {
           error.message.includes('fetch failed') ||
           error.message.includes('UND_ERR_CONNECT_TIMEOUT') ||
           error.message.includes('socket hang up') ||
-          error.name === 'TypeError' && error.message.includes('fetch'));
+          (error.name === 'TypeError' && error.message.includes('fetch')));
 
       if (attempt < this.maxRetries && isRetryableNetworkError) {
         logger.warn({
