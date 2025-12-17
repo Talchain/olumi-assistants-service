@@ -329,13 +329,22 @@ export class ISLClient {
         );
       }
 
-      // Retry on network errors
-      if (
-        attempt < this.maxRetries &&
+      // Retry on transient network errors
+      // Covers Node.js fetch/undici error messages across different runtimes
+      const isRetryableNetworkError =
         error instanceof Error &&
         (error.message.includes('ECONNREFUSED') ||
-          error.message.includes('ETIMEDOUT'))
-      ) {
+          error.message.includes('ETIMEDOUT') ||
+          error.message.includes('ENOTFOUND') ||
+          error.message.includes('ENETUNREACH') ||
+          error.message.includes('ECONNRESET') ||
+          error.message.includes('EHOSTUNREACH') ||
+          error.message.includes('fetch failed') ||
+          error.message.includes('UND_ERR_CONNECT_TIMEOUT') ||
+          error.message.includes('socket hang up') ||
+          error.name === 'TypeError' && error.message.includes('fetch'));
+
+      if (attempt < this.maxRetries && isRetryableNetworkError) {
         logger.warn({
           event: 'isl.retry',
           attempt: attempt + 1,

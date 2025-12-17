@@ -80,6 +80,50 @@ export function resetPerformanceMetrics(): void {
   metrics.requestsByRoute.clear();
 }
 
+// Cached statsd client reference (lazy loaded)
+let cachedStatsd: unknown = null;
+let statsdLoadAttempted = false;
+
+/**
+ * Get StatsD client (lazy loaded, cached)
+ */
+async function getStatsdClient(): Promise<unknown> {
+  if (statsdLoadAttempted) return cachedStatsd;
+
+  statsdLoadAttempted = true;
+  try {
+    // Dynamic import for ESM compatibility
+    const telemetry = await import('../utils/telemetry.js');
+    cachedStatsd = telemetry?.statsd ?? null;
+  } catch {
+    cachedStatsd = null;
+  }
+  return cachedStatsd;
+}
+
+/**
+ * Normalize route path for metrics to prevent high-cardinality.
+ * - Uses Fastify's route template (routeOptions.url) when available
+ * - Falls back to URL path with query string stripped
+ * - Replaces dynamic segments like UUIDs/IDs with placeholders
+ */
+function normalizeRoute(request: FastifyRequest): string {
+  // Prefer Fastify's route template (e.g., "/assist/v1/draft-graph/:id")
+  const routeTemplate = request.routeOptions?.url;
+  if (routeTemplate) {
+    return routeTemplate;
+  }
+
+  // Fallback: strip query string and normalize dynamic segments
+  const urlPath = request.url.split('?')[0];
+
+  // Replace common dynamic patterns to prevent cardinality explosion
+  return urlPath
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:uuid')
+    .replace(/\/[0-9a-f]{24,}/gi, '/:id')
+    .replace(/\/\d+/g, '/:num');
+}
+
 /**
  * Emit metrics to StatsD/Datadog if configured
  */
@@ -91,30 +135,32 @@ function emitMetric(
 ): void {
   if (!METRICS_ENABLED) return;
 
-  // Try to use existing statsd client from telemetry if available
-  try {
-    // Dynamic import to avoid circular dependency - telemetry exports statsd client
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const telemetry = require('../utils/telemetry.js');
-    const statsd = telemetry?.statsd;
-    if (statsd) {
-      const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
+  // Fire and forget - don't block on metric emission
+  getStatsdClient().then((statsd) => {
+    if (!statsd) return;
 
-      switch (metricType) {
-        case 'histogram':
-          statsd.histogram(metricName, value, tagArray);
-          break;
-        case 'counter':
-          statsd.increment(metricName, value, tagArray);
-          break;
-        case 'gauge':
-          statsd.gauge(metricName, value, tagArray);
-          break;
-      }
+    const client = statsd as {
+      histogram: (name: string, value: number, tags: string[]) => void;
+      increment: (name: string, value: number, tags: string[]) => void;
+      gauge: (name: string, value: number, tags: string[]) => void;
+    };
+
+    const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
+
+    switch (metricType) {
+      case 'histogram':
+        client.histogram(metricName, value, tagArray);
+        break;
+      case 'counter':
+        client.increment(metricName, value, tagArray);
+        break;
+      case 'gauge':
+        client.gauge(metricName, value, tagArray);
+        break;
     }
-  } catch {
+  }).catch(() => {
     // StatsD not configured or not available - metrics will only be tracked in-memory
-  }
+  });
 }
 
 export const performanceMonitoring: FastifyPluginAsync = async (app) => {
@@ -128,7 +174,7 @@ export const performanceMonitoring: FastifyPluginAsync = async (app) => {
     if (!request.startTime) return;
 
     const duration = Date.now() - request.startTime;
-    const route = request.routerPath || request.url;
+    const route = normalizeRoute(request); // Use normalized route to prevent high-cardinality
     const method = request.method;
     const statusCode = reply.statusCode;
 

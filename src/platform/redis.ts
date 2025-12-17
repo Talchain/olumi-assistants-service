@@ -22,6 +22,13 @@ let isInitialized = false;
 let initializationError: Error | null = null;
 
 /**
+ * Rate limiting for reconnect logging to prevent log storms
+ */
+let lastReconnectLogTime = 0;
+let reconnectAttemptsSinceLastLog = 0;
+const RECONNECT_LOG_INTERVAL_MS = 30000; // Log at most every 30s during reconnect storms
+
+/**
  * Get Redis configuration from centralized config
  */
 function getRedisConfig(): RedisOptions | null {
@@ -39,10 +46,26 @@ function getRedisConfig(): RedisOptions | null {
     connectTimeout: config.redis.connectTimeout,
     commandTimeout: config.redis.commandTimeout,
 
-    // Reconnection strategy
+    // Reconnection strategy with jittered exponential backoff
     retryStrategy(times: number) {
-      const delay = Math.min(times * 100, 3000);
-      log.warn({ attempt: times, delay_ms: delay }, "Redis reconnecting");
+      // Cap at 30s with jitter to prevent thundering herd
+      const baseDelay = Math.min(times * 100, 30000);
+      const jitter = Math.random() * 1000; // 0-1s jitter
+      const delay = baseDelay + jitter;
+
+      // Rate-limit reconnect logging to prevent log storms
+      reconnectAttemptsSinceLastLog++;
+      const now = Date.now();
+      if (now - lastReconnectLogTime >= RECONNECT_LOG_INTERVAL_MS || times === 1) {
+        log.warn({
+          attempt: times,
+          delay_ms: Math.round(delay),
+          attempts_since_last_log: reconnectAttemptsSinceLastLog,
+        }, "Redis reconnecting");
+        lastReconnectLogTime = now;
+        reconnectAttemptsSinceLastLog = 0;
+      }
+
       return delay;
     },
 
@@ -100,7 +123,7 @@ async function initializeRedis(): Promise<Redis | null> {
     });
 
     client.on("reconnecting", () => {
-      log.warn("Redis reconnecting");
+      // Rate-limited in retryStrategy - only log on successful reconnect
     });
 
     client.on("close", () => {
