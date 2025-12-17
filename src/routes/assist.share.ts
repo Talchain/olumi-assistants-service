@@ -126,7 +126,8 @@ export default async function route(app: FastifyInstance) {
       const redactedGraph = redactGraphForShare(input.graph);
       const redactedBrief = input.brief ? redactBrief(input.brief) : undefined;
 
-      storeShare({
+      // Await persistence to ensure share is stored before returning URL
+      await storeShare({
         share_id: shareId,
         graph: redactedGraph,
         brief: redactedBrief,

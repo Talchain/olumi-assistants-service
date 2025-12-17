@@ -80,25 +80,28 @@ export function resetPerformanceMetrics(): void {
   metrics.requestsByRoute.clear();
 }
 
-// Cached statsd client reference (lazy loaded)
-let cachedStatsd: unknown = null;
-let statsdLoadAttempted = false;
+// Typed StatsD client interface
+interface StatsdClient {
+  histogram: (name: string, value: number, tags: string[]) => void;
+  increment: (name: string, value: number, tags: string[]) => void;
+  gauge: (name: string, value: number, tags: string[]) => void;
+}
+
+// Cached statsd client reference (loaded once at plugin init)
+let statsdClient: StatsdClient | null = null;
 
 /**
- * Get StatsD client (lazy loaded, cached)
+ * Initialize StatsD client once during plugin startup
+ * This avoids Promise overhead on every metric emission
  */
-async function getStatsdClient(): Promise<unknown> {
-  if (statsdLoadAttempted) return cachedStatsd;
-
-  statsdLoadAttempted = true;
+async function initStatsdClient(): Promise<void> {
   try {
     // Dynamic import for ESM compatibility
     const telemetry = await import('../utils/telemetry.js');
-    cachedStatsd = telemetry?.statsd ?? null;
+    statsdClient = telemetry?.statsd ?? null;
   } catch {
-    cachedStatsd = null;
+    statsdClient = null;
   }
-  return cachedStatsd;
 }
 
 /**
@@ -126,6 +129,7 @@ function normalizeRoute(request: FastifyRequest): string {
 
 /**
  * Emit metrics to StatsD/Datadog if configured
+ * Uses synchronous cached client reference (no Promise overhead per call)
  */
 function emitMetric(
   metricType: 'histogram' | 'counter' | 'gauge',
@@ -133,37 +137,31 @@ function emitMetric(
   value: number,
   tags: Record<string, string | number> = {}
 ): void {
-  if (!METRICS_ENABLED) return;
+  if (!METRICS_ENABLED || !statsdClient) return;
 
-  // Fire and forget - don't block on metric emission
-  getStatsdClient().then((statsd) => {
-    if (!statsd) return;
-
-    const client = statsd as {
-      histogram: (name: string, value: number, tags: string[]) => void;
-      increment: (name: string, value: number, tags: string[]) => void;
-      gauge: (name: string, value: number, tags: string[]) => void;
-    };
-
+  try {
     const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
 
     switch (metricType) {
       case 'histogram':
-        client.histogram(metricName, value, tagArray);
+        statsdClient.histogram(metricName, value, tagArray);
         break;
       case 'counter':
-        client.increment(metricName, value, tagArray);
+        statsdClient.increment(metricName, value, tagArray);
         break;
       case 'gauge':
-        client.gauge(metricName, value, tagArray);
+        statsdClient.gauge(metricName, value, tagArray);
         break;
     }
-  }).catch(() => {
-    // StatsD not configured or not available - metrics will only be tracked in-memory
-  });
+  } catch {
+    // StatsD emission failed - continue silently
+  }
 }
 
 export const performanceMonitoring: FastifyPluginAsync = async (app) => {
+  // Initialize StatsD client once at plugin startup (avoid Promise per-request)
+  await initStatsdClient();
+
   // Hook 1: Record request start time
   app.addHook('onRequest', async (request: FastifyRequest) => {
     request.startTime = Date.now();

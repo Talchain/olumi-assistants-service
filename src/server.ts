@@ -131,6 +131,10 @@ export async function build() {
     bodyLimit: BODY_LIMIT_BYTES,
     connectionTimeout: ROUTE_TIMEOUT_MS,
     requestTimeout: ROUTE_TIMEOUT_MS,
+    // Trust proxy for correct IP resolution behind load balancers/reverse proxies
+    // Required for accurate rate limiting, IP allowlisting, and X-Forwarded-* headers
+    // Production: Render, Railway, etc. all proxy requests through their edge
+    trustProxy: nodeEnv === "production",
   });
 
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
