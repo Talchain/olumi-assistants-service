@@ -1,8 +1,13 @@
 /**
- * Attachment Processing for Grounding
+ * Attachment Processing for Grounding (v1.4.0 - PR G)
  *
  * Processes attachments (PDF/TXT/MD/CSV) and extracts text/summaries
  * for use in LLM prompts. Handles character limits and error cases.
+ *
+ * v1.4.0 additions:
+ * - Security hardening (CSV injection, PDF malicious content, path traversal)
+ * - Binary content detection
+ * - Enhanced validation and telemetry
  */
 
 import { Buffer } from "node:buffer";
@@ -14,6 +19,7 @@ import {
   summarizeCsv,
   type CsvSummary as _CsvSummary,
 } from "./index.js";
+import { validateDocumentSecurity } from "./security.js";
 
 export type AttachmentInput = {
   id: string;
@@ -86,6 +92,25 @@ export async function processAttachments(
           }, "Failed to decode attachment payload");
           throw new Error(`File "${attachment.name}": Attachment payload must be valid base64-encoded content`);
         }
+      }
+
+      // V1.4.0: Security validation (filename, size, content)
+      try {
+        validateDocumentSecurity({
+          filename: attachment.name,
+          buffer,
+          kind: attachment.kind,
+        });
+      } catch (securityError) {
+        const err = securityError instanceof Error ? securityError : new Error(String(securityError));
+        log.error({
+          attachment_id: attachment.id,
+          name: attachment.name,
+          kind: attachment.kind,
+          error: err.message,
+          redacted: true,
+        }, "Security validation failed");
+        throw new Error(`File "${attachment.name}": ${err.message}`);
       }
 
       let preview: string;
