@@ -716,4 +716,269 @@ describe("v2 output contract compliance", () => {
     const result = transformResponseToV2(v1Response);
     expect(result.schema_version).toBe("2.2");
   });
+
+  it("should map constraint kind to factor type", () => {
+    const constraintResponse: V1DraftGraphResponse = {
+      graph: {
+        nodes: [{ id: "constraint_1", kind: "constraint", label: "Budget Constraint" }],
+        edges: [],
+      },
+    };
+
+    const result = transformResponseToV2(constraintResponse);
+    expect(result.graph.nodes[0].type).toBe("factor");
+  });
+});
+
+// ============================================================================
+// Parameter Uncertainty Tests
+// ============================================================================
+
+describe("value_std derivation", () => {
+  it("derives value_std when extraction metadata is present", () => {
+    const v1Node: V1Node = {
+      id: "factor_price",
+      kind: "factor",
+      label: "Price",
+      data: {
+        value: 59,
+        unit: "£",
+        extractionType: "explicit",
+        confidence: 0.9,
+      },
+    };
+
+    const v2Node = transformNodeToV2(v1Node);
+
+    expect(v2Node.observed_state).toBeDefined();
+    expect(v2Node.observed_state?.value_std).toBeDefined();
+    expect(v2Node.observed_state?.value_std).toBeGreaterThan(0);
+  });
+
+  it("does not derive value_std without extraction metadata", () => {
+    const v1Node: V1Node = {
+      id: "factor_price",
+      kind: "factor",
+      label: "Price",
+      data: {
+        value: 59,
+        unit: "£",
+        // No extractionType or confidence
+      },
+    };
+
+    const v2Node = transformNodeToV2(v1Node);
+
+    expect(v2Node.observed_state).toBeDefined();
+    expect(v2Node.observed_state?.value_std).toBeUndefined();
+  });
+
+  it("derives higher value_std for inferred extractions", () => {
+    const explicitNode: V1Node = {
+      id: "factor_explicit",
+      kind: "factor",
+      label: "Explicit Price",
+      data: {
+        value: 100,
+        extractionType: "explicit",
+        confidence: 0.9,
+      },
+    };
+
+    const inferredNode: V1Node = {
+      id: "factor_inferred",
+      kind: "factor",
+      label: "Inferred Price",
+      data: {
+        value: 100,
+        extractionType: "inferred",
+        confidence: 0.9,
+      },
+    };
+
+    const v2Explicit = transformNodeToV2(explicitNode);
+    const v2Inferred = transformNodeToV2(inferredNode);
+
+    // Verify both have value_std
+    expect(v2Explicit.observed_state?.value_std).toBeDefined();
+    expect(v2Inferred.observed_state?.value_std).toBeDefined();
+
+    // Inferred should have higher uncertainty
+    const explicitStd = v2Explicit.observed_state?.value_std ?? 0;
+    const inferredStd = v2Inferred.observed_state?.value_std ?? 0;
+    expect(inferredStd).toBeGreaterThan(explicitStd);
+  });
+
+  it("derives value_std from range bounds for range extractions", () => {
+    const v1Node: V1Node = {
+      id: "factor_range",
+      kind: "factor",
+      label: "Price Range",
+      data: {
+        value: 60,
+        extractionType: "range",
+        confidence: 0.8,
+        rangeMin: 50,
+        rangeMax: 70,
+      },
+    };
+
+    const v2Node = transformNodeToV2(v1Node);
+
+    expect(v2Node.observed_state?.value_std).toBeDefined();
+    // For range [50, 70]: std = (70 - 50) / 4 = 5
+    expect(v2Node.observed_state?.value_std).toBeCloseTo(5, 1);
+  });
+
+  it("synthesizes range object from rangeMin/rangeMax", () => {
+    const v1Node: V1Node = {
+      id: "factor_range",
+      kind: "factor",
+      label: "Price Range",
+      data: {
+        value: 60,
+        extractionType: "range",
+        confidence: 0.8,
+        rangeMin: 50,
+        rangeMax: 70,
+      },
+    };
+
+    const v2Node = transformNodeToV2(v1Node);
+
+    expect(v2Node.observed_state?.range).toEqual({ min: 50, max: 70 });
+  });
+});
+
+describe("parameter_uncertainties array", () => {
+  it("populates parameter_uncertainties from nodes with value_std", () => {
+    const v1Graph: V1Graph = {
+      nodes: [
+        {
+          id: "factor_price",
+          kind: "factor",
+          label: "Price",
+          data: {
+            value: 59,
+            extractionType: "explicit",
+            confidence: 0.9,
+          },
+        },
+        {
+          id: "factor_churn",
+          kind: "factor",
+          label: "Churn Rate",
+          data: {
+            value: 0.05,
+            extractionType: "inferred",
+            confidence: 0.7,
+          },
+        },
+        { id: "goal_1", kind: "goal", label: "Success" },
+      ],
+      edges: [],
+    };
+
+    const v2Graph = transformGraphToV2(v1Graph);
+
+    expect(v2Graph.parameter_uncertainties).toBeDefined();
+    expect(v2Graph.parameter_uncertainties).toHaveLength(2);
+
+    const priceUncertainty = v2Graph.parameter_uncertainties?.find(
+      (u) => u.node_id === "factor_price"
+    );
+    expect(priceUncertainty).toBeDefined();
+    expect(priceUncertainty?.std).toBeGreaterThan(0);
+    expect(priceUncertainty?.distribution).toBe("normal");
+
+    const churnUncertainty = v2Graph.parameter_uncertainties?.find(
+      (u) => u.node_id === "factor_churn"
+    );
+    expect(churnUncertainty).toBeDefined();
+    expect(churnUncertainty?.std).toBeGreaterThan(0);
+    expect(churnUncertainty?.distribution).toBe("normal");
+  });
+
+  it("does not include parameter_uncertainties when no nodes have value_std", () => {
+    const v1Graph: V1Graph = {
+      nodes: [
+        {
+          id: "factor_price",
+          kind: "factor",
+          label: "Price",
+          data: {
+            value: 59,
+            // No extraction metadata
+          },
+        },
+        { id: "goal_1", kind: "goal", label: "Success" },
+      ],
+      edges: [],
+    };
+
+    const v2Graph = transformGraphToV2(v1Graph);
+
+    expect(v2Graph.parameter_uncertainties).toBeUndefined();
+  });
+
+  it("parameter_uncertainties values match observed_state.value_std", () => {
+    const v1Graph: V1Graph = {
+      nodes: [
+        {
+          id: "factor_test",
+          kind: "factor",
+          label: "Test Factor",
+          data: {
+            value: 100,
+            extractionType: "explicit",
+            confidence: 0.85,
+          },
+        },
+      ],
+      edges: [],
+    };
+
+    const v2Graph = transformGraphToV2(v1Graph);
+
+    const nodeStd = v2Graph.nodes[0].observed_state?.value_std;
+    const paramStd = v2Graph.parameter_uncertainties?.[0]?.std;
+
+    expect(nodeStd).toBeDefined();
+    expect(paramStd).toBeDefined();
+    expect(nodeStd).toBe(paramStd);
+  });
+
+  it("handles mixed nodes with and without extraction metadata", () => {
+    const v1Graph: V1Graph = {
+      nodes: [
+        {
+          id: "factor_with_meta",
+          kind: "factor",
+          label: "With Metadata",
+          data: {
+            value: 50,
+            extractionType: "explicit",
+            confidence: 0.9,
+          },
+        },
+        {
+          id: "factor_without_meta",
+          kind: "factor",
+          label: "Without Metadata",
+          data: {
+            value: 100,
+            // No extractionType or confidence
+          },
+        },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [],
+    };
+
+    const v2Graph = transformGraphToV2(v1Graph);
+
+    // Only one node should have parameter uncertainty
+    expect(v2Graph.parameter_uncertainties).toHaveLength(1);
+    expect(v2Graph.parameter_uncertainties?.[0].node_id).toBe("factor_with_meta");
+  });
 });

@@ -2574,6 +2574,25 @@ components:
               type: number
             max:
               type: number
+        extractionType:
+          type: string
+          enum: [explicit, inferred, range]
+          description: How the value was extracted from the brief
+          example: "explicit"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence in the extracted value (0-1) for uncertainty derivation
+          example: 0.9
+        rangeMin:
+          type: number
+          description: Minimum of range (when extractionType is 'range')
+          example: 50
+        rangeMax:
+          type: number
+          description: Maximum of range (when extractionType is 'range')
+          example: 70
 
     Node:
       type: object

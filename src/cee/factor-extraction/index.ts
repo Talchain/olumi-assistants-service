@@ -13,6 +13,7 @@
  */
 
 import { log } from "../../utils/telemetry.js";
+import type { ExtractionType } from "../transforms/value-uncertainty-derivation.js";
 
 export interface ExtractedFactor {
   /** Human-readable label for the factor */
@@ -27,7 +28,16 @@ export interface ExtractedFactor {
   confidence: number;
   /** Original text that was matched */
   matchedText: string;
+  /** How the value was extracted */
+  extractionType: ExtractionType;
+  /** For range extractions: minimum bound */
+  rangeMin?: number;
+  /** For range extractions: maximum bound */
+  rangeMax?: number;
 }
+
+// Re-export ExtractionType for convenience
+export type { ExtractionType } from "../transforms/value-uncertainty-derivation.js";
 
 // Currency symbols and their names
 const CURRENCY_MAP: Record<string, string> = {
@@ -89,6 +99,22 @@ const PATTERNS = {
   // Plain numbers with context: "price of 49", "rate of 3.5"
   contextualNumber:
     /(?<context>price|cost|rate|revenue|budget|margin|churn|conversion|growth|target|threshold|limit)\s+(?:of|is|at|was|be)?\s*(?:[£$€])?(?<amount>\d+(?:\.\d+)?)\s*(?:%)?/gi,
+
+  // Approximate values: "around £60", "roughly 50", "approximately $100"
+  approximateValue:
+    /(?:around|roughly|approximately|about|circa|~)\s*(?<currency>[£$€])?(?<amount>\d+(?:\.\d+)?)\s*(?<unit>%)?/gi,
+
+  // Range with currency: "between £50-70", "£50-£70", "50-70 dollars"
+  currencyRange:
+    /(?:between\s+)?(?<currency>[£$€])(?<min>\d+(?:\.\d+)?)\s*[-–—to]+\s*(?:[£$€])?(?<max>\d+(?:\.\d+)?)/gi,
+
+  // Range with percentage: "between 5-10%", "5%-10%"
+  percentRange:
+    /(?:between\s+)?(?<min>\d+(?:\.\d+)?)\s*%?\s*[-–—to]+\s*(?<max>\d+(?:\.\d+)?)\s*%/gi,
+
+  // Generic range: "between 50 and 70", "50 to 70"
+  genericRange:
+    /between\s+(?<min>\d+(?:\.\d+)?)\s+(?:and|to)\s+(?<max>\d+(?:\.\d+)?)/gi,
 };
 
 /**
@@ -139,31 +165,162 @@ function inferLabel(brief: string, matchIndex: number, matchText: string): strin
 }
 
 /**
+ * Generate deduplication key from label, value, and unit.
+ * Uses normalized label (lowercase, trimmed) for consistent matching.
+ */
+function dedupKey(label: string, value: number, unit?: string): string {
+  const normalizedLabel = label.toLowerCase().trim();
+  const normalizedUnit = unit ?? "num";
+  return `${normalizedLabel}:${value}:${normalizedUnit}`;
+}
+
+/**
  * Extract quantitative factors from a brief
  */
 export function extractFactors(brief: string): ExtractedFactor[] {
   const factors: ExtractedFactor[] = [];
-  const seenValues = new Set<string>(); // Dedup by value+unit
+  const seenFactors = new Set<string>(); // Dedup by label+value+unit
 
-  // Extract currency from-to patterns (highest priority)
   let match: RegExpExecArray | null;
+
+  // ============================================================================
+  // RANGE EXTRACTIONS (highest priority for uncertainty derivation)
+  // ============================================================================
+
+  // Extract currency ranges: "between £50-70", "£50-£70"
+  const currencyRangeRegex = new RegExp(PATTERNS.currencyRange.source, "gi");
+  while ((match = currencyRangeRegex.exec(brief)) !== null) {
+    const currency = match.groups?.currency || "";
+    const min = parseFloat(match.groups?.min || "0");
+    const max = parseFloat(match.groups?.max || "0");
+    const midpoint = (min + max) / 2;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, midpoint, currency);
+
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
+      factors.push({
+        label,
+        value: midpoint,
+        unit: currency,
+        confidence: 0.80,
+        matchedText: match[0],
+        extractionType: "range",
+        rangeMin: min,
+        rangeMax: max,
+      });
+    } else {
+      log.debug({ label, value: midpoint, unit: currency, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
+    }
+  }
+
+  // Extract percentage ranges: "between 5-10%", "5%-10%"
+  const percentRangeRegex = new RegExp(PATTERNS.percentRange.source, "gi");
+  while ((match = percentRangeRegex.exec(brief)) !== null) {
+    const min = parseFloat(match.groups?.min || "0") / 100;
+    const max = parseFloat(match.groups?.max || "0") / 100;
+    const midpoint = (min + max) / 2;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, midpoint, "%");
+
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
+      factors.push({
+        label,
+        value: midpoint,
+        unit: "%",
+        confidence: 0.80,
+        matchedText: match[0],
+        extractionType: "range",
+        rangeMin: min,
+        rangeMax: max,
+      });
+    } else {
+      log.debug({ label, value: midpoint, unit: "%", event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
+    }
+  }
+
+  // Extract generic ranges: "between 50 and 70"
+  const genericRangeRegex = new RegExp(PATTERNS.genericRange.source, "gi");
+  while ((match = genericRangeRegex.exec(brief)) !== null) {
+    const min = parseFloat(match.groups?.min || "0");
+    const max = parseFloat(match.groups?.max || "0");
+    const midpoint = (min + max) / 2;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, midpoint, undefined);
+
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
+      factors.push({
+        label,
+        value: midpoint,
+        confidence: 0.80,
+        matchedText: match[0],
+        extractionType: "range",
+        rangeMin: min,
+        rangeMax: max,
+      });
+    } else {
+      log.debug({ label, value: midpoint, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
+    }
+  }
+
+  // ============================================================================
+  // APPROXIMATE EXTRACTIONS (inferred type)
+  // ============================================================================
+
+  // Extract approximate values: "around £60", "roughly 50"
+  const approximateRegex = new RegExp(PATTERNS.approximateValue.source, "gi");
+  while ((match = approximateRegex.exec(brief)) !== null) {
+    const currency = match.groups?.currency;
+    const amount = parseFloat(match.groups?.amount || "0");
+    const unitMatch = match.groups?.unit;
+    const unit = unitMatch === "%" ? "%" : currency;
+    const normalizedValue = unitMatch === "%" ? amount / 100 : amount;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, normalizedValue, unit);
+
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
+      factors.push({
+        label,
+        value: normalizedValue,
+        unit,
+        confidence: 0.70,
+        matchedText: match[0],
+        extractionType: "inferred",
+      });
+    } else {
+      log.debug({ label, value: normalizedValue, unit, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
+    }
+  }
+
+  // ============================================================================
+  // EXPLICIT EXTRACTIONS (highest confidence)
+  // ============================================================================
+
+  // Extract currency from-to patterns (highest priority for explicit)
   const currencyFromToRegex = new RegExp(PATTERNS.currencyFromTo.source, "gi");
   while ((match = currencyFromToRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency1 || "";
     const from = parseFloat(match.groups?.from || "0");
     const to = parseFloat(match.groups?.to || "0");
-    const key = `${to}-${currency}`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, to, currency);
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: to,
         baseline: from,
         unit: currency,
-        confidence: 0.9,
+        confidence: 0.95,
         matchedText: match[0],
+        extractionType: "explicit",
       });
+    } else {
+      log.debug({ label, value: to, unit: currency, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
@@ -172,18 +329,22 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   while ((match = percentFromToRegex.exec(brief)) !== null) {
     const from = parseFloat(match.groups?.from || "0") / 100;
     const to = parseFloat(match.groups?.to || "0") / 100;
-    const key = `${to}-%`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, to, "%");
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: to,
         baseline: from,
         unit: "%",
-        confidence: 0.85,
+        confidence: 0.90,
         matchedText: match[0],
+        extractionType: "explicit",
       });
+    } else {
+      log.debug({ label, value: to, unit: "%", event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
@@ -198,22 +359,26 @@ export function extractFactors(brief: string): ExtractedFactor[] {
 
     const normalizedValue = isPercent ? to / 100 : to;
     const normalizedBaseline = isPercent ? from / 100 : from;
-    const key = `${normalizedValue}-${unit || "num"}`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, normalizedValue, unit);
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: normalizedValue,
         baseline: normalizedBaseline,
         unit,
-        confidence: 0.8,
+        confidence: 0.85,
         matchedText: match[0],
+        extractionType: "explicit",
       });
+    } else {
+      log.debug({ label, value: normalizedValue, unit, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
-  // Extract contextual numbers (lower priority, may overlap)
+  // Extract contextual numbers: "price is £59"
   const contextualRegex = new RegExp(PATTERNS.contextualNumber.source, "gi");
   while ((match = contextualRegex.exec(brief)) !== null) {
     const context = match.groups?.context || "";
@@ -223,79 +388,111 @@ export function extractFactors(brief: string): ExtractedFactor[] {
     const unit = isPercent ? "%" : hasCurrency ? match[0].match(/[£$€]/)?.[0] : undefined;
 
     const normalizedValue = isPercent ? amount / 100 : amount;
-    const key = `${normalizedValue}-${unit || "num"}`;
+    const label = context.charAt(0).toUpperCase() + context.slice(1);
+    const key = dedupKey(label, normalizedValue, unit);
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: context.charAt(0).toUpperCase() + context.slice(1),
+        label,
         value: normalizedValue,
         unit,
-        confidence: 0.7,
+        confidence: 0.90,
         matchedText: match[0],
+        extractionType: "explicit",
       });
+    } else {
+      log.debug({ label, value: normalizedValue, unit, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
-  // Extract currency with multipliers: $1 million, £2.5m, €500k (higher priority than plain currency)
+  // Extract currency with multipliers: $1 million, £2.5m
   const currencyMultiplierRegex = new RegExp(PATTERNS.currencyWithMultiplier.source, "gi");
   while ((match = currencyMultiplierRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
     const baseAmount = parseFloat(match.groups?.amount || "0");
     const multiplier = parseMultiplier(match.groups?.multiplier);
     const amount = baseAmount * multiplier;
-    const key = `${amount}-${currency}`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, amount, currency);
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: amount,
         unit: currency,
-        confidence: 0.85, // Higher confidence than plain currency
+        confidence: 0.85,
         matchedText: match[0],
+        extractionType: "explicit",
       });
+    } else {
+      log.debug({ label, value: amount, unit: currency, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
-  // Extract standalone currency values (lowest priority, gap filler)
+  // ============================================================================
+  // INFERRED EXTRACTIONS (lower confidence, gap fillers)
+  // ============================================================================
+
+  // Extract standalone currency values (inferred from context)
   const currencyRegex = new RegExp(PATTERNS.currency.source, "gi");
   while ((match = currencyRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
     const amount = parseFloat(match.groups?.amount || "0");
-    const key = `${amount}-${currency}`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, amount, currency);
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: amount,
         unit: currency,
-        confidence: 0.6,
+        confidence: 0.60,
         matchedText: match[0],
+        extractionType: "inferred",
       });
+    } else {
+      log.debug({ label, value: amount, unit: currency, event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
-  // Extract standalone percentages (lowest priority, gap filler)
+  // Extract standalone percentages (inferred from context)
   const percentRegex = new RegExp(PATTERNS.percentage.source, "gi");
   while ((match = percentRegex.exec(brief)) !== null) {
     const amount = parseFloat(match.groups?.amount || "0") / 100;
-    const key = `${amount}-%`;
+    const label = inferLabel(brief, match.index, match[0]);
+    const key = dedupKey(label, amount, "%");
 
-    if (!seenValues.has(key)) {
-      seenValues.add(key);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
       factors.push({
-        label: inferLabel(brief, match.index, match[0]),
+        label,
         value: amount,
         unit: "%",
-        confidence: 0.6,
+        confidence: 0.60,
         matchedText: match[0],
+        extractionType: "inferred",
       });
+    } else {
+      log.debug({ label, value: amount, unit: "%", event: "cee.factor_extraction.duplicate_dropped" }, "Duplicate factor dropped");
     }
   }
 
-  log.debug({ factorCount: factors.length }, "Extracted factors from brief");
+  // Count extraction types for telemetry
+  const explicitCount = factors.filter((f) => f.extractionType === "explicit").length;
+  const inferredCount = factors.filter((f) => f.extractionType === "inferred").length;
+  const rangeCount = factors.filter((f) => f.extractionType === "range").length;
+
+  log.debug({
+    event: "cee.factor_extraction.complete",
+    factorCount: factors.length,
+    explicitCount,
+    inferredCount,
+    rangeCount,
+    deduplicatedCount: seenFactors.size,
+  }, "Factor extraction complete");
 
   return factors;
 }

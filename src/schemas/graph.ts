@@ -19,7 +19,15 @@ export const FactorData = z.object({
   range: z.object({
     min: z.number(),
     max: z.number()
-  }).optional()
+  }).optional(),
+  /** How the value was extracted (explicit, inferred, range) */
+  extractionType: z.enum(["explicit", "inferred", "range"]).optional(),
+  /** Extraction confidence (0-1) for uncertainty derivation */
+  confidence: z.number().min(0).max(1).optional(),
+  /** For range extractions: minimum bound */
+  rangeMin: z.number().optional(),
+  /** For range extractions: maximum bound */
+  rangeMax: z.number().optional(),
 });
 
 export const Node = z.object({

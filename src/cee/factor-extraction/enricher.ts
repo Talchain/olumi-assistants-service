@@ -140,6 +140,15 @@ export function enrichGraphWithFactors(
             value: factor.value,
             baseline: factor.baseline,
             unit: factor.unit,
+            // Include extraction metadata for value_std derivation
+            extractionType: factor.extractionType,
+            confidence: factor.confidence,
+            rangeMin: factor.rangeMin,
+            rangeMax: factor.rangeMax,
+            // Synthesize range object for backward compatibility
+            range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
+              ? { min: factor.rangeMin, max: factor.rangeMax }
+              : undefined,
           };
           enrichedGraph.nodes[nodeIndex] = {
             ...enrichedGraph.nodes[nodeIndex],
@@ -165,6 +174,15 @@ export function enrichGraphWithFactors(
       value: factor.value,
       baseline: factor.baseline,
       unit: factor.unit,
+      // Include extraction metadata for value_std derivation
+      extractionType: factor.extractionType,
+      confidence: factor.confidence,
+      rangeMin: factor.rangeMin,
+      rangeMax: factor.rangeMax,
+      // Synthesize range object for backward compatibility
+      range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
+        ? { min: factor.rangeMin, max: factor.rangeMax }
+        : undefined,
     };
 
     const newNode: NodeT = {

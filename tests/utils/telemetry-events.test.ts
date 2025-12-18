@@ -306,6 +306,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Factor Extraction events (v2.3)
         FactorExtractionComplete: "cee.factor_extraction.complete",
 
+        // Schema v2 Transform events (v2.3)
+        SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
+
         // ISL Synthesis events (v2.3)
         IslSynthesisRequested: "cee.isl_synthesis.requested",
         IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
@@ -335,7 +338,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|isl_synthesis)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|isl_synthesis)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -628,6 +631,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Factor Extraction events (v2.3)
         "cee.factor_extraction.complete": [TelemetryEvents.FactorExtractionComplete],
+
+        // Schema v2 Transform events (v2.3)
+        "cee.schema_v2.transform_complete": [TelemetryEvents.SchemaV2TransformComplete],
 
         // ISL Synthesis events (v2.3)
         "cee.isl_synthesis.requested": [TelemetryEvents.IslSynthesisRequested],
@@ -976,6 +982,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Factor Extraction events (v2.3)
         "cee.factor_extraction.complete",
+
+        // Schema v2 Transform events (v2.3)
+        "cee.schema_v2.transform_complete",
 
         // ISL Synthesis events (v2.3)
         "cee.isl_synthesis.requested",

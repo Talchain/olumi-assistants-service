@@ -17,6 +17,11 @@ import {
   type EffectDirection,
   type NodeInfo,
 } from "./effect-direction-inference.js";
+import {
+  deriveValueUncertainty,
+  type ExtractionType,
+} from "./value-uncertainty-derivation.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 // ============================================================================
 // V1 Types (Input)
@@ -32,6 +37,11 @@ export interface V1Node {
     baseline?: number;
     unit?: string;
     range?: { min: number; max: number };
+    /** Extraction metadata for uncertainty derivation */
+    extractionType?: ExtractionType;
+    confidence?: number;
+    rangeMin?: number;
+    rangeMax?: number;
   };
 }
 
@@ -88,7 +98,7 @@ export interface V1DraftGraphResponse {
 // ============================================================================
 
 /** Valid node types in v2.2 contract */
-export type V2NodeType = "factor" | "option" | "outcome" | "goal" | "risk" | "constraint";
+export type V2NodeType = "factor" | "option" | "outcome" | "goal" | "risk";
 
 export interface V2ObservedState {
   value: number;
@@ -96,6 +106,8 @@ export interface V2ObservedState {
   unit?: string;
   source?: string;
   range?: { min: number; max: number };
+  /** Derived uncertainty (standard deviation) for the value */
+  value_std?: number;
 }
 
 export interface V2Node {
@@ -127,11 +139,26 @@ export interface V2Edge {
   // Note: provenance_source intentionally omitted from v2 contract
 }
 
+/**
+ * Parameter uncertainty for ISL sampling.
+ * Specifies uncertainty distribution for factor nodes.
+ */
+export interface ParameterUncertainty {
+  /** Factor node ID */
+  node_id: string;
+  /** Standard deviation for the value */
+  std: number;
+  /** Distribution type (default: normal for derived uncertainties) */
+  distribution: "normal" | "uniform" | "point_mass";
+}
+
 export interface V2Graph {
   version: string;
   default_seed?: number;
   nodes: V2Node[];
   edges: V2Edge[];
+  /** Parameter uncertainties for ISL factor sampling */
+  parameter_uncertainties?: ParameterUncertainty[];
   meta?: {
     roots?: string[];
     leaves?: string[];
@@ -173,7 +200,8 @@ export interface V2DraftGraphResponse {
  * Map v1 kind values to v2 type values.
  * - decision → option (decisions are choices between options)
  * - action → option (actions are a type of option)
- * - Unknown kinds default to "factor"
+ * - constraint → factor (UI cannot create constraint nodes; deprecated)
+ * - Unknown kinds default to "factor" with warning logged
  */
 function mapKindToType(kind: string): V2NodeType {
   const mapping: Record<string, V2NodeType> = {
@@ -182,11 +210,21 @@ function mapKindToType(kind: string): V2NodeType {
     factor: "factor",
     option: "option",
     risk: "risk",
-    constraint: "constraint",
     decision: "option", // Map decision → option
     action: "option", // Map action → option
+    constraint: "factor", // Deprecated: UI cannot create constraint nodes
   };
-  return mapping[kind] ?? "factor"; // Default to factor for unknown kinds
+  const mapped = mapping[kind];
+  if (mapped === undefined) {
+    // Log unknown kind for observability
+    log.warn({
+      kind,
+      defaultedTo: "factor",
+      event: "cee.schema_v2.unknown_node_kind",
+    }, `Unknown node kind "${kind}", defaulting to "factor"`);
+    return "factor";
+  }
+  return mapped;
 }
 
 /**
@@ -210,6 +248,7 @@ function extractProvenanceString(
  * - label is required (uses id as fallback)
  * - body → description
  * - data → observed_state (only when value is defined)
+ * - value_std derived from extraction metadata (v2.2+)
  */
 export function transformNodeToV2(node: V1Node): V2Node {
   const v2Node: V2Node = {
@@ -222,13 +261,34 @@ export function transformNodeToV2(node: V1Node): V2Node {
   // Move data to observed_state ONLY if value is defined
   // (baseline alone is not sufficient per contract)
   if (node.data && node.data.value !== undefined) {
-    v2Node.observed_state = {
+    // Derive range from rangeMin/rangeMax if not present (canonical representation)
+    const range = node.data.range ?? (
+      node.data.rangeMin !== undefined && node.data.rangeMax !== undefined
+        ? { min: node.data.rangeMin, max: node.data.rangeMax }
+        : undefined
+    );
+
+    const observedState: V2ObservedState = {
       value: node.data.value,
       baseline: node.data.baseline,
       unit: node.data.unit,
       source: "brief_extraction",
-      range: node.data.range,
+      range,
     };
+
+    // Derive value_std if extraction metadata is available
+    if (node.data.extractionType && node.data.confidence !== undefined) {
+      const uncertaintyResult = deriveValueUncertainty({
+        value: node.data.value,
+        extractionType: node.data.extractionType,
+        confidence: node.data.confidence,
+        rangeMin: node.data.rangeMin,
+        rangeMax: node.data.rangeMax,
+      });
+      observedState.value_std = uncertaintyResult.valueStd;
+    }
+
+    v2Node.observed_state = observedState;
   }
 
   return v2Node;
@@ -290,13 +350,32 @@ export function transformGraphToV2(graph: V1Graph): V2Graph {
     transformEdgeToV2(edge, index, nodeInfos)
   );
 
-  return {
+  // Build parameter_uncertainties from factor nodes with value_std
+  const parameterUncertainties: ParameterUncertainty[] = [];
+  for (const node of v2Nodes) {
+    if (node.observed_state?.value_std !== undefined) {
+      parameterUncertainties.push({
+        node_id: node.id,
+        std: node.observed_state.value_std,
+        distribution: "normal",
+      });
+    }
+  }
+
+  const v2Graph: V2Graph = {
     version: graph.version ?? "1",
     default_seed: graph.default_seed,
     nodes: v2Nodes,
     edges: v2Edges,
     meta: graph.meta,
   };
+
+  // Only include parameter_uncertainties if there are any
+  if (parameterUncertainties.length > 0) {
+    v2Graph.parameter_uncertainties = parameterUncertainties;
+  }
+
+  return v2Graph;
 }
 
 /**
@@ -309,11 +388,26 @@ export function transformResponseToV2(
   v1Response: V1DraftGraphResponse
 ): V2DraftGraphResponse {
   const { graph, ...rest } = v1Response;
+  const v2Graph = transformGraphToV2(graph);
+
+  // Count factor nodes with value_std for telemetry
+  const factorNodesWithValueStd = v2Graph.nodes.filter(
+    (n) => n.type === "factor" && n.observed_state?.value_std !== undefined
+  ).length;
+
+  // Emit telemetry for transform completion
+  emit(TelemetryEvents.SchemaV2TransformComplete, {
+    nodeCount: v2Graph.nodes.length,
+    edgeCount: v2Graph.edges.length,
+    parameterUncertaintiesCount: v2Graph.parameter_uncertainties?.length ?? 0,
+    hasParameterUncertainties: (v2Graph.parameter_uncertainties?.length ?? 0) > 0,
+    factorNodesWithValueStd,
+  });
 
   return {
     ...rest,
     schema_version: "2.2",
-    graph: transformGraphToV2(graph),
+    graph: v2Graph,
   };
 }
 

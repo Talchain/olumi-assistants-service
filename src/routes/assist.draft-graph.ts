@@ -101,8 +101,8 @@ function buildRefinementBrief(
     ? `\n- Follow these refinement instructions: ${safeInstructions}`
     : "";
 
-  const maxNodes = 12;
-  const maxEdges = 24;
+  const maxNodes = 20;
+  const maxEdges = 40;
   const maxLabelLen = 80;
 
   const nodes = Array.isArray(previousGraph.nodes) ? previousGraph.nodes.slice(0, maxNodes) : [];

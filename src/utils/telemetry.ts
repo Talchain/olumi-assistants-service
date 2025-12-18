@@ -315,6 +315,9 @@ export const TelemetryEvents = {
   // Factor Extraction events (v2.3)
   FactorExtractionComplete: "cee.factor_extraction.complete",
 
+  // Schema v2 Transform events (v2.3)
+  SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
+
   // ISL Synthesis events (v2.3)
   IslSynthesisRequested: "cee.isl_synthesis.requested",
   IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
