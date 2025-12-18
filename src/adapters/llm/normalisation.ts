@@ -131,16 +131,46 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
-  // Coerce string numbers to numbers for belief/weight on edges
+  // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
   if (Array.isArray(obj.edges)) {
     obj.edges = obj.edges.map((edge: unknown) => {
       if (!edge || typeof edge !== 'object') return edge;
       const e = edge as Record<string, unknown>;
 
+      // Parse and clamp belief to [0, 1]
+      let belief: number | undefined = undefined;
+      if (e.belief !== undefined && e.belief !== null) {
+        const rawBelief = Number(e.belief);
+        if (!isNaN(rawBelief)) {
+          if (rawBelief < 0 || rawBelief > 1) {
+            const clampedBelief = Math.max(0, Math.min(1, rawBelief));
+            log.warn({
+              event: 'llm.normalisation.belief_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw_belief: rawBelief,
+              clamped_belief: clampedBelief,
+            }, `Edge belief value ${rawBelief} clamped to ${clampedBelief}`);
+            belief = clampedBelief;
+          } else {
+            belief = rawBelief;
+          }
+        }
+      }
+
+      // Parse weight (no clamping - can be any number for inverse relationships)
+      let weight: number | undefined = undefined;
+      if (e.weight !== undefined && e.weight !== null) {
+        const rawWeight = Number(e.weight);
+        if (!isNaN(rawWeight)) {
+          weight = rawWeight;
+        }
+      }
+
       return {
         ...e,
-        weight: e.weight !== undefined ? Number(e.weight) : undefined,
-        belief: e.belief !== undefined ? Number(e.belief) : undefined,
+        weight,
+        belief,
       };
     });
   }

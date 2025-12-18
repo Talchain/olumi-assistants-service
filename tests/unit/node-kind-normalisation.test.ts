@@ -304,7 +304,7 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[4].weight).toBe(0.3);
     });
 
-    it("handles NaN weight/belief values by coercing to NaN number", () => {
+    it("handles NaN weight/belief values by setting to undefined", () => {
       const input = {
         nodes: [],
         edges: [
@@ -314,9 +314,9 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // Number("invalid") === NaN
-      expect(Number.isNaN(result.edges[0].weight)).toBe(true);
-      expect(Number.isNaN(result.edges[0].belief)).toBe(true);
+      // NaN values are set to undefined (Zod will handle validation)
+      expect(result.edges[0].weight).toBeUndefined();
+      expect(result.edges[0].belief).toBeUndefined();
     });
 
     it("handles null/undefined weight/belief values", () => {
@@ -329,8 +329,8 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // null coerced to 0, undefined stays undefined
-      expect(result.edges[0].weight).toBe(0);
+      // null/undefined → undefined (Zod will handle validation)
+      expect(result.edges[0].weight).toBeUndefined();
       expect(result.edges[0].belief).toBeUndefined();
     });
 
@@ -372,11 +372,13 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
+      // weight is not clamped (can be any number)
       expect(result.edges[0].weight).toBe(Number.MAX_SAFE_INTEGER);
-      expect(result.edges[0].belief).toBe(999.99);
+      // belief is clamped to [0, 1]
+      expect(result.edges[0].belief).toBe(1);
     });
 
-    it("handles negative weight/belief values", () => {
+    it("clamps negative belief values to 0", () => {
       const input = {
         nodes: [],
         edges: [
@@ -386,9 +388,42 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // Negative values are coerced correctly (Zod will validate constraints later)
+      // weight is not clamped (can be negative for inverse relationships)
       expect(result.edges[0].weight).toBe(-0.5);
-      expect(result.edges[0].belief).toBe(-1);
+      // belief is clamped to [0, 1]
+      expect(result.edges[0].belief).toBe(0);
+    });
+
+    it("clamps belief values greater than 1 to 1", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", belief: 1.5 },
+          { from: "n2", to: "n3", belief: "2.0" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief).toBe(1);
+      expect(result.edges[1].belief).toBe(1);
+    });
+
+    it("preserves belief values within [0, 1] range", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", belief: 0 },
+          { from: "n2", to: "n3", belief: 0.5 },
+          { from: "n3", to: "n4", belief: 1 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief).toBe(0);
+      expect(result.edges[1].belief).toBe(0.5);
+      expect(result.edges[2].belief).toBe(1);
     });
   });
 });
