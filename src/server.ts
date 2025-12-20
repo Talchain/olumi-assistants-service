@@ -82,6 +82,10 @@ function resolveAllowedOrigins(): string[] {
     throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
   }
 
+  // Diagnostic: log parsed origins at startup
+  console.log("[CORS] Raw ALLOWED_ORIGINS env:", raw ? `"${raw}"` : "(not set, using defaults)");
+  console.log("[CORS] Parsed origins:", JSON.stringify(origins));
+
   return origins;
 }
 
@@ -144,6 +148,15 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+  });
+
+  // Diagnostic: log incoming origin headers (temporary for debugging CORS issues)
+  app.addHook("onRequest", async (request) => {
+    const origin = request.headers.origin;
+    if (origin) {
+      const isAllowed = allowedOrigins.includes(origin);
+      request.log.info({ origin, isAllowed, allowedOrigins }, "[CORS] Incoming request origin");
+    }
   });
 
   // Security headers: Standard HTTP security headers for defense-in-depth
