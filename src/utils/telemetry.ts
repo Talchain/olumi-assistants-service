@@ -117,6 +117,16 @@ export const TelemetryEvents = {
   CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
   CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
 
+  // CEE Ask endpoint events (Working Set)
+  CeeAskRequested: "cee.ask.requested",
+  CeeAskCompleted: "cee.ask.completed",
+  CeeAskFailed: "cee.ask.failed",
+
+  // CEE Review endpoint events (M1 Orchestrator)
+  CeeReviewRequested: "cee.review.requested",
+  CeeReviewSucceeded: "cee.review.succeeded",
+  CeeReviewFailed: "cee.review.failed",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",

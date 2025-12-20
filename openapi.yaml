@@ -2131,6 +2131,141 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/ask:
+    post:
+      summary: Ask questions about a decision model (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Ask** endpoint.
+
+        UI-facing entrypoint for the "ask about this decision" experience.
+        Accepts questions anchored to the graph and returns model-bound responses
+        that always contain actionable content.
+
+        **Key Features:**
+        - Intent inference from message text if not explicitly provided
+        - Model-bound invariant: responses always contain model_actions, highlights, or follow_up_question
+        - Graph ID validation for all responses
+        - Redis session caching with graceful degradation
+
+        **Supported Intents:**
+        - `explain` / `clarify`: Grounded to selected nodes/edges; includes highlights
+        - `repair`: Propose concrete model_actions to fix/improve structure
+        - `ideate`: Generate alternatives or new ideas
+        - `compare`: Compare options or paths
+        - `challenge`: Challenge assumptions or beliefs
+
+        **Model-Bound Invariant:**
+        Every response MUST contain at least one of:
+        - `model_actions`: Array of graph patch operations
+        - `highlights`: Array of elements to visually emphasize
+        - `follow_up_question`: Clarifying question for the user
+
+        This endpoint provides the foundation for collaborative decision modeling
+        where the AI assistant helps users understand, improve, and refine their
+        decision graphs.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEAskRequestV1'
+            examples:
+              explain_node:
+                summary: Explain a selected node
+                value:
+                  request_id: "550e8400-e29b-41d4-a716-446655440000"
+                  scenario_id: "cloud-provider-decision"
+                  graph_schema_version: "2.2"
+                  brief: "We need to decide on a cloud provider for our SaaS platform."
+                  message: "Why is cost important for this decision?"
+                  intent: "explain"
+                  selection:
+                    node_id: "factor_cost"
+                  graph_snapshot:
+                    nodes:
+                      - id: "goal_1"
+                        kind: "goal"
+                        label: "Choose Cloud Provider"
+                      - id: "factor_cost"
+                        kind: "factor"
+                        label: "Cost"
+                    edges:
+                      - from: "factor_cost"
+                        to: "goal_1"
+                        belief: 0.8
+                  market_context:
+                    id: "ctx_1"
+                    version: "1.0"
+                    hash: "abc123"
+              repair_model:
+                summary: Request repairs to the model
+                value:
+                  request_id: "550e8400-e29b-41d4-a716-446655440001"
+                  scenario_id: "cloud-provider-decision"
+                  graph_schema_version: "2.2"
+                  brief: "We need to decide on a cloud provider for our SaaS platform."
+                  message: "Can you fix any issues with this model?"
+                  intent: "repair"
+                  graph_snapshot:
+                    nodes:
+                      - id: "goal_1"
+                        kind: "goal"
+                        label: "Choose Cloud Provider"
+                      - id: "orphan_factor"
+                        kind: "factor"
+                        label: "Disconnected Factor"
+                    edges: []
+                  market_context:
+                    id: "ctx_1"
+                    version: "1.0"
+                    hash: "abc123"
+      responses:
+        '200':
+          description: Ask response generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Ask feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskResponseV1'
+        '400':
+          description: CEE validation error (invalid graph, missing context, ID not found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Ask
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+
 components:
   schemas:
     DraftGraphInput:
@@ -5841,6 +5976,369 @@ components:
           enum: [cee]
           description: Always 'cee' to indicate CEE generated this response
           example: cee
+
+    # CEE Ask Endpoint Schemas (v1)
+    CEEAskIntentV1:
+      type: string
+      description: User intent for the /ask request
+      enum:
+        - clarify
+        - explain
+        - ideate
+        - repair
+        - compare
+        - challenge
+
+    CEEAskSelectionV1:
+      type: object
+      description: User selection context - what the user is focused on
+      properties:
+        node_id:
+          type: string
+          description: Selected node ID
+        edge_id:
+          type: string
+          description: Selected edge ID (format "from->to")
+        panel_section:
+          type: string
+          description: Selected panel section
+
+    CEEAskTurnV1:
+      type: object
+      description: Conversation turn for context
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          maxLength: 2000
+        referenced_ids:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    CEEAskMarketContextRefV1:
+      type: object
+      description: Market context reference
+      required:
+        - id
+        - version
+        - hash
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        hash:
+          type: string
+
+    CEEAskRequestV1:
+      type: object
+      description: Working Set Request - input to /assist/v1/ask
+      required:
+        - request_id
+        - scenario_id
+        - graph_schema_version
+        - brief
+        - message
+        - graph_snapshot
+        - market_context
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier
+        scenario_id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Scenario identifier for session tracking
+        graph_schema_version:
+          type: string
+          enum: ["2.2"]
+          description: Graph schema version (must be "2.2")
+        brief:
+          type: string
+          minLength: 10
+          maxLength: 10000
+          description: Decision brief text
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User's question or message
+        graph_snapshot:
+          type: object
+          description: Current graph state (authoritative source of truth)
+          required:
+            - nodes
+            - edges
+          properties:
+            nodes:
+              type: array
+              items:
+                type: object
+                required:
+                  - id
+                  - kind
+                properties:
+                  id:
+                    type: string
+                  kind:
+                    type: string
+                  label:
+                    type: string
+                  body:
+                    type: string
+            edges:
+              type: array
+              items:
+                type: object
+                required:
+                  - from
+                  - to
+                properties:
+                  from:
+                    type: string
+                  to:
+                    type: string
+                  belief:
+                    type: number
+            default_seed:
+              type: integer
+        market_context:
+          $ref: '#/components/schemas/CEEAskMarketContextRefV1'
+        selection:
+          $ref: '#/components/schemas/CEEAskSelectionV1'
+        turns_recent:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CEEAskTurnV1'
+        decision_state_summary:
+          type: string
+          maxLength: 1000
+        intent:
+          $ref: '#/components/schemas/CEEAskIntentV1'
+
+    CEEAskModelActionOpV1:
+      type: string
+      description: Model action operation type
+      enum:
+        - add_node
+        - add_edge
+        - update_node
+        - update_edge
+        - delete_node
+        - delete_edge
+
+    CEEAskModelActionV1:
+      type: object
+      description: Model action - a strict graph patch operation
+      required:
+        - action_id
+        - op
+        - payload
+      properties:
+        action_id:
+          type: string
+          format: uuid
+        op:
+          $ref: '#/components/schemas/CEEAskModelActionOpV1'
+        target_id:
+          type: string
+          description: Required for update/delete operations
+        payload:
+          type: object
+          description: Action payload
+        reason_code:
+          type: string
+          maxLength: 50
+        label:
+          type: string
+          maxLength: 100
+
+    CEEAskHighlightStyleV1:
+      type: string
+      enum:
+        - primary
+        - secondary
+        - warning
+        - error
+
+    CEEAskHighlightV1:
+      type: object
+      description: Highlight - visual emphasis on graph elements
+      required:
+        - type
+        - ids
+      properties:
+        type:
+          type: string
+          enum: [node, edge, path]
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        style:
+          $ref: '#/components/schemas/CEEAskHighlightStyleV1'
+        label:
+          type: string
+          maxLength: 100
+
+    CEEAskProvenanceSourceV1:
+      type: string
+      enum:
+        - brief
+        - graph
+        - market_context
+        - validator
+        - engine
+        - user_edit
+
+    CEEAskProvenanceConfidenceV1:
+      type: string
+      enum:
+        - high
+        - medium
+        - low
+
+    CEEAskProvenanceItemV1:
+      type: object
+      description: Provenance - source attribution for responses
+      required:
+        - source
+        - confidence
+        - note
+      properties:
+        source:
+          $ref: '#/components/schemas/CEEAskProvenanceSourceV1'
+        confidence:
+          $ref: '#/components/schemas/CEEAskProvenanceConfidenceV1'
+        note:
+          type: string
+          maxLength: 500
+        references:
+          type: object
+          properties:
+            node_ids:
+              type: array
+              items:
+                type: string
+            edge_ids:
+              type: array
+              items:
+                type: string
+
+    CEEAskAttributionV1:
+      type: object
+      description: Attribution metadata for audit
+      required:
+        - provider
+        - model_id
+        - timestamp
+        - assistant_response_hash
+      properties:
+        provider:
+          type: string
+        model_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        assistant_response_hash:
+          type: string
+        seed:
+          type: integer
+
+    CEEAskResponseV1:
+      type: object
+      description: |
+        Ask response - model-bound response from /assist/v1/ask.
+        At least one of model_actions, highlights, or follow_up_question MUST be present.
+      required:
+        - request_id
+        - message
+        - attribution
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          maxLength: 1000
+          description: Response message to display to user
+        model_actions:
+          type: array
+          description: Graph patch operations to propose
+          items:
+            $ref: '#/components/schemas/CEEAskModelActionV1'
+        highlights:
+          type: array
+          description: Elements to visually emphasize
+          items:
+            $ref: '#/components/schemas/CEEAskHighlightV1'
+        follow_up_question:
+          type: string
+          maxLength: 500
+          description: Clarifying question for the user
+        why:
+          type: array
+          description: Provenance information
+          items:
+            $ref: '#/components/schemas/CEEAskProvenanceItemV1'
+        updated_decision_state_summary:
+          type: string
+          maxLength: 1000
+        attribution:
+          $ref: '#/components/schemas/CEEAskAttributionV1'
+
+    CEEAskErrorCodeV1:
+      type: string
+      description: Error codes specific to /ask endpoint
+      enum:
+        - CEE_ASK_INVALID_GRAPH
+        - CEE_ASK_MISSING_CONTEXT
+        - CEE_ASK_ID_NOT_FOUND
+        - CEE_ASK_ID_COLLISION
+        - CEE_ASK_NOT_MODEL_BOUND
+        - CEE_ASK_INTENT_UNKNOWN
+        - CEE_ASK_LLM_ERROR
+        - CEE_ASK_RATE_LIMITED
+
+    CEEAskErrorResponseV1:
+      type: object
+      description: Error response from /assist/v1/ask
+      required:
+        - request_id
+        - error
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              $ref: '#/components/schemas/CEEAskErrorCodeV1'
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
 
     DecisionStorySummaryV1:
       type: object

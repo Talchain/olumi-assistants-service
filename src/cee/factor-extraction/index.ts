@@ -4,7 +4,12 @@
  * Extracts quantitative factors from natural language briefs.
  * Enables ISL sensitivity, VoI, and tipping point analysis.
  *
- * Patterns detected:
+ * Supports two extraction modes:
+ * - LLM-first (when CEE_LLM_FIRST_EXTRACTION_ENABLED=true): Uses LLM with market context,
+ *   with regex as validation/fallback
+ * - Regex-only (default): Uses pattern matching for explicit/inferred/range extractions
+ *
+ * Patterns detected (regex mode):
  * - Currency values: £49, $100, €50
  * - Currency with multipliers: $1 million, £2.5m, €500k, $1B
  * - Percentages: 5%, 3.5%
@@ -13,7 +18,12 @@
  */
 
 import { log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
 import type { ExtractionType } from "../transforms/value-uncertainty-derivation.js";
+import type { ResolvedContext, SupportedDomain } from "../../context/index.js";
+import { resolveContext } from "../../context/index.js";
+import { extractFactorsLLM } from "./llm-extractor.js";
+import { mergeFactors, type MergedFactor, type MergeResult } from "./merge.js";
 
 export interface ExtractedFactor {
   /** Human-readable label for the factor */
@@ -508,3 +518,150 @@ export function generateFactorId(label: string, index: number): string {
     .substring(0, 20);
   return `factor_${slug}_${index}`;
 }
+
+// ============================================================================
+// LLM-First Orchestration
+// ============================================================================
+
+/**
+ * Alias for regex-based extraction (for clarity when using with LLM orchestration)
+ */
+export const extractFactorsRegex = extractFactors;
+
+/**
+ * Options for orchestrated factor extraction
+ */
+export interface OrchestratedExtractionOptions {
+  /** Market context domain override (auto-detected if not specified) */
+  domain?: SupportedDomain;
+  /** Pre-resolved context (if already available) */
+  context?: ResolvedContext;
+  /** Force regex-only extraction even if LLM is enabled */
+  forceRegex?: boolean;
+  /** Force LLM extraction even if disabled (for testing) */
+  forceLLM?: boolean;
+}
+
+/**
+ * Result from orchestrated extraction
+ */
+export interface OrchestratedExtractionResult {
+  /** Extracted factors */
+  factors: ExtractedFactor[];
+  /** Extraction mode used */
+  mode: "llm-first" | "regex-only";
+  /** Whether LLM extraction succeeded */
+  llmSuccess?: boolean;
+  /** Merge statistics (if LLM was used) */
+  mergeStats?: MergeResult["stats"];
+  /** Any warnings from extraction */
+  warnings: string[];
+}
+
+/**
+ * Orchestrated factor extraction with LLM-first support.
+ *
+ * When CEE_LLM_FIRST_EXTRACTION_ENABLED=true:
+ * 1. Resolves market context for the brief
+ * 2. Calls LLM for factor extraction
+ * 3. Runs regex extraction as fallback/validation
+ * 4. Merges results with LLM taking precedence
+ *
+ * When disabled (default):
+ * - Uses regex-only extraction (original behavior)
+ *
+ * @param brief - The decision brief text
+ * @param options - Extraction options
+ * @returns Extraction result with factors and metadata
+ */
+export async function extractFactorsOrchestrated(
+  brief: string,
+  options: OrchestratedExtractionOptions = {}
+): Promise<OrchestratedExtractionResult> {
+  const { domain, context: providedContext, forceRegex = false, forceLLM = false } = options;
+  const warnings: string[] = [];
+
+  // Check feature flag
+  const llmEnabled = config.cee.llmFirstExtractionEnabled;
+  const useLLM = (llmEnabled || forceLLM) && !forceRegex;
+
+  if (!useLLM) {
+    // Regex-only mode (default)
+    log.debug({ event: "cee.factor_extraction.mode", mode: "regex-only" }, "Using regex-only extraction");
+    const factors = extractFactors(brief);
+    return {
+      factors,
+      mode: "regex-only",
+      warnings: [],
+    };
+  }
+
+  // LLM-first mode
+  log.debug({ event: "cee.factor_extraction.mode", mode: "llm-first" }, "Using LLM-first extraction");
+
+  // Resolve context
+  const context = providedContext ?? resolveContext(brief, domain);
+
+  // Run LLM extraction
+  const llmResult = await extractFactorsLLM(brief, {
+    context,
+    maxFactors: 20,
+    minConfidence: 0.5,
+    validateHallucinations: true,
+  });
+
+  if (llmResult.warnings.length > 0) {
+    warnings.push(...llmResult.warnings);
+  }
+
+  // Always run regex as fallback/validation
+  const regexFactors = extractFactors(brief);
+
+  if (!llmResult.success || llmResult.factors.length === 0) {
+    // LLM failed, use regex only
+    log.info(
+      {
+        event: "cee.factor_extraction.llm_fallback",
+        llmError: llmResult.error,
+        regexFactorCount: regexFactors.length,
+      },
+      "LLM extraction failed, using regex fallback"
+    );
+    return {
+      factors: regexFactors,
+      mode: "llm-first",
+      llmSuccess: false,
+      warnings,
+    };
+  }
+
+  // Merge LLM and regex results
+  const mergeResult = mergeFactors(llmResult.factors, regexFactors, {
+    llmConfidenceThreshold: 0.7,
+    context,
+  });
+
+  log.info(
+    {
+      event: "cee.factor_extraction.orchestrated_complete",
+      llmFactorCount: llmResult.factors.length,
+      regexFactorCount: regexFactors.length,
+      mergedFactorCount: mergeResult.factors.length,
+      ...mergeResult.stats,
+    },
+    "Orchestrated extraction complete"
+  );
+
+  return {
+    factors: mergeResult.factors,
+    mode: "llm-first",
+    llmSuccess: true,
+    mergeStats: mergeResult.stats,
+    warnings,
+  };
+}
+
+// Re-export types and functions from sub-modules
+export type { MergedFactor, MergeResult } from "./merge.js";
+export { mergeFactors, normalizeLabel, labelSimilarity, deduplicateFactors } from "./merge.js";
+export { extractFactorsLLM, type LLMExtractionOptions, type LLMExtractionResult } from "./llm-extractor.js";

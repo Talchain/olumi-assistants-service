@@ -22,7 +22,7 @@ import {
 } from "../config/limits.js";
 import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
-import { enrichGraphWithFactors } from "../factor-extraction/enricher.js";
+import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
 import { config } from "../../config/index.js";
 import {
   detectAmbiguities,
@@ -751,8 +751,9 @@ export async function finaliseCeeDraftResponse(
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // This runs after LLM graph generation but before validation, matching the legacy endpoint's order.
   // Ensures factor nodes have value/baseline/unit data for ISL sensitivity analysis.
+  // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
   if (graph) {
-    const enrichmentResult = enrichGraphWithFactors(graph as any, input.brief);
+    const enrichmentResult = await enrichGraphWithFactorsAsync(graph as any, input.brief);
     graph = enrichmentResult.graph as GraphV1;
     payload.graph = graph as any;
 
@@ -763,6 +764,8 @@ export async function finaliseCeeDraftResponse(
           factors_added: enrichmentResult.factorsAdded,
           factors_enhanced: enrichmentResult.factorsEnhanced,
           factors_skipped: enrichmentResult.factorsSkipped,
+          extraction_mode: enrichmentResult.extractionMode,
+          llm_success: enrichmentResult.llmSuccess,
         },
         "Factor enrichment applied to graph"
       );

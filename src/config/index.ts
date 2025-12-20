@@ -201,7 +201,12 @@ const ConfigSchema = z.object({
     biasLlmDetectionEnabled: booleanString.default(false), // If true, use LLM for nuanced bias detection fallback
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
+    reviewFeatureVersion: z.string().optional(),
+    reviewArchetypesEnabled: booleanString.default(true), // Enable archetype inference for review endpoint
+    reviewPlaceholdersEnabled: booleanString.default(false), // If false, return empty blocks (M1 scaffolding gated)
     causalValidationEnabled: booleanString.default(false),
+    // LLM-first extraction settings
+    llmFirstExtractionEnabled: booleanString.default(false), // If true, use LLM for factor/constraint extraction (regex as fallback)
     // Preflight validation settings
     preflightEnabled: booleanString.default(false), // Enable input validation before draft
     preflightStrict: booleanString.default(false), // If true, reject on preflight failure
@@ -227,6 +232,8 @@ const ConfigSchema = z.object({
     cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
     // Graph structure validation (Phase: Graph Validation)
     enforceSingleGoal: booleanString.default(true), // If true, merge multiple goals into compound goal
+    // Session cache (for /ask endpoint)
+    sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Per-operation model selection for tiered cost optimization
     models: z.object({
       draft: z.string().optional(),
@@ -235,6 +242,7 @@ const ConfigSchema = z.object({
       clarification: z.string().optional(),
       critique: z.string().optional(),
       validation: z.string().optional(),
+      extraction: z.string().optional(), // Model for LLM-first factor/constraint extraction
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -244,6 +252,7 @@ const ConfigSchema = z.object({
       clarification: z.coerce.number().int().positive().optional(),
       critique: z.coerce.number().int().positive().optional(),
       validation: z.coerce.number().int().positive().optional(),
+      extraction: z.coerce.number().int().positive().optional(), // Max tokens for LLM-first extraction
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -426,7 +435,11 @@ function parseConfig(): Config {
       biasLlmDetectionEnabled: env.CEE_BIAS_LLM_DETECTION_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
+      reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
+      reviewArchetypesEnabled: env.CEE_REVIEW_ARCHETYPES_ENABLED,
+      reviewPlaceholdersEnabled: env.CEE_REVIEW_PLACEHOLDERS_ENABLED,
       causalValidationEnabled: env.CEE_CAUSAL_VALIDATION_ENABLED,
+      llmFirstExtractionEnabled: env.CEE_LLM_FIRST_EXTRACTION_ENABLED,
       preflightEnabled: env.CEE_PREFLIGHT_ENABLED,
       preflightStrict: env.CEE_PREFLIGHT_STRICT,
       preflightReadinessThreshold: env.CEE_PREFLIGHT_READINESS_THRESHOLD,
@@ -451,6 +464,8 @@ function parseConfig(): Config {
       cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
       // Graph structure validation
       enforceSingleGoal: env.CEE_ENFORCE_SINGLE_GOAL,
+      // Session cache TTL
+      sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Per-operation model selection
       models: {
         draft: env.CEE_MODEL_DRAFT,
@@ -459,6 +474,7 @@ function parseConfig(): Config {
         clarification: env.CEE_MODEL_CLARIFICATION,
         critique: env.CEE_MODEL_CRITIQUE,
         validation: env.CEE_MODEL_VALIDATION,
+        extraction: env.CEE_MODEL_EXTRACTION,
       },
       // Per-operation max tokens limits
       maxTokens: {

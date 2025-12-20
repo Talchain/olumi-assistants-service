@@ -11,7 +11,7 @@ import { validateGraph } from "../services/validateClientWithCache.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { validateAndFixGraph } from "../cee/structure/index.js";
-import { enrichGraphWithFactors } from "../cee/factor-extraction/enricher.js";
+import { enrichGraphWithFactorsAsync } from "../cee/factor-extraction/enricher.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
@@ -542,7 +542,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
-  const enrichmentResult = enrichGraphWithFactors(graph, effectiveBrief);
+  // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
+  const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief);
   const enrichedGraph = enrichmentResult.graph;
 
   if (enrichmentResult.factorsAdded > 0 || enrichmentResult.factorsEnhanced > 0) {
@@ -550,6 +551,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       factors_added: enrichmentResult.factorsAdded,
       factors_enhanced: enrichmentResult.factorsEnhanced,
       factors_skipped: enrichmentResult.factorsSkipped,
+      extraction_mode: enrichmentResult.extractionMode,
+      llm_success: enrichmentResult.llmSuccess,
     }, "Factor enrichment completed");
   }
 
