@@ -163,6 +163,11 @@ export type {
   CeeInferenceResults,
   CeeMarketContext,
   CeeReviewIntent,
+  // ISL Robustness payload types
+  CeeIslRobustnessPayload,
+  CeeIslSensitivity,
+  CeeIslPredictionInterval,
+  CeeIslCriticalAssumption,
   // Response types
   CeeReviewResponse,
   CeeDecisionReviewPayload,
@@ -176,6 +181,11 @@ export type {
   CeeBlockSeverity,
   CeeBlockPriority,
   CeeBlockItem,
+  // Robustness block types
+  CeeRobustnessStatus,
+  CeeRobustnessFindingType,
+  CeeRobustnessFinding,
+  CeeRobustnessBlock,
   // Readiness types
   CeeReadiness,
   CeeReadinessLevel,

@@ -448,6 +448,182 @@ describe("CEE Review Endpoint", () => {
     });
   });
 
+  describe("Robustness block", () => {
+    it("should return robustness block with status 'requires_run' when no robustness data", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/assist/v1/review",
+        headers: {
+          "content-type": "application/json",
+          "x-olumi-assist-key": "test-key",
+        },
+        payload: validRequest,
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      const robustnessBlock = body.blocks.find((b: any) => b.type === "robustness");
+
+      expect(robustnessBlock).toBeDefined();
+      expect(robustnessBlock.id).toBe("robustness");
+      expect(robustnessBlock.status).toBe("requires_run");
+      expect(robustnessBlock.status_reason).toBeDefined();
+    });
+
+    it("should return computed robustness block when ISL data is provided", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/assist/v1/review",
+        headers: {
+          "content-type": "application/json",
+          "x-olumi-assist-key": "test-key",
+        },
+        payload: {
+          ...validRequest,
+          robustness: {
+            status: "computed",
+            overall_score: 0.75,
+            confidence: 0.85,
+            sensitivities: [
+              {
+                node_id: "factor_1",
+                label: "Market Competition",
+                sensitivity_score: 0.9,
+                classification: "high", // High sensitivity to generate findings
+                description: "Highly sensitive to market competition",
+              },
+            ],
+            prediction_intervals: [
+              {
+                node_id: "goal_1",
+                lower_bound: 0.5,
+                upper_bound: 0.9,
+                confidence_level: 0.9,
+                well_calibrated: false, // Not well calibrated to generate findings
+              },
+            ],
+            critical_assumptions: [
+              {
+                node_id: "factor_1",
+                label: "Market stability",
+                impact: 0.9, // High impact to generate findings
+                recommendation: "Validate market conditions",
+              },
+            ],
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      const robustnessBlock = body.blocks.find((b: any) => b.type === "robustness");
+
+      expect(robustnessBlock).toBeDefined();
+      expect(robustnessBlock.status).toBe("computed");
+      expect(robustnessBlock.overall_score).toBe(0.75);
+      expect(robustnessBlock.confidence).toBe(0.85);
+      expect(robustnessBlock.findings).toBeDefined();
+      expect(robustnessBlock.findings.length).toBeGreaterThan(0);
+      expect(robustnessBlock.summary).toBeDefined();
+    });
+
+    it("should return cannot_compute when ISL failed", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/assist/v1/review",
+        headers: {
+          "content-type": "application/json",
+          "x-olumi-assist-key": "test-key",
+        },
+        payload: {
+          ...validRequest,
+          robustness: {
+            status: "failed",
+            status_reason: "ISL engine timeout",
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      const robustnessBlock = body.blocks.find((b: any) => b.type === "robustness");
+
+      expect(robustnessBlock).toBeDefined();
+      expect(robustnessBlock.status).toBe("cannot_compute");
+      expect(robustnessBlock.status_reason).toContain("ISL engine timeout");
+    });
+
+    it("should return degraded when ISL degraded", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/assist/v1/review",
+        headers: {
+          "content-type": "application/json",
+          "x-olumi-assist-key": "test-key",
+        },
+        payload: {
+          ...validRequest,
+          robustness: {
+            status: "degraded",
+            status_reason: "Partial sensitivity analysis",
+            overall_score: 0.6,
+            sensitivities: [
+              {
+                node_id: "factor_1",
+                label: "Market Competition",
+                sensitivity_score: 0.2,
+                classification: "low",
+                description: "Low sensitivity",
+              },
+            ],
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      const robustnessBlock = body.blocks.find((b: any) => b.type === "robustness");
+
+      expect(robustnessBlock).toBeDefined();
+      expect(robustnessBlock.status).toBe("degraded");
+      expect(robustnessBlock.overall_score).toBe(0.6);
+      // Findings may be undefined for degraded status (partial data)
+      expect(robustnessBlock.status_reason).toContain("Partial sensitivity analysis");
+    });
+
+    it("should never fail overall review when robustness is missing", async () => {
+      // Even with invalid robustness data, the review should succeed
+      const response = await app.inject({
+        method: "POST",
+        url: "/assist/v1/review",
+        headers: {
+          "content-type": "application/json",
+          "x-olumi-assist-key": "test-key",
+        },
+        payload: {
+          ...validRequest,
+          robustness: {
+            status: "not_run",
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      expect(body.readiness).toBeDefined();
+      expect(body.blocks).toBeDefined();
+
+      const robustnessBlock = body.blocks.find((b: any) => b.type === "robustness");
+      expect(robustnessBlock).toBeDefined();
+      expect(robustnessBlock.status).toBe("requires_run");
+    });
+  });
+
   describe("Graph with issues", () => {
     it("should detect orphan nodes", async () => {
       const graphWithOrphans = {

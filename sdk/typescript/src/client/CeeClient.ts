@@ -170,7 +170,7 @@ function validateRequest(request: CeeReviewRequest): void {
  */
 function transformRequest(request: CeeReviewRequest): Record<string, unknown> {
   // Map SDK request format to service format
-  return {
+  const payload: Record<string, unknown> = {
     graph: {
       version: request.graph_schema_version,
       nodes: request.graph_snapshot.nodes,
@@ -191,6 +191,13 @@ function transformRequest(request: CeeReviewRequest): Record<string, unknown> {
     context_id: request.scenario_id,
     // Pass through intent hint (archetype_hint not used for now)
   };
+
+  // Thread through robustness payload if present (ISL sensitivity/uncertainty analysis)
+  if (request.robustness) {
+    payload.robustness = request.robustness;
+  }
+
+  return payload;
 }
 
 // ============================================================================

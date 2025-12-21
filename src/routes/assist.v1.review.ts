@@ -239,6 +239,7 @@ export default async function route(app: FastifyInstance) {
           brief: input.brief,
           requestId,
           inference: input.inference,
+          robustness: input.robustness,
           seed: input.seed,
         };
 
@@ -257,15 +258,28 @@ export default async function route(app: FastifyInstance) {
         // Add readiness block to blocks array
         allBlocks = [...blockResult.blocks, readinessBlock];
       } else {
-        // Return only the readiness block when placeholders are disabled
-        // This is a minimal assessment without heuristic-based scaffolding
+        // When placeholders are disabled, only return readiness + robustness blocks
+        // Robustness is NOT a placeholder - it's computed from ISL data
+        const blockContext: BlockBuilderContext = {
+          graph: input.graph as GraphT,
+          brief: input.brief,
+          requestId,
+          inference: input.inference,
+          robustness: input.robustness,
+          seed: input.seed,
+        };
+
+        // Always build robustness block (never fails, gracefully degrades)
+        const robustnessResult = buildAllBlocks(blockContext, ["robustness"]);
+        warnings = robustnessResult.warnings;
+
         const { block: readinessBlock } = buildReadinessBlock({
           graph: input.graph as GraphT,
           brief: input.brief,
-          blocks: [],
+          blocks: robustnessResult.blocks,
           requestId,
         });
-        allBlocks = [readinessBlock];
+        allBlocks = [...robustnessResult.blocks, readinessBlock];
       }
 
       // Truncate if needed

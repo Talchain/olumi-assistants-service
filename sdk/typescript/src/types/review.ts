@@ -73,6 +73,81 @@ export interface CeeReviewRequest {
   intent: CeeReviewIntent;
   /** Market context metadata */
   market_context: CeeMarketContext;
+  /** ISL robustness analysis (optional - enriches review with sensitivity/uncertainty) */
+  robustness?: CeeIslRobustnessPayload;
+}
+
+/**
+ * ISL sensitivity entry for robustness payload.
+ */
+export interface CeeIslSensitivity {
+  /** Node ID affected by the sensitivity */
+  node_id: string;
+  /** Display label for the node */
+  label: string;
+  /** Sensitivity score (0-1, higher = more sensitive) */
+  sensitivity_score: number;
+  /** Classification of sensitivity level */
+  classification: "low" | "medium" | "high";
+  /** Description of the sensitivity */
+  description?: string;
+}
+
+/**
+ * ISL prediction interval for robustness payload.
+ */
+export interface CeeIslPredictionInterval {
+  /** Node ID for this prediction interval */
+  node_id: string;
+  /** Lower bound of the interval */
+  lower_bound: number;
+  /** Upper bound of the interval */
+  upper_bound: number;
+  /** Confidence level (e.g., 0.9 for 90%) */
+  confidence_level: number;
+  /** Whether the interval is well calibrated */
+  well_calibrated: boolean;
+}
+
+/**
+ * ISL critical assumption for robustness payload.
+ */
+export interface CeeIslCriticalAssumption {
+  /** Node ID for this assumption */
+  node_id: string;
+  /** Display label for the assumption */
+  label: string;
+  /** Impact score (0-1, higher = more impact) */
+  impact: number;
+  /** Recommendation for addressing this assumption */
+  recommendation?: string;
+}
+
+/**
+ * ISL robustness payload - optional input for /assist/v1/review.
+ *
+ * When present, CEE generates a robustness synthesis block.
+ * When absent or degraded, CEE emits a block with status 'requires_run' or 'cannot_compute'.
+ */
+export interface CeeIslRobustnessPayload {
+  /** ISL computation status */
+  status: "computed" | "degraded" | "not_run" | "failed";
+  /** Reason for the status (if not computed) */
+  status_reason?: string;
+  /** Overall robustness score (0-1) */
+  overall_score?: number;
+  /** Confidence in the robustness assessment (0-1) */
+  confidence?: number;
+  /** Sensitivity analysis results */
+  sensitivities?: CeeIslSensitivity[];
+  /** Prediction intervals */
+  prediction_intervals?: CeeIslPredictionInterval[];
+  /** Critical assumptions identified */
+  critical_assumptions?: CeeIslCriticalAssumption[];
+  /** ISL request ID for tracing */
+  isl_request_id?: string;
+  /** ISL processing latency in ms */
+  isl_latency_ms?: number;
 }
 
 /**
@@ -140,7 +215,8 @@ export type CeeBlockId =
   | "risks"
   | "biases"
   | "gaps"
-  | "next_steps";
+  | "next_steps"
+  | "robustness";
 
 /**
  * Block computation status.
@@ -205,6 +281,82 @@ export interface CeeReviewBlock {
   severity?: CeeBlockSeverity;
   /** Index signature for extra fields */
   [key: string]: unknown;
+}
+
+// ============================================================================
+// Robustness Block Types
+// ============================================================================
+
+/**
+ * Robustness block computation status.
+ */
+export type CeeRobustnessStatus =
+  | "computed"
+  | "cannot_compute"
+  | "requires_run"
+  | "degraded";
+
+/**
+ * Robustness finding type classification.
+ * Matches service schema: sensitivity, uncertainty, assumption, calibration
+ */
+export type CeeRobustnessFindingType =
+  | "sensitivity"
+  | "uncertainty"
+  | "assumption"
+  | "calibration";
+
+/**
+ * Finding within a robustness block.
+ * Matches service schema for RobustnessFinding.
+ */
+export interface CeeRobustnessFinding {
+  /** Finding identifier */
+  id: string;
+  /** Finding type classification */
+  finding_type: CeeRobustnessFindingType;
+  /** Severity level */
+  severity: CeeBlockSeverity;
+  /** Related node ID (if applicable) */
+  node_id?: string;
+  /** Display label */
+  label: string;
+  /** Finding description */
+  description: string;
+  /** Recommendation for addressing this finding */
+  recommendation?: string;
+  /** Impact score (0-1) */
+  impact_score?: number;
+}
+
+/**
+ * Robustness synthesis block from ISL analysis.
+ *
+ * This block is generated when ISL robustness data is provided to /assist/v1/review.
+ * If no data is provided, the block has status 'requires_run'.
+ * If data is degraded/failed, the block has status 'cannot_compute' or 'degraded'.
+ */
+export interface CeeRobustnessBlock {
+  /** Block identifier */
+  id: "robustness";
+  /** Block type */
+  type: "robustness";
+  /** Robustness computation status */
+  status: CeeRobustnessStatus;
+  /** Reason for the status (if not 'computed') */
+  status_reason?: string;
+  /** Overall robustness score (0-1), present when status is 'computed' */
+  overall_score?: number;
+  /** Robustness findings */
+  findings?: CeeRobustnessFinding[];
+  /** Human-readable summary */
+  summary?: string;
+  /** Confidence in the assessment (0-1) */
+  confidence?: number;
+  /** Whether this is placeholder content */
+  placeholder?: boolean;
+  /** Generation timestamp */
+  generated_at?: string;
 }
 
 /**

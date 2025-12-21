@@ -22,6 +22,55 @@ export const SafeRequestId = z.string().min(1).max(64).regex(SAFE_REQUEST_ID_PAT
 });
 
 /**
+ * ISL Robustness payload - optional sensitivity/uncertainty analysis from ISL
+ */
+export const ISLRobustnessPayload = z.object({
+  /** Status of the robustness analysis */
+  status: z.enum(["computed", "degraded", "not_run", "failed"]),
+
+  /** Reason for status (especially if not 'computed') */
+  status_reason: z.string().optional(),
+
+  /** Overall robustness score (0-1, higher = more robust) */
+  overall_score: z.number().min(0).max(1).optional(),
+
+  /** Confidence in the robustness assessment */
+  confidence: z.number().min(0).max(1).optional(),
+
+  /** Key sensitivity findings */
+  sensitivities: z.array(z.object({
+    node_id: z.string(),
+    label: z.string(),
+    sensitivity_score: z.number().min(0).max(1),
+    classification: z.enum(["low", "medium", "high"]),
+    description: z.string().optional(),
+  })).optional(),
+
+  /** Prediction intervals from conformal analysis */
+  prediction_intervals: z.array(z.object({
+    node_id: z.string(),
+    lower_bound: z.number(),
+    upper_bound: z.number(),
+    confidence_level: z.number().min(0).max(1),
+    well_calibrated: z.boolean(),
+  })).optional(),
+
+  /** Critical assumptions that most affect the decision */
+  critical_assumptions: z.array(z.object({
+    node_id: z.string(),
+    label: z.string(),
+    impact: z.number().min(0).max(1),
+    recommendation: z.string().optional(),
+  })).optional(),
+
+  /** ISL request metadata */
+  isl_request_id: z.string().optional(),
+  isl_latency_ms: z.number().optional(),
+});
+
+export type ISLRobustnessPayloadT = z.infer<typeof ISLRobustnessPayload>;
+
+/**
  * Inference result from PLoT - ranked actions and drivers
  */
 export const InferenceResult = z.object({
@@ -71,6 +120,9 @@ export const ReviewRequest = z.object({
   /** Inference result from PLoT (optional for pre-inference reviews) */
   inference: InferenceResult.optional(),
 
+  /** ISL robustness analysis (optional - enriches review with sensitivity/uncertainty) */
+  robustness: ISLRobustnessPayload.optional(),
+
   /** Context ID for session continuity */
   context_id: z.string().optional(),
 
@@ -106,6 +158,7 @@ export const ReviewBlockType = z.enum([
   "prediction",
   "risks",
   "next_steps",
+  "robustness",
 ]);
 
 export type ReviewBlockTypeT = z.infer<typeof ReviewBlockType>;
@@ -261,6 +314,49 @@ export const NextStepsBlock = BaseBlock.extend({
 });
 
 /**
+ * Robustness block status - indicates data availability
+ */
+export const RobustnessStatus = z.enum([
+  "computed",       // Full robustness analysis available
+  "cannot_compute", // ISL data missing or unavailable
+  "requires_run",   // ISL analysis needs to be triggered
+  "degraded",       // Partial data available
+]);
+
+/**
+ * Robustness finding - sensitivity or uncertainty insight
+ */
+export const RobustnessFinding = z.object({
+  id: z.string().min(1),
+  finding_type: z.enum(["sensitivity", "uncertainty", "assumption", "calibration"]),
+  severity: z.enum(["low", "medium", "high"]),
+  node_id: z.string().optional(),
+  label: z.string().min(1),
+  description: z.string().min(1),
+  recommendation: z.string().optional(),
+  impact_score: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * Robustness block - ISL sensitivity/uncertainty synthesis
+ */
+export const RobustnessBlock = BaseBlock.extend({
+  type: z.literal("robustness"),
+  /** Block computation status */
+  status: RobustnessStatus,
+  /** Reason for non-computed status */
+  status_reason: z.string().optional(),
+  /** Overall robustness score (0-1, higher = more robust) */
+  overall_score: z.number().min(0).max(1).optional(),
+  /** Key findings from robustness analysis */
+  findings: z.array(RobustnessFinding).optional(),
+  /** Summary headline */
+  summary: z.string().optional(),
+  /** Confidence in the assessment */
+  confidence: z.number().min(0).max(1).optional(),
+});
+
+/**
  * Union of all block types
  */
 export const ReviewBlock = z.discriminatedUnion("type", [
@@ -271,6 +367,7 @@ export const ReviewBlock = z.discriminatedUnion("type", [
   PredictionBlock,
   RisksBlock,
   NextStepsBlock,
+  RobustnessBlock,
 ]);
 
 export type ReviewBlockT = z.infer<typeof ReviewBlock>;

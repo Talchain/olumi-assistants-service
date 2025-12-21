@@ -12,6 +12,7 @@
  * - prediction (formerly key_insight)
  * - risks (formerly structural_warnings)
  * - next_steps (formerly readiness)
+ * - robustness (ISL sensitivity/uncertainty synthesis)
  */
 
 import { randomUUID } from "node:crypto";
@@ -44,6 +45,32 @@ export interface BlockBuilderContext {
       direction?: "positive" | "negative" | "neutral";
     }>;
     summary?: string;
+  };
+  robustness?: {
+    status: "computed" | "degraded" | "not_run" | "failed";
+    status_reason?: string;
+    overall_score?: number;
+    confidence?: number;
+    sensitivities?: Array<{
+      node_id: string;
+      label: string;
+      sensitivity_score: number;
+      classification: "low" | "medium" | "high";
+      description?: string;
+    }>;
+    prediction_intervals?: Array<{
+      node_id: string;
+      lower_bound: number;
+      upper_bound: number;
+      confidence_level: number;
+      well_calibrated: boolean;
+    }>;
+    critical_assumptions?: Array<{
+      node_id: string;
+      label: string;
+      impact: number;
+      recommendation?: string;
+    }>;
   };
   seed?: string;
 }
@@ -538,6 +565,185 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
   };
 }
 
+/**
+ * Build robustness block from ISL sensitivity/uncertainty analysis
+ *
+ * If robustness data is missing or degraded, returns a block with
+ * status: 'cannot_compute' or 'requires_run' and a clear status_reason.
+ * Never fails the overall review - gracefully degrades.
+ */
+export function buildRobustnessBlock(ctx: BlockBuilderContext): BlockBuilderResult {
+  const { robustness } = ctx;
+
+  // Case 1: No robustness data provided at all
+  if (!robustness) {
+    return {
+      block: {
+        id: "robustness",
+        type: "robustness" as const,
+        generated_at: getTimestamp(),
+        placeholder: true,
+        status: "requires_run" as const,
+        status_reason: "ISL robustness analysis was not included in the request. Run ISL analysis to enable this block.",
+      },
+    };
+  }
+
+  // Case 2: ISL reported not_run or failed status
+  if (robustness.status === "not_run") {
+    return {
+      block: {
+        id: "robustness",
+        type: "robustness" as const,
+        generated_at: getTimestamp(),
+        placeholder: true,
+        status: "requires_run" as const,
+        status_reason: robustness.status_reason || "ISL analysis has not been run for this decision graph.",
+      },
+    };
+  }
+
+  if (robustness.status === "failed") {
+    return {
+      block: {
+        id: "robustness",
+        type: "robustness" as const,
+        generated_at: getTimestamp(),
+        placeholder: true,
+        status: "cannot_compute" as const,
+        status_reason: robustness.status_reason || "ISL analysis failed. Check graph structure and retry.",
+      },
+    };
+  }
+
+  // Case 3: Degraded - partial data available
+  if (robustness.status === "degraded") {
+    const findings = buildRobustnessFindings(robustness);
+    return {
+      block: {
+        id: "robustness",
+        type: "robustness" as const,
+        generated_at: getTimestamp(),
+        placeholder: false,
+        status: "degraded" as const,
+        status_reason: robustness.status_reason || "Partial robustness data available. Some analyses could not complete.",
+        overall_score: robustness.overall_score,
+        findings: findings.length > 0 ? findings : undefined,
+        summary: generateRobustnessSummary(robustness),
+        confidence: robustness.confidence,
+      },
+    };
+  }
+
+  // Case 4: Fully computed - synthesize findings
+  const findings = buildRobustnessFindings(robustness);
+  const summary = generateRobustnessSummary(robustness);
+
+  return {
+    block: {
+      id: "robustness",
+      type: "robustness" as const,
+      generated_at: getTimestamp(),
+      placeholder: false,
+      status: "computed" as const,
+      overall_score: robustness.overall_score,
+      findings: findings.length > 0 ? findings : undefined,
+      summary,
+      confidence: robustness.confidence,
+    },
+  };
+}
+
+/**
+ * Build findings array from ISL robustness data
+ */
+function buildRobustnessFindings(robustness: NonNullable<BlockBuilderContext["robustness"]>): Array<{
+  id: string;
+  finding_type: "sensitivity" | "uncertainty" | "assumption" | "calibration";
+  severity: "low" | "medium" | "high";
+  node_id?: string;
+  label: string;
+  description: string;
+  recommendation?: string;
+  impact_score?: number;
+}> {
+  const findings: Array<{
+    id: string;
+    finding_type: "sensitivity" | "uncertainty" | "assumption" | "calibration";
+    severity: "low" | "medium" | "high";
+    node_id?: string;
+    label: string;
+    description: string;
+    recommendation?: string;
+    impact_score?: number;
+  }> = [];
+
+  // Convert high-sensitivity nodes to findings
+  if (robustness.sensitivities) {
+    for (const s of robustness.sensitivities.filter(s => s.classification === "high")) {
+      findings.push({
+        id: generateBlockId(),
+        finding_type: "sensitivity",
+        severity: "high",
+        node_id: s.node_id,
+        label: s.label,
+        description: s.description || `${s.label} has high sensitivity (${(s.sensitivity_score * 100).toFixed(0)}%). Small changes could significantly affect the decision.`,
+        impact_score: s.sensitivity_score,
+      });
+    }
+  }
+
+  // Convert poorly calibrated prediction intervals to findings
+  if (robustness.prediction_intervals) {
+    for (const p of robustness.prediction_intervals.filter(p => !p.well_calibrated)) {
+      findings.push({
+        id: generateBlockId(),
+        finding_type: "calibration",
+        severity: "medium",
+        node_id: p.node_id,
+        label: `Prediction interval for ${p.node_id}`,
+        description: `Prediction interval [${p.lower_bound.toFixed(2)}, ${p.upper_bound.toFixed(2)}] may not be well-calibrated. Confidence level: ${(p.confidence_level * 100).toFixed(0)}%`,
+        recommendation: "Review historical accuracy of predictions for this type of estimate.",
+      });
+    }
+  }
+
+  // Convert critical assumptions to findings
+  if (robustness.critical_assumptions) {
+    for (const a of robustness.critical_assumptions.filter(a => a.impact > 0.7)) {
+      findings.push({
+        id: generateBlockId(),
+        finding_type: "assumption",
+        severity: a.impact > 0.85 ? "high" : "medium",
+        node_id: a.node_id,
+        label: a.label,
+        description: `This assumption has ${(a.impact * 100).toFixed(0)}% impact on the decision outcome.`,
+        recommendation: a.recommendation,
+        impact_score: a.impact,
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Generate a summary headline for the robustness block
+ */
+function generateRobustnessSummary(robustness: NonNullable<BlockBuilderContext["robustness"]>): string {
+  if (robustness.overall_score === undefined) {
+    return "Robustness assessment available with partial data.";
+  }
+
+  if (robustness.overall_score >= 0.8) {
+    return "Decision model is robust. Key assumptions and estimates are well-supported.";
+  } else if (robustness.overall_score >= 0.5) {
+    return "Moderate robustness. Some assumptions may benefit from additional validation.";
+  } else {
+    return "Low robustness detected. Decision is sensitive to uncertain assumptions.";
+  }
+}
+
 // =============================================================================
 // Legacy Aliases (for backward compatibility during migration)
 // =============================================================================
@@ -560,6 +766,7 @@ const BLOCK_BUILDERS: Record<ReviewBlockTypeT, (ctx: BlockBuilderContext) => Blo
   gaps: buildGapsBlock,
   prediction: buildPredictionBlock,
   risks: buildRisksBlock,
+  robustness: buildRobustnessBlock,
   next_steps: () => { throw new Error("Use buildReadinessBlock separately"); },
 };
 
@@ -577,6 +784,7 @@ export function buildAllBlocks(
     "gaps",
     "prediction",
     "risks",
+    "robustness",
   ];
 
   const blocks: ReviewBlockT[] = [];

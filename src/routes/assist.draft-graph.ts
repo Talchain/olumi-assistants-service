@@ -510,6 +510,15 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const initialNodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
   const initialEdgeCount = Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0;
 
+  // DEBUG: Track node counts through pipeline stages
+  log.info({
+    stage: "1_llm_draft",
+    node_count: initialNodeCount,
+    edge_count: initialEdgeCount,
+    node_kinds: graph.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: LLM draft complete");
+
   if (initialNodeCount === 0) {
     emit(TelemetryEvents.GuardViolation, {
       violation_type: "empty_graph",
@@ -546,15 +555,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief);
   const enrichedGraph = enrichmentResult.graph;
 
-  if (enrichmentResult.factorsAdded > 0 || enrichmentResult.factorsEnhanced > 0) {
-    log.info({
-      factors_added: enrichmentResult.factorsAdded,
-      factors_enhanced: enrichmentResult.factorsEnhanced,
-      factors_skipped: enrichmentResult.factorsSkipped,
-      extraction_mode: enrichmentResult.extractionMode,
-      llm_success: enrichmentResult.llmSuccess,
-    }, "Factor enrichment completed");
-  }
+  // DEBUG: Track node counts after factor enrichment
+  log.info({
+    stage: "2_factor_enrichment",
+    node_count: enrichedGraph.nodes.length,
+    edge_count: enrichedGraph.edges.length,
+    factors_added: enrichmentResult.factorsAdded,
+    factors_enhanced: enrichmentResult.factorsEnhanced,
+    factors_skipped: enrichmentResult.factorsSkipped,
+    extraction_mode: enrichmentResult.extractionMode,
+    llm_success: enrichmentResult.llmSuccess,
+    node_kinds: enrichedGraph.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: Factor enrichment complete");
 
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
@@ -577,6 +590,17 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let candidate = stabiliseGraph(ensureDagAndPrune(enrichedGraph));
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
+
+  // DEBUG: Track node counts after first stabiliseGraph (DAG + prune + 20 node cap)
+  log.info({
+    stage: "3_first_stabilise",
+    node_count: candidate.nodes.length,
+    edge_count: candidate.edges.length,
+    had_cycles: hadCycles,
+    cycle_node_ids: cycleNodeIds.slice(0, 5),
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: First stabiliseGraph complete (20 node cap applied)");
 
   const first = await validateGraph(candidate);
   if (!first.ok) {
@@ -674,6 +698,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
   }
 
+  // DEBUG: Track node counts after goal merging and validation fixes
+  log.info({
+    stage: "4_goal_merge_and_fix",
+    node_count: candidate.nodes.length,
+    edge_count: candidate.edges.length,
+    single_goal_applied: graphValidation.fixes?.singleGoalApplied ?? false,
+    original_goal_count: graphValidation.fixes?.originalGoalCount,
+    merged_goal_ids: graphValidation.fixes?.mergedGoalIds,
+    outcome_beliefs_filled: graphValidation.fixes?.outcomeBeliefsFilled ?? 0,
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: Goal merge and validation fixes complete");
+
   const finalNodeIds = new Set<string>(candidate.nodes.map((n: any) => (n as any).id as string));
   let hadPrunedNodes = false;
   for (const id of initialNodeIds) {
@@ -695,6 +732,20 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
   const nodeCount = Array.isArray((candidate as any).nodes) ? (candidate as any).nodes.length : 0;
   const edgeCount = Array.isArray((candidate as any).edges) ? (candidate as any).edges.length : 0;
+
+  // DEBUG: Final pipeline summary with node delta analysis
+  log.info({
+    stage: "5_final_output",
+    initial_node_count: initialNodeCount,
+    final_node_count: nodeCount,
+    node_delta: nodeCount - initialNodeCount,
+    initial_edge_count: initialEdgeCount,
+    final_edge_count: edgeCount,
+    had_cycles: hadCycles,
+    had_pruned_nodes: hadPrunedNodes,
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: FINAL - Node count summary");
 
   if (nodeCount === 0) {
     emit(TelemetryEvents.GuardViolation, {
