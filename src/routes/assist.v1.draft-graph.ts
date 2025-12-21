@@ -355,6 +355,15 @@ export default async function route(app: FastifyInstance) {
 
     reply.code(statusCode);
 
+    // Log response delivery attempt for debugging premature close issues
+    log.info({
+      request_id: requestId,
+      returned_response: true,
+      status_code: statusCode,
+      latency_ms: Date.now() - start,
+      is_error: statusCode >= 400,
+    }, "Draft-graph response ready for delivery");
+
     // Transform to v2 schema if requested and response is successful
     if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
       const v2Body = transformResponseToV2(body as any);

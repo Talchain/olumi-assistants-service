@@ -42,6 +42,29 @@ const SSE_HEADERS = {
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
 
+// Time budget configuration - skip LLM repair if draft takes too long
+// This prevents client timeouts by ensuring faster responses
+const DEFAULT_DRAFT_BUDGET_MS = 25000; // 25 seconds total budget
+const DEFAULT_REPAIR_TIMEOUT_MS = 10000; // 10 seconds for repair call
+
+function getDraftBudgetMs(): number {
+  const envVal = process.env.CEE_DRAFT_BUDGET_MS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_DRAFT_BUDGET_MS;
+}
+
+function getRepairTimeoutMs(): number {
+  const envVal = process.env.CEE_REPAIR_TIMEOUT_MS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_REPAIR_TIMEOUT_MS;
+}
+
 // Lazy config access to avoid module-level initialization issues
 function getDeprecationSunset(): string {
   return config.server.deprecationSunset;
@@ -498,6 +521,24 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const { graph, rationales, usage: draftUsage } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
 
+  // Time budget check: skip LLM repair if we've used too much time on draft
+  const draftBudgetMs = getDraftBudgetMs();
+  const repairTimeoutMs = getRepairTimeoutMs();
+  const remainingBudget = draftBudgetMs - llmDuration;
+  const skipRepairDueToBudget = remainingBudget < repairTimeoutMs;
+
+  if (skipRepairDueToBudget) {
+    log.warn({
+      stage: "repair_budget_check",
+      draft_duration_ms: llmDuration,
+      budget_ms: draftBudgetMs,
+      remaining_ms: remainingBudget,
+      repair_timeout_ms: repairTimeoutMs,
+      skip_repair: true,
+      correlation_id: correlationId,
+    }, "Time budget exceeded - will skip LLM repair and use simple repair if needed");
+  }
+
   // V04: Emit upstream telemetry for successful calls
   emit(TelemetryEvents.DraftUpstreamSuccess, {
     status_code: upstreamStatusCode,
@@ -606,19 +647,44 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   if (!first.ok) {
     issues = first.violations;
 
-    // LLM-guided repair: use violations as hints
-    try {
-      emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+    // If time budget exceeded, skip LLM repair and use simple repair directly
+    if (skipRepairDueToBudget) {
+      log.info({
+        stage: "repair_skipped",
+        violation_count: issues?.length ?? 0,
+        reason: "budget_exceeded",
+        correlation_id: correlationId,
+      }, "Skipping LLM repair due to time budget - using simple repair");
 
-      // Get repair adapter (may be different provider than draft)
-      const repairAdapter = getAdapter('repair_graph');
-      const repairResult = await repairAdapter.repairGraph(
-        {
-          graph: candidate,
-          violations: issues || [],
-        },
-        { requestId: `repair_${Date.now()}`, timeoutMs: 10000 }
-      );
+      repairFallbackReason = "budget_exceeded";
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
+      const second = await validateGraph(repaired);
+      if (second.ok && second.normalized) {
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        issues = second.violations;
+      } else {
+        candidate = repaired;
+        issues = second.violations ?? issues;
+      }
+      emit(TelemetryEvents.RepairFallback, {
+        fallback: "simple_repair",
+        reason: "budget_exceeded",
+        error_type: "none",
+      });
+    } else {
+      // LLM-guided repair: use violations as hints
+      try {
+        emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+
+        // Get repair adapter (may be different provider than draft)
+        const repairAdapter = getAdapter('repair_graph');
+        const repairResult = await repairAdapter.repairGraph(
+          {
+            graph: candidate,
+            violations: issues || [],
+          },
+          { requestId: `repair_${Date.now()}`, timeoutMs: repairTimeoutMs }
+        );
 
       // Calculate repair cost separately (may use different provider/pricing)
       repairCost = calculateCost(repairAdapter.model, repairResult.usage.input_tokens, repairResult.usage.output_tokens);
@@ -674,6 +740,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
         error_type: errorType,
       });
     }
+    } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
     candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));
   }
@@ -850,6 +917,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
 
   emit(TelemetryEvents.DraftCompleted, telemetryData);
+
+  // Log successful response generation for debugging premature close issues
+  log.info({
+    correlation_id: correlationId,
+    returned_response: true,
+    status: "success",
+    node_count: nodeCount,
+    edge_count: edgeCount,
+    total_latency_ms: Date.now() - llmStartTime,
+    repair_skipped: skipRepairDueToBudget,
+    repair_fallback_reason: repairFallbackReason,
+  }, "Draft-graph pipeline complete - response ready for delivery");
 
   return {
     kind: "success",
