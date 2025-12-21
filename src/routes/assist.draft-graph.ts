@@ -277,18 +277,49 @@ export function sanitizeDraftGraphInput(
     passthrough.archetype_hint = archetypeHintValue;
   }
 
+  // Limit sim_* passthrough to prevent DOS via payload bloat
+  const MAX_SIM_FIELDS = 10;
+  const MAX_SIM_STRING_LENGTH = 500;
+  let simFieldCount = 0;
+
   for (const [key, value] of Object.entries(extrasSource)) {
     if (!key.startsWith("sim_")) continue;
     // Skip unsafe keys to prevent prototype pollution
     if (UNSAFE_KEYS.has(key)) continue;
+    // Enforce field count limit
+    if (simFieldCount >= MAX_SIM_FIELDS) {
+      log.warn({ key, limit: MAX_SIM_FIELDS }, "Ignoring sim_* field: count limit exceeded");
+      continue;
+    }
     const valueType = typeof value;
-    if (valueType === "string" || valueType === "number" || valueType === "boolean") {
+    if (valueType === "string") {
+      // Enforce string length limit
+      const strValue = value as string;
+      if (strValue.length > MAX_SIM_STRING_LENGTH) {
+        log.warn({ key, length: strValue.length, limit: MAX_SIM_STRING_LENGTH }, "Truncating sim_* string value");
+        Object.defineProperty(passthrough, key, {
+          value: strValue.slice(0, MAX_SIM_STRING_LENGTH),
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      } else {
+        Object.defineProperty(passthrough, key, {
+          value: strValue,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      }
+      simFieldCount++;
+    } else if (valueType === "number" || valueType === "boolean") {
       Object.defineProperty(passthrough, key, {
         value,
         writable: true,
         enumerable: true,
         configurable: true,
       });
+      simFieldCount++;
     }
   }
 

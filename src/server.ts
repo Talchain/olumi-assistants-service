@@ -44,7 +44,7 @@ import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter } from "./adapters/llm/router.js";
-import { SERVICE_VERSION } from "./version.js";
+import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
@@ -397,17 +397,53 @@ app.get("/healthz", async () => {
   // Prompt store health (degraded if unhealthy but not critical)
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
-  const isDegraded = promptStoreStatus.enabled && !promptStoreHealthy;
+
+  // Check auth configuration
+  const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
+  const hasHmacSecret = !!env.SHARE_SECRET;
+
+  // Check LLM configuration (provider-specific)
+  const llmProvider = adapter.name;
+  const hasLlmKey =
+    llmProvider === 'fixtures' ? true :
+    llmProvider === 'anthropic' ? !!env.ANTHROPIC_API_KEY :
+    llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
+    false;
+
+  // Determine degradation reasons
+  const degradationReasons: string[] = [];
+  if (promptStoreStatus.enabled && !promptStoreHealthy) {
+    degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (!hasAuthKeys && !hasHmacSecret) {
+    degradationReasons.push('no_auth_configured');
+  }
+  if (!hasLlmKey) {
+    degradationReasons.push('no_llm_key_configured');
+  }
+
+  const isDegraded = degradationReasons.length > 0;
 
   return {
     ok: true,
     degraded: isDegraded,
+    degraded_reasons: degradationReasons.length > 0 ? degradationReasons : undefined,
     service: "assistants",
     version: SERVICE_VERSION,
+    commit: GIT_COMMIT_SHORT,
+    commit_full: GIT_COMMIT_SHA,
     provider: adapter.name,
     model: adapter.model,
     limits_source: env.ENGINE_BASE_URL ? "engine" : "config",
     feature_flags: getAllFeatureFlags(),
+    auth: {
+      keys_configured: hasAuthKeys,
+      hmac_configured: hasHmacSecret,
+    },
+    llm: {
+      provider: llmProvider,
+      key_configured: hasLlmKey,
+    },
     cee: {
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
       config: ceeConfig,
@@ -431,7 +467,7 @@ app.get("/healthz", async () => {
     prompts: {
       enabled: promptStoreStatus.enabled,
       healthy: promptStoreHealthy,
-      degraded_reason: isDegraded ? 'prompt_store_unhealthy' : undefined,
+      degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
     },
   };
 });

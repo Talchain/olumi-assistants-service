@@ -528,6 +528,7 @@ export function buildCeeErrorResponse(
     nodeCount?: number;
     edgeCount?: number;
     missingKinds?: string[];
+    stage?: string;  // Pipeline stage where error occurred (for debugging)
   } = {}
 ): CEEErrorResponseV1 {
   const trace: CEETraceMeta = {};
@@ -549,6 +550,7 @@ export function buildCeeErrorResponse(
     node_count?: number;
     edge_count?: number;
     missing_kinds?: string[];
+    stage?: string;
   };
 
   let baseDetails: CeeErrorDetails | undefined = options.details
@@ -585,6 +587,13 @@ export function buildCeeErrorResponse(
     const details = ensureDetails();
     if (details.missing_kinds === undefined) {
       details.missing_kinds = options.missingKinds;
+    }
+  }
+  // Add stage to details for debugging
+  if (options.stage) {
+    const details = ensureDetails();
+    if (details.stage === undefined) {
+      details.stage = options.stage;
     }
   }
 
@@ -632,11 +641,14 @@ export async function finaliseCeeDraftResponse(
     const isTimeout = err.name === "UpstreamTimeoutError";
     const statusCode = isTimeout ? 504 : 500;
     const code: CEEErrorCode = isTimeout ? "CEE_TIMEOUT" : "CEE_INTERNAL_ERROR";
+    // Determine stage from error context if available
+    const stage = (err as any).stage || "llm_draft";
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
       latency_ms: Date.now() - start,
       error_code: code,
       http_status: statusCode,
+      stage,
     });
     logCeeCall({
       requestId,
@@ -651,6 +663,7 @@ export async function finaliseCeeDraftResponse(
       body: buildCeeErrorResponse(code, isTimeout ? "upstream timeout" : err.message || "internal error", {
         retryable: isTimeout,
         requestId,
+        stage,
       }),
     };
   }
@@ -658,6 +671,8 @@ export async function finaliseCeeDraftResponse(
   if (!pipelineResult || pipelineResult.kind === "error") {
     const envelope = pipelineResult?.envelope;
     const statusCode: number = pipelineResult?.statusCode ?? 500;
+    // Extract stage from pipeline result if available
+    const stage = pipelineResult?.stage || "pipeline";
 
     if (!envelope) {
       emit(TelemetryEvents.CeeDraftGraphFailed, {
@@ -665,6 +680,7 @@ export async function finaliseCeeDraftResponse(
         latency_ms: Date.now() - start,
         error_code: "CEE_INTERNAL_ERROR" as CEEErrorCode,
         http_status: statusCode,
+        stage,
       });
       logCeeCall({
         requestId,
@@ -679,6 +695,7 @@ export async function finaliseCeeDraftResponse(
         body: buildCeeErrorResponse("CEE_INTERNAL_ERROR", "unexpected pipeline error", {
           retryable: false,
           requestId,
+          stage,
         }),
       };
     }
@@ -717,6 +734,7 @@ export async function finaliseCeeDraftResponse(
       latency_ms: Date.now() - start,
       error_code: ceeCode,
       http_status: statusCode,
+      stage,
     });
     logCeeCall({
       requestId,
@@ -733,6 +751,7 @@ export async function finaliseCeeDraftResponse(
         retryable,
         requestId,
         details: envelope.details as Record<string, unknown> | undefined,
+        stage,
       }),
     };
   }
