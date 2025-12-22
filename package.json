@@ -46,8 +46,8 @@
     "demo:build": "cd examples/react-sse-client && pnpm build"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.68.0",
-    "@fastify/compress": "^8.3.0",
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^10.1.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
@@ -57,7 +57,7 @@
     "fastify-plugin": "^5.1.0",
     "hot-shots": "^11.2.0",
     "ioredis": "^5.8.2",
-    "openai": "^6.7.0",
+    "openai": "^6.15.0",
     "papaparse": "^5.4.1",
     "pdf-parse": "^1.1.1",
     "pino": "^9.3.1",
