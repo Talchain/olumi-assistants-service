@@ -47,6 +47,14 @@ export const StructuredProvenance = z.object({
 });
 
 /**
+ * Effect direction for causal edges.
+ * Indicates whether increasing the source increases or decreases the target.
+ * - "positive": Increasing source increases target (e.g., Marketing → Revenue)
+ * - "negative": Increasing source decreases target (e.g., Price → Demand)
+ */
+export const EffectDirection = z.enum(["positive", "negative"]);
+
+/**
  * Raw edge input schema - accepts both from/to and source/target formats.
  * Used for parsing input; see EdgeInput for the flexible input type.
  */
@@ -62,7 +70,9 @@ const EdgeInput = z.object({
   belief: z.number().min(0).max(1).optional(),
   // Support both structured and legacy string provenance for migration
   provenance: z.union([StructuredProvenance, z.string().min(1)]).optional(),
-  provenance_source: ProvenanceSource.optional()
+  provenance_source: ProvenanceSource.optional(),
+  // Effect direction: LLM outputs directly, fallback to heuristic inference if missing
+  effect_direction: EffectDirection.optional()
 }).refine(
   (edge) => (edge.from && edge.to) || (edge.source && edge.target),
   { message: "Edge must have either from/to or source/target fields" }
@@ -104,6 +114,7 @@ export type EdgeT = z.infer<typeof Edge>;
 export type NodeT = z.infer<typeof Node>;
 export type FactorDataT = z.infer<typeof FactorData>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
+export type EffectDirectionT = z.infer<typeof EffectDirection>;
 
 /**
  * Check if a graph contains any legacy string provenance (for deprecation tracking)
