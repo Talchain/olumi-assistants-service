@@ -332,6 +332,14 @@ export const TelemetryEvents = {
   IslSynthesisRequested: "cee.isl_synthesis.requested",
   IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
   IslSynthesisFailed: "cee.isl_synthesis.failed",
+
+  // Boundary logging events (observability v1)
+  BoundaryRequest: "boundary.request",
+  BoundaryResponse: "boundary.response",
+
+  // Performance timing events (observability v2)
+  LlmCall: "llm.call",
+  DownstreamCall: "downstream.call",
 } as const;
 
 /**
@@ -1522,6 +1530,51 @@ export function emit(event: string, data: Event) {
             reason: String((eventData.reason as string) || "unknown"),
             task_id: String((eventData.taskId as string) || "all"),
           });
+          break;
+        }
+
+        // Performance timing events (observability v2)
+        case TelemetryEvents.LlmCall: {
+          datadogClient.increment("llm.call", 1, {
+            step: String((eventData.step as string) || "unknown"),
+            model: String((eventData.model as string) || "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
+          });
+          if (typeof eventData.elapsed_ms === "number") {
+            datadogClient.histogram("llm.call.latency_ms", eventData.elapsed_ms as number, {
+              step: String((eventData.step as string) || "unknown"),
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.tokens_prompt === "number") {
+            datadogClient.histogram("llm.call.tokens_prompt", eventData.tokens_prompt as number, {
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.tokens_completion === "number") {
+            datadogClient.histogram("llm.call.tokens_completion", eventData.tokens_completion as number, {
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          break;
+        }
+
+        case TelemetryEvents.DownstreamCall: {
+          datadogClient.increment("downstream.call", 1, {
+            target: String((eventData.target as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+          });
+          if (typeof eventData.elapsed_ms === "number") {
+            datadogClient.histogram("downstream.call.latency_ms", eventData.elapsed_ms as number, {
+              target: String((eventData.target as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.status === "number") {
+            datadogClient.increment("downstream.call.status", 1, {
+              target: String((eventData.target as string) || "unknown"),
+              status: String(eventData.status),
+            });
+          }
           break;
         }
 

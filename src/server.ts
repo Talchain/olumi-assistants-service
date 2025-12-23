@@ -50,6 +50,7 @@ import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/reques
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
+import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
@@ -246,8 +247,11 @@ await app.register(rateLimit, {
   // Note: authPlugin uses getRequestId() which now has correct ID from above hook
   await app.register(authPlugin);
 
-  // Response hash: Add X-Olumi-Response-Hash header (v1.5 PR N)
+  // Response hash: Add x-olumi-response-hash header (v1.5 PR N)
   await app.register(responseHashPlugin);
+
+  // Boundary logging: Service headers + boundary events (observability v1)
+  await app.register(boundaryLoggingPlugin);
 
   // Response hook: Add X-Request-Id header to every response
   app.addHook("onSend", async (request, reply, payload) => {

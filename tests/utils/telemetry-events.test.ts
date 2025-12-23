@@ -323,6 +323,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeReviewRequested: "cee.review.requested",
         CeeReviewSucceeded: "cee.review.succeeded",
         CeeReviewFailed: "cee.review.failed",
+
+        // Boundary logging events (Observability v1)
+        BoundaryRequest: "boundary.request",
+        BoundaryResponse: "boundary.response",
+
+        // Performance timing events (Observability v2)
+        LlmCall: "llm.call",
+        DownstreamCall: "downstream.call",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -348,7 +356,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|isl_synthesis|ask|review)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|isl_synthesis|ask|review)\.|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -680,6 +688,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.approval.required": [TelemetryEvents.PromptApprovalRequired],
         "prompt.approval.granted": [TelemetryEvents.PromptApprovalGranted],
         "prompt.approval.rejected": [TelemetryEvents.PromptApprovalRejected],
+
+        // Performance timing events (Observability v2)
+        "llm.call": [TelemetryEvents.LlmCall],
+        "llm.call.latency_ms": [TelemetryEvents.LlmCall],
+        "llm.call.tokens_prompt": [TelemetryEvents.LlmCall],
+        "llm.call.tokens_completion": [TelemetryEvents.LlmCall],
+        "downstream.call": [TelemetryEvents.DownstreamCall],
+        "downstream.call.latency_ms": [TelemetryEvents.DownstreamCall],
+        "downstream.call.status": [TelemetryEvents.DownstreamCall],
       };
 
       // Verify all events are documented, except debug-only events
@@ -725,6 +742,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeGraphValidation,
         TelemetryEvents.CeeGraphGoalsMerged,
         TelemetryEvents.CeeGraphSizeExceeded,
+        // Boundary logging events (observability, no Datadog counters initially)
+        TelemetryEvents.BoundaryRequest,
+        TelemetryEvents.BoundaryResponse,
       ];
 
       for (const event of allEvents) {
@@ -1020,6 +1040,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.review.requested",
         "cee.review.succeeded",
         "cee.review.failed",
+
+        // Boundary logging events (Observability v1)
+        "boundary.request",
+        "boundary.response",
+
+        // Performance timing events (Observability v2)
+        "llm.call",
+        "downstream.call",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

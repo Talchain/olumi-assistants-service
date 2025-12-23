@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
-import { hashResponse } from "../../src/utils/response-hash.js";
+import { computeResponseHash, RESPONSE_HASH_LENGTH } from "../../src/utils/response-hash.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { setTestSink, TelemetryEvents } from "../../src/utils/telemetry.js";
 
 describe("Response Hash Integration", () => {
   let app: FastifyInstance;
@@ -35,7 +36,7 @@ describe("Response Hash Integration", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-    expect(response.headers["x-olumi-response-hash"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
   });
 
   it("should add X-Olumi-Response-Hash header to /assist/draft-graph", async () => {
@@ -52,7 +53,7 @@ describe("Response Hash Integration", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-    expect(response.headers["x-olumi-response-hash"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
   });
 
   it("should produce deterministic hash for identical responses", async () => {
@@ -86,7 +87,7 @@ describe("Response Hash Integration", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    const expectedHash = hashResponse(body);
+    const expectedHash = computeResponseHash(body);
     const actualHash = response.headers["x-olumi-response-hash"];
 
     expect(actualHash).toBe(expectedHash);
@@ -106,7 +107,7 @@ describe("Response Hash Integration", () => {
 
     expect(response.statusCode).toBe(400); // Bad request
     expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-    expect(response.headers["x-olumi-response-hash"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
   });
 
   it("should not add hash to non-JSON responses", async () => {
@@ -147,7 +148,37 @@ describe("Response Hash Integration", () => {
       });
 
       expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-      expect(response.headers["x-olumi-response-hash"]).toMatch(/^[a-f0-9]{64}$/);
+      expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
+    }
+  });
+
+  it("should have boundary.response.response_hash match X-Olumi-Response-Hash header", async () => {
+    // Set up telemetry capture
+    const emittedEvents: Array<{ event: string; data: Record<string, unknown> }> = [];
+    setTestSink((event, data) => {
+      emittedEvents.push({ event, data });
+    });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/healthz",
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const hashHeader = response.headers["x-olumi-response-hash"];
+      expect(hashHeader).toBeDefined();
+
+      // Find the boundary.response event
+      const boundaryResponse = emittedEvents.find(
+        (e) => e.event === TelemetryEvents.BoundaryResponse
+      );
+
+      expect(boundaryResponse).toBeDefined();
+      expect(boundaryResponse?.data.response_hash).toBe(hashHeader);
+    } finally {
+      setTestSink(null);
     }
   });
 });

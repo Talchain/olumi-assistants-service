@@ -1,17 +1,19 @@
 /**
  * Response Hash Plugin
  *
- * Adds X-Olumi-Response-Hash header to all API responses for:
+ * Adds x-olumi-response-hash header to all API responses for:
  * - Response integrity verification
  * - Cache validation
  * - Replay detection
+ * - Cross-service correlation
  *
  * Hash is deterministic: same response always produces same hash
+ * Uses canonical JSON (sorted keys, no undefined) for consistency with UI.
  */
 
 import type { FastifyInstance, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
-import { hashResponse, shortHash } from "../utils/response-hash.js";
+import { computeResponseHash } from "../utils/response-hash.js";
 import { log } from "../utils/telemetry.js";
 
 /**
@@ -21,9 +23,11 @@ async function responseHashPluginImpl(fastify: FastifyInstance) {
   // Hook: onSend (before sending response to client)
   // This runs after serialization, so we can hash the final response body
   fastify.addHook("onSend", async (_request, reply: FastifyReply, payload: unknown) => {
-    // Skip for non-JSON responses (e.g., SSE streams)
+    // Skip for non-JSON responses (e.g., SSE streams, NDJSON)
+    // Mark as skipped so boundary.response can differentiate missing vs skipped hashes
     const contentType = reply.getHeader("content-type");
     if (typeof contentType === "string" && !contentType.includes("application/json")) {
+      (reply as any).responseHashSkipped = true;
       return payload;
     }
 
@@ -45,15 +49,18 @@ async function responseHashPluginImpl(fastify: FastifyInstance) {
       return payload;
     }
 
-    // Generate hash (canonicalizes JSON for determinism)
-    const hash = hashResponse(body);
+    // Generate 12-char hash (canonicalizes JSON for determinism)
+    const hash = computeResponseHash(body);
 
     // Add header
-    reply.header("X-Olumi-Response-Hash", hash);
+    reply.header("x-olumi-response-hash", hash);
 
-    // Log for debugging (short hash to reduce noise)
+    // Store hash for boundary logging (will be picked up by onResponse hook)
+    (reply as any).responseHash = hash;
+
+    // Log for debugging
     log.debug({
-      response_hash: shortHash(hash),
+      response_hash: hash,
       path: _request.url,
       status: reply.statusCode,
     }, "Response hash computed");
