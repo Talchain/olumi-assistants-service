@@ -6,16 +6,14 @@
 
 import { z } from "zod";
 import { Graph } from "./graph.js";
+import { SAFE_REQUEST_ID_PATTERN, isValidRequestId } from "../utils/request-id.js";
+
+// Re-export for consumers that import from this module
+export { SAFE_REQUEST_ID_PATTERN, isValidRequestId };
 
 // =============================================================================
 // Request Schemas
 // =============================================================================
-
-/**
- * Safe request ID pattern - alphanumeric with dots, underscores, hyphens
- * Same pattern as /ask endpoint for consistency
- */
-export const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 
 export const SafeRequestId = z.string().min(1).max(64).regex(SAFE_REQUEST_ID_PATTERN, {
   message: "Request ID must be 1-64 chars, alphanumeric with ._-",
@@ -514,14 +512,6 @@ export type ReviewErrorResponseT = z.infer<typeof ReviewErrorResponse>;
 // =============================================================================
 // Validation Helpers
 // =============================================================================
-
-/**
- * Check if request ID matches safe pattern
- */
-export function isValidRequestId(id: string | undefined | null): boolean {
-  if (!id || typeof id !== "string") return false;
-  return SAFE_REQUEST_ID_PATTERN.test(id);
-}
 
 /**
  * Validate review request and return parsed result or error

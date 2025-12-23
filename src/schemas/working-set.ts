@@ -10,25 +10,17 @@
 
 import { z } from "zod";
 import { Graph } from "./graph.js";
+import { SAFE_REQUEST_ID_PATTERN, isValidRequestId } from "../utils/request-id.js";
+
+// Re-export for consumers that import from this module
+export { SAFE_REQUEST_ID_PATTERN };
+
+// Alias for backwards compatibility
+export const isRequestIdSafe = isValidRequestId;
 
 // ============================================================================
 // Request ID Validation
 // ============================================================================
-
-/**
- * Safe charset pattern for request IDs.
- * Allows alphanumeric, dots, underscores, and hyphens.
- * Must be 1-64 characters to prevent log injection attacks.
- */
-export const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
-
-/**
- * Validate that a request ID uses safe characters.
- * Returns true if safe, false if potentially dangerous.
- */
-export function isRequestIdSafe(id: string): boolean {
-  return SAFE_REQUEST_ID_PATTERN.test(id);
-}
 
 /**
  * Request ID schema - accepts any safe charset string (not just UUID).
