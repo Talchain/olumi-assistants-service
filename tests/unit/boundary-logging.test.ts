@@ -10,6 +10,7 @@ import { boundaryLoggingPlugin } from "../../src/plugins/boundary-logging.js";
 import { responseHashPlugin } from "../../src/plugins/response-hash.js";
 import { attachRequestId } from "../../src/utils/request-id.js";
 import { setTestSink, TelemetryEvents } from "../../src/utils/telemetry.js";
+import { recordDownstreamCall } from "../../src/utils/request-timing.js";
 
 describe("boundaryLoggingPlugin", () => {
   let app: FastifyInstance;
@@ -47,6 +48,23 @@ describe("boundaryLoggingPlugin", () => {
     app.get("/test/stream", async (_request, reply) => {
       reply.header("content-type", "text/event-stream");
       return reply.send("data: test\n\n");
+    });
+
+    // Add a route that records downstream calls for testing
+    app.get("/test/with-downstream", async (request) => {
+      recordDownstreamCall(request, "isl", 150, {
+        operation: "synthesize",
+        status: 200,
+        payload_hash: "abc123",
+        response_hash: "def456",
+      });
+      recordDownstreamCall(request, "vector-db", 50, {
+        operation: "query",
+        status: 200,
+        payload_hash: "ghi789",
+        response_hash: "jkl012",
+      });
+      return { message: "ok with downstream" };
     });
 
     await app.ready();
@@ -326,6 +344,153 @@ describe("boundaryLoggingPlugin", () => {
 
       expect(boundaryResponse?.data.response_hash_skipped).toBeUndefined();
       expect(boundaryResponse?.data.response_hash).toBeDefined();
+    });
+  });
+
+  describe("x-olumi-trace-received header", () => {
+    it("should echo back request-id and payload-hash when both provided", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/test",
+        headers: {
+          "x-request-id": "upstream-req-123",
+          "x-olumi-payload-hash": "upstream-hash-456",
+        },
+      });
+
+      expect(response.headers["x-olumi-trace-received"]).toBe(
+        "upstream-req-123:upstream-hash-456"
+      );
+    });
+
+    it("should use 'none' when request-id is missing", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/test",
+        headers: {
+          "x-olumi-payload-hash": "hash-only",
+        },
+      });
+
+      expect(response.headers["x-olumi-trace-received"]).toBe("none:hash-only");
+    });
+
+    it("should use 'none' when payload-hash is missing", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test",
+        headers: {
+          "x-request-id": "req-only",
+        },
+      });
+
+      expect(response.headers["x-olumi-trace-received"]).toBe("req-only:none");
+    });
+
+    it("should use 'none:none' when both are missing", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test",
+      });
+
+      expect(response.headers["x-olumi-trace-received"]).toBe("none:none");
+    });
+  });
+
+  describe("x-olumi-downstream-calls header", () => {
+    it("should include downstream calls header when calls are recorded", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test/with-downstream",
+      });
+
+      const header = response.headers["x-olumi-downstream-calls"];
+      expect(header).toBeDefined();
+      expect(header).toContain("isl:200:150:abc123:def456");
+      expect(header).toContain("vector-db:200:50:ghi789:jkl012");
+    });
+
+    it("should NOT include downstream calls header when no calls recorded", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test",
+      });
+
+      expect(response.headers["x-olumi-downstream-calls"]).toBeUndefined();
+    });
+  });
+
+  describe("received_from_header in boundary.request", () => {
+    it("should include received_from_header when x-request-id is provided", async () => {
+      await app.inject({
+        method: "GET",
+        url: "/test",
+        headers: {
+          "x-request-id": "caller-request-id-789",
+        },
+      });
+
+      const boundaryRequest = emittedEvents.find(
+        (e) => e.event === TelemetryEvents.BoundaryRequest
+      );
+
+      expect(boundaryRequest?.data.received_from_header).toBe("caller-request-id-789");
+    });
+
+    it("should have undefined received_from_header when x-request-id is not provided", async () => {
+      await app.inject({
+        method: "GET",
+        url: "/test",
+      });
+
+      const boundaryRequest = emittedEvents.find(
+        (e) => e.event === TelemetryEvents.BoundaryRequest
+      );
+
+      expect(boundaryRequest?.data.received_from_header).toBeUndefined();
+    });
+  });
+
+  describe("downstream array in boundary.response", () => {
+    it("should include downstream array with full metadata", async () => {
+      await app.inject({
+        method: "GET",
+        url: "/test/with-downstream",
+      });
+
+      const boundaryResponse = emittedEvents.find(
+        (e) => e.event === TelemetryEvents.BoundaryResponse
+      );
+
+      expect(boundaryResponse?.data.downstream).toBeDefined();
+      expect(boundaryResponse?.data.downstream).toHaveLength(2);
+
+      // First downstream call
+      expect(boundaryResponse?.data.downstream[0].target).toBe("isl");
+      expect(boundaryResponse?.data.downstream[0].status).toBe(200);
+      expect(boundaryResponse?.data.downstream[0].elapsed_ms).toBe(150);
+      expect(boundaryResponse?.data.downstream[0].payload_hash).toBe("abc123");
+      expect(boundaryResponse?.data.downstream[0].response_hash).toBe("def456");
+
+      // Second downstream call
+      expect(boundaryResponse?.data.downstream[1].target).toBe("vector-db");
+      expect(boundaryResponse?.data.downstream[1].status).toBe(200);
+      expect(boundaryResponse?.data.downstream[1].elapsed_ms).toBe(50);
+      expect(boundaryResponse?.data.downstream[1].payload_hash).toBe("ghi789");
+      expect(boundaryResponse?.data.downstream[1].response_hash).toBe("jkl012");
+    });
+
+    it("should have undefined downstream when no downstream calls recorded", async () => {
+      await app.inject({
+        method: "GET",
+        url: "/test",
+      });
+
+      const boundaryResponse = emittedEvents.find(
+        (e) => e.event === TelemetryEvents.BoundaryResponse
+      );
+
+      expect(boundaryResponse?.data.downstream).toBeUndefined();
     });
   });
 });

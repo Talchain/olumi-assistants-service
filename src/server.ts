@@ -149,6 +149,13 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+    exposedHeaders: [
+      "x-olumi-service",
+      "x-olumi-service-build",
+      "x-olumi-response-hash",
+      "x-olumi-trace-received",
+      "x-olumi-downstream-calls",
+    ],
   });
 
   // Diagnostic: log incoming origin headers (temporary for debugging CORS issues)

@@ -37,6 +37,10 @@ export interface DownstreamCallTiming {
   operation?: string;
   elapsed_ms: number;
   status?: number;
+  /** Payload hash sent to downstream service */
+  payload_hash?: string;
+  /** Response hash received from downstream service */
+  response_hash?: string;
 }
 
 /**
@@ -136,29 +140,49 @@ export function recordLlmCall(
 }
 
 /**
+ * Downstream call metadata for cross-service tracing
+ */
+export interface DownstreamCallMetadata {
+  operation?: string;
+  status?: number;
+  payload_hash?: string;
+  response_hash?: string;
+}
+
+/**
  * Record a downstream service call timing
  *
  * @param request - Fastify request
  * @param target - Target service (e.g., "isl", "vector-db")
- * @param operation - Operation name (optional)
  * @param elapsed_ms - Time taken in milliseconds
- * @param status - HTTP status code (optional)
+ * @param metadata - Optional metadata (operation, status, payload_hash, response_hash)
  */
 export function recordDownstreamCall(
   request: FastifyRequest,
   target: string,
   elapsed_ms: number,
-  operation?: string,
+  metadata?: DownstreamCallMetadata | string,
   status?: number
 ): void {
   const context = getOrCreateTiming(request);
   const requestId = getRequestId(request);
 
+  // Handle backward compatibility: metadata can be a string (operation) or object
+  let meta: DownstreamCallMetadata = {};
+  if (typeof metadata === "string") {
+    meta.operation = metadata;
+    meta.status = status;
+  } else if (metadata) {
+    meta = metadata;
+  }
+
   const timing: DownstreamCallTiming = {
     target,
-    operation,
+    operation: meta.operation,
     elapsed_ms,
-    status,
+    status: meta.status,
+    payload_hash: meta.payload_hash,
+    response_hash: meta.response_hash,
   };
 
   context.downstream_calls.push(timing);
@@ -167,9 +191,11 @@ export function recordDownstreamCall(
   emit(TelemetryEvents.DownstreamCall, {
     request_id: requestId,
     target,
-    operation,
+    operation: meta.operation,
     elapsed_ms,
-    status,
+    status: meta.status,
+    payload_hash: meta.payload_hash,
+    response_hash: meta.response_hash,
   });
 }
 

@@ -19,7 +19,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
 import { getRequestId } from "../utils/request-id.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
-import { getTimingSummary } from "../utils/request-timing.js";
+import { getTimingSummary, getTiming, type DownstreamCallTiming } from "../utils/request-timing.js";
 import { GIT_COMMIT_SHORT } from "../version.js";
 
 /**
@@ -34,6 +34,9 @@ const PAYLOAD_HASH_HEADER = "x-olumi-payload-hash";
 const CLIENT_BUILD_HEADER = "x-olumi-client-build";
 const SERVICE_HEADER = "x-olumi-service";
 const SERVICE_BUILD_HEADER = "x-olumi-service-build";
+const TRACE_RECEIVED_HEADER = "x-olumi-trace-received";
+const DOWNSTREAM_CALLS_HEADER = "x-olumi-downstream-calls";
+const REQUEST_ID_HEADER = "x-request-id";
 
 /**
  * Extract payload hash from request headers
@@ -51,6 +54,17 @@ function getPayloadHash(request: FastifyRequest): string | undefined {
  */
 function getClientBuild(request: FastifyRequest): string | undefined {
   const header = request.headers[CLIENT_BUILD_HEADER];
+  if (typeof header === "string" && header.length > 0) {
+    return header;
+  }
+  return undefined;
+}
+
+/**
+ * Extract incoming request-id header (from upstream caller)
+ */
+function getIncomingRequestId(request: FastifyRequest): string | undefined {
+  const header = request.headers[REQUEST_ID_HEADER];
   if (typeof header === "string" && header.length > 0) {
     return header;
   }
@@ -84,6 +98,25 @@ function getBodyMeta(request: FastifyRequest): { payload_bytes?: number; payload
 }
 
 /**
+ * Format downstream calls for the x-olumi-downstream-calls header
+ *
+ * Format: service:status:elapsed_ms:payloadHash:responseHash;...
+ * Example: isl:200:150:abc123:def456;vector-db:200:50:none:none
+ */
+function formatDownstreamCallsHeader(calls: DownstreamCallTiming[]): string {
+  return calls
+    .map((call) => {
+      const service = call.target;
+      const status = call.status ?? 0;
+      const elapsed = call.elapsed_ms;
+      const payloadHash = (call as any).payload_hash || "none";
+      const responseHash = (call as any).response_hash || "none";
+      return `${service}:${status}:${elapsed}:${payloadHash}:${responseHash}`;
+    })
+    .join(";");
+}
+
+/**
  * Boundary logging plugin (internal implementation)
  */
 async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
@@ -92,12 +125,14 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     const requestId = getRequestId(request);
     const payloadHash = getPayloadHash(request);
     const clientBuild = getClientBuild(request);
+    const incomingRequestId = getIncomingRequestId(request);
     const bodyMeta = getBodyMeta(request);
 
     // Store for later use in boundary.response (preserves client metadata)
     (request as any).boundaryMeta = {
       payloadHash,
       clientBuild,
+      incomingRequestId,
       startTime: Date.now(),
     };
 
@@ -112,14 +147,29 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
       client_build: clientBuild,
       payload_bytes: bodyMeta.payload_bytes,
       payload_keys: bodyMeta.payload_keys,
+      // Include received header for cross-service tracing
+      received_from_header: incomingRequestId,
     });
   });
 
   // Hook: onSend - add service headers to all responses
-  fastify.addHook("onSend", async (_request, reply: FastifyReply, payload) => {
+  fastify.addHook("onSend", async (request: FastifyRequest, reply: FastifyReply, payload) => {
     // Add service identification headers to ALL responses
     reply.header(SERVICE_HEADER, SERVICE_NAME);
     reply.header(SERVICE_BUILD_HEADER, GIT_COMMIT_SHORT);
+
+    // Add trace-received header (echo back received trace info)
+    const boundaryMeta = (request as any).boundaryMeta || {};
+    const incomingRequestId = boundaryMeta.incomingRequestId || "none";
+    const incomingPayloadHash = boundaryMeta.payloadHash || "none";
+    reply.header(TRACE_RECEIVED_HEADER, `${incomingRequestId}:${incomingPayloadHash}`);
+
+    // Add downstream-calls header (summary of downstream calls made)
+    const timingContext = getTiming(request);
+    if (timingContext && timingContext.downstream_calls.length > 0) {
+      const downstreamHeader = formatDownstreamCallsHeader(timingContext.downstream_calls);
+      reply.header(DOWNSTREAM_CALLS_HEADER, downstreamHeader);
+    }
 
     return payload;
   });
@@ -138,6 +188,16 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     // Get timing summary (set by request-timing utility)
     const timingSummary = getTimingSummary(request);
 
+    // Get raw timing context for downstream array
+    const timingContext = getTiming(request);
+    const downstreamArray = timingContext?.downstream_calls.map((call) => ({
+      target: call.target,
+      status: call.status,
+      elapsed_ms: call.elapsed_ms,
+      payload_hash: (call as any).payload_hash,
+      response_hash: (call as any).response_hash,
+    }));
+
     // Emit boundary.response event with preserved client metadata
     emit(TelemetryEvents.BoundaryResponse, {
       timestamp: new Date().toISOString(),
@@ -153,6 +213,8 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
       client_build: boundaryMeta.clientBuild,
       // Performance timing summary (observability v2)
       timings: timingSummary,
+      // Downstream calls with full metadata for cross-service tracing
+      downstream: downstreamArray,
     });
   });
 }
