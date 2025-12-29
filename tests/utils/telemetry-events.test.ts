@@ -309,6 +309,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Schema v2 Transform events (v2.3)
         SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
 
+        // Schema v3 Transform events (v3.0)
+        SchemaV3TransformComplete: "cee.schema_v3.transform_complete",
+        InterventionExtraction: "cee.intervention_extraction",
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        EdgeStrengthClamped: "cee.edge.strength_clamped",
+        EdgeStrengthNegligible: "cee.edge.strength_negligible",
+        EdgeStrengthLow: "cee.edge.strength_low",
+
+        // Analysis-Ready Output events (P0)
+        AnalysisReadyBuilt: "cee.analysis_ready.built",
+        AnalysisReadyValidationFailed: "cee.analysis_ready.validation_failed",
+
         // ISL Synthesis events (v2.3)
         IslSynthesisRequested: "cee.isl_synthesis.requested",
         IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
@@ -356,7 +369,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|isl_synthesis|ask|review)\.|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready)\.|cee\.intervention_extraction$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -653,6 +666,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Schema v2 Transform events (v2.3)
         "cee.schema_v2.transform_complete": [TelemetryEvents.SchemaV2TransformComplete],
 
+        // Schema v3 Transform events (v3.0)
+        "cee.schema_v3.transform_complete": [TelemetryEvents.SchemaV3TransformComplete],
+        "cee.intervention_extraction": [TelemetryEvents.InterventionExtraction],
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        "cee.edge.strength_clamped": [TelemetryEvents.EdgeStrengthClamped],
+        "cee.edge.strength_negligible": [TelemetryEvents.EdgeStrengthNegligible],
+        "cee.edge.strength_low": [TelemetryEvents.EdgeStrengthLow],
+
         // ISL Synthesis events (v2.3)
         "cee.isl_synthesis.requested": [TelemetryEvents.IslSynthesisRequested],
         "cee.isl_synthesis.succeeded": [TelemetryEvents.IslSynthesisSucceeded],
@@ -745,6 +767,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Boundary logging events (observability, no Datadog counters initially)
         TelemetryEvents.BoundaryRequest,
         TelemetryEvents.BoundaryResponse,
+        // Analysis-Ready Output events (P0 - diagnostic only)
+        TelemetryEvents.AnalysisReadyBuilt,
+        TelemetryEvents.AnalysisReadyValidationFailed,
       ];
 
       for (const event of allEvents) {
@@ -1025,6 +1050,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Schema v2 Transform events (v2.3)
         "cee.schema_v2.transform_complete",
+
+        // Schema v3 Transform events (v3.0)
+        "cee.schema_v3.transform_complete",
+        "cee.intervention_extraction",
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        "cee.edge.strength_clamped",
+        "cee.edge.strength_negligible",
+        "cee.edge.strength_low",
+
+        // Analysis-Ready Output events (P0)
+        "cee.analysis_ready.built",
+        "cee.analysis_ready.validation_failed",
 
         // ISL Synthesis events (v2.3)
         "cee.isl_synthesis.requested",

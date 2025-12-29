@@ -25,6 +25,7 @@ export {
   transformResponseToV2,
   isValidSchemaVersion,
   parseSchemaVersion,
+  type SchemaVersion,
   type V1Node,
   type V1Edge,
   type V1Graph,
@@ -36,3 +37,28 @@ export {
   type V2DraftGraphResponse,
   type V2ObservedState,
 } from "./schema-v2.js";
+
+export {
+  transformNodeToV3,
+  transformEdgeToV3,
+  transformGraphToV3,
+  transformResponseToV3,
+  validateStrictModeV3,
+  needsUserMapping,
+  getV3ResponseSummary,
+  type V3DraftGraphResponse,
+  type V3TransformContext,
+  type V3ResponseSummary,
+} from "./schema-v3.js";
+
+export {
+  transformOptionToAnalysisReady,
+  buildAnalysisReadyPayload,
+  validateAnalysisReadyPayload,
+  validateAndLogAnalysisReady,
+  getAnalysisReadySummary,
+  type AnalysisReadyContext,
+  type AnalysisReadyValidationError,
+  type AnalysisReadyValidationResult,
+  type AnalysisReadySummary,
+} from "./analysis-ready.js";

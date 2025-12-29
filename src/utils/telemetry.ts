@@ -328,6 +328,19 @@ export const TelemetryEvents = {
   // Schema v2 Transform events (v2.3)
   SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
 
+  // Schema v3 Transform events (v3.0)
+  SchemaV3TransformComplete: "cee.schema_v3.transform_complete",
+  InterventionExtraction: "cee.intervention_extraction",
+
+  // Edge coefficient clamping events (P1-CEE-2)
+  EdgeStrengthClamped: "cee.edge.strength_clamped",
+  EdgeStrengthNegligible: "cee.edge.strength_negligible",
+  EdgeStrengthLow: "cee.edge.strength_low",
+
+  // Analysis-Ready Output events (P0)
+  AnalysisReadyBuilt: "cee.analysis_ready.built",
+  AnalysisReadyValidationFailed: "cee.analysis_ready.validation_failed",
+
   // ISL Synthesis events (v2.3)
   IslSynthesisRequested: "cee.isl_synthesis.requested",
   IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
