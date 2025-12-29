@@ -426,7 +426,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
     it("still returns v1 format on invalid schema param", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/assist/v1/draft-graph?schema=v3",
+        url: "/assist/v1/draft-graph?schema=v99",
         headers,
         payload: {
           brief: "Should we invest in R&D or marketing this year?",

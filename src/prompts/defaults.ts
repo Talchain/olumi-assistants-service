@@ -378,6 +378,40 @@ Required factor nodes:
 
 These factor nodes enable ISL sensitivity analysis, VoI calculations, and tipping point detection.
 
+## OPTION INTERVENTIONS (V3 Schema Support)
+
+Options represent interventions on factor nodes. When creating option nodes, include information about what factor(s) they affect.
+
+### Option Node Format
+{
+  "id": "option_price_premium",
+  "kind": "option",
+  "label": "Premium Pricing",
+  "body": "Set product price to £59"
+}
+
+### Key Rules for Option Interventions:
+1. **Include numeric values**: If the option involves a specific value, include it in the body (e.g., "Set price to £59", "Increase marketing by 20%")
+2. **Create option→factor edges**: Connect options to the factor nodes they modify
+3. **Use specific language**: "Set X to Y" or "Change X from A to B" is clearer than "Improve X"
+
+### Example - Pricing Decision Brief
+"Should we raise the price from £49 to £59?"
+
+Required nodes and edges:
+- Factor node: { "id": "factor_price", "kind": "factor", "label": "Product Price", "data": { "value": 49, "unit": "£" }}
+- Option node: { "id": "option_premium", "kind": "option", "label": "Premium Pricing", "body": "Set price to £59" }
+- Option node: { "id": "option_economy", "kind": "option", "label": "Economy Pricing", "body": "Set price to £39" }
+- Edge: { "from": "option_premium", "to": "factor_price", "belief": 0.95, "weight": 1.0, "effect_direction": "positive" }
+- Edge: { "from": "option_economy", "to": "factor_price", "belief": 0.95, "weight": 0.8, "effect_direction": "negative" }
+
+### Vague Options Need Clarification
+If an option is vague (e.g., "Improve marketing"), either:
+1. Make it specific with a numeric target: "Increase marketing spend by £5,000"
+2. Or acknowledge the vagueness in the body: "Requires user to specify target spend amount"
+
+This enables the analysis engine to calculate precise intervention effects.
+
 Respond ONLY with valid JSON matching this structure.`;
 
 // ============================================================================

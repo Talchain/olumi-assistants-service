@@ -414,9 +414,14 @@ export function transformResponseToV2(
 /**
  * Check if a schema version is valid.
  */
-export function isValidSchemaVersion(version: unknown): version is "v1" | "v2" {
-  return version === "v1" || version === "v2";
+export function isValidSchemaVersion(version: unknown): version is "v1" | "v2" | "v3" {
+  return version === "v1" || version === "v2" || version === "v3";
 }
+
+/**
+ * Schema version type.
+ */
+export type SchemaVersion = "v1" | "v2" | "v3";
 
 /**
  * Parse schema version from query parameter.
@@ -424,7 +429,10 @@ export function isValidSchemaVersion(version: unknown): version is "v1" | "v2" {
  */
 export function parseSchemaVersion(
   queryParam: unknown
-): "v1" | "v2" {
+): SchemaVersion {
+  if (queryParam === "v3" || queryParam === "3" || queryParam === "3.0") {
+    return "v3";
+  }
   if (queryParam === "v2" || queryParam === "2" || queryParam === "2.2") {
     return "v2";
   }

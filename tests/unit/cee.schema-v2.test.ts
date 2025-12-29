@@ -46,8 +46,20 @@ describe("parseSchemaVersion", () => {
     expect(parseSchemaVersion("2.2")).toBe("v2");
   });
 
+  it("returns v3 for 'v3'", () => {
+    expect(parseSchemaVersion("v3")).toBe("v3");
+  });
+
+  it("returns v3 for '3'", () => {
+    expect(parseSchemaVersion("3")).toBe("v3");
+  });
+
+  it("returns v3 for '3.0'", () => {
+    expect(parseSchemaVersion("3.0")).toBe("v3");
+  });
+
   it("returns v1 for invalid version", () => {
-    expect(parseSchemaVersion("v3")).toBe("v1");
+    expect(parseSchemaVersion("v4")).toBe("v1");
     expect(parseSchemaVersion("invalid")).toBe("v1");
   });
 });
@@ -61,8 +73,12 @@ describe("isValidSchemaVersion", () => {
     expect(isValidSchemaVersion("v2")).toBe(true);
   });
 
+  it("returns true for v3", () => {
+    expect(isValidSchemaVersion("v3")).toBe(true);
+  });
+
   it("returns false for invalid values", () => {
-    expect(isValidSchemaVersion("v3")).toBe(false);
+    expect(isValidSchemaVersion("v4")).toBe(false);
     expect(isValidSchemaVersion(undefined)).toBe(false);
     expect(isValidSchemaVersion(null)).toBe(false);
     expect(isValidSchemaVersion("")).toBe(false);

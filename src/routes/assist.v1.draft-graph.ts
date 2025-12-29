@@ -10,7 +10,12 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { assessBriefReadiness } from "../cee/validation/readiness.js";
-import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
+import {
+  parseSchemaVersion,
+  transformResponseToV2,
+  transformResponseToV3,
+  validateStrictModeV3,
+} from "../cee/transforms/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -340,10 +345,11 @@ export default async function route(app: FastifyInstance) {
 
     const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
 
-    // Check for v2 schema request via query parameter
+    // Check for schema version request via query parameter
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
+    const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
 
-    reply.header("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
+    reply.header("X-CEE-API-Version", schemaVersion);
     reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
     reply.header("X-CEE-Request-ID", requestId);
 
@@ -362,13 +368,48 @@ export default async function route(app: FastifyInstance) {
       status_code: statusCode,
       latency_ms: Date.now() - start,
       is_error: statusCode >= 400,
+      schema_version: schemaVersion,
     }, "Draft-graph response ready for delivery");
 
-    // Transform to v2 schema if requested and response is successful
-    if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
-      const v2Body = transformResponseToV2(body as any);
-      log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
-      return reply.send(v2Body);
+    // Transform to requested schema if response is successful
+    if (statusCode === 200 && body && typeof body === "object" && "graph" in body) {
+      if (schemaVersion === "v3") {
+        const v3Body = transformResponseToV3(body as any, {
+          brief: baseInput.brief,
+          requestId,
+          strictMode,
+        });
+
+        // Validate in strict mode
+        if (strictMode) {
+          try {
+            validateStrictModeV3(v3Body);
+          } catch (err) {
+            log.warn({
+              request_id: requestId,
+              error: (err as Error).message,
+            }, "V3 strict mode validation failed");
+            // In strict mode, return 422 with validation errors
+            reply.code(422);
+            return reply.send({
+              error: {
+                code: "CEE_V3_VALIDATION_FAILED",
+                message: (err as Error).message,
+                validation_warnings: v3Body.validation_warnings,
+              },
+            });
+          }
+        }
+
+        log.debug({ request_id: requestId, schema_version: "v3" }, "Transformed response to v3 schema");
+        return reply.send(v3Body);
+      }
+
+      if (schemaVersion === "v2") {
+        const v2Body = transformResponseToV2(body as any);
+        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
+        return reply.send(v2Body);
+      }
     }
 
     return reply.send(body);
