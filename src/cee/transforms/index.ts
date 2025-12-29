@@ -51,6 +51,12 @@ export {
   type V3ResponseSummary,
 } from "./schema-v3.js";
 
+// Re-export retry helpers for route handlers
+export {
+  hasPriceRelatedUnresolvedTargets,
+  generatePriceFactorHint,
+} from "../extraction/intervention-extractor.js";
+
 export {
   transformOptionToAnalysisReady,
   buildAnalysisReadyPayload,

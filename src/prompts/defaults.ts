@@ -340,16 +340,23 @@ Note: The example shows CORRECT causal direction: decision → options → outco
 The goal node (goal_1) is a SINK with only incoming edges — NO edges originate from the goal.
 Risk edges to goal have negative weight to indicate detraction from goal achievement.
 
-## QUANTITATIVE FACTOR EXTRACTION
+## QUANTITATIVE FACTOR EXTRACTION (MANDATORY)
 
-When the brief contains numeric values, create factor nodes with structured data for ISL analysis.
+**CRITICAL**: When the brief contains numeric values, you MUST create factor nodes. This is NOT optional.
+Failing to create factors for quantifiable dimensions makes the graph unusable for analysis.
 
-### Pattern Recognition
-Look for:
-- Currency values: £49, $100, €50
-- Percentages: 5%, 3.5%, "ten percent"
-- From-to transitions: "from £49 to £59", "from 3% to 5%"
-- Change language: "increase from 10 to 20", "reduce by 15%"
+### Pattern Recognition — ALWAYS Create Factors For:
+- Currency values: £49, $100, €50 → **MUST create price/cost factor**
+- Percentages: 5%, 3.5%, "ten percent" → **MUST create rate/percentage factor**
+- From-to transitions: "from £49 to £59" → **MUST create factor with baseline + value**
+- Change language: "increase from 10 to 20" → **MUST create factor capturing the change**
+
+### MANDATORY Factor Creation Rule
+If the brief mentions ANY of these, you MUST create a corresponding factor node:
+- "price", "cost", "fee", "rate" → Create factor_price or factor_cost
+- "budget", "spend", "investment" → Create factor_budget
+- "churn", "retention", "attrition" → Create factor_churn
+- "conversion", "rate", "percentage" → Create factor with appropriate name
 
 ### Factor Node Format with Data
 When numeric values are present, include a \`data\` field:
@@ -395,15 +402,19 @@ Options represent interventions on factor nodes. When creating option nodes, inc
 2. **Create option→factor edges**: Connect options to the factor nodes they modify
 3. **Use specific language**: "Set X to Y" or "Change X from A to B" is clearer than "Improve X"
 
-### Example - Pricing Decision Brief
+### Example - Pricing Decision Brief (MANDATORY PATTERN)
 "Should we raise the price from £49 to £59?"
 
-Required nodes and edges:
-- Factor node: { "id": "factor_price", "kind": "factor", "label": "Product Price", "data": { "value": 49, "unit": "£" }}
-- Option node: { "id": "option_premium", "kind": "option", "label": "Premium Pricing", "body": "Set price to £59" }
-- Option node: { "id": "option_economy", "kind": "option", "label": "Economy Pricing", "body": "Set price to £39" }
-- Edge: { "from": "option_premium", "to": "factor_price", "belief": 0.95, "weight": 1.0, "effect_direction": "positive" }
-- Edge: { "from": "option_economy", "to": "factor_price", "belief": 0.95, "weight": 0.8, "effect_direction": "negative" }
+**REQUIRED** nodes and edges (you MUST include all of these):
+1. **MANDATORY** Factor node: { "id": "factor_price", "kind": "factor", "label": "Product Price", "data": { "value": 49, "unit": "£" }}
+   - WITHOUT this factor node, the analysis engine cannot compute intervention effects
+2. Option node: { "id": "option_premium", "kind": "option", "label": "Premium Pricing", "body": "Set price to £59" }
+3. Option node: { "id": "option_economy", "kind": "option", "label": "Economy Pricing", "body": "Keep price at £49" }
+4. Edge from option_premium → factor_price with belief/weight
+5. Edge from option_economy → factor_price with belief/weight
+6. Edge from factor_price → goal with effect_direction
+
+**FAILURE MODE**: If you omit factor_price, options cannot specify intervention values, making the graph unusable.
 
 ### Vague Options Need Clarification
 If an option is vague (e.g., "Improve marketing"), either:

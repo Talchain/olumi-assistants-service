@@ -26,7 +26,9 @@ import {
   extractOptionsFromNodes,
   toOptionsV3,
   getExtractionStatistics,
+  hasPriceRelatedUnresolvedTargets,
   type EdgeHint,
+  type ExtractedOption,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
@@ -57,6 +59,12 @@ export interface V3DraftGraphResponse extends CEEGraphResponseV3T {
   }>;
   /** P0: Ready-to-use analysis payload for direct PLoT consumption */
   analysis_ready: AnalysisReadyPayloadT;
+  /** Retry suggestion when price-related factors are missing */
+  _retry_suggestion?: {
+    should_retry: boolean;
+    reason: string;
+    missing_factor_terms: string[];
+  };
 }
 
 /**
@@ -457,6 +465,9 @@ export function transformResponseToV3(
   // Validate analysis-ready payload (log warnings but don't fail)
   validateAndLogAnalysisReady(analysisReady, v3Graph, v3Options, context.requestId);
 
+  // Check for price-related unresolved targets (for retry suggestion)
+  const priceCheck = hasPriceRelatedUnresolvedTargets(extractedOptions);
+
   // Emit telemetry
   const stats = getExtractionStatistics(extractedOptions);
   emit(TelemetryEvents.SchemaV3TransformComplete ?? "cee.schema_v3.transform_complete", {
@@ -466,6 +477,8 @@ export function transformResponseToV3(
     ...stats,
     validationWarningCount: validationWarnings.length,
     analysisReadyStatus: analysisReady.status,
+    priceRelatedUnresolved: priceCheck.detected,
+    priceRelatedTerms: priceCheck.terms,
     requestId: context.requestId,
   });
 
@@ -488,6 +501,21 @@ export function transformResponseToV3(
   // Add validation warnings if any
   if (validationWarnings.length > 0) {
     v3Response.validation_warnings = validationWarnings;
+  }
+
+  // Add retry suggestion if price-related factors are missing
+  if (priceCheck.detected && analysisReady.status === "needs_user_mapping") {
+    v3Response._retry_suggestion = {
+      should_retry: true,
+      reason: "LLM did not create factor nodes for quantitative dimensions",
+      missing_factor_terms: priceCheck.terms,
+    };
+
+    log.info({
+      requestId: context.requestId,
+      missingTerms: priceCheck.terms,
+      event: "cee.v3.retry_suggestion",
+    }, `Retry suggested: missing factor nodes for ${priceCheck.terms.join(", ")}`);
   }
 
   // Add meta if present

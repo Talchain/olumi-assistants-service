@@ -569,3 +569,67 @@ export function getExtractionStatistics(options: ExtractedOption[]): ExtractionS
 
   return stats;
 }
+
+// ============================================================================
+// Price-Related Target Detection (for retry logic)
+// ============================================================================
+
+/**
+ * Price-related synonyms for detecting when LLM missed a pricing factor.
+ */
+const PRICE_RELATED_TERMS = new Set([
+  "price",
+  "pricing",
+  "cost",
+  "fee",
+  "rate",
+  "subscription",
+  "plan",
+  "tier",
+  "charge",
+]);
+
+/**
+ * Check if any unresolved targets are price-related.
+ * Used to trigger LLM retry with explicit factor requirement.
+ *
+ * @param options - Extracted options with potential unresolved_targets
+ * @returns Object with detection result and specific terms found
+ */
+export function hasPriceRelatedUnresolvedTargets(
+  options: ExtractedOption[]
+): { detected: boolean; terms: string[] } {
+  const foundTerms: string[] = [];
+
+  for (const option of options) {
+    if (!option.unresolved_targets) continue;
+
+    for (const target of option.unresolved_targets) {
+      const normalizedTarget = target.toLowerCase().trim();
+
+      // Check if target matches any price-related term
+      for (const term of PRICE_RELATED_TERMS) {
+        if (normalizedTarget.includes(term) || term.includes(normalizedTarget)) {
+          foundTerms.push(target);
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    detected: foundTerms.length > 0,
+    terms: [...new Set(foundTerms)], // Deduplicate
+  };
+}
+
+/**
+ * Generate a retry hint for the LLM when price-related targets are unresolved.
+ *
+ * @param terms - The unresolved price-related terms
+ * @returns A hint string to append to the brief for retry
+ */
+export function generatePriceFactorHint(terms: string[]): string {
+  const termList = terms.join(", ");
+  return `\n\n[SYSTEM NOTE: The previous graph was missing a factor node for ${termList}. You MUST create a factor node (kind="factor") for this quantitative dimension. Example: { "id": "factor_price", "kind": "factor", "label": "Product Price", "data": { "value": <current_value>, "unit": "£" }}]`;
+}
