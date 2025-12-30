@@ -74,15 +74,15 @@ export interface ExtractedOption {
  * Pattern definitions for extracting intervention targets and values.
  */
 const INTERVENTION_PATTERNS = [
-  // "set price to £59"
+  // "set price to £59" or "keep price at £49"
   {
-    pattern: /\b(set|change|adjust|modify)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+to\s+([£$€¥₹]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+    pattern: /\b(set|change|adjust|modify|keep|maintain)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+(?:to|at)\s+([£$€¥₹]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
     targetGroup: 2,
     valueGroup: 3,
   },
-  // "price of £59"
+  // "price of £59" or "price at £59" (fallback without leading verb)
   {
-    pattern: /\b(\w+(?:\s+\w+)?)\s+(?:of|at|to)\s+([£$€¥₹]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+    pattern: /\b(?!(?:set|change|adjust|modify|keep|maintain|increase|decrease|reduce|raise|lower|cut|boost)\s)(\w+(?:\s+\w+)?)\s+(?:of|at|to)\s+([£$€¥₹]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
     targetGroup: 1,
     valueGroup: 2,
   },
@@ -111,7 +111,8 @@ const INTERVENTION_PATTERNS = [
  */
 const SKIP_WORDS = new Set([
   "the", "a", "an", "to", "by", "at", "of", "for", "with", "from",
-  "set", "change", "adjust", "modify", "increase", "decrease", "reduce", "raise", "lower", "cut", "boost",
+  "set", "change", "adjust", "modify", "keep", "maintain",
+  "increase", "decrease", "reduce", "raise", "lower", "cut", "boost",
 ]);
 
 /**
