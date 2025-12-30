@@ -79,11 +79,11 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   }
 
   // Determine status: ready if has interventions, otherwise needs_user_mapping
-  // Use the V3 option's status as source of truth, fallback to intervention check
+  // Interventions are the source of truth - if we extracted values, it's ready
   const status: "ready" | "needs_user_mapping" =
-    option.status === "ready" && Object.keys(interventions).length > 0
+    Object.keys(interventions).length > 0
       ? "ready"
-      : "needs_user_mapping";
+      : (option.status ?? "needs_user_mapping");
 
   return {
     id: option.id,
