@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **V3 Schema Now Default for draft-graph:**
+  - V3 (`schema_version: "3.0"` with `analysis_ready` payload) is now the default response format
+  - No `?schema` query param required - clients receive `analysis_ready` automatically
+  - Backward compatibility: `?schema=v1` or `?schema=v2` explicitly requests legacy formats
+  - Deprecation logging added for V1/V2 schema requests to aid migration monitoring
+  - Goal generation telemetry (`cee.goal_generation`) tracks LLM goal vs outcome classification
+
+- **Improved Goal vs Outcome Distinction in LLM Prompt:**
+  - Added explicit prompt guidance to distinguish goal (ultimate objective) from outcome (intermediate result)
+  - Goals represent the DESTINATION; outcomes represent the JOURNEY toward the goal
+  - Includes brief-type-specific examples (pricing, hiring, etc.) for consistent classification
+  - Reduces risk of LLM incorrectly using "outcome" for main objectives
+
 - **Weight Suggestion Generation Always Enabled:**
   - Removed `CEE_WEIGHT_SUGGESTION_GENERATION_ENABLED` feature flag
   - Weight suggestion generation now runs automatically when the verification pipeline detects edges with problematic beliefs (uniform, near-zero, near-one) or weights (uniform, too low, too high)

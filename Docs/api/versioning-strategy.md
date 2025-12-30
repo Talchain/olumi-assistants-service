@@ -2,6 +2,20 @@
 
 This document summarizes how the Olumi Assistants Service handles API and behavior changes over time, and how operators should think about upgrades.
 
+## Schema versioning (draft-graph)
+
+The `/assist/v1/draft-graph` endpoint supports multiple response schema versions:
+
+| Version | Response | Default? | Query Param |
+|---------|----------|----------|-------------|
+| V1 | Basic graph only | ❌ | `?schema=v1` |
+| V2 | `schema_version: "2.2"` + enhanced graph | ❌ | `?schema=v2` |
+| V3 | `schema_version: "3.0"` + `analysis_ready` payload | ✅ **Default** | (none) or `?schema=v3` |
+
+**V3 is the default** since late 2025. Clients receive `analysis_ready` automatically without any query parameter. This payload is ready for direct pass-through to PLoT analysis.
+
+Legacy clients can explicitly request V1 or V2 via query parameter, but deprecation logging is active to help operators track migration progress.
+
 ## API surface and stability
 
 - The primary public surface is the HTTP API described by `openapi.yaml`.
