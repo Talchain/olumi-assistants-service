@@ -18,49 +18,66 @@ import {
 } from "../../src/cee/transforms/schema-v2.js";
 
 describe("parseSchemaVersion", () => {
-  it("returns v1 for undefined", () => {
-    expect(parseSchemaVersion(undefined)).toBe("v1");
+  // V3 is now the default - includes analysis_ready for PLoT consumption
+  describe("defaults to v3", () => {
+    it("returns v3 for undefined", () => {
+      expect(parseSchemaVersion(undefined)).toBe("v3");
+    });
+
+    it("returns v3 for null", () => {
+      expect(parseSchemaVersion(null)).toBe("v3");
+    });
+
+    it("returns v3 for empty string", () => {
+      expect(parseSchemaVersion("")).toBe("v3");
+    });
+
+    it("returns v3 for invalid versions", () => {
+      expect(parseSchemaVersion("v4")).toBe("v3");
+      expect(parseSchemaVersion("invalid")).toBe("v3");
+    });
   });
 
-  it("returns v1 for null", () => {
-    expect(parseSchemaVersion(null)).toBe("v1");
+  describe("explicit v3 requests", () => {
+    it("returns v3 for 'v3'", () => {
+      expect(parseSchemaVersion("v3")).toBe("v3");
+    });
+
+    it("returns v3 for '3'", () => {
+      expect(parseSchemaVersion("3")).toBe("v3");
+    });
+
+    it("returns v3 for '3.0'", () => {
+      expect(parseSchemaVersion("3.0")).toBe("v3");
+    });
   });
 
-  it("returns v1 for empty string", () => {
-    expect(parseSchemaVersion("")).toBe("v1");
+  describe("explicit v2 requests (deprecated)", () => {
+    it("returns v2 for 'v2'", () => {
+      expect(parseSchemaVersion("v2")).toBe("v2");
+    });
+
+    it("returns v2 for '2'", () => {
+      expect(parseSchemaVersion("2")).toBe("v2");
+    });
+
+    it("returns v2 for '2.2'", () => {
+      expect(parseSchemaVersion("2.2")).toBe("v2");
+    });
   });
 
-  it("returns v1 for v1", () => {
-    expect(parseSchemaVersion("v1")).toBe("v1");
-  });
+  describe("explicit v1 requests (deprecated)", () => {
+    it("returns v1 for 'v1'", () => {
+      expect(parseSchemaVersion("v1")).toBe("v1");
+    });
 
-  it("returns v2 for v2", () => {
-    expect(parseSchemaVersion("v2")).toBe("v2");
-  });
+    it("returns v1 for '1'", () => {
+      expect(parseSchemaVersion("1")).toBe("v1");
+    });
 
-  it("returns v2 for '2'", () => {
-    expect(parseSchemaVersion("2")).toBe("v2");
-  });
-
-  it("returns v2 for '2.2'", () => {
-    expect(parseSchemaVersion("2.2")).toBe("v2");
-  });
-
-  it("returns v3 for 'v3'", () => {
-    expect(parseSchemaVersion("v3")).toBe("v3");
-  });
-
-  it("returns v3 for '3'", () => {
-    expect(parseSchemaVersion("3")).toBe("v3");
-  });
-
-  it("returns v3 for '3.0'", () => {
-    expect(parseSchemaVersion("3.0")).toBe("v3");
-  });
-
-  it("returns v1 for invalid version", () => {
-    expect(parseSchemaVersion("v4")).toBe("v1");
-    expect(parseSchemaVersion("invalid")).toBe("v1");
+    it("returns v1 for '1.0'", () => {
+      expect(parseSchemaVersion("1.0")).toBe("v1");
+    });
   });
 });
 

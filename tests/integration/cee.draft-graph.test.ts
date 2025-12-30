@@ -88,7 +88,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("returns CEEDraftGraphResponseV1 for valid request with fixtures", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for V1 response test
       headers: headersKey1,
       payload: {
         brief: "A sufficiently long decision brief for CEE v1 draft-graph happy-path tests.",
@@ -159,7 +159,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("emits draft_warnings and confidence_flags when structural warnings are enabled", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for legacy field tests
       headers: headersKey1,
       payload: {
         brief: "A sufficiently long decision brief for CEE structural warnings tests.",
@@ -182,7 +182,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("propagates seed and archetype_hint through sanitizer and finaliser", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for seed echo test
       headers: headersKey2,
       payload: {
         brief: "A long pricing decision brief for archetype testing in CEE v1.",

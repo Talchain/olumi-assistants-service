@@ -425,16 +425,21 @@ export type SchemaVersion = "v1" | "v2" | "v3";
 
 /**
  * Parse schema version from query parameter.
- * Returns "v1" if not specified or invalid.
+ * Default: V3 (includes analysis_ready payload for run-ready options).
+ * V1/V2 are deprecated but still supported via explicit ?schema=v1 or ?schema=v2.
  */
 export function parseSchemaVersion(
   queryParam: unknown
 ): SchemaVersion {
-  if (queryParam === "v3" || queryParam === "3" || queryParam === "3.0") {
-    return "v3";
+  // Explicit V1 request (deprecated)
+  if (queryParam === "v1" || queryParam === "1" || queryParam === "1.0") {
+    return "v1";
   }
+  // Explicit V2 request (deprecated)
   if (queryParam === "v2" || queryParam === "2" || queryParam === "2.2") {
     return "v2";
   }
-  return "v1";
+  // V3 is now the default - includes analysis_ready for PLoT consumption
+  // Accepts: "v3", "3", "3.0", or unspecified/invalid
+  return "v3";
 }

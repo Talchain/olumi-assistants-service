@@ -108,7 +108,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       expect(body.schema_version).toBe("2.2");
     });
 
-    it("does NOT return schema_version when no schema param", async () => {
+    it("returns v3 (with schema_version 3.0) when no schema param (v3 is default)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/draft-graph",
@@ -120,7 +120,9 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
 
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
-      expect(body.schema_version).toBeUndefined();
+      // V3 is now the default - includes schema_version and analysis_ready
+      expect(body.schema_version).toBe("3.0");
+      expect(body.analysis_ready).toBeDefined();
     });
   });
 
@@ -355,7 +357,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       expect(res.headers["x-cee-api-version"]).toBe("v2");
     });
 
-    it("sets X-CEE-API-Version header to v1 when no schema param", async () => {
+    it("sets X-CEE-API-Version header to v3 when no schema param (v3 is default)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/draft-graph",
@@ -366,18 +368,19 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.headers["x-cee-api-version"]).toBe("v1");
+      // V3 is now the default - includes analysis_ready for PLoT consumption
+      expect(res.headers["x-cee-api-version"]).toBe("v3");
     });
   });
 
-  describe("v1 vs v2 comparison", () => {
-    it("same brief returns different schema formats for v1 and v2", async () => {
+  describe("v1 vs v2 vs v3 comparison", () => {
+    it("same brief returns different schema formats for v1, v2, and v3", async () => {
       const brief = "Should we increase marketing spend by 20% next quarter?";
 
-      const [v1Res, v2Res] = await Promise.all([
+      const [v1Res, v2Res, defaultRes] = await Promise.all([
         app.inject({
           method: "POST",
-          url: "/assist/v1/draft-graph",
+          url: "/assist/v1/draft-graph?schema=v1",
           headers,
           payload: { brief },
         }),
@@ -387,20 +390,32 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
           headers,
           payload: { brief },
         }),
+        app.inject({
+          method: "POST",
+          url: "/assist/v1/draft-graph", // No schema param = V3 default
+          headers,
+          payload: { brief },
+        }),
       ]);
 
       expect(v1Res.statusCode).toBe(200);
       expect(v2Res.statusCode).toBe(200);
+      expect(defaultRes.statusCode).toBe(200);
 
       const v1Body = JSON.parse(v1Res.body);
       const v2Body = JSON.parse(v2Res.body);
+      const defaultBody = JSON.parse(defaultRes.body);
 
       // V1 should not have schema_version
       expect(v1Body.schema_version).toBeUndefined();
       // V2 should have schema_version 2.2
       expect(v2Body.schema_version).toBe("2.2");
+      // Default (V3) should have schema_version 3.0
+      expect(defaultBody.schema_version).toBe("3.0");
+      // Default (V3) should have analysis_ready
+      expect(defaultBody.analysis_ready).toBeDefined();
 
-      // V1 nodes should have 'kind', V2 should have 'type'
+      // V1 nodes should have 'kind', V2 should have 'type', V3 should have 'kind'
       if (v1Body.graph.nodes.length > 0) {
         expect(v1Body.graph.nodes[0]).toHaveProperty("kind");
         expect(v1Body.graph.nodes[0]).not.toHaveProperty("type");
@@ -409,8 +424,11 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(v2Body.graph.nodes[0]).toHaveProperty("type");
         expect(v2Body.graph.nodes[0]).not.toHaveProperty("kind");
       }
+      if (defaultBody.graph.nodes.length > 0) {
+        expect(defaultBody.graph.nodes[0]).toHaveProperty("kind");
+      }
 
-      // V2 edges should have effect_direction, V1 should not
+      // V2 edges should have effect_direction, V1 should not, V3 should
       if (v1Body.graph.edges.length > 0) {
         expect(v1Body.graph.edges[0]).not.toHaveProperty("effect_direction");
         expect(v1Body.graph.edges[0]).not.toHaveProperty("strength_std");
@@ -419,11 +437,15 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(v2Body.graph.edges[0]).toHaveProperty("effect_direction");
         expect(v2Body.graph.edges[0]).toHaveProperty("strength_std");
       }
+      if (defaultBody.graph.edges.length > 0) {
+        expect(defaultBody.graph.edges[0]).toHaveProperty("effect_direction");
+        expect(defaultBody.graph.edges[0]).toHaveProperty("strength_std");
+      }
     });
   });
 
   describe("error handling", () => {
-    it("still returns v1 format on invalid schema param", async () => {
+    it("returns v3 format on invalid schema param (v3 is default)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/draft-graph?schema=v99",
@@ -436,8 +458,9 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      // Invalid schema falls back to v1
-      expect(body.schema_version).toBeUndefined();
+      // Invalid schema falls back to V3 (the new default)
+      expect(body.schema_version).toBe("3.0");
+      expect(body.analysis_ready).toBeDefined();
       if (body.graph.nodes.length > 0) {
         expect(body.graph.nodes[0]).toHaveProperty("kind");
       }

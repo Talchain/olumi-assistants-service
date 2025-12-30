@@ -346,8 +346,18 @@ export default async function route(app: FastifyInstance) {
     const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
 
     // Check for schema version request via query parameter
+    // Default is V3 (includes analysis_ready) - V1/V2 are deprecated
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
     const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
+
+    // Log deprecation warning for legacy schema versions
+    if (schemaVersion === "v1" || schemaVersion === "v2") {
+      log.warn({
+        request_id: requestId,
+        schema_version: schemaVersion,
+        event: "cee.deprecated_schema_requested",
+      }, `Deprecated schema ${schemaVersion} requested - consider upgrading to V3 for analysis_ready support`);
+    }
 
     reply.header("X-CEE-API-Version", schemaVersion);
     reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
