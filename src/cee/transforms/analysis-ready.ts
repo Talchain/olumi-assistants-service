@@ -78,9 +78,17 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
     };
   }
 
+  // Determine status: ready if has interventions, otherwise needs_user_mapping
+  // Use the V3 option's status as source of truth, fallback to intervention check
+  const status: "ready" | "needs_user_mapping" =
+    option.status === "ready" && Object.keys(interventions).length > 0
+      ? "ready"
+      : "needs_user_mapping";
+
   return {
     id: option.id,
     label: option.label,
+    status,
     interventions,
     extraction_metadata: extractionMetadata,
   };

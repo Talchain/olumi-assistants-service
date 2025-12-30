@@ -560,6 +560,7 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
           {
             id: "opt",
             label: "Option",
+            status: "ready",
             interventions: {
               factor_missing: 100, // This factor doesn't exist in graph
             },
@@ -586,7 +587,7 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
 
       const payload: AnalysisReadyPayloadT = {
         options: [
-          { id: "opt", label: "Option", interventions: {} },
+          { id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} },
         ],
         goal_node_id: "goal",
         suggested_seed: "42",
@@ -607,7 +608,7 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
 
       const payload: AnalysisReadyPayloadT = {
         options: [
-          { id: "opt", label: "Option", interventions: {} },
+          { id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} },
         ],
         goal_node_id: "goal",
         suggested_seed: "42",
@@ -676,7 +677,7 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
   describe("Status alias handling", () => {
     it("should normalize 'needs_user_input' input to 'needs_user_mapping' output via Zod", () => {
       const input = {
-        options: [{ id: "opt", label: "Option", interventions: {} }],
+        options: [{ id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} }],
         goal_node_id: "goal",
         suggested_seed: "42",
         status: "needs_user_input", // Legacy input
@@ -691,7 +692,7 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
 
     it("should accept 'needs_user_mapping' as-is", () => {
       const input = {
-        options: [{ id: "opt", label: "Option", interventions: {} }],
+        options: [{ id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} }],
         goal_node_id: "goal",
         suggested_seed: "42",
         status: "needs_user_mapping",
@@ -705,7 +706,7 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
 
     it("should accept 'ready' as-is", () => {
       const input = {
-        options: [{ id: "opt", label: "Option", interventions: { factor_a: 100 } }],
+        options: [{ id: "opt", label: "Option", status: "ready", interventions: { factor_a: 100 } }],
         goal_node_id: "goal",
         suggested_seed: "42",
         status: "ready",
@@ -888,6 +889,7 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           {
             id: "opt",
             label: "Option",
+            status: "ready",
             interventions: {
               goal: 100, // WRONG: targeting a goal node, not a factor
             },
@@ -920,6 +922,7 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           {
             id: "opt",
             label: "Option",
+            status: "ready",
             interventions: {
               outcome_revenue: 500, // WRONG: targeting an outcome, not a factor
             },
@@ -952,6 +955,7 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           {
             id: "opt",
             label: "Option",
+            status: "ready",
             interventions: {
               factor_a: 100,
               factor_b: 200,
@@ -995,6 +999,7 @@ describe("CEE Analysis-Ready Output - Option ID Consistency", () => {
           {
             id: "opt_fake", // This doesn't exist in v3Options
             label: "Fake Option",
+            status: "ready",
             interventions: { factor_a: 999 },
           },
         ],
@@ -1043,6 +1048,7 @@ describe("CEE Analysis-Ready Output - Option ID Consistency", () => {
           {
             id: "opt_any",
             label: "Any Option",
+            status: "ready",
             interventions: { factor_a: 100 },
           },
         ],
@@ -1075,6 +1081,7 @@ describe("CEE Analysis-Ready Output - Telemetry", () => {
         {
           id: "opt",
           label: "Option",
+          status: "ready",
           interventions: {
             missing_factor: 100, // This will fail validation
           },

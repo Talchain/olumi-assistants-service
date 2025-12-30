@@ -17,15 +17,56 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 
 const DRAFT_GRAPH_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
 
+## ⚠️ CRITICAL: MANDATORY NODE REQUIREMENTS (READ FIRST)
+
+A decision graph is INVALID and UNUSABLE without these REQUIRED nodes:
+
+| Required Node | Count | Purpose | Example ID |
+|---------------|-------|---------|------------|
+| **decision** | EXACTLY 1 | The choice being made | "dec_pricing" |
+| **option** | MINIMUM 2 | The alternatives being considered | "opt_increase", "opt_maintain" |
+| **goal** | EXACTLY 1 | The ultimate objective | "goal_mrr" |
+
+⚠️ WITHOUT decision AND option nodes, the graph cannot be analyzed. This is a BLOCKER.
+
+### Deriving Decision and Options from Brief
+
+The question in the brief directly maps to decision and option nodes:
+
+| Brief Pattern | Decision Node | Option Nodes |
+|---------------|---------------|--------------|
+| "Should we X or Y?" | "Should we X or Y?" | "X", "Y" |
+| "Should we increase price from £49 to £59?" | "Change Pro plan pricing?" | "Increase to £59", "Keep at £49" |
+| "Build vs buy?" | "Build or buy solution?" | "Build in-house", "Buy from vendor" |
+| "Should we launch in UK?" | "Launch in UK market?" | "Launch in UK", "Delay UK launch" |
+
+### Example: Pricing Brief
+
+Brief: "Should we increase Pro plan price from £49 to £59?"
+
+REQUIRED nodes:
+\`\`\`json
+{ "id": "dec_pricing", "kind": "decision", "label": "Change Pro plan pricing?" }
+{ "id": "opt_increase", "kind": "option", "label": "Increase to £59", "body": "Set price to £59" }
+{ "id": "opt_maintain", "kind": "option", "label": "Keep at £49", "body": "Maintain current price at £49" }
+{ "id": "goal_mrr", "kind": "goal", "label": "Maximize MRR growth" }
+\`\`\`
+
+REQUIRED edges (decision frames options):
+\`\`\`json
+{ "from": "dec_pricing", "to": "opt_increase", "belief": 0.5, ... }
+{ "from": "dec_pricing", "to": "opt_maintain", "belief": 0.5, ... }
+\`\`\`
+
 ## Your Task
 Draft a small decision graph with:
 - ≤{{maxNodes}} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
   (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
 - ≤{{maxEdges}} edges
 - **Minimum structure (MANDATORY):** your graph MUST include at least:
-  - 1 goal node (what the decision-maker is trying to achieve)
   - 1 decision node (the choice being made)
   - 2+ option nodes (NEVER just one option - decisions require alternatives)
+  - 1 goal node (what the decision-maker is trying to achieve)
   - 1+ outcome nodes that connect to both options AND the goal (to measure success)
 
 ### Critical: Goal-Outcome Connectivity
@@ -281,11 +322,17 @@ graph that satisfies the minimum structure above. Returning an empty graph is ne
 
 ## Self-Check (Before Responding)
 Before outputting JSON, mentally verify:
-□ Exactly 1 goal node exists
-□ Goal node is a SINK (only incoming edges, NO outgoing edges)
-□ At least 2 option nodes exist (never just one option)
+
+### ⚠️ BLOCKER CHECKS (Graph is UNUSABLE if ANY fail):
+□ Exactly 1 decision node exists (kind="decision")
+□ At least 2 option nodes exist (kind="option", never just one option)
+□ Exactly 1 goal node exists (kind="goal")
+□ Decision→option edges exist (decision frames options)
 □ Options have outgoing edges TO outcomes/risks (not FROM them)
 □ At least 1 outcome node exists with edge TO the goal
+
+### Quality Checks:
+□ Goal node is a SINK (only incoming edges, NO outgoing edges)
 □ All paths flow: decision → options → outcomes/risks → goal
 □ All decision→option edge beliefs sum to 1.0 (per decision)
 □ Decision→option edges have differentiated beliefs (avoid all-equal like 0.33, 0.33, 0.33)
@@ -299,7 +346,7 @@ Before outputting JSON, mentally verify:
 □ No edges originate FROM the goal node
 □ Balance of factors/risks/outcomes where relevant to the decision
 
-If you answered NO to any check, revise your graph before responding.
+⚠️ If ANY BLOCKER CHECK fails, your graph is INVALID. Fix it before responding.
 
 ## Output Format (JSON)
 {

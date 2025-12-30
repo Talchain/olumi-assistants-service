@@ -90,18 +90,20 @@ const V3_VALID_KINDS = new Set(["goal", "factor", "outcome", "decision", "risk",
 
 /**
  * Map V1 node kind to V3 kind.
- * Options and decisions become factors (the nodes stay, options are extracted).
+ * Options are extracted to separate array; decision nodes remain in graph.
  */
 function mapKindToV3(kind: string): NodeV3T["kind"] {
-  // V3 does not have option nodes in the graph
-  if (kind === "option" || kind === "decision") {
-    // These will be extracted as options, but the node is kept as-is for now
-    // The caller should filter these out before including in the graph
+  // V3 does not have option nodes in the graph - they are extracted
+  // BUT decision nodes ARE valid V3 graph nodes and should stay
+  if (kind === "option") {
+    // Options will be extracted to options array, but this shouldn't be called
+    // for option nodes as they should be filtered out before transformation
     return "factor";
   }
-  if (kind === "constraint" || kind === "action") {
+  if (kind === "constraint") {
     return "factor";
   }
+  // decision, action, goal, factor, outcome, risk are all valid V3 kinds
   if (V3_VALID_KINDS.has(kind)) {
     return kind as NodeV3T["kind"];
   }
@@ -329,19 +331,21 @@ function findGoalNode(nodes: V1Node[]): V1Node | undefined {
 
 /**
  * Extract option nodes from graph (to be converted to V3 options).
+ * Note: Only "option" nodes are extracted; "decision" nodes remain in the graph.
  */
 function extractOptionNodes(nodes: V1Node[]): V1Node[] {
-  return nodes.filter((n) => n.kind === "option" || n.kind === "decision");
+  return nodes.filter((n) => n.kind === "option");
 }
 
 /**
  * Extract edge hints from V1 graph - edges from option nodes to factor nodes.
  * These provide structural hints for intervention targeting.
+ * Note: Only "option" nodes, not "decision" nodes.
  */
 function extractEdgeHints(graph: V1Graph): EdgeHint[] {
   const optionNodeIds = new Set(
     graph.nodes
-      .filter((n) => n.kind === "option" || n.kind === "decision")
+      .filter((n) => n.kind === "option")
       .map((n) => n.id)
   );
   const factorNodeIds = new Set(
@@ -361,9 +365,10 @@ function extractEdgeHints(graph: V1Graph): EdgeHint[] {
 
 /**
  * Filter out option nodes from graph (V3 graph should not have option nodes).
+ * Note: Decision nodes ARE kept in the graph - only option nodes are removed.
  */
 function filterNonOptionNodes(nodes: V1Node[]): V1Node[] {
-  return nodes.filter((n) => n.kind !== "option" && n.kind !== "decision");
+  return nodes.filter((n) => n.kind !== "option");
 }
 
 /**

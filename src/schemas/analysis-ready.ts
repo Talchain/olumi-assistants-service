@@ -34,6 +34,8 @@ export const OptionForAnalysis = z.object({
   id: z.string(),
   /** Human-readable label */
   label: z.string(),
+  /** Option readiness status - required for UI to know if option can be used */
+  status: z.enum(["ready", "needs_user_mapping"]),
   /** Interventions: factor_id -> numeric value (NOT objects) */
   interventions: z.record(z.string(), z.number()),
   /** Extraction metadata for transparency */

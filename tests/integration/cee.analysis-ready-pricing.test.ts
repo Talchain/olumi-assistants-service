@@ -117,7 +117,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
     });
   });
 
-  describe("Goal Node Generation", () => {
+  describe("Required Node Types", () => {
     it("graph contains exactly one goal node (not outcome)", async () => {
       const res = await app.inject({
         method: "POST",
@@ -159,6 +159,55 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
           console.warn(`Potential misclassification: "${outcome.label}" as outcome instead of goal`);
         }
       }
+    });
+
+    it("graph contains at least one decision node", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers,
+        payload: {
+          brief: "Should we increase Pro plan price from £49 to £59?",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+
+      const nodes = body.graph?.nodes || [];
+      const decisionNodes = nodes.filter((n: any) => n.kind === "decision");
+
+      // CRITICAL: Must have at least one decision node
+      expect(decisionNodes.length).toBeGreaterThanOrEqual(1);
+
+      // Decision node should have a meaningful label
+      if (decisionNodes.length > 0) {
+        expect(decisionNodes[0].label).toBeDefined();
+        expect(typeof decisionNodes[0].label).toBe("string");
+      }
+    });
+
+    it("graph or options array contains at least two options", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers,
+        payload: {
+          brief: "Should we increase Pro plan price from £49 to £59?",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+
+      // Options can be in graph.nodes OR in top-level options array (V3)
+      const nodes = body.graph?.nodes || [];
+      const optionNodesInGraph = nodes.filter((n: any) => n.kind === "option");
+      const optionsArray = body.options || body.analysis_ready?.options || [];
+
+      // At least 2 options must exist (either in graph or options array)
+      const totalOptions = optionNodesInGraph.length + optionsArray.length;
+      expect(totalOptions).toBeGreaterThanOrEqual(2);
     });
 
     it("analysis_ready.goal_node_id references a valid goal node", async () => {
