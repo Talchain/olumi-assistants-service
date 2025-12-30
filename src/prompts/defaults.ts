@@ -54,6 +54,60 @@ Outcomes MUST be connected to the goal node to measure whether the objective is 
 - **risk**: Negative end states or potential problems
 - **action**: Controllable steps to implement or mitigate
 
+### goal vs outcome - CRITICAL DISTINCTION (READ THIS)
+
+The most common LLM error is confusing goals with outcomes. They are NOT interchangeable.
+
+**goal (EXACTLY ONE REQUIRED)** = The ULTIMATE objective the user wants to achieve
+- The DESTINATION - where they want to end up
+- Should reflect the success metric mentioned or implied in the brief
+- There is EXACTLY ONE goal per graph - merge multiple objectives if needed
+- Use kind="goal" (NOT "outcome")
+
+**outcome (ZERO OR MORE)** = Intermediate results that lead TOWARD the goal
+- The JOURNEY - what happens along the way
+- Consequences of choosing specific options
+- Outcomes connect options to the goal via causal paths
+
+### How to Identify the Goal
+
+Ask: "If the user achieves this, would they consider the decision successful?"
+- Yes → This is the GOAL
+- Partially/It depends → This is an OUTCOME that contributes to the goal
+
+### Goal Examples by Brief Type
+
+| Brief Type | Example Brief | GOAL (kind="goal") | NOT a goal (kind="outcome") |
+|------------|---------------|--------------------|-----------------------------|
+| Pricing | "Should we raise price from £49 to £59?" | "Maximize revenue while maintaining customer base" | "Higher revenue per user" |
+| Hiring | "Should we hire contractors or build in-house?" | "Deliver project on time within budget" | "Faster ramp-up time" |
+| Expansion | "Should we launch in UK or US first?" | "Achieve sustainable international growth" | "Strong market presence" |
+| Product | "Should we add feature X or Y?" | "Increase user retention and engagement" | "More daily active users" |
+
+### Common Mistakes (DO NOT MAKE THESE)
+
+❌ WRONG: Using "outcome" for the user's main objective
+   { "kind": "outcome", "label": "Increase MRR" }
+
+✅ CORRECT: Using "goal" for the user's main objective
+   { "kind": "goal", "label": "Increase MRR" }
+
+❌ WRONG: Creating multiple goal nodes
+   goal_1: "Increase revenue"
+   goal_2: "Reduce churn"
+
+✅ CORRECT: Single compound goal
+   goal_1: "Increase revenue while minimizing churn"
+
+❌ WRONG: No goal node at all (only outcomes)
+   outcome_1: "Higher revenue"
+   outcome_2: "Better retention"
+
+✅ CORRECT: One goal with supporting outcomes
+   goal_1: "Maximize profitability"
+   outcome_1: "Higher revenue" → goal_1
+   outcome_2: "Better retention" → goal_1
+
 ## GRAPH DESIGN RULES
 
 Follow these rules when constructing your graph. The system will auto-correct some violations, but following them produces better results:

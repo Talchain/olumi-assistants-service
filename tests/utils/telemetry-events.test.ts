@@ -177,6 +177,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // LLM Normalization events (Phase 1 NodeKind normalization)
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
+        // Goal generation tracking (prompt tuning)
+        GoalGeneration: "cee.goal_generation",
+
         // CEE Clarification enforcement events (Phase 5)
         ClarificationRequired: "cee.clarification.required",
         ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
@@ -369,7 +372,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready)\.|cee\.intervention_extraction$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -745,6 +748,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.PreflightReadinessAssessed,
         TelemetryEvents.PreflightRejected,
         TelemetryEvents.NodeKindNormalized,
+        TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
         TelemetryEvents.ClarificationBypassAllowed,
         // Multi-turn clarifier events (Phase 1 - diagnostic only)
@@ -1025,6 +1029,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.generate_recommendation.requested",
         "cee.generate_recommendation.completed",
         "cee.generate_recommendation.failed",
+
+        // Goal generation tracking (prompt tuning)
+        "cee.goal_generation",
 
         "cee.narrate_conditions.requested",
         "cee.narrate_conditions.completed",

@@ -591,6 +591,35 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     correlation_id: correlationId,
   }, "Pipeline stage: LLM draft complete");
 
+  // Track goal vs outcome node generation for prompt tuning
+  const goalNodes = graph.nodes.filter((n: any) => n.kind === "goal");
+  const outcomeNodes = graph.nodes.filter((n: any) => n.kind === "outcome");
+
+  emit(TelemetryEvents.GoalGeneration ?? "cee.goal_generation", {
+    goal_count: goalNodes.length,
+    outcome_count: outcomeNodes.length,
+    goal_labels: goalNodes.map((n: any) => n.label),
+    outcome_labels: outcomeNodes.map((n: any) => n.label),
+    brief_preview: effectiveBrief.substring(0, 100),
+    correlation_id: correlationId,
+  });
+
+  if (goalNodes.length === 0) {
+    log.warn({
+      event: "cee.no_goal_node",
+      outcome_labels: outcomeNodes.map((n: any) => n.label),
+      brief_preview: effectiveBrief.substring(0, 150),
+      correlation_id: correlationId,
+    }, "LLM did not generate a goal node - prompt may need improvement");
+  } else if (goalNodes.length > 1) {
+    log.warn({
+      event: "cee.multiple_goal_nodes",
+      goal_count: goalNodes.length,
+      goal_labels: goalNodes.map((n: any) => n.label),
+      correlation_id: correlationId,
+    }, "LLM generated multiple goal nodes - will be merged");
+  }
+
   if (initialNodeCount === 0) {
     emit(TelemetryEvents.GuardViolation, {
       violation_type: "empty_graph",

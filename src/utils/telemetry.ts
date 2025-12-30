@@ -163,6 +163,9 @@ export const TelemetryEvents = {
 
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
+  // Goal generation tracking (prompt tuning)
+  GoalGeneration: "cee.goal_generation",
+
   // Clarification enforcement events (v1.14 - Phase 5)
   ClarificationRequired: "cee.clarification.required",
   ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
