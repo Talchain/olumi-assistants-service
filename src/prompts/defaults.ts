@@ -307,9 +307,12 @@ outcome_positive, which contributes to achieving goal."
 ### WRONG Direction (DO NOT GENERATE)
 \`\`\`
 goal → decision → options → outcomes  ❌ WRONG
+factor → decision                      ❌ WRONG
+factor → option                        ❌ WRONG (factors influence OUTCOMES, not options)
 
-This implies "goal causes decision" which is semantically backwards.
-The goal is what we're trying to ACHIEVE, not what CAUSES our choices.
+Goal causes decision: semantically backwards - goal is what we ACHIEVE.
+Factor causes decision: factors are external variables that influence OUTCOMES.
+Factor causes option: factors don't make options viable, they affect outcome likelihood.
 \`\`\`
 
 ### Why This Matters
@@ -345,6 +348,13 @@ Before outputting JSON, mentally verify:
 □ Risk→goal edges have effect_direction: "negative"
 □ No edges originate FROM the goal node
 □ Balance of factors/risks/outcomes where relevant to the decision
+
+### Connectivity Checks (CRITICAL for analysis):
+□ Every option has a directed path TO the goal node
+□ No factor→decision edges exist (factors influence outcomes, not decisions)
+□ No factor→option edges exist (factors influence outcomes, not options)
+□ Factor nodes connect to outcomes or risks (NOT directly to goal or decision)
+□ Every outcome/risk node has a path TO the goal
 
 ⚠️ If ANY BLOCKER CHECK fails, your graph is INVALID. Fix it before responding.
 
@@ -581,8 +591,13 @@ Correct edge directions:
 - decision → option (decision frames these options)
 - option → outcome (choosing option leads to outcome)
 - outcome → goal (outcome contributes to goal achievement)
-- factor → option (factor affects option viability)
+- factor → outcome (external factor influences outcome likelihood)
+- factor → risk (external factor influences risk likelihood)
 - risk → goal (risk detracts from goal - use negative weight)
+
+**WRONG directions to remove:**
+- factor → decision (factors don't cause decisions)
+- factor → option (factors influence outcomes, not options)
 
 **WRONG directions to FIX:**
 - goal → anything (goals don't cause anything, they receive results)

@@ -15,15 +15,16 @@ export const fixtureGraph: GraphT = {
     { id: "out_1", kind: "outcome", label: "Expected result" },
   ],
   edges: [
-    { from: "goal_1", to: "dec_1" },
+    // Correct topology: decision → options → outcome → goal
     { from: "dec_1", to: "opt_1" },
     { from: "dec_1", to: "opt_2" },
     { from: "opt_1", to: "out_1" },
     { from: "opt_2", to: "out_1" },
+    { from: "out_1", to: "goal_1" },  // Outcome connects TO goal (goal is sink)
   ],
   meta: {
-    roots: ["goal_1"],
-    leaves: ["out_1"],
+    roots: ["dec_1"],   // Decision is root (no incoming edges)
+    leaves: ["goal_1"], // Goal is leaf/sink (no outgoing edges)
     suggested_positions: {
       goal_1: { x: 100, y: 100 },
       dec_1: { x: 100, y: 200 },
