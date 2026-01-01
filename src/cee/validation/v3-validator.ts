@@ -180,10 +180,12 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 /**
  * Allowed edge patterns (closed-world validation).
  * Only these kind-to-kind combinations are permitted.
+ *
+ * Note: In V3, option nodes are in a separate options[] array, not in graph.nodes.
+ * Decision→option and option→factor edges don't exist in the V3 graph.
+ * Controllable factors are determined by intervention targets in options[].
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
-  { from: "decision", to: "option" },
-  { from: "option", to: "factor" },
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },
   { from: "factor", to: "factor" }, // Target must be exogenous (checked separately)
@@ -199,12 +201,12 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const nodeIds = new Set(response.graph.nodes.map((n) => n.id));
   const nodeKindMap = new Map(response.graph.nodes.map((n) => [n.id, n.kind]));
 
-  // Track which nodes have incoming edges from options (controllable factors)
+  // Track which factors are controllable (targeted by interventions in options[])
+  // In V3, options are in a separate array, not in graph.nodes
   const controllableFactors = new Set<string>();
-  for (const edge of response.graph.edges) {
-    const fromKind = nodeKindMap.get(edge.from);
-    if (fromKind === "option") {
-      controllableFactors.add(edge.to);
+  for (const option of response.options) {
+    for (const intervention of Object.values(option.interventions)) {
+      controllableFactors.add(intervention.target_match.node_id);
     }
   }
 
@@ -256,8 +258,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
           warnings.push({
             code: "INVALID_FACTOR_TO_CONTROLLABLE",
             severity: "warning",
-            message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (has incoming option edge)`,
-            suggestion: "Controllable factors should only receive edges from options, not from other factors",
+            message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (targeted by option interventions)`,
+            suggestion: "Controllable factors should only be set by option interventions, not influenced by other factors",
           });
         }
       }
