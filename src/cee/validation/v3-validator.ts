@@ -178,11 +178,35 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 }
 
 /**
+ * Allowed edge patterns (closed-world validation).
+ * Only these kind-to-kind combinations are permitted.
+ */
+const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
+  { from: "decision", to: "option" },
+  { from: "option", to: "factor" },
+  { from: "factor", to: "outcome" },
+  { from: "factor", to: "risk" },
+  { from: "factor", to: "factor" }, // Target must be exogenous (checked separately)
+  { from: "outcome", to: "goal" },
+  { from: "risk", to: "goal" },
+];
+
+/**
  * Validate edges.
  */
 function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const nodeIds = new Set(response.graph.nodes.map((n) => n.id));
+  const nodeKindMap = new Map(response.graph.nodes.map((n) => [n.id, n.kind]));
+
+  // Track which nodes have incoming edges from options (controllable factors)
+  const controllableFactors = new Set<string>();
+  for (const edge of response.graph.edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    if (fromKind === "option") {
+      controllableFactors.add(edge.to);
+    }
+  }
 
   for (let i = 0; i < response.graph.edges.length; i++) {
     const edge = response.graph.edges[i];
@@ -205,6 +229,38 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         message: `Edge ${i}: 'to' node "${edge.to}" not found in graph`,
         affected_node_id: edge.to,
       });
+    }
+
+    // Closed-world edge validation: check kind-to-kind pattern is allowed
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+    if (fromKind && toKind) {
+      const isAllowed = ALLOWED_EDGE_PATTERNS.some(
+        (p) => p.from === fromKind && p.to === toKind
+      );
+      if (!isAllowed) {
+        // Using "warning" severity to maintain backwards compatibility with existing graphs
+        // TODO: Promote to "error" once all fixtures are updated to V4 topology
+        warnings.push({
+          code: "INVALID_EDGE_TYPE",
+          severity: "warning",
+          message: `Edge ${edge.from} → ${edge.to}: ${fromKind} → ${toKind} is not allowed (closed-world violation)`,
+          suggestion: `Valid patterns: ${ALLOWED_EDGE_PATTERNS.map((p) => `${p.from}→${p.to}`).join(", ")}`,
+        });
+      }
+
+      // Additional check: factor→factor only allowed if target is exogenous (not controllable)
+      if (fromKind === "factor" && toKind === "factor") {
+        if (controllableFactors.has(edge.to)) {
+          // Using "warning" severity for backwards compatibility
+          warnings.push({
+            code: "INVALID_FACTOR_TO_CONTROLLABLE",
+            severity: "warning",
+            message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (has incoming option edge)`,
+            suggestion: "Controllable factors should only receive edges from options, not from other factors",
+          });
+        }
+      }
     }
 
     // Check effect_direction matches strength_mean sign

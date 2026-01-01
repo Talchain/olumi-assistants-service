@@ -118,10 +118,39 @@ export const TargetMatch = z.object({
 export type TargetMatchT = z.infer<typeof TargetMatch>;
 
 /**
+ * Value types supported for interventions.
+ * - numeric: Standard quantitative value (e.g., price: 59)
+ * - categorical: Named category (e.g., region: "UK")
+ * - boolean: Toggle flag (e.g., feature_enabled: true)
+ */
+export const InterventionValueType = z.enum(["numeric", "categorical", "boolean"]);
+export type InterventionValueTypeT = z.infer<typeof InterventionValueType>;
+
+/**
+ * Raw intervention value - supports numeric, categorical, or boolean.
+ * Used in raw_interventions field for pre-encoding values.
+ */
+export const RawInterventionValue = z.union([
+  z.number(),
+  z.string(),
+  z.boolean(),
+]);
+export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
+
+/**
  * A single intervention on a factor.
+ *
+ * Supports the Raw+Encoded pattern:
+ * - value: REQUIRED numeric value (for PLoT compatibility)
+ * - raw_value: OPTIONAL original value before encoding (string/number/boolean)
+ * - value_type: OPTIONAL type indicator for non-numeric interventions
+ *
+ * For numeric interventions: value = raw_value (or raw_value omitted)
+ * For categorical: value = encoded integer, raw_value = "UK", value_type = "categorical"
+ * For boolean: value = 0|1, raw_value = true|false, value_type = "boolean"
  */
 export const InterventionV3 = z.object({
-  /** Numeric value (MUST be numeric, no strings) */
+  /** Numeric value (MUST be numeric for PLoT compatibility) */
   value: z.number(),
   /** Unit (should match target factor's observed_state.unit) */
   unit: z.string().optional(),
@@ -133,6 +162,13 @@ export const InterventionV3 = z.object({
   value_confidence: z.enum(["high", "medium", "low"]).optional(),
   /** Explanation for transparency */
   reasoning: z.string().optional(),
+  // --- Raw+Encoded pattern fields (additive, optional) ---
+  /** Original value before encoding (for categorical/boolean interventions) */
+  raw_value: RawInterventionValue.optional(),
+  /** Type of the intervention value */
+  value_type: InterventionValueType.optional(),
+  /** Encoding map for categorical values: raw_value -> encoded integer */
+  encoding_map: z.record(z.string(), z.number()).optional(),
 });
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 
@@ -148,7 +184,21 @@ export const OptionProvenanceV3 = z.object({
 export type OptionProvenanceV3T = z.infer<typeof OptionProvenanceV3>;
 
 /**
+ * Option status values.
+ * - ready: All interventions encoded, ready for analysis
+ * - needs_user_mapping: Missing factor matches or values
+ * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
+ */
+export const OptionStatusV3 = z.enum(["ready", "needs_user_mapping", "needs_encoding"]);
+export type OptionStatusV3T = z.infer<typeof OptionStatusV3>;
+
+/**
  * V3 option schema - decision paths with intervention bundles.
+ *
+ * Supports the Raw+Encoded pattern for categorical/boolean interventions:
+ * - interventions: ALWAYS present, contains encoded numeric values
+ * - raw_interventions: OPTIONAL, contains original values before encoding
+ * - status: "needs_encoding" when raw values exist but aren't yet encoded
  */
 export const OptionV3 = z.object({
   /** Option ID - pattern: ^[a-z0-9_:-]+$ */
@@ -158,9 +208,12 @@ export const OptionV3 = z.object({
   /** Optional description */
   description: z.string().optional(),
   /** Option readiness status */
-  status: z.enum(["ready", "needs_user_mapping"]),
-  /** Intervention bundle: factor_id -> intervention */
+  status: OptionStatusV3,
+  /** Intervention bundle: factor_id -> intervention (encoded numeric values) */
   interventions: z.record(z.string(), InterventionV3),
+  // --- Raw+Encoded pattern: parallel raw values (additive field) ---
+  /** Raw intervention values before encoding (for categorical/boolean) */
+  raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Concepts mentioned but not matched to factors */
   unresolved_targets: z.array(z.string()).optional(),
   /** Specific questions for the user */

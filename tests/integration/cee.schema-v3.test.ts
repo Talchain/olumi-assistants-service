@@ -10,6 +10,8 @@ import { validateV3Response } from "../../src/cee/validation/v3-validator.js";
 import { CEEGraphResponseV3 } from "../../src/schemas/cee-v3.js";
 
 describe("CEE Schema V3 Integration", () => {
+  // V4 topology: decision → options → factors → outcomes/risks → goal
+  // factor→goal is now prohibited (closed-world), must use factor→outcome→goal
   const sampleV1Response: V1DraftGraphResponse = {
     graph: {
       version: "1",
@@ -20,10 +22,15 @@ describe("CEE Schema V3 Integration", () => {
         { id: "option_premium", kind: "option", label: "Premium Pricing", body: "Set price to £59" },
         { id: "option_economy", kind: "option", label: "Economy Pricing", body: "Set price to £39" },
         { id: "outcome_growth", kind: "outcome", label: "Business Growth" },
+        { id: "risk_churn", kind: "risk", label: "Customer Churn" },
       ],
       edges: [
-        { from: "factor_price", to: "goal_revenue", weight: 0.8, belief: 0.9, effect_direction: "positive" },
-        { from: "factor_marketing", to: "goal_revenue", weight: 0.6, belief: 0.85, effect_direction: "positive" },
+        // V4 topology: factor → outcome/risk → goal (not factor → goal directly)
+        { from: "factor_price", to: "outcome_growth", weight: 0.8, belief: 0.9, effect_direction: "positive" },
+        { from: "factor_marketing", to: "outcome_growth", weight: 0.6, belief: 0.85, effect_direction: "positive" },
+        { from: "factor_price", to: "risk_churn", weight: 0.4, belief: 0.8, effect_direction: "positive" },
+        { from: "outcome_growth", to: "goal_revenue", weight: 1.0, belief: 1.0, effect_direction: "positive" },
+        { from: "risk_churn", to: "goal_revenue", weight: 0.5, belief: 0.9, effect_direction: "negative" },
         { from: "option_premium", to: "factor_price", weight: 0.7, belief: 0.8 },
         { from: "option_economy", to: "factor_price", weight: 0.7, belief: 0.8 },
       ],
@@ -223,7 +230,9 @@ describe("CEE Schema V3 Integration", () => {
             { id: "outcome_growth", kind: "outcome", label: "Business Growth" },
           ],
           edges: [
-            { from: "factor_price", to: "goal_revenue", weight: 0.8, belief: 0.9, effect_direction: "positive" },
+            // V4 topology: factor → outcome → goal (not factor → goal directly)
+            { from: "factor_price", to: "outcome_growth", weight: 0.8, belief: 0.9, effect_direction: "positive" },
+            { from: "outcome_growth", to: "goal_revenue", weight: 1.0, belief: 1.0, effect_direction: "positive" },
           ],
         },
       };
@@ -252,20 +261,21 @@ describe("CEE Schema V3 Integration", () => {
     });
 
     it("preserves negative effect directions", () => {
+      // Use factor_marketing -> risk_churn which doesn't exist in sampleV1Response
       const responseWithNegativeEffect: V1DraftGraphResponse = {
         ...sampleV1Response,
         graph: {
           ...sampleV1Response.graph,
           edges: [
             ...sampleV1Response.graph.edges,
-            { from: "factor_price", to: "outcome_growth", weight: 0.5, belief: 0.7, effect_direction: "negative" },
+            { from: "factor_marketing", to: "risk_churn", weight: 0.5, belief: 0.7, effect_direction: "negative" },
           ],
         },
       };
 
       const v3Response = transformResponseToV3(responseWithNegativeEffect);
       const negativeEdge = v3Response.graph.edges.find(
-        (e) => e.from === "factor_price" && e.to === "outcome_growth"
+        (e) => e.from === "factor_marketing" && e.to === "risk_churn"
       );
 
       expect(negativeEdge).toBeDefined();

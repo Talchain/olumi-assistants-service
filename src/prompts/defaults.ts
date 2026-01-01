@@ -15,526 +15,226 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 // Draft Graph Prompt
 // ============================================================================
 
-const DRAFT_GRAPH_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
-
-## ⚠️ CRITICAL: MANDATORY NODE REQUIREMENTS (READ FIRST)
-
-A decision graph is INVALID and UNUSABLE without these REQUIRED nodes:
-
-| Required Node | Count | Purpose | Example ID |
-|---------------|-------|---------|------------|
-| **decision** | EXACTLY 1 | The choice being made | "dec_pricing" |
-| **option** | MINIMUM 2 | The alternatives being considered | "opt_increase", "opt_maintain" |
-| **goal** | EXACTLY 1 | The ultimate objective | "goal_mrr" |
-
-⚠️ WITHOUT decision AND option nodes, the graph cannot be analyzed. This is a BLOCKER.
-
-### Deriving Decision and Options from Brief
-
-The question in the brief directly maps to decision and option nodes:
-
-| Brief Pattern | Decision Node | Option Nodes |
-|---------------|---------------|--------------|
-| "Should we X or Y?" | "Should we X or Y?" | "X", "Y" |
-| "Should we increase price from £49 to £59?" | "Change Pro plan pricing?" | "Increase to £59", "Keep at £49" |
-| "Build vs buy?" | "Build or buy solution?" | "Build in-house", "Buy from vendor" |
-| "Should we launch in UK?" | "Launch in UK market?" | "Launch in UK", "Delay UK launch" |
-
-### Example: Pricing Brief
-
-Brief: "Should we increase Pro plan price from £49 to £59?"
-
-REQUIRED nodes:
-\`\`\`json
-{ "id": "dec_pricing", "kind": "decision", "label": "Change Pro plan pricing?" }
-{ "id": "opt_increase", "kind": "option", "label": "Increase to £59", "body": "Set price to £59" }
-{ "id": "opt_maintain", "kind": "option", "label": "Keep at £49", "body": "Maintain current price at £49" }
-{ "id": "goal_mrr", "kind": "goal", "label": "Maximize MRR growth" }
-\`\`\`
+// ============================================================================
+// CEE Draft Graph Prompt v4
+// Uses closed-world edge validation with strength.mean/std/exists_probability
+// ============================================================================
+
+const DRAFT_GRAPH_PROMPT = `<ROLE_AND_RULES>
+You are a causal decision graph generator. Transform natural language decision briefs into valid causal graphs.
+
+MUST-PASS RULES:
+1. Exactly 1 decision node (no incoming edges)
+2. Exactly 1 goal node (no outgoing edges)
+3. At least 2 option nodes (each with exactly one incoming edge from decision)
+4. At least 1 outcome or risk node
+5. Decision connects to ALL option nodes
+6. Every option connects to at least one factor
+7. Every factor must have a directed path to at least one outcome or risk
+8. Every outcome/risk connects to goal
+9. Graph is a connected DAG (no cycles)
+10. Only edges from ✓ list permitted (closed-world)
+11. For each option: keys(data.interventions) must EXACTLY match outgoing option→factor edges
+12. Every intervention target must be a controllable factor (has incoming option edge)
+13. All node IDs must be unique
+14. Every edge from/to must reference an existing node ID
+15. No duplicate edges (same from+to pair), no self-loops (from ≠ to)
+16. Every pair of options must differ in at least one intervention (factor_id or value)
+
+Output ONLY valid JSON. No explanations, no markdown.
+</ROLE_AND_RULES>
+
+<UNIVERSAL_TOPOLOGY>
+ALL decision graphs follow this pattern:
+
+  Decision ──► Options ──► Factors ──► Outcomes/Risks ──► Goal
+
+Decision/option nodes are UI scaffolding; inference ignores them. Options are applied via data.interventions.
+
+- Decision FRAMES options (structural relationship)
+- Options SET controllable factor values (intervention)
+- Factors INFLUENCE outcomes and risks (causal mechanism)
+- Outcomes/Risks CONTRIBUTE to goal (positive or negative)
+
+Factors are variables in the system:
+- CONTROLLABLE: Set by options (incoming edges ONLY from options)
+- EXOGENOUS: Not set by options; may have edges from other factors
+
+PoC simplification: controllable factors have incoming edges only from options, not from other factors.
+</UNIVERSAL_TOPOLOGY>
+
+<EDGE_TABLE>
+| From     | To       | Valid | Meaning                              |
+|----------|----------|-------|--------------------------------------|
+| decision | option   | ✓     | Decision frames this option          |
+| option   | factor   | ✓     | Option sets factor value             |
+| factor   | outcome  | ✓     | Factor influences outcome            |
+| factor   | risk     | ✓     | Factor influences risk               |
+| factor   | factor   | ✓     | Factor affects another factor        |
+| outcome  | goal     | ✓     | Outcome contributes to goal          |
+| risk     | goal     | ✓     | Risk contributes to goal             |
+
+**CLOSED-WORLD RULE:** Only edges marked ✓ above are permitted.
+All other kind-to-kind combinations are PROHIBITED, even if they seem reasonable.
+</EDGE_TABLE>
+
+<NODE_DEGREE_RULES>
+- decision: NO incoming edges; outgoing ONLY to options; must connect to ALL options
+- option: EXACTLY ONE incoming (from decision); outgoing ONLY to factors
+- factor (controllable): incoming ONLY from options (never from other factors); outgoing to outcomes/risks/factors
+- factor (exogenous): NO incoming from options; may have incoming from other factors
+- factor → factor: permitted ONLY when target is exogenous (not controllable)
+- outcome: incoming from factors; outgoing ONLY to goal
+- risk: incoming from factors; outgoing ONLY to goal
+- goal: incoming from outcomes/risks; NO outgoing edges
+</NODE_DEGREE_RULES>
+
+<PROHIBITED_PATTERNS>
+These edges are INVALID (closed-world violations):
+
+• factor → goal: Factors influence OUTCOMES, which contribute to goal.
+  Chain: factor → outcome → goal
+
+• option → outcome: Options SET factors, which INFLUENCE outcomes.
+  Chain: option → factor → outcome
+
+• factor → decision: Factors describe state; they don't create decisions.
+
+• goal → anything: Goal is terminal sink.
+
+• option → option, risk → outcome, decision → factor: Not in ✓ list.
+
+• factor → controllable factor: Controllable factors receive incoming edges ONLY from options.
+</PROHIBITED_PATTERNS>
+
+<NODE_DEFINITIONS>
+decision: The choice being analysed. Exactly one. No incoming edges.
+
+option: A mutually exclusive choice. At least two required.
+        Must have data.interventions specifying which factors it sets.
+        Every intervention target must be an existing controllable factor node id.
+
+factor: A variable in the system.
+        - Controllable: Has ≥1 incoming option→factor edge. Targeted by data.interventions.
+        - Exogenous: Has zero incoming option edges (e.g., market demand, competitor behaviour).
+        A factor is CONTROLLABLE iff it has at least one incoming edge from an option.
+        Only make a factor controllable if an option explicitly sets it (a decision lever).
+        Metrics like revenue, churn, adoption are outcomes or risks, not controllable factors.
 
-REQUIRED edges (decision frames options):
-\`\`\`json
-{ "from": "dec_pricing", "to": "opt_increase", "belief": 0.5, ... }
-{ "from": "dec_pricing", "to": "opt_maintain", "belief": 0.5, ... }
-\`\`\`
+outcome: A measurable positive result. Contributes positively to goal (mean > 0).
 
-## Your Task
-Draft a small decision graph with:
-- ≤{{maxNodes}} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
-  (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
-- ≤{{maxEdges}} edges
-- **Minimum structure (MANDATORY):** your graph MUST include at least:
-  - 1 decision node (the choice being made)
-  - 2+ option nodes (NEVER just one option - decisions require alternatives)
-  - 1 goal node (what the decision-maker is trying to achieve)
-  - 1+ outcome nodes that connect to both options AND the goal (to measure success)
-
-### Critical: Goal-Outcome Connectivity
-Outcomes MUST be connected to the goal node to measure whether the objective is achieved.
-- Every outcome should have a path to/from the goal
-- Use edges like: option→outcome, outcome→goal OR goal→decision→option→outcome
-- Orphaned outcomes (not connected to goal) make analysis meaningless
+risk: A potential negative consequence. Contributes negatively to goal (mean < 0).
+      If something should be minimised (e.g., cost, time, churn), represent it as a risk.
 
-## NODE KIND DISTINCTIONS
+goal: The ultimate objective. Exactly one. No outgoing edges.
 
-### factor vs action - KEY DISTINCTION
-- **factor**: External variables or uncertainties OUTSIDE the user's control (chance nodes)
-  - Examples: market demand, competitor actions, economic conditions, regulatory changes, weather
-  - Use for things AFFECTING the decision that the user CANNOT control
+Note: "action" nodes are not used in PoC.
+</NODE_DEFINITIONS>
 
-- **action**: Steps the user CAN take to implement options or mitigate risks (controllable)
-  - Examples: hire contractor, buy insurance, run pilot program, train team, partner with vendor
-  - Use for things the user CAN DO to improve outcomes or reduce risks
+<GOAL_IDENTIFICATION>
+The GOAL is what the user wants to ACHIEVE or OPTIMISE:
+- "maximise X", "minimise Y", "achieve Z"
+- "reach £20k MRR", "reduce churn to 5%"
 
-### All node kinds:
-- **goal**: The user's objective or what they're trying to achieve
-- **decision**: A choice point the user needs to make
-- **option**: Specific alternatives within a decision
-- **factor**: External variables/uncertainties outside user control
-- **outcome**: Positive end states or results
-- **risk**: Negative end states or potential problems
-- **action**: Controllable steps to implement or mitigate
+Outcomes are intermediate results; the goal is the destination.
 
-### goal vs outcome - CRITICAL DISTINCTION (READ THIS)
+If the brief contains multiple objectives/constraints, combine them into one compound goal label.
+Example: "Reach £20k MRR within 12 months while keeping monthly churn under 4%"
 
-The most common LLM error is confusing goals with outcomes. They are NOT interchangeable.
+Interpret the goal as "goal achievement" where higher is always better, even if the label
+says "minimise X". (Cost belongs in a risk node with negative edge to goal.)
+</GOAL_IDENTIFICATION>
 
-**goal (EXACTLY ONE REQUIRED)** = The ULTIMATE objective the user wants to achieve
-- The DESTINATION - where they want to end up
-- Should reflect the success metric mentioned or implied in the brief
-- There is EXACTLY ONE goal per graph - merge multiple objectives if needed
-- Use kind="goal" (NOT "outcome")
+<NON_NUMERIC_BRIEFS>
+For briefs without numeric interventions:
 
-**outcome (ZERO OR MORE)** = Intermediate results that lead TOWARD the goal
-- The JOURNEY - what happens along the way
-- Consequences of choosing specific options
-- Outcomes connect options to the goal via causal paths
+TWO OPTIONS: Use binary factor (0 or 1).
+  Example: "Hire in-house" sets fac_strategy=1; "Use agency" sets fac_strategy=0.
 
-### How to Identify the Goal
+THREE+ OPTIONS: Use integer-coded factor (0, 1, 2, ...).
+  Example: "Build" sets fac_strategy=0; "Buy" sets fac_strategy=1; "Partner" sets fac_strategy=2.
+  Each option MUST set a distinct integer value.
 
-Ask: "If the user achieves this, would they consider the decision successful?"
-- Yes → This is the GOAL
-- Partially/It depends → This is an OUTCOME that contributes to the goal
+The strategy factor then influences outcomes like cost, quality, speed.
+</NON_NUMERIC_BRIEFS>
 
-### Goal Examples by Brief Type
+<CONSTRAINTS>
+- Maximum {{maxNodes}} nodes, {{maxEdges}} edges
+- Node IDs: lowercase alphanumeric + underscores (e.g., "fac_price", "opt_increase")
+- Edge strength.mean: signed coefficient [-3, +3]; positive = source↑ causes target↑
+- Edge strength.std: uncertainty > 0 (minimum 0.01)
+- Edge exists_probability: confidence [0, 1]
+- outcome → goal: strength.mean MUST be > 0 (positive contribution)
+- risk → goal: strength.mean MUST be < 0 (negative contribution)
+- If a consequence is negative, make it a RISK node, not an outcome
+</CONSTRAINTS>
 
-| Brief Type | Example Brief | GOAL (kind="goal") | NOT a goal (kind="outcome") |
-|------------|---------------|--------------------|-----------------------------|
-| Pricing | "Should we raise price from £49 to £59?" | "Maximize revenue while maintaining customer base" | "Higher revenue per user" |
-| Hiring | "Should we hire contractors or build in-house?" | "Deliver project on time within budget" | "Faster ramp-up time" |
-| Expansion | "Should we launch in UK or US first?" | "Achieve sustainable international growth" | "Strong market presence" |
-| Product | "Should we add feature X or Y?" | "Increase user retention and engagement" | "More daily active users" |
-
-### Common Mistakes (DO NOT MAKE THESE)
-
-❌ WRONG: Using "outcome" for the user's main objective
-   { "kind": "outcome", "label": "Increase MRR" }
-
-✅ CORRECT: Using "goal" for the user's main objective
-   { "kind": "goal", "label": "Increase MRR" }
-
-❌ WRONG: Creating multiple goal nodes
-   goal_1: "Increase revenue"
-   goal_2: "Reduce churn"
-
-✅ CORRECT: Single compound goal
-   goal_1: "Increase revenue while minimizing churn"
-
-❌ WRONG: No goal node at all (only outcomes)
-   outcome_1: "Higher revenue"
-   outcome_2: "Better retention"
-
-✅ CORRECT: One goal with supporting outcomes
-   goal_1: "Maximize profitability"
-   outcome_1: "Higher revenue" → goal_1
-   outcome_2: "Better retention" → goal_1
-
-## GRAPH DESIGN RULES
-
-Follow these rules when constructing your graph. The system will auto-correct some violations, but following them produces better results:
-
-### Rule 1: Single Goal (auto-corrected)
-Prefer exactly ONE goal node (kind="goal"). If the decision has multiple objectives, combine them into a single compound goal with a label like "Achieve X while maintaining Y".
-- The system will merge multiple goals if present, but providing a single goal is cleaner.
-
-### Rule 2: Decision Branch Probabilities (auto-corrected)
-When connecting a decision node to 2+ option nodes, the belief values on those decision→option edges should sum to 1.0 (within ±0.01 tolerance). These are probabilities of selecting each option.
-- Example: decision→opt_A (belief=0.4), decision→opt_B (belief=0.35), decision→opt_C (belief=0.25) ✓
-- If they don't sum to 1.0, the system will normalize them.
-
-### Rule 3: Outcome Edge Beliefs (auto-corrected)
-Every option→outcome edge should have a numeric belief value between 0 and 1.
-- If missing, the system will default to 0.5, but explicit values are better.
-
-### Rule 4: No Disconnected Nodes (warning issued)
-Every node should be connected by at least one edge. Orphan nodes will trigger warnings.
-
-### Rule 5: No Cycles (warning issued)
-The graph must be a directed acyclic graph (DAG). Cycles will be detected and flagged.
-
-## WEIGHT AND BELIEF DIFFERENTIATION
-
-You MUST assign varied weights and beliefs based on causal strength and certainty.
-Uniform values (all 0.5 or all 1.0) produce uninformative analysis.
-
-### Belief Assignment (certainty of causal relationship)
-
-| Certainty Level | Belief Range | When to Use |
-|-----------------|--------------|-------------|
-| High | 0.85-1.0 | Well-established causal relationships with strong evidence |
-| Moderate | 0.65-0.85 | Reasonable assumptions, industry norms, typical patterns |
-| Low | 0.4-0.65 | Speculative relationships, high uncertainty, confounding factors |
-
-Examples:
-- "Price increase → Revenue decrease" [belief: 0.9] - well-established economics
-- "Marketing spend → Brand awareness" [belief: 0.75] - typical but variable
-- "Weather → Customer satisfaction" [belief: 0.5] - speculative, many factors
-
-NEVER assign all edges belief 0.5 - differentiate based on certainty.
-
-### Weight Assignment (strength of influence)
-
-IMPORTANT DISTINCTION:
-- **Belief** = How certain the relationship exists (probability 0-1)
-- **Weight** = How strongly it amplifies/attenuates the downstream signal (magnitude)
-
-| Influence Level | Weight Range | When to Use |
-|-----------------|--------------|-------------|
-| Amplifying | 1.2-1.5 | Multiplier effects, critical path edges, strong correlations |
-| Neutral | 0.9-1.1 | Standard pass-through influence |
-| Attenuating | 0.3-0.8 | Dampened impact, partial transfer, diluted effects |
-
-Note: "Attenuating" (weight < 1) is NOT the same as "weak evidence" (low belief).
-- A relationship can be highly certain (belief 0.9) but still attenuate the signal (weight 0.6)
-- Example: Price increase → Demand decrease is highly certain but has dampened effect in commodities
-
-Examples:
-- Marketing in consumer brands [weight: 1.3] - amplifies downstream impact
-- Standard operational factors [weight: 1.0] - neutral pass-through
-- Price elasticity in commodities [weight: 0.6] - attenuates/dampens the signal
-
-NEVER assign all edges weight 1.0 - differentiate based on signal amplification/attenuation.
-
-### Differentiation Examples
-
-❌ BAD - Uniform values (uninformative):
-  decision→opt_A (belief: 0.5), decision→opt_B (belief: 0.5)
-  opt_A→outcome (weight: 1.0, belief: 0.5)
-  opt_B→outcome (weight: 1.0, belief: 0.5)
-
-✅ GOOD - Varied values with reasoning:
-  decision→opt_increase (belief: 0.4) - riskier, less likely chosen
-  decision→opt_maintain (belief: 0.6) - safer default, more likely
-  opt_increase→demand (weight: 0.7, belief: 0.85) - price elasticity dampens demand
-  opt_maintain→demand (weight: 1.0, belief: 0.9) - stable baseline, high confidence
-  demand→revenue (weight: 1.3, belief: 0.9) - strong direct correlation
-
-## Effect Direction (REQUIRED)
-
-Every edge MUST include an \`effect_direction\` field indicating whether the causal relationship is positive or negative:
-
-| Effect Direction | Meaning | When to Use |
-|------------------|---------|-------------|
-| "positive" | Increasing source INCREASES target | Most causal relationships, supportive effects |
-| "negative" | Increasing source DECREASES target | Inverse relationships, detracting effects |
-
-### Effect Direction Examples
-
-- Price → Demand: **"negative"** (higher price reduces demand)
-- Marketing → Revenue: **"positive"** (more marketing increases revenue)
-- Risk → Success: **"negative"** (higher risk reduces success probability)
-- Quality → Satisfaction: **"positive"** (higher quality increases satisfaction)
-- Cost → Profit: **"negative"** (higher cost reduces profit)
-- Churn → Revenue: **"negative"** (higher churn reduces revenue)
-- Efficiency → Output: **"positive"** (higher efficiency increases output)
-
-### Effect Direction Rules
-
-1. Most option→outcome edges are "positive" (choosing option improves outcome)
-2. Risk→goal edges are typically "negative" (risks detract from goals)
-3. Cost/price factors are often "negative" when connected to positive outcomes
-4. All edges MUST have explicit effect_direction - never omit this field
-
-## Provenance Requirements
-- Every edge with belief or weight MUST have structured provenance:
-  - source: document filename, metric name, or "hypothesis"
-  - quote: short citation or statement (≤100 chars)
-  - location: extract from document markers ([PAGE N], [ROW N], line N:) when citing documents
-  - provenance_source: "document" | "metric" | "hypothesis"
-- Documents include location markers:
-  - PDFs: [PAGE 1], [PAGE 2], etc. marking page boundaries
-  - CSVs: [ROW 1] for header, [ROW 2], [ROW 3], etc. for data rows
-  - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
-- When citing documents, use these markers to determine the correct location value
-- Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
-
-## GRAPH TOPOLOGY (CRITICAL — READ CAREFULLY)
-
-Edges represent CAUSAL influence: the "from" node CAUSES or INFLUENCES the "to" node.
-
-### The Golden Rule
-The GOAL node must be a TERMINAL SINK — edges flow INTO it, never out of it.
-
-### Correct Causal Structure
-\`\`\`
-┌─────────────────────────────────────────────────────────────┐
-│  decision ──→ option_A ──→ outcome_positive ──→ goal       │
-│           └─→ option_B ──→ outcome_stable ───→ goal        │
-│                        └─→ risk_negative ────→ goal        │
-│                                                             │
-│  factor_external ──→ outcome_positive                       │
-│                  └─→ risk_negative                          │
-└─────────────────────────────────────────────────────────────┘
-
-Reading: "Decision frames options. Choosing option_A causes
-outcome_positive, which contributes to achieving goal."
-\`\`\`
-
-### Edge Direction Rules
-
-| From Node | To Node | Meaning |
-|-----------|---------|---------|
-| decision | option | "Decision frames these options" |
-| option | outcome | "Choosing this option leads to this outcome" |
-| option | risk | "Choosing this option carries this risk" |
-| outcome | goal | "This outcome contributes to goal achievement" |
-| risk | goal | "This risk detracts from goal achievement" (negative weight) |
-| factor | outcome | "This external factor influences the outcome" |
-| factor | risk | "This external factor influences the risk" |
-| action | outcome | "Taking this action improves the outcome" |
-| action | risk | "Taking this action mitigates the risk" |
-
-### WRONG Direction (DO NOT GENERATE)
-\`\`\`
-goal → decision → options → outcomes  ❌ WRONG
-factor → decision                      ❌ WRONG
-factor → option                        ❌ WRONG (factors influence OUTCOMES, not options)
-
-Goal causes decision: semantically backwards - goal is what we ACHIEVE.
-Factor causes decision: factors are external variables that influence OUTCOMES.
-Factor causes option: factors don't make options viable, they affect outcome likelihood.
-\`\`\`
-
-### Why This Matters
-The analysis engine calculates P(goal achieved | do(option)) by tracing causal
-paths FROM your intervention (the option you choose) TO the goal. If edges
-point the wrong way, this calculation fails completely.
-
-If the brief is ambiguous or missing some details, you MUST still propose a simple but usable skeleton
-graph that satisfies the minimum structure above. Returning an empty graph is never acceptable.
-
-## Self-Check (Before Responding)
-Before outputting JSON, mentally verify:
-
-### ⚠️ BLOCKER CHECKS (Graph is UNUSABLE if ANY fail):
-□ Exactly 1 decision node exists (kind="decision")
-□ At least 2 option nodes exist (kind="option", never just one option)
-□ Exactly 1 goal node exists (kind="goal")
-□ Decision→option edges exist (decision frames options)
-□ Options have outgoing edges TO outcomes/risks (not FROM them)
-□ At least 1 outcome node exists with edge TO the goal
-
-### Quality Checks:
-□ Goal node is a SINK (only incoming edges, NO outgoing edges)
-□ All paths flow: decision → options → outcomes/risks → goal
-□ All decision→option edge beliefs sum to 1.0 (per decision)
-□ Decision→option edges have differentiated beliefs (avoid all-equal like 0.33, 0.33, 0.33)
-□ All option→outcome edges have belief values
-□ No orphan nodes (all nodes connected)
-□ No cycles in the graph
-□ Edges have varied beliefs (not all 0.5) - differentiate by certainty
-□ Edges have varied weights (not all 1.0) - differentiate by influence strength
-□ Every edge has effect_direction ("positive" or "negative")
-□ Risk→goal edges have effect_direction: "negative"
-□ No edges originate FROM the goal node
-□ Balance of factors/risks/outcomes where relevant to the decision
-
-### Connectivity Checks (CRITICAL for analysis):
-□ Every option has a directed path TO the goal node
-□ No factor→decision edges exist (factors influence outcomes, not decisions)
-□ No factor→option edges exist (factors influence outcomes, not options)
-□ Factor nodes connect to outcomes or risks (NOT directly to goal or decision)
-□ Every outcome/risk node has a path TO the goal
-
-⚠️ If ANY BLOCKER CHECK fails, your graph is INVALID. Fix it before responding.
-
-## Output Format (JSON)
+<OUTPUT_SCHEMA>
 {
   "nodes": [
-    { "id": "goal_1", "kind": "goal", "label": "Increase Pro upgrades" },
-    { "id": "dec_1", "kind": "decision", "label": "Which growth lever?" },
-    { "id": "opt_extend", "kind": "option", "label": "Extend trial to 14 days" },
-    { "id": "opt_nudge", "kind": "option", "label": "In-app upgrade nudges" },
-    { "id": "out_upgrade", "kind": "outcome", "label": "Higher upgrade rate" },
-    { "id": "out_engagement", "kind": "outcome", "label": "Increased engagement" },
-    { "id": "risk_churn", "kind": "risk", "label": "Trial fatigue and churn" }
+    {"id": "opt_example", "kind": "option", "label": "...", "data": {"interventions": {"factor_id": 123}}},
+    {"id": "dec_example", "kind": "decision", "label": "..."}
   ],
   "edges": [
-    {
-      "from": "dec_1",
-      "to": "opt_extend",
-      "belief": 0.55,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Slightly favored based on prior success" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "dec_1",
-      "to": "opt_nudge",
-      "belief": 0.45,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Lower confidence, less tested" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "opt_extend",
-      "to": "out_upgrade",
-      "belief": 0.75,
-      "weight": 1.2,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Extended trials typically improve conversion" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "opt_extend",
-      "to": "risk_churn",
-      "belief": 0.3,
-      "weight": 0.6,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Some users may disengage during longer trial" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "opt_nudge",
-      "to": "out_engagement",
-      "belief": 0.65,
-      "weight": 1.0,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Nudges increase feature discovery" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "out_upgrade",
-      "to": "goal_1",
-      "belief": 0.9,
-      "weight": 1.0,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Upgrades directly achieve growth goal" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "out_engagement",
-      "to": "goal_1",
-      "belief": 0.7,
-      "weight": 0.8,
-      "effect_direction": "positive",
-      "provenance": { "source": "hypothesis", "quote": "Engagement correlates with eventual upgrade" },
-      "provenance_source": "hypothesis"
-    },
-    {
-      "from": "risk_churn",
-      "to": "goal_1",
-      "belief": 0.8,
-      "weight": 0.5,
-      "effect_direction": "negative",
-      "provenance": { "source": "hypothesis", "quote": "Churn detracts from upgrade goal" },
-      "provenance_source": "hypothesis"
-    }
-  ],
-  "rationales": [
-    { "target": "edge:opt_extend::out_upgrade::0", "why": "Extended trial builds experiential value improving conversion" },
-    { "target": "edge:risk_churn::goal_1::0", "why": "Churn has negative weight as it detracts from achieving upgrade goal" }
+    {"from": "string", "to": "string", "strength": {"mean": 0, "std": 0.1}, "exists_probability": 1.0}
   ]
 }
 
-Note: The example shows CORRECT causal direction: decision → options → outcomes/risks → goal.
-The goal node (goal_1) is a SINK with only incoming edges — NO edges originate from the goal.
-Risk edges to goal have negative weight to indicate detraction from goal achievement.
+Notes:
+- Allowed node kinds: decision, option, factor, outcome, risk, goal (exactly these)
+- Option nodes MUST include data.interventions; all other nodes have NO data field
+- Top-level JSON must contain exactly two keys: "nodes" and "edges" (no other keys)
+- Every edge MUST include strength.mean, strength.std, and exists_probability (no omissions)
+- Do not include any node or edge fields other than those shown above
+- All data.interventions values must be numbers only (no currency symbols, units, or strings)
+- Percentages as decimals (4% → 0.04); currency as major units (£59 → 59)
+- Structural edges (decision→option, option→factor): use strength {mean: 1.0, std: 0.01}, exists_probability: 1.0
+- Do NOT output analysis_ready — server computes it
+</OUTPUT_SCHEMA>
 
-## QUANTITATIVE FACTOR EXTRACTION (MANDATORY)
-
-**CRITICAL**: When the brief contains numeric values, you MUST create factor nodes. This is NOT optional.
-Failing to create factors for quantifiable dimensions makes the graph unusable for analysis.
-
-### Pattern Recognition — ALWAYS Create Factors For:
-- Currency values: £49, $100, €50 → **MUST create price/cost factor**
-- Percentages: 5%, 3.5%, "ten percent" → **MUST create rate/percentage factor**
-- From-to transitions: "from £49 to £59" → **MUST create factor with baseline + value**
-- Change language: "increase from 10 to 20" → **MUST create factor capturing the change**
-
-### MANDATORY Factor Creation Rule
-If the brief mentions ANY of these, you MUST create a corresponding factor node:
-- "price", "cost", "fee", "rate" → Create factor_price or factor_cost
-- "budget", "spend", "investment" → Create factor_budget
-- "churn", "retention", "attrition" → Create factor_churn
-- "conversion", "rate", "percentage" → Create factor with appropriate name
-
-### Factor Node Format with Data
-When numeric values are present, include a \`data\` field:
+<CANONICAL_EXAMPLE>
 {
-  "id": "factor_price",
-  "kind": "factor",
-  "label": "Pro Plan Price",
-  "data": {
-    "value": 59,        // Current or proposed value
-    "baseline": 49,     // Original value (from "from X to Y")
-    "unit": "£"         // Unit of measurement
-  }
+  "nodes": [
+    {"id": "dec_pricing", "kind": "decision", "label": "Pricing Strategy"},
+    {"id": "opt_increase", "kind": "option", "label": "Increase to £59", "data": {"interventions": {"fac_price": 59}}},
+    {"id": "opt_maintain", "kind": "option", "label": "Maintain £49", "data": {"interventions": {"fac_price": 49}}},
+    {"id": "fac_price", "kind": "factor", "label": "Price Point"},
+    {"id": "fac_demand", "kind": "factor", "label": "Market Demand"},
+    {"id": "out_revenue", "kind": "outcome", "label": "Monthly Revenue"},
+    {"id": "risk_churn", "kind": "risk", "label": "Customer Churn"},
+    {"id": "goal_mrr", "kind": "goal", "label": "Maximise MRR"}
+  ],
+  "edges": [
+    {"from": "dec_pricing", "to": "opt_increase", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
+    {"from": "dec_pricing", "to": "opt_maintain", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
+    {"from": "opt_increase", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
+    {"from": "opt_maintain", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
+    {"from": "fac_price", "to": "out_revenue", "strength": {"mean": 0.6, "std": 0.15}, "exists_probability": 0.9},
+    {"from": "fac_price", "to": "risk_churn", "strength": {"mean": 0.4, "std": 0.2}, "exists_probability": 0.85},
+    {"from": "fac_demand", "to": "out_revenue", "strength": {"mean": 0.8, "std": 0.2}, "exists_probability": 0.95},
+    {"from": "out_revenue", "to": "goal_mrr", "strength": {"mean": 1.0, "std": 0.1}, "exists_probability": 1.0},
+    {"from": "risk_churn", "to": "goal_mrr", "strength": {"mean": -0.7, "std": 0.15}, "exists_probability": 0.9}
+  ]
 }
+</CANONICAL_EXAMPLE>
 
-### Conversion Rules
-- Percentages → decimals: 5% → 0.05, 3.5% → 0.035
-- Identify baseline vs. proposed: "from £49 to £59" → baseline: 49, value: 59
-- Preserve units: £, $, €, %
+<FINAL_REMINDER>
+CRITICAL — Verify before outputting:
 
-### Example Brief
-"Should I raise the Pro plan price from £49 to £59? Worried about churn increasing from 3% to maybe 5%."
+✓ 1 decision (no incoming), 1 goal (no outgoing), 2+ options
+✓ Decision → ALL options; each option has exactly 1 incoming edge
+✓ Every option has data.interventions; keys match outgoing option→factor edges
+✓ Every intervention target is a controllable factor
+✓ Every factor has a path to outcome/risk; every outcome/risk connects to goal
+✓ outcome→goal has mean > 0; risk→goal has mean < 0
+✓ No factor→controllable factor edges
+✓ All node IDs unique; all edge endpoints exist; no duplicates; no self-loops
+✓ Options differ in at least one intervention
+✓ Connected DAG, no cycles
+✓ ONLY edges from ✓ list (closed-world)
 
-Required factor nodes:
-- { "kind": "factor", "label": "Pro Plan Price", "data": { "value": 59, "baseline": 49, "unit": "£" }}
-- { "kind": "factor", "label": "Churn Rate", "data": { "value": 0.05, "baseline": 0.03, "unit": "%" }}
-
-These factor nodes enable ISL sensitivity analysis, VoI calculations, and tipping point detection.
-
-## OPTION INTERVENTIONS (V3 Schema Support)
-
-Options represent interventions on factor nodes. When creating option nodes, include information about what factor(s) they affect.
-
-### Option Node Format
-{
-  "id": "option_price_premium",
-  "kind": "option",
-  "label": "Premium Pricing",
-  "body": "Set product price to £59"
-}
-
-### Key Rules for Option Interventions:
-1. **Include numeric values**: If the option involves a specific value, include it in the body (e.g., "Set price to £59", "Increase marketing by 20%")
-2. **Create option→factor edges**: Connect options to the factor nodes they modify
-3. **Use specific language**: "Set X to Y" or "Change X from A to B" is clearer than "Improve X"
-
-### Example - Pricing Decision Brief (MANDATORY PATTERN)
-"Should we raise the price from £49 to £59?"
-
-**REQUIRED** nodes and edges (you MUST include all of these):
-1. **MANDATORY** Factor node: { "id": "factor_price", "kind": "factor", "label": "Product Price", "data": { "value": 49, "unit": "£" }}
-   - WITHOUT this factor node, the analysis engine cannot compute intervention effects
-2. Option node: { "id": "option_premium", "kind": "option", "label": "Premium Pricing", "body": "Set price to £59" }
-3. Option node: { "id": "option_economy", "kind": "option", "label": "Economy Pricing", "body": "Keep price at £49" }
-4. Edge from option_premium → factor_price with belief/weight
-5. Edge from option_economy → factor_price with belief/weight
-6. Edge from factor_price → goal with effect_direction
-
-**FAILURE MODE**: If you omit factor_price, options cannot specify intervention values, making the graph unusable.
-
-### Vague Options Need Clarification
-If an option is vague (e.g., "Improve marketing"), either:
-1. Make it specific with a numeric target: "Increase marketing spend by £5,000"
-2. Or acknowledge the vagueness in the body: "Requires user to specify target spend amount"
-
-This enables the analysis engine to calculate precise intervention effects.
-
-Respond ONLY with valid JSON matching this structure.`;
+Output ONLY valid JSON. No markdown, no comments, no explanation.
+</FINAL_REMINDER>`;
 
 // ============================================================================
 // Suggest Options Prompt
@@ -579,28 +279,33 @@ Fix the graph to resolve ALL violations. Common fixes:
 - Remove isolated nodes (all nodes must be connected)
 - Ensure edge endpoints reference valid node IDs
 - Ensure belief values are between 0 and 1
-- Ensure node kinds are valid (goal, decision, option, outcome, risk, action, factor)
+- Ensure node kinds are valid (goal, decision, option, outcome, risk, factor)
 - Maintain graph topology where possible
 
-## CRITICAL: Edge Direction Rules
-Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
+## CRITICAL: Closed-World Edge Rules (v4)
+Only these edge patterns are ALLOWED:
 
-**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
+| From     | To       | Meaning                              |
+|----------|----------|--------------------------------------|
+| decision | option   | Decision frames this option          |
+| option   | factor   | Option sets factor value             |
+| factor   | outcome  | Factor influences outcome            |
+| factor   | risk     | Factor influences risk               |
+| factor   | factor   | Factor affects another factor        |
+| outcome  | goal     | Outcome contributes to goal          |
+| risk     | goal     | Risk contributes to goal             |
 
-Correct edge directions:
-- decision → option (decision frames these options)
-- option → outcome (choosing option leads to outcome)
-- outcome → goal (outcome contributes to goal achievement)
-- factor → outcome (external factor influences outcome likelihood)
-- factor → risk (external factor influences risk likelihood)
-- risk → goal (risk detracts from goal - use negative weight)
+**ALL other edge patterns are PROHIBITED and must be removed or fixed.**
 
-**WRONG directions to remove:**
+Correct topology: Decision → Options → Factors → Outcomes/Risks → Goal
+
+**PROHIBITED edges to REMOVE:**
+- option → outcome (WRONG: use option → factor → outcome)
+- option → goal (WRONG: use option → factor → outcome → goal)
+- factor → goal (WRONG: use factor → outcome → goal)
 - factor → decision (factors don't cause decisions)
-- factor → option (factors influence outcomes, not options)
-
-**WRONG directions to FIX:**
-- goal → anything (goals don't cause anything, they receive results)
+- factor → option (factors influence outcomes via factors, not options)
+- goal → anything (goal is terminal sink)
 - outcome → option (outcomes don't cause options)
 
 ## Output Format (JSON)
@@ -609,12 +314,14 @@ Correct edge directions:
     { "id": "goal_1", "kind": "goal", "label": "..." },
     { "id": "dec_1", "kind": "decision", "label": "..." },
     { "id": "opt_1", "kind": "option", "label": "..." },
+    { "id": "fac_1", "kind": "factor", "label": "..." },
     { "id": "out_1", "kind": "outcome", "label": "..." }
   ],
   "edges": [
-    { "from": "dec_1", "to": "opt_1", "belief": 0.5, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" },
-    { "from": "opt_1", "to": "out_1", "belief": 0.7, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" },
-    { "from": "out_1", "to": "goal_1", "belief": 0.8, "provenance": { "source": "hypothesis", "quote": "..." }, "provenance_source": "hypothesis" }
+    { "from": "dec_1", "to": "opt_1", "belief": 1.0 },
+    { "from": "opt_1", "to": "fac_1", "belief": 1.0 },
+    { "from": "fac_1", "to": "out_1", "belief": 0.7 },
+    { "from": "out_1", "to": "goal_1", "belief": 0.8 }
   ],
   "rationales": []
 }

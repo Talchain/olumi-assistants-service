@@ -12,7 +12,6 @@
 
 import type {
   OptionV3T,
-  NodeV3T,
   GraphV3T,
 } from "../../schemas/cee-v3.js";
 import type {
@@ -21,6 +20,7 @@ import type {
   ExtractionMetadataT,
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 
 // ============================================================================
 // Types
@@ -50,14 +50,45 @@ export interface AnalysisReadyValidationResult {
 /**
  * Transform a V3 option to analysis-ready format.
  * Flattens InterventionV3 objects to plain numeric values.
+ *
+ * Supports the Raw+Encoded pattern:
+ * - Extracts raw_value from InterventionV3 to build raw_interventions
+ * - Status logic: needs_encoding when raw values exist but aren't fully encoded
  */
 export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
+  // Build raw_interventions from raw_value fields (Raw+Encoded pattern)
+  const rawInterventions: Record<string, number | string | boolean> = {};
+  let hasRawValues = false;
+  let hasNonNumericRaw = false;
 
   for (const [factorId, intervention] of Object.entries(option.interventions)) {
-    // Extract just the numeric value
+    // Extract the encoded numeric value (always required)
     interventions[factorId] = intervention.value;
+
+    // Check for raw_value in the intervention (Raw+Encoded pattern)
+    if (intervention.raw_value !== undefined) {
+      rawInterventions[factorId] = intervention.raw_value;
+      hasRawValues = true;
+      // Track if we have non-numeric raw values (categorical/boolean)
+      if (typeof intervention.raw_value !== "number") {
+        hasNonNumericRaw = true;
+      }
+    }
+  }
+
+  // Also carry through raw_interventions from option level if present
+  if (option.raw_interventions) {
+    for (const [factorId, rawValue] of Object.entries(option.raw_interventions)) {
+      if (rawInterventions[factorId] === undefined) {
+        rawInterventions[factorId] = rawValue;
+        hasRawValues = true;
+        if (typeof rawValue !== "number") {
+          hasNonNumericRaw = true;
+        }
+      }
+    }
   }
 
   // Build extraction metadata from first intervention's source/confidence
@@ -78,20 +109,34 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
     };
   }
 
-  // Determine status: ready if has interventions, otherwise needs_user_mapping
-  // Interventions are the source of truth - if we extracted values, it's ready
-  const status: "ready" | "needs_user_mapping" =
-    Object.keys(interventions).length > 0
-      ? "ready"
-      : (option.status ?? "needs_user_mapping");
+  // Determine status using shared utility for consistency across endpoints
+  // Uses computeAnalysisReadyStatusWithReason() from option-status.ts
+  //
+  // Status rules:
+  // - "ready": has interventions, no non-numeric raw values needing encoding
+  // - "needs_encoding": has non-numeric raw values awaiting user encoding
+  // - "needs_user_mapping": no interventions or option explicitly needs mapping
+  const { status, reason: statusReason } = computeAnalysisReadyStatusWithReason(
+    Object.keys(interventions).length,
+    option.status,
+    hasNonNumericRaw
+  );
 
-  return {
+  const result: OptionForAnalysisT = {
     id: option.id,
     label: option.label,
     status,
+    status_reason: statusReason,
     interventions,
     extraction_metadata: extractionMetadata,
   };
+
+  // Only include raw_interventions if we have any (additive field)
+  if (hasRawValues) {
+    result.raw_interventions = rawInterventions;
+  }
+
+  return result;
 }
 
 // ============================================================================
@@ -111,6 +156,10 @@ export interface AnalysisReadyContext {
 /**
  * Build analysis-ready payload from V3 options and graph.
  *
+ * Supports the Raw+Encoded pattern:
+ * - Payload status is "needs_encoding" when any option needs encoding
+ * - This is separate from "needs_user_mapping" (missing values)
+ *
  * @param options - V3 options array
  * @param goalNodeId - Goal node ID
  * @param graph - V3 graph (for validation)
@@ -126,11 +175,13 @@ export function buildAnalysisReadyPayload(
   // Transform all options
   const analysisOptions = options.map(transformOptionToAnalysisReady);
 
-  // Determine status based on options
-  // Status is "ready" if all options have at least one intervention
-  // Status is "needs_user_mapping" if any option has empty interventions OR status is needs_user_mapping
-  const hasIncompleteOptions = options.some(
+  // Determine status based on transformed options (Raw+Encoded pattern)
+  // Priority: needs_user_mapping > needs_encoding > ready
+  const hasIncompleteOptions = analysisOptions.some(
     (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+  );
+  const hasEncodingNeeded = analysisOptions.some(
+    (o) => o.status === "needs_encoding"
   );
 
   // Collect user questions from options that need mapping
@@ -147,7 +198,7 @@ export function buildAnalysisReadyPayload(
   // Generate fallback questions for incomplete options without explicit questions
   // This ensures the payload passes validation (needs_user_mapping requires user_questions)
   if (hasIncompleteOptions && uniqueQuestions.length === 0) {
-    const incompleteOptionLabels = options
+    const incompleteOptionLabels = analysisOptions
       .filter((o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0)
       .map((o) => o.label)
       .slice(0, 3); // Limit to first 3 for readability
@@ -162,11 +213,32 @@ export function buildAnalysisReadyPayload(
     }
   }
 
+  // Count options by status for telemetry
+  const readyOptionsCount = analysisOptions.filter(
+    (o) => o.status === "ready"
+  ).length;
+  const optionsNeedingEncoding = analysisOptions.filter(
+    (o) => o.status === "needs_encoding"
+  ).length;
+  const optionsNeedingMapping = analysisOptions.filter(
+    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+  ).length;
+
+  // Determine payload status (priority: needs_user_mapping > needs_encoding > ready)
+  let payloadStatus: "ready" | "needs_user_mapping" | "needs_encoding";
+  if (hasIncompleteOptions) {
+    payloadStatus = "needs_user_mapping";
+  } else if (hasEncodingNeeded) {
+    payloadStatus = "needs_encoding";
+  } else {
+    payloadStatus = "ready";
+  }
+
   const payload: AnalysisReadyPayloadT = {
     options: analysisOptions,
     goal_node_id: goalNodeId,
     suggested_seed: context.seed ?? "42",
-    status: hasIncompleteOptions ? "needs_user_mapping" : "ready",
+    status: payloadStatus,
   };
 
   // Add user_questions when status is needs_user_mapping
@@ -175,13 +247,17 @@ export function buildAnalysisReadyPayload(
     payload.user_questions = uniqueQuestions;
   }
 
-  // Emit telemetry
+  // Emit telemetry with option status breakdown for observability
   emit(TelemetryEvents.AnalysisReadyBuilt ?? "cee.analysis_ready.built", {
     optionCount: analysisOptions.length,
     status: payload.status,
     userQuestionCount: uniqueQuestions.length,
     goalNodeId,
     requestId: context.requestId,
+    // Option status breakdown (P0 observability)
+    readyOptionsCount,
+    optionsNeedingEncoding,
+    optionsNeedingMapping,
   });
 
   return payload;
@@ -319,6 +395,52 @@ export function validateAnalysisReadyPayload(
     });
   }
 
+  // Rule 6: needs_encoding status consistency (Raw+Encoded pattern)
+  // When status is "needs_encoding", at least one option should have raw_interventions
+  // with non-numeric values that justify the encoding requirement
+  if (payload.status === "needs_encoding") {
+    const hasRawInterventions = payload.options.some(
+      (o) => o.raw_interventions && Object.keys(o.raw_interventions).length > 0
+    );
+
+    if (!hasRawInterventions) {
+      errors.push({
+        code: "NEEDS_ENCODING_WITHOUT_RAW",
+        message: "Status is 'needs_encoding' but no options have raw_interventions",
+        field: "status",
+      });
+    }
+
+    // Check that at least one raw value is non-numeric (categorical/boolean)
+    const hasNonNumericRaw = payload.options.some((o) => {
+      if (!o.raw_interventions) return false;
+      return Object.values(o.raw_interventions).some((v) => typeof v !== "number");
+    });
+
+    if (hasRawInterventions && !hasNonNumericRaw) {
+      // All raw values are numeric - should be "ready" not "needs_encoding"
+      errors.push({
+        code: "NEEDS_ENCODING_ALL_NUMERIC",
+        message: "Status is 'needs_encoding' but all raw_interventions are already numeric",
+        field: "status",
+      });
+    }
+  }
+
+  // Rule 7: Option-level status consistency with raw_interventions
+  for (const option of payload.options) {
+    if (option.status === "needs_encoding") {
+      // Option claims to need encoding, should have raw_interventions
+      if (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0) {
+        errors.push({
+          code: "OPTION_NEEDS_ENCODING_WITHOUT_RAW",
+          message: `Option "${option.id}" has status 'needs_encoding' but no raw_interventions`,
+          field: `options[${option.id}].raw_interventions`,
+        });
+      }
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,
@@ -373,7 +495,7 @@ export interface AnalysisReadySummary {
   optionCount: number;
   totalInterventions: number;
   averageInterventionsPerOption: number;
-  status: "ready" | "needs_user_mapping";
+  status: "ready" | "needs_user_mapping" | "needs_encoding";
   userQuestionCount: number;
   readyOptions: number;
   incompleteOptions: number;

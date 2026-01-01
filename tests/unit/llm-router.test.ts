@@ -102,7 +102,7 @@ describe("LLM Router", () => {
       );
 
       expect(result.graph).toBeDefined();
-      expect(result.graph.nodes).toHaveLength(5); // fixture graph has 5 nodes
+      expect(result.graph.nodes).toHaveLength(6); // V4 fixture graph has 6 nodes (with factor)
       expect(result.usage.input_tokens).toBe(0);
       expect(result.usage.output_tokens).toBe(0);
     });

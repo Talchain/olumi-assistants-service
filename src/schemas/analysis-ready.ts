@@ -4,6 +4,10 @@
  * P0 Schema for direct pass-through to PLoT analysis engine.
  * Key requirement: interventions must be Record<string, number> (plain numbers).
  *
+ * Supports the Raw+Encoded pattern for categorical/boolean interventions:
+ * - interventions: Record<string, number> (always numeric for PLoT)
+ * - raw_interventions: Record<string, number|string|boolean> (original values)
+ *
  * @see CEE Workstream — Analysis-Ready Output (Complete Specification)
  */
 
@@ -27,7 +31,33 @@ export const ExtractionMetadata = z.object({
 export type ExtractionMetadataT = z.infer<typeof ExtractionMetadata>;
 
 /**
+ * Raw intervention value - supports numeric, categorical, or boolean.
+ */
+export const RawInterventionValue = z.union([
+  z.number(),
+  z.string(),
+  z.boolean(),
+]);
+export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
+
+/**
+ * Option status values for analysis-ready payload.
+ * - ready: All interventions encoded as numbers, ready for PLoT
+ * - needs_user_mapping: Missing factor matches or values
+ * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
+ */
+export const OptionForAnalysisStatus = z.enum(["ready", "needs_user_mapping", "needs_encoding"]);
+export type OptionForAnalysisStatusT = z.infer<typeof OptionForAnalysisStatus>;
+
+/**
  * Option ready for analysis - interventions are plain numbers.
+ *
+ * Supports the Raw+Encoded pattern for categorical/boolean interventions:
+ * - interventions: Record<string, number> (always numeric for PLoT compatibility)
+ * - raw_interventions: Record<string, number|string|boolean> (original values)
+ *
+ * For purely numeric decisions, raw_interventions is omitted.
+ * For categorical/boolean, raw_interventions preserves "UK", true, etc.
  */
 export const OptionForAnalysis = z.object({
   /** Option ID - must match a node in graph.nodes where kind="option" */
@@ -35,9 +65,14 @@ export const OptionForAnalysis = z.object({
   /** Human-readable label */
   label: z.string(),
   /** Option readiness status - required for UI to know if option can be used */
-  status: z.enum(["ready", "needs_user_mapping"]),
-  /** Interventions: factor_id -> numeric value (NOT objects) */
+  status: OptionForAnalysisStatus,
+  /** Reason for status determination (for debugging/transparency) */
+  status_reason: z.string().optional(),
+  /** Interventions: factor_id -> numeric value (ALWAYS numeric for PLoT) */
   interventions: z.record(z.string(), z.number()),
+  // --- Raw+Encoded pattern: parallel raw values (additive field) ---
+  /** Raw intervention values before encoding (for categorical/boolean) */
+  raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Extraction metadata for transparency */
   extraction_metadata: ExtractionMetadata.optional(),
 });
@@ -49,20 +84,26 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
 
 /**
  * Status enum for analysis-ready payload.
- * Aligned with UI vocabulary: 'ready' | 'needs_user_mapping'
+ * - ready: All interventions encoded, ready for PLoT analysis
+ * - needs_user_mapping: Missing factor matches or values
+ * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
  *
  * Accepts 'needs_user_input' as backwards-compatible input alias,
  * but ALWAYS outputs 'needs_user_mapping'.
  */
 export const AnalysisReadyStatus = z
-  .enum(["ready", "needs_user_mapping", "needs_user_input"])
+  .enum(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"])
   .transform((val) => (val === "needs_user_input" ? "needs_user_mapping" : val)) as z.ZodType<
-  "ready" | "needs_user_mapping"
+  "ready" | "needs_user_mapping" | "needs_encoding"
 >;
 
 /**
  * Complete analysis-ready payload.
  * Can be sent directly to PLoT without transformation.
+ *
+ * Supports the Raw+Encoded pattern at the payload level:
+ * - When status is "ready", all options have encoded numeric interventions
+ * - When status is "needs_encoding", some options have raw values awaiting encoding
  */
 export const AnalysisReadyPayload = z.object({
   /** Options with numeric interventions */
@@ -71,7 +112,7 @@ export const AnalysisReadyPayload = z.object({
   goal_node_id: z.string(),
   /** Suggested seed for reproducibility */
   suggested_seed: z.string().default("42"),
-  /** Status: ready to run or needs_user_mapping (requires user input) */
+  /** Status: ready, needs_user_mapping, or needs_encoding */
   status: AnalysisReadyStatus,
   /** Questions for user when status is needs_user_mapping */
   user_questions: z.array(z.string()).optional(),

@@ -39,9 +39,12 @@ describe('PROMPT_TEMPLATES', () => {
 
   it('draft_graph prompt contains key instructions', () => {
     const prompt = PROMPT_TEMPLATES.draft_graph;
-    expect(prompt).toContain('decision graphs');
-    expect(prompt).toContain('goal, decision, option, outcome');
-    expect(prompt).toContain('provenance');
+    expect(prompt).toContain('causal decision graph');
+    expect(prompt).toContain('decision');
+    expect(prompt).toContain('option');
+    expect(prompt).toContain('factor');
+    expect(prompt).toContain('outcome');
+    expect(prompt).toContain('goal');
     expect(prompt).toContain('JSON');
     expect(prompt).toContain('{{maxNodes}}');
     expect(prompt).toContain('{{maxEdges}}');
@@ -175,7 +178,8 @@ describe('Prompt Content Quality', () => {
     const defaults = getDefaultPrompts();
     const prompt = defaults.draft_graph ?? '';
 
-    const requiredKinds = ['goal', 'decision', 'option', 'outcome', 'risk', 'action'];
+    // v4 uses factor instead of action, and explicitly notes action is not used in PoC
+    const requiredKinds = ['goal', 'decision', 'option', 'outcome', 'risk', 'factor'];
     for (const kind of requiredKinds) {
       expect(prompt).toContain(kind);
     }

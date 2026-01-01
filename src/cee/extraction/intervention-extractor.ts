@@ -14,10 +14,17 @@ import type {
   InterventionV3T,
   OptionV3T,
   TargetMatchT,
+  InterventionValueTypeT,
+  RawInterventionValueT,
 } from "../../schemas/cee-v3.js";
-import { parseNumericValue, resolveRelativeValue, type ParsedValue, type RelativeKind } from "./numeric-parser.js";
+import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
+import {
+  computeOptionStatus,
+  categorizeUserQuestions,
+  type StatusComputationInput,
+} from "../transforms/option-status.js";
 
 /**
  * Raw extracted intervention before graph matching.
@@ -31,6 +38,10 @@ export interface RawExtractedIntervention {
   source: "brief_extraction" | "cee_hypothesis" | "user_specified";
   /** Original text segment */
   original_segment: string;
+  /** Raw categorical/boolean value (for non-numeric interventions) */
+  raw_categorical_value?: string | boolean;
+  /** Value type for categorical/boolean interventions */
+  value_type?: InterventionValueTypeT;
 }
 
 /**
@@ -47,6 +58,10 @@ export interface EdgeHint {
 
 /**
  * Option with interventions after extraction and matching.
+ *
+ * Supports the Raw+Encoded pattern for categorical/boolean interventions:
+ * - status: "needs_encoding" when raw values exist but aren't fully encoded
+ * - raw_interventions: preserves original categorical/boolean values
  */
 export interface ExtractedOption {
   /** Generated option ID */
@@ -56,9 +71,11 @@ export interface ExtractedOption {
   /** Option description (if available) */
   description?: string;
   /** Option status */
-  status: "ready" | "needs_user_mapping";
+  status: "ready" | "needs_user_mapping" | "needs_encoding";
   /** Matched interventions keyed by factor ID */
   interventions: Record<string, InterventionV3T>;
+  /** Raw intervention values (for categorical/boolean, before encoding) */
+  raw_interventions?: Record<string, RawInterventionValueT>;
   /** Targets that couldn't be matched */
   unresolved_targets?: string[];
   /** Questions for the user */
@@ -114,6 +131,103 @@ const SKIP_WORDS = new Set([
   "set", "change", "adjust", "modify", "keep", "maintain",
   "increase", "decrease", "reduce", "raise", "lower", "cut", "boost",
 ]);
+
+// ============================================================================
+// Categorical Extraction Patterns (Raw+Encoded Pattern Support)
+// ============================================================================
+
+/**
+ * Patterns for extracting categorical interventions (non-numeric values).
+ * These extract target+value pairs where the value is a string, not a number.
+ */
+const CATEGORICAL_PATTERNS = [
+  // "launch in UK" / "expand to Germany" / "enter Japan market"
+  {
+    pattern: /\b(launch|expand|enter|deploy|roll\s*out)\s+(?:in|to|into)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\b(?:\s+market)?/gi,
+    targetType: "location" as const,
+    targetGroup: 1, // The action verb indicates the target type
+    valueGroup: 2,  // The location/region is the value
+    factorHint: "region",
+  },
+  // "hire contractors" / "use freelancers" / "employ consultants"
+  {
+    pattern: /\b(hire|employ|use|engage|bring\s+on)\s+(\w+(?:\s+\w+)?)/gi,
+    targetType: "staffing" as const,
+    targetGroup: 1,
+    valueGroup: 2,
+    factorHint: "staffing_model",
+  },
+  // "use React" / "adopt TypeScript" / "choose Vue" / "select Python"
+  {
+    pattern: /\b(use|adopt|choose|select|switch\s+to|migrate\s+to)\s+(\w+(?:\.\w+)?)/gi,
+    targetType: "technology" as const,
+    targetGroup: 1,
+    valueGroup: 2,
+    factorHint: "technology",
+  },
+  // "build in-house" / "buy from vendor" / "outsource to agency"
+  {
+    pattern: /\b(build|develop|create)\s+(in-?house|internally)/gi,
+    targetType: "build_vs_buy" as const,
+    targetGroup: 0, // Full match
+    valueGroup: 0,
+    staticValue: "build",
+    factorHint: "approach",
+  },
+  {
+    pattern: /\b(buy|purchase|license|acquire)\s+(?:from\s+)?(?:a\s+)?(\w+)?/gi,
+    targetType: "build_vs_buy" as const,
+    targetGroup: 0,
+    valueGroup: 0,
+    staticValue: "buy",
+    factorHint: "approach",
+  },
+  {
+    pattern: /\b(outsource|contract\s+out|delegate)\s+(?:to\s+)?(\w+(?:\s+\w+)?)?/gi,
+    targetType: "build_vs_buy" as const,
+    targetGroup: 0,
+    valueGroup: 2,
+    staticValue: "outsource",
+    factorHint: "approach",
+  },
+];
+
+/**
+ * Boolean patterns for enable/disable style interventions.
+ */
+const BOOLEAN_PATTERNS = [
+  // "enable feature X" / "disable dark mode" / "turn on notifications"
+  {
+    pattern: /\b(enable|activate|turn\s+on|switch\s+on)\s+(?:the\s+)?(\w+(?:\s+\w+)?)/gi,
+    booleanValue: true,
+    targetGroup: 2,
+  },
+  {
+    pattern: /\b(disable|deactivate|turn\s+off|switch\s+off)\s+(?:the\s+)?(\w+(?:\s+\w+)?)/gi,
+    booleanValue: false,
+    targetGroup: 2,
+  },
+  // "with feature X" / "without feature X"
+  {
+    pattern: /\b(with)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+(?:feature|option|flag)/gi,
+    booleanValue: true,
+    targetGroup: 2,
+  },
+  {
+    pattern: /\b(without)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+(?:feature|option|flag)?/gi,
+    booleanValue: false,
+    targetGroup: 2,
+  },
+];
+
+/**
+ * Default encoding maps for common categorical dimensions.
+ * These provide sensible numeric encodings when the user hasn't specified one.
+ */
+const DEFAULT_ENCODING_MAPS: Record<string, Record<string, number>> = {
+  build_vs_buy: { build: 0, buy: 1, outsource: 2 },
+  boolean: { false: 0, true: 1 },
+};
 
 /**
  * Extract raw interventions from option text.
@@ -225,6 +339,113 @@ function extractFallbackInterventions(
   return results;
 }
 
+// ============================================================================
+// Categorical/Boolean Extraction (Raw+Encoded Pattern Support)
+// ============================================================================
+
+/**
+ * Extract categorical interventions from option text.
+ * These represent non-numeric values like locations, technologies, or choices.
+ *
+ * @param optionText - Option label or description text
+ * @param source - Source of the option
+ * @returns Array of raw extracted interventions with categorical values
+ */
+export function extractCategoricalInterventions(
+  optionText: string,
+  source: "brief_extraction" | "cee_hypothesis" = "brief_extraction"
+): RawExtractedIntervention[] {
+  const results: RawExtractedIntervention[] = [];
+  const processedSegments = new Set<string>();
+
+  // Try categorical patterns
+  for (const patternDef of CATEGORICAL_PATTERNS) {
+    const regex = new RegExp(patternDef.pattern.source, patternDef.pattern.flags);
+    let match;
+
+    while ((match = regex.exec(optionText)) !== null) {
+      const fullMatch = match[0];
+
+      // Skip if already processed
+      if (processedSegments.has(fullMatch.toLowerCase())) {
+        continue;
+      }
+      processedSegments.add(fullMatch.toLowerCase());
+
+      // Extract the categorical value
+      const rawValue = (patternDef as any).staticValue
+        ? (patternDef as any).staticValue
+        : cleanTargetText(match[patternDef.valueGroup] || fullMatch);
+
+      if (!rawValue || rawValue.length === 0) {
+        continue;
+      }
+
+      results.push({
+        target_text: patternDef.factorHint,
+        value: null, // No numeric value yet - needs encoding
+        source,
+        original_segment: fullMatch,
+        raw_categorical_value: rawValue,
+        value_type: "categorical",
+      });
+    }
+  }
+
+  // Try boolean patterns
+  for (const patternDef of BOOLEAN_PATTERNS) {
+    const regex = new RegExp(patternDef.pattern.source, patternDef.pattern.flags);
+    let match;
+
+    while ((match = regex.exec(optionText)) !== null) {
+      const fullMatch = match[0];
+
+      // Skip if already processed
+      if (processedSegments.has(fullMatch.toLowerCase())) {
+        continue;
+      }
+      processedSegments.add(fullMatch.toLowerCase());
+
+      const targetText = cleanTargetText(match[patternDef.targetGroup] || "feature");
+
+      results.push({
+        target_text: targetText,
+        value: null, // Will be encoded as 0/1
+        source,
+        original_segment: fullMatch,
+        raw_categorical_value: patternDef.booleanValue,
+        value_type: "boolean",
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Get default numeric encoding for a categorical value.
+ * Returns undefined if no default encoding exists.
+ */
+function getDefaultEncoding(
+  valueType: InterventionValueTypeT,
+  rawValue: string | boolean,
+  targetType?: string
+): number | undefined {
+  if (valueType === "boolean") {
+    return rawValue ? 1 : 0;
+  }
+
+  if (targetType && DEFAULT_ENCODING_MAPS[targetType]) {
+    const encoding = DEFAULT_ENCODING_MAPS[targetType][String(rawValue).toLowerCase()];
+    if (encoding !== undefined) {
+      return encoding;
+    }
+  }
+
+  // No default encoding available
+  return undefined;
+}
+
 /**
  * Format a human-readable description of a relative value change.
  *
@@ -281,18 +502,27 @@ export function extractInterventionsForOption(
   // Build set of hinted factor IDs for priority matching
   const hintedFactorIds = new Set(edgeHints.map(h => h.to_factor_id));
 
-  // Extract raw interventions from label and description
+  // Extract raw numeric interventions from label and description
   const rawFromLabel = extractRawInterventions(optionLabel, "brief_extraction");
   const rawFromDesc = optionDescription
     ? extractRawInterventions(optionDescription, "brief_extraction")
     : [];
 
+  // Extract categorical/boolean interventions (Raw+Encoded pattern)
+  const catFromLabel = extractCategoricalInterventions(optionLabel, "brief_extraction");
+  const catFromDesc = optionDescription
+    ? extractCategoricalInterventions(optionDescription, "brief_extraction")
+    : [];
+
   const allRaw = [...rawFromLabel, ...rawFromDesc];
+  const allCategorical = [...catFromLabel, ...catFromDesc];
 
   // Match interventions to factors
   const interventions: Record<string, InterventionV3T> = {};
+  const rawInterventions: Record<string, RawInterventionValueT> = {};
   const unresolvedTargets: string[] = [];
   const userQuestions: string[] = [];
+  let hasNonNumericRaw = false;
 
   for (const raw of allRaw) {
     const matchResult = matchInterventionToFactor(raw.target_text, nodes, edges, goalNodeId);
@@ -380,8 +610,94 @@ export function extractInterventionsForOption(
     }
   }
 
-  // Determine status
-  const status = determineOptionStatus(interventions, unresolvedTargets, userQuestions);
+  // Process categorical/boolean interventions (Raw+Encoded pattern)
+  for (const cat of allCategorical) {
+    if (!cat.raw_categorical_value || !cat.value_type) {
+      continue;
+    }
+
+    // Try to match to a factor node
+    const matchResult = matchInterventionToFactor(cat.target_text, nodes, edges, goalNodeId);
+
+    // Determine factor ID - use matched node or generate from target
+    const factorId = matchResult.matched && matchResult.node_id
+      ? matchResult.node_id
+      : normalizeToId(`factor_${cat.target_text}`, new Set(Object.keys(interventions)));
+
+    // Try to get a default encoding
+    const defaultEncoding = getDefaultEncoding(
+      cat.value_type,
+      cat.raw_categorical_value,
+      cat.target_text
+    );
+
+    // Track the raw value (always)
+    rawInterventions[factorId] = cat.raw_categorical_value;
+    hasNonNumericRaw = hasNonNumericRaw || typeof cat.raw_categorical_value !== "number";
+
+    if (defaultEncoding !== undefined) {
+      // We have a default encoding - create intervention with raw_value
+      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
+        ? {
+            node_id: matchResult.node_id,
+            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+            confidence: matchResult.confidence,
+          }
+        : {
+            node_id: factorId,
+            match_type: "semantic" as const,
+            confidence: "low" as const,
+          };
+
+      interventions[factorId] = {
+        value: defaultEncoding,
+        source: cat.source,
+        target_match: targetMatch,
+        value_confidence: "medium",
+        reasoning: cat.original_segment,
+        raw_value: cat.raw_categorical_value,
+        value_type: cat.value_type,
+      };
+
+      // Generate encoding question for non-default categories
+      if (cat.value_type === "categorical" && !DEFAULT_ENCODING_MAPS[cat.target_text]) {
+        userQuestions.push(
+          `How should "${cat.raw_categorical_value}" be encoded numerically for "${cat.target_text}"?`
+        );
+      }
+    } else {
+      // No default encoding - mark as needing encoding
+      // Still create a placeholder intervention with value=0
+      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
+        ? {
+            node_id: matchResult.node_id,
+            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+            confidence: matchResult.confidence,
+          }
+        : {
+            node_id: factorId,
+            match_type: "semantic" as const,
+            confidence: "low" as const,
+          };
+
+      interventions[factorId] = {
+        value: 0, // Placeholder - needs encoding
+        source: cat.source,
+        target_match: targetMatch,
+        value_confidence: "low",
+        reasoning: cat.original_segment,
+        raw_value: cat.raw_categorical_value,
+        value_type: cat.value_type,
+      };
+
+      userQuestions.push(
+        `How should "${cat.raw_categorical_value}" be encoded numerically for "${cat.target_text}"?`
+      );
+    }
+  }
+
+  // Determine status (now considers categorical/raw values)
+  const status = determineOptionStatus(interventions, unresolvedTargets, userQuestions, hasNonNumericRaw);
 
   if (
     status === "needs_user_mapping" &&
@@ -407,6 +723,11 @@ export function extractInterventionsForOption(
     result.description = optionDescription;
   }
 
+  // Add raw_interventions if any categorical/boolean values were extracted
+  if (Object.keys(rawInterventions).length > 0) {
+    result.raw_interventions = rawInterventions;
+  }
+
   if (unresolvedTargets.length > 0) {
     result.unresolved_targets = unresolvedTargets;
   }
@@ -421,31 +742,49 @@ export function extractInterventionsForOption(
 /**
  * Determine option status based on interventions and unresolved targets.
  *
- * Rules:
- * - `ready`: Non-empty interventions, no critical issues
- * - `needs_user_mapping`: Empty interventions, unresolved targets, or low confidence matches
+ * Uses the shared computeOptionStatus() utility for consistent status computation
+ * across draft-graph and graph-readiness endpoints.
+ *
+ * KEY RULE: Both exact_id AND exact_label matches count as "resolved".
+ * Only semantic matches or unmatched targets block "ready" status.
+ *
+ * Status priority (highest to lowest):
+ * 1. `needs_user_mapping`: No interventions, only semantic matches, or blocking questions
+ * 2. `needs_encoding`: Has non-numeric raw values (categorical/boolean) awaiting encoding
+ * 3. `ready`: Has at least one resolved intervention (exact_id or exact_label match)
+ *
+ * @param interventions - Matched interventions
+ * @param unresolvedTargets - Targets that couldn't be matched
+ * @param userQuestions - Questions for the user (both blocking and informational)
+ * @param hasNonNumericRaw - Whether any non-numeric raw values exist
  */
 function determineOptionStatus(
   interventions: Record<string, InterventionV3T>,
   unresolvedTargets: string[],
-  userQuestions: string[]
-): "ready" | "needs_user_mapping" {
-  // No interventions at all
-  if (Object.keys(interventions).length === 0) {
-    return "needs_user_mapping";
-  }
+  userQuestions: string[],
+  hasNonNumericRaw: boolean = false
+): "ready" | "needs_user_mapping" | "needs_encoding" {
+  // Categorize questions: blocking vs informational
+  // Blocking: "What value should X be set to?" - requires user input
+  // Informational: "Is X correctly mapped to Y?" - just confirmation, doesn't block
+  const { blocking } = categorizeUserQuestions(userQuestions);
 
-  // Has unresolved targets
-  if (unresolvedTargets.length > 0) {
-    return "needs_user_mapping";
-  }
+  // Check for categorical interventions that need encoding
+  const needsEncodingCheck = Object.values(interventions).some(
+    (i) => i.raw_value !== undefined && i.value_type === "categorical"
+  );
 
-  // Has user questions (low confidence matches, missing paths, etc.)
-  if (userQuestions.length > 0) {
-    return "needs_user_mapping";
-  }
+  // Build input for shared status computation
+  const input: StatusComputationInput = {
+    interventions,
+    unresolvedTargets,
+    hasNonNumericRaw: hasNonNumericRaw || needsEncodingCheck,
+    blockingQuestions: blocking,
+  };
 
-  return "ready";
+  // Use shared utility for consistent status computation
+  const result = computeOptionStatus(input);
+  return result.status;
 }
 
 /**
@@ -493,9 +832,10 @@ export function extractOptionsFromNodes(
 
 /**
  * Convert extracted option to V3 schema format.
+ * Includes raw_interventions for Raw+Encoded pattern support.
  */
 export function toOptionV3(extracted: ExtractedOption): OptionV3T {
-  return {
+  const result: OptionV3T = {
     id: extracted.id,
     label: extracted.label,
     description: extracted.description,
@@ -505,6 +845,13 @@ export function toOptionV3(extracted: ExtractedOption): OptionV3T {
     user_questions: extracted.user_questions,
     provenance: extracted.provenance,
   };
+
+  // Add raw_interventions if present (Raw+Encoded pattern)
+  if (extracted.raw_interventions && Object.keys(extracted.raw_interventions).length > 0) {
+    result.raw_interventions = extracted.raw_interventions;
+  }
+
+  return result;
 }
 
 /**
@@ -516,17 +863,24 @@ export function toOptionsV3(extracted: ExtractedOption[]): OptionV3T[] {
 
 /**
  * Get extraction statistics for telemetry.
+ * Includes categorical/boolean stats for Raw+Encoded pattern adoption tracking.
  */
 export interface ExtractionStatistics {
   options_total: number;
   options_ready: number;
   options_needs_mapping: number;
+  options_needs_encoding: number;
   interventions_total: number;
   exact_id_matches: number;
   exact_label_matches: number;
   semantic_matches: number;
   unresolved_targets_total: number;
   user_questions_total: number;
+  // Raw+Encoded pattern stats
+  raw_interventions_total: number;
+  categorical_interventions: number;
+  boolean_interventions: number;
+  options_with_raw_values: number;
 }
 
 export function getExtractionStatistics(options: ExtractedOption[]): ExtractionStatistics {
@@ -534,26 +888,48 @@ export function getExtractionStatistics(options: ExtractedOption[]): ExtractionS
     options_total: options.length,
     options_ready: 0,
     options_needs_mapping: 0,
+    options_needs_encoding: 0,
     interventions_total: 0,
     exact_id_matches: 0,
     exact_label_matches: 0,
     semantic_matches: 0,
     unresolved_targets_total: 0,
     user_questions_total: 0,
+    // Raw+Encoded pattern stats
+    raw_interventions_total: 0,
+    categorical_interventions: 0,
+    boolean_interventions: 0,
+    options_with_raw_values: 0,
   };
 
   for (const option of options) {
-    if (option.status === "ready") {
-      stats.options_ready++;
-    } else {
-      stats.options_needs_mapping++;
+    // Track status distribution
+    switch (option.status) {
+      case "ready":
+        stats.options_ready++;
+        break;
+      case "needs_encoding":
+        stats.options_needs_encoding++;
+        break;
+      case "needs_user_mapping":
+      default:
+        stats.options_needs_mapping++;
+        break;
     }
 
     stats.unresolved_targets_total += option.unresolved_targets?.length || 0;
     stats.user_questions_total += option.user_questions?.length || 0;
 
+    // Track raw_interventions (Raw+Encoded pattern)
+    if (option.raw_interventions && Object.keys(option.raw_interventions).length > 0) {
+      stats.options_with_raw_values++;
+      stats.raw_interventions_total += Object.keys(option.raw_interventions).length;
+    }
+
     for (const intervention of Object.values(option.interventions)) {
       stats.interventions_total++;
+
+      // Track match types
       switch (intervention.target_match.match_type) {
         case "exact_id":
           stats.exact_id_matches++;
@@ -564,6 +940,13 @@ export function getExtractionStatistics(options: ExtractedOption[]): ExtractionS
         case "semantic":
           stats.semantic_matches++;
           break;
+      }
+
+      // Track value types (Raw+Encoded pattern)
+      if (intervention.value_type === "categorical") {
+        stats.categorical_interventions++;
+      } else if (intervention.value_type === "boolean") {
+        stats.boolean_interventions++;
       }
     }
   }
