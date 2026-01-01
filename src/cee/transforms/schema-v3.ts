@@ -85,25 +85,19 @@ export interface V3TransformContext {
 // Node Kind Mapping
 // ============================================================================
 
-/** V3 valid node kinds (option is NOT valid - options are separate) */
-const V3_VALID_KINDS = new Set(["goal", "factor", "outcome", "decision", "risk", "action"]);
+/** V3 valid node kinds (option is included for graph connectivity) */
+const V3_VALID_KINDS = new Set(["goal", "factor", "outcome", "decision", "risk", "action", "option"]);
 
 /**
  * Map V1 node kind to V3 kind.
- * Options are extracted to separate array; decision nodes remain in graph.
+ * Options remain in graph for connectivity; also extracted to options[] array.
  */
 function mapKindToV3(kind: string): NodeV3T["kind"] {
-  // V3 does not have option nodes in the graph - they are extracted
-  // BUT decision nodes ARE valid V3 graph nodes and should stay
-  if (kind === "option") {
-    // Options will be extracted to options array, but this shouldn't be called
-    // for option nodes as they should be filtered out before transformation
-    return "factor";
-  }
+  // constraint maps to factor
   if (kind === "constraint") {
     return "factor";
   }
-  // decision, action, goal, factor, outcome, risk are all valid V3 kinds
+  // decision, action, goal, factor, outcome, risk, option are all valid V3 kinds
   if (V3_VALID_KINDS.has(kind)) {
     return kind as NodeV3T["kind"];
   }
@@ -364,27 +358,20 @@ function extractEdgeHints(graph: V1Graph): EdgeHint[] {
 }
 
 /**
- * Filter out option nodes from graph (V3 graph should not have option nodes).
- * Note: Decision nodes ARE kept in the graph - only option nodes are removed.
- */
-function filterNonOptionNodes(nodes: V1Node[]): V1Node[] {
-  return nodes.filter((n) => n.kind !== "option");
-}
-
-/**
  * Transform V1 graph to V3 format.
+ * Keeps ALL nodes including options for graph connectivity (decision→option→factor).
+ * Options are also extracted to the separate options[] array with intervention metadata.
  */
 export function transformGraphToV3(graph: V1Graph): GraphV3T {
-  // Filter out option nodes (they become top-level options)
-  const nonOptionNodes = filterNonOptionNodes(graph.nodes);
-  const nonOptionNodeIds = new Set(nonOptionNodes.map((n) => n.id));
+  // Keep ALL nodes including options (for PLoT connectivity and canvas visualization)
+  const allNodeIds = new Set(graph.nodes.map((n) => n.id));
 
-  // Transform nodes
-  const v3Nodes = nonOptionNodes.map(transformNodeToV3);
+  // Transform all nodes
+  const v3Nodes = graph.nodes.map(transformNodeToV3);
 
-  // Filter out edges that reference option nodes
+  // Keep ALL valid edges (including decision→option and option→factor)
   const validEdges = graph.edges.filter(
-    (edge) => nonOptionNodeIds.has(edge.from) && nonOptionNodeIds.has(edge.to)
+    (edge) => allNodeIds.has(edge.from) && allNodeIds.has(edge.to)
   );
 
   // Transform edges
@@ -560,18 +547,8 @@ function generateValidationWarnings(
     });
   }
 
-  // Check for option nodes in graph (should not exist in V3)
-  for (const node of graph.nodes) {
-    if (node.kind === ("option" as NodeV3T["kind"])) {
-      warnings.push({
-        code: "OPTION_NODE_IN_GRAPH",
-        severity: "warning",
-        message: `Node "${node.id}" has kind='option' but options should be in the options[] array`,
-        affected_node_id: node.id,
-        suggestion: "Move option to the options[] array with intervention mappings",
-      });
-    }
-  }
+  // Note: Option nodes ARE now allowed in graph for connectivity (decision→option→factor)
+  // Options also exist in the options[] array with intervention metadata
 
   // Check options
   for (const option of options) {

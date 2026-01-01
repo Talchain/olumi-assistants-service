@@ -20,7 +20,8 @@ import { z } from "zod";
 
 /**
  * Valid node kinds in V3.
- * Note: 'option' is NOT a valid node kind - options are separate.
+ * Options are included for graph connectivity (decision→option→factor).
+ * Options also exist in the separate options[] array with intervention metadata.
  */
 export const NodeKindV3 = z.enum([
   "goal",
@@ -29,6 +30,7 @@ export const NodeKindV3 = z.enum([
   "decision",
   "risk",
   "action",
+  "option",
 ]);
 export type NodeKindV3T = z.infer<typeof NodeKindV3>;
 
@@ -53,7 +55,7 @@ export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 export const NodeV3 = z.object({
   /** Node ID - pattern: ^[a-z0-9_:-]+$ */
   id: z.string().regex(/^[a-z0-9_:-]+$/, "Node ID must be lowercase alphanumeric with underscores, colons, or hyphens"),
-  /** Node kind - NOT 'option' */
+  /** Node kind */
   kind: NodeKindV3,
   /** Human-readable label */
   label: z.string(),
@@ -268,7 +270,8 @@ export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
 // ============================================================================
 
 /**
- * V3 graph structure (without options - they're separate).
+ * V3 graph structure.
+ * Includes option nodes for connectivity (decision→option→factor).
  */
 export const GraphV3 = z.object({
   /** Graph nodes */
@@ -301,7 +304,7 @@ export type GraphMetaV3T = z.infer<typeof GraphMetaV3>;
 export const CEEGraphResponseV3 = z.object({
   /** Schema version marker */
   schema_version: z.literal("3.0"),
-  /** Causal graph (no option nodes) */
+  /** Causal graph with full topology including option nodes */
   graph: GraphV3,
   /** Decision paths with intervention bundles */
   options: z.array(OptionV3),

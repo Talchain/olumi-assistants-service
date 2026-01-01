@@ -162,16 +162,8 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       });
     }
 
-    // 'option' is not a valid node kind in V3
-    if ((node.kind as string) === "option") {
-      warnings.push({
-        code: "OPTION_NODE_IN_GRAPH",
-        severity: "warning",
-        message: `Node "${node.id}" has kind='option' which is not valid in V3 schema`,
-        affected_node_id: node.id,
-        suggestion: "Move option to the options[] array with intervention mappings",
-      });
-    }
+    // Note: 'option' IS now a valid node kind in V3 for graph connectivity
+    // Options exist in both graph.nodes AND options[] array
   }
 
   return warnings;
@@ -181,14 +173,15 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  * Allowed edge patterns (closed-world validation).
  * Only these kind-to-kind combinations are permitted.
  *
- * Note: In V3, option nodes are in a separate options[] array, not in graph.nodes.
- * Decision→option and option→factor edges don't exist in the V3 graph.
- * Controllable factors are determined by intervention targets in options[].
+ * V4 topology: decision→option→factor→outcome/risk→goal
+ * Options exist in BOTH graph.nodes AND options[] array.
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
+  { from: "decision", to: "option" },  // Decision branches to options
+  { from: "option", to: "factor" },    // Options set controllable factors
   { from: "factor", to: "outcome" },
   { from: "factor", to: "risk" },
-  { from: "factor", to: "factor" }, // Target must be exogenous (checked separately)
+  { from: "factor", to: "factor" },    // Target must be exogenous (checked separately)
   { from: "outcome", to: "goal" },
   { from: "risk", to: "goal" },
 ];

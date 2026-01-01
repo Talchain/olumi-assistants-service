@@ -63,17 +63,20 @@ describe("CEE Schema V3 Integration", () => {
       expect(v3Response.goal_node_id).toBe("goal_revenue");
     });
 
-    it("separates options from graph nodes", () => {
+    it("keeps options in both graph nodes and options array", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
-      // Options should be in the options array, not in graph.nodes
-      const optionInGraph = v3Response.graph.nodes.find(
-        (n) => n.id === "option_premium" || n.id === "option_economy"
+      // Options should be in BOTH the graph.nodes (for connectivity) AND options[] (for interventions)
+      const optionNodesInGraph = v3Response.graph.nodes.filter(
+        (n) => n.kind === "option"
       );
-      expect(optionInGraph).toBeUndefined();
+      expect(optionNodesInGraph.length).toBe(2);
 
-      // Options should be in the options array
+      // Options should also be in the options array with intervention metadata
       expect(v3Response.options.length).toBeGreaterThan(0);
+
+      // Count should match (IDs may differ due to extraction normalization)
+      expect(v3Response.options.length).toBe(optionNodesInGraph.length);
     });
 
     it("transforms edges to V3 format with strength_mean", () => {
