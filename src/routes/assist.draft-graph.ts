@@ -717,7 +717,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }, "Skipping LLM repair due to time budget - using simple repair");
 
       repairFallbackReason = "budget_exceeded";
-      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId)));
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
         candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
@@ -772,7 +772,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
         emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
       } else {
         // Repair didn't fix all issues, fallback to simple repair
-        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired)));
+        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired, correlationId)));
         issues = second.violations ?? issues;
         repairFallbackReason = "partial_fix";
         emit(TelemetryEvents.RepairPartial, { repair_worked: false, fallback_reason: repairFallbackReason });
@@ -785,7 +785,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }
       log.warn({ error, fallback_reason: repairFallbackReason }, "LLM repair failed, falling back to simple repair");
 
-      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId)));
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
         candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
