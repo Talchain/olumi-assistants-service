@@ -620,7 +620,7 @@ describe("Edge Cases", () => {
 // =============================================================================
 
 import { enrichGraphWithFactors } from "../../src/cee/factor-extraction/enricher.js";
-import type { GraphT } from "../../src/schemas/graph.js";
+import type { GraphT, FactorDataT } from "../../src/schemas/graph.js";
 
 describe("End-to-End Integration: Enrichment → V2 Transform", () => {
   it("enriched factors include value_std in v2 output", () => {
@@ -657,9 +657,10 @@ describe("End-to-End Integration: Enrichment → V2 Transform", () => {
     expect(factorNode!.data).toBeDefined();
 
     // Verify extraction metadata was propagated
-    expect(factorNode!.data!.extractionType).toBeDefined();
-    expect(factorNode!.data!.confidence).toBeDefined();
-    expect(factorNode!.data!.confidence).toBeGreaterThan(0);
+    const factorData = factorNode!.data as FactorDataT;
+    expect(factorData.extractionType).toBeDefined();
+    expect(factorData.confidence).toBeDefined();
+    expect(factorData.confidence).toBeGreaterThan(0);
 
     // Transform to v2 schema
     const v2Graph = transformGraphToV2(enrichedGraph);
@@ -716,9 +717,10 @@ describe("End-to-End Integration: Enrichment → V2 Transform", () => {
     expect(factorNode).toBeDefined();
 
     // If it's a range extraction, should have range bounds
-    if (factorNode!.data!.extractionType === "range") {
-      expect(factorNode!.data!.rangeMin).toBeDefined();
-      expect(factorNode!.data!.rangeMax).toBeDefined();
+    const factorData = factorNode!.data as FactorDataT;
+    if (factorData.extractionType === "range") {
+      expect(factorData.rangeMin).toBeDefined();
+      expect(factorData.rangeMax).toBeDefined();
     }
 
     // Transform and verify

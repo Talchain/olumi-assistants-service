@@ -30,13 +30,33 @@ export const FactorData = z.object({
   rangeMax: z.number().optional(),
 });
 
+/**
+ * Intervention data for option nodes.
+ * V4 prompt instructs LLM to include interventions directly on option nodes.
+ * Maps factor IDs to their intervention values (numeric only).
+ */
+export const OptionData = z.object({
+  interventions: z.record(z.string(), z.number()),
+});
+
+/**
+ * Union type for node data - can be either:
+ * - FactorData: quantitative data for factor nodes (ISL integration)
+ * - OptionData: intervention mappings for option nodes (V4 format)
+ */
+export const NodeData = z.union([FactorData, OptionData]);
+
 export const Node = z.object({
   id: z.string().min(1),
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
-  /** Quantitative data for factor nodes (used by ISL) */
-  data: FactorData.optional()
+  /**
+   * Node data - type depends on node kind:
+   * - factor nodes: FactorData (quantitative values for ISL)
+   * - option nodes: OptionData (intervention mappings from V4 prompt)
+   */
+  data: NodeData.optional()
 });
 
 // Structured provenance for production trust and traceability
@@ -113,6 +133,8 @@ export type GraphT = z.infer<typeof Graph>;
 export type EdgeT = z.infer<typeof Edge>;
 export type NodeT = z.infer<typeof Node>;
 export type FactorDataT = z.infer<typeof FactorData>;
+export type OptionDataT = z.infer<typeof OptionData>;
+export type NodeDataT = z.infer<typeof NodeData>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
 export type EffectDirectionT = z.infer<typeof EffectDirection>;
 

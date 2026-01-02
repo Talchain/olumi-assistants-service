@@ -16,11 +16,19 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
+import type { GraphT, NodeT, EdgeT, NodeDataT, FactorDataT } from "../../schemas/graph.js";
 import type {
   ReviewBlockT,
   ReviewBlockTypeT,
 } from "../../schemas/review.js";
+
+/**
+ * Type guard to check if node data is FactorData (not OptionData)
+ */
+function isFactorData(data: NodeDataT | undefined): data is FactorDataT {
+  if (!data) return false;
+  return !('interventions' in data);
+}
 
 // =============================================================================
 // Types
@@ -340,10 +348,10 @@ export function buildDriversBlock(ctx: BlockBuilderContext): BlockBuilderResult 
       });
     }
   } else {
-    // Fallback: identify factors with data
-    const factors = getNodesByKind(graph, "factor").filter((f) => f.data);
+    // Fallback: identify factors with FactorData (not OptionData)
+    const factors = getNodesByKind(graph, "factor").filter((f) => isFactorData(f.data));
     for (const factor of factors.slice(0, 3)) {
-      const data = factor.data!;
+      const data = factor.data as FactorDataT;
       suggestions.push({
         node_id: factor.id,
         label: factor.label || factor.id,

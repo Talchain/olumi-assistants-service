@@ -22,6 +22,7 @@ import type {
 import { deriveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
+import { isFactorData } from "./schema-v2.js";
 import {
   extractOptionsFromNodes,
   toOptionsV3,
@@ -122,8 +123,9 @@ export function transformNodeToV3(node: V1Node): NodeV3T {
     description: node.body,
   };
 
-  // Transform data to observed_state (only if value is defined)
-  if (node.data && node.data.value !== undefined) {
+  // Transform data to observed_state (only if it's FactorData with value defined)
+  // OptionData (with interventions) is handled separately in options extraction
+  if (isFactorData(node.data) && node.data.value !== undefined) {
     v3Node.observed_state = {
       value: node.data.value,
       baseline: node.data.baseline,

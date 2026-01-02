@@ -9,7 +9,7 @@
  * with market context and regex fallback/validation.
  */
 
-import type { GraphT, NodeT, EdgeT, FactorDataT } from "../../schemas/graph.js";
+import type { GraphT, NodeT, EdgeT, FactorDataT, NodeDataT } from "../../schemas/graph.js";
 import {
   extractFactors,
   extractFactorsOrchestrated,
@@ -18,6 +18,15 @@ import {
 } from "./index.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
+
+/**
+ * Type guard to check if node data is FactorData (not OptionData)
+ * OptionData has 'interventions', FactorData does not
+ */
+function isFactorData(data: NodeDataT | undefined): data is FactorDataT {
+  if (!data) return false;
+  return !('interventions' in data);
+}
 
 /**
  * Result of factor enrichment
@@ -146,8 +155,11 @@ export function enrichGraphWithFactors(
     if (existingNode) {
       // Enhance existing factor with data if it doesn't have meaningful values
       // Check for actual numeric data, not just existence of data object
-      const hasFactorData = existingNode.data?.value !== undefined ||
-                            existingNode.data?.baseline !== undefined;
+      // Use type guard to ensure we're checking FactorData properties (not OptionData)
+      const hasFactorData = isFactorData(existingNode.data) && (
+        existingNode.data.value !== undefined ||
+        existingNode.data.baseline !== undefined
+      );
       if (!hasFactorData) {
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
@@ -344,8 +356,11 @@ export async function enrichGraphWithFactorsAsync(
 
     if (existingNode) {
       // Enhance existing factor with data if it doesn't have meaningful values
-      const hasFactorData = existingNode.data?.value !== undefined ||
-                            existingNode.data?.baseline !== undefined;
+      // Use type guard to ensure we're checking FactorData properties (not OptionData)
+      const hasFactorData = isFactorData(existingNode.data) && (
+        existingNode.data.value !== undefined ||
+        existingNode.data.baseline !== undefined
+      );
       if (!hasFactorData) {
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {

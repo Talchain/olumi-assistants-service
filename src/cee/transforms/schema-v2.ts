@@ -27,22 +27,57 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 // V1 Types (Input)
 // ============================================================================
 
+/**
+ * FactorData structure for factor nodes (ISL integration)
+ */
+export interface V1FactorData {
+  value?: number;
+  baseline?: number;
+  unit?: string;
+  range?: { min: number; max: number };
+  /** Extraction metadata for uncertainty derivation */
+  extractionType?: ExtractionType;
+  confidence?: number;
+  rangeMin?: number;
+  rangeMax?: number;
+}
+
+/**
+ * OptionData structure for option nodes (V4 prompt format)
+ * Maps factor IDs to their intervention values
+ */
+export interface V1OptionData {
+  interventions: Record<string, number>;
+}
+
+/**
+ * V1 Node data - can be either FactorData or OptionData depending on node kind
+ */
+export type V1NodeData = V1FactorData | V1OptionData;
+
+/**
+ * Type guard to check if node data is FactorData (has 'value' or no 'interventions')
+ */
+export function isFactorData(data: V1NodeData | undefined): data is V1FactorData {
+  if (!data) return false;
+  // OptionData has 'interventions' key, FactorData does not
+  return !('interventions' in data);
+}
+
+/**
+ * Type guard to check if node data is OptionData (has 'interventions')
+ */
+export function isOptionData(data: V1NodeData | undefined): data is V1OptionData {
+  if (!data) return false;
+  return 'interventions' in data;
+}
+
 export interface V1Node {
   id: string;
   kind: string;
   label?: string;
   body?: string;
-  data?: {
-    value?: number;
-    baseline?: number;
-    unit?: string;
-    range?: { min: number; max: number };
-    /** Extraction metadata for uncertainty derivation */
-    extractionType?: ExtractionType;
-    confidence?: number;
-    rangeMin?: number;
-    rangeMax?: number;
-  };
+  data?: V1NodeData;
 }
 
 export interface V1Edge {
@@ -258,9 +293,10 @@ export function transformNodeToV2(node: V1Node): V2Node {
     description: node.body,
   };
 
-  // Move data to observed_state ONLY if value is defined
+  // Move data to observed_state ONLY if it's FactorData with value defined
   // (baseline alone is not sufficient per contract)
-  if (node.data && node.data.value !== undefined) {
+  // OptionData (with interventions) is handled separately in V3 transformation
+  if (isFactorData(node.data) && node.data.value !== undefined) {
     // Derive range from rangeMin/rangeMax if not present (canonical representation)
     const range = node.data.range ?? (
       node.data.rangeMin !== undefined && node.data.rangeMax !== undefined

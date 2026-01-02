@@ -809,7 +809,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   candidate = enforceStableEdgeIds(candidate);
 
   // Enforce single goal and other graph invariants (fix for multiple goal nodes bug)
-  const graphValidation = validateAndFixGraph(candidate, undefined, {
+  // Type assertion needed: validateAndFixGraph uses generic handling internally
+  const graphValidation = validateAndFixGraph(candidate as any, undefined, {
     enforceSingleGoal: config.cee.enforceSingleGoal,
     checkSizeLimits: false, // Already handled by adapter
   });
