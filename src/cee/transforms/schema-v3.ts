@@ -22,7 +22,7 @@ import type {
 import { deriveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
-import { isFactorData } from "./schema-v2.js";
+import { isFactorData, isOptionData } from "./schema-v2.js";
 import {
   extractOptionsFromNodes,
   toOptionsV3,
@@ -429,6 +429,8 @@ export function transformResponseToV3(
       id: n.id,
       label: n.label ?? n.id,
       description: n.body,
+      // V4 prompt outputs interventions directly on option nodes - use them if present
+      v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
     })),
     v3NodesTyped,
     v3EdgesTyped,

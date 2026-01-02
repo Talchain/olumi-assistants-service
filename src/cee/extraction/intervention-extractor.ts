@@ -25,6 +25,7 @@ import {
   categorizeUserQuestions,
   type StatusComputationInput,
 } from "../transforms/option-status.js";
+import { log } from "../../utils/telemetry.js";
 
 /**
  * Raw extracted intervention before graph matching.
@@ -476,6 +477,72 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
+ * Build interventions directly from V4 prompt data.
+ *
+ * V4 prompt instructs LLM to return option nodes with `data.interventions`
+ * containing direct factor ID -> numeric value mappings. This provides
+ * high-confidence interventions without text extraction.
+ *
+ * @param optionId - Option ID
+ * @param optionLabel - Option label
+ * @param v4Interventions - Direct factor -> value mapping from LLM
+ * @param factors - All factor nodes for validation
+ * @returns ExtractedOption with V4 interventions
+ */
+function buildInterventionsFromV4Data(
+  optionId: string,
+  optionLabel: string,
+  v4Interventions: Record<string, number>,
+  factors: NodeV3T[]
+): ExtractedOption {
+  const interventions: Record<string, InterventionV3T> = {};
+  const factorIds = new Set(factors.map((f) => f.id));
+  const missingFactors: string[] = [];
+
+  for (const [factorId, value] of Object.entries(v4Interventions)) {
+    // Validate factor exists in graph
+    if (!factorIds.has(factorId)) {
+      log.warn(
+        { factorId, optionId, optionLabel },
+        "V4 intervention targets non-existent factor"
+      );
+      missingFactors.push(factorId);
+      continue;
+    }
+
+    // Get factor node for context
+    const factor = factors.find((f) => f.id === factorId);
+
+    interventions[factorId] = {
+      value,
+      unit: factor?.observed_state?.unit,
+      source: "brief_extraction", // V4 prompt extracts from brief
+      target_match: {
+        node_id: factorId,
+        match_type: "exact_id", // LLM provided exact ID
+        confidence: "high", // Direct from V4 prompt = high confidence
+      },
+      value_confidence: "high",
+      reasoning: "Direct from V4 prompt data.interventions",
+    };
+  }
+
+  const hasInterventions = Object.keys(interventions).length > 0;
+  const status = hasInterventions ? "ready" : "needs_user_mapping";
+
+  return {
+    id: optionId,
+    label: optionLabel,
+    interventions,
+    status,
+    unresolved_targets: missingFactors.length > 0 ? missingFactors : undefined,
+    provenance: {
+      source: "brief_extraction",
+    },
+  };
+}
+
+/**
  * Extract interventions from an option and match to graph factors.
  *
  * @param optionLabel - Option label
@@ -485,6 +552,7 @@ function formatRelativeDescription(value: ParsedValue): string {
  * @param goalNodeId - Goal node ID
  * @param existingIds - Set of existing option IDs
  * @param edgeHints - Optional V1 edges from this option to factors (high-confidence targets)
+ * @param v4Interventions - Optional direct interventions from V4 prompt
  * @returns Extracted option with matched interventions
  */
 export function extractInterventionsForOption(
@@ -494,11 +562,19 @@ export function extractInterventionsForOption(
   edges: EdgeV3T[],
   goalNodeId: string,
   existingIds: Set<string> = new Set(),
-  edgeHints: EdgeHint[] = []
+  edgeHints: EdgeHint[] = [],
+  v4Interventions?: Record<string, number>
 ): ExtractedOption {
   // Generate option ID
   const id = normalizeToId(optionLabel, existingIds);
 
+  // V4 prompt: If interventions are provided directly, use them (high confidence)
+  if (v4Interventions && Object.keys(v4Interventions).length > 0) {
+    const factors = nodes.filter((n) => n.kind === "factor");
+    return buildInterventionsFromV4Data(id, optionLabel, v4Interventions, factors);
+  }
+
+  // Fallback: Extract interventions from text (legacy path)
   // Build set of hinted factor IDs for priority matching
   const hintedFactorIds = new Set(edgeHints.map(h => h.to_factor_id));
 
@@ -798,7 +874,13 @@ function determineOptionStatus(
  * @returns Array of extracted options
  */
 export function extractOptionsFromNodes(
-  optionNodes: Array<{ id?: string; label: string; description?: string; body?: string }>,
+  optionNodes: Array<{
+    id?: string;
+    label: string;
+    description?: string;
+    body?: string;
+    v4Interventions?: Record<string, number>;
+  }>,
   allNodes: NodeV3T[],
   edges: EdgeV3T[],
   goalNodeId: string,
@@ -821,7 +903,8 @@ export function extractOptionsFromNodes(
       edges,
       goalNodeId,
       usedIds,
-      hintsForOption
+      hintsForOption,
+      node.v4Interventions
     );
     usedIds.add(option.id);
     results.push(option);
