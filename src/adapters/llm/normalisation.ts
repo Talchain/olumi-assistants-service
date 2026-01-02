@@ -132,12 +132,62 @@ export function normaliseDraftResponse(raw: unknown): unknown {
   }
 
   // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
+  // Also handle V4 format (strength.mean, strength.std, exists_probability)
   if (Array.isArray(obj.edges)) {
     obj.edges = obj.edges.map((edge: unknown) => {
       if (!edge || typeof edge !== 'object') return edge;
       const e = edge as Record<string, unknown>;
 
-      // Parse and clamp belief to [0, 1]
+      // ========================================================================
+      // V4 FORMAT HANDLING: strength.mean/std and exists_probability
+      // Convert to internal representation (strength_mean, strength_std, belief_exists)
+      // while preserving backwards compatibility with legacy weight/belief fields
+      // ========================================================================
+
+      let strength_mean: number | undefined = undefined;
+      let strength_std: number | undefined = undefined;
+      let belief_exists: number | undefined = undefined;
+
+      // Handle V4 nested strength object
+      if (e.strength && typeof e.strength === 'object') {
+        const strength = e.strength as { mean?: number; std?: number };
+        if (typeof strength.mean === 'number') {
+          strength_mean = strength.mean;
+          log.debug({
+            event: 'llm.normalisation.v4_strength_mean',
+            edge_from: e.from,
+            edge_to: e.to,
+            strength_mean,
+          }, 'V4 strength.mean extracted');
+        }
+        if (typeof strength.std === 'number' && strength.std > 0) {
+          strength_std = strength.std;
+        }
+      }
+
+      // Handle V4 exists_probability
+      if (typeof e.exists_probability === 'number') {
+        const rawProb = e.exists_probability;
+        if (rawProb < 0 || rawProb > 1) {
+          belief_exists = Math.max(0, Math.min(1, rawProb));
+          log.warn({
+            event: 'llm.normalisation.exists_probability_clamped',
+            edge_from: e.from,
+            edge_to: e.to,
+            raw: rawProb,
+            clamped: belief_exists,
+          }, `V4 exists_probability ${rawProb} clamped to ${belief_exists}`);
+        } else {
+          belief_exists = rawProb;
+        }
+      }
+
+      // ========================================================================
+      // LEGACY FORMAT HANDLING: weight and belief
+      // Use as fallback when V4 fields not present
+      // ========================================================================
+
+      // Parse and clamp belief to [0, 1] (legacy format)
       let belief: number | undefined = undefined;
       if (e.belief !== undefined && e.belief !== null) {
         const rawBelief = Number(e.belief);
@@ -167,10 +217,26 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         }
       }
 
+      // ========================================================================
+      // FIELD MAPPING: V4 → Legacy (for downstream compatibility)
+      // V4 fields take precedence; legacy fields are fallback
+      // ========================================================================
+
+      // Map strength_mean → weight (if V4 provided, use it; otherwise keep legacy weight)
+      const finalWeight = strength_mean !== undefined ? strength_mean : weight;
+
+      // Map belief_exists → belief (if V4 provided, use it; otherwise keep legacy belief)
+      const finalBelief = belief_exists !== undefined ? belief_exists : belief;
+
       return {
         ...e,
-        weight,
-        belief,
+        // V4 fields (preserved for Phase 2 direct access)
+        strength_mean,
+        strength_std,
+        belief_exists,
+        // Legacy fields (populated from V4 or original legacy values)
+        weight: finalWeight,
+        belief: finalBelief,
       };
     });
   }

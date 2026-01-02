@@ -26,9 +26,19 @@ const OpenAINode = z.object({
   data: FactorData.optional(), // Quantitative data for factor nodes (ISL integration)
 });
 
+// V4 edge strength schema (nested object from LLM)
+const EdgeStrength = z.object({
+  mean: z.number(),
+  std: z.number().positive(),
+}).optional();
+
 const OpenAIEdge = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
+  // V4 format (preferred) - from v4 prompt
+  strength: EdgeStrength,
+  exists_probability: z.number().min(0).max(1).optional(),
+  // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
   provenance: StructuredProvenance.optional(),
