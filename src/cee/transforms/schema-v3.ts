@@ -218,17 +218,18 @@ export function transformEdgeToV3(
   _index: number,
   _nodes: V1Node[]
 ): EdgeV3T {
-  const weight = edge.weight ?? 0.5;
-  const belief = edge.belief ?? 0.5;
+  // V4 fields take precedence, fallback to legacy for backwards compatibility
+  const rawStrength = edge.strength_mean ?? edge.weight ?? 0.5;
+  const beliefExists = edge.belief_exists ?? edge.belief ?? 0.5;
 
   // In V3, strength_mean is a signed coefficient
   // If effect_direction is negative, strength_mean should be negative
   const existingDirection = edge.effect_direction;
-  let strengthMean = weight;
+  let strengthMean = rawStrength;
 
-  // Apply sign based on effect direction
-  if (existingDirection === "negative") {
-    strengthMean = -Math.abs(weight);
+  // Apply sign based on effect direction (only if not already signed from V4)
+  if (existingDirection === "negative" && rawStrength > 0) {
+    strengthMean = -Math.abs(rawStrength);
   }
 
   // P1-CEE-2: Clamp strength_mean to [-3, +3]
@@ -244,13 +245,16 @@ export function transformEdgeToV3(
     emit(TelemetryEvents.EdgeStrengthClamped ?? "cee.edge.strength_clamped", {
       edgeFrom: edge.from,
       edgeTo: edge.to,
-      originalMean: weight * (existingDirection === "negative" ? -1 : 1),
+      originalMean: rawStrength * (existingDirection === "negative" ? -1 : 1),
       clampedMean: strengthMean,
     });
   }
 
-  // Derive std from belief and provenance
-  let strengthStd = deriveStrengthStd(Math.abs(weight), belief, edge.provenance);
+  // Use V4 strength_std if present, otherwise derive from strength and belief
+  let strengthStd = edge.strength_std;
+  if (strengthStd === undefined) {
+    strengthStd = deriveStrengthStd(Math.abs(rawStrength), beliefExists, edge.provenance);
+  }
 
   // P1-CEE-2: Apply std bounds (floor 1e-6, cap max(0.5, 2×|mean|))
   strengthStd = boundStrengthStd(strengthStd, strengthMean, edge.from, edge.to);
@@ -266,7 +270,7 @@ export function transformEdgeToV3(
     to: edge.to,
     strength_mean: strengthMean,
     strength_std: strengthStd,
-    belief_exists: belief,
+    belief_exists: beliefExists,
     effect_direction: effectDirection,
     provenance,
   };

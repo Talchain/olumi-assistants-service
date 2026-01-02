@@ -199,7 +199,8 @@ export function normaliseDecisionBranchBeliefs(
     const values: number[] = [];
 
     for (const edgeIndex of indices) {
-      const raw = (normalisedEdges[edgeIndex] as any).belief;
+      // V4 fields take precedence, fallback to legacy for backwards compatibility
+      const raw = (normalisedEdges[edgeIndex] as any).belief_exists ?? (normalisedEdges[edgeIndex] as any).belief;
       if (typeof raw === "number" && Number.isFinite(raw)) {
         const clamped = Math.max(0, Math.min(1, raw));
         numericIndices.push(edgeIndex);
@@ -218,7 +219,10 @@ export function normaliseDecisionBranchBeliefs(
     for (let i = 0; i < numericIndices.length; i += 1) {
       const edgeIndex = numericIndices[i];
       const value = values[i];
-      (normalisedEdges[edgeIndex] as any).belief = value / sum;
+      const normalizedValue = value / sum;
+      // Write to both V4 and legacy fields during transition
+      (normalisedEdges[edgeIndex] as any).belief_exists = normalizedValue;
+      (normalisedEdges[edgeIndex] as any).belief = normalizedValue;
     }
   }
 
@@ -304,7 +308,8 @@ function edgePriority(edge: any): number {
   let score = 0;
   if (edge?.provenance?.source) score += 100;
   if (edge?.provenance?.quote) score += 50;
-  if (typeof edge?.belief === "number") score += 10;
+  // V4 field takes precedence, fallback to legacy
+  if (typeof edge?.belief_exists === "number" || typeof edge?.belief === "number") score += 10;
   if (typeof edge?.id === "string") score += 1;
   return score;
 }
@@ -402,8 +407,11 @@ export function enforceSingleGoal(
   // Normalize beliefs on edges leaving the compound goal to 1.0
   // After goal merge, there's only one path from compound goal, so belief should be 100%
   const dedupedEdges = Array.from(edgesByKey.values()).map((edge) => {
-    if ((edge as any)?.from === primaryId && typeof (edge as any)?.belief === "number") {
-      return { ...edge, belief: 1.0 };
+    // V4 field takes precedence, fallback to legacy
+    const hasBeliefValue = typeof (edge as any)?.belief_exists === "number" || typeof (edge as any)?.belief === "number";
+    if ((edge as any)?.from === primaryId && hasBeliefValue) {
+      // Write to both V4 and legacy fields during transition
+      return { ...edge, belief_exists: 1.0, belief: 1.0 };
     }
     return edge;
   });
@@ -467,7 +475,8 @@ export function fixMissingOutcomeEdgeBeliefs(
   const updatedEdges = edges.map((edge) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
-    const belief = (edge as any)?.belief;
+    // V4 field takes precedence, fallback to legacy
+    const belief = (edge as any)?.belief_exists ?? (edge as any)?.belief;
     const edgeId = (edge as any)?.id;
 
     // Only fix option→outcome edges
@@ -485,6 +494,8 @@ export function fixMissingOutcomeEdgeBeliefs(
         }
         return {
           ...(edge as any),
+          // Write to both V4 and legacy fields during transition
+          belief_exists: defaultBelief,
           belief: defaultBelief,
         };
       }

@@ -90,6 +90,11 @@ export interface V1Edge {
   provenance_source?: string;
   // LLM may output this if prompt is updated
   effect_direction?: EffectDirection;
+  // V4 fields (populated by normalisation.ts from V4 LLM output)
+  // These take precedence over legacy weight/belief when present
+  strength_mean?: number;
+  strength_std?: number;
+  belief_exists?: number;
 }
 
 export interface V1Graph {

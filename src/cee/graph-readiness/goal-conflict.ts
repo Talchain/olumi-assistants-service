@@ -34,6 +34,10 @@ type EdgeLike = {
   to?: string;
   source?: string;
   target?: string;
+  // V4 fields (preferred)
+  strength_mean?: number;
+  belief_exists?: number;
+  // Legacy fields (fallback)
   weight?: number;
   belief?: number;
 } & Record<string, unknown>;
@@ -353,7 +357,8 @@ function determineRelationship(
     const from = getEdgeFrom(edge);
     const to = getEdgeTo(edge);
     if (!from || !to) continue;
-    const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
+    // V4 field takes precedence, fallback to legacy
+    const weight = edge.strength_mean ?? edge.weight ?? 1.0;
     edgeWeights.set(`${from}->${to}`, weight);
   }
 

@@ -38,6 +38,10 @@ type NodeLike = { id?: string; kind?: string; label?: string } & Record<string, 
 type EdgeLike = {
   from?: string;
   to?: string;
+  // V4 fields (preferred)
+  strength_mean?: number;
+  belief_exists?: number;
+  // Legacy fields (fallback)
   weight?: number;
   belief?: number;
   provenance?: unknown;
@@ -116,10 +120,11 @@ export function scoreCausalDetail(graph: GraphV1 | undefined): FactorResult {
     score += C.edgeDensityBonus;
   }
 
-  // Check for edges with beliefs
-  const edgesWithBeliefs = edges.filter(
-    (e) => typeof e.belief === "number" && e.belief > 0 && e.belief < 1,
-  ).length;
+  // Check for edges with beliefs (V4 field takes precedence, fallback to legacy)
+  const edgesWithBeliefs = edges.filter((e) => {
+    const belief = e.belief_exists ?? e.belief;
+    return typeof belief === "number" && belief > 0 && belief < 1;
+  }).length;
   const beliefCoverage = edges.length > 0 ? edgesWithBeliefs / edges.length : 0;
   if (beliefCoverage < C.beliefCoverageThreshold) {
     score += C.beliefCoveragePenalty;
@@ -161,8 +166,9 @@ export function scoreWeightRefinement(graph: GraphV1 | undefined): FactorResult 
   const issues: string[] = [];
   const C = WEIGHT_REFINEMENT_SCORING;
 
+  // V4 field takes precedence, fallback to legacy
   const beliefs = edges
-    .map((e) => e.belief)
+    .map((e) => e.belief_exists ?? e.belief)
     .filter((b): b is number => typeof b === "number");
 
   if (beliefs.length === 0) {
@@ -187,8 +193,9 @@ export function scoreWeightRefinement(graph: GraphV1 | undefined): FactorResult 
   }
 
   // Check for extreme values (near 0 or 1 without provenance)
+  // V4 field takes precedence, fallback to legacy
   const extremeEdges = edges.filter((e) => {
-    const b = e.belief;
+    const b = e.belief_exists ?? e.belief;
     return typeof b === "number" && (b < 0.1 || b > 0.9) && !e.provenance;
   });
   if (extremeEdges.length > 0) {
@@ -724,8 +731,9 @@ export function identifyKeyAssumptions(
   for (const edge of edges) {
     const from = edge.from ?? "";
     const to = edge.to ?? "";
-    const belief = typeof edge.belief === "number" ? edge.belief : 0.5; // Default belief
-    const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
+    // V4 fields take precedence, fallback to legacy for backwards compatibility
+    const belief = edge.belief_exists ?? edge.belief ?? 0.5; // Default belief
+    const weight = edge.strength_mean ?? edge.weight ?? 1.0;
 
     // Priority: Lower belief = higher priority to validate
     // Also factor in weight (higher weight = more important relationship)

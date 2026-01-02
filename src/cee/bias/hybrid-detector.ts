@@ -30,6 +30,10 @@ type EdgeLike = {
   to?: string;
   source?: string;
   target?: string;
+  // V4 fields (preferred)
+  strength_mean?: number;
+  belief_exists?: number;
+  // Legacy fields (fallback)
   weight?: number;
   belief?: number;
 } & Record<string, unknown>;
@@ -187,7 +191,8 @@ export function detectAnchoringBias(
   for (const edge of edges) {
     const from = getEdgeFrom(edge);
     const to = getEdgeTo(edge);
-    const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
+    // V4 field takes precedence, fallback to legacy
+    const weight = edge.strength_mean ?? edge.weight ?? 1.0;
 
     if (from && optionIdSet.has(from)) {
       edgeCountByOption.set(from, (edgeCountByOption.get(from) ?? 0) + 1);
@@ -389,13 +394,14 @@ export function detectOverconfidenceBiasEnhanced(
   const edges = getEdges(graph);
   if (edges.length === 0) return null;
 
-  const edgesWithBelief = edges.filter(
-    (e) => typeof e.belief === "number" && Number.isFinite(e.belief),
-  );
+  // V4 field takes precedence, fallback to legacy
+  const edgesWithBelief = edges
+    .map((e) => ({ ...e, _belief: e.belief_exists ?? e.belief }))
+    .filter((e) => typeof e._belief === "number" && Number.isFinite(e._belief));
 
   if (edgesWithBelief.length < 3) return null;
 
-  const beliefs = edgesWithBelief.map((e) => e.belief as number);
+  const beliefs = edgesWithBelief.map((e) => e._belief as number);
 
   // Check if ALL beliefs are above threshold
   const overconfidenceThreshold = 0.8;
