@@ -14,6 +14,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { getSystemPrompt } from "./prompt-loader.js";
 
 // ============================================================================
 // Zod schemas for OpenAI response validation (same as Anthropic)
@@ -101,7 +102,13 @@ function getClient(): OpenAI {
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 
-function buildDraftPrompt(brief: string, docs: DocPreview[]): string {
+/**
+ * @deprecated Use getSystemPrompt('draft_graph') from prompt-loader.js instead.
+ * This legacy prompt lacks v4 topology rules (closed-world edge validation,
+ * factor→decision prohibition, option→factor→outcome chain requirement).
+ * Kept for reference only - will be removed in future cleanup.
+ */
+function _buildDraftPromptLegacy(brief: string, docs: DocPreview[]): string {
   const docContext = docs.length
     ? `\n\n## Attached Documents\n${docs
         .map((d) => {
@@ -376,7 +383,20 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
-    const prompt = buildDraftPrompt(brief, docs);
+
+    // V4: Use shared prompt management system (same as Anthropic adapter)
+    const systemPrompt = getSystemPrompt('draft_graph');
+
+    // Build user content with brief and documents
+    const docContext = docs.length
+      ? `\n\n## Attached Documents\n${docs
+          .map((d) => {
+            const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+            return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+          })
+          .join("\n\n")}`
+      : "";
+    const userContent = `## Brief\n${brief}${docContext}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -396,7 +416,11 @@ export class OpenAIAdapter implements LLMAdapter {
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
+          // V4: Use system + user messages (same as Anthropic adapter)
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userContent },
+          ],
           temperature: 0,
           response_format: { type: "json_object" },
           seed: seed, // OpenAI supports deterministic seed
