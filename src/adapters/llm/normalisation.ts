@@ -218,25 +218,21 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       }
 
       // ========================================================================
-      // FIELD MAPPING: V4 → Legacy (for downstream compatibility)
-      // V4 fields take precedence; legacy fields are fallback
+      // OUTPUT: V4 fields are primary, legacy fields preserved if present
+      // Phase 2d: Downstream consumers now read V4 fields directly
+      // Legacy fields only populated from original input (not mapped from V4)
       // ========================================================================
-
-      // Map strength_mean → weight (if V4 provided, use it; otherwise keep legacy weight)
-      const finalWeight = strength_mean !== undefined ? strength_mean : weight;
-
-      // Map belief_exists → belief (if V4 provided, use it; otherwise keep legacy belief)
-      const finalBelief = belief_exists !== undefined ? belief_exists : belief;
 
       return {
         ...e,
-        // V4 fields (preserved for Phase 2 direct access)
+        // V4 fields (primary)
         strength_mean,
         strength_std,
         belief_exists,
-        // Legacy fields (populated from V4 or original legacy values)
-        weight: finalWeight,
-        belief: finalBelief,
+        // Legacy fields (only from original input, NOT from V4 mapping)
+        // Kept for backwards compatibility with old fixtures/inputs
+        weight,
+        belief,
       };
     });
   }
