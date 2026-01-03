@@ -161,13 +161,47 @@ The strategy factor then influences outcomes like cost, quality, speed.
 <CONSTRAINTS>
 - Maximum {{maxNodes}} nodes, {{maxEdges}} edges
 - Node IDs: lowercase alphanumeric + underscores (e.g., "fac_price", "opt_increase")
-- Edge strength.mean: signed coefficient [-3, +3]; positive = source↑ causes target↑
-- Edge strength.std: uncertainty > 0 (minimum 0.01)
-- Edge exists_probability: confidence [0, 1]
 - outcome → goal: strength.mean MUST be > 0 (positive contribution)
 - risk → goal: strength.mean MUST be < 0 (negative contribution)
 - If a consequence is negative, make it a RISK node, not an outcome
 </CONSTRAINTS>
+
+<EDGE_STRENGTH_GUIDANCE>
+EDGE STRENGTH (strength.mean):
+Represents the STANDARDISED CAUSAL EFFECT — how much the target changes
+(in standard units) when the source changes by 1 standard unit.
+
+RANGE: -1.0 to +1.0
+
+| Strength | Meaning | Example |
+|----------|---------|---------|
+| +0.8 to +1.0 | Strong positive | "Price directly determines revenue" |
+| +0.4 to +0.7 | Moderate positive | "Marketing noticeably increases awareness" |
+| +0.1 to +0.3 | Weak positive | "Weather slightly affects foot traffic" |
+| -0.1 to +0.1 | Negligible | "Office layout has minimal effect on productivity" |
+| -0.3 to -0.1 | Weak negative | "Complexity slightly reduces adoption" |
+| -0.7 to -0.4 | Moderate negative | "Price increase reduces demand" |
+| -1.0 to -0.8 | Strong negative | "Competitor launch directly hurts market share" |
+
+CRITICAL:
+- Use the FULL RANGE. Not all edges should be 0.5.
+- Different relationships have different effect sizes.
+- Consider the DIRECTION (positive/negative) based on the relationship.
+- Stronger causal claims → values closer to ±1.0
+- Uncertain or indirect relationships → values closer to 0
+
+EDGE UNCERTAINTY (strength.std):
+How confident are you in the strength estimate?
+- High confidence (known/measured): std = 0.05 to 0.1
+- Moderate confidence (estimated): std = 0.1 to 0.2
+- Low confidence (speculative): std = 0.2 to 0.3
+
+EXISTENCE PROBABILITY (exists_probability):
+How confident are you this causal link exists at all?
+- Very confident (established relationship): 0.85 to 1.0
+- Somewhat confident (likely relationship): 0.6 to 0.85
+- Uncertain (hypothesised relationship): 0.4 to 0.6
+</EDGE_STRENGTH_GUIDANCE>
 
 <OUTPUT_SCHEMA>
 {
@@ -232,6 +266,8 @@ CRITICAL — Verify before outputting:
 ✓ Options differ in at least one intervention
 ✓ Connected DAG, no cycles
 ✓ ONLY edges from ✓ list (closed-world)
+✓ strength.mean values VARY (not all 0.5) — use full [-1, +1] range based on relationship strength
+✓ Different relationships have different strengths (strong: ±0.7-1.0, moderate: ±0.4-0.7, weak: ±0.1-0.4)
 
 Output ONLY valid JSON. No markdown, no comments, no explanation.
 </FINAL_REMINDER>`;

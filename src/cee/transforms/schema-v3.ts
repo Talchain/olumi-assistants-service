@@ -146,8 +146,9 @@ export function transformNodeToV3(node: V1Node): NodeV3T {
 // ============================================================================
 
 /** Min/Max bounds for strength_mean coefficient */
-const STRENGTH_MEAN_MIN = -3;
-const STRENGTH_MEAN_MAX = 3;
+// Canonical strength range: [-1, +1] (standardised coefficients)
+const STRENGTH_MEAN_MIN = -1;
+const STRENGTH_MEAN_MAX = 1;
 
 /** Minimum floor for strength_std */
 const STRENGTH_STD_FLOOR = 1e-6;
@@ -209,7 +210,7 @@ function boundStrengthStd(
  *
  * V3 Changes:
  * - weight → strength_mean (can be negative for negative effects)
- * - Uses signed coefficient model: range [-3, +3]
+ * - Uses signed coefficient model: range [-1, +1]
  * - effect_direction derived from strength_mean sign
  * - strength_std: floor 1e-6, cap max(0.5, 2×|mean|)
  */
@@ -232,7 +233,7 @@ export function transformEdgeToV3(
     strengthMean = -Math.abs(rawStrength);
   }
 
-  // P1-CEE-2: Clamp strength_mean to [-3, +3]
+  // P1-CEE-2: Clamp strength_mean to [-1, +1]
   const { clamped: clampedMean, wasClamped } = clampStrengthMean(
     strengthMean,
     edge.from,

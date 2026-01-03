@@ -79,7 +79,7 @@ export const EffectDirection = z.enum(["positive", "negative"]);
  * Used for parsing input; see EdgeInput for the flexible input type.
  *
  * V4 Edge Fields:
- * - strength_mean: Effect magnitude [-3, +3], sign indicates direction
+ * - strength_mean: Effect magnitude [-1, +1], sign indicates direction
  * - strength_std: Parametric uncertainty for sensitivity analysis
  * - belief_exists: Confidence in relationship existence [0, 1]
  *
@@ -96,7 +96,7 @@ const EdgeInput = z.object({
   source: z.string().optional(),
   target: z.string().optional(),
   // V4 edge fields (preferred)
-  /** Effect magnitude: [-3, +3]. Sign indicates direction (positive/negative). */
+  /** Effect magnitude: [-1, +1]. Sign indicates direction (positive/negative). */
   strength_mean: z.number().optional(),
   /** Parametric uncertainty derived from belief and provenance. */
   strength_std: z.number().positive().optional(),

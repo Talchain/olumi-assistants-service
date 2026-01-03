@@ -186,6 +186,11 @@ const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "risk", to: "goal" },
 ];
 
+// Canonical strength range for CEE edges
+const MIN_STRENGTH = -1.0;
+const MAX_STRENGTH = 1.0;
+const NEGLIGIBLE_THRESHOLD = 0.05;
+
 /**
  * Validate edges.
  */
@@ -200,6 +205,48 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   for (const option of response.options) {
     for (const intervention of Object.values(option.interventions)) {
       controllableFactors.add(intervention.target_match.node_id);
+    }
+  }
+
+  // Collect strength values for uniformity check (exclude structural edges)
+  const causalStrengths: number[] = [];
+  const structuralEdgeTypes = new Set(["decision-option", "option-factor"]);
+
+  for (const edge of response.graph.edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+    const edgeType = `${fromKind}-${toKind}`;
+
+    // Skip structural edges for strength variation analysis
+    if (!structuralEdgeTypes.has(edgeType)) {
+      causalStrengths.push(edge.strength_mean);
+    }
+  }
+
+  // Check for uniform strengths (P1-CEE-1)
+  if (causalStrengths.length > 2) {
+    const uniqueStrengths = new Set(causalStrengths.map((v) => v.toFixed(2)));
+    if (uniqueStrengths.size === 1) {
+      warnings.push({
+        code: "UNIFORM_STRENGTHS",
+        severity: "warning",
+        message: `All ${causalStrengths.length} causal edges have identical strength (${causalStrengths[0].toFixed(2)}). This will produce undifferentiated results.`,
+        suggestion: "Review edge strengths — different relationships should have different effect sizes.",
+      });
+    }
+  }
+
+  // Check for all-same-direction (unlikely in real models)
+  if (causalStrengths.length > 3) {
+    const allPositive = causalStrengths.every((v) => v >= 0);
+    const allNegative = causalStrengths.every((v) => v <= 0);
+    if (allPositive || allNegative) {
+      warnings.push({
+        code: "UNIFORM_DIRECTION",
+        severity: "info",
+        message: `All ${causalStrengths.length} causal edges are ${allPositive ? "positive" : "negative"}. Most real-world models have mixed directions.`,
+        suggestion: "Consider whether any relationships are inverse (e.g., cost reduces profit).",
+      });
     }
   }
 
@@ -284,6 +331,32 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "INVALID_BELIEF_EXISTS",
         severity: "error",
         message: `Edge ${edge.from} → ${edge.to}: belief_exists must be in [0, 1], got ${edge.belief_exists}`,
+      });
+    }
+
+    // Check strength_mean is in canonical [-1, +1] range (P1-CEE-2)
+    if (edge.strength_mean < MIN_STRENGTH || edge.strength_mean > MAX_STRENGTH) {
+      warnings.push({
+        code: "STRENGTH_OUT_OF_RANGE",
+        severity: "warning",
+        message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
+        suggestion: "Standardised coefficients should be in [-1, +1] range.",
+      });
+    }
+
+    // Check for negligible strength (P1-CEE-3) - skip structural edges
+    const fromKindCheck = nodeKindMap.get(edge.from);
+    const toKindCheck = nodeKindMap.get(edge.to);
+    const isStructuralEdge =
+      (fromKindCheck === "decision" && toKindCheck === "option") ||
+      (fromKindCheck === "option" && toKindCheck === "factor");
+
+    if (!isStructuralEdge && Math.abs(edge.strength_mean) < NEGLIGIBLE_THRESHOLD) {
+      warnings.push({
+        code: "NEGLIGIBLE_STRENGTH",
+        severity: "info",
+        message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength_mean.toFixed(2)}). Consider removing.`,
+        suggestion: "Edges with |strength| < 0.05 have minimal impact on outcomes.",
       });
     }
   }
