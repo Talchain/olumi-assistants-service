@@ -426,4 +426,155 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[2].belief).toBe(1);
     });
   });
+
+  describe("V4 format edge handling", () => {
+    it("extracts V4 strength.mean and strength.std from nested object", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 0.8, std: 0.15 },
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.8);
+      expect(result.edges[0].strength_std).toBe(0.15);
+    });
+
+    it("extracts V4 exists_probability to belief_exists", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            exists_probability: 0.9,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(0.9);
+    });
+
+    it("clamps exists_probability to [0, 1]", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: 1.5 },
+          { from: "n2", to: "n3", exists_probability: -0.5 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(1);
+      expect(result.edges[1].belief_exists).toBe(0);
+    });
+
+    it("handles mixed V4 and legacy fields", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 1.2, std: 0.1 },
+            exists_probability: 0.85,
+            weight: 0.5, // legacy - should be preserved
+            belief: 0.6, // legacy - should be preserved
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // V4 fields extracted
+      expect(result.edges[0].strength_mean).toBe(1.2);
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[0].belief_exists).toBe(0.85);
+      // Legacy fields preserved from input
+      expect(result.edges[0].weight).toBe(0.5);
+      expect(result.edges[0].belief).toBe(0.6);
+    });
+
+    it("does NOT map V4 fields to legacy fields (Phase 2d)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 1.5 },
+            exists_probability: 0.9,
+            // No legacy fields provided
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // V4 fields extracted
+      expect(result.edges[0].strength_mean).toBe(1.5);
+      expect(result.edges[0].belief_exists).toBe(0.9);
+      // Legacy fields should be undefined (NOT mapped from V4)
+      expect(result.edges[0].weight).toBeUndefined();
+      expect(result.edges[0].belief).toBeUndefined();
+    });
+
+    it("handles V4 strength object with only mean (no std)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 0.7 },
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[0].strength_std).toBeUndefined();
+    });
+
+    it("ignores invalid strength.std values (negative or zero)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: 1.0, std: 0 } },
+          { from: "n2", to: "n3", strength: { mean: 1.0, std: -0.1 } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // std must be > 0, otherwise ignored
+      expect(result.edges[0].strength_std).toBeUndefined();
+      expect(result.edges[1].strength_std).toBeUndefined();
+    });
+
+    it("ignores non-numeric strength values", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: "invalid" } },
+          { from: "n2", to: "n3", strength: "not_an_object" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBeUndefined();
+      expect(result.edges[1].strength_mean).toBeUndefined();
+    });
+  });
 });

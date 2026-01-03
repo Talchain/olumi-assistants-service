@@ -77,6 +77,15 @@ export const EffectDirection = z.enum(["positive", "negative"]);
 /**
  * Raw edge input schema - accepts both from/to and source/target formats.
  * Used for parsing input; see EdgeInput for the flexible input type.
+ *
+ * V4 Edge Fields:
+ * - strength_mean: Effect magnitude [-3, +3], sign indicates direction
+ * - strength_std: Parametric uncertainty for sensitivity analysis
+ * - belief_exists: Confidence in relationship existence [0, 1]
+ *
+ * Legacy Fields (deprecated, use V4 equivalents):
+ * - weight: @deprecated Use strength_mean instead
+ * - belief: @deprecated Use belief_exists instead
  */
 const EdgeInput = z.object({
   id: z.string().optional(),
@@ -86,7 +95,17 @@ const EdgeInput = z.object({
   // Alternative format (common in graph libraries like D3, Cytoscape, vis.js)
   source: z.string().optional(),
   target: z.string().optional(),
+  // V4 edge fields (preferred)
+  /** Effect magnitude: [-3, +3]. Sign indicates direction (positive/negative). */
+  strength_mean: z.number().optional(),
+  /** Parametric uncertainty derived from belief and provenance. */
+  strength_std: z.number().positive().optional(),
+  /** Confidence in relationship existence: [0, 1]. */
+  belief_exists: z.number().min(0).max(1).optional(),
+  // Legacy fields (deprecated - kept for backwards compatibility)
+  /** @deprecated Use strength_mean instead. */
   weight: z.number().optional(),
+  /** @deprecated Use belief_exists instead. */
   belief: z.number().min(0).max(1).optional(),
   // Support both structured and legacy string provenance for migration
   provenance: z.union([StructuredProvenance, z.string().min(1)]).optional(),
