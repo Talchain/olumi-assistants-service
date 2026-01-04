@@ -146,6 +146,10 @@ class FixturesAdapter implements LLMAdapter {
     return {
       graph: fixtureGraph,
       rationales: [],
+      debug: {
+        raw_llm_output: { _fixture: true, graph: fixtureGraph },
+        raw_llm_output_truncated: false,
+      },
       usage: {
         input_tokens: 0,
         output_tokens: 0,

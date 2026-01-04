@@ -35,6 +35,29 @@ type AnthropicSystemBlock = {
   cache_control?: { type: "ephemeral" };
 };
 
+/**
+ * Max size for raw LLM output in debug trace (chars).
+ * Truncates large responses to prevent payload bloat.
+ */
+const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
+
+/**
+ * Truncate raw LLM output for debug tracing.
+ * Returns the output with a truncation flag if over limit.
+ */
+function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
+  const jsonStr = JSON.stringify(raw);
+  if (jsonStr.length <= RAW_LLM_OUTPUT_MAX_CHARS) {
+    return { output: raw, truncated: false };
+  }
+  // Truncate and add marker
+  const truncatedStr = jsonStr.slice(0, RAW_LLM_OUTPUT_MAX_CHARS);
+  return {
+    output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
+    truncated: true,
+  };
+}
+
 // Zod schemas for Anthropic response validation
 const AnthropicNode = z.object({
   id: z.string().min(1),
@@ -517,9 +540,16 @@ export async function draftGraphWithAnthropic(
       "draft complete"
     );
 
+    // Capture raw LLM output for debug tracing (before normalisation)
+    const rawOutput = truncateRawOutput(rawJson);
+
     return {
       graph,
       rationales: parsed.rationales || [],
+      debug: {
+        raw_llm_output: rawOutput.output,
+        raw_llm_output_truncated: rawOutput.truncated,
+      },
       usage: {
         input_tokens: response.usage.input_tokens,
         output_tokens: response.usage.output_tokens,

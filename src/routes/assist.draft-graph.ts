@@ -549,7 +549,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     throw new Error("draft_graph_missing_result");
   }
 
-  const { graph, rationales, usage: draftUsage } = draftResult;
+  const { graph, rationales, usage: draftUsage, debug: adapterDebug } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
 
   // Time budget check: skip LLM repair if we've used too much time on draft
@@ -906,6 +906,11 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // Build debug payload: merge adapter debug (raw_llm_output) with internal debug (needle_movers)
+  const debugPayload = input.include_debug
+    ? { needle_movers: docs, ...(adapterDebug || {}) }
+    : adapterDebug || undefined;
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -913,7 +918,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     issues: issues?.length ? issues : undefined,
     confidence,
     clarifier_status: clarifier,
-    debug: input.include_debug ? { needle_movers: docs } : undefined
+    debug: debugPayload,
   });
 
   // Check for legacy string provenance (for deprecation tracking)

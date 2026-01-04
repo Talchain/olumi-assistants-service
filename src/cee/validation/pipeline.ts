@@ -986,12 +986,19 @@ export async function finaliseCeeDraftResponse(
     };
   }
 
+  // Extract raw_llm_output from debug payload for trace (if present)
+  const rawLlmOutput = payload.debug?.raw_llm_output;
+  const rawLlmOutputTruncated = payload.debug?.raw_llm_output_truncated;
+
   const trace: CEETraceMeta = {
     request_id: requestId,
     correlation_id: requestId,
     engine: {
       provider,
       model,
+      // Include raw LLM output in trace for debug panel visibility
+      ...(rawLlmOutput !== undefined && { raw_llm_output: rawLlmOutput }),
+      ...(rawLlmOutputTruncated !== undefined && { raw_llm_output_truncated: rawLlmOutputTruncated }),
     },
   };
 

@@ -309,6 +309,29 @@ Return ONLY valid JSON:
 Return ONLY the JSON object, no markdown formatting`;
 }
 
+/**
+ * Max size for raw LLM output in debug trace (chars).
+ * Truncates large responses to prevent payload bloat.
+ */
+const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
+
+/**
+ * Truncate raw LLM output for debug tracing.
+ * Returns the output with a truncation flag if over limit.
+ */
+function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
+  const jsonStr = JSON.stringify(raw);
+  if (jsonStr.length <= RAW_LLM_OUTPUT_MAX_CHARS) {
+    return { output: raw, truncated: false };
+  }
+  // Truncate and add marker
+  const truncatedStr = jsonStr.slice(0, RAW_LLM_OUTPUT_MAX_CHARS);
+  return {
+    output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
+    truncated: true,
+  };
+}
+
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
   const nodesSorted = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -479,9 +502,16 @@ export class OpenAIAdapter implements LLMAdapter {
         },
       };
 
+      // Capture raw LLM output for debug tracing (before normalisation)
+      const rawOutput = truncateRawOutput(rawJson);
+
       return {
         graph,
         rationales: parsed.rationales || [],
+        debug: {
+          raw_llm_output: rawOutput.output,
+          raw_llm_output_truncated: rawOutput.truncated,
+        },
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
           output_tokens: response.usage?.completion_tokens || 0,
