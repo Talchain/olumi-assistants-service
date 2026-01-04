@@ -13,6 +13,7 @@ import {
   ISLValidationError,
   createISLClient,
 } from '../../adapters/isl/index.js';
+import { normalizeGraphForISL } from './graph-normalizer.js';
 import type {
   ISLSensitivityRequest,
   ISLSensitivityResponse,
@@ -473,10 +474,14 @@ export async function executeDecisionReview(
   // At this point islClient is guaranteed to be non-null because we returned early above
   const client = islClient!;
 
+  // Normalize graph for ISL: convert V3 observed_state to V1 data format
+  // ISL expects node.data.value, but CEE produces node.observed_state.value
+  const normalizedGraph = normalizeGraphForISL(graph);
+
   // Sensitivity analysis
   if (config.enableSensitivity !== false) {
     const sensitivityRequest: ISLSensitivityRequest = {
-      graph,
+      graph: normalizedGraph,
       target_nodes: nodeIds,
       config: { include_paths: true },
     };
@@ -490,7 +495,7 @@ export async function executeDecisionReview(
   // Contrastive explanation (only if there's a decision node)
   if (config.enableContrastive !== false && decisionNode) {
     const contrastiveRequest: ISLContrastiveRequest = {
-      graph,
+      graph: normalizedGraph,
       decision_node_id: decisionNode.id,
       config: { include_counterfactuals: true },
     };
@@ -504,7 +509,7 @@ export async function executeDecisionReview(
   // Conformal prediction (only if enabled and there are quantitative nodes)
   if (config.enableConformal === true && quantitativeNodes.length > 0) {
     const conformalRequest: ISLConformalRequest = {
-      graph,
+      graph: normalizedGraph,
       prediction_nodes: quantitativeNodes.map((n) => n.id),
       confidence_level: 0.9,
     };
@@ -518,7 +523,7 @@ export async function executeDecisionReview(
   // Validation strategies
   if (config.enableValidationStrategies !== false) {
     const validationRequest: ISLValidationStrategiesRequest = {
-      graph,
+      graph: normalizedGraph,
       config: { prioritize_by: 'impact' },
     };
     islPromises.push(

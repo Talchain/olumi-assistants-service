@@ -80,8 +80,8 @@ export function isValidCeeTask(task: string): task is CeeTask {
  */
 export const TIER_SHORTCUTS = {
   _default: "Use task default model",
-  _fast: "Force fast tier (gpt-4o-mini) for eligible tasks",
-  _quality: "Force quality tier (gpt-4o) for all tasks",
+  _fast: "Force fast tier (gpt-5-mini) for eligible tasks",
+  _quality: "Force quality tier (gpt-5.2) for all tasks",
 } as const;
 
 export type TierShortcut = keyof typeof TIER_SHORTCUTS;

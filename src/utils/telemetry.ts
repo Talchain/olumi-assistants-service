@@ -478,6 +478,10 @@ const OPENAI_PRICING = {
     input_per_1k: 0.015,   // $15 per million input tokens (reasoning model)
     output_per_1k: 0.06,   // $60 per million output tokens (reasoning model)
   },
+  "gpt-5-mini": {
+    input_per_1k: 0.0003,  // $0.30 per million input tokens (fast tier)
+    output_per_1k: 0.0012, // $1.20 per million output tokens (fast tier)
+  },
   "gpt-4o": {
     input_per_1k: 0.0025,  // $2.50 per million input tokens
     output_per_1k: 0.01,   // $10 per million output tokens
