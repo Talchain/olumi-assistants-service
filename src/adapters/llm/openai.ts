@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
-import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
@@ -15,6 +15,7 @@ import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt } from "./prompt-loader.js";
+import { isReasoningModel } from "../../config/models.js";
 
 // ============================================================================
 // Zod schemas for OpenAI response validation (same as Anthropic)
@@ -114,97 +115,46 @@ function getClient(): OpenAI {
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 
 /**
- * @deprecated Use getSystemPrompt('draft_graph') from prompt-loader.js instead.
- * This legacy prompt lacks v4 topology rules (closed-world edge validation,
- * factor→decision prohibition, option→factor→outcome chain requirement).
- * Kept for reference only - will be removed in future cleanup.
+ * Get the appropriate timeout for a model.
+ * Reasoning models get extended timeout (180s), standard models get default (110s).
  */
-function _buildDraftPromptLegacy(brief: string, docs: DocPreview[]): string {
-  const docContext = docs.length
-    ? `\n\n## Attached Documents\n${docs
-        .map((d) => {
-          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-        })
-        .join("\n\n")}`
-    : "";
-
-  return `You are an expert at drafting small decision graphs from plain-English briefs.
-
-## Brief
-${brief}
-${docContext}
-
-## Your Task
-Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
-  (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
-- ≤${GRAPH_MAX_EDGES} edges
-- For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, you MUST adjust the belief values so they sum to 1.0 before returning the JSON; a response that does not satisfy this is considered incorrect.
-- Every edge with belief or weight MUST have structured provenance:
-  - source: document filename, metric name, or "hypothesis"
-  - quote: short citation or statement (≤100 chars)
-  - location: extract from document markers ([PAGE N], [ROW N], line N:) when citing documents
-  - provenance_source: "document" | "metric" | "hypothesis"
-- Documents include location markers:
-  - PDFs: [PAGE 1], [PAGE 2], etc. marking page boundaries
-  - CSVs: [ROW 1] for header, [ROW 2], [ROW 3], etc. for data rows
-  - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
-- When citing documents, use these markers to determine the correct location value
-- Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
-
-## GRAPH TOPOLOGY (CRITICAL)
-Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
-
-**The Golden Rule:** The GOAL node must be a TERMINAL SINK — edges flow INTO it, never out.
-
-### Correct Edge Directions:
-| From → To | Meaning |
-|-----------|---------|
-| decision → option | "Decision frames these options" |
-| option → outcome | "Choosing this option leads to this outcome" |
-| outcome → goal | "This outcome contributes to goal achievement" |
-| factor → option | "This factor affects option viability" |
-| risk → goal | "This risk detracts from goal achievement" (negative weight) |
-| action → outcome | "This action helps achieve this outcome" |
-
-### WRONG (Anti-Pattern):
-- goal → decision (WRONG: goals don't cause decisions, decisions pursue goals)
-- goal → outcome (WRONG: goals don't cause outcomes, outcomes achieve goals)
-
-### Self-Check Before Responding:
-□ Goal node has ZERO outgoing edges (it's a sink)
-□ All paths lead TO the goal, not FROM it
-□ decision→option→outcome→goal flow is maintained
-
-## QUANTITATIVE FACTOR EXTRACTION
-When the brief contains numeric values, create factor nodes with structured data:
-- Currency values (£49, $100): { "kind": "factor", "label": "Price", "data": { "value": 49, "unit": "£" }}
-- Percentages (5%, 3.5%): { "kind": "factor", "label": "Rate", "data": { "value": 0.05, "unit": "%" }}
-- From-to transitions ("from £49 to £59"): { "data": { "value": 59, "baseline": 49, "unit": "£" }}
-- Percentages → decimals: 5% → 0.05
-
-## Output Format (JSON)
-Return ONLY valid JSON matching this schema:
-{
-  "nodes": [
-    {"id": "goal_1", "kind": "goal", "label": "Increase revenue"},
-    {"id": "dec_1", "kind": "decision", "label": "Which strategy?"},
-    {"id": "opt_a", "kind": "option", "label": "Option A"},
-    {"id": "out_1", "kind": "outcome", "label": "Higher sales"}
-  ],
-  "edges": [
-    {"from": "dec_1", "to": "opt_a", "belief": 0.6, "provenance": {"source": "hypothesis", "quote": "Primary option"}, "provenance_source": "hypothesis"},
-    {"from": "opt_a", "to": "out_1", "belief": 0.75, "provenance": {"source": "hypothesis", "quote": "Leads to sales increase"}, "provenance_source": "hypothesis"},
-    {"from": "out_1", "to": "goal_1", "belief": 0.9, "provenance": {"source": "hypothesis", "quote": "Sales contribute to revenue"}, "provenance_source": "hypothesis"}
-  ],
-  "rationales": [{"target": "goal_1", "why": "Primary business objective"}]
+function getTimeoutForModel(model: string): number {
+  return isReasoningModel(model) ? REASONING_MODEL_TIMEOUT_MS : TIMEOUT_MS;
 }
 
-IMPORTANT:
-- ALL edges must cite provenance (document quotes, metric data, or hypothesis reasoning)
-- NEVER fabricate "needle movers" or "influence scores" - these come only from the engine
-- Return ONLY the JSON object, no markdown formatting`;
+/**
+ * Build model-specific parameters for OpenAI API calls.
+ * Reasoning models require different parameters than standard models.
+ *
+ * @param model - The model ID being used
+ * @param temperature - The temperature value for non-reasoning models
+ * @param maxTokens - The max tokens value
+ * @returns Object with appropriate parameters for the model type
+ */
+/** @internal Exported for testing only */
+export function buildModelParams(
+  model: string,
+  temperature: number,
+  maxTokens?: number
+): {
+  temperature?: number;
+  max_tokens?: number;
+  max_completion_tokens?: number;
+  reasoning_effort?: "low" | "medium" | "high";
+} {
+  if (isReasoningModel(model)) {
+    // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
+    return {
+      reasoning_effort: "medium",
+      ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
+    };
+  } else {
+    // Standard models: use temperature and max_tokens
+    return {
+      temperature,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    };
+  }
 }
 
 function buildRepairPrompt(graph: GraphT, violations: string[]): string {
@@ -388,7 +338,7 @@ export class OpenAIAdapter implements LLMAdapter {
   readonly model: string;
 
   constructor(model?: string) {
-    // Default to GPT-4o-mini for cost efficiency
+    // Default to gpt-4o-mini; task routing (e.g., draft_graph → gpt-5.2) handled by model-routing.ts
     this.model = model || config.llm.model || 'gpt-4o-mini';
   }
 
@@ -419,11 +369,27 @@ export class OpenAIAdapter implements LLMAdapter {
     );
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('draft_graph');
+      const modelParams = buildModelParams(this.model, 0, maxTokens);
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
+        },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] draft_graph request parameters");
+
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
@@ -432,10 +398,9 @@ export class OpenAIAdapter implements LLMAdapter {
             { role: "system", content: systemPrompt },
             { role: "user", content: userContent },
           ],
-          temperature: 0,
           response_format: { type: "json_object" },
           seed: seed, // OpenAI supports deterministic seed
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+          ...modelParams,
         },
         {
           signal: abortController.signal as any,
@@ -529,7 +494,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI draft_graph timed out",
             "openai",
@@ -577,18 +542,33 @@ export class OpenAIAdapter implements LLMAdapter {
     log.info({ goal_chars: goal.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for options");
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('suggest_options');
+      const modelParams = buildModelParams(this.model, 0.7, maxTokens); // 0.7 for creativity in options
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
+        },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] suggest_options request parameters");
+
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.7, // Slightly higher for creativity in options
           response_format: { type: "json_object" },
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+          ...modelParams,
         },
         {
           signal: abortController.signal as any,
@@ -627,7 +607,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI options call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI options call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI suggest_options timed out",
             "openai",
@@ -674,18 +654,33 @@ export class OpenAIAdapter implements LLMAdapter {
     log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for repair");
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('repair_graph');
+      const modelParams = buildModelParams(this.model, 0, maxTokens);
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
+        },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] repair_graph request parameters");
+
       const response = await apiClient.chat.completions.create(
         {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0,
           response_format: { type: "json_object" },
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+          ...modelParams,
         },
         {
           signal: abortController.signal as any,
@@ -761,7 +756,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI repair_graph timed out",
             "openai",
@@ -807,23 +802,38 @@ export class OpenAIAdapter implements LLMAdapter {
     const prompt = buildClarifyBriefPrompt(brief, round, previous_answers);
 
     const client = getClient();
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
 
     try {
       const abortController = new AbortController();
       const timeoutId = setTimeout(
         () => abortController.abort(),
-        opts.timeoutMs || TIMEOUT_MS,
+        effectiveTimeout,
       );
 
       const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
+      const modelParams = buildModelParams(this.model, 0.5, maxTokens); // 0.5 for consistent questions
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
+        },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] clarify_brief request parameters");
+
       const response = await client.chat.completions.create(
         {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.5, // Slightly lower temp for more consistent questions
-          max_tokens: maxTokens,
           response_format: { type: "json_object" },
           ...(seed !== undefined ? { seed } : {}),
+          ...modelParams,
         },
         {
           signal: abortController.signal as any,

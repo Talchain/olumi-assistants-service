@@ -8,6 +8,7 @@ import {
   getBestModelForTier,
   isKnownModel,
   getModelProvider,
+  isReasoningModel,
 } from "../../src/config/models.js";
 import {
   TASK_MODEL_DEFAULTS,
@@ -23,7 +24,23 @@ describe("Model Registry", () => {
     it("contains expected models", () => {
       expect(MODEL_REGISTRY["gpt-4o-mini"]).toBeDefined();
       expect(MODEL_REGISTRY["gpt-4o"]).toBeDefined();
+      expect(MODEL_REGISTRY["gpt-5.2"]).toBeDefined();
       expect(MODEL_REGISTRY["claude-sonnet-4-20250514"]).toBeDefined();
+    });
+
+    it("gpt-5.2 is a reasoning model", () => {
+      const model = MODEL_REGISTRY["gpt-5.2"];
+      expect(model.reasoning).toBe(true);
+      expect(model.provider).toBe("openai");
+      expect(model.tier).toBe("premium");
+      expect(model.enabled).toBe(true);
+      expect(model.maxTokens).toBe(16384);
+    });
+
+    it("non-reasoning models do not have reasoning flag", () => {
+      expect(MODEL_REGISTRY["gpt-4o"].reasoning).toBeUndefined();
+      expect(MODEL_REGISTRY["gpt-4o-mini"].reasoning).toBeUndefined();
+      expect(MODEL_REGISTRY["claude-sonnet-4-20250514"].reasoning).toBeUndefined();
     });
 
     it("has correct tier assignments", () => {
@@ -124,6 +141,28 @@ describe("Model Registry", () => {
       expect(getModelProvider("unknown")).toBeUndefined();
     });
   });
+
+  describe("isReasoningModel", () => {
+    it("returns true for gpt-5.2 (reasoning model)", () => {
+      expect(isReasoningModel("gpt-5.2")).toBe(true);
+    });
+
+    it("returns false for standard OpenAI models", () => {
+      expect(isReasoningModel("gpt-4o")).toBe(false);
+      expect(isReasoningModel("gpt-4o-mini")).toBe(false);
+    });
+
+    it("returns false for Anthropic models", () => {
+      expect(isReasoningModel("claude-sonnet-4-20250514")).toBe(false);
+      expect(isReasoningModel("claude-3-5-sonnet-20241022")).toBe(false);
+    });
+
+    it("returns false for unknown models (registry lookup, not string matching)", () => {
+      // This proves we use registry lookup, not string matching like startsWith("gpt-5")
+      expect(isReasoningModel("gpt-5-unknown")).toBe(false);
+      expect(isReasoningModel("reasoning-model")).toBe(false);
+    });
+  });
 });
 
 describe("Task-to-Model Routing", () => {
@@ -147,10 +186,13 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("assigns quality tier to complex tasks", () => {
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4o");
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("gpt-4o");
       expect(TASK_MODEL_DEFAULTS.sensitivity_coach).toBe("gpt-4o");
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-4o");
+    });
+
+    it("assigns premium reasoning tier to draft_graph", () => {
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-5.2");
     });
   });
 
@@ -169,7 +211,7 @@ describe("Task-to-Model Routing", () => {
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
       expect(getDefaultModelForTask("clarification")).toBe("gpt-4o-mini");
-      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4o");
+      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-5.2");
     });
   });
 

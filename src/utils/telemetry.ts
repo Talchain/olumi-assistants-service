@@ -474,6 +474,10 @@ const ANTHROPIC_PRICING = {
 } as const;
 
 const OPENAI_PRICING = {
+  "gpt-5.2": {
+    input_per_1k: 0.015,   // $15 per million input tokens (reasoning model)
+    output_per_1k: 0.06,   // $60 per million output tokens (reasoning model)
+  },
   "gpt-4o": {
     input_per_1k: 0.0025,  // $2.50 per million input tokens
     output_per_1k: 0.01,   // $10 per million output tokens
