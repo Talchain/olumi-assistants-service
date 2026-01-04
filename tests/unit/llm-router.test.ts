@@ -269,4 +269,67 @@ describe("LLM Router", () => {
     // - Anthropic: cache_read_input_tokens populated when prompt caching is used
     // - OpenAI: cache_read_input_tokens always 0 or undefined (no prompt caching support)
   });
+
+  describe("TASK_MODEL_DEFAULTS integration", () => {
+    it("uses gpt-5.2 for draft_graph when no CEE_MODEL_DRAFT override", () => {
+      delete process.env.CEE_MODEL_DRAFT;
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("draft_graph");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-5.2");
+    });
+
+    it("uses gpt-5-mini for clarification when no CEE_MODEL_CLARIFICATION override", () => {
+      delete process.env.CEE_MODEL_CLARIFICATION;
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("clarification");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-5-mini");
+    });
+
+    it("uses gpt-5.2 for bias_check when no CEE_MODEL_* override", () => {
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("bias_check");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-5.2");
+    });
+
+    it("CEE_MODEL_DRAFT env var overrides TASK_MODEL_DEFAULTS", () => {
+      process.env.CEE_MODEL_DRAFT = "gpt-4o";
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("draft_graph");
+
+      expect(adapter.model).toBe("gpt-4o");
+    });
+
+    it("non-CEE tasks fall back to LLM_MODEL or adapter default", () => {
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      // "unknown_task" is not a valid CEE task, so no TASK_MODEL_DEFAULTS applies
+      const adapter = getAdapter("unknown_task");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-4o-mini"); // adapter default
+    });
+
+    it("LLM_MODEL takes precedence over TASK_MODEL_DEFAULTS for non-CEE tasks", () => {
+      process.env.LLM_MODEL = "gpt-4o";
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("unknown_task");
+
+      expect(adapter.model).toBe("gpt-4o");
+    });
+  });
 });

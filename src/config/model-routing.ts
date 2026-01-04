@@ -23,21 +23,23 @@ export type CeeTask =
 /**
  * Default model assignments per task
  *
- * Fast tier (gpt-4o-mini): Simple, speed-sensitive tasks
- * Quality tier (gpt-4o): Complex reasoning, quality-critical tasks
- * Premium tier (gpt-5.2): Advanced reasoning with extended thinking
+ * All tasks now use GPT-5 family models:
+ * - Fast tier (gpt-5-mini): Simple, speed-sensitive tasks
+ * - Premium tier (gpt-5.2): Advanced reasoning with extended thinking
  */
 export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
-  clarification: "gpt-4o-mini",
-  preflight: "gpt-4o-mini",
-  draft_graph: "gpt-5.2", // Premium reasoning model for causal graph generation
-  bias_check: "gpt-4o",
-  evidence_helper: "gpt-4o-mini",
-  sensitivity_coach: "gpt-4o",
-  options: "gpt-4o",
-  explainer: "gpt-4o-mini",
-  repair_graph: "gpt-4o",
-  critique_graph: "gpt-4o",
+  // Fast tier - simple generation, low latency
+  clarification: "gpt-5-mini",
+  preflight: "gpt-5-mini",
+  explainer: "gpt-5-mini",
+  evidence_helper: "gpt-5-mini",
+  sensitivity_coach: "gpt-5-mini",
+  // Premium tier - advanced reasoning
+  options: "gpt-5.2",
+  draft_graph: "gpt-5.2",
+  repair_graph: "gpt-5.2",
+  bias_check: "gpt-5.2",
+  critique_graph: "gpt-5.2",
 };
 
 /**

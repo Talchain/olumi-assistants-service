@@ -59,6 +59,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.75,
     description: "Fast, cost-effective model for simple tasks",
   },
+  "gpt-5-mini": {
+    id: "gpt-5-mini",
+    provider: "openai",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 0.30,
+    averageLatencyMs: 600,
+    qualityScore: 0.82,
+    description: "Fast GPT-5 variant for simple generation tasks",
+    reasoning: false,
+  },
   "gpt-4o": {
     id: "gpt-4o",
     provider: "openai",
