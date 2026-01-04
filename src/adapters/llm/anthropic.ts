@@ -398,7 +398,7 @@ export type UsageMetrics = {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
+): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; debug?: { [key: string]: unknown }; usage: UsageMetrics }> {
   const prompt = buildDraftPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
