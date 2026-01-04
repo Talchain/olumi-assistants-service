@@ -3590,7 +3590,7 @@ components:
         id:
           type: string
           description: Stable identifier for this warning type
-          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome]
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths]
         severity:
           type: string
           enum: [low, medium, high]

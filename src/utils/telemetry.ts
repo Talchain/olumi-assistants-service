@@ -161,6 +161,9 @@ export const TelemetryEvents = {
   EdgeDirectionViolationDetected: "cee.edge_direction.violation_detected",
   EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
 
+  // Uniform strength detection (LLM output quality)
+  CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
   // Goal generation tracking (prompt tuning)

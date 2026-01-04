@@ -20,7 +20,7 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
+import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
 import { config } from "../../config/index.js";
@@ -1163,6 +1163,25 @@ export async function finaliseCeeDraftResponse(
         ...(uncertain_nodes ? { uncertain_nodes } : {}),
         ...(simplificationApplied ? { simplification_applied: true } : {}),
       };
+    }
+  }
+
+  // Detect uniform edge strengths (LLM output quality check)
+  const uniformStrengthResult = detectUniformStrengths(graph);
+  if (uniformStrengthResult.detected) {
+    emit(TelemetryEvents.CeeUniformStrengthsDetected, {
+      request_id: requestId,
+      total_edges: uniformStrengthResult.totalEdges,
+      default_strength_count: uniformStrengthResult.defaultStrengthCount,
+      default_strength_percentage: uniformStrengthResult.defaultStrengthPercentage,
+    });
+
+    // Append warning to draft_warnings
+    if (uniformStrengthResult.warning) {
+      if (!draftWarnings) {
+        draftWarnings = [];
+      }
+      draftWarnings.push(uniformStrengthResult.warning);
     }
   }
 

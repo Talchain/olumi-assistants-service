@@ -39,7 +39,7 @@ const _VALID_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "risk", to: "goal" },            // Risk affects goal achievement
   { from: "factor", to: "option" },        // Factor affects option viability
   { from: "factor", to: "outcome" },       // Factor influences outcome
-  { from: "factor", to: "decision" },      // Factor informs decision
+  // NOTE: factor→decision removed (V4 topology: factors must route through options/outcomes)
   { from: "action", to: "outcome" },       // Action leads to outcome
   { from: "action", to: "risk" },          // Action mitigates risk
   { from: "decision", to: "decision" },    // Sub-decisions (allowed)

@@ -20,6 +20,12 @@ vi.mock("../../src/utils/responseGuards.js", () => ({
 
 vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: (...args: any[]) => detectStructuralWarningsMock(...args),
+  detectUniformStrengths: () => ({
+    detected: false,
+    totalEdges: 0,
+    defaultStrengthCount: 0,
+    defaultStrengthPercentage: 0,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,

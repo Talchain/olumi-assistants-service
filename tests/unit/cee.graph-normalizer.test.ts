@@ -324,3 +324,302 @@ describe('getFactorValueStats', () => {
     expect(stats.missingValue).toBe(0);
   });
 });
+
+describe('normalizeGraphForISL - parameter_uncertainties', () => {
+  describe('uncertainty derivation', () => {
+    it('derives std using conservative default (20%) when no extraction metadata', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_price',
+            kind: 'factor',
+            label: 'Price Factor',
+            observed_state: {
+              value: 100,
+              // No source specified - no extraction metadata
+            },
+          } as unknown as GraphV1['nodes'][0],
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // Should derive std = 0.2 * |100| = 20
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties).toHaveLength(1);
+      expect(normalized.parameter_uncertainties![0].node_id).toBe('fac_price');
+      expect(normalized.parameter_uncertainties![0].std).toBe(20);
+      expect(normalized.parameter_uncertainties![0].distribution).toBe('normal');
+    });
+
+    it('derives std from explicit extraction metadata with confidence', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_price',
+            kind: 'factor',
+            label: 'Price Factor',
+            data: {
+              value: 59,
+              extractionType: 'explicit',
+              confidence: 0.9,
+            },
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // With explicit type and 0.9 confidence:
+      // baseCV = 0.2 * (1 - 0.9) + 0.05 = 0.07
+      // std = 0.07 * 59 * 1.0 = 4.13
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties).toHaveLength(1);
+      expect(normalized.parameter_uncertainties![0].node_id).toBe('fac_price');
+      expect(normalized.parameter_uncertainties![0].std).toBeCloseTo(4.13, 1);
+      expect(normalized.parameter_uncertainties![0].distribution).toBe('normal');
+
+      // Factor node should also have value_std populated
+      const factorNode = normalized.nodes.find((n) => n.id === 'fac_price');
+      expect(factorNode?.data?.value_std).toBeCloseTo(4.13, 1);
+    });
+
+    it('derives std from inferred extraction metadata with higher multiplier', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_revenue',
+            kind: 'factor',
+            label: 'Revenue Factor',
+            data: {
+              value: 100,
+              extractionType: 'inferred',
+              confidence: 0.7,
+            },
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // With inferred type and 0.7 confidence:
+      // baseCV = 0.2 * (1 - 0.7) + 0.05 = 0.11
+      // std = 0.11 * 100 * 1.5 = 16.5
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties![0].std).toBeCloseTo(16.5, 1);
+    });
+
+    it('uses existing value_std when already present', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_price',
+            kind: 'factor',
+            label: 'Price Factor',
+            data: {
+              value: 100,
+              value_std: 5, // Pre-computed std
+            },
+          } as unknown as GraphV1['nodes'][0],
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // Should use existing value_std, not derive new one
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties![0].std).toBe(5);
+    });
+
+    it('applies minimum floor for small values', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_ratio',
+            kind: 'factor',
+            label: 'Ratio Factor',
+            observed_state: {
+              value: 0.01, // Very small value
+            },
+          } as unknown as GraphV1['nodes'][0],
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // Conservative: 0.2 * 0.01 = 0.002, but floor is 0.01
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties![0].std).toBeGreaterThanOrEqual(0.01);
+    });
+  });
+
+  describe('parameter_uncertainties array building', () => {
+    it('builds array with multiple factors', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_a',
+            kind: 'factor',
+            label: 'Factor A',
+            data: { value: 50 },
+          },
+          {
+            id: 'fac_b',
+            kind: 'factor',
+            label: 'Factor B',
+            observed_state: { value: 100 },
+          } as unknown as GraphV1['nodes'][0],
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Goal',
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties).toHaveLength(2);
+      expect(normalized.parameter_uncertainties!.map((p) => p.node_id)).toContain('fac_a');
+      expect(normalized.parameter_uncertainties!.map((p) => p.node_id)).toContain('fac_b');
+    });
+
+    it('excludes factors without values from parameter_uncertainties', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_with_value',
+            kind: 'factor',
+            label: 'Factor with value',
+            data: { value: 100 },
+          },
+          {
+            id: 'fac_without_value',
+            kind: 'factor',
+            label: 'Factor without value',
+            // No data or observed_state
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties).toHaveLength(1);
+      expect(normalized.parameter_uncertainties![0].node_id).toBe('fac_with_value');
+    });
+
+    it('returns undefined parameter_uncertainties when no factors have values', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_no_value',
+            kind: 'factor',
+            label: 'Factor without value',
+          },
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Goal',
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      expect(normalized.parameter_uncertainties).toBeUndefined();
+    });
+  });
+
+  describe('handles mixed scenarios', () => {
+    it('handles factors with mixed metadata availability', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          // Factor with full metadata
+          {
+            id: 'fac_full',
+            kind: 'factor',
+            label: 'Full Metadata Factor',
+            data: {
+              value: 59,
+              extractionType: 'explicit',
+              confidence: 0.95,
+            },
+          },
+          // Factor with partial metadata (no confidence)
+          {
+            id: 'fac_partial',
+            kind: 'factor',
+            label: 'Partial Metadata Factor',
+            observed_state: {
+              value: 100,
+              source: 'brief_extraction',
+            },
+          } as unknown as GraphV1['nodes'][0],
+          // Factor with no metadata
+          {
+            id: 'fac_none',
+            kind: 'factor',
+            label: 'No Metadata Factor',
+            data: { value: 50 },
+          },
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      expect(normalized.parameter_uncertainties).toBeDefined();
+      expect(normalized.parameter_uncertainties).toHaveLength(3);
+
+      // Full metadata: uses derivation formula
+      const fullUncertainty = normalized.parameter_uncertainties!.find(
+        (p) => p.node_id === 'fac_full'
+      );
+      // baseCV = 0.2 * (1 - 0.95) + 0.05 = 0.06
+      // std = 0.06 * 59 * 1.0 = 3.54
+      expect(fullUncertainty?.std).toBeCloseTo(3.54, 1);
+
+      // Partial metadata: falls back to conservative default
+      const partialUncertainty = normalized.parameter_uncertainties!.find(
+        (p) => p.node_id === 'fac_partial'
+      );
+      // Conservative: 0.2 * 100 = 20
+      expect(partialUncertainty?.std).toBe(20);
+
+      // No metadata: uses conservative default
+      const noneUncertainty = normalized.parameter_uncertainties!.find(
+        (p) => p.node_id === 'fac_none'
+      );
+      // Conservative: 0.2 * 50 = 10
+      expect(noneUncertainty?.std).toBe(10);
+    });
+  });
+});

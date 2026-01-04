@@ -676,3 +676,111 @@ export function validateAndFixGraph(
     warnings,
   };
 }
+
+/**
+ * Uniform strength detection result
+ */
+export interface UniformStrengthResult {
+  /** Whether uniform strengths were detected (>80% edges have default 0.5) */
+  detected: boolean;
+  /** Total number of edges analyzed */
+  totalEdges: number;
+  /** Number of edges with default 0.5 strength */
+  defaultStrengthCount: number;
+  /** Percentage of edges with default strength */
+  defaultStrengthPercentage: number;
+  /** Warning to include in draft_warnings if detected */
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect uniform edge strengths indicating LLM did not output varied coefficients.
+ *
+ * When >80% of edges have strength_mean === 0.5 (the default), this indicates
+ * the LLM failed to output the V4 `strength: {mean, std}` nested object and
+ * the pipeline fell back to defaults. This defeats sensitivity analysis.
+ *
+ * @param graph - Graph to analyze
+ * @param threshold - Percentage threshold for detection (default: 0.8 = 80%)
+ * @returns Detection result with optional warning
+ */
+export function detectUniformStrengths(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.8,
+): UniformStrengthResult {
+  const DEFAULT_STRENGTH = 0.5;
+  const EPSILON = 0.001; // Tolerance for floating point comparison
+
+  if (!graph || !Array.isArray((graph as any).edges)) {
+    return {
+      detected: false,
+      totalEdges: 0,
+      defaultStrengthCount: 0,
+      defaultStrengthPercentage: 0,
+    };
+  }
+
+  const edges = (graph as any).edges as any[];
+
+  if (edges.length === 0) {
+    return {
+      detected: false,
+      totalEdges: 0,
+      defaultStrengthCount: 0,
+      defaultStrengthPercentage: 0,
+    };
+  }
+
+  let defaultStrengthCount = 0;
+
+  for (const edge of edges) {
+    // Check V4 field (strength_mean) first, fallback to legacy (weight)
+    const strength = edge?.strength_mean ?? edge?.weight ?? DEFAULT_STRENGTH;
+
+    if (typeof strength === "number" && Math.abs(strength - DEFAULT_STRENGTH) < EPSILON) {
+      defaultStrengthCount++;
+    }
+  }
+
+  const defaultStrengthPercentage = defaultStrengthCount / edges.length;
+  const detected = defaultStrengthPercentage >= threshold;
+
+  if (!detected) {
+    return {
+      detected: false,
+      totalEdges: edges.length,
+      defaultStrengthCount,
+      defaultStrengthPercentage,
+    };
+  }
+
+  // Build edge IDs for the warning (cap at 10 for readability)
+  const affectedEdgeIds: string[] = [];
+  for (const edge of edges) {
+    const strength = edge?.strength_mean ?? edge?.weight ?? DEFAULT_STRENGTH;
+    if (typeof strength === "number" && Math.abs(strength - DEFAULT_STRENGTH) < EPSILON) {
+      const edgeId = edge?.id;
+      if (typeof edgeId === "string" && affectedEdgeIds.length < 10) {
+        affectedEdgeIds.push(edgeId);
+      }
+    }
+  }
+
+  const warning: CEEStructuralWarningV1 = {
+    id: "uniform_edge_strengths",
+    severity: "medium",
+    node_ids: [],
+    edge_ids: affectedEdgeIds,
+    explanation: `${Math.round(defaultStrengthPercentage * 100)}% of edges have default strength (0.5). ` +
+      `The LLM may not have output varied edge coefficients, which reduces sensitivity analysis accuracy. ` +
+      `Consider reviewing edge strengths or refining the brief with more causal detail.`,
+  };
+
+  return {
+    detected: true,
+    totalEdges: edges.length,
+    defaultStrengthCount,
+    defaultStrengthPercentage,
+    warning,
+  };
+}
