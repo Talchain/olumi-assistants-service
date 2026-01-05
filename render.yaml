@@ -28,7 +28,7 @@ services:
       - key: PORT
         value: "3101"
       - key: ALLOWED_ORIGINS
-        value: "https://olumi.app,https://app.olumi.app,https://staging--olumi.netlify.app,http://localhost:5173,http://localhost:3000"
+        value: "https://olumi.app,https://app.olumi.app,https://staging--olumi.netlify.app,http://localhost:5173,http://localhost:5174,http://localhost:3000"
       - key: RATE_LIMIT_MAX
         value: "120"
       - key: RATE_LIMIT_WINDOW_MS
