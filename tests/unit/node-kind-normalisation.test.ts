@@ -562,7 +562,7 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[1].strength_std).toBeUndefined();
     });
 
-    it("ignores non-numeric strength values", () => {
+    it("ignores non-numeric strength values that cannot be coerced", () => {
       const input = {
         nodes: [],
         edges: [
@@ -575,6 +575,88 @@ describe("NodeKind Normalisation", () => {
 
       expect(result.edges[0].strength_mean).toBeUndefined();
       expect(result.edges[1].strength_mean).toBeUndefined();
+    });
+
+    it("coerces string numbers in V4 strength.mean", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: "0.7" } },
+          { from: "n2", to: "n3", strength: { mean: "-0.5" } },
+          { from: "n3", to: "n4", strength: { mean: "1.2" } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[1].strength_mean).toBe(-0.5);
+      expect(result.edges[2].strength_mean).toBe(1.2);
+    });
+
+    it("coerces string numbers in V4 strength.std", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: 0.5, std: "0.1" } },
+          { from: "n2", to: "n3", strength: { mean: 0.5, std: "0.25" } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[1].strength_std).toBe(0.25);
+    });
+
+    it("coerces string numbers in V4 exists_probability", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: "0.85" },
+          { from: "n2", to: "n3", exists_probability: "0.5" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(0.85);
+      expect(result.edges[1].belief_exists).toBe(0.5);
+    });
+
+    it("clamps string exists_probability values to [0, 1]", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: "1.5" },
+          { from: "n2", to: "n3", exists_probability: "-0.3" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(1);
+      expect(result.edges[1].belief_exists).toBe(0);
+    });
+
+    it("handles mixed string and number V4 fields", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: "0.8", std: 0.1 },
+            exists_probability: 0.9,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.8);
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[0].belief_exists).toBe(0.9);
     });
   });
 });

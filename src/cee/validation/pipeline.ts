@@ -1174,6 +1174,9 @@ export async function finaliseCeeDraftResponse(
       total_edges: uniformStrengthResult.totalEdges,
       default_strength_count: uniformStrengthResult.defaultStrengthCount,
       default_strength_percentage: uniformStrengthResult.defaultStrengthPercentage,
+      // Additional context for diagnosis
+      model,
+      provider,
     });
 
     // Append warning to draft_warnings

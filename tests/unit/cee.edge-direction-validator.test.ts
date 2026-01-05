@@ -172,7 +172,7 @@ describe("EdgeDirectionValidator", () => {
       expect(details.violations[0].reason).toMatch(/Outcomes don't cause decisions/);
     });
 
-    it("allows correct patterns: factor → option", async () => {
+    it("allows correct patterns: option → factor (V4 intervention topology)", async () => {
       const graph = makeGraph({
         nodes: [
           { id: "goal_1", kind: "goal" } as any,
@@ -181,7 +181,7 @@ describe("EdgeDirectionValidator", () => {
           { id: "out_1", kind: "outcome" } as any,
         ],
         edges: [
-          { from: "factor_1", to: "opt_1" } as any, // Correct
+          { from: "opt_1", to: "factor_1" } as any, // V4 correct: option intervenes on factor
           { from: "opt_1", to: "out_1" } as any,
           { from: "out_1", to: "goal_1" } as any,
         ],
@@ -192,6 +192,30 @@ describe("EdgeDirectionValidator", () => {
 
       expect(result.valid).toBe(true);
       expect(result.severity).toBeUndefined();
+    });
+
+    it("warns on factor → option (V4 prohibits this direction)", async () => {
+      const graph = makeGraph({
+        nodes: [
+          { id: "goal_1", kind: "goal" } as any,
+          { id: "factor_1", kind: "factor" } as any,
+          { id: "opt_1", kind: "option" } as any,
+          { id: "out_1", kind: "outcome" } as any,
+        ],
+        edges: [
+          { from: "factor_1", to: "opt_1" } as any, // V4 prohibited
+          { from: "opt_1", to: "out_1" } as any,
+          { from: "out_1", to: "goal_1" } as any,
+        ],
+      });
+
+      const validator = new EdgeDirectionValidator();
+      const result = await validator.validate({ graph } as any);
+
+      expect(result.valid).toBe(true); // Still valid, but with warning
+      expect(result.severity).toBe("warning");
+      const details = result.details as any;
+      expect(details.violations[0].reason).toMatch(/Factors don't cause options/);
     });
 
     it("allows risk → goal (negative influence)", async () => {

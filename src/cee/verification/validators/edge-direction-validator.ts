@@ -35,11 +35,12 @@ const _VALID_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },     // Decision frames options
   { from: "option", to: "outcome" },       // Option leads to outcome
   { from: "option", to: "risk" },          // Option has associated risk
+  { from: "option", to: "factor" },        // Option intervenes on factor (V4 topology)
   { from: "outcome", to: "goal" },         // Outcome contributes to goal
   { from: "risk", to: "goal" },            // Risk affects goal achievement
-  { from: "factor", to: "option" },        // Factor affects option viability
   { from: "factor", to: "outcome" },       // Factor influences outcome
   // NOTE: factor→decision removed (V4 topology: factors must route through options/outcomes)
+  // NOTE: factor→option removed (V4 topology: options intervene on factors, not reverse)
   { from: "action", to: "outcome" },       // Action leads to outcome
   { from: "action", to: "risk" },          // Action mitigates risk
   { from: "decision", to: "decision" },    // Sub-decisions (allowed)
@@ -57,6 +58,8 @@ const INVALID_EDGE_PATTERNS: Array<{ from: string; to: string; reason: string }>
   { from: "goal", to: "action", reason: "Goals don't cause actions; actions pursue goals" },
   { from: "outcome", to: "option", reason: "Outcomes don't cause options; options lead to outcomes" },
   { from: "outcome", to: "decision", reason: "Outcomes don't cause decisions; decisions lead to outcomes" },
+  // V4 topology: options target factors for intervention (option→factor), not reverse
+  { from: "factor", to: "option", reason: "Factors don't cause options; options intervene on factors" },
 ];
 
 export class EdgeDirectionValidator implements VerificationStage<unknown, unknown> {

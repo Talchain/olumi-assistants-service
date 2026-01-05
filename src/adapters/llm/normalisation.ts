@@ -149,36 +149,43 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       let belief_exists: number | undefined = undefined;
 
       // Handle V4 nested strength object
+      // Use Number() coercion to handle string numbers (e.g., "0.7" → 0.7)
       if (e.strength && typeof e.strength === 'object') {
-        const strength = e.strength as { mean?: number; std?: number };
-        if (typeof strength.mean === 'number') {
-          strength_mean = strength.mean;
+        const strength = e.strength as { mean?: unknown; std?: unknown };
+        const parsedMean = Number(strength.mean);
+        if (!Number.isNaN(parsedMean) && strength.mean !== undefined && strength.mean !== null) {
+          strength_mean = parsedMean;
           log.debug({
             event: 'llm.normalisation.v4_strength_mean',
             edge_from: e.from,
             edge_to: e.to,
             strength_mean,
+            was_string: typeof strength.mean === 'string',
           }, 'V4 strength.mean extracted');
         }
-        if (typeof strength.std === 'number' && strength.std > 0) {
-          strength_std = strength.std;
+        const parsedStd = Number(strength.std);
+        if (!Number.isNaN(parsedStd) && parsedStd > 0) {
+          strength_std = parsedStd;
         }
       }
 
       // Handle V4 exists_probability
-      if (typeof e.exists_probability === 'number') {
-        const rawProb = e.exists_probability;
-        if (rawProb < 0 || rawProb > 1) {
-          belief_exists = Math.max(0, Math.min(1, rawProb));
-          log.warn({
-            event: 'llm.normalisation.exists_probability_clamped',
-            edge_from: e.from,
-            edge_to: e.to,
-            raw: rawProb,
-            clamped: belief_exists,
-          }, `V4 exists_probability ${rawProb} clamped to ${belief_exists}`);
-        } else {
-          belief_exists = rawProb;
+      // Use Number() coercion to handle string numbers
+      if (e.exists_probability !== undefined && e.exists_probability !== null) {
+        const rawProb = Number(e.exists_probability);
+        if (!Number.isNaN(rawProb)) {
+          if (rawProb < 0 || rawProb > 1) {
+            belief_exists = Math.max(0, Math.min(1, rawProb));
+            log.warn({
+              event: 'llm.normalisation.exists_probability_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw: rawProb,
+              clamped: belief_exists,
+            }, `V4 exists_probability ${rawProb} clamped to ${belief_exists}`);
+          } else {
+            belief_exists = rawProb;
+          }
         }
       }
 
