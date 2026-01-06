@@ -17,9 +17,19 @@ import {
 import {
   buildAllBlocks,
   buildReadinessBlock,
+  generateRobustnessSynthesis,
+  computeDecisionQuality,
+  countMissingBaselines,
+  aggregateInsights,
+  generateImprovementGuidance,
+  generateRationale,
   type BlockBuilderContext,
 } from "../services/review/index.js";
 import { computeQuality } from "../cee/quality/index.js";
+import { detectBiases } from "../cee/bias/index.js";
+import { checkDomainCompleteness } from "../cee/graph-readiness/domain-completeness.js";
+import { computeEvidenceQualityDistribution } from "../cee/graph-readiness/factors.js";
+import type { GraphV1 } from "../contracts/plot/engine.js";
 import { inferArchetype } from "../cee/archetypes/index.js";
 import { generateRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -352,6 +362,53 @@ export default async function route(app: FastifyInstance) {
           : warnings.length > 0 ? warnings.slice(0, 3) : undefined,
       };
 
+      // Generate robustness synthesis from PLoT data (if provided)
+      const robustnessSynthesis = generateRobustnessSynthesis(input.robustness_data);
+
+      // Compute decision quality for Results Panel
+      const missingBaselineCount = countMissingBaselines(input.graph as any);
+      const fragileEdgeCount = input.robustness_data?.fragile_edges?.length ?? 0;
+      const decisionQuality = computeDecisionQuality({
+        quality,
+        readiness: { level: assessment.level, score: assessment.score },
+        issues: warnings,
+        missingBaselineCount,
+        fragileEdgeCount,
+      });
+
+      // Aggregate insights for Results Panel
+      const biasFindings = detectBiases(input.graph as GraphV1, archetype);
+      const domainCompleteness = checkDomainCompleteness(input.graph as GraphV1, input.brief);
+      const evidenceQuality = computeEvidenceQualityDistribution(input.graph as GraphV1);
+      const insights = aggregateInsights({
+        assumptionExplanations: robustnessSynthesis?.assumption_explanations,
+        biasFindings,
+        domainCompleteness,
+        evidenceQuality,
+      });
+
+      // Generate improvement guidance for Results Panel
+      const improvementGuidance = generateImprovementGuidance({
+        graph: input.graph as { nodes: Array<{ id: string; kind: string; label: string; observed_state?: { value?: number } }> },
+        investigationSuggestions: robustnessSynthesis?.investigation_suggestions,
+        biasFindings,
+      });
+
+      // Generate rationale for Results Panel
+      const goalNode = input.graph.nodes.find((n) => n.kind === "goal");
+      const goal = goalNode && goalNode.label ? { id: goalNode.id, label: goalNode.label } : undefined;
+      const drivers = input.robustness_data?.factor_sensitivity?.map((f: { factor_id: string; factor_label: string; elasticity: number }) => ({
+        id: f.factor_id,
+        label: f.factor_label,
+        sensitivity: f.elasticity,
+      }));
+      const rationale = generateRationale({
+        recommendedOption: input.robustness_data?.recommended_option as { id: string; label: string } | undefined,
+        goal,
+        drivers,
+        stability: input.robustness_data?.recommendation_stability as number | undefined,
+      });
+
       // Build response
       const latencyMs = Date.now() - start;
 
@@ -415,6 +472,16 @@ export default async function route(app: FastifyInstance) {
           blocks_truncated: blocksTruncated,
         },
         guidance,
+        // Robustness synthesis from PLoT data
+        robustness_synthesis: robustnessSynthesis,
+        // Decision quality assessment for Results Panel
+        decision_quality: decisionQuality,
+        // Insights aggregation for Results Panel
+        insights: insights.length > 0 ? insights : undefined,
+        // Improvement guidance for Results Panel
+        improvement_guidance: improvementGuidance.length > 0 ? improvementGuidance : undefined,
+        // Plain English rationale for Results Panel
+        rationale: rationale || undefined,
       };
 
       // Emit success telemetry
@@ -430,6 +497,12 @@ export default async function route(app: FastifyInstance) {
         graph_edges: input.graph.edges.length,
         has_inference: Boolean(input.inference),
         placeholders_enabled: placeholdersEnabled,
+        has_robustness_data: Boolean(input.robustness_data),
+        has_robustness_synthesis: Boolean(robustnessSynthesis),
+        decision_quality_level: decisionQuality.level,
+        insights_count: insights.length,
+        improvement_guidance_count: improvementGuidance.length,
+        has_rationale: Boolean(rationale),
       });
 
       logCeeCall({

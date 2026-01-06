@@ -68,6 +68,67 @@ export const ISLRobustnessPayload = z.object({
 
 export type ISLRobustnessPayloadT = z.infer<typeof ISLRobustnessPayload>;
 
+// =============================================================================
+// PLoT Robustness Data (for synthesis generation)
+// =============================================================================
+
+/**
+ * Fragile edge - an edge where alternative winner could emerge
+ */
+export const FragileEdge = z.object({
+  edge_id: z.string(),
+  from_label: z.string(),
+  to_label: z.string(),
+  alternative_winner_id: z.string().optional(),
+  alternative_winner_label: z.string().optional(),
+  switch_probability: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * Robust edge - an edge that is stable across scenarios
+ */
+export const RobustEdge = z.object({
+  edge_id: z.string(),
+  from_label: z.string(),
+  to_label: z.string(),
+});
+
+/**
+ * Factor sensitivity data
+ */
+export const FactorSensitivity = z.object({
+  factor_id: z.string(),
+  factor_label: z.string(),
+  elasticity: z.number(),
+  importance_rank: z.number().int().min(1).optional(),
+  interpretation: z.string().optional(),
+});
+
+/**
+ * PLoT Robustness data - enriched sensitivity analysis from PLoT
+ */
+export const PLoTRobustnessData = z.object({
+  /** Overall recommendation stability (0-1, higher = more stable) */
+  recommendation_stability: z.number().min(0).max(1).optional(),
+
+  /** The currently recommended option */
+  recommended_option: z.object({
+    id: z.string(),
+    label: z.string(),
+  }).optional(),
+
+  /** Edges where the recommendation could change */
+  fragile_edges: z.array(FragileEdge).optional(),
+
+  /** Edges that are stable across scenarios */
+  robust_edges: z.array(RobustEdge).optional(),
+
+  /** Factor sensitivity rankings */
+  factor_sensitivity: z.array(FactorSensitivity).optional(),
+});
+
+export type PLoTRobustnessDataT = z.infer<typeof PLoTRobustnessData>;
+
 /**
  * Inference result from PLoT - ranked actions and drivers
  */
@@ -120,6 +181,9 @@ export const ReviewRequest = z.object({
 
   /** ISL robustness analysis (optional - enriches review with sensitivity/uncertainty) */
   robustness: ISLRobustnessPayload.optional(),
+
+  /** PLoT robustness data (optional - for generating natural language synthesis) */
+  robustness_data: PLoTRobustnessData.optional(),
 
   /** Context ID for session continuity */
   context_id: z.string().optional(),
@@ -420,6 +484,152 @@ export const ReadinessFactor = z.object({
   status: z.enum(["ok", "warning", "blocking"]),
 });
 
+// =============================================================================
+// Robustness Synthesis (generated from PLoT robustness_data)
+// =============================================================================
+
+/**
+ * Assumption explanation - generated from fragile edges
+ */
+export const AssumptionExplanation = z.object({
+  edge_id: z.string(),
+  explanation: z.string(),
+  severity: z.enum(["fragile", "moderate", "robust"]),
+});
+
+/**
+ * Investigation suggestion - generated from factor sensitivity
+ */
+export const InvestigationSuggestion = z.object({
+  factor_id: z.string(),
+  suggestion: z.string(),
+  elasticity: z.number(),
+});
+
+/**
+ * Robustness synthesis - natural language explanations from PLoT data
+ */
+export const RobustnessSynthesis = z.object({
+  /** Main headline summarizing confidence level */
+  headline: z.string().optional(),
+
+  /** Explanations of fragile assumptions */
+  assumption_explanations: z.array(AssumptionExplanation).optional(),
+
+  /** Suggestions for factors to investigate */
+  investigation_suggestions: z.array(InvestigationSuggestion).optional(),
+});
+
+export type RobustnessSynthesisT = z.infer<typeof RobustnessSynthesis>;
+
+// =============================================================================
+// Decision Quality (simplified quality level for Results Panel)
+// =============================================================================
+
+/**
+ * Decision quality level - simplified assessment for UI
+ */
+export const DecisionQualityLevel = z.enum([
+  "incomplete",
+  "needs_strengthening",
+  "good",
+  "solid",
+]);
+
+/**
+ * Decision quality assessment for Results Panel
+ */
+export const DecisionQuality = z.object({
+  /** Simplified quality level */
+  level: DecisionQualityLevel,
+  /** Human-readable summary (1-2 sentences) */
+  summary: z.string(),
+});
+
+export type DecisionQualityT = z.infer<typeof DecisionQuality>;
+
+// =============================================================================
+// Insights (aggregated observations for Results Panel)
+// =============================================================================
+
+/**
+ * Insight type classification
+ */
+export const InsightType = z.enum([
+  "fragile_assumption",
+  "potential_bias",
+  "information_gap",
+]);
+
+/**
+ * Insight severity level
+ */
+export const InsightSeverity = z.enum(["low", "medium", "high"]);
+
+/**
+ * Single insight for Results Panel
+ */
+export const Insight = z.object({
+  /** Type of insight */
+  type: InsightType,
+  /** Human-readable content */
+  content: z.string(),
+  /** Severity level */
+  severity: InsightSeverity.optional(),
+});
+
+export type InsightT = z.infer<typeof Insight>;
+
+// =============================================================================
+// Improvement Guidance Schema
+// =============================================================================
+
+/**
+ * Source of improvement recommendation
+ */
+export const ImprovementSource = z.enum([
+  "missing_baseline",
+  "fragile_edge",
+  "bias",
+  "structure",
+]);
+
+export type ImprovementSourceT = z.infer<typeof ImprovementSource>;
+
+/**
+ * Single improvement guidance item for Results Panel
+ */
+export const ImprovementGuidanceItem = z.object({
+  /** Priority (1 = highest, 5 = lowest) */
+  priority: z.number().int().min(1).max(5),
+  /** Actionable recommendation */
+  action: z.string(),
+  /** Why this improvement matters */
+  reason: z.string(),
+  /** Source of this recommendation */
+  source: ImprovementSource,
+});
+
+export type ImprovementGuidanceItemT = z.infer<typeof ImprovementGuidanceItem>;
+
+// =============================================================================
+// Rationale Schema
+// =============================================================================
+
+/**
+ * Plain English rationale explaining the recommendation
+ */
+export const Rationale = z.object({
+  /** 2-3 sentence summary of why this option is recommended */
+  summary: z.string(),
+  /** The most influential factor driving the recommendation */
+  key_driver: z.string().optional(),
+  /** How the recommended option aligns with the stated goal */
+  goal_alignment: z.string().optional(),
+});
+
+export type RationaleT = z.infer<typeof Rationale>;
+
 /**
  * Review response schema
  */
@@ -466,6 +676,21 @@ export const ReviewResponse = z.object({
     next_steps: z.array(z.string()).optional(),
     warnings: z.array(z.string()).optional(),
   }).optional(),
+
+  /** Robustness synthesis - natural language explanations from PLoT data */
+  robustness_synthesis: RobustnessSynthesis.nullable().optional(),
+
+  /** Decision quality assessment for Results Panel */
+  decision_quality: DecisionQuality.optional(),
+
+  /** Aggregated insights for Results Panel */
+  insights: z.array(Insight).optional(),
+
+  /** Prioritized improvement actions for Results Panel */
+  improvement_guidance: z.array(ImprovementGuidanceItem).optional(),
+
+  /** Plain English rationale for the recommendation */
+  rationale: Rationale.optional(),
 });
 
 export type ReviewResponseT = z.infer<typeof ReviewResponse>;

@@ -25,3 +25,36 @@ export {
   type ReadinessAssessment,
   type ReadinessContext,
 } from "./readinessAssessor.js";
+
+export {
+  generateRobustnessSynthesis,
+} from "./robustnessSynthesis.js";
+
+export {
+  computeDecisionQuality,
+  countMissingBaselines,
+  type DecisionQualityResult,
+  type DecisionQualityLevel,
+  type DecisionQualityInputs,
+} from "./decisionQuality.js";
+
+export {
+  aggregateInsights,
+  type Insight,
+  type InsightType,
+  type InsightSeverity,
+  type InsightsContext,
+} from "./insights.js";
+
+export {
+  generateImprovementGuidance,
+  type ImprovementGuidanceItem,
+  type ImprovementSource,
+  type ImprovementGuidanceContext,
+} from "./improvementGuidance.js";
+
+export {
+  generateRationale,
+  type RationaleResult,
+  type RationaleContext,
+} from "./rationale.js";
