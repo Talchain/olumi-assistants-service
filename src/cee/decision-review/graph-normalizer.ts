@@ -175,10 +175,36 @@ export function normalizeGraphForISL(graph: GraphV1): NormalizedGraphForISL {
     });
   }
 
-  // Return graph with normalized nodes and parameter_uncertainties
+  // Filter out option-originated edges (option → factor edges corrupt ISL equations)
+  // Options should specify interventions, not causal relationships
+  // Edge hints are extracted from the original graph before normalization, so they're unaffected
+  const optionNodeIds = new Set(
+    graph.nodes.filter(n => n.kind === 'option').map(n => n.id)
+  );
+
+  const filteredEdges = graph.edges?.filter(edge => {
+    // Keep edge if source (from) is NOT an option node
+    return !optionNodeIds.has(edge.from);
+  });
+
+  // Log if edges were filtered
+  const originalEdgeCount = graph.edges?.length ?? 0;
+  const filteredEdgeCount = filteredEdges?.length ?? 0;
+  if (filteredEdgeCount < originalEdgeCount) {
+    logger.debug({
+      event: 'isl.edges_filtered',
+      original_count: originalEdgeCount,
+      filtered_count: filteredEdgeCount,
+      removed: originalEdgeCount - filteredEdgeCount,
+      message: `Filtered ${originalEdgeCount - filteredEdgeCount} option→factor edge(s) for ISL`,
+    });
+  }
+
+  // Return graph with normalized nodes, filtered edges, and parameter_uncertainties
   return {
     ...graph,
     nodes: normalizedNodes,
+    edges: filteredEdges,
     parameter_uncertainties: parameterUncertainties.length > 0 ? parameterUncertainties : undefined,
   } as NormalizedGraphForISL;
 }

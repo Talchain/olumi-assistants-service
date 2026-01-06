@@ -623,3 +623,170 @@ describe('normalizeGraphForISL - parameter_uncertainties', () => {
     });
   });
 });
+
+describe('normalizeGraphForISL - option edge filtering', () => {
+  describe('filters out option-originated edges', () => {
+    it('removes option→factor edges from normalized graph', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+          { id: 'fac_2', kind: 'factor', label: 'Factor 2', data: { value: 20 } },
+        ],
+        edges: [
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 }, // Should be removed
+          { id: 'e2', from: 'fac_1', to: 'fac_2', weight: 0.8 }, // Should be kept
+        ],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toHaveLength(1);
+      expect(result.edges![0].id).toBe('e2');
+    });
+
+    it('removes multiple option→factor edges', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_a', kind: 'option', label: 'Option A' },
+          { id: 'opt_b', kind: 'option', label: 'Option B' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+          { id: 'fac_2', kind: 'factor', label: 'Factor 2', data: { value: 20 } },
+          { id: 'out_1', kind: 'outcome', label: 'Outcome' },
+        ],
+        edges: [
+          { id: 'e1', from: 'opt_a', to: 'fac_1', weight: 0.5 }, // Should be removed
+          { id: 'e2', from: 'opt_b', to: 'fac_1', weight: 0.3 }, // Should be removed
+          { id: 'e3', from: 'opt_a', to: 'fac_2', weight: 0.7 }, // Should be removed
+          { id: 'e4', from: 'fac_1', to: 'out_1', weight: 0.8 }, // Should be kept
+          { id: 'e5', from: 'fac_2', to: 'out_1', weight: 0.6 }, // Should be kept
+        ],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toHaveLength(2);
+      expect(result.edges!.map(e => e.id).sort()).toEqual(['e4', 'e5']);
+    });
+
+    it('preserves all edges when no option nodes exist', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+          { id: 'fac_2', kind: 'factor', label: 'Factor 2', data: { value: 20 } },
+          { id: 'out_1', kind: 'outcome', label: 'Outcome' },
+        ],
+        edges: [
+          { id: 'e1', from: 'fac_1', to: 'fac_2', weight: 0.8 },
+          { id: 'e2', from: 'fac_2', to: 'out_1', weight: 0.6 },
+        ],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toHaveLength(2);
+    });
+
+    it('handles graph with no edges', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+        ],
+        edges: [],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toEqual([]);
+    });
+
+    it('handles graph with undefined edges', () => {
+      const graph = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+        ],
+        // No edges property
+      } as unknown as GraphV1;
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toBeUndefined();
+    });
+
+    it('handles graph where all edges originate from options', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'opt_2', kind: 'option', label: 'Option B' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+        ],
+        edges: [
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 },
+          { id: 'e2', from: 'opt_2', to: 'fac_1', weight: 0.3 },
+        ],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toHaveLength(0);
+    });
+
+    it('preserves edges where option is the target (not source)', () => {
+      // Edge case: factor → option edge (unusual but possible)
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+        ],
+        edges: [
+          { id: 'e1', from: 'fac_1', to: 'opt_1', weight: 0.5 }, // Factor → Option, should be kept
+        ],
+      };
+
+      const result = normalizeGraphForISL(graph);
+
+      expect(result.edges).toHaveLength(1);
+      expect(result.edges![0].id).toBe('e1');
+    });
+  });
+
+  describe('does not mutate original graph edges', () => {
+    it('original graph edges remain unchanged', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'opt_1', kind: 'option', label: 'Option A' },
+          { id: 'fac_1', kind: 'factor', label: 'Factor 1', data: { value: 10 } },
+        ],
+        edges: [
+          { id: 'e1', from: 'opt_1', to: 'fac_1', weight: 0.5 },
+          { id: 'e2', from: 'fac_1', to: 'fac_1', weight: 0.8 },
+        ],
+      };
+
+      const originalEdgeCount = graph.edges.length;
+      normalizeGraphForISL(graph);
+
+      // Original graph should be unchanged
+      expect(graph.edges).toHaveLength(originalEdgeCount);
+      expect(graph.edges[0].from).toBe('opt_1');
+    });
+  });
+});
