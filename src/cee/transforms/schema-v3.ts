@@ -499,6 +499,7 @@ export function transformResponseToV3(
       request_id: context.requestId ?? v1Response.trace?.request_id,
       correlation_id: context.correlationId ?? v1Response.trace?.correlation_id,
       engine: v1Response.trace?.engine,
+      goal_handling: v1Response.trace?.goal_handling,
     },
     draft_warnings: v1Response.draft_warnings,
   };

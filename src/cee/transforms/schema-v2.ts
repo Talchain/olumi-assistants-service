@@ -123,6 +123,13 @@ export interface V1DraftGraphResponse {
     request_id?: string;
     correlation_id?: string;
     engine?: Record<string, unknown>;
+    /** Goal handling observability */
+    goal_handling?: {
+      goal_source: "llm_generated" | "retry_generated" | "inferred" | "placeholder";
+      retry_attempted: boolean;
+      original_missing_kinds?: string[];
+      goal_node_id?: string;
+    };
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{

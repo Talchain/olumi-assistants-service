@@ -24,7 +24,7 @@ import {
 import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
-import { config } from "../../config/index.js";
+import { config, isProduction } from "../../config/index.js";
 import {
   detectAmbiguities,
   detectConvergence,
@@ -1001,6 +1001,31 @@ export async function finaliseCeeDraftResponse(
         },
       }),
     };
+  }
+
+  // === FAULT INJECTION (Dev/Test only) ===
+  // Strip specified node kinds for deterministic testing of repair paths
+  // Header: X-Debug-Force-Missing-Kinds: goal,decision (comma-separated)
+  if (!isProduction() && graph) {
+    const forceMissingHeader = request.headers["x-debug-force-missing-kinds"];
+    if (typeof forceMissingHeader === "string" && forceMissingHeader.length > 0) {
+      const kindsToStrip = forceMissingHeader.split(",").map(k => k.trim().toLowerCase());
+      const originalNodeCount = graph.nodes.length;
+
+      graph = {
+        ...graph,
+        nodes: graph.nodes.filter((n: any) => !kindsToStrip.includes(n.kind?.toLowerCase())),
+      };
+      payload.graph = graph as any;
+
+      log.info({
+        request_id: requestId,
+        kinds_stripped: kindsToStrip,
+        nodes_before: originalNodeCount,
+        nodes_after: graph.nodes.length,
+        event: "cee.fault_injection.applied",
+      }, "Fault injection: stripped node kinds for testing");
+    }
   }
 
   // Enforce minimum structure requirements for usable graphs.

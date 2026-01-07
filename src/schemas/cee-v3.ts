@@ -327,6 +327,13 @@ export const CEEGraphResponseV3 = z.object({
     request_id: z.string().optional(),
     correlation_id: z.string().optional(),
     engine: z.record(z.unknown()).optional(),
+    /** Goal handling observability */
+    goal_handling: z.object({
+      goal_source: z.enum(["llm_generated", "retry_generated", "inferred", "placeholder"]),
+      retry_attempted: z.boolean(),
+      original_missing_kinds: z.array(z.string()).optional(),
+      goal_node_id: z.string().optional(),
+    }).optional(),
   }).optional(),
 });
 export type CEEGraphResponseV3T = z.infer<typeof CEEGraphResponseV3>;
