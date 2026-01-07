@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normaliseNodeKind, normaliseDraftResponse } from "../../src/adapters/llm/normalisation.js";
+import { normaliseNodeKind, normaliseDraftResponse, ensureControllableFactorBaselines } from "../../src/adapters/llm/normalisation.js";
 
 describe("NodeKind Normalisation", () => {
   describe("normaliseNodeKind", () => {
@@ -658,5 +658,148 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[0].strength_std).toBe(0.1);
       expect(result.edges[0].belief_exists).toBe(0.9);
     });
+  });
+});
+
+describe("ensureControllableFactorBaselines", () => {
+  it("adds default baseline to controllable factors without data.value", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor without value" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },  // Makes fac_1 controllable
+        { from: "fac_1", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const fac1 = nodes.find((n: any) => n.id === "fac_1");
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
+    expect(fac1.data.value).toBe(1.0);
+    expect(fac1.data.extractionType).toBe("inferred");
+  });
+
+  it("preserves existing data.value on controllable factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor with value", data: { value: 49, unit: "£" } },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const fac1 = nodes.find((n: any) => n.id === "fac_1");
+
+    expect(defaultedFactors).toEqual([]);
+    expect(fac1.data.value).toBe(49);
+    expect(fac1.data.unit).toBe("£");
+  });
+
+  it("does not add baseline to exogenous factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Controllable factor" },
+        { id: "fac_exog", kind: "factor", label: "Exogenous factor" },  // No incoming option edge
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },  // Only fac_1 is controllable
+        { from: "fac_1", to: "out_1" },
+        { from: "fac_exog", to: "out_1" },  // fac_exog influences outcome but not controllable
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const facExog = nodes.find((n: any) => n.id === "fac_exog");
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
+    expect(facExog.data).toBeUndefined();  // Exogenous factor should NOT get default
+  });
+
+  it("handles multiple controllable factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_a", kind: "factor", label: "Factor A" },
+        { id: "fac_b", kind: "factor", label: "Factor B", data: { value: 100 } },
+        { id: "fac_c", kind: "factor", label: "Factor C" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_a" },
+        { from: "opt_1", to: "fac_b" },
+        { from: "opt_1", to: "fac_c" },
+        { from: "fac_a", to: "out_1" },
+        { from: "fac_b", to: "out_1" },
+        { from: "fac_c", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+
+    // fac_a and fac_c should get defaults (no value), fac_b should keep its value
+    expect(defaultedFactors).toContain("fac_a");
+    expect(defaultedFactors).toContain("fac_c");
+    expect(defaultedFactors).not.toContain("fac_b");
+    expect(defaultedFactors.length).toBe(2);
+
+    const facA = nodes.find((n: any) => n.id === "fac_a");
+    const facB = nodes.find((n: any) => n.id === "fac_b");
+    const facC = nodes.find((n: any) => n.id === "fac_c");
+
+    expect(facA.data.value).toBe(1.0);
+    expect(facA.data.extractionType).toBe("inferred");
+    expect(facB.data.value).toBe(100);
+    expect(facC.data.value).toBe(1.0);
+  });
+
+  it("returns unchanged response when no nodes or edges", () => {
+    const emptyResponse = { nodes: [], edges: [] };
+    const { response, defaultedFactors } = ensureControllableFactorBaselines(emptyResponse);
+
+    expect(response).toEqual(emptyResponse);
+    expect(defaultedFactors).toEqual([]);
+  });
+
+  it("handles source/target edge format", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { source: "dec_1", target: "opt_1" },
+        { source: "opt_1", target: "fac_1" },  // source/target format
+        { source: "fac_1", target: "out_1" },
+      ],
+    };
+
+    const { defaultedFactors } = ensureControllableFactorBaselines(response);
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
   });
 });

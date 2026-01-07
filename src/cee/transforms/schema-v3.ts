@@ -126,11 +126,15 @@ export function transformNodeToV3(node: V1Node): NodeV3T {
   // Transform data to observed_state (only if it's FactorData with value defined)
   // OptionData (with interventions) is handled separately in options extraction
   if (isFactorData(node.data) && node.data.value !== undefined) {
+    // Map extractionType to V3 source format
+    const source: "brief_extraction" | "cee_inference" =
+      node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
+
     v3Node.observed_state = {
       value: node.data.value,
       baseline: node.data.baseline,
       unit: node.data.unit,
-      source: "brief_extraction",
+      source,
     };
   }
 

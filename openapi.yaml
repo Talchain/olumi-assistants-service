@@ -2937,6 +2937,27 @@ components:
           type: object
           description: Additional trace metadata
           additionalProperties: true
+        goal_handling:
+          type: object
+          description: Goal node handling trace for observability
+          properties:
+            goal_source:
+              type: string
+              enum: [llm_generated, retry_generated, inferred, placeholder]
+              description: |
+                How the goal node was obtained:
+                - llm_generated: LLM included goal in initial response
+                - retry_generated: LLM included goal after reinforced retry
+                - inferred: Goal was extracted from brief patterns
+                - placeholder: Default placeholder goal was used
+            retry_attempted:
+              type: boolean
+              description: Whether a reinforced retry was attempted before repair
+            original_missing_kinds:
+              type: array
+              description: Node kinds that were missing before any repair
+              items:
+                type: string
 
     CEEValidationIssue:
       type: object
