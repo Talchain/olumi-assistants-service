@@ -237,7 +237,6 @@ export function buildAnalysisReadyPayload(
   const payload: AnalysisReadyPayloadT = {
     options: analysisOptions,
     goal_node_id: goalNodeId,
-    suggested_seed: context.seed ?? "42",
     status: payloadStatus,
   };
 

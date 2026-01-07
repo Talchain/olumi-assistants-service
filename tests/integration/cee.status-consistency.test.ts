@@ -276,7 +276,6 @@ describe("CEE Status Consistency", () => {
           },
         ],
         goal_node_id: "goal_growth",
-        suggested_seed: "42",
         status: "needs_encoding",
       };
 

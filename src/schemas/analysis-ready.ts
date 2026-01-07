@@ -110,8 +110,6 @@ export const AnalysisReadyPayload = z.object({
   options: z.array(OptionForAnalysis),
   /** Goal node ID - must match a goal node in graph */
   goal_node_id: z.string(),
-  /** Suggested seed for reproducibility */
-  suggested_seed: z.string().default("42"),
   /** Status: ready, needs_user_mapping, or needs_encoding */
   status: AnalysisReadyStatus,
   /** Questions for user when status is needs_user_mapping */

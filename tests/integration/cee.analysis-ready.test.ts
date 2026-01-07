@@ -222,7 +222,6 @@ describe("CEE Analysis-Ready Output - Acceptance Criteria", () => {
       const payload: AnalysisReadyPayloadT = {
         options: [],
         goal_node_id: "missing_goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -567,7 +566,6 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -590,7 +588,6 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
           { id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready", // Inconsistent: should be needs_user_mapping
       };
 
@@ -611,7 +608,6 @@ describe("CEE Analysis-Ready Output - Validation Rules", () => {
           { id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "needs_user_mapping",
         // Missing user_questions
       };
@@ -679,7 +675,6 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
       const input = {
         options: [{ id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} }],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "needs_user_input", // Legacy input
         user_questions: ["What is the baseline?"],
       };
@@ -694,7 +689,6 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
       const input = {
         options: [{ id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} }],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "needs_user_mapping",
         user_questions: ["What is the baseline?"],
       };
@@ -708,7 +702,6 @@ describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
       const input = {
         options: [{ id: "opt", label: "Option", status: "ready", interventions: { factor_a: 100 } }],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -896,7 +889,6 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -929,7 +921,6 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -963,7 +954,6 @@ describe("CEE Analysis-Ready Output - Factor Kind Enforcement", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -1004,7 +994,6 @@ describe("CEE Analysis-Ready Output - Option ID Consistency", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -1053,7 +1042,6 @@ describe("CEE Analysis-Ready Output - Option ID Consistency", () => {
           },
         ],
         goal_node_id: "goal",
-        suggested_seed: "42",
         status: "ready",
       };
 
@@ -1088,7 +1076,6 @@ describe("CEE Analysis-Ready Output - Telemetry", () => {
         },
       ],
       goal_node_id: "goal",
-      suggested_seed: "42",
       status: "ready",
     };
 
