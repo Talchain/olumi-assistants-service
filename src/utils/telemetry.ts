@@ -165,6 +165,7 @@ export const TelemetryEvents = {
   CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
 
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
+  FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
 
   // Goal generation tracking (prompt tuning)
   GoalGeneration: "cee.goal_generation",
