@@ -110,3 +110,21 @@ export {
   registerAllDefaultPrompts,
   PROMPT_TEMPLATES,
 } from './defaults.js';
+
+// Repository exports (new)
+export {
+  PromptRepository,
+  getPromptRepository,
+  initializePromptRepository,
+  resetPromptRepository,
+  type IPromptReader,
+  type IPromptWriter,
+  type RepositoryHealthStatus,
+} from './repository.js';
+
+// Seed exports (new)
+export {
+  initializeAndSeedPrompts,
+  checkSeedStatus,
+  type SeedResult,
+} from './seed.js';
