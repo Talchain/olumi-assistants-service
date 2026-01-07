@@ -22,6 +22,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     warnings: [],
     uncertainNodeIds: [],
   }),
+  detectUniformStrengths: () => ({
+    detected: false,
+    totalEdges: 0,
+    defaultStrengthCount: 0,
+    defaultStrengthPercentage: 0,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -32,6 +38,17 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  // Goal inference utilities
+  hasGoalNode: (graph: any) => {
+    if (!graph || !Array.isArray(graph.nodes)) return false;
+    return graph.nodes.some((n: any) => n.kind === "goal");
+  },
+  ensureGoalNode: (graph: any) => ({
+    graph,
+    goalAdded: false,
+    inferredFrom: undefined,
+    goalNodeId: undefined,
   }),
 }));
 

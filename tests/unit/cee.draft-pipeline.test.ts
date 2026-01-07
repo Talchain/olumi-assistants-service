@@ -37,6 +37,17 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     },
     warnings: [],
   }),
+  // Goal inference utilities (added for goal repair feature)
+  hasGoalNode: (graph: any) => {
+    if (!graph || !Array.isArray(graph.nodes)) return false;
+    return graph.nodes.some((n: any) => n.kind === "goal");
+  },
+  ensureGoalNode: (graph: any, brief: string, explicitGoal?: string) => ({
+    graph,
+    goalAdded: false,
+    inferredFrom: undefined,
+    goalNodeId: undefined,
+  }),
 }));
 
 import { finaliseCeeDraftResponse } from "../../src/cee/validation/pipeline.js";

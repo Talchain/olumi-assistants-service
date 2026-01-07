@@ -1004,12 +1004,24 @@ export async function finaliseCeeDraftResponse(
   }
 
   // Enforce minimum structure requirements for usable graphs.
-  // If goal is missing, attempt repair before failing.
+  // If goal is missing, attempt deterministic repair before failing.
   let structure = validateMinimumStructure(graph);
   let goalInferenceWarning: CEEStructuralWarningV1 | undefined;
 
+  // Goal handling observability
+  type GoalSource = "llm_generated" | "retry_generated" | "inferred" | "placeholder";
+  let goalSource: GoalSource = "llm_generated";
+  const originalMissingKinds = structure.valid ? [] : [...structure.missing];
+  let goalNodeId: string | undefined;
+
+  // Check if LLM generated goal
+  const llmGeneratedGoal = hasGoalNode(graph);
+  if (llmGeneratedGoal) {
+    goalSource = "llm_generated";
+  }
+
   if (!structure.valid && structure.missing.includes("goal")) {
-    // Goal missing - attempt inference/repair
+    // Goal missing - attempt deterministic repair (no retry, just infer)
     const explicitGoal = Array.isArray(input.context?.goals) && input.context.goals.length > 0
       ? input.context.goals[0]
       : undefined;
@@ -1019,9 +1031,20 @@ export async function finaliseCeeDraftResponse(
     if (goalResult.goalAdded) {
       graph = goalResult.graph;
       payload.graph = graph as any;
+      goalNodeId = goalResult.goalNodeId;
 
       // Re-validate after goal addition
       structure = validateMinimumStructure(graph);
+
+      // Determine goal source based on how it was obtained
+      if (goalResult.inferredFrom === "explicit") {
+        // Explicit from context.goals - treat as llm_generated equivalent
+        goalSource = "llm_generated";
+      } else if (goalResult.inferredFrom === "brief") {
+        goalSource = "inferred";
+      } else {
+        goalSource = "placeholder";
+      }
 
       // Only add warning if goal was inferred (not explicit from context.goals)
       if (goalResult.inferredFrom !== "explicit") {
@@ -1039,6 +1062,7 @@ export async function finaliseCeeDraftResponse(
           request_id: requestId,
           inferred_from: goalResult.inferredFrom,
           goal_node_id: goalResult.goalNodeId,
+          goal_source: goalSource,
         });
       }
 
@@ -1047,9 +1071,18 @@ export async function finaliseCeeDraftResponse(
         goal_added: true,
         inferred_from: goalResult.inferredFrom,
         goal_node_id: goalResult.goalNodeId,
+        goal_source: goalSource,
       }, "Goal node added to graph via inference");
     }
   }
+
+  // Build goal_handling trace object
+  const goalHandling = {
+    goal_source: goalSource,
+    retry_attempted: false, // No LLM retry in current implementation
+    original_missing_kinds: originalMissingKinds.length > 0 ? originalMissingKinds : undefined,
+    ...(goalNodeId && { goal_node_id: goalNodeId }),
+  };
 
   if (!structure.valid) {
     const latencyMs = Date.now() - start;
@@ -1139,6 +1172,8 @@ export async function finaliseCeeDraftResponse(
       ...(rawLlmOutput !== undefined && { raw_llm_output: rawLlmOutput }),
       ...(rawLlmOutputTruncated !== undefined && { raw_llm_output_truncated: rawLlmOutputTruncated }),
     },
+    // Goal handling observability
+    goal_handling: goalHandling as any,
   };
 
   const validationIssues: CEEValidationIssue[] = [];

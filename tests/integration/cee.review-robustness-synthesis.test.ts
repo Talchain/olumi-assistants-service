@@ -41,6 +41,17 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     },
     warnings: [],
   }),
+  // Goal inference utilities
+  hasGoalNode: (graph: any) => {
+    if (!graph || !Array.isArray(graph.nodes)) return false;
+    return graph.nodes.some((n: any) => n.kind === "goal");
+  },
+  ensureGoalNode: (graph: any) => ({
+    graph,
+    goalAdded: false,
+    inferredFrom: undefined,
+    goalNodeId: undefined,
+  }),
 }));
 
 import { build } from "../../src/server.js";
