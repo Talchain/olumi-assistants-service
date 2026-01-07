@@ -7,6 +7,7 @@ import type { DraftGraphInputT } from "../../schemas/assist.js";
 import { validateResponse } from "../../utils/responseGuards.js";
 import { getRequestId } from "../../utils/request-id.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
+import { isSchemaValidationError, calculateBackoffDelay, SCHEMA_VALIDATION_RETRY_CONFIG } from "../../utils/retry.js";
 import { inferArchetype } from "../archetypes/index.js";
 import { computeQuality } from "../quality/index.js";
 import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
@@ -633,22 +634,99 @@ export async function finaliseCeeDraftResponse(
   const start = Date.now();
   const requestId = getRequestId(request);
 
+  // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
-  try {
-    pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId);
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error("unexpected error");
+  let lastError: Error | null = null;
+  let schemaRetryAttempted = false;
+
+  for (let attempt = 1; attempt <= SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts; attempt++) {
+    try {
+      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId);
+      lastError = null;
+      break; // Success - exit retry loop
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error("unexpected error");
+      lastError = err;
+
+      // Only retry on schema validation failures, and only once
+      if (isSchemaValidationError(err) && attempt < SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts) {
+        schemaRetryAttempted = true;
+        const delay = calculateBackoffDelay(attempt, SCHEMA_VALIDATION_RETRY_CONFIG);
+
+        log.warn({
+          request_id: requestId,
+          attempt,
+          max_attempts: SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts,
+          delay_ms: delay,
+          error_message: err.message?.substring(0, 100),
+          event: 'cee.schema_validation.retry',
+        }, `Schema validation failed, retrying in ${delay}ms (attempt ${attempt}/${SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts})`);
+
+        emit(TelemetryEvents.LlmRetry, {
+          adapter: 'cee_pipeline',
+          model: 'draft_graph',
+          operation: 'schema_validation',
+          attempt,
+          max_attempts: SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts,
+          delay_ms: delay,
+          reason: 'schema_validation_failed',
+        });
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue; // Retry
+      }
+
+      // Not retryable or max attempts reached - break and handle error below
+      break;
+    }
+  }
+
+  // Handle error if pipeline failed
+  if (lastError) {
+    const err = lastError;
     const isTimeout = err.name === "UpstreamTimeoutError";
-    const statusCode = isTimeout ? 504 : 500;
-    const code: CEEErrorCode = isTimeout ? "CEE_TIMEOUT" : "CEE_INTERNAL_ERROR";
+    const isSchemaValidationFailure = isSchemaValidationError(err);
+
+    let statusCode: number;
+    let code: CEEErrorCode;
+    let retryable: boolean;
+
+    if (isTimeout) {
+      statusCode = 504;
+      code = "CEE_TIMEOUT";
+      retryable = true;
+    } else if (isSchemaValidationFailure) {
+      // LLM returned malformed JSON that failed Zod validation
+      statusCode = 502; // Bad Gateway - upstream returned invalid response
+      code = "CEE_LLM_VALIDATION_FAILED";
+      retryable = false; // Already retried once, don't suggest client retry
+    } else {
+      statusCode = 500;
+      code = "CEE_INTERNAL_ERROR";
+      retryable = false;
+    }
+
     // Determine stage from error context if available
     const stage = (err as any).stage || "llm_draft";
+
+    // Emit exhausted event if we retried
+    if (schemaRetryAttempted && isSchemaValidationFailure) {
+      emit(TelemetryEvents.LlmRetryExhausted, {
+        adapter: 'cee_pipeline',
+        model: 'draft_graph',
+        operation: 'schema_validation',
+        total_attempts: SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts,
+        error_message: err.message?.substring(0, 100) || 'unknown',
+      });
+    }
+
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
       latency_ms: Date.now() - start,
       error_code: code,
       http_status: statusCode,
       stage,
+      schema_retry_attempted: schemaRetryAttempted,
     });
     logCeeCall({
       requestId,
@@ -661,7 +739,7 @@ export async function finaliseCeeDraftResponse(
     return {
       statusCode,
       body: buildCeeErrorResponse(code, isTimeout ? "upstream timeout" : err.message || "internal error", {
-        retryable: isTimeout,
+        retryable,
         requestId,
         stage,
       }),

@@ -47,6 +47,28 @@ const RETRYABLE_ERROR_PATTERNS = [
 ];
 
 /**
+ * Check if an error is a schema validation failure from LLM response
+ */
+export function isSchemaValidationError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("_response_invalid_schema");
+}
+
+/**
+ * Retry configuration for schema validation failures
+ * - Only 1 retry (2 total attempts) to limit token burn
+ * - Shorter delay since LLM may produce valid JSON on retry
+ */
+export const SCHEMA_VALIDATION_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 2,
+  baseDelayMs: 100,
+  maxDelayMs: 500,
+  backoffFactor: 2,
+  jitterPercent: 20,
+};
+
+/**
  * HTTP status codes that should trigger retries
  */
 const RETRYABLE_STATUS_CODES = new Set([

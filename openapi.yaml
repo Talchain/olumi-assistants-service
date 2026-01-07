@@ -3049,6 +3049,7 @@ components:
         - CEE_SERVICE_UNAVAILABLE
         - CEE_ENGINE_DEGRADED
         - CEE_REPRO_MISMATCH
+        - CEE_LLM_VALIDATION_FAILED
 
     CEEErrorResponseV1:
       type: object

@@ -12,7 +12,7 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt } from "./prompt-loader.js";
 import { isReasoningModel } from "../../config/models.js";
@@ -440,18 +440,34 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      // Parse, normalise non-standard node kinds, then validate with Zod
+      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
       const normalised = normaliseDraftResponse(rawJson);
-      const parseResult = OpenAIDraftResponse.safeParse(normalised);
+      const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
+      if (defaultedFactors.length > 0) {
+        log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
+      }
+      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 
       if (!parseResult.success) {
         const flatErrors = parseResult.error.flatten();
+
+        // Capture truncated raw output for debugging (before throwing)
+        const rawOutputSample = (() => {
+          try {
+            const serialized = JSON.stringify(rawJson);
+            return serialized.length > 500 ? serialized.slice(0, 500) + '...[truncated]' : serialized;
+          } catch {
+            return '[serialization failed]';
+          }
+        })();
+
         log.error({
           errors: flatErrors,
           raw_node_kinds: Array.isArray(rawJson?.nodes)
             ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
             : [],
+          raw_output_sample: rawOutputSample,
           event: 'llm.validation.schema_failed'
         }, "OpenAI response failed schema validation after normalisation");
 
@@ -727,10 +743,14 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      // Parse, normalise non-standard node kinds, then validate with Zod
+      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
       const normalised = normaliseDraftResponse(rawJson);
-      const parseResult = OpenAIDraftResponse.safeParse(normalised);
+      const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
+      if (repairDefaultedFactors.length > 0) {
+        log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
+      }
+      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 
       if (!parseResult.success) {
         const flatErrors = parseResult.error.flatten();
