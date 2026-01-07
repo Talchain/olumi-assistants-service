@@ -137,6 +137,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Uniform strength detection (LLM output quality)
         CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
 
+        // Goal inference (defence-in-depth for missing goal nodes)
+        CeeGoalInferred: "cee.draft_graph.goal_inferred",
+
         // CEE v1 Explain Graph events (v1.12.0)
         CeeExplainGraphRequested: "cee.explain_graph.requested",
         CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
@@ -311,6 +314,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Factor Extraction events (v2.3)
         FactorExtractionComplete: "cee.factor_extraction.complete",
+        FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
 
         // Schema v2 Transform events (v2.3)
         SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
@@ -375,7 +379,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -565,6 +569,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.succeeded": [TelemetryEvents.CeeDraftGraphSucceeded],
         "cee.draft_graph.failed": [TelemetryEvents.CeeDraftGraphFailed],
         "cee.draft_graph.uniform_strengths_detected": [TelemetryEvents.CeeUniformStrengthsDetected],
+        "cee.draft_graph.goal_inferred": [TelemetryEvents.CeeGoalInferred],
         "cee.explain_graph.requested": [TelemetryEvents.CeeExplainGraphRequested],
         "cee.explain_graph.succeeded": [TelemetryEvents.CeeExplainGraphSucceeded],
         "cee.explain_graph.failed": [TelemetryEvents.CeeExplainGraphFailed],
@@ -778,6 +783,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Analysis-Ready Output events (P0 - diagnostic only)
         TelemetryEvents.AnalysisReadyBuilt,
         TelemetryEvents.AnalysisReadyValidationFailed,
+        // Factor baseline defaulting (diagnostic only)
+        TelemetryEvents.FactorBaselineDefaulted,
       ];
 
       for (const event of allEvents) {
@@ -875,6 +882,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Uniform strength detection (LLM output quality)
         "cee.draft_graph.uniform_strengths_detected",
+
+        // Goal inference (defence-in-depth for missing goal nodes)
+        "cee.draft_graph.goal_inferred",
 
         // CEE v1 Explain Graph events
         "cee.explain_graph.requested",
@@ -1061,6 +1071,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Factor Extraction events (v2.3)
         "cee.factor_extraction.complete",
+        "cee.factor.baseline_defaulted",
 
         // Schema v2 Transform events (v2.3)
         "cee.schema_v2.transform_complete",

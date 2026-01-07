@@ -19,6 +19,10 @@ export const DraftGraphInput = z.object({
   focus_areas: z
     .array(z.enum(["structure", "completeness", "feasibility", "provenance"]))
     .optional(),
+  // Optional structured context for graph generation
+  context: z.object({
+    goals: z.array(z.string().min(5).max(200)).max(5).optional(),
+  }).optional(),
   // Optional refinement context for iterative drafting (Phase B)
   previous_graph: Graph.optional(),
   refinement_mode: z

@@ -21,7 +21,7 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, type StructuralMeta } from "../structure/index.js";
+import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
 import { config } from "../../config/index.js";
@@ -1004,10 +1004,67 @@ export async function finaliseCeeDraftResponse(
   }
 
   // Enforce minimum structure requirements for usable graphs.
-  const structure = validateMinimumStructure(graph);
+  // If goal is missing, attempt repair before failing.
+  let structure = validateMinimumStructure(graph);
+  let goalInferenceWarning: CEEStructuralWarningV1 | undefined;
+
+  if (!structure.valid && structure.missing.includes("goal")) {
+    // Goal missing - attempt inference/repair
+    const explicitGoal = Array.isArray(input.context?.goals) && input.context.goals.length > 0
+      ? input.context.goals[0]
+      : undefined;
+
+    const goalResult = ensureGoalNode(graph!, input.brief, explicitGoal);
+
+    if (goalResult.goalAdded) {
+      graph = goalResult.graph;
+      payload.graph = graph as any;
+
+      // Re-validate after goal addition
+      structure = validateMinimumStructure(graph);
+
+      // Only add warning if goal was inferred (not explicit from context.goals)
+      if (goalResult.inferredFrom !== "explicit") {
+        goalInferenceWarning = {
+          id: "goal_inferred",
+          severity: "medium",
+          node_ids: goalResult.goalNodeId ? [goalResult.goalNodeId] : [],
+          edge_ids: [],
+          explanation: goalResult.inferredFrom === "brief"
+            ? "Goal was inferred from your description. Review to ensure it captures your intended objective."
+            : "A placeholder goal was added because one could not be inferred. Please update it to reflect your actual objective.",
+        } as CEEStructuralWarningV1;
+
+        emit(TelemetryEvents.CeeGoalInferred, {
+          request_id: requestId,
+          inferred_from: goalResult.inferredFrom,
+          goal_node_id: goalResult.goalNodeId,
+        });
+      }
+
+      log.info({
+        request_id: requestId,
+        goal_added: true,
+        inferred_from: goalResult.inferredFrom,
+        goal_node_id: goalResult.goalNodeId,
+      }, "Goal node added to graph via inference");
+    }
+  }
+
   if (!structure.valid) {
     const latencyMs = Date.now() - start;
     const ceeCode: CEEErrorCode = "CEE_GRAPH_INVALID";
+
+    // Extract observability fields for error diagnosis
+    const rawNodeKinds = Array.isArray(graph?.nodes)
+      ? (graph!.nodes as any[]).map((n: any) => n?.kind).filter(Boolean)
+      : [];
+    const nodeLabels = Array.isArray(graph?.nodes)
+      ? (graph!.nodes as any[]).map((n: any) => {
+          const label = n?.label;
+          return typeof label === "string" ? label.substring(0, 50) : undefined;
+        }).filter(Boolean)
+      : [];
 
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
@@ -1016,6 +1073,8 @@ export async function finaliseCeeDraftResponse(
       http_status: 400,
       graph_nodes: nodeCount,
       graph_edges: edgeCount,
+      missing_kinds: structure.missing,
+      raw_node_kinds: rawNodeKinds,
     });
 
     logCeeCall({
@@ -1059,6 +1118,8 @@ export async function finaliseCeeDraftResponse(
           node_count: nodeCount,
           edge_count: edgeCount,
           counts: structure.counts,
+          raw_node_kinds: rawNodeKinds,
+          node_labels: nodeLabels,
         },
       }),
     };
@@ -1264,6 +1325,14 @@ export async function finaliseCeeDraftResponse(
       }
       draftWarnings.push(uniformStrengthResult.warning);
     }
+  }
+
+  // Add goal inference warning if present
+  if (goalInferenceWarning) {
+    if (!draftWarnings) {
+      draftWarnings = [];
+    }
+    draftWarnings.push(goalInferenceWarning);
   }
 
   const guidance = buildCeeGuidance({

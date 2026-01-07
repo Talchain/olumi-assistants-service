@@ -2334,6 +2334,24 @@ components:
           type: boolean
           description: Include debug information in response
           default: false
+        context:
+          type: object
+          description: |
+            Optional structured context to guide graph generation.
+
+            **goals:** When provided, the first goal is used as the explicit goal node
+            instead of inferring one from the brief. This prevents GOAL_INFERRED warnings.
+          properties:
+            goals:
+              type: array
+              description: |
+                Explicit goal(s) for the decision. The first entry becomes the goal node.
+                If empty or not provided, CEE will infer a goal from the brief.
+              maxItems: 5
+              items:
+                type: string
+                minLength: 5
+                maxLength: 200
         previous_graph:
           $ref: '#/components/schemas/Graph'
           description: |
@@ -3591,7 +3609,7 @@ components:
         id:
           type: string
           description: Stable identifier for this warning type
-          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths]
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred]
         severity:
           type: string
           enum: [low, medium, high]

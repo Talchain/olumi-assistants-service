@@ -164,6 +164,9 @@ export const TelemetryEvents = {
   // Uniform strength detection (LLM output quality)
   CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
 
+  // Goal inference (defence-in-depth for missing goal nodes)
+  CeeGoalInferred: "cee.draft_graph.goal_inferred",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
   FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
 

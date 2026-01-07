@@ -827,3 +827,14 @@ export function detectUniformStrengths(
     warning,
   };
 }
+
+// Re-export goal inference utilities
+export {
+  inferGoalFromBrief,
+  ensureGoalNode,
+  hasGoalNode,
+  createGoalNode,
+  wireOutcomesToGoal,
+  DEFAULT_GOAL_LABEL,
+  type GoalInferenceResult,
+} from "./goal-inference.js";

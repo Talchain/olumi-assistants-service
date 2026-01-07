@@ -20,7 +20,22 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 // Adds baseline extraction (data.value) for factor nodes
 // ============================================================================
 
-const DRAFT_GRAPH_PROMPT = `<ROLE>
+const DRAFT_GRAPH_PROMPT = `<CRITICAL_REQUIREMENT>
+You MUST output ALL of the following node types in every response:
+- Exactly 1 decision node
+- At least 2 option nodes
+- At least 1 goal node (representing what the user is trying to achieve)
+
+The goal node is MANDATORY. Infer it from the user's brief - what outcome are they ultimately trying to achieve? Common patterns:
+- "Should I X to achieve Y?" → goal is Y
+- "I want to X" → goal is X
+- "to enable me to focus on..." → goal is "Focus on high-value tasks"
+- If unclear, the goal is "Achieve the best outcome for this decision"
+
+NEVER omit the goal node. A graph without a goal is INVALID.
+</CRITICAL_REQUIREMENT>
+
+<ROLE>
 You are a causal decision graph generator. Transform natural language decision briefs into valid JSON causal graphs.
 </ROLE>
 
@@ -75,7 +90,7 @@ option: A mutually exclusive choice. At least two required. Exactly one incoming
   - For numeric factors with unknown baseline, omit from interventions and do not create option→factor edge
 
 factor: A variable in the system.
-  - Controllable: has incoming option→factor edge(s). May include data.value (the current/baseline state).
+  - Controllable: has incoming option→factor edge(s). MUST include data.value (current/baseline state) and data.extractionType ("explicit" or "inferred").
   - Exogenous (non-controllable): no incoming option edges (e.g., market demand). No data field. May still receive factor→factor edges from controllable or other exogenous factors.
 
 outcome: Positive result. Incoming from factors, outgoing only to goal. Edge to goal has mean > 0.
@@ -86,23 +101,33 @@ goal: Ultimate objective. Exactly one. No outgoing edges.
 </NODE_DEFINITIONS>
 
 <BASELINE_EXTRACTION>
-Extract the current/baseline value when the brief explicitly states it.
+Extract or infer the current/baseline value for ALL controllable factors.
 
 data.value represents the CURRENT STATE before any intervention is applied.
+data.extractionType indicates provenance: "explicit" (from brief) or "inferred" (default).
 
+## Explicit Extraction (when brief states current value)
 Patterns:
-- "from £49 to £59" → data.value: 49, intervention: 59, unit: "£"
-- "increase from 100 to 150" → data.value: 100, intervention: 150
-- "currently 5%, target 3%" → data.value: 0.05, intervention: 0.03
+- "from £49 to £59" → data: {value: 49, unit: "£", extractionType: "explicit"}
+- "increase from 100 to 150" → data: {value: 100, extractionType: "explicit"}
+- "currently 5%, target 3%" → data: {value: 0.05, extractionType: "explicit"}
 
-Rules:
-- Never guess baselines — only include data.value when brief explicitly states current value
-- Do not infer baselines from "typical" or "common" values
-- Only include data.unit when unit appears in brief; otherwise omit
-- If no baseline extractable, omit data field entirely
-- Strip symbols: £59 → 59, $10k → 10000, 4% → 0.04
+Strip symbols: £59 → 59, $10k → 10000, 4% → 0.04
+Only include data.unit when unit appears in brief.
 
-Non-numeric briefs: use integer encoding with data.value = 0 as baseline.
+## CRITICAL: All Controllable Factors MUST Have data.value
+Every controllable factor (has incoming option→factor edge) MUST include data.value.
+
+1. If brief explicitly states current value → extract with extractionType: "explicit"
+2. If brief does NOT state current value → use data: {value: 1.0, extractionType: "inferred"}
+
+The normalized default 1.0 enables ISL sensitivity analysis. The "inferred" extractionType
+signals the user should confirm or update the baseline value.
+
+## Non-numeric Briefs
+Use integer encoding with extractionType: "explicit":
+- "Build vs Buy" → factor with data: {value: 0, extractionType: "explicit"}
+- Options set 0 for Build, 1 for Buy
 </BASELINE_EXTRACTION>
 
 <CONSTRAINTS>
@@ -121,10 +146,11 @@ Three node shapes:
 Option node (data.interventions required):
 {"id": "opt_x", "kind": "option", "label": "...", "data": {"interventions": {"fac_id": 59}}}
 
-Controllable factor (data.value when baseline extractable):
-{"id": "fac_x", "kind": "factor", "label": "...", "data": {"value": 49, "unit": "£"}}
+Controllable factor (data.value and data.extractionType REQUIRED):
+{"id": "fac_x", "kind": "factor", "label": "...", "data": {"value": 49, "unit": "£", "extractionType": "explicit"}}
+{"id": "fac_y", "kind": "factor", "label": "...", "data": {"value": 1.0, "extractionType": "inferred"}}
 
-All other nodes (no data field):
+Exogenous factor and other nodes (no data field):
 {"id": "dec_x", "kind": "decision", "label": "..."}
 {"id": "out_x", "kind": "outcome", "label": "..."}
 {"id": "risk_x", "kind": "risk", "label": "..."}
@@ -145,8 +171,8 @@ Brief: "Given our goal of reaching £20k MRR within 12 months while keeping mont
     {"id": "dec_pricing", "kind": "decision", "label": "Pro Plan Pricing with Feature Release"},
     {"id": "opt_increase", "kind": "option", "label": "Increase to £59 with release", "data": {"interventions": {"fac_price": 59, "fac_bundle_release": 1}}},
     {"id": "opt_status_quo", "kind": "option", "label": "Maintain £49", "data": {"interventions": {"fac_price": 49, "fac_bundle_release": 0}}},
-    {"id": "fac_price", "kind": "factor", "label": "Pro Plan Price", "data": {"value": 49, "unit": "£"}},
-    {"id": "fac_bundle_release", "kind": "factor", "label": "Bundle Price Change with Feature Release", "data": {"value": 0}},
+    {"id": "fac_price", "kind": "factor", "label": "Pro Plan Price", "data": {"value": 49, "unit": "£", "extractionType": "explicit"}},
+    {"id": "fac_bundle_release", "kind": "factor", "label": "Bundle Price Change with Feature Release", "data": {"value": 0, "extractionType": "explicit"}},
     {"id": "fac_perceived_value", "kind": "factor", "label": "Perceived Value"},
     {"id": "fac_market_conditions", "kind": "factor", "label": "Market Conditions"},
     {"id": "out_mrr", "kind": "outcome", "label": "Monthly Recurring Revenue"},
@@ -178,11 +204,12 @@ Brief: "Given our goal of reaching £20k MRR within 12 months while keeping mont
 
 Key patterns demonstrated:
 - Compound goal: combines MRR target and churn constraint in label
-- Numeric baseline: fac_price has data.value: 49 (from "from £49")
-- Integer encoding: fac_bundle_release uses 0/1 (0=no bundle, 1=bundle with price change)
+- Numeric baseline: fac_price has data.value: 49, extractionType: "explicit" (from "from £49")
+- Integer encoding: fac_bundle_release uses 0/1 with extractionType: "explicit"
+- All controllable factors have data.value and data.extractionType
 - Status quo option: opt_status_quo sets all factors to baseline values
 - Factor→factor edge: fac_bundle_release → fac_perceived_value (controllable → exogenous)
-- Exogenous factors: fac_perceived_value and fac_market_conditions have no incoming option edges
+- Exogenous factors: fac_perceived_value and fac_market_conditions have no incoming option edges (no data field)
 - Multiple outcomes and risks flowing to single goal
 - Varied strengths: -0.7, -0.6, -0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
 - Varied exists_probability: 0.5, 0.6, 0.7, 0.8, 0.85, 0.95, 1.0
