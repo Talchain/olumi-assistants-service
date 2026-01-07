@@ -250,3 +250,102 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 
   return obj;
 }
+
+/**
+ * Ensure all controllable factors have baseline values (data.value).
+ *
+ * Controllable factors are factors with incoming option→factor edges.
+ * When LLM fails to output data.value for a controllable factor,
+ * we add a default value of 1.0 with extractionType: "inferred".
+ *
+ * This ensures ISL can compute sensitivity analysis.
+ *
+ * @param response - Draft graph response
+ * @returns Response with baseline values ensured on controllable factors
+ */
+export function ensureControllableFactorBaselines(response: unknown): {
+  response: unknown;
+  defaultedFactors: string[];
+} {
+  const defaultedFactors: string[] = [];
+
+  if (!response || typeof response !== 'object') {
+    return { response, defaultedFactors };
+  }
+
+  const obj = response as Record<string, unknown>;
+  const nodes = obj.nodes as Array<Record<string, unknown>> | undefined;
+  const edges = obj.edges as Array<Record<string, unknown>> | undefined;
+
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+    return { response, defaultedFactors };
+  }
+
+  // Build set of controllable factor IDs (factors with incoming option→factor edges)
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) {
+    if (typeof node.id === 'string' && typeof node.kind === 'string') {
+      nodeKindMap.set(node.id, node.kind);
+    }
+  }
+
+  const controllableFactorIds = new Set<string>();
+  for (const edge of edges) {
+    const fromId = edge.from ?? edge.source;
+    const toId = edge.to ?? edge.target;
+    if (typeof fromId === 'string' && typeof toId === 'string') {
+      const fromKind = nodeKindMap.get(fromId);
+      const toKind = nodeKindMap.get(toId);
+      // option→factor edge makes the factor controllable
+      if (fromKind === 'option' && toKind === 'factor') {
+        controllableFactorIds.add(toId);
+      }
+    }
+  }
+
+  // For each controllable factor, ensure data.value exists
+  const updatedNodes = nodes.map((node) => {
+    const nodeId = typeof node.id === 'string' ? node.id : undefined;
+    const nodeKind = typeof node.kind === 'string' ? node.kind : undefined;
+
+    if (!nodeId || nodeKind !== 'factor' || !controllableFactorIds.has(nodeId)) {
+      return node;
+    }
+
+    // Check if node already has data.value
+    const data = node.data as Record<string, unknown> | undefined;
+    if (data && typeof data.value === 'number') {
+      return node; // Already has value
+    }
+
+    // Add default baseline value
+    defaultedFactors.push(nodeId);
+    log.info({
+      event: 'llm.normalisation.factor_baseline_defaulted',
+      factor_id: nodeId,
+      default_value: 1.0,
+      extraction_type: 'inferred',
+    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
+
+    return {
+      ...node,
+      data: {
+        ...(data || {}),
+        value: 1.0,
+        extractionType: 'inferred',
+      },
+    };
+  });
+
+  if (defaultedFactors.length > 0) {
+    emit(TelemetryEvents.FactorBaselineDefaulted, {
+      defaulted_count: defaultedFactors.length,
+      factor_ids: defaultedFactors,
+    });
+  }
+
+  return {
+    response: { ...obj, nodes: updatedNodes },
+    defaultedFactors,
+  };
+}
