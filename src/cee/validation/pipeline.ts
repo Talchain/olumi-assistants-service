@@ -81,11 +81,42 @@ type MinimumStructureResult = {
   valid: boolean;
   missing: string[];
   counts: Record<string, number>;
+  /** Connectivity diagnostic - only populated if kind counts pass */
+  connectivity?: ConnectivityDiagnostic;
+  /** Whether connectivity check specifically failed (kinds present but not connected) */
+  connectivity_failed?: boolean;
 };
 
-function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
+/**
+ * Connectivity diagnostic result
+ */
+type ConnectivityDiagnostic = {
+  passed: boolean;
+  decision_ids: string[];
+  reachable_options: string[];
+  reachable_goals: string[];
+  unreachable_nodes: string[];
+  all_option_ids: string[];
+  all_goal_ids: string[];
+};
+
+/**
+ * Check if graph has connected minimum structure with diagnostic info.
+ * Returns both pass/fail and detailed diagnostics for observability.
+ */
+function checkConnectedMinimumStructure(graph: GraphV1 | undefined): ConnectivityDiagnostic {
+  const emptyDiagnostic: ConnectivityDiagnostic = {
+    passed: false,
+    decision_ids: [],
+    reachable_options: [],
+    reachable_goals: [],
+    unreachable_nodes: [],
+    all_option_ids: [],
+    all_goal_ids: [],
+  };
+
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray((graph as any).edges)) {
-    return false;
+    return emptyDiagnostic;
   }
 
   const nodes = graph.nodes;
@@ -93,7 +124,10 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
 
   const kinds = new Map<string, string>();
   const decisions: string[] = [];
+  const options: string[] = [];
+  const goals: string[] = [];
   const adjacency = new Map<string, Set<string>>();
+  const allNodeIds: string[] = [];
 
   for (const node of nodes) {
     const id = typeof (node as any).id === "string" ? ((node as any).id as string) : undefined;
@@ -103,11 +137,16 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
     }
 
     kinds.set(id, kind);
+    allNodeIds.push(id);
     if (!adjacency.has(id)) {
       adjacency.set(id, new Set());
     }
     if (kind === "decision") {
       decisions.push(id);
+    } else if (kind === "option") {
+      options.push(id);
+    } else if (kind === "goal") {
+      goals.push(id);
     }
   }
 
@@ -130,14 +169,24 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
   }
 
   if (decisions.length === 0) {
-    return false;
+    return {
+      ...emptyDiagnostic,
+      all_option_ids: options,
+      all_goal_ids: goals,
+      unreachable_nodes: [...options, ...goals],
+    };
   }
+
+  // Track all reachable nodes from any decision
+  const allReachable = new Set<string>();
+  let foundValidPath = false;
 
   for (const decisionId of decisions) {
     const visited = new Set<string>();
     const queue: string[] = [decisionId];
     let hasGoal = false;
     let hasOption = false;
+    const reachableFromDecision = new Set<string>();
 
     while (queue.length > 0) {
       const current = queue.shift() as string;
@@ -145,6 +194,8 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
         continue;
       }
       visited.add(current);
+      reachableFromDecision.add(current);
+      allReachable.add(current);
 
       const kind = kinds.get(current);
       if (kind === "goal") {
@@ -154,7 +205,7 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
       }
 
       if (hasGoal && hasOption) {
-        return true;
+        foundValidPath = true;
       }
 
       const neighbours = adjacency.get(current);
@@ -170,7 +221,33 @@ function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
     }
   }
 
-  return false;
+  // Compute reachable options and goals
+  const reachableOptions = options.filter(id => allReachable.has(id));
+  const reachableGoals = goals.filter(id => allReachable.has(id));
+
+  // Compute unreachable nodes (options and goals not reachable from any decision)
+  const unreachableNodes = allNodeIds.filter(id => {
+    const kind = kinds.get(id);
+    // Only report options and goals as "unreachable" since they're the key targets
+    return (kind === "option" || kind === "goal") && !allReachable.has(id);
+  });
+
+  return {
+    passed: foundValidPath,
+    decision_ids: decisions,
+    reachable_options: reachableOptions,
+    reachable_goals: reachableGoals,
+    unreachable_nodes: unreachableNodes,
+    all_option_ids: options,
+    all_goal_ids: goals,
+  };
+}
+
+/**
+ * Simple boolean check for backward compatibility.
+ */
+function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
+  return checkConnectedMinimumStructure(graph).passed;
 }
 
 function validateMinimumStructure(graph: GraphV1 | undefined): MinimumStructureResult {
@@ -193,12 +270,26 @@ function validateMinimumStructure(graph: GraphV1 | undefined): MinimumStructureR
   }
 
   const hasMinimumCounts = missing.length === 0;
-  const hasConnectivity = hasMinimumCounts ? hasConnectedMinimumStructure(graph) : false;
+
+  // Only check connectivity if kind counts pass
+  if (!hasMinimumCounts) {
+    return {
+      valid: false,
+      missing,
+      counts,
+    };
+  }
+
+  // Get full connectivity diagnostic
+  const connectivity = checkConnectedMinimumStructure(graph);
+  const connectivityFailed = !connectivity.passed;
 
   return {
-    valid: hasMinimumCounts && hasConnectivity,
+    valid: connectivity.passed,
     missing,
     counts,
+    connectivity,
+    connectivity_failed: connectivityFailed,
   };
 }
 
@@ -622,6 +713,14 @@ export function buildCeeErrorResponse(
   return response;
 }
 
+// Pipeline stage for trace
+type PipelineStageEntry = {
+  name: "llm_draft" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "final_validation";
+  status: "success" | "failed" | "skipped" | "repaired";
+  duration_ms: number;
+  details?: Record<string, unknown>;
+};
+
 export async function finaliseCeeDraftResponse(
   input: DraftInputWithCeeExtras,
   rawBody: unknown,
@@ -633,6 +732,11 @@ export async function finaliseCeeDraftResponse(
 }> {
   const start = Date.now();
   const requestId = getRequestId(request);
+
+  // Pipeline stage timing for trace.pipeline
+  const pipelineStages: PipelineStageEntry[] = [];
+  let llmDraftStart = start;
+  let llmCallCount = 0;
 
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
@@ -834,6 +938,16 @@ export async function finaliseCeeDraftResponse(
     };
   }
 
+  // LLM draft stage completed successfully
+  const llmDraftEnd = Date.now();
+  llmCallCount = schemaRetryAttempted ? 2 : 1; // Count retry if attempted
+  pipelineStages.push({
+    name: "llm_draft",
+    status: "success",
+    duration_ms: llmDraftEnd - llmDraftStart,
+    details: schemaRetryAttempted ? { schema_retry_attempted: true } : undefined,
+  });
+
   const { payload, cost_usd, provider, model, repro_mismatch, structural_meta } = pipelineResult as {
     payload: any;
     cost_usd: number;
@@ -871,13 +985,30 @@ export async function finaliseCeeDraftResponse(
 
   // Run graph validation and auto-corrections (single goal, outcome beliefs, decision branches)
   // Uses checkSizeLimits: false since the pipeline already has size guards downstream
+  const nodeValidationStart = Date.now();
   const validationResult = validateAndFixGraph(graph, structural_meta, {
     checkSizeLimits: false, // Pipeline has existing size guards
     enforceSingleGoal: config.cee.enforceSingleGoal, // Configurable via CEE_ENFORCE_SINGLE_GOAL
   });
+  const nodeValidationEnd = Date.now();
 
   // Emit telemetry for validation results
   const { fixes } = validationResult;
+
+  // Determine node_validation stage status
+  const nodeValidationStatus = fixes.singleGoalApplied || fixes.outcomeBeliefsFilled > 0 || fixes.decisionBranchesNormalized
+    ? "repaired" as const
+    : "success" as const;
+  pipelineStages.push({
+    name: "node_validation",
+    status: nodeValidationStatus,
+    duration_ms: nodeValidationEnd - nodeValidationStart,
+    details: nodeValidationStatus === "repaired" ? {
+      single_goal_applied: fixes.singleGoalApplied,
+      outcome_beliefs_filled: fixes.outcomeBeliefsFilled,
+      decision_branches_normalized: fixes.decisionBranchesNormalized,
+    } : undefined,
+  });
   emit(TelemetryEvents.CeeGraphValidation, {
     request_id: requestId,
     single_goal_applied: fixes.singleGoalApplied,
@@ -1030,7 +1161,9 @@ export async function finaliseCeeDraftResponse(
 
   // Enforce minimum structure requirements for usable graphs.
   // If goal is missing, attempt deterministic repair before failing.
+  const connectivityCheckStart = Date.now();
   let structure = validateMinimumStructure(graph);
+  const connectivityCheckEnd = Date.now();
   let goalInferenceWarning: CEEStructuralWarningV1 | undefined;
 
   // Goal handling observability
@@ -1038,6 +1171,8 @@ export async function finaliseCeeDraftResponse(
   let goalSource: GoalSource = "llm_generated";
   const originalMissingKinds = structure.valid ? [] : [...structure.missing];
   let goalNodeId: string | undefined;
+  let goalRepairDurationMs = 0;
+  let goalRepairPerformed = false;
 
   // Check if LLM generated goal
   const llmGeneratedGoal = hasGoalNode(graph);
@@ -1047,6 +1182,7 @@ export async function finaliseCeeDraftResponse(
 
   if (!structure.valid && structure.missing.includes("goal")) {
     // Goal missing - attempt deterministic repair (no retry, just infer)
+    const goalRepairStart = Date.now();
     const explicitGoal = Array.isArray(input.context?.goals) && input.context.goals.length > 0
       ? input.context.goals[0]
       : undefined;
@@ -1057,9 +1193,11 @@ export async function finaliseCeeDraftResponse(
       graph = goalResult.graph;
       payload.graph = graph as any;
       goalNodeId = goalResult.goalNodeId;
+      goalRepairPerformed = true;
 
       // Re-validate after goal addition
       structure = validateMinimumStructure(graph);
+      goalRepairDurationMs = Date.now() - goalRepairStart;
 
       // Determine goal source based on how it was obtained
       if (goalResult.inferredFrom === "explicit") {
@@ -1109,9 +1247,94 @@ export async function finaliseCeeDraftResponse(
     ...(goalNodeId && { goal_node_id: goalNodeId }),
   };
 
+  // Add connectivity_check stage
+  const connectivityPassed = structure.valid || (structure.connectivity?.passed ?? false);
+  pipelineStages.push({
+    name: "connectivity_check",
+    status: connectivityPassed ? "success" : "failed",
+    duration_ms: connectivityCheckEnd - connectivityCheckStart,
+    details: structure.connectivity ? {
+      decision_count: structure.connectivity.decision_ids.length,
+      reachable_options: structure.connectivity.reachable_options.length,
+      reachable_goals: structure.connectivity.reachable_goals.length,
+      unreachable_count: structure.connectivity.unreachable_nodes.length,
+    } : undefined,
+  });
+
+  // Add goal_repair stage if it was attempted
+  if (goalRepairPerformed) {
+    pipelineStages.push({
+      name: "goal_repair",
+      status: structure.valid ? "repaired" : "failed",
+      duration_ms: goalRepairDurationMs,
+      details: {
+        goal_source: goalSource,
+        goal_node_id: goalNodeId,
+      },
+    });
+  } else if (originalMissingKinds.includes("goal")) {
+    // Goal was missing but repair wasn't performed (shouldn't happen, but track it)
+    pipelineStages.push({
+      name: "goal_repair",
+      status: "skipped",
+      duration_ms: 0,
+    });
+  }
+
+  // Emit connectivity check telemetry with counts and failure classification
+  if (structure.connectivity) {
+    // Compute failure_class for alerting and dashboarding
+    const reachableOptionCount = structure.connectivity.reachable_options.length;
+    const reachableGoalCount = structure.connectivity.reachable_goals.length;
+    const connectivityPassed = structure.connectivity.passed;
+
+    let failureClass: "none" | "no_path_to_options" | "no_path_to_goal" | "neither_reachable" | "partial";
+    if (connectivityPassed) {
+      failureClass = "none";
+    } else if (reachableOptionCount === 0 && reachableGoalCount === 0) {
+      failureClass = "neither_reachable";
+    } else if (reachableOptionCount === 0) {
+      failureClass = "no_path_to_options";
+    } else if (reachableGoalCount === 0) {
+      failureClass = "no_path_to_goal";
+    } else {
+      failureClass = "partial";
+    }
+
+    emit(TelemetryEvents.CeeConnectivityCheck, {
+      request_id: requestId,
+      // Existing arrays (keep for debugging)
+      decision_ids: structure.connectivity.decision_ids,
+      reachable_options: structure.connectivity.reachable_options,
+      reachable_goals: structure.connectivity.reachable_goals,
+      unreachable_nodes: structure.connectivity.unreachable_nodes,
+      // Counts for dashboards
+      decision_count: structure.connectivity.decision_ids.length,
+      option_count: structure.connectivity.all_option_ids.length,
+      goal_count: structure.connectivity.all_goal_ids.length,
+      reachable_option_count: reachableOptionCount,
+      reachable_goal_count: reachableGoalCount,
+      unreachable_count: structure.connectivity.unreachable_nodes.length,
+      edges_in_graph: edgeCount,
+      // Classification for alerting
+      connectivity_passed: connectivityPassed,
+      failure_class: failureClass,
+      all_kinds_present: structure.missing.length === 0,
+      repair_attempted: false, // Edge repair not yet implemented
+      repair_succeeded: false,
+    });
+  }
+
   if (!structure.valid) {
     const latencyMs = Date.now() - start;
-    const ceeCode: CEEErrorCode = "CEE_GRAPH_INVALID";
+
+    // Determine if this is a connectivity failure (all kinds present but not connected)
+    const isConnectivityFailure = structure.connectivity_failed && structure.missing.length === 0;
+
+    // Use distinct error code for connectivity failures (clients should branch on `code`)
+    const ceeCode: CEEErrorCode = isConnectivityFailure
+      ? "CEE_GRAPH_CONNECTIVITY_FAILED"
+      : "CEE_GRAPH_INVALID";
 
     // Extract observability fields for error diagnosis
     const rawNodeKinds = Array.isArray(graph?.nodes)
@@ -1133,6 +1356,8 @@ export async function finaliseCeeDraftResponse(
       graph_edges: edgeCount,
       missing_kinds: structure.missing,
       raw_node_kinds: rawNodeKinds,
+      connectivity_failed: isConnectivityFailure,
+      unreachable_nodes: structure.connectivity?.unreachable_nodes,
     });
 
     logCeeCall({
@@ -1146,21 +1371,43 @@ export async function finaliseCeeDraftResponse(
       hasValidationIssues: true,
     });
 
-    const missingList = structure.missing.join(", ");
-    const message = structure.missing.length
-      ? `Graph missing required elements: ${missingList}`
-      : "Graph does not meet minimum structure requirements";
+    // Use different message and reason for connectivity failures
+    const message = isConnectivityFailure
+      ? "Graph has all required node types but they are not connected via edges"
+      : structure.missing.length
+        ? `Graph missing required elements: ${structure.missing.join(", ")}`
+        : "Graph does not meet minimum structure requirements";
 
-    return {
-      statusCode: 400,
-      body: buildCeeErrorResponse(ceeCode, message, {
-        retryable: false,
-        requestId,
-        reason: "incomplete_structure",
-        nodeCount,
-        edgeCount,
-        missingKinds: structure.missing,
-        recovery: {
+    const reason = isConnectivityFailure ? "connectivity_failed" : "incomplete_structure";
+
+    // Build conditional hint based on actual diagnostic counts
+    const reachableOptionCount = structure.connectivity?.reachable_options.length ?? 0;
+    const reachableGoalCount = structure.connectivity?.reachable_goals.length ?? 0;
+
+    let connectivityHint: string;
+    if (reachableOptionCount === 0 && reachableGoalCount === 0) {
+      connectivityHint = "Neither options nor goal are reachable from decision via edges";
+    } else if (reachableOptionCount === 0) {
+      connectivityHint = "No option is reachable from decision via edges";
+    } else if (reachableGoalCount === 0) {
+      connectivityHint = "Options are reachable but goal is not connected to the causal chain";
+    } else {
+      connectivityHint = "Graph has partial connectivity — some nodes are unreachable";
+    }
+
+    // Build recovery guidance based on failure type
+    const recovery = isConnectivityFailure
+      ? {
+          suggestion: "The graph has all required node types but they are not connected. Ensure outcomes and risks connect to the goal node.",
+          hints: [
+            "Check that outcome nodes have edges leading to the goal node.",
+            "Check that risk nodes have edges leading to the goal node.",
+            "Ensure there is a path from the decision through options to outcomes/risks and finally to the goal.",
+          ],
+          example:
+            "Edges should flow: decision → options → factors → outcomes/risks → goal",
+        }
+      : {
           suggestion:
             "Your description needs to specify the decision being made, the options being considered, and at least one goal.",
           hints: [
@@ -1170,15 +1417,41 @@ export async function finaliseCeeDraftResponse(
           ],
           example:
             "Should we hire a contractor or build in-house? Options: (1) Hire contractors, (2) Outsource to agency, (3) Build with current team.",
-        },
-        details: {
-          missing_kinds: structure.missing,
-          node_count: nodeCount,
-          edge_count: edgeCount,
-          counts: structure.counts,
-          raw_node_kinds: rawNodeKinds,
-          node_labels: nodeLabels,
-        },
+        };
+
+    // Build details including connectivity diagnostic when available
+    const details: Record<string, unknown> = {
+      missing_kinds: structure.missing,
+      node_count: nodeCount,
+      edge_count: edgeCount,
+      counts: structure.counts,
+      raw_node_kinds: rawNodeKinds,
+      node_labels: nodeLabels,
+    };
+
+    // Add connectivity diagnostic for connectivity failures
+    if (isConnectivityFailure && structure.connectivity) {
+      details.connectivity = {
+        decision_ids: structure.connectivity.decision_ids,
+        reachable_options: structure.connectivity.reachable_options,
+        reachable_goals: structure.connectivity.reachable_goals,
+        unreachable_nodes: structure.connectivity.unreachable_nodes,
+      };
+      // Use conditional hint based on diagnostic counts
+      details.hint = connectivityHint;
+    }
+
+    return {
+      statusCode: 400,
+      body: buildCeeErrorResponse(ceeCode, message, {
+        retryable: false,
+        requestId,
+        reason,
+        nodeCount,
+        edgeCount,
+        missingKinds: structure.missing,
+        recovery,
+        details,
       }),
     };
   }
@@ -1441,6 +1714,7 @@ export async function finaliseCeeDraftResponse(
   // Run the CEE verification pipeline as a final hard guard for successful
   // draft responses. This ensures the response conforms to the Zod schema and
   // attaches metadata-only verification information under trace.verification.
+  const finalValidationStart = Date.now();
   let verifiedResponse: CEEDraftGraphResponseV1;
   try {
     const { response } = await verificationPipeline.verify(
@@ -1455,6 +1729,74 @@ export async function finaliseCeeDraftResponse(
       },
     );
     verifiedResponse = response as CEEDraftGraphResponseV1;
+    const finalValidationEnd = Date.now();
+
+    // Add final_validation stage
+    pipelineStages.push({
+      name: "final_validation",
+      status: "success",
+      duration_ms: finalValidationEnd - finalValidationStart,
+    });
+
+    // Build pipeline trace and add to response
+    const totalDurationMs = finalValidationEnd - start;
+    const pipelineStatus = pipelineStages.some(s => s.status === "failed")
+      ? "failed" as const
+      : pipelineStages.some(s => s.status === "repaired")
+        ? "repaired" as const
+        : "success" as const;
+
+    // Build connectivity diagnostic for pipeline trace
+    const connectivityDiagnostic = structure.connectivity ? {
+      checked: true,
+      passed: structure.connectivity.passed,
+      decision_ids: structure.connectivity.decision_ids,
+      reachable_options: structure.connectivity.reachable_options,
+      reachable_goals: structure.connectivity.reachable_goals,
+      unreachable_nodes: structure.connectivity.unreachable_nodes,
+    } : {
+      checked: false,
+      passed: false,
+      decision_ids: [],
+      reachable_options: [],
+      reachable_goals: [],
+      unreachable_nodes: [],
+    };
+
+    const pipelineTrace: Record<string, unknown> = {
+      status: pipelineStatus,
+      total_duration_ms: totalDurationMs,
+      llm_call_count: llmCallCount,
+      stages: pipelineStages,
+      connectivity: connectivityDiagnostic,
+    };
+
+    // Add detailed LLM call info and final graph only in non-production (dev/staging)
+    if (!isProduction()) {
+      // Include raw LLM output details if available
+      if (rawLlmOutput !== undefined) {
+        pipelineTrace.llm_calls = [{
+          provider,
+          model,
+          duration_ms: pipelineStages.find(s => s.name === "llm_draft")?.duration_ms ?? 0,
+          raw_output_truncated: rawLlmOutputTruncated ?? false,
+        }];
+      }
+      // Include final graph summary for debugging
+      pipelineTrace.final_graph = {
+        node_count: nodeCount,
+        edge_count: edgeCount,
+        node_kinds: Array.isArray(graph?.nodes)
+          ? [...new Set((graph!.nodes as any[]).map(n => n?.kind).filter(Boolean))]
+          : [],
+      };
+    }
+
+    // Attach pipeline trace to response
+    verifiedResponse.trace = {
+      ...verifiedResponse.trace,
+      pipeline: pipelineTrace,
+    } as any;
   } catch (error) {
     const message = error instanceof Error ? error.message || "verification failed" : "verification failed";
 

@@ -48,7 +48,9 @@ export {
 
 export {
   generateImprovementGuidance,
+  generateImprovementGuidanceItems,
   type ImprovementGuidanceItem,
+  type ImprovementGuidanceResult,
   type ImprovementSource,
   type ImprovementGuidanceContext,
 } from "./improvementGuidance.js";

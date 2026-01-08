@@ -390,10 +390,12 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
 
     expect(statusCode).toBe(400);
     expect(error.schema).toBe("cee.error.v1");
-    expect(error.code).toBe("CEE_GRAPH_INVALID");
+    // Uses distinct error code for connectivity failures (all kinds present but not connected)
+    expect(error.code).toBe("CEE_GRAPH_CONNECTIVITY_FAILED");
     expect(error.retryable).toBe(false);
+    // Now correctly reports "connectivity_failed" when all kinds present but not connected
     expect(error.details).toMatchObject({
-      reason: "incomplete_structure",
+      reason: "connectivity_failed",
       node_count: 3,
       edge_count: 1,
     });
@@ -401,7 +403,7 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
 
     const failedEvents = telemetrySink.getEventsByName(TelemetryEvents.CeeDraftGraphFailed);
     expect(failedEvents.length).toBe(1);
-    expect(failedEvents[0].data.error_code).toBe("CEE_GRAPH_INVALID");
+    expect(failedEvents[0].data.error_code).toBe("CEE_GRAPH_CONNECTIVITY_FAILED");
     expect(failedEvents[0].data.http_status).toBe(400);
     expect(failedEvents[0].data.graph_nodes).toBe(3);
     expect(failedEvents[0].data.graph_edges).toBe(1);

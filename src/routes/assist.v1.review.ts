@@ -387,12 +387,27 @@ export default async function route(app: FastifyInstance) {
         evidenceQuality,
       });
 
+      // Get the next_steps block factors early for use in guidance generation
+      const nextStepsBlockEarly = allBlocks.find((b) => b.type === "next_steps");
+      const blockFactorsEarly = nextStepsBlockEarly && nextStepsBlockEarly.type === "next_steps"
+        ? nextStepsBlockEarly.factors
+        : { completeness: 0, structure: 0, evidence: 0, bias_risk: 1 };
+
       // Generate improvement guidance for Results Panel
-      const improvementGuidance = generateImprovementGuidance({
+      // Pass readiness to ensure guidance is never empty when model needs improvement
+      const guidanceResult = generateImprovementGuidance({
         graph: input.graph as { nodes: Array<{ id: string; kind: string; label: string; observed_state?: { value?: number } }> },
         investigationSuggestions: robustnessSynthesis?.investigation_suggestions,
         biasFindings,
+        readiness: {
+          level: assessment.level,
+          score: assessment.score,
+          factors: blockFactorsEarly,
+          summary: assessment.summary,
+          recommendations: assessment.recommendations,
+        },
       });
+      const improvementGuidance = guidanceResult.items;
 
       // Generate rationale for Results Panel
       const goalNode = input.graph.nodes.find((n) => n.kind === "goal");
@@ -480,11 +495,41 @@ export default async function route(app: FastifyInstance) {
         insights: insights.length > 0 ? insights : undefined,
         // Improvement guidance for Results Panel
         improvement_guidance: improvementGuidance.length > 0 ? improvementGuidance : undefined,
+        // Guidance truncation flag (when more guidance available than shown)
+        guidance_truncated: guidanceResult.truncated || undefined,
         // Plain English rationale for Results Panel
         rationale: rationale || undefined,
       };
 
-      // Emit success telemetry
+      // Compute telemetry aggregates for dashboards (no raw content)
+      const insightTypeCounts = insights.reduce((acc, i) => {
+        acc[i.type] = (acc[i.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const guidanceCategoryCounts = improvementGuidance.reduce((acc, g) => {
+        acc[g.source] = (acc[g.source] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const highSeverityInsightCount = insights.filter(i => i.severity === "high").length;
+
+      // Derive decision_quality_summary for trending
+      let decisionQualitySummary: "good" | "mixed" | "poor";
+      if (assessment.level === "ready" && highSeverityInsightCount === 0) {
+        decisionQualitySummary = "good";
+      } else if (assessment.level === "not_ready" || highSeverityInsightCount >= 2) {
+        decisionQualitySummary = "poor";
+      } else {
+        decisionQualitySummary = "mixed";
+      }
+
+      // Find dominant blocker (lowest factor if any is blocking)
+      const dominantBlocker = readinessFactors
+        .filter(f => f.status === "blocking")
+        .map(f => f.label.toLowerCase().replace(/ /g, "_"))[0] || null;
+
+      // Emit success telemetry with enhanced aggregates
       emit(TelemetryEvents.CeeReviewSucceeded, {
         ...telemetryCtx,
         latency_ms: latencyMs,
@@ -503,6 +548,19 @@ export default async function route(app: FastifyInstance) {
         insights_count: insights.length,
         improvement_guidance_count: improvementGuidance.length,
         has_rationale: Boolean(rationale),
+        // Enhanced aggregates (Task 5)
+        insight_type_counts: insightTypeCounts,
+        guidance_category_counts: guidanceCategoryCounts,
+        guidance_truncated: guidanceResult.truncated,
+        guidance_priority_min: improvementGuidance.length > 0
+          ? Math.min(...improvementGuidance.map(g => g.priority))
+          : null,
+        guidance_priority_max: improvementGuidance.length > 0
+          ? Math.max(...improvementGuidance.map(g => g.priority))
+          : null,
+        decision_quality_summary: decisionQualitySummary,
+        dominant_blocker: dominantBlocker,
+        high_severity_insight_count: highSeverityInsightCount,
       });
 
       logCeeCall({

@@ -2958,6 +2958,104 @@ components:
               description: Node kinds that were missing before any repair
               items:
                 type: string
+            goal_node_id:
+              type: string
+              description: ID of the goal node if one was added via repair
+        pipeline:
+          type: object
+          description: Pipeline execution trace for debugging and observability
+          properties:
+            status:
+              type: string
+              enum: [success, failed, repaired]
+              description: Overall pipeline status
+            total_duration_ms:
+              type: number
+              description: Total pipeline execution time in milliseconds
+            llm_call_count:
+              type: integer
+              description: Number of LLM calls made (including retries)
+            stages:
+              type: array
+              description: Individual pipeline stages with timing
+              items:
+                type: object
+                required:
+                  - name
+                  - status
+                  - duration_ms
+                properties:
+                  name:
+                    type: string
+                    enum: [llm_draft, node_validation, connectivity_check, goal_repair, edge_repair, final_validation]
+                    description: Stage name
+                  status:
+                    type: string
+                    enum: [success, failed, skipped, repaired]
+                    description: Stage outcome
+                  duration_ms:
+                    type: number
+                    description: Stage duration in milliseconds
+                  details:
+                    type: object
+                    additionalProperties: true
+                    description: Stage-specific diagnostic details
+            connectivity:
+              type: object
+              description: Connectivity validation diagnostic
+              properties:
+                checked:
+                  type: boolean
+                  description: Whether connectivity check was performed
+                passed:
+                  type: boolean
+                  description: Whether connectivity check passed
+                decision_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: IDs of decision nodes found
+                reachable_options:
+                  type: array
+                  items:
+                    type: string
+                  description: Option node IDs reachable from decision
+                reachable_goals:
+                  type: array
+                  items:
+                    type: string
+                  description: Goal node IDs reachable from decision
+                unreachable_nodes:
+                  type: array
+                  items:
+                    type: string
+                  description: Node IDs not reachable from any decision
+            llm_calls:
+              type: array
+              description: Detailed LLM call information (dev/staging only)
+              items:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  duration_ms:
+                    type: number
+                  raw_output_truncated:
+                    type: boolean
+            final_graph:
+              type: object
+              description: Final graph summary (dev/staging only)
+              properties:
+                node_count:
+                  type: integer
+                edge_count:
+                  type: integer
+                node_kinds:
+                  type: array
+                  items:
+                    type: string
 
     CEEValidationIssue:
       type: object
@@ -3082,6 +3180,7 @@ components:
         - CEE_TIMEOUT
         - CEE_RATE_LIMIT
         - CEE_GRAPH_INVALID
+        - CEE_GRAPH_CONNECTIVITY_FAILED
         - CEE_VALIDATION_FAILED
         - CEE_CLARIFICATION_REQUIRED
         - CEE_INTERNAL_ERROR

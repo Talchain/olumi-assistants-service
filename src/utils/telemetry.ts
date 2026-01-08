@@ -167,6 +167,9 @@ export const TelemetryEvents = {
   // Goal inference (defence-in-depth for missing goal nodes)
   CeeGoalInferred: "cee.draft_graph.goal_inferred",
 
+  // Connectivity validation (P0 diagnostics)
+  CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
   FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
 

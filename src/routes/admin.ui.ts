@@ -17,6 +17,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { log, emit } from '../utils/telemetry.js';
+import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
+
+/**
+ * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
+ * This ensures admin UI stays in sync with all registered prompt tasks.
+ */
+function generateTaskOptions(): string {
+  return PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
+}
+
+/**
+ * Generate HTML options for task filter dropdown (includes "All Tasks" option).
+ */
+function generateTaskFilterOptions(): string {
+  const allTasksOption = '<option value="">All Tasks</option>';
+  const taskOptions = PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
+  return `${allTasksOption}\n                    ${taskOptions}`;
+}
 
 /**
  * Telemetry event for blocked IP access
@@ -415,15 +433,7 @@ function generateAdminUI(): string {
 
                 <div class="flex mt-2 mb-2">
                   <select x-model="filter.taskId" @change="loadPrompts()" style="width: auto;">
-                    <option value="">All Tasks</option>
-                    <option value="draft_graph">draft_graph</option>
-                    <option value="suggest_options">suggest_options</option>
-                    <option value="repair_graph">repair_graph</option>
-                    <option value="clarify_brief">clarify_brief</option>
-                    <option value="critique_graph">critique_graph</option>
-                    <option value="bias_check">bias_check</option>
-                    <option value="evidence_helper">evidence_helper</option>
-                    <option value="sensitivity_coach">sensitivity_coach</option>
+                    ${generateTaskFilterOptions()}
                   </select>
                   <select x-model="filter.status" @change="loadPrompts()" style="width: auto;">
                     <option value="">All Statuses</option>
@@ -581,14 +591,7 @@ function generateAdminUI(): string {
             <div class="form-group">
               <label>Task</label>
               <select x-model="newPrompt.taskId">
-                <option value="draft_graph">draft_graph</option>
-                <option value="suggest_options">suggest_options</option>
-                <option value="repair_graph">repair_graph</option>
-                <option value="clarify_brief">clarify_brief</option>
-                <option value="critique_graph">critique_graph</option>
-                <option value="bias_check">bias_check</option>
-                <option value="evidence_helper">evidence_helper</option>
-                <option value="sensitivity_coach">sensitivity_coach</option>
+                ${generateTaskOptions()}
               </select>
             </div>
 

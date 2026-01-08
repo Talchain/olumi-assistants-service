@@ -7,20 +7,33 @@
  * - Fragile edges from robustness analysis
  * - Bias mitigations from bias detection
  * - Structural recommendations from factor analysis
+ * - Readiness recommendations (for caution/not_ready states)
  */
 
 import type { components } from "../../generated/openapi.d.ts";
 import type { KeyAssumptionsResult } from "../../cee/graph-readiness/types.js";
+import type { ReadinessAssessment } from "./readinessAssessor.js";
 
 type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 
-export type ImprovementSource = "missing_baseline" | "fragile_edge" | "bias" | "structure";
+export type ImprovementSource = "missing_baseline" | "fragile_edge" | "bias" | "structure" | "readiness";
 
 export interface ImprovementGuidanceItem {
   priority: number; // 1-5 (1 = highest)
   action: string;
   reason: string;
   source: ImprovementSource;
+}
+
+/**
+ * Result of improvement guidance generation with metadata
+ */
+export interface ImprovementGuidanceResult {
+  items: ImprovementGuidanceItem[];
+  /** True when more items were available but capped at MAX_GUIDANCE_ITEMS */
+  truncated: boolean;
+  /** Number of items before truncation */
+  total_available: number;
 }
 
 export interface ImprovementGuidanceContext {
@@ -50,19 +63,26 @@ export interface ImprovementGuidanceContext {
   }>;
   /** Bias findings with micro-interventions */
   biasFindings?: CEEBiasFindingV1[];
+  /** Readiness assessment for ensuring minimum guidance when not ready */
+  readiness?: ReadinessAssessment;
 }
 
 const MAX_GUIDANCE_ITEMS = 5;
 const MAX_MISSING_BASELINE_ITEMS = 2;
 const MAX_BIAS_ITEMS = 2;
+const MAX_READINESS_ITEMS = 2;
 
 /**
  * Generate prioritized improvement guidance from multiple sources.
  * Returns at most 5 items, prioritized by impact and actionability.
+ *
+ * IMPORTANT: When readiness.level is "caution" or "not_ready" and no
+ * other guidance is available, this function will inject readiness
+ * recommendations to ensure users always have actionable next steps.
  */
 export function generateImprovementGuidance(
   context: ImprovementGuidanceContext
-): ImprovementGuidanceItem[] {
+): ImprovementGuidanceResult {
   const items: ImprovementGuidanceItem[] = [];
 
   // 1. Missing baselines (highest priority if present)
@@ -81,8 +101,41 @@ export function generateImprovementGuidance(
   const structuralImprovements = mapFactorRecommendations(context.factorRecommendations);
   items.push(...structuralImprovements);
 
+  // 5. Readiness recommendations (fallback for caution/not_ready)
+  // Only inject if readiness indicates issues AND we have few/no items
+  const readinessItems = mapReadinessRecommendations(context.readiness, items.length);
+  items.push(...readinessItems);
+
   // Prioritize and dedupe
-  return prioritizeAndDedupe(items).slice(0, MAX_GUIDANCE_ITEMS);
+  const dedupedItems = prioritizeAndDedupe(items);
+  const totalAvailable = dedupedItems.length;
+  const truncated = totalAvailable > MAX_GUIDANCE_ITEMS;
+  const finalItems = dedupedItems.slice(0, MAX_GUIDANCE_ITEMS);
+
+  // Ensure minimum guidance rule: if readiness is caution/not_ready and
+  // guidance array is empty, inject at least one blocker-derived action
+  if (finalItems.length === 0 && context.readiness) {
+    const minGuidance = ensureMinimumGuidance(context.readiness);
+    if (minGuidance) {
+      finalItems.push(minGuidance);
+    }
+  }
+
+  return {
+    items: finalItems,
+    truncated,
+    total_available: totalAvailable,
+  };
+}
+
+/**
+ * Legacy function signature for backward compatibility.
+ * Returns just the items array.
+ */
+export function generateImprovementGuidanceItems(
+  context: ImprovementGuidanceContext
+): ImprovementGuidanceItem[] {
+  return generateImprovementGuidance(context).items;
 }
 
 /**
@@ -184,4 +237,92 @@ function prioritizeAndDedupe(
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Map readiness recommendations to guidance items.
+ * Only injects if readiness is caution/not_ready AND we have few existing items.
+ *
+ * @param readiness - ReadinessAssessment from readinessAssessor
+ * @param existingItemCount - Number of guidance items already collected
+ */
+function mapReadinessRecommendations(
+  readiness: ImprovementGuidanceContext["readiness"],
+  existingItemCount: number
+): ImprovementGuidanceItem[] {
+  if (!readiness) return [];
+
+  // Only inject readiness recommendations if:
+  // 1. Level is caution or not_ready
+  // 2. We have few existing items (leave room for readiness guidance)
+  const needsReadinessGuidance =
+    (readiness.level === "caution" || readiness.level === "not_ready") &&
+    existingItemCount < 3;
+
+  if (!needsReadinessGuidance) return [];
+  if (!readiness.recommendations || readiness.recommendations.length === 0) return [];
+
+  // Convert readiness recommendations to guidance items
+  // Priority 2 for not_ready (higher urgency), 3 for caution
+  const basePriority = readiness.level === "not_ready" ? 2 : 3;
+
+  return readiness.recommendations.slice(0, MAX_READINESS_ITEMS).map((rec, idx) => ({
+    priority: basePriority + idx,
+    action: rec,
+    reason: readiness.level === "not_ready"
+      ? "Critical: Model not ready for analysis"
+      : "Model needs improvement before reliable analysis",
+    source: "readiness" as const,
+  }));
+}
+
+/**
+ * Ensure minimum guidance when readiness indicates issues.
+ * This is the last-resort fallback when all other sources produce no guidance.
+ *
+ * @param readiness - ReadinessAssessment from readinessAssessor
+ * @returns A single guidance item or undefined
+ */
+function ensureMinimumGuidance(
+  readiness: ReadinessAssessment
+): ImprovementGuidanceItem | undefined {
+  // Only apply to caution or not_ready states
+  if (readiness.level === "ready") return undefined;
+
+  // Try to use a recommendation first
+  if (readiness.recommendations && readiness.recommendations.length > 0) {
+    return {
+      priority: 1,
+      action: readiness.recommendations[0],
+      reason: readiness.summary || "Model needs improvement",
+      source: "readiness",
+    };
+  }
+
+  // Fallback to summary-based guidance
+  if (readiness.summary) {
+    // Extract actionable hint from summary
+    const action = readiness.level === "not_ready"
+      ? "Address critical model issues before proceeding"
+      : "Review model structure for potential improvements";
+
+    return {
+      priority: 1,
+      action,
+      reason: readiness.summary,
+      source: "readiness",
+    };
+  }
+
+  // Final fallback - generic guidance based on level
+  if (readiness.level === "not_ready") {
+    return {
+      priority: 1,
+      action: "Complete the decision model before analysis",
+      reason: "Model is missing key elements required for reliable analysis",
+      source: "readiness",
+    };
+  }
+
+  return undefined;
 }

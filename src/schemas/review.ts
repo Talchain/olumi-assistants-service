@@ -592,6 +592,7 @@ export const ImprovementSource = z.enum([
   "fragile_edge",
   "bias",
   "structure",
+  "readiness",
 ]);
 
 export type ImprovementSourceT = z.infer<typeof ImprovementSource>;
@@ -688,6 +689,9 @@ export const ReviewResponse = z.object({
 
   /** Prioritized improvement actions for Results Panel */
   improvement_guidance: z.array(ImprovementGuidanceItem).optional(),
+
+  /** True when more guidance items were available but capped (MAX_GUIDANCE_ITEMS = 5) */
+  guidance_truncated: z.boolean().optional(),
 
   /** Plain English rationale for the recommendation */
   rationale: Rationale.optional(),
