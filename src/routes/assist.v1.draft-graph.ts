@@ -384,11 +384,30 @@ export default async function route(app: FastifyInstance) {
     // Transform to requested schema if response is successful
     if (statusCode === 200 && body && typeof body === "object" && "graph" in body) {
       if (schemaVersion === "v3") {
+        // DEBUG: Log V1 trace.pipeline before transform
+        const v1Trace = (body as any).trace;
+        log.info({
+          request_id: requestId,
+          v1_trace_keys: v1Trace ? Object.keys(v1Trace) : [],
+          v1_has_pipeline: !!(v1Trace?.pipeline),
+          v1_pipeline_status: v1Trace?.pipeline?.status,
+          event: "cee.pipeline.debug.v1",
+        }, `[DEBUG] V1 trace before V3 transform`);
+
         const v3Body = transformResponseToV3(body as any, {
           brief: baseInput.brief,
           requestId,
           strictMode,
         });
+
+        // DEBUG: Log V3 trace.pipeline after transform
+        log.info({
+          request_id: requestId,
+          v3_trace_keys: v3Body.trace ? Object.keys(v3Body.trace) : [],
+          v3_has_pipeline: !!(v3Body.trace?.pipeline),
+          v3_pipeline_status: (v3Body.trace as any)?.pipeline?.status,
+          event: "cee.pipeline.debug.v3",
+        }, `[DEBUG] V3 trace after transform`);
 
         // Validate in strict mode
         if (strictMode) {

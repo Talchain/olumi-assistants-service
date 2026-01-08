@@ -130,6 +130,8 @@ export interface V1DraftGraphResponse {
       original_missing_kinds?: string[];
       goal_node_id?: string;
     };
+    /** Pipeline diagnostics (P0) */
+    pipeline?: Record<string, unknown>;
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{

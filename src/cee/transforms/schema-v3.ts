@@ -500,6 +500,8 @@ export function transformResponseToV3(
       correlation_id: context.correlationId ?? v1Response.trace?.correlation_id,
       engine: v1Response.trace?.engine,
       goal_handling: v1Response.trace?.goal_handling,
+      // P0: Pipeline diagnostics for debug panel
+      pipeline: v1Response.trace?.pipeline,
     },
     draft_warnings: v1Response.draft_warnings,
   };

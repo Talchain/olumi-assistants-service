@@ -334,6 +334,8 @@ export const CEEGraphResponseV3 = z.object({
       original_missing_kinds: z.array(z.string()).optional(),
       goal_node_id: z.string().optional(),
     }).optional(),
+    /** Pipeline diagnostics (P0) */
+    pipeline: z.record(z.unknown()).optional(),
   }).optional(),
 });
 export type CEEGraphResponseV3T = z.infer<typeof CEEGraphResponseV3>;

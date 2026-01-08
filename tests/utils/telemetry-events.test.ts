@@ -134,6 +134,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
         CeeDraftGraphFailed: "cee.draft_graph.failed",
 
+        // Connectivity validation (P0 diagnostics)
+        CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
+
         // Uniform strength detection (LLM output quality)
         CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
 
@@ -568,6 +571,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.requested": [TelemetryEvents.CeeDraftGraphRequested],
         "cee.draft_graph.succeeded": [TelemetryEvents.CeeDraftGraphSucceeded],
         "cee.draft_graph.failed": [TelemetryEvents.CeeDraftGraphFailed],
+        "cee.draft_graph.connectivity_check": [TelemetryEvents.CeeConnectivityCheck],
         "cee.draft_graph.uniform_strengths_detected": [TelemetryEvents.CeeUniformStrengthsDetected],
         "cee.draft_graph.goal_inferred": [TelemetryEvents.CeeGoalInferred],
         "cee.explain_graph.requested": [TelemetryEvents.CeeExplainGraphRequested],
@@ -879,6 +883,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.requested",
         "cee.draft_graph.succeeded",
         "cee.draft_graph.failed",
+
+        // Connectivity validation (P0 diagnostics)
+        "cee.draft_graph.connectivity_check",
 
         // Uniform strength detection (LLM output quality)
         "cee.draft_graph.uniform_strengths_detected",

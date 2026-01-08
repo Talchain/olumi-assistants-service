@@ -61,12 +61,114 @@ export const CEEWeightSuggestionV1Schema = z.object({
 
 export type CEEWeightSuggestionV1T = z.infer<typeof CEEWeightSuggestionV1Schema>;
 
+// ============================================================================
+// Pipeline Trace Schemas (P0 Diagnostics)
+// ============================================================================
+
+/** Pipeline stage status */
+export const PipelineStageStatusSchema = z.enum([
+  "success",
+  "failed",
+  "skipped",
+  "repaired",
+]);
+
+/** Pipeline stage name */
+export const PipelineStageNameSchema = z.enum([
+  "llm_draft",
+  "node_validation",
+  "connectivity_check",
+  "goal_repair",
+  "edge_repair",
+  "final_validation",
+]);
+
+/** Individual pipeline stage */
+export const PipelineStageSchema = z.object({
+  name: PipelineStageNameSchema,
+  status: PipelineStageStatusSchema,
+  duration_ms: z.number(),
+  details: z.record(z.unknown()).optional(),
+});
+
+export type PipelineStageT = z.infer<typeof PipelineStageSchema>;
+
+/** LLM call trace (for debugging) */
+export const LlmCallTraceSchema = z.object({
+  id: z.string(),
+  model: z.string(),
+  duration_ms: z.number(),
+  prompt_tokens: z.number().optional(),
+  completion_tokens: z.number().optional(),
+  // Full request/response only in dev/staging (not production)
+  request: z.record(z.unknown()).optional(),
+  response: z.record(z.unknown()).optional(),
+});
+
+export type LlmCallTraceT = z.infer<typeof LlmCallTraceSchema>;
+
+/** Connectivity diagnostic info */
+export const ConnectivityDiagnosticSchema = z.object({
+  checked: z.boolean(),
+  passed: z.boolean(),
+  decision_ids: z.array(z.string()),
+  reachable_options: z.array(z.string()),
+  reachable_goals: z.array(z.string()),
+  unreachable_nodes: z.array(z.string()),
+  edges_added: z.array(z.object({
+    from: z.string(),
+    to: z.string(),
+  })).optional(),
+});
+
+export type ConnectivityDiagnosticT = z.infer<typeof ConnectivityDiagnosticSchema>;
+
+/** Final graph summary in trace */
+export const FinalGraphTraceSchema = z.object({
+  node_count: z.number(),
+  edge_count: z.number(),
+  // Full nodes/edges only in dev/staging
+  nodes: z.array(z.record(z.unknown())).optional(),
+  edges: z.array(z.record(z.unknown())).optional(),
+});
+
+export type FinalGraphTraceT = z.infer<typeof FinalGraphTraceSchema>;
+
+/** Pipeline overall status */
+export const PipelineStatusSchema = z.enum([
+  "success",
+  "success_with_repairs",
+  "failed",
+]);
+
+/** Complete pipeline trace */
+export const PipelineTraceSchema = z.object({
+  status: PipelineStatusSchema,
+  total_duration_ms: z.number(),
+  llm_call_count: z.number(),
+  stages: z.array(PipelineStageSchema),
+  connectivity: ConnectivityDiagnosticSchema.optional(),
+  llm_calls: z.array(LlmCallTraceSchema).optional(),
+  final_graph: FinalGraphTraceSchema.optional(),
+});
+
+export type PipelineTraceT = z.infer<typeof PipelineTraceSchema>;
+
 export const CEETraceMetaSchema = z
   .object({
     request_id: z.string().optional(),
     correlation_id: z.string().optional(),
     engine: z.record(z.any()).optional(),
     context_id: z.string().optional(),
+    // Pipeline diagnostics (P0)
+    pipeline: PipelineTraceSchema.optional(),
+    // Goal handling (existing)
+    goal_handling: z.object({
+      goal_source: z.enum(["llm_generated", "retry_generated", "inferred", "placeholder"]),
+      retry_attempted: z.boolean(),
+      original_missing_kinds: z.array(z.string()).optional(),
+      goal_node_id: z.string().optional(),
+    }).optional(),
   })
   .passthrough();
 
