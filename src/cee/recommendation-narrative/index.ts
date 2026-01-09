@@ -30,6 +30,8 @@ import {
   generatePolicyNarrative,
   generateStepExplanations,
   generateDependenciesExplanation,
+  extractGoalContext,
+  generateWhyExplanation,
 } from "./templates.js";
 
 import { sanitiseLabel } from "../../utils/label-sanitiser.js";
@@ -42,24 +44,35 @@ export * from "./types.js";
 export function generateRecommendation(
   input: GenerateRecommendationInput,
 ): GenerateRecommendationOutput {
-  const { ranked_actions, goal_label, context: _context, tone = "formal" } = input;
+  const { ranked_actions, goal_label, brief, context: _context, tone = "formal", drivers } = input;
 
   // Sort by rank (ascending) to get winner
   const sorted = [...ranked_actions].sort((a, b) => a.rank - b.rank);
   const winner = sorted[0];
   const runnerUp = sorted[1];
 
-  const headline = generateHeadline(winner, runnerUp, tone);
+  // Extract goal context from brief or use explicit goal_label
+  const goalContext = extractGoalContext(brief, goal_label);
+
+  // Get confidence level for headline
+  const { statement: confidence_statement, confidence } =
+    generateConfidenceStatement(winner, ranked_actions, tone);
+
+  // Generate contextualised headline with goal and confidence
+  const headline = generateHeadline(winner, runnerUp, tone, goalContext, confidence);
+
   const recommendation_narrative = generateNarrative(
     winner,
     runnerUp,
     goal_label,
     tone,
   );
-  const { statement: confidence_statement, confidence: _confidence } =
-    generateConfidenceStatement(winner, ranked_actions, tone);
+
   const alternatives_summary = generateAlternativesSummary(ranked_actions, tone);
   const caveat = generateCaveat(winner, runnerUp, tone);
+
+  // Generate "why" explanation with driver impact
+  const why = generateWhyExplanation(winner, drivers, goal_label);
 
   return {
     headline,
@@ -67,6 +80,7 @@ export function generateRecommendation(
     confidence_statement,
     alternatives_summary,
     caveat,
+    why,
     provenance: "cee",
   };
 }

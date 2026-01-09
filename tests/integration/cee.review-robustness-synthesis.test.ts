@@ -145,20 +145,19 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       expect(body.robustness_synthesis.headline).toBe(
         "87% confident that Premium Pricing remains your best option"
       );
+      // With contextualised templates, check for key elements
       expect(body.robustness_synthesis.assumption_explanations).toHaveLength(1);
-      expect(body.robustness_synthesis.assumption_explanations[0]).toEqual({
-        edge_id: "fac_price->goal_revenue",
-        explanation:
-          "If the effect of Price on Revenue is weaker than modelled, Economy Pricing may become preferred",
-        severity: "fragile",
-      });
+      expect(body.robustness_synthesis.assumption_explanations[0].edge_id).toBe("fac_price->goal_revenue");
+      expect(body.robustness_synthesis.assumption_explanations[0].severity).toBe("fragile");
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("Price");
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("Revenue");
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("Economy Pricing");
+
       expect(body.robustness_synthesis.investigation_suggestions).toHaveLength(1);
-      expect(body.robustness_synthesis.investigation_suggestions[0]).toEqual({
-        factor_id: "fac_market_size",
-        suggestion:
-          "Validate your Market Size estimate — this factor has high influence on the outcome",
-        elasticity: 0.73,
-      });
+      expect(body.robustness_synthesis.investigation_suggestions[0].factor_id).toBe("fac_market_size");
+      expect(body.robustness_synthesis.investigation_suggestions[0].elasticity).toBe(0.73);
+      expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain("Market Size");
+      expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain("high influence");
     });
   });
 
@@ -188,8 +187,9 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       expect(body.robustness_synthesis.headline).toBe(
         "75% confident that Hire Engineers remains your best option"
       );
-      expect(body.robustness_synthesis.assumption_explanations).toBeUndefined();
-      expect(body.robustness_synthesis.investigation_suggestions).toBeUndefined();
+      // With fallback behavior, these have fallback messages
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("No critical assumptions");
+      expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain("stable influence");
     });
 
     it("returns synthesis with only fragile edges", async () => {
@@ -216,11 +216,12 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       const body = JSON.parse(res.body);
 
       expect(body.robustness_synthesis).toBeDefined();
-      expect(body.robustness_synthesis.headline).toBeUndefined();
+      // With fallback behavior, headline has fallback message when stability is missing
+      expect(body.robustness_synthesis.headline).toBe("Robustness analysis in progress");
       expect(body.robustness_synthesis.assumption_explanations).toHaveLength(1);
-      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toBe(
-        "If the effect of Market Size on Growth is weaker than modelled, your recommendation may change"
-      );
+      // With contextualised templates, check for key elements
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("Market Size");
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain("Growth");
     });
 
     it("returns synthesis with only factor sensitivity", async () => {
@@ -248,7 +249,8 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       const body = JSON.parse(res.body);
 
       expect(body.robustness_synthesis).toBeDefined();
-      expect(body.robustness_synthesis.headline).toBeUndefined();
+      // With fallback behavior enabled, headline is populated with fallback message
+      expect(body.robustness_synthesis.headline).toBe("Robustness analysis in progress");
       expect(body.robustness_synthesis.investigation_suggestions).toHaveLength(1);
       expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain(
         "Development Cost"
@@ -271,10 +273,11 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
+      // Still null when no robustness_data provided at all
       expect(body.robustness_synthesis).toBeNull();
     });
 
-    it("returns null robustness_synthesis when empty data provided", async () => {
+    it("returns fallback robustness_synthesis when empty data provided", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/review",
@@ -292,7 +295,15 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      expect(body.robustness_synthesis).toBeNull();
+      // With fallback behavior enabled, returns fallback messages instead of null
+      expect(body.robustness_synthesis).toBeDefined();
+      expect(body.robustness_synthesis.headline).toBe("Robustness analysis in progress");
+      expect(body.robustness_synthesis.assumption_explanations[0].explanation).toContain(
+        "No critical assumptions"
+      );
+      expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain(
+        "stable influence"
+      );
     });
   });
 
@@ -322,9 +333,11 @@ describe("POST /assist/v1/review robustness synthesis", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      // Should only have headline, no investigation suggestions
+      // Should have headline and fallback investigation suggestion
       expect(body.robustness_synthesis.headline).toBeDefined();
-      expect(body.robustness_synthesis.investigation_suggestions).toBeUndefined();
+      // With fallback behavior, returns a "stable influence" message when no factors meet criteria
+      expect(body.robustness_synthesis.investigation_suggestions).toHaveLength(1);
+      expect(body.robustness_synthesis.investigation_suggestions[0].suggestion).toContain("stable influence");
     });
 
     it("coexists with existing robustness field", async () => {

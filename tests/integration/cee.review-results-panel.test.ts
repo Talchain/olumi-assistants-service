@@ -220,7 +220,7 @@ describe("POST /assist/v1/review Results Panel content", () => {
           expect(g.priority).toBeLessThanOrEqual(5);
           expect(typeof g.action).toBe("string");
           expect(typeof g.reason).toBe("string");
-          expect(["missing_baseline", "fragile_edge", "bias", "structure"]).toContain(
+          expect(["missing_baseline", "fragile_edge", "bias", "structure", "readiness"]).toContain(
             g.source
           );
         });
@@ -246,7 +246,7 @@ describe("POST /assist/v1/review Results Panel content", () => {
         body.improvement_guidance.forEach((item: { priority: number; source: string }) => {
           expect(item.priority).toBeGreaterThanOrEqual(1);
           expect(item.priority).toBeLessThanOrEqual(5);
-          expect(["missing_baseline", "fragile_edge", "bias", "structure"]).toContain(
+          expect(["missing_baseline", "fragile_edge", "bias", "structure", "readiness"]).toContain(
             item.source
           );
         });

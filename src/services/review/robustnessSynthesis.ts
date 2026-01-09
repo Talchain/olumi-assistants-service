@@ -25,6 +25,76 @@ const MAX_IMPORTANCE_RANK = 3;
 /** Minimum elasticity to include in suggestions */
 const MIN_ELASTICITY_THRESHOLD = 0.3;
 
+/** Threshold probability for "likely" switch */
+const HIGH_SWITCH_PROBABILITY = 0.4;
+
+/** Patterns to detect factor types for contextualised messaging */
+const FACTOR_TYPE_PATTERNS: Array<{
+  type: string;
+  patterns: RegExp[];
+  validationHint: string;
+  uncertaintyPhrase: string;
+}> = [
+  {
+    type: "cost",
+    patterns: [/cost/i, /price/i, /expense/i, /budget/i, /spend/i, /fee/i, /£|€|\$/],
+    validationHint: "Get actual quotes or historical cost data",
+    uncertaintyPhrase: "costs may differ from estimates",
+  },
+  {
+    type: "time",
+    patterns: [/time/i, /duration/i, /delay/i, /schedule/i, /deadline/i, /weeks?|months?|days?/i],
+    validationHint: "Review past project timelines or get expert estimates",
+    uncertaintyPhrase: "timelines may vary",
+  },
+  {
+    type: "probability",
+    patterns: [/probability/i, /likelihood/i, /chance/i, /risk/i, /%/],
+    validationHint: "Gather historical frequency data or expert assessments",
+    uncertaintyPhrase: "the likelihood may be different than assumed",
+  },
+  {
+    type: "revenue",
+    patterns: [/revenue/i, /sales/i, /income/i, /profit/i, /margin/i, /earnings/i],
+    validationHint: "Validate with market research or sales forecasts",
+    uncertaintyPhrase: "revenue projections may not materialise",
+  },
+  {
+    type: "demand",
+    patterns: [/demand/i, /volume/i, /quantity/i, /uptake/i, /adoption/i, /customers?/i],
+    validationHint: "Test with customer surveys or pilot programs",
+    uncertaintyPhrase: "demand levels are uncertain",
+  },
+  {
+    type: "quality",
+    patterns: [/quality/i, /satisfaction/i, /rating/i, /score/i, /nps/i, /retention/i],
+    validationHint: "Run user testing or gather customer feedback",
+    uncertaintyPhrase: "quality outcomes may vary",
+  },
+];
+
+/**
+ * Detect the factor type from its label for contextualised messaging.
+ */
+function detectFactorType(label: string): {
+  type: string;
+  validationHint: string;
+  uncertaintyPhrase: string;
+} | undefined {
+  for (const factorType of FACTOR_TYPE_PATTERNS) {
+    for (const pattern of factorType.patterns) {
+      if (pattern.test(label)) {
+        return {
+          type: factorType.type,
+          validationHint: factorType.validationHint,
+          uncertaintyPhrase: factorType.uncertaintyPhrase,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
 // =============================================================================
 // Headline Generation
 // =============================================================================
@@ -51,6 +121,52 @@ function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
 // =============================================================================
 
 /**
+ * Generate a plain English explanation of an assumption's fragility.
+ * Uses factor type detection to provide contextualised messaging.
+ */
+function generateContextualisedAssumptionExplanation(
+  fromLabel: string,
+  toLabel: string,
+  alternativeWinner: string | undefined,
+  switchProbability: number | undefined,
+): string {
+  // Detect factor types for contextualised phrasing
+  const fromType = detectFactorType(fromLabel);
+  const toType = detectFactorType(toLabel);
+
+  // Build uncertainty phrase based on detected types
+  let uncertaintyPhrase: string;
+  if (fromType) {
+    uncertaintyPhrase = fromType.uncertaintyPhrase;
+  } else if (toType) {
+    uncertaintyPhrase = toType.uncertaintyPhrase;
+  } else {
+    uncertaintyPhrase = "this assumption may not hold";
+  }
+
+  // Build switch likelihood phrase
+  let likelihoodPhrase = "";
+  if (switchProbability !== undefined) {
+    if (switchProbability >= HIGH_SWITCH_PROBABILITY) {
+      likelihoodPhrase = " This is a realistic scenario.";
+    } else if (switchProbability >= 0.2) {
+      likelihoodPhrase = " This is worth considering.";
+    }
+  }
+
+  // Build the consequence phrase
+  let consequencePhrase: string;
+  if (alternativeWinner) {
+    consequencePhrase = `${alternativeWinner} could become the better choice`;
+  } else {
+    consequencePhrase = "the recommendation could change";
+  }
+
+  // Generate contextualised explanation
+  return `The recommendation assumes ${fromLabel} significantly affects ${toLabel}. If ${uncertaintyPhrase}, ${consequencePhrase}.${likelihoodPhrase}`;
+}
+
+/**
  * Generate assumption explanations from fragile edges
  */
 function generateAssumptionExplanations(
@@ -59,24 +175,29 @@ function generateAssumptionExplanations(
   edge_id: string;
   explanation: string;
   severity: "fragile" | "moderate" | "robust";
+  validation_hint?: string;
 }> | undefined {
   if (!data.fragile_edges || data.fragile_edges.length === 0) {
     return undefined;
   }
 
   return data.fragile_edges.map((edge) => {
-    let explanation: string;
+    const explanation = generateContextualisedAssumptionExplanation(
+      edge.from_label,
+      edge.to_label,
+      edge.alternative_winner_label,
+      edge.switch_probability,
+    );
 
-    if (edge.alternative_winner_label) {
-      explanation = `If the effect of ${edge.from_label} on ${edge.to_label} is weaker than modelled, ${edge.alternative_winner_label} may become preferred`;
-    } else {
-      explanation = `If the effect of ${edge.from_label} on ${edge.to_label} is weaker than modelled, your recommendation may change`;
-    }
+    // Get validation hint based on factor type
+    const factorType = detectFactorType(edge.from_label) || detectFactorType(edge.to_label);
+    const validationHint = factorType?.validationHint;
 
     return {
       edge_id: edge.edge_id,
       explanation,
       severity: "fragile" as const,
+      ...(validationHint && { validation_hint: validationHint }),
     };
   });
 }
@@ -114,6 +235,33 @@ function shouldIncludeFactor(factor: {
 }
 
 /**
+ * Generate a contextualised investigation suggestion based on factor type.
+ */
+function generateContextualisedSuggestion(
+  factorLabel: string,
+  elasticity: number,
+  importanceRank?: number,
+): string {
+  const influenceLevel = getInfluenceLevel(elasticity);
+  const factorType = detectFactorType(factorLabel);
+
+  // Build importance phrase
+  let importancePhrase = "";
+  if (importanceRank !== undefined && importanceRank <= 3) {
+    const ordinals = ["most", "second most", "third most"];
+    importancePhrase = ` (the ${ordinals[importanceRank - 1] || "key"} influential factor)`;
+  }
+
+  // Generate contextualised suggestion based on factor type
+  if (factorType) {
+    return `${factorType.validationHint} for "${factorLabel}"${importancePhrase}. This factor has ${influenceLevel} influence on the outcome.`;
+  }
+
+  // Fallback for unrecognised factor types
+  return `Validate your "${factorLabel}" estimate${importancePhrase}. This factor has ${influenceLevel} influence on the outcome.`;
+}
+
+/**
  * Generate investigation suggestions from factor sensitivity data
  */
 function generateInvestigationSuggestions(
@@ -122,6 +270,8 @@ function generateInvestigationSuggestions(
   factor_id: string;
   suggestion: string;
   elasticity: number;
+  factor_type?: string;
+  validation_action?: string;
 }> | undefined {
   if (!data.factor_sensitivity || data.factor_sensitivity.length === 0) {
     return undefined;
@@ -144,14 +294,34 @@ function generateInvestigationSuggestions(
   });
 
   return sortedFactors.map((factor) => {
-    const influenceLevel = getInfluenceLevel(factor.elasticity);
+    const suggestion = generateContextualisedSuggestion(
+      factor.factor_label,
+      factor.elasticity,
+      factor.importance_rank,
+    );
+
+    const factorType = detectFactorType(factor.factor_label);
+
     return {
       factor_id: factor.factor_id,
-      suggestion: `Validate your ${factor.factor_label} estimate — this factor has ${influenceLevel} influence on the outcome`,
+      suggestion,
       elasticity: factor.elasticity,
+      ...(factorType && { factor_type: factorType.type }),
+      ...(factorType && { validation_action: factorType.validationHint }),
     };
   });
 }
+
+// =============================================================================
+// Fallback Messages
+// =============================================================================
+
+const FALLBACK_MESSAGES = {
+  headline_no_stability: "Robustness analysis in progress",
+  headline_no_option: "Analysis complete, awaiting option selection",
+  no_fragile_edges: "No critical assumptions identified that could change the recommendation",
+  no_sensitive_factors: "All factors show stable influence on the outcome",
+};
 
 // =============================================================================
 // Main Entry Point
@@ -160,41 +330,69 @@ function generateInvestigationSuggestions(
 /**
  * Generate robustness synthesis from PLoT robustness data.
  *
- * Returns null if no robustness_data is provided.
- * Returns partial synthesis if only some data is available.
+ * Returns partial synthesis with fallback messages if some data is missing.
+ * Returns null only if no robustness_data is provided at all.
  *
  * @param robustnessData - PLoT robustness data (may be undefined)
+ * @param options - Optional configuration for fallback behavior
  * @returns RobustnessSynthesis or null
  */
 export function generateRobustnessSynthesis(
-  robustnessData: PLoTRobustnessDataT | undefined | null
+  robustnessData: PLoTRobustnessDataT | undefined | null,
+  options?: {
+    /** Include fallback messages for missing sections (default: true) */
+    includeFallbacks?: boolean;
+    /** Goal label for context in headlines */
+    goalLabel?: string;
+  }
 ): RobustnessSynthesisT | null {
-  // Handle missing data
+  // Handle completely missing data
   if (!robustnessData) {
     return null;
   }
+
+  const includeFallbacks = options?.includeFallbacks !== false;
 
   // Generate each component independently
   const headline = generateHeadline(robustnessData);
   const assumptionExplanations = generateAssumptionExplanations(robustnessData);
   const investigationSuggestions = generateInvestigationSuggestions(robustnessData);
 
-  // If all components are empty, return null
-  if (!headline && !assumptionExplanations && !investigationSuggestions) {
-    return null;
-  }
-
-  // Build synthesis object, omitting undefined fields
+  // Build synthesis object with graceful fallbacks
   const synthesis: RobustnessSynthesisT = {};
 
+  // Headline - always include with fallback if needed
   if (headline) {
     synthesis.headline = headline;
+  } else if (includeFallbacks) {
+    synthesis.headline = FALLBACK_MESSAGES.headline_no_stability;
   }
+
+  // Assumption explanations - include or provide fallback message
   if (assumptionExplanations && assumptionExplanations.length > 0) {
     synthesis.assumption_explanations = assumptionExplanations;
+  } else if (includeFallbacks) {
+    synthesis.assumption_explanations = [{
+      edge_id: "none",
+      explanation: FALLBACK_MESSAGES.no_fragile_edges,
+      severity: "robust" as const,
+    }];
   }
+
+  // Investigation suggestions - include or provide fallback message
   if (investigationSuggestions && investigationSuggestions.length > 0) {
     synthesis.investigation_suggestions = investigationSuggestions;
+  } else if (includeFallbacks) {
+    synthesis.investigation_suggestions = [{
+      factor_id: "none",
+      suggestion: FALLBACK_MESSAGES.no_sensitive_factors,
+      elasticity: 0,
+    }];
+  }
+
+  // If synthesis has no meaningful content even with fallbacks, return null
+  if (!synthesis.headline && !synthesis.assumption_explanations && !synthesis.investigation_suggestions) {
+    return null;
   }
 
   return synthesis;

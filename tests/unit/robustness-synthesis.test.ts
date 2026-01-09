@@ -56,7 +56,7 @@ describe("generateRobustnessSynthesis", () => {
       );
     });
 
-    it("omits headline when stability is missing", () => {
+    it("uses fallback headline when stability is missing", () => {
       const data: PLoTRobustnessDataT = {
         recommended_option: {
           id: "opt_a",
@@ -74,13 +74,36 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result).not.toBeNull();
+      // With fallbacks enabled, should get a fallback headline
+      expect(result?.headline).toBe("Robustness analysis in progress");
+      expect(result?.assumption_explanations).toBeDefined();
+    });
+
+    it("omits headline when stability is missing and fallbacks disabled", () => {
+      const data: PLoTRobustnessDataT = {
+        recommended_option: {
+          id: "opt_a",
+          label: "Option A",
+        },
+        fragile_edges: [
+          {
+            edge_id: "e1",
+            from_label: "Price",
+            to_label: "Revenue",
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
+
+      expect(result).not.toBeNull();
       expect(result?.headline).toBeUndefined();
       expect(result?.assumption_explanations).toBeDefined();
     });
   });
 
   describe("assumption explanations generation", () => {
-    it("generates explanation with alternative winner", () => {
+    it("generates contextualised explanation with alternative winner", () => {
       const data: PLoTRobustnessDataT = {
         fragile_edges: [
           {
@@ -97,15 +120,18 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.assumption_explanations).toHaveLength(1);
-      expect(result?.assumption_explanations?.[0]).toEqual({
-        edge_id: "fac_price->goal_revenue",
-        explanation:
-          "If the effect of Price on Revenue is weaker than modelled, Economy Pricing may become preferred",
-        severity: "fragile",
-      });
+      const explanation = result?.assumption_explanations?.[0];
+      expect(explanation?.edge_id).toBe("fac_price->goal_revenue");
+      expect(explanation?.severity).toBe("fragile");
+      // Check contextualised explanation includes key elements
+      expect(explanation?.explanation).toContain("Price");
+      expect(explanation?.explanation).toContain("Revenue");
+      expect(explanation?.explanation).toContain("Economy Pricing");
+      // Should have validation_hint for price (cost type)
+      expect(explanation?.validation_hint).toBeDefined();
     });
 
-    it("generates fallback explanation without alternative winner", () => {
+    it("generates explanation without alternative winner", () => {
       const data: PLoTRobustnessDataT = {
         fragile_edges: [
           {
@@ -118,9 +144,64 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result?.assumption_explanations?.[0]?.explanation).toBe(
-        "If the effect of Market Size on Growth is weaker than modelled, your recommendation may change"
-      );
+      const explanation = result?.assumption_explanations?.[0]?.explanation;
+      expect(explanation).toContain("Market Size");
+      expect(explanation).toContain("Growth");
+      expect(explanation).toContain("recommendation could change");
+    });
+
+    it("generates contextualised explanation for cost factors", () => {
+      const data: PLoTRobustnessDataT = {
+        fragile_edges: [
+          {
+            edge_id: "e1",
+            from_label: "Implementation Cost",
+            to_label: "Profit",
+            switch_probability: 0.45,
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      const explanation = result?.assumption_explanations?.[0];
+      expect(explanation?.explanation).toContain("costs may differ from estimates");
+      expect(explanation?.validation_hint).toContain("quotes");
+    });
+
+    it("generates contextualised explanation for time factors", () => {
+      const data: PLoTRobustnessDataT = {
+        fragile_edges: [
+          {
+            edge_id: "e1",
+            from_label: "Development Time",
+            to_label: "Revenue",
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      const explanation = result?.assumption_explanations?.[0];
+      expect(explanation?.explanation).toContain("timelines may vary");
+      expect(explanation?.validation_hint).toContain("timelines");
+    });
+
+    it("includes likelihood phrase for high switch probability", () => {
+      const data: PLoTRobustnessDataT = {
+        fragile_edges: [
+          {
+            edge_id: "e1",
+            from_label: "Factor A",
+            to_label: "Goal",
+            switch_probability: 0.5,
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("realistic scenario");
     });
 
     it("handles multiple fragile edges", () => {
@@ -147,7 +228,7 @@ describe("generateRobustnessSynthesis", () => {
       expect(result?.assumption_explanations?.[1]?.edge_id).toBe("e2");
     });
 
-    it("omits assumption_explanations when fragile_edges is empty", () => {
+    it("provides fallback for assumption_explanations when fragile_edges is empty", () => {
       const data: PLoTRobustnessDataT = {
         recommendation_stability: 0.9,
         fragile_edges: [],
@@ -156,17 +237,31 @@ describe("generateRobustnessSynthesis", () => {
       const result = generateRobustnessSynthesis(data);
 
       expect(result?.headline).toBeDefined();
+      // Should have fallback message
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("No critical assumptions");
+    });
+
+    it("omits assumption_explanations when fallbacks disabled", () => {
+      const data: PLoTRobustnessDataT = {
+        recommendation_stability: 0.9,
+        fragile_edges: [],
+      };
+
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
+
+      expect(result?.headline).toBeDefined();
       expect(result?.assumption_explanations).toBeUndefined();
     });
 
-    it("omits assumption_explanations when fragile_edges is missing", () => {
+    it("provides fallback for assumption_explanations when fragile_edges is missing", () => {
       const data: PLoTRobustnessDataT = {
         recommendation_stability: 0.9,
       };
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result?.assumption_explanations).toBeUndefined();
+      // Should have fallback message
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("No critical assumptions");
     });
   });
 
@@ -226,7 +321,7 @@ describe("generateRobustnessSynthesis", () => {
       expect(result?.investigation_suggestions?.[0]?.factor_id).toBe("fac_a");
     });
 
-    it("generates suggestion with high influence for elasticity >= 0.5", () => {
+    it("generates contextualised suggestion with high influence for elasticity >= 0.5", () => {
       const data: PLoTRobustnessDataT = {
         factor_sensitivity: [
           {
@@ -240,18 +335,58 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result?.investigation_suggestions?.[0]?.suggestion).toBe(
-        "Validate your Market Size estimate — this factor has high influence on the outcome"
-      );
-      expect(result?.investigation_suggestions?.[0]?.elasticity).toBe(0.73);
+      const suggestion = result?.investigation_suggestions?.[0];
+      expect(suggestion?.suggestion).toContain("Market Size");
+      expect(suggestion?.suggestion).toContain("high influence");
+      expect(suggestion?.suggestion).toContain("most influential factor");
+      expect(suggestion?.elasticity).toBe(0.73);
+    });
+
+    it("generates contextualised suggestion for cost factors", () => {
+      const data: PLoTRobustnessDataT = {
+        factor_sensitivity: [
+          {
+            factor_id: "fac_cost",
+            factor_label: "Implementation Cost",
+            elasticity: 0.55,
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      const suggestion = result?.investigation_suggestions?.[0];
+      expect(suggestion?.suggestion).toContain("quotes");
+      expect(suggestion?.suggestion).toContain("Implementation Cost");
+      expect(suggestion?.factor_type).toBe("cost");
+      expect(suggestion?.validation_action).toContain("quotes");
+    });
+
+    it("generates contextualised suggestion for time factors", () => {
+      const data: PLoTRobustnessDataT = {
+        factor_sensitivity: [
+          {
+            factor_id: "fac_time",
+            factor_label: "Time to Market",
+            elasticity: 0.45,
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      const suggestion = result?.investigation_suggestions?.[0];
+      expect(suggestion?.suggestion).toContain("Time to Market");
+      expect(suggestion?.suggestion).toContain("timelines");
+      expect(suggestion?.factor_type).toBe("time");
     });
 
     it("generates suggestion with moderate influence for elasticity < 0.5", () => {
       const data: PLoTRobustnessDataT = {
         factor_sensitivity: [
           {
-            factor_id: "fac_cost",
-            factor_label: "Cost",
+            factor_id: "fac_generic",
+            factor_label: "Generic Factor",
             elasticity: 0.35,
           },
         ],
@@ -259,8 +394,8 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result?.investigation_suggestions?.[0]?.suggestion).toBe(
-        "Validate your Cost estimate — this factor has moderate influence on the outcome"
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain(
+        "moderate influence"
       );
     });
 
@@ -296,7 +431,7 @@ describe("generateRobustnessSynthesis", () => {
       ]);
     });
 
-    it("omits investigation_suggestions when factor_sensitivity is empty", () => {
+    it("provides fallback for investigation_suggestions when factor_sensitivity is empty", () => {
       const data: PLoTRobustnessDataT = {
         recommendation_stability: 0.9,
         factor_sensitivity: [],
@@ -304,10 +439,22 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
+      // Should have fallback message
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("stable influence");
+    });
+
+    it("omits investigation_suggestions when fallbacks disabled", () => {
+      const data: PLoTRobustnessDataT = {
+        recommendation_stability: 0.9,
+        factor_sensitivity: [],
+      };
+
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
+
       expect(result?.investigation_suggestions).toBeUndefined();
     });
 
-    it("omits investigation_suggestions when no factors meet criteria", () => {
+    it("provides fallback when no factors meet criteria", () => {
       const data: PLoTRobustnessDataT = {
         recommendation_stability: 0.9,
         factor_sensitivity: [
@@ -321,6 +468,25 @@ describe("generateRobustnessSynthesis", () => {
       };
 
       const result = generateRobustnessSynthesis(data);
+
+      // Should have fallback message since no factors meet criteria
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("stable influence");
+    });
+
+    it("omits investigation_suggestions when no factors meet criteria and fallbacks disabled", () => {
+      const data: PLoTRobustnessDataT = {
+        recommendation_stability: 0.9,
+        factor_sensitivity: [
+          {
+            factor_id: "fac_a",
+            factor_label: "Factor A",
+            elasticity: 0.1,
+            importance_rank: 5,
+          },
+        ],
+      };
+
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
 
       expect(result?.investigation_suggestions).toBeUndefined();
     });
@@ -337,21 +503,35 @@ describe("generateRobustnessSynthesis", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null when all fields are empty", () => {
+    it("returns fallback messages when all fields are empty (default behavior)", () => {
       const data: PLoTRobustnessDataT = {
         fragile_edges: [],
         factor_sensitivity: [],
       };
 
       const result = generateRobustnessSynthesis(data);
+
+      // With fallbacks enabled (default), should return synthesis with fallback messages
+      expect(result).not.toBeNull();
+      expect(result?.headline).toBe("Robustness analysis in progress");
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("No critical assumptions");
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("stable influence");
+    });
+
+    it("returns null for empty object when fallbacks disabled", () => {
+      const data: PLoTRobustnessDataT = {};
+
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
       expect(result).toBeNull();
     });
 
-    it("returns null for empty object", () => {
+    it("returns fallback messages for empty object (default behavior)", () => {
       const data: PLoTRobustnessDataT = {};
 
       const result = generateRobustnessSynthesis(data);
-      expect(result).toBeNull();
+
+      expect(result).not.toBeNull();
+      expect(result?.headline).toBeDefined();
     });
   });
 
@@ -393,25 +573,23 @@ describe("generateRobustnessSynthesis", () => {
 
       const result = generateRobustnessSynthesis(data);
 
-      expect(result).toEqual({
-        headline: "87% confident that Premium Pricing remains your best option",
-        assumption_explanations: [
-          {
-            edge_id: "fac_price->goal_revenue",
-            explanation:
-              "If the effect of Price on Revenue is weaker than modelled, Economy Pricing may become preferred",
-            severity: "fragile",
-          },
-        ],
-        investigation_suggestions: [
-          {
-            factor_id: "fac_market_size",
-            suggestion:
-              "Validate your Market Size estimate — this factor has high influence on the outcome",
-            elasticity: 0.73,
-          },
-        ],
-      });
+      // Check headline
+      expect(result?.headline).toBe("87% confident that Premium Pricing remains your best option");
+
+      // Check assumption explanations - should have contextualised content
+      expect(result?.assumption_explanations).toHaveLength(1);
+      expect(result?.assumption_explanations?.[0]?.edge_id).toBe("fac_price->goal_revenue");
+      expect(result?.assumption_explanations?.[0]?.severity).toBe("fragile");
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("Price");
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("Revenue");
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("Economy Pricing");
+
+      // Check investigation suggestions - should have contextualised content
+      expect(result?.investigation_suggestions).toHaveLength(1);
+      expect(result?.investigation_suggestions?.[0]?.factor_id).toBe("fac_market_size");
+      expect(result?.investigation_suggestions?.[0]?.elasticity).toBe(0.73);
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("Market Size");
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("high influence");
     });
 
     it("generates partial synthesis when only some data available", () => {
@@ -424,13 +602,29 @@ describe("generateRobustnessSynthesis", () => {
         // No fragile_edges or factor_sensitivity
       };
 
-      const result = generateRobustnessSynthesis(data);
+      const result = generateRobustnessSynthesis(data, { includeFallbacks: false });
 
-      expect(result).toEqual({
-        headline: "75% confident that Option A remains your best option",
-      });
+      expect(result?.headline).toBe("75% confident that Option A remains your best option");
       expect(result?.assumption_explanations).toBeUndefined();
       expect(result?.investigation_suggestions).toBeUndefined();
+    });
+
+    it("includes fallback messages when partial data with fallbacks enabled", () => {
+      const data: PLoTRobustnessDataT = {
+        recommendation_stability: 0.75,
+        recommended_option: {
+          id: "opt_a",
+          label: "Option A",
+        },
+        // No fragile_edges or factor_sensitivity
+      };
+
+      const result = generateRobustnessSynthesis(data);
+
+      expect(result?.headline).toBe("75% confident that Option A remains your best option");
+      // Fallback messages should be included for missing sections
+      expect(result?.assumption_explanations?.[0]?.explanation).toContain("No critical assumptions");
+      expect(result?.investigation_suggestions?.[0]?.suggestion).toContain("stable influence");
     });
   });
 

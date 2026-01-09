@@ -495,6 +495,8 @@ export const AssumptionExplanation = z.object({
   edge_id: z.string(),
   explanation: z.string(),
   severity: z.enum(["fragile", "moderate", "robust"]),
+  /** Optional validation hint for how to verify this assumption */
+  validation_hint: z.string().optional(),
 });
 
 /**
@@ -504,6 +506,10 @@ export const InvestigationSuggestion = z.object({
   factor_id: z.string(),
   suggestion: z.string(),
   elasticity: z.number(),
+  /** Detected factor type (cost, time, probability, etc.) */
+  factor_type: z.string().optional(),
+  /** Specific validation action based on factor type */
+  validation_action: z.string().optional(),
 });
 
 /**

@@ -12,11 +12,120 @@ import type {
   RankedAction,
   Condition,
   PolicyStep,
+  GenerateRecommendationInput,
 } from "./types.js";
 
 // Confidence thresholds
 const HIGH_SCORE_GAP = 15; // Clear winner
 const MEDIUM_SCORE_GAP = 5; // Moderate advantage
+
+// Goal context extraction settings
+const MAX_GOAL_CONTEXT_LENGTH = 50;
+
+// =============================================================================
+// Goal Context Extraction
+// =============================================================================
+
+/**
+ * Extract a concise goal context from the user's brief.
+ * Looks for patterns like "to achieve X", "for Y", "goal is Z".
+ * Falls back to first sentence, truncated to ~50 chars.
+ */
+export function extractGoalContext(brief: string | undefined, goalLabel: string | undefined): string | undefined {
+  // Prefer explicit goal label if provided
+  if (goalLabel) {
+    return truncateContext(sanitiseLabel(goalLabel));
+  }
+
+  if (!brief || brief.trim().length === 0) {
+    return undefined;
+  }
+
+  const normalised = brief.trim();
+
+  // Pattern 1: "to achieve X" / "to maximize X" / "to improve X"
+  const achieveMatch = normalised.match(/\bto\s+(achieve|maximize|maximise|improve|increase|reduce|minimize|minimise|ensure|optimize|optimise)\s+([^.,;]+)/i);
+  if (achieveMatch?.[2]) {
+    return truncateContext(sanitiseLabel(achieveMatch[2].trim()));
+  }
+
+  // Pattern 2: "goal is X" / "objective is X" / "aim is X"
+  const goalMatch = normalised.match(/\b(goal|objective|aim|target)\s+(?:is|:)\s*([^.,;]+)/i);
+  if (goalMatch?.[2]) {
+    return truncateContext(sanitiseLabel(goalMatch[2].trim()));
+  }
+
+  // Pattern 3: "for X" at end of first sentence
+  const forMatch = normalised.match(/\bfor\s+([^.,;]+)(?:\.|,|;|$)/i);
+  if (forMatch?.[1] && forMatch[1].split(/\s+/).length <= 8) {
+    return truncateContext(sanitiseLabel(forMatch[1].trim()));
+  }
+
+  // Pattern 4: "deciding whether to X" / "decision about X"
+  const decisionMatch = normalised.match(/\b(?:deciding|decision)\s+(?:whether\s+to|about|on)\s+([^.,;]+)/i);
+  if (decisionMatch?.[1]) {
+    return truncateContext(sanitiseLabel(decisionMatch[1].trim()));
+  }
+
+  // Fallback: No clear goal pattern found
+  return undefined;
+}
+
+/**
+ * Truncate context to max length, adding ellipsis if needed.
+ */
+function truncateContext(text: string): string {
+  if (text.length <= MAX_GOAL_CONTEXT_LENGTH) {
+    return text;
+  }
+  // Try to break at word boundary
+  const truncated = text.slice(0, MAX_GOAL_CONTEXT_LENGTH - 3);
+  const lastSpace = truncated.lastIndexOf(" ");
+  if (lastSpace > MAX_GOAL_CONTEXT_LENGTH * 0.6) {
+    return truncated.slice(0, lastSpace) + "...";
+  }
+  return truncated + "...";
+}
+
+// =============================================================================
+// Driver Impact Templates
+// =============================================================================
+
+/**
+ * Generate a "why" explanation including driver impact.
+ */
+export function generateWhyExplanation(
+  winner: RankedAction,
+  drivers: GenerateRecommendationInput["drivers"],
+  goalLabel: string | undefined,
+): string | undefined {
+  if (!drivers || drivers.length === 0) {
+    return undefined;
+  }
+
+  const topDriver = drivers[0];
+  const driverLabel = sanitiseLabel(topDriver.label);
+
+  // Build impact phrase
+  let impactPhrase = "";
+  if (topDriver.impact_pct !== undefined && topDriver.impact_pct > 0) {
+    impactPhrase = ` (${Math.round(topDriver.impact_pct)}% of the decision)`;
+  }
+
+  // Build direction phrase
+  let directionPhrase = "positively influences";
+  if (topDriver.direction === "negative") {
+    directionPhrase = "significantly affects";
+  }
+
+  // With goal context
+  if (goalLabel) {
+    return `${labelForDisplay(winner.label)} ${directionPhrase} ${driverLabel}${impactPhrase}, which is the key factor for achieving ${sanitiseLabel(goalLabel)}.`;
+  }
+
+  // Without goal context
+  return `${labelForDisplay(winner.label)} ${directionPhrase} ${driverLabel}${impactPhrase}, which is the most influential factor in this decision.`;
+}
 
 /**
  * Patterns that indicate a baseline/status quo option.
@@ -75,11 +184,19 @@ function reframeBaselineLabel(label: string): string {
  * IMPORTANT: Checks outcome_quality to avoid contradictory messaging.
  * If outcome is negative, uses cautionary phrasing instead of recommending.
  * Baseline options (do nothing, status quo) are reframed neutrally.
+ *
+ * @param winner - The winning ranked action
+ * @param runnerUp - The second-place option (if any)
+ * @param tone - "formal" or "conversational"
+ * @param goalContext - Optional goal context extracted from brief (e.g., "maximizing Q4 revenue")
+ * @param confidence - Optional confidence level for inclusion in headline
  */
 export function generateHeadline(
   winner: RankedAction,
   runnerUp: RankedAction | undefined,
   tone: Tone,
+  goalContext?: string,
+  confidence?: Confidence,
 ): string {
   // Check if winner is a baseline option - use neutral reframing
   const winnerIsBaseline = isBaselineOption(winner.label);
@@ -89,38 +206,46 @@ export function generateHeadline(
 
   const scoreGap = runnerUp ? winner.score - runnerUp.score : 100;
 
+  // Build goal phrase if context available
+  const goalPhrase = goalContext ? ` for ${goalContext}` : "";
+
+  // Build confidence phrase if available
+  const confidencePhrase = confidence
+    ? ` with ${confidence} confidence`
+    : "";
+
   // Special handling for baseline winners - avoid negative framing
   if (winnerIsBaseline) {
-    return generateBaselineHeadline(winnerLabel, runnerUp, scoreGap, tone);
+    return generateBaselineHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase, confidencePhrase);
   }
 
   // Check for negative outcome - avoid recommending options with poor expected results
   if (winner.outcome_quality === "negative") {
-    return generateNegativeOutcomeHeadline(winnerLabel, runnerUp, scoreGap, tone);
+    return generateNegativeOutcomeHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase);
   }
 
   // Check for mixed outcomes with risks
   if (winner.outcome_quality === "mixed" || winner.has_risks) {
-    return generateCautiousHeadline(winnerLabel, runnerUp, scoreGap, tone);
+    return generateCautiousHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase);
   }
 
-  // Standard positive/neutral outcome handling
+  // Standard positive/neutral outcome handling with context
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is the recommended course of action`
-      : `${winnerLabel} is your best bet`;
+      ? `${winnerLabel} is recommended${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} is your best bet${goalPhrase}${confidencePhrase}`;
   }
 
   if (scoreGap >= MEDIUM_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} emerges as the stronger option`
-      : `${winnerLabel} looks like the better choice`;
+      ? `${winnerLabel} emerges as the stronger option${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} looks like the better choice${goalPhrase}${confidencePhrase}`;
   }
 
   // Close call
   return tone === "formal"
-    ? `${winnerLabel} holds a slight advantage`
-    : `${winnerLabel} edges ahead, but it's close`;
+    ? `${winnerLabel} holds a slight advantage${goalPhrase}${confidencePhrase}`
+    : `${winnerLabel} edges ahead${goalPhrase}, but it's close`;
 }
 
 /**
@@ -140,24 +265,26 @@ function generateBaselineHeadline(
   runnerUp: RankedAction | undefined,
   scoreGap: number,
   tone: Tone,
+  goalPhrase: string = "",
+  confidencePhrase: string = "",
 ): string {
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is the recommended approach`
-      : `${winnerLabel} is your best move`;
+      ? `${winnerLabel} is the recommended approach${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} is your best move${goalPhrase}${confidencePhrase}`;
   }
 
   if (scoreGap >= MEDIUM_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is advisable at this time`
-      : `${winnerLabel} makes sense for now`;
+      ? `${winnerLabel} is advisable${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} makes sense for now${goalPhrase}${confidencePhrase}`;
   }
 
   // Close call - suggest waiting may be appropriate
   const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
   return tone === "formal"
-    ? `${winnerLabel} is marginally preferred to ${runnerUpLabel}`
-    : `${winnerLabel} slightly edges out ${runnerUpLabel}`;
+    ? `${winnerLabel} is marginally preferred to ${runnerUpLabel}${goalPhrase}`
+    : `${winnerLabel} slightly edges out ${runnerUpLabel}${goalPhrase}`;
 }
 
 /**
@@ -169,28 +296,29 @@ function generateNegativeOutcomeHeadline(
   runnerUp: RankedAction | undefined,
   scoreGap: number,
   tone: Tone,
+  goalPhrase: string = "",
 ): string {
   if (!runnerUp) {
     return tone === "formal"
-      ? `${winnerLabel} is the only option, though outcomes carry risk`
-      : `${winnerLabel} is your only option, but expect some challenges`;
+      ? `${winnerLabel} is the only option${goalPhrase}, though outcomes carry risk`
+      : `${winnerLabel} is your only option${goalPhrase}, but expect some challenges`;
   }
 
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} minimises negative impact compared to alternatives`
-      : `${winnerLabel} is the least bad option here`;
+      ? `${winnerLabel} minimises negative impact${goalPhrase} compared to alternatives`
+      : `${winnerLabel} is the least bad option here${goalPhrase}`;
   }
 
   if (scoreGap >= MEDIUM_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} offers relatively better outcomes despite risks`
-      : `${winnerLabel} looks better than the alternatives, though neither is great`;
+      ? `${winnerLabel} offers relatively better outcomes${goalPhrase} despite risks`
+      : `${winnerLabel} looks better than the alternatives${goalPhrase}, though neither is great`;
   }
 
   return tone === "formal"
-    ? `${winnerLabel} and alternatives both carry significant risk`
-    : `${winnerLabel} edges ahead, but all options have downsides`;
+    ? `${winnerLabel} and alternatives both carry significant risk${goalPhrase}`
+    : `${winnerLabel} edges ahead${goalPhrase}, but all options have downsides`;
 }
 
 /**
@@ -202,23 +330,24 @@ function generateCautiousHeadline(
   runnerUp: RankedAction | undefined,
   scoreGap: number,
   tone: Tone,
+  goalPhrase: string = "",
 ): string {
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is recommended, though outcomes are less predictable`
-      : `${winnerLabel} is your best bet, but expect some ups and downs`;
+      ? `${winnerLabel} is recommended${goalPhrase}, though outcomes are less predictable`
+      : `${winnerLabel} is your best bet${goalPhrase}, but expect some ups and downs`;
   }
 
   if (scoreGap >= MEDIUM_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} emerges as the stronger option with higher potential but less certainty`
-      : `${winnerLabel} looks better—more upside potential, though less predictable`;
+      ? `${winnerLabel} emerges as the stronger option${goalPhrase} with higher potential but less certainty`
+      : `${winnerLabel} looks better${goalPhrase}—more upside potential, though less predictable`;
   }
 
   const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
   return tone === "formal"
-    ? `${winnerLabel} holds a slight advantage; both options balance reward against predictability`
-    : `${winnerLabel} edges ahead of ${runnerUpLabel}—both have pros and cons to weigh`;
+    ? `${winnerLabel} holds a slight advantage${goalPhrase}; both options balance reward against predictability`
+    : `${winnerLabel} edges ahead of ${runnerUpLabel}${goalPhrase}—both have pros and cons to weigh`;
 }
 
 /**
