@@ -122,4 +122,39 @@ describe("POST /assist/v1/draft-graph (CEE v1) - empty graph", () => {
       edge_count: 0,
     });
   });
+
+  it("includes pipeline trace in error response for debugging", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/draft-graph",
+      headers: { "X-Olumi-Assist-Key": "cee-key-empty-2" },
+      payload: {
+        brief: "A sufficiently long decision brief to test pipeline trace in error response.",
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+
+    // Verify error response structure
+    expect(body.schema).toBe("cee.error.v1");
+    expect(body.code).toBe("CEE_GRAPH_INVALID");
+
+    // Verify pipeline trace is included in error response
+    expect(body.trace).toBeDefined();
+    expect(body.trace.pipeline).toBeDefined();
+    expect(body.trace.pipeline.status).toBe("failed");
+    expect(typeof body.trace.pipeline.total_duration_ms).toBe("number");
+    expect(Array.isArray(body.trace.pipeline.stages)).toBe(true);
+
+    // Verify at least one stage is present (llm_draft)
+    expect(body.trace.pipeline.stages.length).toBeGreaterThan(0);
+    const llmDraftStage = body.trace.pipeline.stages.find(
+      (s: any) => s.name === "llm_draft"
+    );
+    expect(llmDraftStage).toBeDefined();
+    // In error cases, the stage may have status "failed" or "success" depending on where the error occurred
+    expect(["success", "failed"]).toContain(llmDraftStage.status);
+    expect(typeof llmDraftStage.duration_ms).toBe("number");
+  });
 });

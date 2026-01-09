@@ -622,6 +622,17 @@ export function buildCeeErrorResponse(
     edgeCount?: number;
     missingKinds?: string[];
     stage?: string;  // Pipeline stage where error occurred (for debugging)
+    pipelineTrace?: {
+      status: "success" | "failed";
+      total_duration_ms: number;
+      stages: Array<{
+        name: string;
+        status: string;
+        duration_ms: number;
+        details?: Record<string, unknown>;
+      }>;
+      llm_quality?: Record<string, unknown>;
+    };
   } = {}
 ): CEEErrorResponseV1 {
   const trace: CEETraceMeta = {};
@@ -636,6 +647,11 @@ export function buildCeeErrorResponse(
       ...(trace.engine || {}),
       degraded: true,
     };
+  }
+
+  // Include pipeline trace for debugging (shows stages completed before failure)
+  if (options.pipelineTrace) {
+    (trace as any).pipeline = options.pipelineTrace;
   }
 
   type CeeErrorDetails = Record<string, unknown> & {
@@ -716,11 +732,58 @@ export function buildCeeErrorResponse(
 
 // Pipeline stage for trace
 type PipelineStageEntry = {
-  name: "llm_draft" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "final_validation";
+  name: "llm_draft" | "coefficient_normalisation" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "final_validation";
   status: "success" | "failed" | "skipped" | "repaired";
   duration_ms: number;
   details?: Record<string, unknown>;
 };
+
+// Risk coefficient correction record
+type RiskCoefficientCorrection = {
+  source: string;
+  target: string;
+  original: number;
+  corrected: number;
+};
+
+/**
+ * Normalise risk coefficients: risk→goal and risk→outcome edges should have negative strength_mean.
+ * LLM sometimes generates positive coefficients for risks, which is semantically incorrect.
+ * This follows the "trust but verify" pattern used by goal repair.
+ */
+export function normaliseRiskCoefficients(
+  nodes: Array<{ id: string; kind?: string }>,
+  edges: Array<{ from?: string; to?: string; strength_mean?: number; strength?: { mean?: number } }>
+): { edges: typeof edges; corrections: RiskCoefficientCorrection[] } {
+  const nodeKindMap = new Map(nodes.map(n => [n.id, n.kind?.toLowerCase()]));
+  const corrections: RiskCoefficientCorrection[] = [];
+
+  const normalisedEdges = edges.map(edge => {
+    const sourceKind = nodeKindMap.get(edge.from ?? "");
+    const targetKind = nodeKindMap.get(edge.to ?? "");
+
+    // Only process risk→goal and risk→outcome edges
+    if (sourceKind === "risk" && (targetKind === "goal" || targetKind === "outcome")) {
+      // Get the current strength_mean (checking both flat and nested formats)
+      const original = edge.strength_mean ?? edge.strength?.mean ?? 0.5;
+
+      // If positive, make it negative (risks should have negative impact on goals/outcomes)
+      if (original > 0) {
+        const corrected = -Math.abs(original);
+        corrections.push({
+          source: edge.from ?? "",
+          target: edge.to ?? "",
+          original,
+          corrected,
+        });
+        return { ...edge, strength_mean: corrected };
+      }
+    }
+    return edge;
+  });
+
+  return { edges: normalisedEdges, corrections };
+}
 
 export async function finaliseCeeDraftResponse(
   input: DraftInputWithCeeExtras,
@@ -928,6 +991,18 @@ export async function finaliseCeeDraftResponse(
       httpStatus: statusCode,
     });
 
+    // Build minimal pipeline trace for early errors
+    // At this point we may only have partial stage info, but it's better than nothing
+    const earlyErrorPipelineTrace = {
+      status: "failed" as const,
+      total_duration_ms: Date.now() - start,
+      stages: pipelineStages.length > 0 ? pipelineStages : [{
+        name: "llm_draft" as const,
+        status: "failed" as const,
+        duration_ms: Date.now() - start,
+      }],
+    };
+
     return {
       statusCode,
       body: buildCeeErrorResponse(ceeCode, envelope.message, {
@@ -935,6 +1010,7 @@ export async function finaliseCeeDraftResponse(
         requestId,
         details: envelope.details as Record<string, unknown> | undefined,
         stage,
+        pipelineTrace: earlyErrorPipelineTrace,
       }),
     };
   }
@@ -1027,6 +1103,40 @@ export async function finaliseCeeDraftResponse(
       statusCode: 200,
       body: rawResponse,
     };
+  }
+
+  // === RISK COEFFICIENT NORMALISATION ===
+  // LLM sometimes generates positive coefficients for risk→goal/outcome edges.
+  // Normalise these to negative values (risks reduce goal attainment).
+  // This follows the "trust but verify" pattern used by goal repair.
+  let riskCoefficientCorrections: RiskCoefficientCorrection[] = [];
+  if (graph && Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {
+    const coeffNormStart = Date.now();
+    const normResult = normaliseRiskCoefficients(graph.nodes as any[], graph.edges as any[]);
+    const coeffNormEnd = Date.now();
+
+    if (normResult.corrections.length > 0) {
+      graph = { ...graph, edges: normResult.edges as any };
+      payload.graph = graph as any;
+      riskCoefficientCorrections = normResult.corrections;
+
+      log.info({
+        request_id: requestId,
+        corrections_count: normResult.corrections.length,
+        corrections: normResult.corrections,
+      }, `Pipeline stage: Coefficient normalisation complete, ${normResult.corrections.length} risk→goal edges corrected`);
+    }
+
+    // Add coefficient_normalisation stage to pipeline trace
+    pipelineStages.push({
+      name: "coefficient_normalisation",
+      status: normResult.corrections.length > 0 ? "repaired" : "success",
+      duration_ms: coeffNormEnd - coeffNormStart,
+      details: normResult.corrections.length > 0 ? {
+        corrections_count: normResult.corrections.length,
+        corrections: normResult.corrections,
+      } : undefined,
+    });
   }
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
@@ -1147,6 +1257,11 @@ export async function finaliseCeeDraftResponse(
           example:
             "We need to decide whether to build the feature in-house or outsource it. Options are: hire contractors, use an agency, or build with the current team. Success means launching within 3 months under $50k.",
         },
+        pipelineTrace: {
+          status: "failed",
+          total_duration_ms: latencyMs,
+          stages: pipelineStages,
+        },
       }),
     };
   }
@@ -1199,6 +1314,11 @@ export async function finaliseCeeDraftResponse(
         details: {
           guard_violation: violation,
           validation_issues: [issue],
+        },
+        pipelineTrace: {
+          status: "failed",
+          total_duration_ms: latencyMs,
+          stages: pipelineStages,
         },
       }),
     };
@@ -1537,6 +1657,17 @@ export async function finaliseCeeDraftResponse(
       details.hint = connectivityHint;
     }
 
+    // Build pipeline trace for error response (shows stages completed before failure)
+    const errorPipelineTrace = {
+      status: "failed" as const,
+      total_duration_ms: latencyMs,
+      stages: pipelineStages,
+      llm_quality: riskCoefficientCorrections.length > 0 ? {
+        risk_coefficient_corrections: riskCoefficientCorrections.length,
+        corrections: riskCoefficientCorrections,
+      } : undefined,
+    };
+
     return {
       statusCode: 400,
       body: buildCeeErrorResponse(ceeCode, message, {
@@ -1548,6 +1679,7 @@ export async function finaliseCeeDraftResponse(
         missingKinds: structure.missing,
         recovery,
         details,
+        pipelineTrace: errorPipelineTrace,
       }),
     };
   }
@@ -1865,6 +1997,11 @@ export async function finaliseCeeDraftResponse(
       llm_call_count: llmCallCount,
       stages: pipelineStages,
       connectivity: connectivityDiagnostic,
+      // LLM quality metrics: tracks corrections made to LLM output
+      llm_quality: {
+        risk_coefficient_corrections: riskCoefficientCorrections.length,
+        corrections: riskCoefficientCorrections.length > 0 ? riskCoefficientCorrections : undefined,
+      },
     };
 
     // Add detailed LLM call info and final graph only in non-production (dev/staging)
