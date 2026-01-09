@@ -186,7 +186,14 @@ export function findIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): string[] {
 }
 
 /**
- * Prune isolated nodes from graph
+ * Node kinds that should never be pruned, even if isolated.
+ * Goals and decisions are essential structural nodes that must be preserved.
+ */
+const PROTECTED_KINDS = new Set(["goal", "decision"]);
+
+/**
+ * Prune isolated nodes from graph.
+ * Protected kinds (goal, decision) are never pruned regardless of connectivity.
  */
 export function pruneIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): NodeT[] {
   // Don't prune if there's only one node (isolated single nodes are still valid graphs)
@@ -196,14 +203,37 @@ export function pruneIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): NodeT[] {
 
   const isolated = new Set(findIsolatedNodes(nodes, edges));
 
-  if (isolated.size > 0) {
-    log.info({
-      isolated_count: isolated.size,
-      isolated_ids: Array.from(isolated)
-    }, "Pruning isolated nodes");
+  if (isolated.size === 0) {
+    return nodes;
   }
 
-  return nodes.filter(n => !isolated.has(n.id));
+  // Filter out protected kinds from pruning candidates
+  const nodesToPrune = new Set<string>();
+  const protectedButIsolated: string[] = [];
+
+  for (const nodeId of isolated) {
+    const node = nodes.find(n => n.id === nodeId);
+    const kind = (node as any)?.kind?.toLowerCase?.() ?? "";
+
+    if (PROTECTED_KINDS.has(kind)) {
+      protectedButIsolated.push(nodeId);
+    } else {
+      nodesToPrune.add(nodeId);
+    }
+  }
+
+  if (nodesToPrune.size > 0 || protectedButIsolated.length > 0) {
+    log.info({
+      isolated_count: isolated.size,
+      isolated_ids: Array.from(isolated),
+      pruned_count: nodesToPrune.size,
+      pruned_ids: Array.from(nodesToPrune),
+      protected_count: protectedButIsolated.length,
+      protected_ids: protectedButIsolated,
+    }, "Pruning isolated nodes (goal/decision protected)");
+  }
+
+  return nodes.filter(n => !nodesToPrune.has(n.id));
 }
 
 /**

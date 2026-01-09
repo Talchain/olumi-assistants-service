@@ -238,6 +238,7 @@ export function sanitizeDraftGraphInput(
     refinement_mode,
     refinement_instructions,
     preserve_nodes,
+    raw_output,
   } = input;
 
   const base = {
@@ -252,6 +253,7 @@ export function sanitizeDraftGraphInput(
     refinement_mode,
     refinement_instructions,
     preserve_nodes,
+    raw_output,
   };
 
   const passthrough: Record<string, unknown> = {};

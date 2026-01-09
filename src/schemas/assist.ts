@@ -43,6 +43,9 @@ export const DraftGraphInput = z.object({
     answer: z.string(),
   })).optional(),
   max_clarifier_rounds: z.number().int().min(0).max(10).default(5).optional(),
+  // Raw output mode - skip all post-processing repairs (factor enrichment, goal repair, etc.)
+  // Returns LLM output directly after basic schema validation
+  raw_output: z.boolean().optional(),
 });
 
 export const DraftGraphOutput = z.object({

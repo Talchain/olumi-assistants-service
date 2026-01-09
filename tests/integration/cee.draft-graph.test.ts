@@ -69,7 +69,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     // Allow multiple API keys so tests can use independent buckets
     vi.stubEnv(
       "ASSIST_API_KEYS",
-      "cee-key-1,cee-key-2,cee-key-3,cee-key-limit,cee-telemetry-success,cee-telemetry-validation,cee-telemetry-limit"
+      "cee-key-1,cee-key-2,cee-key-3,cee-key-limit,cee-telemetry-success,cee-telemetry-validation,cee-telemetry-limit,cee-raw-output-1,cee-raw-output-2"
     );
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-model-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "2");
@@ -311,5 +311,64 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     const retryAfter = limited.headers["retry-after"];
     expect(retryAfter).toBeDefined();
     expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+
+  describe("raw_output mode", () => {
+    const headersRawOutput1 = { "X-Olumi-Assist-Key": "cee-raw-output-1" } as const;
+    const headersRawOutput2 = { "X-Olumi-Assist-Key": "cee-raw-output-2" } as const;
+
+    it("skips post-processing repairs when raw_output=true", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph?schema=v3",
+        headers: headersRawOutput1,
+        payload: {
+          brief: "A sufficiently long decision brief for raw output mode testing in CEE.",
+          raw_output: true,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // Core graph should be present
+      expect(body.graph).toBeDefined();
+
+      // Trace should indicate raw_output_mode
+      expect(body.trace).toBeDefined();
+      expect(body.trace.pipeline).toBeDefined();
+      expect(body.trace.pipeline.raw_output_mode).toBe(true);
+      expect(body.trace.pipeline.status).toBe("success");
+
+      // Should only have llm_draft stage (no factor enrichment, goal repair, etc.)
+      const stages = body.trace.pipeline.stages;
+      expect(Array.isArray(stages)).toBe(true);
+      expect(stages.length).toBe(1);
+      expect(stages[0].name).toBe("llm_draft");
+    });
+
+    it("logs raw_output event with node/edge counts", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph?schema=v3",
+        headers: headersRawOutput2,
+        payload: {
+          brief: "A sufficiently long decision brief for raw output event logging test.",
+          raw_output: true,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // Verify response has graph with nodes and edges
+      expect(body.graph).toBeDefined();
+      expect(Array.isArray(body.graph.nodes)).toBe(true);
+      expect(Array.isArray(body.graph.edges)).toBe(true);
+
+      // Quality should be zeroed in raw mode (not computed)
+      expect(body.quality).toBeDefined();
+      expect(body.quality.overall).toBe(0);
+    });
   });
 });

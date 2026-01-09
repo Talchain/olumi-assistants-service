@@ -49,6 +49,7 @@ type CEEConfidenceFlagsV1 = components["schemas"]["CEEConfidenceFlagsV1"];
 type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
   archetype_hint?: string;
+  raw_output?: boolean;
 };
 
 /**
@@ -958,6 +959,75 @@ export async function finaliseCeeDraftResponse(
   };
 
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+
+  // === RAW OUTPUT MODE ===
+  // When raw_output: true, skip all post-processing (factor enrichment, goal repair, etc.)
+  // and return LLM output directly after basic schema validation
+  if (input.raw_output === true) {
+    log.info({
+      request_id: requestId,
+      event: "cee.draft_graph.raw_output",
+      node_count: Array.isArray(graph?.nodes) ? graph!.nodes.length : 0,
+      edge_count: Array.isArray(graph?.edges) ? graph!.edges.length : 0,
+    }, "Raw output mode: skipping post-processing repairs");
+
+    emit(TelemetryEvents.CeeDraftGraphSucceeded, {
+      request_id: requestId,
+      latency_ms: Date.now() - start,
+      quality_overall: 0, // Not computed in raw mode
+      graph_nodes: Array.isArray(graph?.nodes) ? graph!.nodes.length : 0,
+      graph_edges: Array.isArray(graph?.edges) ? graph!.edges.length : 0,
+      has_validation_issues: false,
+      any_truncated: false,
+      draft_warning_count: 0,
+      uncertain_node_count: 0,
+      simplification_applied: false,
+      cost_usd: typeof cost_usd === "number" && Number.isFinite(cost_usd) ? cost_usd : 0,
+      engine_provider: provider,
+      engine_model: model,
+      raw_output_mode: true,
+    });
+
+    logCeeCall({
+      requestId,
+      capability: "cee_draft_graph",
+      provider,
+      model,
+      latencyMs: Date.now() - start,
+      costUsd: cost_usd,
+      status: "ok",
+      anyTruncated: false,
+      hasValidationIssues: false,
+      httpStatus: 200,
+    });
+
+    // Build minimal response with raw LLM output
+    const rawResponse: CEEDraftGraphResponseV1 = {
+      ...payload,
+      trace: {
+        request_id: requestId,
+        correlation_id: requestId,
+        engine: { provider, model },
+        pipeline: {
+          status: "success",
+          total_duration_ms: Date.now() - start,
+          raw_output_mode: true,
+          stages: [{
+            name: "llm_draft",
+            status: "success",
+            duration_ms: Date.now() - start,
+          }],
+        },
+      } as any,
+      quality: { overall: 0, completeness: 0, coherence: 0, clarity: 0 },
+      seed: input.seed,
+    };
+
+    return {
+      statusCode: 200,
+      body: rawResponse,
+    };
+  }
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // This runs after LLM graph generation but before validation, matching the legacy endpoint's order.
