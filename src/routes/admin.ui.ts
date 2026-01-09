@@ -16,7 +16,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { log, emit } from '../utils/telemetry.js';
+import { log, emit, hashIP } from '../utils/telemetry.js';
 import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
 
 /**
@@ -79,12 +79,14 @@ function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean 
     (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
 
   if (!isAllowed) {
+    // Use hashed IP in telemetry/logs to avoid PII leakage
+    const ipHash = hashIP(requestIP);
     emit(AdminUIIPBlocked, {
-      ip: requestIP,
+      ip_hash: ipHash,
       path: request.url,
       allowedCount: allowedIPs.size,
     });
-    log.warn({ ip: requestIP, path: request.url }, 'Admin UI access blocked by IP allowlist');
+    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin UI access blocked by IP allowlist');
     reply.status(403).send('Forbidden: IP not allowed');
     return false;
   }

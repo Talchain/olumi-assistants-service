@@ -1303,12 +1303,7 @@ export async function finaliseCeeDraftResponse(
 
     emit(TelemetryEvents.CeeConnectivityCheck, {
       request_id: requestId,
-      // Existing arrays (keep for debugging)
-      decision_ids: structure.connectivity.decision_ids,
-      reachable_options: structure.connectivity.reachable_options,
-      reachable_goals: structure.connectivity.reachable_goals,
-      unreachable_nodes: structure.connectivity.unreachable_nodes,
-      // Counts for dashboards
+      // Counts only (avoid high-cardinality arrays in telemetry)
       decision_count: structure.connectivity.decision_ids.length,
       option_count: structure.connectivity.all_option_ids.length,
       goal_count: structure.connectivity.all_goal_ids.length,
@@ -1340,12 +1335,10 @@ export async function finaliseCeeDraftResponse(
     const rawNodeKinds = Array.isArray(graph?.nodes)
       ? (graph!.nodes as any[]).map((n: any) => n?.kind).filter(Boolean)
       : [];
-    const nodeLabels = Array.isArray(graph?.nodes)
-      ? (graph!.nodes as any[]).map((n: any) => {
-          const label = n?.label;
-          return typeof label === "string" ? label.substring(0, 50) : undefined;
-        }).filter(Boolean)
-      : [];
+    // Count nodes with labels for observability (avoid PII in telemetry)
+    const labeledNodeCount = Array.isArray(graph?.nodes)
+      ? (graph!.nodes as any[]).filter((n: any) => typeof n?.label === "string" && n.label.length > 0).length
+      : 0;
 
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
@@ -1357,7 +1350,8 @@ export async function finaliseCeeDraftResponse(
       missing_kinds: structure.missing,
       raw_node_kinds: rawNodeKinds,
       connectivity_failed: isConnectivityFailure,
-      unreachable_nodes: structure.connectivity?.unreachable_nodes,
+      // Use count instead of array to avoid high-cardinality telemetry
+      unreachable_node_count: structure.connectivity?.unreachable_nodes?.length ?? 0,
     });
 
     logCeeCall({
@@ -1420,22 +1414,24 @@ export async function finaliseCeeDraftResponse(
         };
 
     // Build details including connectivity diagnostic when available
+    // Note: Use counts only for labels to avoid PII in error responses
     const details: Record<string, unknown> = {
       missing_kinds: structure.missing,
       node_count: nodeCount,
       edge_count: edgeCount,
       counts: structure.counts,
       raw_node_kinds: rawNodeKinds,
-      node_labels: nodeLabels,
+      labeled_node_count: labeledNodeCount,
+      has_labels: labeledNodeCount > 0,
     };
 
-    // Add connectivity diagnostic for connectivity failures
+    // Add connectivity diagnostic for connectivity failures (counts only, no PII)
     if (isConnectivityFailure && structure.connectivity) {
       details.connectivity = {
-        decision_ids: structure.connectivity.decision_ids,
-        reachable_options: structure.connectivity.reachable_options,
-        reachable_goals: structure.connectivity.reachable_goals,
-        unreachable_nodes: structure.connectivity.unreachable_nodes,
+        decision_count: structure.connectivity.decision_ids.length,
+        reachable_option_count: structure.connectivity.reachable_options.length,
+        reachable_goal_count: structure.connectivity.reachable_goals.length,
+        unreachable_count: structure.connectivity.unreachable_nodes.length,
       };
       // Use conditional hint based on diagnostic counts
       details.hint = connectivityHint;

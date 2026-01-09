@@ -1,7 +1,23 @@
 import { env } from "node:process";
+import { createHash, randomBytes } from "crypto";
 import pino from "pino";
 import { StatsD } from "hot-shots";
 import { createLoggerConfig } from "./logger-config.js";
+
+/**
+ * Server salt for IP hashing (stable for session correlation, not stored)
+ * Uses IP_HASH_SALT env var or generates once at boot.
+ * Centralized here to ensure consistent hashing across all modules.
+ */
+const IP_HASH_SALT = env.IP_HASH_SALT || randomBytes(16).toString('hex');
+
+/**
+ * Hash IP address for telemetry/logging (avoids storing raw PII)
+ * Returns first 12 chars of SHA-256 hash (enough for correlation, not reconstruction)
+ */
+export function hashIP(ip: string): string {
+  return createHash('sha256').update(IP_HASH_SALT + ip).digest('hex').substring(0, 12);
+}
 
 /**
  * Pino logger with secret/PII redaction
@@ -418,6 +434,26 @@ function sanitizeTelemetryValue(
   }
 
   if (Array.isArray(value)) {
+    // Cap arrays to avoid high-cardinality telemetry
+    const MAX_ARRAY_ITEMS = 10;
+    const SAMPLE_SIZE = 3;
+
+    if (value.length > MAX_ARRAY_ITEMS) {
+      // Truncate large arrays to a summary object
+      const sample: Array<TelemetryLeaf | TelemetryShape> = [];
+      for (let i = 0; i < Math.min(SAMPLE_SIZE, value.length); i++) {
+        const sanitizedItem = sanitizeTelemetryValue(value[i]);
+        if (sanitizedItem !== undefined) {
+          sample.push(sanitizedItem as TelemetryLeaf | TelemetryShape);
+        }
+      }
+      return {
+        truncated: true,
+        count: value.length,
+        sample,
+      } as TelemetryShape;
+    }
+
     const sanitizedArray: Array<TelemetryLeaf | TelemetryShape> = [];
     for (const item of value) {
       const sanitizedItem = sanitizeTelemetryValue(item);

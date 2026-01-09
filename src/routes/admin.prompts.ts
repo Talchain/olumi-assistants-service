@@ -50,7 +50,7 @@ import {
 } from '../prompts/index.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
-import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
+import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 /**
@@ -107,12 +107,14 @@ function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean 
     (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
 
   if (!isAllowed) {
+    // Use hashed IP in telemetry/logs to avoid PII leakage
+    const ipHash = hashIP(requestIP);
     emit(AdminTelemetryEvents.AdminIPBlocked, {
-      ip: requestIP,
+      ip_hash: ipHash,
       path: request.url,
       allowedCount: allowedIPs.size,
     });
-    log.warn({ ip: requestIP, path: request.url }, 'Admin access blocked by IP allowlist');
+    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin access blocked by IP allowlist');
     reply.status(403).send({
       error: 'ip_not_allowed',
       message: 'Your IP address is not authorized for admin access',

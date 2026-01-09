@@ -524,10 +524,19 @@ export default async function route(app: FastifyInstance) {
         decisionQualitySummary = "mixed";
       }
 
-      // Find dominant blocker (lowest factor if any is blocking)
-      const dominantBlocker = readinessFactors
+      // Find dominant blocker - map label to stable enum constant (avoids high-cardinality)
+      const labelToBlockerEnum: Record<string, string> = {
+        "Model completeness": "BLOCKER_COVERAGE",
+        "Structural integrity": "BLOCKER_STRUCTURE",
+        "Evidence coverage": "BLOCKER_EVIDENCE",
+        "Bias risk assessment": "BLOCKER_OTHER",
+      };
+      const firstBlockingLabel = readinessFactors
         .filter(f => f.status === "blocking")
-        .map(f => f.label.toLowerCase().replace(/ /g, "_"))[0] || null;
+        .map(f => f.label)[0];
+      const dominantBlocker = firstBlockingLabel
+        ? (labelToBlockerEnum[firstBlockingLabel] || "BLOCKER_OTHER")
+        : null;
 
       // Emit success telemetry with enhanced aggregates
       emit(TelemetryEvents.CeeReviewSucceeded, {
