@@ -67,10 +67,10 @@ describe("Goal Repair Pipeline (Deterministic)", () => {
       const goalEdges = result.graph.edges.filter((e: any) => e.to === result.goalNodeId);
       expect(goalEdges.length).toBeGreaterThan(0);
 
-      // Verify risk edge has negative strength
+      // Verify risk edge has negative strength_mean (flat field, not nested)
       const riskEdge = goalEdges.find((e: any) => e.from === "risk_cost");
       if (riskEdge) {
-        expect((riskEdge as any).strength.mean).toBeLessThan(0);
+        expect((riskEdge as any).strength_mean).toBeLessThan(0);
       }
     });
 
@@ -213,8 +213,9 @@ describe("Goal Repair Pipeline (Deterministic)", () => {
       expect(goalEdges.length).toBe(3); // All 3 outcomes
 
       for (const edge of goalEdges) {
-        expect((edge as any).strength.mean).toBeGreaterThan(0);
-        expect((edge as any).exists_probability).toBeGreaterThan(0);
+        // Verify flat field names (wireOutcomesToGoal uses strength_mean, belief_exists)
+        expect((edge as any).strength_mean).toBeGreaterThan(0);
+        expect((edge as any).belief_exists).toBeGreaterThan(0);
       }
     });
 
@@ -234,7 +235,8 @@ describe("Goal Repair Pipeline (Deterministic)", () => {
       expect(goalEdges.length).toBe(2); // Both risks
 
       for (const edge of goalEdges) {
-        expect((edge as any).strength.mean).toBeLessThan(0);
+        // Verify flat field names with negative coefficient for risks
+        expect((edge as any).strength_mean).toBeLessThan(0);
       }
     });
 
@@ -331,10 +333,12 @@ describe("Goal Repair Pipeline (Deterministic)", () => {
       );
 
       for (const e of outcomeEdges) {
-        expect((e as any).strength.mean).toBeGreaterThan(0);
+        // Flat field names: outcomes have positive strength_mean
+        expect((e as any).strength_mean).toBeGreaterThan(0);
       }
       for (const e of riskEdges) {
-        expect((e as any).strength.mean).toBeLessThan(0);
+        // Flat field names: risks have negative strength_mean
+        expect((e as any).strength_mean).toBeLessThan(0);
       }
     });
 

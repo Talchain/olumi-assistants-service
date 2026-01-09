@@ -182,11 +182,11 @@ export function wireOutcomesToGoal(
       newEdges.push({
         from: nodeId,
         to: goalId,
-        strength: {
-          mean: isRisk ? -0.5 : 0.7,
-          std: 0.15,
-        },
-        exists_probability: 0.9,
+        // Use flat field names to match V3 transform expectations
+        // (edges added here bypass LLM normalisation which flattens strength.mean)
+        strength_mean: isRisk ? -0.5 : 0.7,
+        strength_std: 0.15,
+        belief_exists: 0.9,
       });
     }
   }

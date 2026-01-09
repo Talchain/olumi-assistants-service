@@ -287,6 +287,91 @@ describe("CEE Schema V3 Integration", () => {
     });
   });
 
+  describe("Risk Node Coefficient Sign (Goal Repair)", () => {
+    it("REGRESSION: risk→goal edges have negative strength_mean", () => {
+      // This test verifies that risk→goal edges have negative coefficients
+      // in V3 output. The LLM prompt and goal-repair both specify that
+      // risk→goal should have negative strength.
+      const responseWithRisk: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Achieve Success" },
+            { id: "factor_1", kind: "factor", label: "Investment", data: { value: 100 } },
+            { id: "outcome_1", kind: "outcome", label: "Revenue Growth" },
+            { id: "risk_1", kind: "risk", label: "Budget Overrun" },
+            { id: "option_1", kind: "option", label: "Option A" },
+          ],
+          edges: [
+            { from: "factor_1", to: "outcome_1", weight: 0.8, belief: 0.9 },
+            { from: "factor_1", to: "risk_1", weight: 0.6, belief: 0.8 },
+            // Outcome → Goal: POSITIVE (contributes)
+            { from: "outcome_1", to: "goal_1", weight: 0.7, belief: 0.9, effect_direction: "positive" },
+            // Risk → Goal: NEGATIVE (detracts)
+            { from: "risk_1", to: "goal_1", weight: 0.5, belief: 0.9, effect_direction: "negative" },
+            { from: "option_1", to: "factor_1", weight: 1.0, belief: 1.0 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(responseWithRisk);
+
+      // Find risk→goal and outcome→goal edges
+      const riskToGoal = v3Response.graph.edges.find(
+        (e) => e.from === "risk_1" && e.to === "goal_1"
+      );
+      const outcomeToGoal = v3Response.graph.edges.find(
+        (e) => e.from === "outcome_1" && e.to === "goal_1"
+      );
+
+      expect(riskToGoal).toBeDefined();
+      expect(outcomeToGoal).toBeDefined();
+
+      // Risk → Goal MUST have negative coefficient
+      expect(riskToGoal?.strength_mean).toBeLessThan(0);
+      expect(riskToGoal?.effect_direction).toBe("negative");
+
+      // Outcome → Goal should have positive coefficient
+      expect(outcomeToGoal?.strength_mean).toBeGreaterThan(0);
+      expect(outcomeToGoal?.effect_direction).toBe("positive");
+    });
+
+    it("handles edges with flat strength_mean fields (post-goal-repair format)", () => {
+      // After goal repair, edges use flat field names (strength_mean, strength_std, belief_exists)
+      // instead of nested (strength.mean, exists_probability). This test verifies
+      // that such edges are correctly handled.
+      const responseWithFlatFields: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Success" },
+            { id: "risk_1", kind: "risk", label: "Churn Risk" },
+            { id: "out_1", kind: "outcome", label: "Revenue" },
+          ],
+          edges: [
+            // Flat field format (as produced by wireOutcomesToGoal)
+            { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.15, belief_exists: 0.9 } as any,
+            { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9 } as any,
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(responseWithFlatFields);
+
+      const riskEdge = v3Response.graph.edges.find((e) => e.from === "risk_1");
+      const outcomeEdge = v3Response.graph.edges.find((e) => e.from === "out_1");
+
+      // Verify edges are transformed correctly
+      expect(riskEdge).toBeDefined();
+      expect(riskEdge?.strength_mean).toBeLessThan(0);
+      expect(riskEdge?.effect_direction).toBe("negative");
+
+      expect(outcomeEdge).toBeDefined();
+      expect(outcomeEdge?.strength_mean).toBeGreaterThan(0);
+      expect(outcomeEdge?.effect_direction).toBe("positive");
+    });
+  });
+
   describe("Backward Compatibility", () => {
     it("handles V1 responses without effect_direction", () => {
       const responseWithoutEffectDirection: V1DraftGraphResponse = {

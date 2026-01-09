@@ -164,7 +164,7 @@ describe("Goal Inference Utility", () => {
       expect(result.edges.some((e: any) => e.from === "out_2" && e.to === "goal_1")).toBe(true);
     });
 
-    it("wires risks to goal node with negative strength", () => {
+    it("wires risks to goal node with negative strength_mean (flat field)", () => {
       const graph: GraphV1 = {
         nodes: [
           { id: "risk_1", kind: "risk", label: "Churn" },
@@ -178,7 +178,30 @@ describe("Goal Inference Utility", () => {
       const riskEdge = result.edges[0] as any;
       expect(riskEdge.from).toBe("risk_1");
       expect(riskEdge.to).toBe("goal_1");
-      expect(riskEdge.strength.mean).toBeLessThan(0);
+      // Verify flat field names (not nested strength.mean)
+      expect(riskEdge.strength_mean).toBeLessThan(0);
+      expect(riskEdge.strength_std).toBeGreaterThan(0);
+      expect(riskEdge.belief_exists).toBeGreaterThan(0);
+    });
+
+    it("wires outcomes to goal node with positive strength_mean (flat field)", () => {
+      const graph: GraphV1 = {
+        nodes: [
+          { id: "out_1", kind: "outcome", label: "Revenue" },
+          { id: "goal_1", kind: "goal", label: "Success" },
+        ],
+        edges: [],
+      } as any;
+
+      const result = wireOutcomesToGoal(graph, "goal_1");
+      expect(result.edges).toHaveLength(1);
+      const outcomeEdge = result.edges[0] as any;
+      expect(outcomeEdge.from).toBe("out_1");
+      expect(outcomeEdge.to).toBe("goal_1");
+      // Verify flat field names with positive coefficient for outcomes
+      expect(outcomeEdge.strength_mean).toBeGreaterThan(0);
+      expect(outcomeEdge.strength_std).toBeGreaterThan(0);
+      expect(outcomeEdge.belief_exists).toBeGreaterThan(0);
     });
 
     it("does not duplicate existing edges", () => {
@@ -194,6 +217,33 @@ describe("Goal Inference Utility", () => {
 
       const result = wireOutcomesToGoal(graph, "goal_1");
       expect(result.edges).toHaveLength(1); // No duplicate added
+    });
+
+    it("REGRESSION: does NOT use nested strength.mean format (bypasses normalisation)", () => {
+      // This test guards against regression to nested format which would cause
+      // transformEdgeToV3 to fall back to 0.5 (positive) for risk edges
+      const graph: GraphV1 = {
+        nodes: [
+          { id: "risk_1", kind: "risk", label: "Churn Risk" },
+          { id: "out_1", kind: "outcome", label: "Revenue" },
+          { id: "goal_1", kind: "goal", label: "Success" },
+        ],
+        edges: [],
+      } as any;
+
+      const result = wireOutcomesToGoal(graph, "goal_1");
+
+      for (const edge of result.edges) {
+        const e = edge as any;
+        // MUST NOT have nested strength object
+        expect(e.strength).toBeUndefined();
+        expect(e.exists_probability).toBeUndefined();
+
+        // MUST have flat field names
+        expect(typeof e.strength_mean).toBe("number");
+        expect(typeof e.strength_std).toBe("number");
+        expect(typeof e.belief_exists).toBe("number");
+      }
     });
   });
 

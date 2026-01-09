@@ -1340,6 +1340,19 @@ export async function finaliseCeeDraftResponse(
       ? (graph!.nodes as any[]).filter((n: any) => typeof n?.label === "string" && n.label.length > 0).length
       : 0;
 
+    // Compute unreachable_kinds for telemetry (deduplicated list of kinds)
+    let unreachableKindsTelemetry: string[] = [];
+    if (isConnectivityFailure && graph && Array.isArray(graph.nodes) && structure.connectivity) {
+      const unreachableSet = new Set(structure.connectivity.unreachable_nodes);
+      const kindsSet = new Set<string>();
+      for (const node of graph.nodes as any[]) {
+        if (unreachableSet.has(node.id) && node.kind) {
+          kindsSet.add(node.kind);
+        }
+      }
+      unreachableKindsTelemetry = Array.from(kindsSet);
+    }
+
     emit(TelemetryEvents.CeeDraftGraphFailed, {
       request_id: requestId,
       latency_ms: latencyMs,
@@ -1350,8 +1363,11 @@ export async function finaliseCeeDraftResponse(
       missing_kinds: structure.missing,
       raw_node_kinds: rawNodeKinds,
       connectivity_failed: isConnectivityFailure,
-      // Use count instead of array to avoid high-cardinality telemetry
+      // Use count instead of array for node IDs to avoid high-cardinality telemetry
       unreachable_node_count: structure.connectivity?.unreachable_nodes?.length ?? 0,
+      // Additional connectivity diagnostics (kinds are low-cardinality, safe for telemetry)
+      all_kinds_present: isConnectivityFailure && structure.missing.length === 0,
+      unreachable_kinds: unreachableKindsTelemetry,
     });
 
     logCeeCall({
@@ -1427,6 +1443,20 @@ export async function finaliseCeeDraftResponse(
 
     // Add connectivity diagnostic for connectivity failures (counts only, no PII)
     if (isConnectivityFailure && structure.connectivity) {
+      // Compute unreachable_kinds from unreachable nodes (for debugging without PII)
+      const unreachableKinds: string[] = [];
+      if (graph && Array.isArray(graph.nodes)) {
+        const unreachableSet = new Set(structure.connectivity.unreachable_nodes);
+        for (const node of graph.nodes as any[]) {
+          if (unreachableSet.has(node.id) && node.kind && !unreachableKinds.includes(node.kind)) {
+            unreachableKinds.push(node.kind);
+          }
+        }
+      }
+
+      details.connectivity_failed = true;
+      details.all_kinds_present = structure.missing.length === 0;
+      details.unreachable_kinds = unreachableKinds;
       details.connectivity = {
         decision_count: structure.connectivity.decision_ids.length,
         reachable_option_count: structure.connectivity.reachable_options.length,
