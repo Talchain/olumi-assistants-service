@@ -124,7 +124,9 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
 
-      expect(body.graph).toBeDefined();
+      // V3 response has nodes/edges at root level (not nested under graph)
+      expect(body.nodes).toBeDefined();
+      expect(body.edges).toBeDefined();
       expect(body.quality).toBeDefined();
       expect(body.trace).toBeDefined();
     });

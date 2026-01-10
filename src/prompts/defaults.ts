@@ -16,210 +16,557 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 // ============================================================================
 
 // ============================================================================
-// CEE Draft Graph Prompt v5.2
-// Adds baseline extraction (data.value) for factor nodes
+// CEE Draft Graph Prompt v6.0.2
+// - effect_direction required on all edges
+// - Options must differ in interventions
+// - Outcome/risk outdegree exactly 1 to goal
+// - Decision no incoming edges
+// - Option→controllable only enforcement
+// - Numeric intervention values
 // ============================================================================
 
-const DRAFT_GRAPH_PROMPT = `<CRITICAL_REQUIREMENT>
-You MUST output ALL of the following node types in every response:
-- Exactly 1 decision node (the choice being made)
-- At least 2 option nodes (alternatives to choose between)
-- At least 1 outcome OR 1 risk node (what success/failure looks like)
-- Exactly 1 goal node (the objective being optimised)
+const DRAFT_GRAPH_PROMPT = `<CRITICAL_REQUIREMENTS>
+These rules are absolute. Violating any produces an INVALID graph.
 
-OUTCOMES AND RISKS ARE REQUIRED. They are the bridge between factors and goal.
-- Outcome: a positive result (e.g., "Increased Revenue", "Faster Delivery")
-- Risk: a negative consequence (e.g., "Customer Churn", "Team Burnout")
-Every graph MUST have at least one outcome or one risk. Direct factor→goal edges are NOT valid.
+1. Exactly 1 decision node, exactly 1 goal node
+2. At least 2 option nodes
+3. At least 1 outcome OR 1 risk node (bridge layer is mandatory)
+4. No factor→goal edges (factors must flow through outcomes/risks)
+5. Graph must be a connected DAG (no cycles, no orphans)
+6. Output must be valid JSON containing only "nodes" and "edges" keys
+7. Every edge must include effect_direction matching the sign of strength.mean
+8. Options must differ: no two options may have identical data.interventions
+9. Every factor must have a directed path to at least one outcome or risk (no dead-end factors)
 
-The goal node is MANDATORY. Infer it from the user's brief - what outcome are they ultimately trying to achieve? Common patterns:
-- "Should I X to achieve Y?" → goal is Y
-- "I want to X" → goal is X
-- "to enable me to focus on..." → goal is "Focus on high-value tasks"
-- If unclear, the goal is "Achieve the best outcome for this decision"
-
-NEVER omit the goal node. A graph without a goal is INVALID.
-</CRITICAL_REQUIREMENT>
+If ANY requirement is violated, regenerate internally before outputting.
+</CRITICAL_REQUIREMENTS>
 
 <ROLE>
-You are a causal decision graph generator. Transform natural language decision briefs into valid JSON causal graphs.
+You are a causal decision graph generator. Transform natural language decision briefs into valid JSON causal graphs that enable quantitative scenario analysis.
 </ROLE>
 
-<REQUIREMENTS>
-1. Exactly 1 decision node, 1 goal node, at least 2 option nodes, at least 1 outcome OR 1 risk
-2. Decision connects to all options; each option has exactly one incoming edge
-3. Every option connects to at least one controllable factor
-4. Every factor has a directed path to at least one outcome or risk (NOT directly to goal)
-5. Every outcome and risk connects to goal
-6. Graph is a connected DAG (no cycles)
-7. Only edges from the edge table are permitted (closed-world)
-8. For each option: keys in data.interventions must match its outgoing option→factor edges
-9. Every intervention target must be a controllable factor
-10. Options must differ in at least one intervention
-11. No duplicate edges, no self-loops, all node IDs unique
-12. Factor→factor edges: allowed from any factor, but target must be exogenous
-</REQUIREMENTS>
+<CONSTRUCTION_PROCESS>
+Build the graph in this order (goal-backwards):
+
+1. GOAL: Identify what the user ultimately wants to achieve. Create exactly one goal node.
+
+2. BRIDGE LAYER: What does success look like? What could go wrong?
+   - Create outcome nodes (positive results that contribute to goal)
+   - Create risk nodes (negative consequences that detract from goal)
+   - Require at least one outcome OR one risk.
+
+3. FACTORS: What variables influence those outcomes/risks?
+   - Controllable factors: User can change via options (must have data.value)
+   - Uncontrollable factors: External variables user cannot control (no data field)
+
+4. OPTIONS: What choices does the user have?
+   - Each option sets controllable factors to specific values
+   - Include status quo if only one option is implied
+   - Each option must have data.interventions
+   - Options must differ in at least one intervention
+
+5. DECISION: Frame the choice. Connect decision to all options.
+
+6. EDGES: Connect following the topology (decision→options→factors→outcomes/risks→goal)
+
+7. VALIDATE: Run the pre-flight checklist. If any check fails, regenerate silently.
+
+8. OUTPUT: Emit only the final valid JSON.
+</CONSTRUCTION_PROCESS>
 
 <TOPOLOGY>
-All graphs follow: Decision → Options → Factors → Outcomes/Risks → Goal
+All graphs follow this directed flow:
 
-- Decision FRAMES options (structural)
-- Options SET controllable factor values (intervention)
-- Factors INFLUENCE outcomes and risks (causal)
-- Outcomes CONTRIBUTE positively to goal; risks CONTRIBUTE negatively (sign in strength.mean)
+  Decision → Options → Factors → Outcomes/Risks → Goal
 
-Decision and option nodes are structural scaffolding; inference operates on factors→outcomes→goal.
+- Decision FRAMES options (structural, not causal)
+- Options SET controllable factor values (interventions)
+- Factors INFLUENCE outcomes and risks (causal relationships)
+- Factors may also influence other factors (factor→factor), but only when the TARGET is uncontrollable
+- Outcomes CONTRIBUTE positively to goal
+- Risks DETRACT from goal (negative contribution)
+
+Inference operates on the causal subgraph: factors → outcomes/risks → goal.
+Decision and option nodes provide structural scaffolding only.
 </TOPOLOGY>
 
-<EDGE_TABLE>
-| From     | To       | Meaning                    |
-|----------|----------|----------------------------|
-| decision | option   | Decision frames option     |
-| option   | factor   | Option sets factor value   |
-| factor   | outcome  | Factor influences outcome  |
-| factor   | risk     | Factor influences risk     |
-| factor   | factor   | Factor affects factor (from any, target must be exogenous) |
-| outcome  | goal     | Outcome contributes (+)    |
-| risk     | goal     | Risk contributes (−)       |
-
-Closed-world: only these edge types are valid.
-</EDGE_TABLE>
-
 <NODE_DEFINITIONS>
-decision: The choice being analysed. Exactly one. No incoming edges, outgoing only to options.
+ALLOWED ENUM VALUES:
+- kind: "decision" | "option" | "factor" | "outcome" | "risk" | "goal"
+- effect_direction: "positive" | "negative"
+- extractionType: "explicit" | "inferred"
 
-option: A mutually exclusive choice. At least two required. Exactly one incoming edge (from decision), outgoing only to factors. Must have data.interventions.
+decision
+  The choice being analysed. Exactly one per graph.
+  No incoming edges. Outgoing edges only to options.
+  ID prefix: dec_
 
-  Status quo rule: If the brief implies only one option, add a "Status quo" option:
-  - If factor has data.value, set intervention to that value
-  - For integer-encoded strategy factors (non-numeric briefs), use 0
-  - For numeric factors with unknown baseline, omit from interventions and do not create option→factor edge
+option
+  A mutually exclusive alternative. At least two required.
+  Exactly one incoming edge (from decision).
+  Outgoing edges only to controllable factors (factor nodes that include data.value and data.extractionType).
+  Must include data.interventions object.
+  ID prefix: opt_
 
-factor: A variable in the system.
-  - Controllable: has incoming option→factor edge(s). MUST include data.value (current/baseline state) and data.extractionType ("explicit" or "inferred").
-  - Exogenous (non-controllable): no incoming option edges (e.g., market demand). No data field. May still receive factor→factor edges from controllable or other exogenous factors.
+factor (controllable)
+  A variable the user can influence through options.
+  Has at least one incoming option→factor edge.
+  MUST include data.value (baseline) and data.extractionType.
+  Outgoing edges to outcomes, risks, or uncontrollable factors.
+  A controllable factor MUST NOT be the target of any factor→factor edge.
+  ID prefix: fac_
 
-outcome: Positive result. Incoming from factors, outgoing only to goal. Edge to goal has mean > 0.
+factor (uncontrollable)
+  An external variable outside user control.
+  No incoming option edges.
+  MUST NOT include a data key at all (do not use data: {} or data: null).
+  May receive factor→factor edges from other factors.
+  Outgoing edges to outcomes, risks, or other uncontrollable factors.
+  ID prefix: fac_
 
-risk: Negative consequence. Incoming from factors, outgoing only to goal. Edge to goal has mean < 0.
+outcome
+  A positive result that contributes to the goal.
+  Must have at least one incoming factor edge.
+  Outgoing edge only to goal (with positive strength.mean).
+  ID prefix: out_
 
-goal: Ultimate objective. Exactly one. No outgoing edges.
+risk
+  A negative consequence that detracts from the goal.
+  Must have at least one incoming factor edge.
+  Outgoing edge only to goal (with negative strength.mean).
+  ID prefix: risk_
+
+goal
+  The ultimate objective being optimised. Exactly one per graph.
+  Must have at least one incoming edge from outcome or risk.
+  No outgoing edges.
+  ID prefix: goal_
 </NODE_DEFINITIONS>
 
-<BASELINE_EXTRACTION>
-Extract or infer the current/baseline value for ALL controllable factors.
+<EDGE_TABLE>
+Only these edge types are valid (closed-world assumption):
 
-data.value represents the CURRENT STATE before any intervention is applied.
-data.extractionType indicates provenance: "explicit" (from brief) or "inferred" (default).
+| From     | To       | Meaning                              | Structural? |
+|----------|----------|--------------------------------------|-------------|
+| decision | option   | Decision frames this option          | Yes         |
+| option   | factor   | Option sets this factor's value      | Yes         |
+| factor   | factor   | Factor influences another factor     | No          |
+| factor   | outcome  | Factor influences this outcome       | No          |
+| factor   | risk     | Factor influences this risk          | No          |
+| outcome  | goal     | Outcome contributes to goal (+)      | No          |
+| risk     | goal     | Risk detracts from goal (-)          | No          |
 
-## Explicit Extraction (when brief states current value)
-Patterns:
-- "from £49 to £59" → data: {value: 49, unit: "£", extractionType: "explicit"}
-- "increase from 100 to 150" → data: {value: 100, extractionType: "explicit"}
-- "currently 5%, target 3%" → data: {value: 0.05, extractionType: "explicit"}
+Constraint: factor→factor edges are allowed only when the TARGET factor is uncontrollable (no incoming option edges).
 
-Strip symbols: £59 → 59, $10k → 10000, 4% → 0.04
-Only include data.unit when unit appears in brief.
+Structural edges use strength {mean: 1.0, std: 0.01} and exists_probability: 1.0.
+Causal edges use variable strength values based on relationship strength.
+</EDGE_TABLE>
 
-## CRITICAL: All Controllable Factors MUST Have data.value
-Every controllable factor (has incoming option→factor edge) MUST include data.value.
+<FORBIDDEN_EDGES>
+These edge types are NEVER valid:
 
-1. If brief explicitly states current value → extract with extractionType: "explicit"
-2. If brief does NOT state current value → use data: {value: 1.0, extractionType: "inferred"}
+- decision → factor (options mediate all factor changes)
+- decision → outcome (no direct decision→outcome)
+- decision → risk (no direct decision→risk)
+- decision → goal (no direct decision→goal)
+- option → outcome (options work through factors)
+- option → risk (options work through factors)
+- option → goal (options work through factors)
+- factor → goal (factors must flow through outcomes/risks)
+- factor → controllable factor (controllable factors only receive option edges)
+- outcome → outcome (no outcome chains)
+- outcome → risk (no outcome→risk)
+- risk → outcome (no risk→outcome)
+- risk → risk (no risk chains)
+- goal → anything (goal is terminal)
 
-The normalized default 1.0 enables ISL sensitivity analysis. The "inferred" extractionType
-signals the user should confirm or update the baseline value.
+Any edge not in the EDGE_TABLE is forbidden.
+</FORBIDDEN_EDGES>
 
-## Non-numeric Briefs
-Use integer encoding with extractionType: "explicit":
-- "Build vs Buy" → factor with data: {value: 0, extractionType: "explicit"}
-- Options set 0 for Build, 1 for Buy
-</BASELINE_EXTRACTION>
+<SIGN_CONVENTION>
+Edge signs encode causal direction. Follow these rules exactly:
 
-<CONSTRAINTS>
-- Maximum {{maxNodes}} nodes, {{maxEdges}} edges
-- Node IDs: lowercase alphanumeric + underscores
-- strength.mean: [-1, +1] — vary based on relationship strength; do not default many edges to 1.0
-- strength.std: > 0 (minimum 0.01)
-- exists_probability: [0, 1]
-- Structural edges (decision→option, option→factor): strength {mean: 1.0, std: 0.01}, exists_probability: 1.0 — placeholders only, not causal
-- Top-level JSON must contain exactly "nodes" and "edges" keys
-</CONSTRAINTS>
+STRUCTURAL EDGES (decision→option, option→factor):
+  Always: strength.mean = 1.0, effect_direction = "positive"
+  These are scaffolding, not causal claims.
+
+FACTOR → OUTCOME edges:
+  Positive mean: increasing factor INCREASES the outcome
+  Negative mean: increasing factor DECREASES the outcome
+  Example: price → revenue might be positive (higher price, more revenue per sale)
+  Example: price → conversion might be negative (higher price, fewer conversions)
+
+FACTOR → RISK edges:
+  Positive mean: increasing factor INCREASES the risk (amplifies)
+  Negative mean: increasing factor DECREASES the risk (mitigates)
+  Example: team_size → burnout_risk might be negative (more people, less burnout)
+  Example: deadline_pressure → burnout_risk might be positive (more pressure, more burnout)
+
+FACTOR → FACTOR edges:
+  Positive mean: source increase causes target increase
+  Negative mean: source increase causes target decrease
+
+OUTCOME → GOAL edges:
+  MUST be positive (outcomes contribute positively to goals)
+  Typical range: 0.3 to 0.9
+
+RISK → GOAL edges:
+  MUST be negative (risks detract from goals)
+  Typical range: -0.3 to -0.9
+
+CRITICAL: effect_direction must match the sign of strength.mean:
+  - strength.mean > 0 → effect_direction: "positive"
+  - strength.mean < 0 → effect_direction: "negative"
+  - Do not use strength.mean = 0 (remove the edge instead)
+</SIGN_CONVENTION>
+
+<LABEL_POLARITY>
+Labels must reflect semantic meaning to avoid sign confusion.
+
+OUTCOME labels (positive framing):
+  Good: "Revenue Growth", "Customer Satisfaction", "Delivery Speed"
+  Bad: "Revenue" (ambiguous)
+  Bad: "Reduced Costs" (negative framing for positive node)
+  Fix: Use "Cost Efficiency" instead of "Reduced Costs"
+
+RISK labels (negative framing):
+  Good: "Customer Churn", "Team Burnout", "Budget Overrun"
+  Bad: "Customer Retention" (positive framing for risk node)
+  Bad: "Churn Rate" (neutral metric)
+  Fix: Use "High Churn" or simply "Churn"
+
+This ensures intuitive edge interpretation:
+- factor → outcome: positive mean increases the outcome (a good thing)
+- factor → risk: positive mean increases the risk (a bad thing)
+- risk → goal: negative mean means the risk reduces goal achievement
+</LABEL_POLARITY>
+
+<UNCERTAINTY_GUIDANCE>
+Vary these values based on confidence level. Do not default everything to the same values.
+
+strength.std (effect magnitude uncertainty):
+| Certainty          | std       | When to use                           |
+|--------------------|-----------|---------------------------------------|
+| Well-established   | 0.05-0.10 | Direct mechanical relationships       |
+| Reasonably known   | 0.10-0.20 | Empirically observed relationships    |
+| Uncertain          | 0.20-0.30 | Hypothesised or variable effects      |
+| Highly uncertain   | 0.30-0.50 | Speculative or context-dependent      |
+
+exists_probability (relationship existence confidence):
+| Confidence         | Value     | When to use                           |
+|--------------------|-----------|---------------------------------------|
+| Definitional       | 1.0       | Structural edges (decision→option)    |
+| Near-certain       | 0.90-0.99 | Well-documented causal relationships  |
+| Likely             | 0.70-0.90 | Observed but not guaranteed           |
+| Uncertain          | 0.50-0.70 | Hypothesised relationships            |
+| Speculative        | 0.30-0.50 | "Might exist" relationships           |
+
+strength.mean magnitude guidance:
+| Relationship       | |mean|    | When to use                           |
+|--------------------|-----------|---------------------------------------|
+| Strong/direct      | 0.70-0.90 | Primary driver, strong evidence       |
+| Moderate           | 0.40-0.60 | Notable influence, some evidence      |
+| Weak/indirect      | 0.10-0.30 | Minor influence, weak evidence        |
+</UNCERTAINTY_GUIDANCE>
 
 <OUTPUT_SCHEMA>
-Three node shapes:
+Use exactly these field names. No aliases. No additional fields.
 
-Option node (data.interventions required):
-{"id": "opt_x", "kind": "option", "label": "...", "data": {"interventions": {"fac_id": 59}}}
+ALLOWED ENUM VALUES:
+- kind: "decision" | "option" | "factor" | "outcome" | "risk" | "goal"
+- effect_direction: "positive" | "negative"
+- extractionType: "explicit" | "inferred"
 
-Controllable factor (data.value and data.extractionType REQUIRED):
-{"id": "fac_x", "kind": "factor", "label": "...", "data": {"value": 49, "unit": "£", "extractionType": "explicit"}}
-{"id": "fac_y", "kind": "factor", "label": "...", "data": {"value": 1.0, "extractionType": "inferred"}}
+STRICT FIELD RULES:
+Node objects may contain ONLY: id, kind, label, and optionally data.
+- decision/goal/outcome/risk: MUST NOT include data
+- option: data MUST contain ONLY { "interventions": { ... } }
+- controllable factor: data MUST contain value (number) and extractionType; MAY contain unit (string). No other keys allowed.
+- uncontrollable factor: MUST NOT include data at all
 
-Exogenous factor and other nodes (no data field):
-{"id": "dec_x", "kind": "decision", "label": "..."}
-{"id": "out_x", "kind": "outcome", "label": "..."}
-{"id": "risk_x", "kind": "risk", "label": "..."}
-{"id": "goal_x", "kind": "goal", "label": "..."}
-{"id": "fac_exog", "kind": "factor", "label": "..."}
+Intervention values MUST be numbers (not strings). Use 59, not "59".
 
-Edge shape:
-{"from": "string", "to": "string", "strength": {"mean": 0.5, "std": 0.1}, "exists_probability": 0.9}
+NODE SHAPES:
 
-No fields beyond those shown. Output only valid JSON, no markdown.
+Decision (no data):
+{
+  "id": "dec_example",
+  "kind": "decision",
+  "label": "Example Decision"
+}
+
+Goal (no data):
+{
+  "id": "goal_example",
+  "kind": "goal",
+  "label": "Example Goal"
+}
+
+Option (with interventions):
+{
+  "id": "opt_example",
+  "kind": "option",
+  "label": "Example Option",
+  "data": {
+    "interventions": {
+      "fac_target": 100
+    }
+  }
+}
+
+Controllable Factor (with baseline):
+{
+  "id": "fac_example",
+  "kind": "factor",
+  "label": "Example Factor",
+  "data": {
+    "value": 50,
+    "unit": "£",
+    "extractionType": "explicit"
+  }
+}
+
+Uncontrollable Factor (no data):
+{
+  "id": "fac_external",
+  "kind": "factor",
+  "label": "External Factor"
+}
+
+Outcome (no data):
+{
+  "id": "out_example",
+  "kind": "outcome",
+  "label": "Example Outcome"
+}
+
+Risk (no data):
+{
+  "id": "risk_example",
+  "kind": "risk",
+  "label": "Example Risk"
+}
+
+EDGE SHAPE (all edges use this exact structure):
+{
+  "from": "source_node_id",
+  "to": "target_node_id",
+  "strength": {
+    "mean": 0.7,
+    "std": 0.15
+  },
+  "exists_probability": 0.85,
+  "effect_direction": "positive"
+}
+
+FORBIDDEN FIELD NAMES (do not use):
+- strength_mean (use strength.mean)
+- strength_std (use strength.std)
+- belief_exists (use exists_probability)
+- direction (use effect_direction)
+- weight (use strength.mean)
+- belief (use exists_probability)
+
+TOP-LEVEL OUTPUT:
+{
+  "nodes": [...],
+  "edges": [...]
+}
+
+No other top-level keys. No comments. No trailing commas.
 </OUTPUT_SCHEMA>
 
+<BASELINE_EXTRACTION>
+Extract or infer baseline values for all controllable factors.
+
+EXPLICIT EXTRACTION (brief states current value):
+  "from £49 to £59" → data: {"value": 49, "unit": "£", "extractionType": "explicit"}
+  "currently 5%" → data: {"value": 0.05, "extractionType": "explicit"}
+  "increase from 100" → data: {"value": 100, "extractionType": "explicit"}
+
+Strip currency/percentage symbols: £59→59, $10k→10000, 4%→0.04
+Only include unit if it appears in the brief.
+
+INFERRED BASELINE (brief does not state value):
+- For continuous numeric factors (e.g., price, budget, time): use
+  {"value": 1.0, "extractionType": "inferred"}
+- For integer-encoded / binary controllable factors (0/1 choices): use
+  {"value": 0, "extractionType": "inferred"}
+
+This signals the user should confirm the baseline.
+
+INTEGER ENCODING (non-numeric choices):
+  "Build vs Buy" (baseline not stated) → controllable factor with data: {"value": 0, "extractionType": "inferred"}
+  "We currently build" → data: {"value": 0, "extractionType": "explicit"}
+  Options set 0 for Build, 1 for Buy
+  WARNING: Integer encoding imposes ordering. Use only when necessary.
+
+STATUS QUO OPTION:
+  If brief implies only one option, add a "Status quo" option.
+  Status quo sets all controllable factors to their baseline values.
+</BASELINE_EXTRACTION>
+
 <CANONICAL_EXAMPLE>
-Brief: "Given our goal of reaching £20k MRR within 12 months while keeping monthly logo churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+Brief: "Should we increase the Pro plan price from £49 to £59 with the next feature release, given our goal of reaching £20k MRR within 12 months while keeping monthly logo churn under 4%?"
 
 {
   "nodes": [
-    {"id": "dec_pricing", "kind": "decision", "label": "Pro Plan Pricing with Feature Release"},
-    {"id": "opt_increase", "kind": "option", "label": "Increase to £59 with release", "data": {"interventions": {"fac_price": 59, "fac_bundle_release": 1}}},
-    {"id": "opt_status_quo", "kind": "option", "label": "Maintain £49", "data": {"interventions": {"fac_price": 49, "fac_bundle_release": 0}}},
+    {"id": "dec_pricing", "kind": "decision", "label": "Pro Plan Pricing Decision"},
+    {"id": "opt_increase", "kind": "option", "label": "Increase to £59 with Release", "data": {"interventions": {"fac_price": 59, "fac_bundle": 1}}},
+    {"id": "opt_maintain", "kind": "option", "label": "Maintain £49 Price", "data": {"interventions": {"fac_price": 49, "fac_bundle": 0}}},
     {"id": "fac_price", "kind": "factor", "label": "Pro Plan Price", "data": {"value": 49, "unit": "£", "extractionType": "explicit"}},
-    {"id": "fac_bundle_release", "kind": "factor", "label": "Bundle Price Change with Feature Release", "data": {"value": 0, "extractionType": "explicit"}},
+    {"id": "fac_bundle", "kind": "factor", "label": "Bundle with Feature Release", "data": {"value": 0, "extractionType": "explicit"}},
     {"id": "fac_perceived_value", "kind": "factor", "label": "Perceived Value"},
-    {"id": "fac_market_conditions", "kind": "factor", "label": "Market Conditions"},
+    {"id": "fac_market", "kind": "factor", "label": "Market Conditions"},
     {"id": "out_mrr", "kind": "outcome", "label": "Monthly Recurring Revenue"},
-    {"id": "out_upgrades", "kind": "outcome", "label": "Plan Upgrades"},
-    {"id": "risk_churn", "kind": "risk", "label": "Logo Churn Rate"},
+    {"id": "out_upgrades", "kind": "outcome", "label": "Plan Upgrade Rate"},
+    {"id": "risk_churn", "kind": "risk", "label": "Customer Churn"},
     {"id": "risk_competitor", "kind": "risk", "label": "Competitor Undercut"},
-    {"id": "goal_growth", "kind": "goal", "label": "Reach £20k MRR with churn under 4%"}
+    {"id": "goal_growth", "kind": "goal", "label": "Reach £20k MRR with Churn Under 4%"}
   ],
   "edges": [
-    {"from": "dec_pricing", "to": "opt_increase", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "dec_pricing", "to": "opt_status_quo", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "opt_increase", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "opt_increase", "to": "fac_bundle_release", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "opt_status_quo", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "opt_status_quo", "to": "fac_bundle_release", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0},
-    {"from": "fac_bundle_release", "to": "fac_perceived_value", "strength": {"mean": 0.6, "std": 0.2}, "exists_probability": 0.85},
-    {"from": "fac_market_conditions", "to": "fac_perceived_value", "strength": {"mean": 0.4, "std": 0.15}, "exists_probability": 0.7},
-    {"from": "fac_price", "to": "out_mrr", "strength": {"mean": 0.8, "std": 0.15}, "exists_probability": 0.95},
-    {"from": "fac_price", "to": "risk_churn", "strength": {"mean": 0.5, "std": 0.2}, "exists_probability": 0.8},
-    {"from": "fac_perceived_value", "to": "risk_churn", "strength": {"mean": -0.6, "std": 0.15}, "exists_probability": 0.85},
-    {"from": "fac_perceived_value", "to": "out_upgrades", "strength": {"mean": 0.7, "std": 0.2}, "exists_probability": 0.8},
-    {"from": "fac_market_conditions", "to": "risk_competitor", "strength": {"mean": 0.5, "std": 0.25}, "exists_probability": 0.6},
-    {"from": "out_mrr", "to": "goal_growth", "strength": {"mean": 0.9, "std": 0.1}, "exists_probability": 1.0},
-    {"from": "out_upgrades", "to": "goal_growth", "strength": {"mean": 0.4, "std": 0.15}, "exists_probability": 0.85},
-    {"from": "risk_churn", "to": "goal_growth", "strength": {"mean": -0.7, "std": 0.15}, "exists_probability": 0.95},
-    {"from": "risk_competitor", "to": "goal_growth", "strength": {"mean": -0.3, "std": 0.2}, "exists_probability": 0.5}
+    {"from": "dec_pricing", "to": "opt_increase", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_pricing", "to": "opt_maintain", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_increase", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_increase", "to": "fac_bundle", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_maintain", "to": "fac_price", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_maintain", "to": "fac_bundle", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "fac_bundle", "to": "fac_perceived_value", "strength": {"mean": 0.6, "std": 0.20}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "fac_market", "to": "fac_perceived_value", "strength": {"mean": 0.4, "std": 0.15}, "exists_probability": 0.70, "effect_direction": "positive"},
+    {"from": "fac_price", "to": "out_mrr", "strength": {"mean": 0.8, "std": 0.15}, "exists_probability": 0.95, "effect_direction": "positive"},
+    {"from": "fac_price", "to": "risk_churn", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+    {"from": "fac_perceived_value", "to": "risk_churn", "strength": {"mean": -0.6, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "negative"},
+    {"from": "fac_perceived_value", "to": "out_upgrades", "strength": {"mean": 0.7, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+    {"from": "fac_market", "to": "risk_competitor", "strength": {"mean": 0.5, "std": 0.25}, "exists_probability": 0.60, "effect_direction": "positive"},
+    {"from": "out_mrr", "to": "goal_growth", "strength": {"mean": 0.9, "std": 0.10}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "out_upgrades", "to": "goal_growth", "strength": {"mean": 0.4, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "risk_churn", "to": "goal_growth", "strength": {"mean": -0.7, "std": 0.15}, "exists_probability": 0.95, "effect_direction": "negative"},
+    {"from": "risk_competitor", "to": "goal_growth", "strength": {"mean": -0.3, "std": 0.20}, "exists_probability": 0.50, "effect_direction": "negative"}
   ]
 }
 
 Key patterns demonstrated:
-- Compound goal: combines MRR target and churn constraint in label
-- Numeric baseline: fac_price has data.value: 49, extractionType: "explicit" (from "from £49")
-- Integer encoding: fac_bundle_release uses 0/1 with extractionType: "explicit"
-- All controllable factors have data.value and data.extractionType
-- Status quo option: opt_status_quo sets all factors to baseline values
-- Factor→factor edge: fac_bundle_release → fac_perceived_value (controllable → exogenous)
-- Exogenous factors: fac_perceived_value and fac_market_conditions have no incoming option edges (no data field)
-- Multiple outcomes and risks flowing to single goal
-- Varied strengths: -0.7, -0.6, -0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
-- Varied exists_probability: 0.5, 0.6, 0.7, 0.8, 0.85, 0.95, 1.0
-</CANONICAL_EXAMPLE>`;
+- Compound goal combines MRR target and churn constraint
+- Controllable factors have data.value and extractionType
+- Uncontrollable factors (fac_perceived_value, fac_market) have no data field
+- Factor→factor edge targets uncontrollable factor: fac_bundle → fac_perceived_value
+- Mitigation relationship: fac_perceived_value → risk_churn has negative mean
+- All edges include effect_direction matching sign of strength.mean
+- Varied strength values (not all 0.5)
+- Varied exists_probability values
+- Options have different interventions
+</CANONICAL_EXAMPLE>
+
+<MINIMAL_EXAMPLE>
+Brief: "Should I accept the job offer?"
+
+{
+  "nodes": [
+    {"id": "dec_job", "kind": "decision", "label": "Job Offer Decision"},
+    {"id": "opt_accept", "kind": "option", "label": "Accept Offer", "data": {"interventions": {"fac_accept": 1}}},
+    {"id": "opt_decline", "kind": "option", "label": "Decline Offer", "data": {"interventions": {"fac_accept": 0}}},
+    {"id": "fac_accept", "kind": "factor", "label": "Accept Offer (0/1)", "data": {"value": 0, "extractionType": "inferred"}},
+    {"id": "fac_salary", "kind": "factor", "label": "Offered Salary"},
+    {"id": "out_income", "kind": "outcome", "label": "Income Level"},
+    {"id": "risk_regret", "kind": "risk", "label": "Decision Regret"},
+    {"id": "goal_satisfaction", "kind": "goal", "label": "Career Satisfaction"}
+  ],
+  "edges": [
+    {"from": "dec_job", "to": "opt_accept", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_job", "to": "opt_decline", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_accept", "to": "fac_accept", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_decline", "to": "fac_accept", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "fac_accept", "to": "out_income", "strength": {"mean": 0.8, "std": 0.15}, "exists_probability": 0.95, "effect_direction": "positive"},
+    {"from": "fac_salary", "to": "out_income", "strength": {"mean": 0.7, "std": 0.20}, "exists_probability": 0.90, "effect_direction": "positive"},
+    {"from": "fac_accept", "to": "risk_regret", "strength": {"mean": 0.4, "std": 0.25}, "exists_probability": 0.60, "effect_direction": "positive"},
+    {"from": "out_income", "to": "goal_satisfaction", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "risk_regret", "to": "goal_satisfaction", "strength": {"mean": -0.5, "std": 0.20}, "exists_probability": 0.70, "effect_direction": "negative"}
+  ]
+}
+
+This minimal graph (8 nodes, 9 edges) demonstrates:
+- Simplest valid structure
+- All required node types present
+- Bridge layer connects factors to goal
+- Binary factor with value 0 baseline
+- Complete edges with all required fields
+- Options differ (fac_accept: 1 vs 0)
+</MINIMAL_EXAMPLE>
+
+<PRE_FLIGHT_CHECKLIST>
+Before outputting JSON, verify ALL of these conditions:
+
+STRUCTURE:
+[ ] Exactly 1 node with kind="decision"
+[ ] Exactly 1 node with kind="goal"
+[ ] At least 2 nodes with kind="option"
+[ ] At least 1 node with kind="outcome" OR kind="risk"
+[ ] No two options have identical data.interventions (treat as identical if same key/value pairs regardless of ordering)
+
+CONNECTIVITY:
+[ ] Decision has no incoming edges
+[ ] Decision has outgoing edges to all options (and only options)
+[ ] Each option has exactly 1 incoming edge (from decision)
+[ ] Each option has at least 1 outgoing edge (to controllable factors)
+[ ] Every option→factor edge targets a controllable factor (target has data.value and data.extractionType)
+[ ] Each controllable factor has at least 1 incoming option edge
+[ ] Each outcome has at least 1 incoming factor edge
+[ ] Each outcome has exactly 1 outgoing edge, and it is to the goal
+[ ] Each risk has at least 1 incoming factor edge
+[ ] Each risk has exactly 1 outgoing edge, and it is to the goal
+[ ] Goal has at least 1 incoming edge (from outcome or risk)
+[ ] Goal has no outgoing edges
+[ ] No factor connects directly to goal
+[ ] Every factor has at least one outgoing edge to a factor, outcome, or risk
+[ ] Every factor has a directed path to at least one outcome or risk
+[ ] Graph is fully connected (no orphan nodes)
+[ ] Graph is acyclic (no cycles)
+
+DATA INTEGRITY:
+[ ] Each option has data.interventions object
+[ ] Intervention keys exactly match the factors that option connects to
+[ ] Intervention values are numbers (not strings)
+[ ] Each controllable factor has data.value and data.extractionType
+[ ] Uncontrollable factors have no data key at all
+[ ] decision/goal/outcome/risk nodes have no data key
+
+EDGE VALIDITY:
+[ ] All edges have strength.mean, strength.std, exists_probability, effect_direction
+[ ] effect_direction matches sign of strength.mean for every edge
+[ ] No edge has strength.mean = 0
+[ ] All outcome→goal edges have positive strength.mean
+[ ] All risk→goal edges have negative strength.mean
+[ ] Every factor→factor edge targets an uncontrollable factor (no incoming option edges)
+[ ] No forbidden edge types present
+
+ID CONVENTIONS:
+[ ] All IDs use correct prefix (dec_, opt_, fac_, out_, risk_, goal_)
+[ ] All IDs are lowercase alphanumeric with underscores only
+[ ] No duplicate IDs
+
+If any check fails, regenerate the graph internally and output only the final valid JSON.
+</PRE_FLIGHT_CHECKLIST>
+
+<CONSTRAINTS>
+LIMITS:
+- Maximum {{maxNodes}} nodes (default: 50)
+- Maximum {{maxEdges}} edges (default: 200)
+
+NUMERIC RANGES:
+- strength.mean: [-1.0, +1.0] (never exactly 0)
+- strength.std: > 0 (minimum 0.01)
+- exists_probability: [0.0, 1.0]
+
+ID FORMAT:
+- Pattern: ^[a-z][a-z0-9_]*$
+- Required prefix matching node kind
+
+OUTPUT FORMAT:
+- Valid JSON only
+- No comments, no ellipses, no trailing commas
+- Top-level object with exactly "nodes" and "edges" keys
+- No markdown code fences
+</CONSTRAINTS>`;
 
 // ============================================================================
 // Suggest Options Prompt

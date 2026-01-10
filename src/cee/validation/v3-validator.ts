@@ -208,6 +208,67 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
   }
 
+  // Track incoming/outgoing edges for topology validation (v6.0.2 rules)
+  const incomingEdges = new Map<string, string[]>();
+  const outgoingEdges = new Map<string, string[]>();
+
+  for (const edge of response.edges) {
+    if (!incomingEdges.has(edge.to)) incomingEdges.set(edge.to, []);
+    if (!outgoingEdges.has(edge.from)) outgoingEdges.set(edge.from, []);
+    incomingEdges.get(edge.to)!.push(edge.from);
+    outgoingEdges.get(edge.from)!.push(edge.to);
+  }
+
+  // V6.0.2: Decision nodes must have no incoming edges
+  for (const node of response.nodes) {
+    if (node.kind === "decision") {
+      const incoming = incomingEdges.get(node.id) || [];
+      if (incoming.length > 0) {
+        warnings.push({
+          code: "DECISION_HAS_INCOMING_EDGES",
+          severity: "warning",
+          message: `Decision node "${node.id}" has ${incoming.length} incoming edge(s) but should have none`,
+          affected_node_id: node.id,
+          suggestion: "Decision nodes should not have any incoming edges",
+        });
+      }
+    }
+
+    // V6.0.2: Outcome/risk nodes must have exactly 1 outgoing edge to goal
+    if (node.kind === "outcome" || node.kind === "risk") {
+      const outgoing = outgoingEdges.get(node.id) || [];
+      if (outgoing.length === 0) {
+        warnings.push({
+          code: `${node.kind.toUpperCase()}_NO_OUTGOING_EDGE`,
+          severity: "warning",
+          message: `${node.kind} node "${node.id}" has no outgoing edge to goal`,
+          affected_node_id: node.id,
+          suggestion: `${node.kind} nodes must connect to the goal node`,
+        });
+      } else if (outgoing.length > 1) {
+        warnings.push({
+          code: `${node.kind.toUpperCase()}_MULTIPLE_OUTGOING_EDGES`,
+          severity: "info",
+          message: `${node.kind} node "${node.id}" has ${outgoing.length} outgoing edges (expected exactly 1 to goal)`,
+          affected_node_id: node.id,
+          suggestion: `${node.kind} nodes should have exactly one outgoing edge to the goal`,
+        });
+      } else {
+        // Exactly 1 outgoing - verify it goes to goal
+        const targetKind = nodeKindMap.get(outgoing[0]);
+        if (targetKind !== "goal") {
+          warnings.push({
+            code: `${node.kind.toUpperCase()}_NOT_CONNECTED_TO_GOAL`,
+            severity: "warning",
+            message: `${node.kind} node "${node.id}" connects to "${outgoing[0]}" (${targetKind}) instead of goal`,
+            affected_node_id: node.id,
+            suggestion: `${node.kind} nodes should only connect to the goal node`,
+          });
+        }
+      }
+    }
+  }
+
   // Collect strength values for uniformity check (exclude structural edges)
   const causalStrengths: number[] = [];
   const structuralEdgeTypes = new Set(["decision-option", "option-factor"]);
@@ -374,6 +435,9 @@ function validateOptions(
   const warnings: ValidationWarningV3T[] = [];
   const seenIds = new Set<string>();
 
+  // Track intervention signatures to detect identical options
+  const interventionSignatures = new Map<string, string>();
+
   for (const option of response.options) {
     // Check for duplicate option IDs
     if (seenIds.has(option.id)) {
@@ -385,6 +449,26 @@ function validateOptions(
       });
     }
     seenIds.add(option.id);
+
+    // Check for identical interventions (v6.0.2 rule: options must differ)
+    // Normalize by sorting keys to make comparison order-insensitive
+    const interventionEntries = Object.entries(option.interventions)
+      .map(([k, v]) => `${v.target_match.node_id}:${v.value}`)
+      .sort()
+      .join("|");
+
+    if (interventionSignatures.has(interventionEntries)) {
+      const existingOptionId = interventionSignatures.get(interventionEntries);
+      warnings.push({
+        code: "IDENTICAL_OPTION_INTERVENTIONS",
+        severity: "warning",
+        message: `Options "${option.id}" and "${existingOptionId}" have identical interventions`,
+        affected_option_id: option.id,
+        suggestion: "Options must differ in at least one intervention value",
+      });
+    } else {
+      interventionSignatures.set(interventionEntries, option.id);
+    }
 
     // Check ID format
     if (!/^[a-z0-9_:-]+$/.test(option.id)) {
