@@ -300,12 +300,15 @@ export type GraphMetaV3T = z.infer<typeof GraphMetaV3>;
 
 /**
  * Complete CEE V3 response schema.
+ * Note: nodes and edges are at root level (not nested under graph).
  */
 export const CEEGraphResponseV3 = z.object({
   /** Schema version marker */
   schema_version: z.literal("3.0"),
-  /** Causal graph with full topology including option nodes */
-  graph: GraphV3,
+  /** Graph nodes at root level */
+  nodes: z.array(NodeV3),
+  /** Graph edges at root level */
+  edges: z.array(EdgeV3),
   /** Decision paths with intervention bundles */
   options: z.array(OptionV3),
   /** Goal node ID - must reference a node with kind='goal' */

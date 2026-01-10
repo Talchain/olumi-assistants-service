@@ -129,7 +129,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       app,
       telemetrySink,
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers,
       payload: {
         brief: `${fixture.inputs.draft?.brief ?? "Synthetic golden journey"} ${SECRET}`,
@@ -212,7 +212,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       app,
       telemetrySink,
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers,
       payload: {
         brief: fixture.inputs.draft?.brief ?? "Synthetic golden journey",
@@ -280,7 +280,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       app,
       telemetrySink,
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers,
       payload: {
         brief: fixture.inputs.draft?.brief ?? "Synthetic golden journey",

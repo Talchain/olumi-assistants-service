@@ -86,6 +86,8 @@ type MinimumStructureResult = {
   connectivity?: ConnectivityDiagnostic;
   /** Whether connectivity check specifically failed (kinds present but not connected) */
   connectivity_failed?: boolean;
+  /** Whether outcome OR risk requirement failed (needs at least one) */
+  outcome_or_risk_missing?: boolean;
 };
 
 /**
@@ -278,6 +280,20 @@ function validateMinimumStructure(graph: GraphV1 | undefined): MinimumStructureR
       valid: false,
       missing,
       counts,
+    };
+  }
+
+  // Check outcome OR risk requirement (at least one must exist)
+  // This check happens BEFORE connectivity to give a clearer error message.
+  // Outcomes and risks are the bridges between factors and goal in the topology.
+  const outcomeCount = counts["outcome"] ?? 0;
+  const riskCount = counts["risk"] ?? 0;
+  if (outcomeCount + riskCount === 0) {
+    return {
+      valid: false,
+      missing: [], // All required kinds are present, but outcome/risk bridge is missing
+      counts,
+      outcome_or_risk_missing: true,
     };
   }
 
@@ -1433,9 +1449,11 @@ export async function finaliseCeeDraftResponse(
   // LLM sometimes generates goal node but forgets to connect outcomes/risks to it.
   // This causes connectivity check to fail with "goal unreachable".
   // Fix by programmatically adding missing outcome→goal and risk→goal edges.
-  let edgeRepairPerformed = false;
+  let edgeRepairCalled = false;
+  let edgeRepairCandidatesFound = 0;
   let edgeRepairDurationMs = 0;
   let edgesAddedByRepair = 0;
+  let edgeRepairNoopReason: string | undefined;
 
   // Check if connectivity failed due to unreachable goal
   const goalExistsButUnreachable =
@@ -1446,12 +1464,18 @@ export async function finaliseCeeDraftResponse(
 
   if (goalExistsButUnreachable && graph) {
     const edgeRepairStart = Date.now();
+    edgeRepairCalled = true;
 
     // Find the goal node ID
     const goalNode = graph.nodes.find((n: any) => n.kind === "goal");
     const foundGoalId = goalNode?.id as string | undefined;
 
     if (foundGoalId) {
+      // Count candidates (outcome/risk nodes) before wiring
+      edgeRepairCandidatesFound = (graph.nodes as any[]).filter(
+        (n: any) => n.kind === "outcome" || n.kind === "risk"
+      ).length;
+
       const edgeCountBefore = graph.edges?.length ?? 0;
 
       // Wire outcomes and risks to the goal
@@ -1460,21 +1484,37 @@ export async function finaliseCeeDraftResponse(
 
       const edgeCountAfter = graph.edges?.length ?? 0;
       edgesAddedByRepair = edgeCountAfter - edgeCountBefore;
+      edgeRepairDurationMs = Date.now() - edgeRepairStart;
 
       if (edgesAddedByRepair > 0) {
-        edgeRepairPerformed = true;
-
         // Re-validate after edge repair
         structure = validateMinimumStructure(graph);
-        edgeRepairDurationMs = Date.now() - edgeRepairStart;
 
         log.info({
           request_id: requestId,
           edges_added: edgesAddedByRepair,
+          candidates_found: edgeRepairCandidatesFound,
           goal_node_id: foundGoalId,
           connectivity_passed_after_repair: structure.connectivity?.passed,
         }, "Edge repair: wired outcomes/risks to goal");
+      } else if (edgeRepairCandidatesFound === 0) {
+        edgeRepairNoopReason = "no_outcome_or_risk_nodes";
+        log.info({
+          request_id: requestId,
+          candidates_found: 0,
+          goal_node_id: foundGoalId,
+        }, "Edge repair: no outcome/risk nodes to wire");
+      } else {
+        edgeRepairNoopReason = "all_candidates_already_wired";
       }
+    } else {
+      // Goal node exists (per hasGoalNode check) but has no valid ID
+      edgeRepairNoopReason = "goal_node_missing_id";
+      edgeRepairDurationMs = Date.now() - edgeRepairStart;
+      log.warn({
+        request_id: requestId,
+        goal_node_present: !!goalNode,
+      }, "Edge repair: goal node exists but has no ID");
     }
   }
 
@@ -1520,16 +1560,19 @@ export async function finaliseCeeDraftResponse(
     });
   }
 
-  // Add edge_repair stage if it was attempted
-  if (edgeRepairPerformed) {
+  // Add edge_repair stage if it was called (regardless of whether edges were added)
+  if (edgeRepairCalled) {
     pipelineStages.push({
       name: "edge_repair",
-      status: structure.valid ? "repaired" : "failed",
+      status: edgesAddedByRepair > 0 ? (structure.valid ? "repaired" : "failed") : "skipped",
       duration_ms: edgeRepairDurationMs,
       details: {
+        called: true,
+        candidates_found: edgeRepairCandidatesFound,
         edges_added: edgesAddedByRepair,
+        ...(edgeRepairNoopReason && { noop_reason: edgeRepairNoopReason }),
         repair_reason: "goal_unreachable",
-        connectivity_restored: structure.connectivity?.passed ?? false,
+        connectivity_restored: edgesAddedByRepair > 0 && (structure.connectivity?.passed ?? false),
       },
     });
   }
@@ -1568,19 +1611,23 @@ export async function finaliseCeeDraftResponse(
       connectivity_passed: connectivityPassed,
       failure_class: failureClass,
       all_kinds_present: structure.missing.length === 0,
-      repair_attempted: edgeRepairPerformed,
-      repair_succeeded: edgeRepairPerformed && (structure.connectivity?.passed ?? false),
-      edges_added_by_repair: edgeRepairPerformed ? edgesAddedByRepair : undefined,
+      repair_called: edgeRepairCalled,
+      repair_candidates_found: edgeRepairCandidatesFound,
+      repair_succeeded: edgesAddedByRepair > 0 && (structure.connectivity?.passed ?? false),
+      edges_added_by_repair: edgeRepairCalled ? edgesAddedByRepair : undefined,
+      repair_noop_reason: edgeRepairNoopReason,
     });
   }
 
   if (!structure.valid) {
     const latencyMs = Date.now() - start;
 
-    // Determine if this is a connectivity failure (all kinds present but not connected)
-    const isConnectivityFailure = structure.connectivity_failed && structure.missing.length === 0;
+    // Determine failure type: outcome/risk missing takes precedence over connectivity
+    const isOutcomeOrRiskMissing = structure.outcome_or_risk_missing === true;
+    const isConnectivityFailure = !isOutcomeOrRiskMissing && structure.connectivity_failed && structure.missing.length === 0;
 
     // Use distinct error code for connectivity failures (clients should branch on `code`)
+    // outcome/risk missing uses CEE_GRAPH_INVALID since it's a structural requirement
     const ceeCode: CEEErrorCode = isConnectivityFailure
       ? "CEE_GRAPH_CONNECTIVITY_FAILED"
       : "CEE_GRAPH_INVALID";
@@ -1617,6 +1664,7 @@ export async function finaliseCeeDraftResponse(
       missing_kinds: structure.missing,
       raw_node_kinds: rawNodeKinds,
       connectivity_failed: isConnectivityFailure,
+      outcome_or_risk_missing: isOutcomeOrRiskMissing,
       // Use count instead of array for node IDs to avoid high-cardinality telemetry
       unreachable_node_count: structure.connectivity?.unreachable_nodes?.length ?? 0,
       // Additional connectivity diagnostics (kinds are low-cardinality, safe for telemetry)
@@ -1635,14 +1683,23 @@ export async function finaliseCeeDraftResponse(
       hasValidationIssues: true,
     });
 
-    // Use different message and reason for connectivity failures
-    const message = isConnectivityFailure
-      ? "Graph has all required node types but they are not connected via edges"
-      : structure.missing.length
-        ? `Graph missing required elements: ${structure.missing.join(", ")}`
-        : "Graph does not meet minimum structure requirements";
+    // Use different message and reason based on failure type
+    let message: string;
+    let reason: string;
 
-    const reason = isConnectivityFailure ? "connectivity_failed" : "incomplete_structure";
+    if (isOutcomeOrRiskMissing) {
+      message = "Your model needs at least one outcome or risk to connect factors to your goal";
+      reason = "missing_outcome_or_risk";
+    } else if (isConnectivityFailure) {
+      message = "Graph has all required node types but they are not connected via edges";
+      reason = "connectivity_failed";
+    } else if (structure.missing.length) {
+      message = `Graph missing required elements: ${structure.missing.join(", ")}`;
+      reason = "incomplete_structure";
+    } else {
+      message = "Graph does not meet minimum structure requirements";
+      reason = "incomplete_structure";
+    }
 
     // Build conditional hint based on actual diagnostic counts
     const reachableOptionCount = structure.connectivity?.reachable_options.length ?? 0;
@@ -1660,28 +1717,43 @@ export async function finaliseCeeDraftResponse(
     }
 
     // Build recovery guidance based on failure type
-    const recovery = isConnectivityFailure
-      ? {
-          suggestion: "The graph has all required node types but they are not connected. Ensure outcomes and risks connect to the goal node.",
-          hints: [
-            "Check that outcome nodes have edges leading to the goal node.",
-            "Check that risk nodes have edges leading to the goal node.",
-            "Ensure there is a path from the decision through options to outcomes/risks and finally to the goal.",
-          ],
-          example:
-            "Edges should flow: decision → options → factors → outcomes/risks → goal",
-        }
-      : {
-          suggestion:
-            "Your description needs to specify the decision being made, the options being considered, and at least one goal.",
-          hints: [
-            "State what choice you're trying to make (the decision).",
-            "List at least one alternative you're considering (options).",
-            "Describe the goal or outcome you are trying to achieve.",
-          ],
-          example:
-            "Should we hire a contractor or build in-house? Options: (1) Hire contractors, (2) Outsource to agency, (3) Build with current team.",
-        };
+    let recovery: { suggestion: string; hints: string[]; example?: string };
+
+    if (isOutcomeOrRiskMissing) {
+      recovery = {
+        suggestion: "Your model needs outcomes or risks to connect factors to your goal. These describe what success or failure looks like.",
+        hints: [
+          "Try adding: 'Success would mean...' or 'The desired outcome is...'",
+          "Try adding: 'The main risk is...' or 'What could go wrong is...'",
+          "Outcomes and risks bridge factors to goals in the causal chain.",
+        ],
+        example:
+          "Should we raise prices? Success would mean higher revenue. The risk is customer churn.",
+      };
+    } else if (isConnectivityFailure) {
+      recovery = {
+        suggestion: "The graph has all required node types but they are not connected. Ensure outcomes and risks connect to the goal node.",
+        hints: [
+          "Check that outcome nodes have edges leading to the goal node.",
+          "Check that risk nodes have edges leading to the goal node.",
+          "Ensure there is a path from the decision through options to outcomes/risks and finally to the goal.",
+        ],
+        example:
+          "Edges should flow: decision → options → factors → outcomes/risks → goal",
+      };
+    } else {
+      recovery = {
+        suggestion:
+          "Your description needs to specify the decision being made, the options being considered, and at least one goal.",
+        hints: [
+          "State what choice you're trying to make (the decision).",
+          "List at least one alternative you're considering (options).",
+          "Describe the goal or outcome you are trying to achieve.",
+        ],
+        example:
+          "Should we hire a contractor or build in-house? Options: (1) Hire contractors, (2) Outsource to agency, (3) Build with current team.",
+      };
+    }
 
     // Build details including connectivity diagnostic when available
     // Note: Use counts only for labels to avoid PII in error responses
@@ -1761,11 +1833,13 @@ export async function finaliseCeeDraftResponse(
         missing_edge_sources: nodesMissingGoalEdges, // Which nodes need edges to goal
       };
 
-      // Edge repair status
+      // Edge repair status with improved semantics
       details.edge_repair = {
-        attempted: edgeRepairPerformed,
+        called: edgeRepairCalled,
+        candidates_found: edgeRepairCandidatesFound,
         edges_added: edgesAddedByRepair,
-        connectivity_restored: edgeRepairPerformed && (structure.connectivity?.passed ?? false),
+        ...(edgeRepairNoopReason && { noop_reason: edgeRepairNoopReason }),
+        connectivity_restored: edgesAddedByRepair > 0 && (structure.connectivity?.passed ?? false),
       };
 
       // Use conditional hint based on diagnostic counts

@@ -103,7 +103,7 @@ function categorizeWarnings(warnings: ValidationWarningV3T[]): V3ValidationResul
  */
 function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
-  const nodeIds = new Set(response.graph.nodes.map((n) => n.id));
+  const nodeIds = new Set(response.nodes.map((n) => n.id));
 
   // goal_node_id must reference an existing node
   if (!nodeIds.has(response.goal_node_id)) {
@@ -118,7 +118,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
   }
 
   // goal_node_id must reference a node with kind='goal'
-  const goalNode = response.graph.nodes.find((n) => n.id === response.goal_node_id);
+  const goalNode = response.nodes.find((n) => n.id === response.goal_node_id);
   if (goalNode && goalNode.kind !== "goal") {
     warnings.push({
       code: "GOAL_NODE_WRONG_KIND",
@@ -139,7 +139,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const seenIds = new Set<string>();
 
-  for (const node of response.graph.nodes) {
+  for (const node of response.nodes) {
     // Check for duplicate IDs
     if (seenIds.has(node.id)) {
       warnings.push({
@@ -163,7 +163,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
 
     // Note: 'option' IS now a valid node kind in V3 for graph connectivity
-    // Options exist in both graph.nodes AND options[] array
+    // Options exist in both nodes[] AND options[] array
   }
 
   return warnings;
@@ -174,7 +174,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  * Only these kind-to-kind combinations are permitted.
  *
  * V4 topology: decision→option→factor→outcome/risk→goal
- * Options exist in BOTH graph.nodes AND options[] array.
+ * Options exist in BOTH nodes[] AND options[] array.
  */
 const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },  // Decision branches to options
@@ -196,11 +196,11 @@ const NEGLIGIBLE_THRESHOLD = 0.05;
  */
 function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
-  const nodeIds = new Set(response.graph.nodes.map((n) => n.id));
-  const nodeKindMap = new Map(response.graph.nodes.map((n) => [n.id, n.kind]));
+  const nodeIds = new Set(response.nodes.map((n) => n.id));
+  const nodeKindMap = new Map(response.nodes.map((n) => [n.id, n.kind]));
 
   // Track which factors are controllable (targeted by interventions in options[])
-  // In V3, options are in a separate array, not in graph.nodes
+  // In V3, options are in a separate array (as well as in nodes[] for graph connectivity)
   const controllableFactors = new Set<string>();
   for (const option of response.options) {
     for (const intervention of Object.values(option.interventions)) {
@@ -212,7 +212,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const causalStrengths: number[] = [];
   const structuralEdgeTypes = new Set(["decision-option", "option-factor"]);
 
-  for (const edge of response.graph.edges) {
+  for (const edge of response.edges) {
     const fromKind = nodeKindMap.get(edge.from);
     const toKind = nodeKindMap.get(edge.to);
     const edgeType = `${fromKind}-${toKind}`;
@@ -250,8 +250,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
   }
 
-  for (let i = 0; i < response.graph.edges.length; i++) {
-    const edge = response.graph.edges[i];
+  for (let i = 0; i < response.edges.length; i++) {
+    const edge = response.edges[i];
 
     // Check from node exists
     if (!nodeIds.has(edge.from)) {
@@ -446,8 +446,8 @@ function validateInterventions(
   options: V3ValidationOptions
 ): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
-  const nodeIds = new Set(response.graph.nodes.map((n) => n.id));
-  const factorNodes = response.graph.nodes.filter((n) => n.kind === "factor");
+  const nodeIds = new Set(response.nodes.map((n) => n.id));
+  const factorNodes = response.nodes.filter((n) => n.kind === "factor");
   const factorIds = new Set(factorNodes.map((n) => n.id));
 
   for (const option of response.options) {
@@ -480,7 +480,7 @@ function validateInterventions(
       if (options.requirePathToGoal) {
         const hasPath = hasPathToGoal(
           intervention.target_match.node_id,
-          response.graph.edges,
+          response.edges,
           response.goal_node_id
         );
         if (!hasPath) {
@@ -507,7 +507,7 @@ function validateInterventions(
       }
 
       // Check for unit mismatch (if target has observed_state)
-      const targetNode = response.graph.nodes.find(
+      const targetNode = response.nodes.find(
         (n) => n.id === intervention.target_match.node_id
       );
       if (

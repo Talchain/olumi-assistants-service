@@ -209,7 +209,7 @@ describe("P1 CEE Verification", () => {
 
       const v3Response = transformResponseToV3(response);
 
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         expect(edge.strength_mean).toBeGreaterThanOrEqual(-3);
         expect(edge.strength_mean).toBeLessThanOrEqual(3);
       }
@@ -231,7 +231,7 @@ describe("P1 CEE Verification", () => {
 
       const v3Response = transformResponseToV3(response);
 
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         expect(edge.strength_std).toBeGreaterThan(0);
       }
     });
@@ -252,7 +252,7 @@ describe("P1 CEE Verification", () => {
 
       const v3Response = transformResponseToV3(response);
 
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         const cap = Math.max(0.5, 2 * Math.abs(edge.strength_mean));
         expect(edge.strength_std).toBeLessThanOrEqual(cap);
       }

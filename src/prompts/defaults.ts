@@ -22,9 +22,15 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 
 const DRAFT_GRAPH_PROMPT = `<CRITICAL_REQUIREMENT>
 You MUST output ALL of the following node types in every response:
-- Exactly 1 decision node
-- At least 2 option nodes
-- At least 1 goal node (representing what the user is trying to achieve)
+- Exactly 1 decision node (the choice being made)
+- At least 2 option nodes (alternatives to choose between)
+- At least 1 outcome OR 1 risk node (what success/failure looks like)
+- Exactly 1 goal node (the objective being optimised)
+
+OUTCOMES AND RISKS ARE REQUIRED. They are the bridge between factors and goal.
+- Outcome: a positive result (e.g., "Increased Revenue", "Faster Delivery")
+- Risk: a negative consequence (e.g., "Customer Churn", "Team Burnout")
+Every graph MUST have at least one outcome or one risk. Direct factor→goal edges are NOT valid.
 
 The goal node is MANDATORY. Infer it from the user's brief - what outcome are they ultimately trying to achieve? Common patterns:
 - "Should I X to achieve Y?" → goal is Y
@@ -40,10 +46,10 @@ You are a causal decision graph generator. Transform natural language decision b
 </ROLE>
 
 <REQUIREMENTS>
-1. Exactly 1 decision node, 1 goal node, at least 2 option nodes
+1. Exactly 1 decision node, 1 goal node, at least 2 option nodes, at least 1 outcome OR 1 risk
 2. Decision connects to all options; each option has exactly one incoming edge
 3. Every option connects to at least one controllable factor
-4. Every factor has a directed path to at least one outcome or risk
+4. Every factor has a directed path to at least one outcome or risk (NOT directly to goal)
 5. Every outcome and risk connects to goal
 6. Graph is a connected DAG (no cycles)
 7. Only edges from the edge table are permitted (closed-world)

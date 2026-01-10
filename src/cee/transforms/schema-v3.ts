@@ -487,10 +487,11 @@ export function transformResponseToV3(
     requestId: context.requestId,
   });
 
-  // Build response
+  // Build response - V3.1: nodes and edges at root level (not nested under graph)
   const v3Response: V3DraftGraphResponse = {
     schema_version: "3.0",
-    graph: v3Graph,
+    nodes: v3Graph.nodes,
+    edges: v3Graph.edges,
     options: v3Options,
     goal_node_id: goalNodeId,
     analysis_ready: analysisReady,
@@ -698,8 +699,8 @@ export function getV3ResponseSummary(response: V3DraftGraphResponse): V3Response
   const warnings = response.validation_warnings ?? [];
 
   return {
-    nodeCount: response.graph.nodes.length,
-    edgeCount: response.graph.edges.length,
+    nodeCount: response.nodes.length,
+    edgeCount: response.edges.length,
     optionCount: response.options.length,
     readyOptions: response.options.filter((o) => o.status === "ready").length,
     needsMappingOptions: response.options.filter((o) => o.status === "needs_user_mapping").length,

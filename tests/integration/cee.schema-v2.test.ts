@@ -433,6 +433,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       expect(defaultBody.analysis_ready).toBeDefined();
 
       // V1 nodes should have 'kind', V2 should have 'type', V3 should have 'kind'
+      // V3 has nodes at root level, V1/V2 have graph.nodes
       if (v1Body.graph.nodes.length > 0) {
         expect(v1Body.graph.nodes[0]).toHaveProperty("kind");
         expect(v1Body.graph.nodes[0]).not.toHaveProperty("type");
@@ -441,11 +442,12 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(v2Body.graph.nodes[0]).toHaveProperty("type");
         expect(v2Body.graph.nodes[0]).not.toHaveProperty("kind");
       }
-      if (defaultBody.graph.nodes.length > 0) {
-        expect(defaultBody.graph.nodes[0]).toHaveProperty("kind");
+      if (defaultBody.nodes.length > 0) {
+        expect(defaultBody.nodes[0]).toHaveProperty("kind");
       }
 
       // V2 edges should have effect_direction, V1 should not, V3 should
+      // V3 has edges at root level, V1/V2 have graph.edges
       if (v1Body.graph.edges.length > 0) {
         expect(v1Body.graph.edges[0]).not.toHaveProperty("effect_direction");
         expect(v1Body.graph.edges[0]).not.toHaveProperty("strength_std");
@@ -454,9 +456,9 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(v2Body.graph.edges[0]).toHaveProperty("effect_direction");
         expect(v2Body.graph.edges[0]).toHaveProperty("strength_std");
       }
-      if (defaultBody.graph.edges.length > 0) {
-        expect(defaultBody.graph.edges[0]).toHaveProperty("effect_direction");
-        expect(defaultBody.graph.edges[0]).toHaveProperty("strength_std");
+      if (defaultBody.edges.length > 0) {
+        expect(defaultBody.edges[0]).toHaveProperty("effect_direction");
+        expect(defaultBody.edges[0]).toHaveProperty("strength_std");
       }
     });
   });
@@ -476,10 +478,11 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       const body = JSON.parse(res.body);
 
       // Invalid schema falls back to V3 (the new default)
+      // V3: nodes and edges at root level
       expect(body.schema_version).toBe("3.0");
       expect(body.analysis_ready).toBeDefined();
-      if (body.graph.nodes.length > 0) {
-        expect(body.graph.nodes[0]).toHaveProperty("kind");
+      if (body.nodes.length > 0) {
+        expect(body.nodes[0]).toHaveProperty("kind");
       }
     });
 

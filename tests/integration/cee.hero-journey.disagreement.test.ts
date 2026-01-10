@@ -49,7 +49,7 @@ describe("CEE hero journey: options + team disagreement with low evidence", () =
     // 1) Draft My Model
     const draftRes = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: { "X-Olumi-Assist-Key": "cee-hero-disagreement-key" },
       payload: {
         brief: `Disagreement journey decision with secret marker ${SECRET}`,
@@ -141,7 +141,7 @@ describe("CEE hero journey: options + team disagreement with low evidence", () =
 
     const draftRes = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: { "X-Olumi-Assist-Key": "cee-hero-disagreement-key" },
       payload: {
         brief: `Disagreement review journey with secret marker ${SECRET}`,

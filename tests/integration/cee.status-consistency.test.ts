@@ -65,11 +65,12 @@ describe("CEE Status Consistency", () => {
       // Step 2: Call graph-readiness with a V1-style graph + analysis_ready
       // For V3 mode, graph-readiness reads options from analysis_ready
       // Build V1-compatible graph (add fake nodes if needed for option validation)
+      // V3: nodes and edges are at root level now
       const v1Graph = {
         version: "1",
         default_seed: 17,
         nodes: [
-          ...draftResult.graph.nodes,
+          ...draftResult.nodes,
           // Add option nodes back (graph-readiness checks them against analysis_ready)
           ...analysisReady.options.map((o: any) => ({
             id: o.id,
@@ -77,7 +78,7 @@ describe("CEE Status Consistency", () => {
             label: o.label,
           })),
         ],
-        edges: draftResult.graph.edges.map((e: any) => ({
+        edges: draftResult.edges.map((e: any) => ({
           from: e.from,
           to: e.to,
           weight: Math.abs(e.strength_mean) || 0.5,

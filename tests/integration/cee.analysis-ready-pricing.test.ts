@@ -148,7 +148,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      const nodes = body.graph?.nodes || [];
+      const nodes = body.nodes || [];
       const goalNodes = nodes.filter((n: any) => n.kind === "goal");
       const outcomeNodes = nodes.filter((n: any) => n.kind === "outcome");
 
@@ -191,7 +191,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      const nodes = body.graph?.nodes || [];
+      const nodes = body.nodes || [];
       const decisionNodes = nodes.filter((n: any) => n.kind === "decision");
 
       // CRITICAL: Must have at least one decision node
@@ -218,7 +218,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       const body = JSON.parse(res.body);
 
       // Options can be in graph.nodes OR in top-level options array (V3)
-      const nodes = body.graph?.nodes || [];
+      const nodes = body.nodes || [];
       const optionNodesInGraph = nodes.filter((n: any) => n.kind === "option");
       const optionsArray = body.options || body.analysis_ready?.options || [];
 
@@ -244,7 +244,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       expect(goalNodeId).toBeDefined();
 
       // The goal_node_id must reference an actual node in the graph
-      const nodes = body.graph?.nodes || [];
+      const nodes = body.nodes || [];
       const goalNode = nodes.find((n: any) => n.id === goalNodeId);
 
       expect(goalNode).toBeDefined();

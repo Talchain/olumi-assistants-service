@@ -122,14 +122,14 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
-    // Verify graph has required nodes
-    expect(body.graph.nodes.some((n: any) => n.kind === "goal")).toBe(true);
-    expect(body.graph.nodes.some((n: any) => n.kind === "outcome")).toBe(true);
-    expect(body.graph.nodes.some((n: any) => n.kind === "risk")).toBe(true);
+    // Verify graph has required nodes (V3: nodes at root level)
+    expect(body.nodes.some((n: any) => n.kind === "goal")).toBe(true);
+    expect(body.nodes.some((n: any) => n.kind === "outcome")).toBe(true);
+    expect(body.nodes.some((n: any) => n.kind === "risk")).toBe(true);
 
-    // Verify edges to goal were added
-    const goalNode = body.graph.nodes.find((n: any) => n.kind === "goal");
-    const edgesToGoal = body.graph.edges.filter((e: any) => e.to === goalNode.id);
+    // Verify edges to goal were added (V3: edges at root level)
+    const goalNode = body.nodes.find((n: any) => n.kind === "goal");
+    const edgesToGoal = body.edges.filter((e: any) => e.to === goalNode.id);
 
     // Should have at least 2 edges to goal (outcome + risk)
     expect(edgesToGoal.length).toBeGreaterThanOrEqual(2);
@@ -143,9 +143,15 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
     );
     expect(edgeRepairStage).toBeDefined();
     expect(edgeRepairStage.status).toBe("repaired");
+
+    // Verify new trace semantics
+    expect(edgeRepairStage.details.called).toBe(true);
+    expect(edgeRepairStage.details.candidates_found).toBeGreaterThanOrEqual(2);
     expect(edgeRepairStage.details.edges_added).toBeGreaterThanOrEqual(2);
     expect(edgeRepairStage.details.repair_reason).toBe("goal_unreachable");
     expect(edgeRepairStage.details.connectivity_restored).toBe(true);
+    // noop_reason should NOT be present when repair succeeded
+    expect(edgeRepairStage.details.noop_reason).toBeUndefined();
   });
 
   it("includes edge repair details in pipeline trace", async () => {
@@ -171,10 +177,12 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
     );
 
     if (edgeRepairStage) {
-      // If edge repair ran, verify its details
+      // If edge repair ran, verify its details with new semantics
       expect(edgeRepairStage.status).toBe("repaired");
       expect(typeof edgeRepairStage.duration_ms).toBe("number");
       expect(edgeRepairStage.details).toBeDefined();
+      expect(edgeRepairStage.details.called).toBe(true);
+      expect(typeof edgeRepairStage.details.candidates_found).toBe("number");
       expect(typeof edgeRepairStage.details.edges_added).toBe("number");
     }
 

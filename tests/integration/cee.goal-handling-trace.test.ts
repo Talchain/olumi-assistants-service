@@ -205,7 +205,7 @@ describe("POST /assist/v1/draft-graph trace.goal_handling", () => {
       expect(body.trace.goal_handling.goal_node_id).toBeDefined();
 
       // Graph should now have a goal node
-      const goalNodes = body.graph?.nodes?.filter((n: any) => n.kind === "goal");
+      const goalNodes = body.nodes?.filter((n: any) => n.kind === "goal");
       expect(goalNodes?.length).toBeGreaterThanOrEqual(1);
     });
 

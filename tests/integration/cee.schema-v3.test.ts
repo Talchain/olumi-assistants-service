@@ -67,7 +67,7 @@ describe("CEE Schema V3 Integration", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
       // Options should be in BOTH the graph.nodes (for connectivity) AND options[] (for interventions)
-      const optionNodesInGraph = v3Response.graph.nodes.filter(
+      const optionNodesInGraph = v3Response.nodes.filter(
         (n) => n.kind === "option"
       );
       expect(optionNodesInGraph.length).toBe(2);
@@ -82,7 +82,7 @@ describe("CEE Schema V3 Integration", () => {
     it("transforms edges to V3 format with strength_mean", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         expect(edge).toHaveProperty("strength_mean");
         expect(edge).toHaveProperty("strength_std");
         expect(edge).toHaveProperty("belief_exists");
@@ -94,7 +94,7 @@ describe("CEE Schema V3 Integration", () => {
     it("transforms nodes to V3 format", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
-      for (const node of v3Response.graph.nodes) {
+      for (const node of v3Response.nodes) {
         expect(node).toHaveProperty("id");
         expect(node).toHaveProperty("kind");
         expect(node).toHaveProperty("label");
@@ -104,7 +104,7 @@ describe("CEE Schema V3 Integration", () => {
     it("preserves factor observed_state", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
-      const priceNode = v3Response.graph.nodes.find((n) => n.id === "factor_price");
+      const priceNode = v3Response.nodes.find((n) => n.id === "factor_price");
       expect(priceNode).toBeDefined();
       expect(priceNode?.observed_state).toBeDefined();
       expect(priceNode?.observed_state?.value).toBe(49);
@@ -254,7 +254,7 @@ describe("CEE Schema V3 Integration", () => {
     it("derives effect_direction from strength_mean sign", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         if (edge.strength_mean >= 0) {
           expect(edge.effect_direction).toBe("positive");
         } else {
@@ -277,7 +277,7 @@ describe("CEE Schema V3 Integration", () => {
       };
 
       const v3Response = transformResponseToV3(responseWithNegativeEffect);
-      const negativeEdge = v3Response.graph.edges.find(
+      const negativeEdge = v3Response.edges.find(
         (e) => e.from === "factor_marketing" && e.to === "risk_churn"
       );
 
@@ -317,10 +317,10 @@ describe("CEE Schema V3 Integration", () => {
       const v3Response = transformResponseToV3(responseWithRisk);
 
       // Find risk→goal and outcome→goal edges
-      const riskToGoal = v3Response.graph.edges.find(
+      const riskToGoal = v3Response.edges.find(
         (e) => e.from === "risk_1" && e.to === "goal_1"
       );
-      const outcomeToGoal = v3Response.graph.edges.find(
+      const outcomeToGoal = v3Response.edges.find(
         (e) => e.from === "outcome_1" && e.to === "goal_1"
       );
 
@@ -358,8 +358,8 @@ describe("CEE Schema V3 Integration", () => {
 
       const v3Response = transformResponseToV3(responseWithFlatFields);
 
-      const riskEdge = v3Response.graph.edges.find((e) => e.from === "risk_1");
-      const outcomeEdge = v3Response.graph.edges.find((e) => e.from === "out_1");
+      const riskEdge = v3Response.edges.find((e) => e.from === "risk_1");
+      const outcomeEdge = v3Response.edges.find((e) => e.from === "out_1");
 
       // Verify edges are transformed correctly
       expect(riskEdge).toBeDefined();
@@ -391,7 +391,7 @@ describe("CEE Schema V3 Integration", () => {
       const v3Response = transformResponseToV3(responseWithoutEffectDirection);
 
       // Should still have effect_direction derived from weight
-      for (const edge of v3Response.graph.edges) {
+      for (const edge of v3Response.edges) {
         expect(edge.effect_direction).toBeDefined();
         expect(["positive", "negative"]).toContain(edge.effect_direction);
       }

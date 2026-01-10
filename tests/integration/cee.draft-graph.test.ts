@@ -221,7 +221,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("accepts refinement fields when refinement flag is enabled", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: headersKey2,
       payload: {
         brief: "A sufficiently long decision brief for refinement tests in CEE v1.",
@@ -331,8 +331,9 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
 
-      // Core graph should be present
-      expect(body.graph).toBeDefined();
+      // V3: nodes and edges at root level
+      expect(body.nodes).toBeDefined();
+      expect(body.edges).toBeDefined();
 
       // Trace should indicate raw_output_mode
       expect(body.trace).toBeDefined();
@@ -361,10 +362,11 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
 
-      // Verify response has graph with nodes and edges
-      expect(body.graph).toBeDefined();
-      expect(Array.isArray(body.graph.nodes)).toBe(true);
-      expect(Array.isArray(body.graph.edges)).toBe(true);
+      // V3: nodes and edges at root level
+      expect(body.nodes).toBeDefined();
+      expect(body.edges).toBeDefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
+      expect(Array.isArray(body.edges)).toBe(true);
 
       // Quality should be zeroed in raw mode (not computed)
       expect(body.quality).toBeDefined();
