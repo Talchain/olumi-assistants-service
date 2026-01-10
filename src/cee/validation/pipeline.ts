@@ -21,7 +21,7 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, type StructuralMeta } from "../structure/index.js";
+import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, wireOutcomesToGoal, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
 import { config, isProduction } from "../../config/index.js";
@@ -732,7 +732,7 @@ export function buildCeeErrorResponse(
 
 // Pipeline stage for trace
 type PipelineStageEntry = {
-  name: "llm_draft" | "coefficient_normalisation" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "final_validation";
+  name: "llm_draft" | "coefficient_normalisation" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "edge_wiring" | "final_validation";
   status: "success" | "failed" | "skipped" | "repaired";
   duration_ms: number;
   details?: Record<string, unknown>;
@@ -1429,6 +1429,55 @@ export async function finaliseCeeDraftResponse(
     }
   }
 
+  // === EDGE REPAIR: Wire outcomes/risks to goal when connectivity fails ===
+  // LLM sometimes generates goal node but forgets to connect outcomes/risks to it.
+  // This causes connectivity check to fail with "goal unreachable".
+  // Fix by programmatically adding missing outcome→goal and risk→goal edges.
+  let edgeRepairPerformed = false;
+  let edgeRepairDurationMs = 0;
+  let edgesAddedByRepair = 0;
+
+  // Check if connectivity failed due to unreachable goal
+  const goalExistsButUnreachable =
+    !structure.valid &&
+    structure.connectivity_failed &&
+    structure.connectivity?.reachable_goals?.length === 0 &&
+    hasGoalNode(graph);
+
+  if (goalExistsButUnreachable && graph) {
+    const edgeRepairStart = Date.now();
+
+    // Find the goal node ID
+    const goalNode = graph.nodes.find((n: any) => n.kind === "goal");
+    const foundGoalId = goalNode?.id as string | undefined;
+
+    if (foundGoalId) {
+      const edgeCountBefore = graph.edges?.length ?? 0;
+
+      // Wire outcomes and risks to the goal
+      graph = wireOutcomesToGoal(graph, foundGoalId);
+      payload.graph = graph as any;
+
+      const edgeCountAfter = graph.edges?.length ?? 0;
+      edgesAddedByRepair = edgeCountAfter - edgeCountBefore;
+
+      if (edgesAddedByRepair > 0) {
+        edgeRepairPerformed = true;
+
+        // Re-validate after edge repair
+        structure = validateMinimumStructure(graph);
+        edgeRepairDurationMs = Date.now() - edgeRepairStart;
+
+        log.info({
+          request_id: requestId,
+          edges_added: edgesAddedByRepair,
+          goal_node_id: foundGoalId,
+          connectivity_passed_after_repair: structure.connectivity?.passed,
+        }, "Edge repair: wired outcomes/risks to goal");
+      }
+    }
+  }
+
   // Build goal_handling trace object
   const goalHandling = {
     goal_source: goalSource,
@@ -1471,6 +1520,20 @@ export async function finaliseCeeDraftResponse(
     });
   }
 
+  // Add edge_repair stage if it was attempted
+  if (edgeRepairPerformed) {
+    pipelineStages.push({
+      name: "edge_repair",
+      status: structure.valid ? "repaired" : "failed",
+      duration_ms: edgeRepairDurationMs,
+      details: {
+        edges_added: edgesAddedByRepair,
+        repair_reason: "goal_unreachable",
+        connectivity_restored: structure.connectivity?.passed ?? false,
+      },
+    });
+  }
+
   // Emit connectivity check telemetry with counts and failure classification
   if (structure.connectivity) {
     // Compute failure_class for alerting and dashboarding
@@ -1505,8 +1568,9 @@ export async function finaliseCeeDraftResponse(
       connectivity_passed: connectivityPassed,
       failure_class: failureClass,
       all_kinds_present: structure.missing.length === 0,
-      repair_attempted: false, // Edge repair not yet implemented
-      repair_succeeded: false,
+      repair_attempted: edgeRepairPerformed,
+      repair_succeeded: edgeRepairPerformed && (structure.connectivity?.passed ?? false),
+      edges_added_by_repair: edgeRepairPerformed ? edgesAddedByRepair : undefined,
     });
   }
 
@@ -1644,6 +1708,39 @@ export async function finaliseCeeDraftResponse(
         }
       }
 
+      // Enhanced observability: identify which outcome/risk nodes exist and their goal edges
+      const outcomeNodes: string[] = [];
+      const riskNodes: string[] = [];
+      const goalNodes: string[] = [];
+      const nodesWithGoalEdges: string[] = [];
+      const nodesMissingGoalEdges: string[] = [];
+
+      if (graph && Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {
+        // Collect nodes by kind
+        for (const node of graph.nodes as any[]) {
+          if (node.kind === "outcome") outcomeNodes.push(node.id);
+          else if (node.kind === "risk") riskNodes.push(node.id);
+          else if (node.kind === "goal") goalNodes.push(node.id);
+        }
+
+        // Find which outcomes/risks have edges to goal
+        const goalSet = new Set(goalNodes);
+        for (const edge of graph.edges as any[]) {
+          if (goalSet.has(edge.to) && (outcomeNodes.includes(edge.from) || riskNodes.includes(edge.from))) {
+            if (!nodesWithGoalEdges.includes(edge.from)) {
+              nodesWithGoalEdges.push(edge.from);
+            }
+          }
+        }
+
+        // Find which outcomes/risks are missing goal edges
+        for (const nodeId of [...outcomeNodes, ...riskNodes]) {
+          if (!nodesWithGoalEdges.includes(nodeId)) {
+            nodesMissingGoalEdges.push(nodeId);
+          }
+        }
+      }
+
       details.connectivity_failed = true;
       details.all_kinds_present = structure.missing.length === 0;
       details.unreachable_kinds = unreachableKinds;
@@ -1653,6 +1750,24 @@ export async function finaliseCeeDraftResponse(
         reachable_goal_count: structure.connectivity.reachable_goals.length,
         unreachable_count: structure.connectivity.unreachable_nodes.length,
       };
+
+      // Part 3 Observability: detailed breakdown of goal wiring
+      details.goal_wiring = {
+        outcome_nodes_found: outcomeNodes.length,
+        risk_nodes_found: riskNodes.length,
+        goal_nodes_found: goalNodes.length,
+        nodes_with_goal_edges: nodesWithGoalEdges.length,
+        nodes_missing_goal_edges: nodesMissingGoalEdges.length,
+        missing_edge_sources: nodesMissingGoalEdges, // Which nodes need edges to goal
+      };
+
+      // Edge repair status
+      details.edge_repair = {
+        attempted: edgeRepairPerformed,
+        edges_added: edgesAddedByRepair,
+        connectivity_restored: edgeRepairPerformed && (structure.connectivity?.passed ?? false),
+      };
+
       // Use conditional hint based on diagnostic counts
       details.hint = connectivityHint;
     }
