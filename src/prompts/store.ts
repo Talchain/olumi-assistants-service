@@ -9,13 +9,15 @@
 
 import { FilePromptStore } from './stores/file.js';
 import { PostgresPromptStore } from './stores/postgres.js';
-import type { IPromptStore, FileStoreConfig, PostgresStoreConfig } from './stores/interface.js';
+import { SupabasePromptStore } from './stores/supabase.js';
+import type { IPromptStore, FileStoreConfig, PostgresStoreConfig, SupabaseStoreConfig } from './stores/interface.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 // Re-export types and interfaces for backward compatibility
 export { FilePromptStore } from './stores/file.js';
 export { PostgresPromptStore } from './stores/postgres.js';
+export { SupabasePromptStore } from './stores/supabase.js';
 export type { IPromptStore, PromptListFilter, GetCompiledOptions, ActivePromptResult } from './stores/interface.js';
 
 /**
@@ -52,7 +54,18 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
   if (!defaultStore) {
     const storeType = config.prompts?.storeType ?? 'file';
 
-    if (storeType === 'postgres') {
+    if (storeType === 'supabase') {
+      const url = config.prompts?.supabaseUrl;
+      const serviceRoleKey = config.prompts?.supabaseServiceRoleKey;
+      if (!url || !serviceRoleKey) {
+        throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when PROMPTS_STORE_TYPE=supabase');
+      }
+      defaultStore = new SupabasePromptStore({
+        url,
+        serviceRoleKey,
+      });
+      log.info({ storeType: 'supabase' }, 'Using Supabase prompt store');
+    } else if (storeType === 'postgres') {
       const connectionString = config.prompts?.postgresUrl;
       if (!connectionString) {
         throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');

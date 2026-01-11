@@ -329,13 +329,15 @@ const ConfigSchema = z.object({
   // Prompt Management
   prompts: z.object({
     enabled: booleanString.default(false), // Master switch for prompt management
-    storeType: z.enum(["file", "postgres"]).default("file"), // Storage backend type
+    storeType: z.enum(["file", "postgres", "supabase"]).default("file"), // Storage backend type
     storePath: z.string().default("data/prompts.json"), // Path to prompts JSON file (file store)
     backupEnabled: booleanString.default(true), // Create backups before writes (file store)
     maxBackups: z.coerce.number().int().positive().default(10), // Max backup files to keep (file store)
     postgresUrl: z.string().optional(), // PostgreSQL connection string (postgres store)
     postgresPoolSize: z.coerce.number().int().positive().default(10), // Connection pool size (postgres store)
     postgresSsl: booleanString.default(false), // Use SSL for PostgreSQL connection
+    supabaseUrl: z.string().optional(), // Supabase project URL (supabase store)
+    supabaseServiceRoleKey: z.string().optional(), // Supabase service role key (supabase store)
     braintrustEnabled: booleanString.default(false), // Enable Braintrust experiment tracking
     braintrustProject: z.string().default("olumi-prompts"), // Braintrust project name
     adminApiKey: z.string().optional(), // Admin API key for prompt management (full access)
@@ -548,6 +550,8 @@ function parseConfig(): Config {
       postgresUrl: env.PROMPTS_POSTGRES_URL,
       postgresPoolSize: env.PROMPTS_POSTGRES_POOL_SIZE,
       postgresSsl: env.PROMPTS_POSTGRES_SSL,
+      supabaseUrl: env.SUPABASE_URL,
+      supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
       braintrustEnabled: env.PROMPTS_BRAINTRUST_ENABLED,
       braintrustProject: env.BRAINTRUST_PROJECT,
       adminApiKey: env.ADMIN_API_KEY,
