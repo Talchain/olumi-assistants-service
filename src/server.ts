@@ -63,12 +63,28 @@ import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/p
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 
-const DEFAULT_ORIGINS = [
+export const DEFAULT_ORIGINS = [
   "https://olumi.app",
   "https://app.olumi.app",
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
+];
+
+export const DEFAULT_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Authorization",
+  "X-Olumi-Assist-Key",
+  "X-Olumi-Signature",
+  "X-Olumi-Timestamp",
+  "X-Olumi-Nonce",
+  "X-Requested-With",
+  "X-CEE-API-Version",
+  "X-CEE-Feature-Version",
+  "X-CEE-Request-ID",
+  "X-CEE-Readiness-Score",
+  "X-Olumi-Client-Build",
+  "X-Olumi-Payload-Hash",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -150,6 +166,7 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+    allowedHeaders: DEFAULT_ALLOWED_HEADERS,
     exposedHeaders: [
       "x-olumi-service",
       "x-olumi-service-build",
