@@ -58,8 +58,8 @@ import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
-import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
-import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
+import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
+import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 
@@ -585,11 +585,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
 
   // Admin routes for prompt management (enabled via config)
   if (config.prompts?.enabled || config.prompts?.adminApiKey) {
-    await initializePromptStore();
-    // Only warm cache when prompts are enabled (store is actually initialized)
+    // Initialize store, seed defaults, and warm cache
     if (config.prompts?.enabled) {
-      const warmResult = await warmPromptCacheFromStore();
-      app.log.info({ warmResult }, 'Prompt cache warmed from store');
+      const seedResult = await initializeAndSeedPrompts();
+      app.log.info({ seedResult }, 'Prompt system initialized');
     }
     await adminPromptRoutes(app);
     await adminUIRoutes(app);
