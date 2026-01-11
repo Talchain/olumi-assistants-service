@@ -59,7 +59,7 @@ import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enri
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
 import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
-import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
+import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 
@@ -586,6 +586,11 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // Admin routes for prompt management (enabled via config)
   if (config.prompts?.enabled || config.prompts?.adminApiKey) {
     await initializePromptStore();
+    // Only warm cache when prompts are enabled (store is actually initialized)
+    if (config.prompts?.enabled) {
+      const warmResult = await warmPromptCacheFromStore();
+      app.log.info({ warmResult }, 'Prompt cache warmed from store');
+    }
     await adminPromptRoutes(app);
     await adminUIRoutes(app);
     app.log.info('Admin prompt management routes registered');

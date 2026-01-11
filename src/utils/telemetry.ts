@@ -329,6 +329,8 @@ export const TelemetryEvents = {
   PromptStoreCacheHit: "prompt.store.cache.hit",
   PromptStoreCacheMiss: "prompt.store.cache.miss",
   PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+  PromptStoreCacheWarmed: "prompt.store.cache.warmed",
+  PromptStoreBackgroundRefresh: "prompt.store.background_refresh",
 
   // Prompt Test Sandbox events (v2.1)
   PromptTestExecuted: "prompt.test.executed",
@@ -1599,6 +1601,20 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.store.cache.invalidated", 1, {
             reason: String((eventData.reason as string) || "unknown"),
             task_id: String((eventData.taskId as string) || "all"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheWarmed: {
+          datadogClient.gauge("prompt.store.cache.warmed", Number(eventData.warmed) || 0);
+          datadogClient.gauge("prompt.store.cache.warmed_failed", Number(eventData.failed) || 0);
+          datadogClient.gauge("prompt.store.cache.warmed_skipped", Number(eventData.skipped) || 0);
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreBackgroundRefresh: {
+          datadogClient.increment("prompt.store.background_refresh", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
           });
           break;
         }

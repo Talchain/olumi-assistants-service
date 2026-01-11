@@ -235,6 +235,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PromptStoreCacheHit: "prompt.store.cache.hit",
         PromptStoreCacheMiss: "prompt.store.cache.miss",
         PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+        PromptStoreCacheWarmed: "prompt.store.cache.warmed",
+        PromptStoreBackgroundRefresh: "prompt.store.background_refresh",
 
         // Prompt Test Sandbox events (v2.1)
         PromptTestExecuted: "prompt.test.executed",
@@ -382,7 +384,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -710,6 +712,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
         "prompt.store.cache.miss": [TelemetryEvents.PromptStoreCacheMiss],
         "prompt.store.cache.invalidated": [TelemetryEvents.PromptStoreCacheInvalidated],
+        "prompt.store.cache.warmed": [TelemetryEvents.PromptStoreCacheWarmed],
+        "prompt.store.background_refresh": [TelemetryEvents.PromptStoreBackgroundRefresh],
 
         // Prompt Test Sandbox events (v2.1)
         "prompt.test.executed": [TelemetryEvents.PromptTestExecuted],
@@ -993,6 +997,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.hit",
         "prompt.store.cache.miss",
         "prompt.store.cache.invalidated",
+        "prompt.store.cache.warmed",
+        "prompt.store.background_refresh",
 
         // Prompt Test Sandbox events (v2.1)
         "prompt.test.executed",
