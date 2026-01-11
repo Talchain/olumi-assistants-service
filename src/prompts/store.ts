@@ -99,9 +99,9 @@ export async function initializePromptStore(): Promise<void> {
     return;
   }
 
-  // Only initialize if prompt management is enabled
-  if (!config.prompts?.enabled) {
-    log.debug('Prompt management disabled, skipping store initialization');
+  // Only initialize if prompt management or admin access is enabled
+  if (!config.prompts?.enabled && !config.prompts?.adminApiKey) {
+    log.debug('Prompt management disabled and no admin API key, skipping store initialization');
     storeInitialized = true;
     storeHealthy = false; // Not applicable when disabled
     return;

@@ -12,10 +12,11 @@
 import type { CeeTaskId } from './schema.js';
 import type { PromptDefinition, CreatePromptRequest } from './schema.js';
 import { computeContentHash } from './schema.js';
-import type { IPromptStore, ActivePromptResult } from './stores/interface.js';
+import type { IPromptStore } from './stores/interface.js';
 import { PostgresPromptStore } from './stores/postgres.js';
+import { SupabasePromptStore } from './stores/supabase.js';
 import { FilePromptStore } from './stores/file.js';
-import { getDefaultPrompts, registerDefaultPrompt } from './loader.js';
+import { getDefaultPrompts } from './loader.js';
 import { log } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
@@ -127,7 +128,6 @@ export interface IPromptWriter {
  */
 export class PromptRepository implements IPromptReader, IPromptWriter {
   private store: IPromptStore | null = null;
-  private fileStore: FilePromptStore | null = null;
   private initialized = false;
 
   // Cache for active prompts by task
@@ -143,55 +143,79 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     private readonly fileStorePath?: string
   ) {}
 
+  private getConfiguredStoreType(): 'file' | 'postgres' | 'supabase' {
+    // Back-compat: explicit connection string constructor means "use postgres"
+    if (this.connectionString) return 'postgres';
+    const storeType = config.prompts?.storeType ?? 'file';
+    if (storeType === 'postgres' || storeType === 'supabase' || storeType === 'file') return storeType;
+    return 'file';
+  }
+
+  private createPrimaryStore(): IPromptStore {
+    const storeType = this.getConfiguredStoreType();
+
+    if (storeType === 'supabase') {
+      const url = config.prompts?.supabaseUrl;
+      const serviceRoleKey = config.prompts?.supabaseServiceRoleKey;
+      if (!url || !serviceRoleKey) {
+        throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when PROMPTS_STORE_TYPE=supabase');
+      }
+      return new SupabasePromptStore({ url, serviceRoleKey });
+    }
+
+    if (storeType === 'postgres') {
+      const connStr = this.connectionString ?? config.prompts?.postgresUrl;
+      if (!connStr) {
+        throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');
+      }
+      return new PostgresPromptStore({
+        connectionString: connStr,
+        poolSize: config.prompts?.postgresPoolSize ?? 10,
+        ssl: config.prompts?.postgresSsl ?? false,
+      });
+    }
+
+    const filePath = this.fileStorePath ?? config.prompts?.storePath ?? 'data/prompts.json';
+    return new FilePromptStore({
+      filePath,
+      backupEnabled: config.prompts?.backupEnabled ?? true,
+      maxBackups: config.prompts?.maxBackups ?? 10,
+    });
+  }
+
+  private async initializeStore(): Promise<void> {
+    const storeType = this.getConfiguredStoreType();
+    const store = this.createPrimaryStore();
+    await store.initialize();
+    this.store = store;
+    this.fallbackActive = false;
+    this.lastDbError = undefined;
+
+    log.info({
+      event: 'prompt.repository.initialized',
+      backend: storeType,
+    }, `Prompt repository initialized with ${storeType}`);
+  }
+
   /**
    * Initialize the repository
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    const connStr = this.connectionString ?? config.prompts?.postgresUrl;
-
-    if (connStr) {
-      try {
-        this.store = new PostgresPromptStore({
-          connectionString: connStr,
-          poolSize: config.prompts?.postgresPoolSize ?? 10,
-          ssl: config.prompts?.postgresSsl ?? false,
-        });
-        await this.store.initialize();
-        this.fallbackActive = false;
-        this.lastDbError = undefined;
-
-        log.info({
-          event: 'prompt.repository.initialized',
-          backend: 'postgres',
-        }, 'Prompt repository initialized with PostgreSQL');
-      } catch (error) {
-        this.lastDbError = String(error);
-        this.activateFallback();
-
-        log.warn({
-          event: 'prompt.repository.postgres_failed',
-          error: this.lastDbError,
-        }, 'PostgreSQL init failed, activating fallback');
-      }
-    } else {
-      // No PostgreSQL URL, use file store as primary
+    try {
+      await this.initializeStore();
+    } catch (error) {
+      this.lastDbError = String(error);
+      this.store = null;
       this.activateFallback();
-      log.info({
-        event: 'prompt.repository.initialized',
-        backend: 'file',
-      }, 'Prompt repository initialized with file backend');
-    }
 
-    // Initialize file store for fallback
-    const filePath = this.fileStorePath ?? config.prompts?.storePath ?? 'data/prompts.json';
-    this.fileStore = new FilePromptStore({
-      filePath,
-      backupEnabled: true,
-      maxBackups: 5,
-    });
-    await this.fileStore.initialize();
+      log.warn({
+        event: 'prompt.repository.init_failed',
+        store_type: this.getConfiguredStoreType(),
+        error: this.lastDbError,
+      }, 'Prompt store init failed, activating fallback');
+    }
 
     this.initialized = true;
   }
@@ -217,17 +241,7 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     if (Date.now() < this.fallbackCooldownUntil) return false;
 
     try {
-      const connStr = this.connectionString ?? config.prompts?.postgresUrl;
-      if (!connStr) return false;
-
-      this.store = new PostgresPromptStore({
-        connectionString: connStr,
-        poolSize: config.prompts?.postgresPoolSize ?? 10,
-        ssl: config.prompts?.postgresSsl ?? false,
-      });
-      await this.store.initialize();
-      this.fallbackActive = false;
-      this.lastDbError = undefined;
+      await this.initializeStore();
 
       log.info({
         event: 'prompt.repository.recovered',

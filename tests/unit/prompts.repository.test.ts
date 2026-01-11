@@ -9,21 +9,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { rm, mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 
-// Mock config before importing modules
-vi.mock('../../src/config/index.js', async () => {
-  return {
-    config: {
-      prompts: {
-        enabled: true,
-        storeType: 'file',
-        storePath: 'tests/fixtures/prompts-repo-test/prompts.json',
-        postgresUrl: undefined,
-        postgresPoolSize: 10,
-        postgresSsl: false,
-      },
+let promptsConfig: Record<string, unknown> = {};
+
+vi.mock('../../src/config/index.js', () => ({
+  config: {
+    get prompts() {
+      return promptsConfig;
     },
-  };
-});
+  },
+}));
 
 // Test directory for file operations
 const TEST_DATA_DIR = 'tests/fixtures/prompts-repo-test';
@@ -31,6 +25,18 @@ const TEST_DATA_DIR = 'tests/fixtures/prompts-repo-test';
 describe('Prompt Repository', () => {
   beforeEach(async () => {
     vi.resetModules();
+
+    promptsConfig = {
+      enabled: true,
+      storeType: 'file',
+      storePath: 'tests/fixtures/prompts-repo-test/prompts.json',
+      postgresUrl: undefined,
+      postgresPoolSize: 10,
+      postgresSsl: false,
+      backupEnabled: false,
+      maxBackups: 0,
+    };
+
     // Clean test directory
     try {
       await rm(TEST_DATA_DIR, { recursive: true, force: true });
@@ -42,7 +48,7 @@ describe('Prompt Repository', () => {
     // Create empty prompts file
     await writeFile(
       join(TEST_DATA_DIR, 'prompts.json'),
-      JSON.stringify({ prompts: [] })
+      JSON.stringify({ version: 1, prompts: {}, lastModified: new Date().toISOString() })
     );
 
     // Reset any singletons
@@ -60,7 +66,7 @@ describe('Prompt Repository', () => {
   });
 
   describe('Health Status', () => {
-    it('should report health status correctly when fallback is active', async () => {
+    it('should report health status correctly when using file store as primary', async () => {
       const { PromptRepository } = await import('../../src/prompts/repository.js');
 
       const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
@@ -68,15 +74,41 @@ describe('Prompt Repository', () => {
 
       const health = repo.getHealth();
 
-      // Without PostgreSQL URL, should be in fallback mode
+      expect(health.fallbackActive).toBe(false);
+      expect(health.dbHealthy).toBe(true);
+      expect(health.cacheSize).toBe(0);
+    });
+
+    it('should enter fallback when configured for postgres but no URL is set', async () => {
+      vi.resetModules();
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: undefined,
+      };
+
+      const { PromptRepository, resetPromptRepository } = await import('../../src/prompts/repository.js');
+      resetPromptRepository();
+
+      const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
+      await repo.initialize();
+
+      const health = repo.getHealth();
       expect(health.fallbackActive).toBe(true);
       expect(health.dbHealthy).toBe(false);
-      expect(health.cacheSize).toBe(0);
+      expect(health.lastDbError).toBeDefined();
     });
   });
 
   describe('Fallback to Defaults', () => {
     it('should return fallback content when database unavailable', async () => {
+      vi.resetModules();
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: undefined,
+      };
+
       // Register a default prompt first
       const { registerDefaultPrompt, getDefaultPrompts } = await import('../../src/prompts/loader.js');
       registerDefaultPrompt('draft_graph', 'Test draft graph prompt content');
@@ -95,6 +127,13 @@ describe('Prompt Repository', () => {
     });
 
     it('should return null for unregistered task', async () => {
+      vi.resetModules();
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: undefined,
+      };
+
       const { PromptRepository } = await import('../../src/prompts/repository.js');
 
       const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
@@ -146,6 +185,13 @@ describe('Prompt Repository', () => {
 
   describe('Write Operations in Fallback Mode', () => {
     it('should throw error when trying to write in fallback mode', async () => {
+      vi.resetModules();
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: undefined,
+      };
+
       const { PromptRepository } = await import('../../src/prompts/repository.js');
 
       const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
@@ -164,6 +210,13 @@ describe('Prompt Repository', () => {
     });
 
     it('should throw error when getting prompt by ID in fallback mode', async () => {
+      vi.resetModules();
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: undefined,
+      };
+
       const { PromptRepository } = await import('../../src/prompts/repository.js');
 
       const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
@@ -172,11 +225,109 @@ describe('Prompt Repository', () => {
       await expect(repo.get('test-id')).rejects.toThrow('Database unavailable');
     });
   });
+
+  describe('Store Selection', () => {
+    it('should construct Supabase store when configured', async () => {
+      vi.resetModules();
+
+      const instances: Array<{ initialize: ReturnType<typeof vi.fn> }> = [];
+
+      class MockSupabasePromptStore {
+        initialize = vi.fn().mockResolvedValue(undefined);
+        getActivePromptForTask = vi.fn().mockResolvedValue(null);
+        create = vi.fn();
+        get = vi.fn();
+        list = vi.fn();
+        update = vi.fn();
+        createVersion = vi.fn();
+        rollback = vi.fn();
+        approveVersion = vi.fn();
+        updateTestCases = vi.fn();
+        delete = vi.fn();
+        getCompiled = vi.fn();
+
+        constructor() {
+          instances.push(this);
+        }
+      }
+
+      vi.doMock('../../src/prompts/stores/supabase.js', () => ({
+        SupabasePromptStore: MockSupabasePromptStore,
+      }));
+
+      promptsConfig = {
+        enabled: true,
+        storeType: 'supabase',
+        supabaseUrl: 'https://example.supabase.co',
+        supabaseServiceRoleKey: 'eyJ.fake.jwt',
+      };
+
+      const { PromptRepository, resetPromptRepository } = await import('../../src/prompts/repository.js');
+      resetPromptRepository();
+
+      const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
+      await repo.initialize();
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0].initialize).toHaveBeenCalledTimes(1);
+    });
+
+    it('should construct Postgres store when configured', async () => {
+      vi.resetModules();
+
+      const instances: Array<{ initialize: ReturnType<typeof vi.fn> }> = [];
+
+      class MockPostgresPromptStore {
+        initialize = vi.fn().mockResolvedValue(undefined);
+        getActivePromptForTask = vi.fn().mockResolvedValue(null);
+        create = vi.fn();
+        get = vi.fn();
+        list = vi.fn();
+        update = vi.fn();
+        createVersion = vi.fn();
+        rollback = vi.fn();
+        approveVersion = vi.fn();
+        updateTestCases = vi.fn();
+        delete = vi.fn();
+        getCompiled = vi.fn();
+
+        constructor() {
+          instances.push(this);
+        }
+      }
+
+      vi.doMock('../../src/prompts/stores/postgres.js', () => ({
+        PostgresPromptStore: MockPostgresPromptStore,
+      }));
+
+      promptsConfig = {
+        enabled: true,
+        storeType: 'postgres',
+        postgresUrl: 'postgresql://user:pass@localhost:5432/db',
+        postgresPoolSize: 1,
+        postgresSsl: false,
+      };
+
+      const { PromptRepository, resetPromptRepository } = await import('../../src/prompts/repository.js');
+      resetPromptRepository();
+
+      const repo = new PromptRepository(undefined, join(TEST_DATA_DIR, 'prompts.json'));
+      await repo.initialize();
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0].initialize).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('Prompt Seeding', () => {
   beforeEach(async () => {
     vi.resetModules();
+
+    promptsConfig = {
+      enabled: false,
+    };
+
     // Clean test directory
     try {
       await rm(TEST_DATA_DIR, { recursive: true, force: true });
@@ -188,7 +339,7 @@ describe('Prompt Seeding', () => {
     // Create empty prompts file
     await writeFile(
       join(TEST_DATA_DIR, 'prompts.json'),
-      JSON.stringify({ prompts: [] })
+      JSON.stringify({ version: 1, prompts: {}, lastModified: new Date().toISOString() })
     );
   });
 
@@ -202,15 +353,6 @@ describe('Prompt Seeding', () => {
 
   describe('initializeAndSeedPrompts', () => {
     it('should register in-memory defaults', async () => {
-      // Mock config with prompts disabled
-      vi.doMock('../../src/config/index.js', () => ({
-        config: {
-          prompts: {
-            enabled: false,
-          },
-        },
-      }));
-
       const { initializeAndSeedPrompts } = await import('../../src/prompts/seed.js');
       const { getDefaultPrompts } = await import('../../src/prompts/loader.js');
 
@@ -226,15 +368,6 @@ describe('Prompt Seeding', () => {
     });
 
     it('should skip database seeding when prompts disabled', async () => {
-      // Mock config with prompts disabled
-      vi.doMock('../../src/config/index.js', () => ({
-        config: {
-          prompts: {
-            enabled: false,
-          },
-        },
-      }));
-
       const { initializeAndSeedPrompts } = await import('../../src/prompts/seed.js');
 
       const result = await initializeAndSeedPrompts();

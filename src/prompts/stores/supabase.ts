@@ -5,8 +5,9 @@
  * Avoids direct PostgreSQL connection issues (SASL, IPv6) on Render.
  *
  * Requires tables:
- * - prompts: id, name, description, task_id, status, active_version, tags, created_at, updated_at
- * - prompt_versions: prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, approved_by, approved_at, test_cases
+ * - cee_prompts: id, name, description, task_id, status, active_version, tags, created_at, updated_at
+ * - cee_prompt_versions: prompt_id, version, content, variables, created_by, created_at, change_note, content_hash, requires_approval, approved_by, approved_at, test_cases
+ * - cee_prompt_observations: id, prompt_id, version, observation_type, content, rating, payload_hash, created_by, created_at
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -69,6 +70,47 @@ interface VersionRow {
   test_cases: string; // JSON string
 }
 
+interface ObservationRow {
+  id: string;
+  prompt_id: string;
+  version: number;
+  observation_type: string;
+  content: string | null;
+  rating: number | null;
+  payload_hash: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/**
+ * Observation types for prompt feedback
+ */
+export type ObservationType = 'note' | 'rating' | 'failure' | 'success';
+
+/**
+ * Prompt observation for tracking feedback and issues
+ */
+export interface PromptObservation {
+  id?: string;
+  promptId: string;
+  version: number;
+  observationType: ObservationType;
+  content?: string;
+  rating?: number; // 1-5
+  payloadHash?: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+/**
+ * Result of getObservations including aggregated rating
+ */
+export interface ObservationsResult {
+  observations: PromptObservation[];
+  averageRating: number | null;
+  totalCount: number;
+}
+
 /**
  * Supabase-backed prompt store
  */
@@ -93,7 +135,7 @@ export class SupabasePromptStore implements IPromptStore {
       });
 
       // Verify connection with a simple query
-      const { error } = await this.client.from('prompts').select('id').limit(1);
+      const { error } = await this.client.from('cee_prompts').select('id').limit(1);
       if (error) {
         throw new Error(`Supabase connection test failed: ${error.message}`);
       }
@@ -129,7 +171,7 @@ export class SupabasePromptStore implements IPromptStore {
 
     // Check for existing prompt
     const { data: existing } = await client
-      .from('prompts')
+      .from('cee_prompts')
       .select('id')
       .eq('id', request.id)
       .single();
@@ -139,7 +181,7 @@ export class SupabasePromptStore implements IPromptStore {
     }
 
     // Insert prompt
-    const { error: promptError } = await client.from('prompts').insert({
+    const { error: promptError } = await client.from('cee_prompts').insert({
       id: request.id,
       name: request.name,
       description: request.description ?? null,
@@ -156,7 +198,7 @@ export class SupabasePromptStore implements IPromptStore {
     }
 
     // Insert first version
-    const { error: versionError } = await client.from('prompt_versions').insert({
+    const { error: versionError } = await client.from('cee_prompt_versions').insert({
       prompt_id: request.id,
       version: 1,
       content: request.content,
@@ -171,7 +213,7 @@ export class SupabasePromptStore implements IPromptStore {
 
     if (versionError) {
       // Rollback prompt creation
-      await client.from('prompts').delete().eq('id', request.id);
+      await client.from('cee_prompts').delete().eq('id', request.id);
       throw new Error(`Failed to create version: ${versionError.message}`);
     }
 
@@ -187,7 +229,7 @@ export class SupabasePromptStore implements IPromptStore {
     const client = this.ensureInitialized();
 
     const { data: prompt, error: promptError } = await client
-      .from('prompts')
+      .from('cee_prompts')
       .select('*')
       .eq('id', id)
       .single();
@@ -197,7 +239,7 @@ export class SupabasePromptStore implements IPromptStore {
     }
 
     const { data: versions, error: versionsError } = await client
-      .from('prompt_versions')
+      .from('cee_prompt_versions')
       .select('*')
       .eq('prompt_id', id)
       .order('version', { ascending: true });
@@ -215,7 +257,7 @@ export class SupabasePromptStore implements IPromptStore {
   async list(filter?: PromptListFilter): Promise<PromptDefinition[]> {
     const client = this.ensureInitialized();
 
-    let query = client.from('prompts').select('*');
+    let query = client.from('cee_prompts').select('*');
 
     if (filter?.taskId) {
       query = query.eq('task_id', filter.taskId);
@@ -237,7 +279,7 @@ export class SupabasePromptStore implements IPromptStore {
     // Fetch all versions for all prompts
     const promptIds = prompts.map((p: PromptRow) => p.id);
     const { data: allVersions, error: versionsError } = await client
-      .from('prompt_versions')
+      .from('cee_prompt_versions')
       .select('*')
       .in('prompt_id', promptIds)
       .order('version', { ascending: true });
@@ -281,7 +323,7 @@ export class SupabasePromptStore implements IPromptStore {
     // If setting to production, check for existing production prompt for same task
     if (request.status === 'production' && existing.status !== 'production') {
       const { data: prodPrompts } = await client
-        .from('prompts')
+        .from('cee_prompts')
         .select('id')
         .eq('task_id', existing.taskId)
         .eq('status', 'production')
@@ -290,7 +332,7 @@ export class SupabasePromptStore implements IPromptStore {
       if (prodPrompts && prodPrompts.length > 0) {
         // Demote existing production prompt
         await client
-          .from('prompts')
+          .from('cee_prompts')
           .update({ status: 'staging', updated_at: new Date().toISOString() })
           .eq('id', prodPrompts[0].id);
       }
@@ -307,7 +349,7 @@ export class SupabasePromptStore implements IPromptStore {
     if (request.activeVersion !== undefined) updateData.active_version = request.activeVersion;
     if (request.stagingVersion !== undefined) updateData.staging_version = request.stagingVersion;
 
-    const { error } = await client.from('prompts').update(updateData).eq('id', id);
+    const { error } = await client.from('cee_prompts').update(updateData).eq('id', id);
 
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
@@ -332,7 +374,7 @@ export class SupabasePromptStore implements IPromptStore {
     const contentHash = computeContentHash(request.content);
     const now = new Date().toISOString();
 
-    const { error: versionError } = await client.from('prompt_versions').insert({
+    const { error: versionError } = await client.from('cee_prompt_versions').insert({
       prompt_id: id,
       version: newVersion,
       content: request.content,
@@ -370,7 +412,7 @@ export class SupabasePromptStore implements IPromptStore {
     }
 
     const { error } = await client
-      .from('prompts')
+      .from('cee_prompts')
       .update({
         active_version: request.targetVersion,
         updated_at: new Date().toISOString(),
@@ -416,7 +458,7 @@ export class SupabasePromptStore implements IPromptStore {
     const now = new Date().toISOString();
 
     const { error } = await client
-      .from('prompt_versions')
+      .from('cee_prompt_versions')
       .update({
         approved_by: request.approvedBy,
         approved_at: now,
@@ -428,7 +470,7 @@ export class SupabasePromptStore implements IPromptStore {
       throw new Error(`Failed to approve version: ${error.message}`);
     }
 
-    await client.from('prompts').update({ updated_at: now }).eq('id', id);
+    await client.from('cee_prompts').update({ updated_at: now }).eq('id', id);
 
     log.info({ promptId: id, version: request.version, approvedBy: request.approvedBy }, 'Version approved');
     return this.get(id) as Promise<PromptDefinition>;
@@ -451,7 +493,7 @@ export class SupabasePromptStore implements IPromptStore {
     }
 
     const { error } = await client
-      .from('prompt_versions')
+      .from('cee_prompt_versions')
       .update({ test_cases: JSON.stringify(testCases) })
       .eq('prompt_id', id)
       .eq('version', version);
@@ -460,7 +502,7 @@ export class SupabasePromptStore implements IPromptStore {
       throw new Error(`Failed to update test cases: ${error.message}`);
     }
 
-    await client.from('prompts').update({ updated_at: new Date().toISOString() }).eq('id', id);
+    await client.from('cee_prompts').update({ updated_at: new Date().toISOString() }).eq('id', id);
 
     return this.get(id) as Promise<PromptDefinition>;
   }
@@ -478,7 +520,7 @@ export class SupabasePromptStore implements IPromptStore {
 
     if (hard) {
       // Hard delete - cascade will handle versions
-      const { error } = await client.from('prompts').delete().eq('id', id);
+      const { error } = await client.from('cee_prompts').delete().eq('id', id);
       if (error) {
         throw new Error(`Failed to delete prompt: ${error.message}`);
       }
@@ -486,7 +528,7 @@ export class SupabasePromptStore implements IPromptStore {
     } else {
       // Soft delete - archive
       const { error } = await client
-        .from('prompts')
+        .from('cee_prompts')
         .update({ status: 'archived', updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) {
@@ -508,7 +550,7 @@ export class SupabasePromptStore implements IPromptStore {
 
     // Find production prompt for task
     const { data: prompts, error: promptError } = await client
-      .from('prompts')
+      .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
       .eq('status', 'production')
@@ -523,7 +565,7 @@ export class SupabasePromptStore implements IPromptStore {
 
     // Get the version
     const { data: versions, error: versionError } = await client
-      .from('prompt_versions')
+      .from('cee_prompt_versions')
       .select('*')
       .eq('prompt_id', prompt.id)
       .eq('version', targetVersion)
@@ -552,7 +594,7 @@ export class SupabasePromptStore implements IPromptStore {
     const client = this.ensureInitialized();
 
     const { data: prompts, error } = await client
-      .from('prompts')
+      .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
       .eq('status', 'production')
@@ -603,6 +645,204 @@ export class SupabasePromptStore implements IPromptStore {
         approvedAt: v.approved_at ?? undefined,
         testCases: JSON.parse(v.test_cases || '[]'),
       })),
+    };
+  }
+
+  // =========================================================================
+  // Observation Methods
+  // =========================================================================
+
+  /**
+   * Add an observation to a prompt version
+   * @throws Error if prompt or version not found
+   * @throws Error if validation fails (invalid type, rating out of range, missing content)
+   */
+  async addObservation(observation: Omit<PromptObservation, 'id' | 'createdAt'>): Promise<PromptObservation> {
+    const client = this.ensureInitialized();
+
+    // Validate prompt exists
+    const prompt = await this.get(observation.promptId);
+    if (!prompt) {
+      throw new Error(`Prompt '${observation.promptId}' not found`);
+    }
+
+    // Validate version exists
+    const versionExists = prompt.versions.some((v) => v.version === observation.version);
+    if (!versionExists) {
+      throw new Error(`Version ${observation.version} not found for prompt '${observation.promptId}'`);
+    }
+
+    // Validate observation type
+    const validTypes: ObservationType[] = ['note', 'rating', 'failure', 'success'];
+    if (!validTypes.includes(observation.observationType)) {
+      throw new Error(`Invalid observation type: ${observation.observationType}. Must be one of: ${validTypes.join(', ')}`);
+    }
+
+    // Validate rating if provided
+    if (observation.rating !== undefined && (observation.rating < 1 || observation.rating > 5)) {
+      throw new Error('Rating must be between 1 and 5');
+    }
+
+    // Validate content for types that require it
+    if (['note', 'failure', 'success'].includes(observation.observationType) && !observation.content) {
+      throw new Error(`Content is required for observation type '${observation.observationType}'`);
+    }
+
+    const now = new Date().toISOString();
+
+    const { data, error } = await client
+      .from('cee_prompt_observations')
+      .insert({
+        prompt_id: observation.promptId,
+        version: observation.version,
+        observation_type: observation.observationType,
+        content: observation.content ?? null,
+        rating: observation.rating ?? null,
+        payload_hash: observation.payloadHash ?? null,
+        created_by: observation.createdBy ?? null,
+        created_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to add observation: ${error.message}`);
+    }
+
+    const row = data as ObservationRow;
+    log.info(
+      { promptId: observation.promptId, version: observation.version, type: observation.observationType },
+      'Observation added'
+    );
+
+    return this.toObservation(row);
+  }
+
+  /**
+   * Get observations for a prompt, optionally filtered by version
+   * Returns observations with aggregated average rating
+   */
+  async getObservations(promptId: string, version?: number): Promise<ObservationsResult> {
+    const client = this.ensureInitialized();
+
+    // Validate prompt exists
+    const prompt = await this.get(promptId);
+    if (!prompt) {
+      throw new Error(`Prompt '${promptId}' not found`);
+    }
+
+    // Validate version if specified
+    if (version !== undefined) {
+      const versionExists = prompt.versions.some((v) => v.version === version);
+      if (!versionExists) {
+        throw new Error(`Version ${version} not found for prompt '${promptId}'`);
+      }
+    }
+
+    let query = client
+      .from('cee_prompt_observations')
+      .select('*')
+      .eq('prompt_id', promptId)
+      .order('created_at', { ascending: false });
+
+    if (version !== undefined) {
+      query = query.eq('version', version);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch observations: ${error.message}`);
+    }
+
+    const observations = ((data ?? []) as ObservationRow[]).map((row) => this.toObservation(row));
+
+    // Calculate average rating from observations with ratings
+    const ratingsForVersion = version !== undefined
+      ? observations.filter((o) => o.rating !== undefined)
+      : observations.filter((o) => o.rating !== undefined);
+
+    const averageRating = ratingsForVersion.length > 0
+      ? ratingsForVersion.reduce((sum, o) => sum + (o.rating ?? 0), 0) / ratingsForVersion.length
+      : null;
+
+    return {
+      observations,
+      averageRating: averageRating !== null ? Math.round(averageRating * 100) / 100 : null,
+      totalCount: observations.length,
+    };
+  }
+
+  /**
+   * Get average rating for a specific prompt version
+   */
+  async getAverageRating(promptId: string, version: number): Promise<number | null> {
+    const client = this.ensureInitialized();
+
+    const { data, error } = await client
+      .from('cee_prompt_observations')
+      .select('rating')
+      .eq('prompt_id', promptId)
+      .eq('version', version)
+      .not('rating', 'is', null);
+
+    if (error) {
+      throw new Error(`Failed to fetch ratings: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      return null;
+    }
+
+    const ratings = data.map((r: { rating: number }) => r.rating);
+    const average = ratings.reduce((sum: number, r: number) => sum + r, 0) / ratings.length;
+    return Math.round(average * 100) / 100;
+  }
+
+  /**
+   * Delete an observation by ID
+   * @throws Error if observation not found
+   */
+  async deleteObservation(id: string): Promise<void> {
+    const client = this.ensureInitialized();
+
+    // Check if observation exists
+    const { data: existing, error: fetchError } = await client
+      .from('cee_prompt_observations')
+      .select('id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existing) {
+      throw new Error(`Observation '${id}' not found`);
+    }
+
+    const { error } = await client
+      .from('cee_prompt_observations')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      throw new Error(`Failed to delete observation: ${error.message}`);
+    }
+
+    log.info({ observationId: id }, 'Observation deleted');
+  }
+
+  /**
+   * Convert database row to PromptObservation
+   */
+  private toObservation(row: ObservationRow): PromptObservation {
+    return {
+      id: row.id,
+      promptId: row.prompt_id,
+      version: row.version,
+      observationType: row.observation_type as ObservationType,
+      content: row.content ?? undefined,
+      rating: row.rating ?? undefined,
+      payloadHash: row.payload_hash ?? undefined,
+      createdBy: row.created_by ?? undefined,
+      createdAt: row.created_at,
     };
   }
 }

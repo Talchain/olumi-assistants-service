@@ -105,8 +105,10 @@ export function getSystemPrompt(
     throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
   }
 
+  const hasVariables = Boolean(variables && Object.keys(variables).length > 0);
+
   const now = Date.now();
-  const cached = promptCache.get(taskId);
+  const cached = hasVariables ? undefined : promptCache.get(taskId);
 
   // Return cached value if still fresh
   if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
@@ -123,7 +125,6 @@ export function getSystemPrompt(
   // Load from prompt system (sync path for immediate return)
   try {
     const content = loadPromptSync(taskId, variables ?? {});
-    const hasVariables = variables && Object.keys(variables).length > 0;
 
     // Only cache static prompts (no variables) to avoid cache poisoning
     if (!hasVariables) {
@@ -135,7 +136,7 @@ export function getSystemPrompt(
 
     // Trigger background refresh from store to update cache for next request
     // Only if not already in-flight (prevents thundering herd on cache expiry)
-    if (!inflightRefresh.has(taskId)) {
+    if (!hasVariables && !inflightRefresh.has(taskId)) {
       const refreshPromise = loadPrompt(taskId, { variables: variables ?? {} })
         .then((loaded) => {
           if (loaded.source === 'store' && !hasVariables) {
