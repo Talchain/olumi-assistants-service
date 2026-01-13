@@ -104,6 +104,21 @@ export default async function route(app: FastifyInstance) {
   const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
+  function isUnsafeCaptureRequested(req: any): boolean {
+    const query = (req.query as Record<string, unknown>) ?? {};
+    const unsafeQuery = query.unsafe;
+    const unsafeHeader = req.headers?.["x-olumi-unsafe"];
+    return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
+  }
+
+  function isAdminAuthorized(req: any): boolean {
+    const providedKey = req.headers?.["x-admin-key"] as string | undefined;
+    if (!providedKey) return false;
+    const adminKey = config.prompts?.adminApiKey;
+    const adminKeyRead = config.prompts?.adminApiKeyRead;
+    return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
+  }
+
   app.post("/assist/v1/draft-graph", async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
@@ -199,6 +214,19 @@ export default async function route(app: FastifyInstance) {
       seed?: string;
       archetype_hint?: string;
     };
+
+    const unsafeCaptureEnabled = isUnsafeCaptureRequested(req) && isAdminAuthorized(req);
+    // Override any client-provided include_debug. Unsafe capture is admin-only.
+    (baseInput as any).include_debug = unsafeCaptureEnabled;
+    if (unsafeCaptureEnabled) {
+      const existingFlags = typeof (baseInput as any).flags === "object" && (baseInput as any).flags !== null
+        ? ((baseInput as any).flags as Record<string, unknown>)
+        : undefined;
+      (baseInput as any).flags = {
+        ...(existingFlags ?? {}),
+        unsafe_capture: true,
+      };
+    }
 
     // Preflight validation - check brief readiness before LLM call
     if (config.cee.preflightEnabled) {

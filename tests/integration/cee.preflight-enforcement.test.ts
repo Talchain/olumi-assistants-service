@@ -47,6 +47,11 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       // Reset config cache to ensure fresh config parsing with new env vars
       _resetConfigCache();
 
+      // Re-stub core envs here because other suites call vi.unstubAllEnvs()
+      vi.stubEnv("LLM_PROVIDER", "fixtures");
+      vi.stubEnv("CEE_CAUSAL_VALIDATION_ENABLED", "false");
+      vi.stubEnv("VALIDATION_CACHE_ENABLED", "false");
+
       vi.stubEnv("ASSIST_API_KEYS", "preflight-test-key");
       vi.stubEnv("CEE_PREFLIGHT_ENABLED", "true");
       vi.stubEnv("CEE_PREFLIGHT_STRICT", "true");
@@ -163,6 +168,11 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       // Reset config cache to ensure fresh config parsing with new env vars
       _resetConfigCache();
 
+      // Re-stub core envs here because other suites call vi.unstubAllEnvs()
+      vi.stubEnv("LLM_PROVIDER", "fixtures");
+      vi.stubEnv("CEE_CAUSAL_VALIDATION_ENABLED", "false");
+      vi.stubEnv("VALIDATION_CACHE_ENABLED", "false");
+
       vi.stubEnv("ASSIST_API_KEYS", "clarification-test-key");
       vi.stubEnv("CEE_PREFLIGHT_ENABLED", "true");
       vi.stubEnv("CEE_PREFLIGHT_STRICT", "false"); // Don't reject on preflight, allow clarification flow
@@ -221,7 +231,7 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       // Same brief but with completed clarification rounds
       const res = await app.inject({
         method: "POST",
-        url: "/assist/v1/draft-graph",
+        url: "/assist/v1/draft-graph?schema=v1",
         headers,
         payload: {
           brief: "Should we expand our product line with new features for our customers in the market?",
@@ -250,7 +260,7 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       // Expected score: ~0.85+
       const res = await app.inject({
         method: "POST",
-        url: "/assist/v1/draft-graph",
+        url: "/assist/v1/draft-graph?schema=v1",
         headers,
         payload: {
           brief: "Should we hire an additional senior developer for our engineering team to meet the Q4 deadline? Our budget is $150,000 annually and we need someone with React and Node.js experience. The alternative is to outsource to a contractor.",
@@ -316,6 +326,11 @@ describe("CEE Preflight Enforcement (Integration)", () => {
     beforeAll(async () => {
       // Reset config cache to ensure fresh config parsing with new env vars
       _resetConfigCache();
+
+      // Re-stub core envs here because other suites call vi.unstubAllEnvs()
+      vi.stubEnv("LLM_PROVIDER", "fixtures");
+      vi.stubEnv("CEE_CAUSAL_VALIDATION_ENABLED", "false");
+      vi.stubEnv("VALIDATION_CACHE_ENABLED", "false");
 
       vi.stubEnv("ASSIST_API_KEYS", "combined-test-key");
       vi.stubEnv("CEE_PREFLIGHT_ENABLED", "true");

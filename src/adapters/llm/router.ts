@@ -143,12 +143,37 @@ class FixturesAdapter implements LLMAdapter {
     // Import fixture dynamically to avoid circular deps
     const { fixtureGraph } = await import("../../utils/fixtures.js");
 
+    const unsafeCaptureEnabled = Boolean(_args?.includeDebug === true && _args?.flags?.unsafe_capture === true);
+    const rawNodeKinds = Array.isArray((fixtureGraph as any)?.nodes)
+      ? ((fixtureGraph as any).nodes as any[])
+        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+        .filter(Boolean)
+      : [];
+
     return {
       graph: fixtureGraph,
       rationales: [],
-      debug: {
+      debug: unsafeCaptureEnabled ? {
         raw_llm_output: { _fixture: true, graph: fixtureGraph },
         raw_llm_output_truncated: false,
+      } : undefined,
+      meta: {
+        model: this.model,
+        prompt_version: 'fixture:draft_graph',
+        temperature: 0,
+        token_usage: {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+        },
+        finish_reason: 'fixture',
+        provider_latency_ms: 0,
+        node_kinds_raw_json: rawNodeKinds,
+        ...(unsafeCaptureEnabled ? {
+          raw_output_preview: '{"_fixture":true}',
+          raw_llm_text: '{"_fixture":true}',
+          raw_llm_json: { _fixture: true, graph: fixtureGraph },
+        } : {}),
       },
       usage: {
         input_tokens: 0,

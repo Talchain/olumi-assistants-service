@@ -149,6 +149,7 @@ export function getPromptStoreStatus(): {
   storeType: string;
   storePath?: string;
   postgresConnected?: boolean;
+  supabaseHost?: string;
 } {
   const storeType = config.prompts?.storeType ?? 'file';
   const status: ReturnType<typeof getPromptStoreStatus> = {
@@ -162,6 +163,15 @@ export function getPromptStoreStatus(): {
     status.storePath = config.prompts?.storePath ?? DEFAULT_STORE_PATH;
   } else if (storeType === 'postgres') {
     status.postgresConnected = storeHealthy;
+  } else if (storeType === 'supabase') {
+    const url = config.prompts?.supabaseUrl;
+    if (url) {
+      try {
+        status.supabaseHost = new URL(url).host;
+      } catch {
+        // ignore
+      }
+    }
   }
 
   return status;

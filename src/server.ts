@@ -58,10 +58,13 @@ import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
-import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy, initializePromptStore } from "./prompts/index.js";
+import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
+import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
+import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
+import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 
 export const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -75,6 +78,7 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "Content-Type",
   "Authorization",
   "X-Olumi-Assist-Key",
+  "X-Admin-Key",
   "X-Olumi-Signature",
   "X-Olumi-Timestamp",
   "X-Olumi-Nonce",
@@ -85,6 +89,7 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "X-CEE-Readiness-Score",
   "X-Olumi-Client-Build",
   "X-Olumi-Payload-Hash",
+  "X-Olumi-Unsafe",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -427,6 +432,26 @@ app.get("/healthz", async () => {
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
 
+  let promptCounts:
+    | {
+        total: number;
+        production: number;
+      }
+    | undefined;
+
+  if (promptStoreStatus.enabled && promptStoreHealthy) {
+    try {
+      const store = getPromptStore();
+      const allPrompts = await store.list();
+      promptCounts = {
+        total: allPrompts.length,
+        production: allPrompts.filter((p) => p.status === 'production').length,
+      };
+    } catch {
+      // ignore
+    }
+  }
+
   // Check auth configuration
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
   const hasHmacSecret = !!env.SHARE_SECRET;
@@ -497,6 +522,8 @@ app.get("/healthz", async () => {
       enabled: promptStoreStatus.enabled,
       healthy: promptStoreHealthy,
       degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
+      store: promptStoreStatus,
+      counts: promptCounts,
     },
   };
 });
@@ -616,7 +643,11 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     }
     await adminPromptRoutes(app);
     await adminUIRoutes(app);
+    await adminDraftFailureRoutes(app);
+    await adminLLMOutputRoutes(app);
     app.log.info('Admin prompt management routes registered');
+
+    startDraftFailureRetentionJob();
 
     // Initialize Braintrust experiment tracking if enabled
     if (config.prompts?.braintrustEnabled) {

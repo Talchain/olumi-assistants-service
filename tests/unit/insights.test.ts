@@ -73,7 +73,8 @@ describe("aggregateInsights", () => {
       const context: InsightsContext = {
         biasFindings: [
           {
-            type: "confirmation_bias",
+            id: "confirmation_bias",
+            category: "other",
             severity: "high",
             explanation: "Evidence appears to confirm pre-existing beliefs",
           },
@@ -94,7 +95,8 @@ describe("aggregateInsights", () => {
       const context: InsightsContext = {
         biasFindings: [
           {
-            type: "anchoring_bias",
+            id: "anchoring_bias",
+            category: "other",
             severity: "medium",
             explanation: "Initial estimates may be anchoring subsequent judgments",
           },
@@ -111,7 +113,8 @@ describe("aggregateInsights", () => {
       const context: InsightsContext = {
         biasFindings: [
           {
-            type: "availability_bias",
+            id: "availability_bias",
+            category: "other",
             severity: "low",
             explanation: "Minor availability bias detected",
           },
@@ -126,9 +129,9 @@ describe("aggregateInsights", () => {
     it("limits bias insights to max 2", () => {
       const context: InsightsContext = {
         biasFindings: [
-          { type: "confirmation_bias", severity: "high", explanation: "Bias 1" },
-          { type: "anchoring_bias", severity: "high", explanation: "Bias 2" },
-          { type: "framing_bias", severity: "high", explanation: "Bias 3" },
+          { id: "confirmation_bias", category: "other", severity: "high", explanation: "Bias 1" },
+          { id: "anchoring_bias", category: "other", severity: "high", explanation: "Bias 2" },
+          { id: "framing_bias", category: "other", severity: "high", explanation: "Bias 3" },
         ],
       };
 
@@ -141,8 +144,8 @@ describe("aggregateInsights", () => {
     it("skips bias findings without explanation", () => {
       const context: InsightsContext = {
         biasFindings: [
-          { type: "confirmation_bias", severity: "high" }, // No explanation
-          { type: "anchoring_bias", severity: "high", explanation: "Has explanation" },
+          { id: "confirmation_bias", category: "other", severity: "high" }, // No explanation
+          { id: "anchoring_bias", category: "other", severity: "high", explanation: "Has explanation" },
         ],
       };
 
@@ -157,14 +160,17 @@ describe("aggregateInsights", () => {
     it("maps critical missing domain factors", () => {
       const context: InsightsContext = {
         domainCompleteness: {
-          domain: "pricing",
-          score: 0.6,
-          present_factors: [{ name: "cost", importance: "high" }],
+          detected_domain: "pricing",
+          detection_confidence: 0.8,
+          factors_found: ["cost"],
+          completeness_score: 60,
+          summary: "Pricing domain completeness assessment",
           missing_factors: [
             {
               name: "competitor pricing",
               importance: "critical",
               rationale: "Essential for market positioning",
+              suggestion: "Add a factor node for competitor pricing and connect it to relevant options/outcomes.",
             },
           ],
         },
@@ -183,14 +189,17 @@ describe("aggregateInsights", () => {
     it("ignores non-critical missing factors", () => {
       const context: InsightsContext = {
         domainCompleteness: {
-          domain: "pricing",
-          score: 0.8,
-          present_factors: [],
+          detected_domain: "pricing",
+          detection_confidence: 0.8,
+          factors_found: [],
+          completeness_score: 80,
+          summary: "Pricing domain completeness assessment",
           missing_factors: [
             {
               name: "brand perception",
-              importance: "high",
+              importance: "recommended",
               rationale: "Would improve analysis",
+              suggestion: "Add a factor node for brand perception and connect it to outcomes.",
             },
           ],
         },
@@ -208,6 +217,7 @@ describe("aggregateInsights", () => {
           moderate: 1,
           weak: 3,
           none: 2,
+          summary: "Mostly weak or missing evidence",
         },
       };
 
@@ -228,6 +238,7 @@ describe("aggregateInsights", () => {
           moderate: 2,
           weak: 1,
           none: 1,
+          summary: "Evidence is mostly strong/moderate",
         },
       };
 
@@ -258,7 +269,7 @@ describe("aggregateInsights", () => {
           { edge_id: "e1", explanation: "Fragile assumption", severity: "fragile" },
         ],
         biasFindings: [
-          { type: "confirmation_bias", severity: "high", explanation: "Bias finding" },
+          { id: "confirmation_bias", category: "other", severity: "high", explanation: "Bias finding" },
         ],
       };
 
@@ -277,16 +288,18 @@ describe("aggregateInsights", () => {
           { edge_id: "e3", explanation: "Assumption 3", severity: "fragile" },
         ],
         biasFindings: [
-          { type: "bias1", severity: "high", explanation: "Bias 1" },
-          { type: "bias2", severity: "high", explanation: "Bias 2" },
+          { id: "bias1", category: "other", severity: "high", explanation: "Bias 1" },
+          { id: "bias2", category: "other", severity: "high", explanation: "Bias 2" },
         ],
         domainCompleteness: {
-          domain: "test",
-          score: 0.5,
-          present_factors: [],
+          detected_domain: "general",
+          detection_confidence: 0.5,
+          factors_found: [],
+          completeness_score: 50,
+          summary: "Domain completeness assessment",
           missing_factors: [
-            { name: "factor1", importance: "critical", rationale: "Missing 1" },
-            { name: "factor2", importance: "critical", rationale: "Missing 2" },
+            { name: "factor1", importance: "critical", rationale: "Missing 1", suggestion: "Add factor1" },
+            { name: "factor2", importance: "critical", rationale: "Missing 2", suggestion: "Add factor2" },
           ],
         },
       };

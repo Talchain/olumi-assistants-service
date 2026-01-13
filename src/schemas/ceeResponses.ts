@@ -65,17 +65,114 @@ export type CEEWeightSuggestionV1T = z.infer<typeof CEEWeightSuggestionV1Schema>
 // Pipeline Trace Schemas (P0 Diagnostics)
 // ============================================================================
 
+// ============================================================================
+// LLM Observability Trace Schemas (Enhanced Diagnostics)
+// ============================================================================
+
+/** Node kind counts at each pipeline stage */
+export const NodeExtractionSchema = z.object({
+  /** Counts from parsed LLM JSON, before any processing */
+  raw: z.record(z.string(), z.number()),
+  /** Counts after coefficient_normalisation */
+  normalised: z.record(z.string(), z.number()),
+  /** Counts at final validation */
+  validated: z.record(z.string(), z.number()),
+});
+
+export type NodeExtractionT = z.infer<typeof NodeExtractionSchema>;
+
+/** LLM call metadata for observability */
+export const LLMMetadataSchema = z.object({
+  model: z.string(),
+  prompt_version: z.string().optional(),
+  duration_ms: z.number().optional(),
+  finish_reason: z.string().optional(),
+  response_chars: z.number().optional(),
+  token_usage: z.object({
+    prompt_tokens: z.number(),
+    completion_tokens: z.number(),
+    total_tokens: z.number(),
+  }).optional(),
+  parse_error: z.string().optional(),
+});
+
+export type LLMMetadataT = z.infer<typeof LLMMetadataSchema>;
+
+/** LLM raw output preview pattern */
+export const LLMRawSchema = z.object({
+  /** First 2000 chars of raw LLM text */
+  output_preview: z.string(),
+  /** SHA-256 of stored output (may be truncated by adapters) */
+  output_hash: z.string(),
+  /** Quick check: how many nodes in parsed output */
+  output_node_count: z.number(),
+  /** Quick check: how many edges in parsed output */
+  output_edge_count: z.number(),
+  /** True if preview was truncated */
+  truncated: z.boolean(),
+  /** True if full output stored for later retrieval */
+  full_output_available: z.boolean(),
+});
+
+export type LLMRawT = z.infer<typeof LLMRawSchema>;
+
+/** Explicit validation result */
+export const ValidationSummarySchema = z.object({
+  status: z.enum(["valid", "invalid"]),
+  required_kinds: z.array(z.string()),
+  present_kinds: z.array(z.string()),
+  missing_kinds: z.array(z.string()),
+  message: z.string().optional(),
+  suggestion: z.string().optional(),
+});
+
+export type ValidationSummaryT = z.infer<typeof ValidationSummarySchema>;
+
+/** Coefficient modification record */
+export const CoefficientModificationSchema = z.object({
+  edge_id: z.string(),
+  field: z.string(),
+  before: z.number(),
+  after: z.number(),
+  reason: z.string(),
+});
+
+export type CoefficientModificationT = z.infer<typeof CoefficientModificationSchema>;
+
+/** Transform record for pipeline stages */
+export const TransformSchema = z.object({
+  stage: z.string(),
+  kind: z.enum(["normalisation", "repair"]),
+  trigger: z.string(),
+  changes_summary: z.string(),
+  repair_attempted: z.boolean(),
+  repair_success: z.boolean(),
+  /** Node counts before transform */
+  before_counts: z.record(z.string(), z.number()),
+  /** Node counts after transform */
+  after_counts: z.record(z.string(), z.number()),
+  /** Coefficient modifications (when relevant) */
+  coefficients_modified: z.array(CoefficientModificationSchema).optional(),
+  nodes_added_count: z.number().optional(),
+  nodes_removed_count: z.number().optional(),
+  edges_added_count: z.number().optional(),
+  edges_removed_count: z.number().optional(),
+});
+
+export type TransformT = z.infer<typeof TransformSchema>;
+
 /** Pipeline stage status */
 export const PipelineStageStatusSchema = z.enum([
   "success",
   "failed",
   "skipped",
-  "repaired",
+  "success_with_repairs",
 ]);
 
 /** Pipeline stage name */
 export const PipelineStageNameSchema = z.enum([
   "llm_draft",
+  "coefficient_normalisation",
   "node_validation",
   "connectivity_check",
   "goal_repair",

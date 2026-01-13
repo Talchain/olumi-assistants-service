@@ -68,11 +68,10 @@ describe('Prompt Observations', () => {
     });
 
     it('should export observation-related types', async () => {
-      const { PromptObservation, ObservationType, ObservationsResult } =
-        await import('../../src/prompts/stores/supabase.js');
-
-      // Types are compile-time only, but the module should load without error
-      expect(SupabasePromptStore).toBeDefined();
+      // Types are compile-time only; at runtime the module should load without error.
+      const module = await import('../../src/prompts/stores/supabase.js');
+      expect(module).toBeDefined();
+      expect((module as any).SupabasePromptStore).toBeDefined();
     });
   });
 

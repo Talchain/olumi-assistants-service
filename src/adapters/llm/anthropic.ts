@@ -15,13 +15,14 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt } from "./prompt-loader.js";
+import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
 
 export type DraftArgs = {
   brief: string;
   docs: DocPreview[];
   seed: number;
   model?: string;
+  includeDebug?: boolean;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -174,7 +175,11 @@ function getClient(): Anthropic {
   return client;
 }
 
-const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
+const TIMEOUT_MS = 45_000; // 45 seconds
+
+const RAW_LLM_TEXT_MAX_CHARS = 10_000;
+const RAW_LLM_PREVIEW_MAX_CHARS = 500;
+
 function isAnthropicPromptCacheEnabled(): boolean {
   return config.promptCache.anthropicEnabled;
 }
@@ -398,8 +403,9 @@ export type UsageMetrics = {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; debug?: { [key: string]: unknown }; usage: UsageMetrics }> {
+): Promise<DraftGraphResult> {
   const prompt = buildDraftPrompt(args);
+  const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
 
@@ -438,6 +444,8 @@ export async function draftGraphWithAnthropic(
 
     clearTimeout(timeoutId);
 
+    const providerLatencyMs = Date.now() - startTime;
+
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
@@ -454,6 +462,11 @@ export async function draftGraphWithAnthropic(
 
     // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
     const rawJson = JSON.parse(jsonText);
+    const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
+      ? ((rawJson as any).nodes as any[])
+        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+        .filter(Boolean)
+      : [];
     const normalised = normaliseDraftResponse(rawJson);
     const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
     if (defaultedFactors.length > 0) {
@@ -559,12 +572,43 @@ export async function draftGraphWithAnthropic(
     // Capture raw LLM output for debug tracing (before normalisation)
     const rawOutput = truncateRawOutput(rawJson);
 
+    const unsafeCaptureEnabled = args.includeDebug === true && (args as any).flags?.unsafe_capture === true;
+    const rawTextTruncated = jsonText.length > RAW_LLM_TEXT_MAX_CHARS
+      ? jsonText.slice(0, RAW_LLM_TEXT_MAX_CHARS)
+      : jsonText;
+    const rawPreview = jsonText.length > RAW_LLM_PREVIEW_MAX_CHARS
+      ? jsonText.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
+      : jsonText;
+
+    const finishReason = (response as any)?.stop_reason || (response as any)?.stopReason;
+
     return {
       graph,
       rationales: parsed.rationales || [],
-      debug: {
+      debug: unsafeCaptureEnabled ? {
         raw_llm_output: rawOutput.output,
         raw_llm_output_truncated: rawOutput.truncated,
+      } : undefined,
+      meta: {
+        model,
+        prompt_version: promptMeta.prompt_version,
+        prompt_hash: promptMeta.prompt_hash,
+        temperature: 0,
+        token_usage: {
+          prompt_tokens: response.usage.input_tokens,
+          completion_tokens: response.usage.output_tokens,
+          total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+        },
+        finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+        provider_latency_ms: providerLatencyMs,
+        node_kinds_raw_json: rawNodeKinds,
+        // Always include raw output for LLM observability trace (preview + full text for storage)
+        raw_output_preview: rawPreview,
+        raw_llm_text: rawTextTruncated,
+        // Only include parsed JSON when unsafe capture is enabled (admin-gated)
+        ...(unsafeCaptureEnabled ? {
+          raw_llm_json: rawOutput.output,
+        } : {}),
       },
       usage: {
         input_tokens: response.usage.input_tokens,

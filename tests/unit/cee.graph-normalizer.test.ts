@@ -387,7 +387,7 @@ describe('normalizeGraphForISL - parameter_uncertainties', () => {
 
       // Factor node should also have value_std populated
       const factorNode = normalized.nodes.find((n) => n.id === 'fac_price');
-      expect(factorNode?.data?.value_std).toBeCloseTo(4.13, 1);
+      expect((factorNode as any)?.data?.value_std).toBeCloseTo(4.13, 1);
     });
 
     it('derives std from inferred extraction metadata with higher multiplier', () => {

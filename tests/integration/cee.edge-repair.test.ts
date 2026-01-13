@@ -136,13 +136,13 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
 
     // Verify edge repair is recorded in pipeline trace
     expect(body.trace.pipeline).toBeDefined();
-    expect(body.trace.pipeline.status).toBe("repaired");
+    expect(body.trace.pipeline.status).toBe("success_with_repairs");
 
     const edgeRepairStage = body.trace.pipeline.stages.find(
       (s: any) => s.name === "edge_repair"
     );
     expect(edgeRepairStage).toBeDefined();
-    expect(edgeRepairStage.status).toBe("repaired");
+    expect(edgeRepairStage.status).toBe("success_with_repairs");
 
     // Verify new trace semantics
     expect(edgeRepairStage.details.called).toBe(true);
@@ -178,7 +178,7 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
 
     if (edgeRepairStage) {
       // If edge repair ran, verify its details with new semantics
-      expect(edgeRepairStage.status).toBe("repaired");
+      expect(edgeRepairStage.status).toBe("success_with_repairs");
       expect(typeof edgeRepairStage.duration_ms).toBe("number");
       expect(edgeRepairStage.details).toBeDefined();
       expect(edgeRepairStage.details.called).toBe(true);

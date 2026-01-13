@@ -28,6 +28,18 @@ interface CEEGraphReadinessResponseV1 {
   quality_factors: GraphReadinessAssessment["quality_factors"];
   can_run_analysis: boolean;
   blocker_reason?: string;
+  evidence_quality?: {
+    /** Count of edges with strong evidence */
+    strong: number;
+    /** Count of edges with moderate evidence */
+    moderate: number;
+    /** Count of edges with weak evidence (assumptions/hypotheses) */
+    weak: number;
+    /** Count of edges with no provenance */
+    none: number;
+    /** Human-readable summary */
+    summary: string;
+  };
   trace?: CEETraceMeta;
 }
 
@@ -445,6 +457,7 @@ export default async function route(app: FastifyInstance) {
         quality_factors: assessment.quality_factors,
         can_run_analysis: assessment.can_run_analysis,
         blocker_reason: assessment.blocker_reason,
+        evidence_quality: assessment.evidence_quality,
         trace,
       };
 

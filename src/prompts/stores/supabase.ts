@@ -10,6 +10,7 @@
  * - cee_prompt_observations: id, prompt_id, version, observation_type, content, rating, payload_hash, created_by, created_at
  */
 
+import { Buffer } from 'node:buffer';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type {
   IPromptStore,
@@ -29,6 +30,21 @@ import type {
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+
+function getJwtClaim(token: string, claim: string): string | undefined {
+  const parts = token.split('.');
+  if (parts.length < 2) return undefined;
+  try {
+    // JWT payload is base64url encoded
+    const payloadB64 = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const json = Buffer.from(payloadB64, 'base64').toString('utf8');
+    const payload = JSON.parse(json) as Record<string, unknown>;
+    const value = payload[claim];
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Supabase store configuration
@@ -127,6 +143,14 @@ export class SupabasePromptStore implements IPromptStore {
    */
   async initialize(): Promise<void> {
     try {
+      const role = getJwtClaim(this.config.serviceRoleKey, 'role');
+      if (role && role !== 'service_role') {
+        throw new Error(
+          `SUPABASE_SERVICE_ROLE_KEY is not a service role key (role=${role}). ` +
+          `This commonly causes empty reads due to RLS. Please provide the service_role JWT.`
+        );
+      }
+
       this.client = createClient(this.config.url, this.config.serviceRoleKey, {
         auth: {
           autoRefreshToken: false,
@@ -134,11 +158,15 @@ export class SupabasePromptStore implements IPromptStore {
         },
       });
 
-      // Verify connection with a simple query
-      const { error } = await this.client.from('cee_prompts').select('id').limit(1);
+      // Verify connection with a simple query (count helps distinguish empty vs inaccessible)
+      const { error, count } = await this.client
+        .from('cee_prompts')
+        .select('id', { count: 'exact', head: true });
       if (error) {
         throw new Error(`Supabase connection test failed: ${error.message}`);
       }
+
+      log.info({ supabaseHost: new URL(this.config.url).host, role, count }, 'Supabase prompt store connection test');
 
       log.info('Supabase prompt store initialized');
     } catch (error) {

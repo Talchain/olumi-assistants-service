@@ -336,6 +336,7 @@ type PipelineResult =
       cost_usd: number;
       provider: string;
       model: string;
+      llm_meta?: DraftGraphResult["meta"];
       structural_meta?: StructuralMeta;
     }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
@@ -518,7 +519,13 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
     try {
       draftResult = await draftAdapter.draftGraph(
-        { brief: effectiveBrief, docs, seed: 17 },
+        {
+          brief: effectiveBrief,
+          docs,
+          seed: 17,
+          flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
+          includeDebug: input.include_debug === true,
+        },
         { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS }
       );
       break;
@@ -551,7 +558,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     throw new Error("draft_graph_missing_result");
   }
 
-  const { graph, rationales, usage: draftUsage, debug: adapterDebug } = draftResult;
+  const { graph, rationales, usage: draftUsage, debug: adapterDebug, meta: llmMeta } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
 
   // Time budget check: skip LLM repair if we've used too much time on draft
@@ -602,7 +609,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     outcome_count: outcomeNodes.length,
     goal_labels: goalNodes.map((n: any) => n.label),
     outcome_labels: outcomeNodes.map((n: any) => n.label),
-    brief_preview: effectiveBrief.substring(0, 100),
     correlation_id: correlationId,
   });
 
@@ -610,7 +616,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     log.warn({
       event: "cee.no_goal_node",
       outcome_labels: outcomeNodes.map((n: any) => n.label),
-      brief_preview: effectiveBrief.substring(0, 150),
       correlation_id: correlationId,
     }, "LLM did not generate a goal node - prompt may need improvement");
   } else if (goalNodes.length > 1) {
@@ -911,7 +916,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Build debug payload: merge adapter debug (raw_llm_output) with internal debug (needle_movers)
   const debugPayload = input.include_debug
     ? { needle_movers: docs, ...(adapterDebug || {}) }
-    : adapterDebug || undefined;
+    : undefined;
 
   const payload = DraftGraphOutput.parse({
     graph: candidate,
@@ -1005,6 +1010,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     cost_usd: totalCost,
     provider: draftAdapter.name,
     model: draftAdapter.model,
+    llm_meta: llmMeta,
     structural_meta: (structuralMeta.had_cycles || structuralMeta.had_pruned_nodes) ? structuralMeta : undefined,
   };
 }

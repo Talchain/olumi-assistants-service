@@ -40,6 +40,33 @@ export interface DraftGraphResult {
     influence_scores?: Array<{ node_id: string; score: number }>;
     [key: string]: unknown;
   };
+  /**
+   * Provider/prompt observability metadata.
+   * Safe fields should always be populated when available.
+   * Unsafe fields must only be populated when explicitly gated by the caller.
+   */
+  meta?: {
+    // Safe
+    model: string;
+    prompt_version?: string;
+    prompt_hash?: string;
+    temperature?: number;
+    token_usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    finish_reason?: string;
+    provider_latency_ms?: number;
+
+    // Safe diagnostics
+    node_kinds_raw_json?: string[];
+
+    // Unsafe (admin-gated)
+    raw_output_preview?: string;
+    raw_llm_text?: string;
+    raw_llm_json?: unknown;
+  };
   usage: UsageMetrics;
 }
 

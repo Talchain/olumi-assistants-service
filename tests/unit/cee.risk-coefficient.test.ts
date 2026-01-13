@@ -181,4 +181,53 @@ describe("normaliseRiskCoefficients", () => {
     expect(result.corrections).toHaveLength(0);
     expect(result.edges).toHaveLength(0);
   });
+
+  it("handles nodes with missing kind field gracefully (no crash)", () => {
+    const nodes = [
+      { id: "node_1" }, // No kind field
+      { id: "node_2", kind: "goal" },
+      { id: "risk_1", kind: "risk" },
+    ];
+    const edges = [
+      { from: "node_1", to: "node_2", strength_mean: 0.5 }, // Source has no kind
+      { from: "risk_1", to: "node_1", strength_mean: 0.4 }, // Target has no kind (not goal/outcome)
+      { from: "risk_1", to: "node_2", strength_mean: 0.6 }, // Should be corrected
+    ];
+
+    // Should not throw
+    const result = normaliseRiskCoefficients(nodes, edges);
+
+    // Only risk→goal edge should be corrected
+    expect(result.corrections).toHaveLength(1);
+    expect(result.corrections[0]).toEqual({
+      source: "risk_1",
+      target: "node_2",
+      original: 0.6,
+      corrected: -0.6,
+    });
+
+    // Other edges should be unchanged
+    expect(result.edges[0].strength_mean).toBe(0.5);
+    expect(result.edges[1].strength_mean).toBe(0.4);
+    expect(result.edges[2].strength_mean).toBe(-0.6);
+  });
+
+  it("skips edges with missing from/to node IDs", () => {
+    const nodes = [
+      { id: "risk_1", kind: "risk" },
+      { id: "goal_1", kind: "goal" },
+    ];
+    const edges = [
+      { to: "goal_1", strength_mean: 0.5 }, // Missing from
+      { from: "risk_1", strength_mean: 0.5 }, // Missing to
+      { from: "risk_1", to: "goal_1", strength_mean: 0.5 }, // Valid
+    ];
+
+    const result = normaliseRiskCoefficients(nodes, edges);
+
+    // Only the valid edge should be corrected
+    expect(result.corrections).toHaveLength(1);
+    expect(result.corrections[0].source).toBe("risk_1");
+    expect(result.corrections[0].target).toBe("goal_1");
+  });
 });

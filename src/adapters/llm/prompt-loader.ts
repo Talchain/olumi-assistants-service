@@ -72,6 +72,10 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
 interface CacheEntry {
   content: string;
   loadedAt: number;
+  source?: LoadedPrompt["source"];
+  promptId?: string;
+  version?: number;
+  promptHash?: string;
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
@@ -126,11 +130,15 @@ export function getSystemPrompt(
   try {
     const content = loadPromptSync(taskId, variables ?? {});
 
+    const promptHash = createHash('sha256').update(content).digest('hex');
+
     // Only cache static prompts (no variables) to avoid cache poisoning
     if (!hasVariables) {
       promptCache.set(taskId, {
         content,
         loadedAt: now,
+        source: 'default',
+        promptHash,
       });
     }
 
@@ -140,9 +148,14 @@ export function getSystemPrompt(
       const refreshPromise = loadPrompt(taskId, { variables: variables ?? {} })
         .then((loaded) => {
           if (loaded.source === 'store' && !hasVariables) {
+            const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
             promptCache.set(taskId, {
               content: loaded.content,
               loadedAt: Date.now(),
+              source: loaded.source,
+              promptId: loaded.promptId,
+              version: loaded.version,
+              promptHash: refreshedHash,
             });
             emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
               taskId,
@@ -169,6 +182,41 @@ export function getSystemPrompt(
     );
     throw error;
   }
+}
+
+export function getSystemPromptMeta(operation: string): {
+  taskId: CeeTaskId;
+  source: 'store' | 'default';
+  promptId?: string;
+  version?: number;
+  prompt_version: string;
+  prompt_hash?: string;
+} {
+  ensureDefaultsRegistered();
+
+  const taskId = OPERATION_TO_TASK_ID[operation];
+  if (!taskId) {
+    throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
+  }
+
+  const cached = promptCache.get(taskId);
+  const source: 'store' | 'default' = cached?.source ?? 'default';
+  const promptId = cached?.promptId;
+  const version = cached?.version;
+  const promptHash = cached?.promptHash;
+
+  const promptVersion = source === 'store' && promptId && typeof version === 'number'
+    ? `${promptId}@v${version}`
+    : `default:${taskId}`;
+
+  return {
+    taskId,
+    source,
+    promptId,
+    version,
+    prompt_version: promptVersion,
+    prompt_hash: promptHash,
+  };
 }
 
 /**
@@ -204,9 +252,15 @@ export async function warmPromptCacheFromStore(): Promise<{
     try {
       const loaded = await loadPrompt(taskId);
 
+      const promptHash = createHash('sha256').update(loaded.content).digest('hex');
+
       promptCache.set(taskId, {
         content: loaded.content,
         loadedAt: Date.now(),
+        source: loaded.source,
+        promptId: loaded.promptId,
+        version: loaded.version,
+        promptHash,
       });
 
       if (loaded.source === 'store') {

@@ -8,13 +8,15 @@ import { validateResponse } from "../../utils/responseGuards.js";
 import { getRequestId } from "../../utils/request-id.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { isSchemaValidationError, calculateBackoffDelay, SCHEMA_VALIDATION_RETRY_CONFIG } from "../../utils/retry.js";
-import { inferArchetype } from "../archetypes/index.js";
-import { computeQuality } from "../quality/index.js";
-import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
+import { config, isProduction } from "../../config/index.js";
 import { logCeeCall } from "../logging.js";
+import { persistDraftFailureBundle } from "../draft-failures/store.js";
 import { CEEDraftGraphResponseV1Schema } from "../../schemas/ceeResponses.js";
 import { verificationPipeline } from "../verification/index.js";
 import { createValidationIssue } from "./classifier.js";
+import { computeQuality } from "../quality/index.js";
+import { inferArchetype } from "../archetypes/index.js";
+import { buildCeeGuidance, ceeAnyTruncated } from "../guidance/index.js";
 import {
   CEE_BIAS_FINDINGS_MAX,
   CEE_OPTIONS_MAX,
@@ -24,7 +26,6 @@ import {
 import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, wireOutcomesToGoal, type StructuralMeta } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
-import { config, isProduction } from "../../config/index.js";
 import {
   detectAmbiguities,
   detectConvergence,
@@ -35,7 +36,8 @@ import {
   incorporateAnswer,
   type ConversationHistoryEntry,
 } from "../clarifier/index.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -77,6 +79,66 @@ const MINIMUM_STRUCTURE_REQUIREMENT: Readonly<Record<string, number>> = {
   decision: 1,
   option: 1,
 };
+
+function extractNodeKinds(data: unknown): string[] {
+  if (!data || typeof data !== "object") return [];
+  const obj = data as any;
+  const nodes = Array.isArray(obj) ? obj : obj.nodes;
+  if (!Array.isArray(nodes)) return [];
+  return nodes
+    .map((n: any) => n?.kind ?? n?.type ?? "unknown")
+    .filter(Boolean);
+}
+
+/**
+ * Count nodes by kind for LLM observability trace.
+ * Returns a Record<string, number> with counts for each node kind.
+ */
+function countNodeKinds(nodes: Array<{ kind?: string; type?: string }> | undefined): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!nodes || !Array.isArray(nodes)) return counts;
+  for (const node of nodes) {
+    const kind = (node.kind ?? node.type ?? "unknown") as string;
+    counts[kind] = (counts[kind] || 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * Convert node kinds string array to counts object.
+ * Used for backwards compatibility with existing node_kinds arrays.
+ */
+function nodeKindsArrayToCounts(kinds: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const kind of kinds) {
+    counts[kind] = (counts[kind] || 0) + 1;
+  }
+  return counts;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function truncatePreview(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, max);
+}
+
+function isUnsafeCaptureRequested(request: FastifyRequest): boolean {
+  const query = (request.query as Record<string, unknown>) ?? {};
+  const unsafeQuery = query.unsafe;
+  const unsafeHeader = request.headers["x-olumi-unsafe"];
+  return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
+}
+
+function isAdminAuthorized(request: FastifyRequest): boolean {
+  const providedKey = request.headers["x-admin-key"] as string | undefined;
+  if (!providedKey) return false;
+  const adminKey = config.prompts?.adminApiKey;
+  const adminKeyRead = config.prompts?.adminApiKeyRead;
+  return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
+}
 
 type MinimumStructureResult = {
   valid: boolean;
@@ -749,7 +811,7 @@ export function buildCeeErrorResponse(
 // Pipeline stage for trace
 type PipelineStageEntry = {
   name: "llm_draft" | "coefficient_normalisation" | "node_validation" | "connectivity_check" | "goal_repair" | "edge_repair" | "edge_wiring" | "final_validation";
-  status: "success" | "failed" | "skipped" | "repaired";
+  status: "success" | "failed" | "skipped" | "success_with_repairs";
   duration_ms: number;
   details?: Record<string, unknown>;
 };
@@ -760,6 +822,39 @@ type RiskCoefficientCorrection = {
   target: string;
   original: number;
   corrected: number;
+};
+
+// Transform record for pipeline observability
+type TransformEntry = {
+  stage: string;
+  kind: "normalisation" | "repair";
+  trigger: string;
+  changes_summary: string;
+  repair_attempted: boolean;
+  repair_success: boolean;
+  before_counts: Record<string, number>;
+  after_counts: Record<string, number>;
+  coefficients_modified?: Array<{
+    edge_id: string;
+    field: string;
+    before: number;
+    after: number;
+    reason: string;
+  }>;
+  nodes_added_count?: number;
+  nodes_removed_count?: number;
+  edges_added_count?: number;
+  edges_removed_count?: number;
+};
+
+// Validation summary for explicit missing_kinds reporting
+type ValidationSummaryEntry = {
+  status: "valid" | "invalid";
+  required_kinds: string[];
+  present_kinds: string[];
+  missing_kinds: string[];
+  message?: string;
+  suggestion?: string;
 };
 
 /**
@@ -817,6 +912,22 @@ export async function finaliseCeeDraftResponse(
   const pipelineStages: PipelineStageEntry[] = [];
   let llmDraftStart = start;
   let llmCallCount = 0;
+
+  const briefHash = sha256Hex(input.brief);
+  const unsafeCaptureEnabled = isUnsafeCaptureRequested(request) && isAdminAuthorized(request);
+  // Prefer adapter-reported raw node kinds when available.
+  let nodeKindsRawJsonFromAdapter: string[] = [];
+  let nodeKindsPostNormalisation: string[] = [];
+  let nodeKindsPreValidation: string[] = [];
+  let llmMeta: any | undefined;
+  let failureBundleId: string | undefined;
+
+  // Enhanced trace tracking for LLM observability
+  const transforms: TransformEntry[] = [];
+  let nodeCountsRaw: Record<string, number> = {};
+  let nodeCountsNormalised: Record<string, number> = {};
+  let nodeCountsValidated: Record<string, number> = {};
+  let validationSummary: ValidationSummaryEntry | undefined;
 
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
@@ -1041,16 +1152,35 @@ export async function finaliseCeeDraftResponse(
     details: schemaRetryAttempted ? { schema_retry_attempted: true } : undefined,
   });
 
-  const { payload, cost_usd, provider, model, repro_mismatch, structural_meta } = pipelineResult as {
+  const { payload, cost_usd, provider, model, repro_mismatch, structural_meta, llm_meta } = pipelineResult as {
     payload: any;
     cost_usd: number;
     provider: string;
     model: string;
     repro_mismatch?: boolean;
     structural_meta?: StructuralMeta;
+    llm_meta?: any;
   };
 
+  llmMeta = llm_meta;
+  nodeKindsRawJsonFromAdapter = Array.isArray(llmMeta?.node_kinds_raw_json) ? llmMeta.node_kinds_raw_json : [];
+  // Compute raw node counts from adapter-reported kinds
+  nodeCountsRaw = nodeKindsArrayToCounts(nodeKindsRawJsonFromAdapter);
+
+  // Store LLM output for admin retrieval (always store, but full output only accessible via admin endpoint)
+  if (llmMeta?.raw_llm_text) {
+    storeLLMOutput(requestId, llmMeta.raw_llm_text, payload.graph, {
+      model: llmMeta.model ?? model,
+      promptVersion: llmMeta.prompt_version,
+    });
+  }
+
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+
+  // Node extraction (post-LLM parse) - safe
+  nodeKindsPostNormalisation = extractNodeKinds(graph);
+  // Compute normalized node counts (after version normalization)
+  nodeCountsNormalised = countNodeKinds(graph?.nodes as any);
 
   // === RAW OUTPUT MODE ===
   // When raw_output: true, skip all post-processing (factor enrichment, goal repair, etc.)
@@ -1132,21 +1262,42 @@ export async function finaliseCeeDraftResponse(
     const coeffNormEnd = Date.now();
 
     if (normResult.corrections.length > 0) {
+      const beforeCounts = countNodeKinds(graph.nodes as any);
       graph = { ...graph, edges: normResult.edges as any };
       payload.graph = graph as any;
       riskCoefficientCorrections = normResult.corrections;
+      const afterCounts = countNodeKinds(graph.nodes as any);
 
       log.info({
         request_id: requestId,
         corrections_count: normResult.corrections.length,
         corrections: normResult.corrections,
-      }, `Pipeline stage: Coefficient normalisation complete, ${normResult.corrections.length} risk→goal edges corrected`);
+      }, `Pipeline stage: Coefficient normalisation complete, ${normResult.corrections.length} risk→goal/outcome edges corrected`);
+
+      // Add transform entry for observability
+      transforms.push({
+        stage: "coefficient_normalisation",
+        kind: "normalisation",
+        trigger: `${normResult.corrections.length} edges had positive risk→goal/outcome coefficients`,
+        changes_summary: `Corrected ${normResult.corrections.length} edge coefficients to negative values`,
+        repair_attempted: true,
+        repair_success: true,
+        before_counts: beforeCounts,
+        after_counts: afterCounts,
+        coefficients_modified: normResult.corrections.map(c => ({
+          edge_id: `${c.source}::${c.target}`,
+          field: "strength_mean",
+          before: c.original,
+          after: c.corrected,
+          reason: "risk edges should have negative impact on goals/outcomes",
+        })),
+      });
     }
 
     // Add coefficient_normalisation stage to pipeline trace
     pipelineStages.push({
       name: "coefficient_normalisation",
-      status: normResult.corrections.length > 0 ? "repaired" : "success",
+      status: normResult.corrections.length > 0 ? "success_with_repairs" : "success",
       duration_ms: coeffNormEnd - coeffNormStart,
       details: normResult.corrections.length > 0 ? {
         corrections_count: normResult.corrections.length,
@@ -1193,13 +1344,13 @@ export async function finaliseCeeDraftResponse(
 
   // Determine node_validation stage status
   const nodeValidationStatus = fixes.singleGoalApplied || fixes.outcomeBeliefsFilled > 0 || fixes.decisionBranchesNormalized
-    ? "repaired" as const
+    ? "success_with_repairs" as const
     : "success" as const;
   pipelineStages.push({
     name: "node_validation",
     status: nodeValidationStatus,
     duration_ms: nodeValidationEnd - nodeValidationStart,
-    details: nodeValidationStatus === "repaired" ? {
+    details: nodeValidationStatus === "success_with_repairs" ? {
       single_goal_applied: fixes.singleGoalApplied,
       outcome_beliefs_filled: fixes.outcomeBeliefsFilled,
       decision_branches_normalized: fixes.decisionBranchesNormalized,
@@ -1227,6 +1378,11 @@ export async function finaliseCeeDraftResponse(
   if (graph) {
     payload.graph = graph as any;
   }
+
+  // Node extraction (pre-validation) - safe
+  nodeKindsPreValidation = extractNodeKinds(graph);
+  // Track validated node counts (after node validation fixes)
+  nodeCountsValidated = countNodeKinds(graph?.nodes as any);
   const nodeCount = Array.isArray(graph?.nodes) ? graph!.nodes.length : 0;
   const edgeCount = Array.isArray(graph?.edges) ? graph!.edges.length : 0;
 
@@ -1257,7 +1413,8 @@ export async function finaliseCeeDraftResponse(
 
     return {
       statusCode: 400,
-      body: buildCeeErrorResponse(ceeCode, "Draft graph is empty; unable to construct model", {
+      body: (() => {
+        const errBody = buildCeeErrorResponse(ceeCode, "Draft graph is empty; unable to construct model", {
         retryable: false,
         requestId,
         reason: "empty_graph",
@@ -1278,7 +1435,21 @@ export async function finaliseCeeDraftResponse(
           total_duration_ms: latencyMs,
           stages: pipelineStages,
         },
-      }),
+      });
+        (errBody as any).trace = {
+          ...((errBody as any).trace || {}),
+          request_id: requestId,
+          correlation_id: requestId,
+          prompt_version: llmMeta?.prompt_version,
+          prompt_hash: llmMeta?.prompt_hash,
+          model: llmMeta?.model ?? model,
+          temperature: llmMeta?.temperature,
+          token_usage: llmMeta?.token_usage,
+          finish_reason: llmMeta?.finish_reason,
+          brief_hash: briefHash,
+        };
+        return errBody;
+      })(),
     };
   }
 
@@ -1324,7 +1495,8 @@ export async function finaliseCeeDraftResponse(
 
     return {
       statusCode: 400,
-      body: buildCeeErrorResponse(ceeCode, violation.message, {
+      body: (() => {
+        const errBody = buildCeeErrorResponse(ceeCode, violation.message, {
         retryable: false,
         requestId,
         details: {
@@ -1336,7 +1508,21 @@ export async function finaliseCeeDraftResponse(
           total_duration_ms: latencyMs,
           stages: pipelineStages,
         },
-      }),
+      });
+        (errBody as any).trace = {
+          ...((errBody as any).trace || {}),
+          request_id: requestId,
+          correlation_id: requestId,
+          prompt_version: llmMeta?.prompt_version,
+          prompt_hash: llmMeta?.prompt_hash,
+          model: llmMeta?.model ?? model,
+          temperature: llmMeta?.temperature,
+          token_usage: llmMeta?.token_usage,
+          finish_reason: llmMeta?.finish_reason,
+          brief_hash: briefHash,
+        };
+        return errBody;
+      })(),
     };
   }
 
@@ -1369,6 +1555,7 @@ export async function finaliseCeeDraftResponse(
   // If goal is missing, attempt deterministic repair before failing.
   const connectivityCheckStart = Date.now();
   let structure = validateMinimumStructure(graph);
+  nodeKindsPreValidation = extractNodeKinds(graph);
   const connectivityCheckEnd = Date.now();
   let goalInferenceWarning: CEEStructuralWarningV1 | undefined;
 
@@ -1544,7 +1731,7 @@ export async function finaliseCeeDraftResponse(
   if (goalRepairPerformed) {
     pipelineStages.push({
       name: "goal_repair",
-      status: structure.valid ? "repaired" : "failed",
+      status: structure.valid ? "success_with_repairs" : "failed",
       duration_ms: goalRepairDurationMs,
       details: {
         goal_source: goalSource,
@@ -1564,7 +1751,7 @@ export async function finaliseCeeDraftResponse(
   if (edgeRepairCalled) {
     pipelineStages.push({
       name: "edge_repair",
-      status: edgesAddedByRepair > 0 ? (structure.valid ? "repaired" : "failed") : "skipped",
+      status: edgesAddedByRepair > 0 ? (structure.valid ? "success_with_repairs" : "failed") : "skipped",
       duration_ms: edgeRepairDurationMs,
       details: {
         called: true,
@@ -1621,6 +1808,26 @@ export async function finaliseCeeDraftResponse(
 
   if (!structure.valid) {
     const latencyMs = Date.now() - start;
+
+    // Build validation_summary for LLM observability trace
+    const requiredKinds = Object.keys(MINIMUM_STRUCTURE_REQUIREMENT);
+    const presentKinds = Object.keys(structure.counts).filter(k => (structure.counts[k] ?? 0) > 0);
+    validationSummary = {
+      status: "invalid",
+      required_kinds: requiredKinds,
+      present_kinds: presentKinds,
+      missing_kinds: structure.missing,
+      message: structure.outcome_or_risk_missing
+        ? "Graph missing required outcome or risk nodes"
+        : structure.connectivity_failed
+          ? "Graph has all required node types but they are not connected via edges"
+          : `Graph missing required elements: ${structure.missing.join(", ")}`,
+      suggestion: structure.outcome_or_risk_missing
+        ? "Add at least one outcome or risk node to connect factors to your goal"
+        : structure.connectivity_failed
+          ? "Ensure there is a path from decision through options to outcomes/risks and finally to goal"
+          : `Add at least ${structure.missing.map(k => `1 ${k} node`).join(", ")}`,
+    };
 
     // Determine failure type: outcome/risk missing takes precedence over connectivity
     const isOutcomeOrRiskMissing = structure.outcome_or_risk_missing === true;
@@ -1846,6 +2053,15 @@ export async function finaliseCeeDraftResponse(
       details.hint = connectivityHint;
     }
 
+    // Build llm_raw trace for error response (storeLLMOutput is idempotent)
+    const errorLlmRawTrace = llmMeta?.raw_llm_text
+      ? buildLLMRawTrace(requestId, llmMeta.raw_llm_text, payload.graph, {
+          model: llmMeta.model ?? model,
+          promptVersion: llmMeta.prompt_version,
+          storeOutput: true, // Idempotent - won't re-store if already stored
+        })
+      : undefined;
+
     // Build pipeline trace for error response (shows stages completed before failure)
     const errorPipelineTrace = {
       status: "failed" as const,
@@ -1855,11 +2071,69 @@ export async function finaliseCeeDraftResponse(
         risk_coefficient_corrections: riskCoefficientCorrections.length,
         corrections: riskCoefficientCorrections,
       } : undefined,
-    };
+      // Enhanced LLM metadata for observability
+      llm_metadata: llmMeta ? {
+        model: llmMeta.model ?? model,
+        prompt_version: llmMeta.prompt_version,
+        duration_ms: llmMeta.provider_latency_ms,
+        finish_reason: llmMeta.finish_reason,
+        response_chars: llmMeta.raw_llm_text?.length,
+        token_usage: llmMeta.token_usage,
+      } : {
+        model,
+      },
+      // Node extraction counts at each pipeline stage
+      node_extraction: {
+        raw: nodeCountsRaw,
+        normalised: nodeCountsNormalised,
+        validated: nodeCountsValidated,
+      },
+      // Validation summary with explicit missing_kinds
+      validation_summary: validationSummary,
+      // Transforms applied during pipeline
+      transforms: transforms.length > 0 ? transforms : undefined,
+      // LLM raw output preview
+      llm_raw: errorLlmRawTrace,
+    } as any;
+
+    // Best-effort persistence of failure bundle (bounded await; never blocks response)
+    try {
+      const persistResult = await persistDraftFailureBundle({
+        requestId,
+        correlationId: requestId,
+        briefHash,
+        briefPreview: unsafeCaptureEnabled ? truncatePreview(input.brief, 500) : undefined,
+        brief: unsafeCaptureEnabled ? input.brief : undefined,
+        rawLLMOutput: unsafeCaptureEnabled ? llmMeta?.raw_llm_json : undefined,
+        rawLLMText: unsafeCaptureEnabled ? llmMeta?.raw_llm_text : undefined,
+        validationError: message,
+        statusCode: 400,
+        missingKinds: structure.missing,
+        nodeKindsRawJson: nodeKindsRawJsonFromAdapter,
+        nodeKindsPostNormalisation: nodeKindsPostNormalisation,
+        nodeKindsPreValidation: nodeKindsPreValidation,
+        promptVersion: llmMeta?.prompt_version,
+        promptHash: llmMeta?.prompt_hash,
+        model: llmMeta?.model ?? model,
+        temperature: llmMeta?.temperature,
+        tokenUsage: llmMeta?.token_usage,
+        finishReason: llmMeta?.finish_reason,
+        llmDurationMs: (pipelineStages.find(s => s.name === 'llm_draft')?.duration_ms) as any,
+        totalDurationMs: latencyMs,
+        unsafeCaptureEnabled,
+      });
+      failureBundleId = persistResult.failureBundleId;
+      if (failureBundleId) {
+        errorPipelineTrace.failure_bundle_id = failureBundleId;
+      }
+    } catch {
+      // non-fatal
+    }
 
     return {
       statusCode: 400,
-      body: buildCeeErrorResponse(ceeCode, message, {
+      body: (() => {
+        const errBody = buildCeeErrorResponse(ceeCode, message, {
         retryable: false,
         requestId,
         reason,
@@ -1869,13 +2143,23 @@ export async function finaliseCeeDraftResponse(
         recovery,
         details,
         pipelineTrace: errorPipelineTrace,
-      }),
+      });
+        (errBody as any).trace = {
+          ...((errBody as any).trace || {}),
+          request_id: requestId,
+          correlation_id: requestId,
+          prompt_version: llmMeta?.prompt_version,
+          prompt_hash: llmMeta?.prompt_hash,
+          model: llmMeta?.model ?? model,
+          temperature: llmMeta?.temperature,
+          token_usage: llmMeta?.token_usage,
+          finish_reason: llmMeta?.finish_reason,
+          brief_hash: briefHash,
+        };
+        return errBody;
+      })(),
     };
   }
-
-  // Extract raw_llm_output from debug payload for trace (if present)
-  const rawLlmOutput = payload.debug?.raw_llm_output;
-  const rawLlmOutputTruncated = payload.debug?.raw_llm_output_truncated;
 
   const trace: CEETraceMeta = {
     request_id: requestId,
@@ -1883,13 +2167,19 @@ export async function finaliseCeeDraftResponse(
     engine: {
       provider,
       model,
-      // Include raw LLM output in trace for debug panel visibility
-      ...(rawLlmOutput !== undefined && { raw_llm_output: rawLlmOutput }),
-      ...(rawLlmOutputTruncated !== undefined && { raw_llm_output_truncated: rawLlmOutputTruncated }),
     },
+    ...(llmMeta ? {
+      prompt_version: llmMeta.prompt_version,
+      prompt_hash: llmMeta.prompt_hash,
+      model: llmMeta.model ?? model,
+      temperature: llmMeta.temperature,
+      token_usage: llmMeta.token_usage,
+      finish_reason: llmMeta.finish_reason,
+      brief_hash: briefHash,
+    } : { brief_hash: briefHash }),
     // Goal handling observability
     goal_handling: goalHandling as any,
-  };
+  } as any;
 
   const validationIssues: CEEValidationIssue[] = [];
 
@@ -2159,8 +2449,8 @@ export async function finaliseCeeDraftResponse(
     const totalDurationMs = finalValidationEnd - start;
     const pipelineStatus = pipelineStages.some(s => s.status === "failed")
       ? "failed" as const
-      : pipelineStages.some(s => s.status === "repaired")
-        ? "repaired" as const
+      : pipelineStages.some(s => s.status === "success_with_repairs")
+        ? "success_with_repairs" as const
         : "success" as const;
 
     // Build connectivity diagnostic for pipeline trace
@@ -2180,6 +2470,25 @@ export async function finaliseCeeDraftResponse(
       unreachable_nodes: [],
     };
 
+    // Build validation_summary for success case
+    const requiredKinds = Object.keys(MINIMUM_STRUCTURE_REQUIREMENT);
+    const presentKinds = Object.keys(structure.counts).filter(k => (structure.counts[k] ?? 0) > 0);
+    validationSummary = {
+      status: "valid",
+      required_kinds: requiredKinds,
+      present_kinds: presentKinds,
+      missing_kinds: [],
+    };
+
+    // Build llm_raw trace with preview pattern (storeLLMOutput is idempotent)
+    const llmRawTrace = llmMeta?.raw_llm_text
+      ? buildLLMRawTrace(requestId, llmMeta.raw_llm_text, payload.graph, {
+          model: llmMeta.model ?? model,
+          promptVersion: llmMeta.prompt_version,
+          storeOutput: true, // Idempotent - won't re-store if already stored
+        })
+      : undefined;
+
     const pipelineTrace: Record<string, unknown> = {
       status: pipelineStatus,
       total_duration_ms: totalDurationMs,
@@ -2191,26 +2500,44 @@ export async function finaliseCeeDraftResponse(
         risk_coefficient_corrections: riskCoefficientCorrections.length,
         corrections: riskCoefficientCorrections.length > 0 ? riskCoefficientCorrections : undefined,
       },
+      // Enhanced LLM metadata for observability
+      llm_metadata: llmMeta ? {
+        model: llmMeta.model ?? model,
+        prompt_version: llmMeta.prompt_version,
+        duration_ms: llmMeta.provider_latency_ms,
+        finish_reason: llmMeta.finish_reason,
+        response_chars: llmMeta.raw_llm_text?.length,
+        token_usage: llmMeta.token_usage,
+      } : {
+        model,
+      },
+      // Node extraction counts at each pipeline stage (for LLM observability)
+      node_extraction: {
+        raw: nodeCountsRaw,
+        normalised: nodeCountsNormalised,
+        validated: nodeCountsValidated,
+      },
+      // Validation summary with explicit missing_kinds
+      validation_summary: validationSummary,
+      // Transforms applied during pipeline
+      transforms: transforms.length > 0 ? transforms : undefined,
+      // LLM raw output preview (safe to include in all responses)
+      llm_raw: llmRawTrace,
     };
 
-    // Add detailed LLM call info and final graph only in non-production (dev/staging)
-    if (!isProduction()) {
-      // Include raw LLM output details if available
-      if (rawLlmOutput !== undefined) {
-        pipelineTrace.llm_calls = [{
-          provider,
-          model,
-          duration_ms: pipelineStages.find(s => s.name === "llm_draft")?.duration_ms ?? 0,
-          raw_output_truncated: rawLlmOutputTruncated ?? false,
-        }];
-      }
-      // Include final graph summary for debugging
-      pipelineTrace.final_graph = {
-        node_count: nodeCount,
-        edge_count: edgeCount,
-        node_kinds: Array.isArray(graph?.nodes)
-          ? [...new Set((graph!.nodes as any[]).map(n => n?.kind).filter(Boolean))]
-          : [],
+    // Include final graph summary for debugging (safe)
+    pipelineTrace.final_graph = {
+      node_count: nodeCount,
+      edge_count: edgeCount,
+      node_kinds: Array.isArray(graph?.nodes)
+        ? [...new Set((graph!.nodes as any[]).map(n => n?.kind).filter(Boolean))]
+        : [],
+    };
+
+    // Unsafe additions: only when explicitly gated
+    if (unsafeCaptureEnabled && llmMeta) {
+      pipelineTrace.unsafe = {
+        raw_output_preview: llmMeta.raw_output_preview,
       };
     }
 
@@ -2219,6 +2546,17 @@ export async function finaliseCeeDraftResponse(
       ...verifiedResponse.trace,
       pipeline: pipelineTrace,
     } as any;
+
+    // Diagnostic log: confirms all pipeline stages that executed
+    log.debug({
+      request_id: requestId,
+      event: "cee.pipeline.stages_summary",
+      stages: pipelineStages.map(s => s.name),
+      stage_count: pipelineStages.length,
+      status: pipelineStatus,
+      coefficient_normalisation_executed: pipelineStages.some(s => s.name === "coefficient_normalisation"),
+      risk_corrections: riskCoefficientCorrections.length,
+    }, `Pipeline complete: ${pipelineStages.map(s => s.name).join(" → ")}`);
   } catch (error) {
     const message = error instanceof Error ? error.message || "verification failed" : "verification failed";
 

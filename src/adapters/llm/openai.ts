@@ -14,7 +14,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt } from "./prompt-loader.js";
+import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 
 // ============================================================================
@@ -315,6 +315,9 @@ Return ONLY the JSON object, no markdown formatting`;
  */
 const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
 
+const RAW_LLM_TEXT_MAX_CHARS = 10_000;
+const RAW_LLM_PREVIEW_MAX_CHARS = 500;
+
 /**
  * Truncate raw LLM output for debug tracing.
  * Returns the output with a truncation flag if over limit.
@@ -370,6 +373,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
     const systemPrompt = getSystemPrompt('draft_graph');
+    const promptMeta = getSystemPromptMeta('draft_graph');
 
     // Build user content with brief and documents
     const docContext = docs.length
@@ -399,6 +403,9 @@ export class OpenAIAdapter implements LLMAdapter {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('draft_graph');
       const modelParams = buildModelParams(this.model, 0, maxTokens);
+      const temperature = 'temperature' in modelParams
+        ? (modelParams as any).temperature as number
+        : undefined;
 
       // Debug: Log model parameters for runtime validation
       log.debug({
@@ -440,8 +447,15 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
+      const finishReason = response.choices[0]?.finish_reason;
+
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
+      const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
+        ? ((rawJson as any).nodes as any[])
+          .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+          .filter(Boolean)
+        : [];
       const normalised = normaliseDraftResponse(rawJson);
       const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
       if (defaultedFactors.length > 0) {
@@ -521,12 +535,43 @@ export class OpenAIAdapter implements LLMAdapter {
       // Capture raw LLM output for debug tracing (before normalisation)
       const rawOutput = truncateRawOutput(rawJson);
 
+      const unsafeCaptureEnabled = args.includeDebug === true && args.flags?.unsafe_capture === true;
+      const rawTextTruncated = content.length > RAW_LLM_TEXT_MAX_CHARS
+        ? content.slice(0, RAW_LLM_TEXT_MAX_CHARS)
+        : content;
+      const rawPreview = content.length > RAW_LLM_PREVIEW_MAX_CHARS
+        ? content.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
+        : content;
+
+      const tokenUsage = {
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0,
+        total_tokens: response.usage?.total_tokens || ((response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)),
+      };
+
       return {
         graph,
         rationales: parsed.rationales || [],
-        debug: {
+        debug: unsafeCaptureEnabled ? {
           raw_llm_output: rawOutput.output,
           raw_llm_output_truncated: rawOutput.truncated,
+        } : undefined,
+        meta: {
+          model: this.model,
+          prompt_version: promptMeta.prompt_version,
+          prompt_hash: promptMeta.prompt_hash,
+          temperature,
+          token_usage: tokenUsage,
+          finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+          provider_latency_ms: _elapsedMs,
+          node_kinds_raw_json: rawNodeKinds,
+          // Always include raw output for LLM observability trace (preview + full text for storage)
+          raw_output_preview: rawPreview,
+          raw_llm_text: rawTextTruncated,
+          // Only include parsed JSON when unsafe capture is enabled (admin-gated)
+          ...(unsafeCaptureEnabled ? {
+            raw_llm_json: rawOutput.output,
+          } : {}),
         },
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
