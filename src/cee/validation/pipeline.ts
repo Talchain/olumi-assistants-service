@@ -2614,6 +2614,22 @@ export async function finaliseCeeDraftResponse(
     httpStatus: 200,
   });
 
+  // Diagnostic log for edge coefficient values at CEE output boundary
+  const responseEdges = (verifiedResponse as any).graph?.edges ?? [];
+  const sampleEdges = responseEdges.slice(0, 3).map((e: any) => ({
+    from: e.from,
+    to: e.to,
+    strength_mean: e.strength_mean ?? e.strength?.mean ?? 'MISSING',
+    strength_std: e.strength_std ?? e.strength?.std ?? 'MISSING',
+    belief_exists: e.belief_exists ?? e.exists_probability ?? 'MISSING',
+  }));
+  log.info({
+    request_id: requestId,
+    event: 'cee.boundary.edge_values',
+    edge_count: responseEdges.length,
+    sample_edges: sampleEdges,
+  }, '[BOUNDARY-CEE-OUT] Edge coefficient values in response');
+
   return {
     statusCode: 200,
     body: verifiedResponse,

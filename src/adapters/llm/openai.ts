@@ -37,9 +37,14 @@ const EdgeStrength = z.object({
 const OpenAIEdge = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
-  // V4 format (preferred) - from v4 prompt
+  // V4 format (preferred) - from v4 prompt (nested)
   strength: EdgeStrength,
   exists_probability: z.number().min(0).max(1).optional(),
+  // V4 format (flat) - added by normaliseDraftResponse()
+  strength_mean: z.number().optional(),
+  strength_std: z.number().optional(),
+  belief_exists: z.number().optional(),
+  effect_direction: z.enum(["positive", "negative"]).optional(),
   // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),

@@ -78,9 +78,14 @@ const EdgeStrength = z.object({
 const AnthropicEdge = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
-  // V4 format (preferred) - from v4 prompt
+  // V4 format (preferred) - from v4 prompt (nested)
   strength: EdgeStrength,
   exists_probability: z.number().min(0).max(1).optional(),
+  // V4 format (flat) - added by normaliseDraftResponse()
+  strength_mean: z.number().optional(),
+  strength_std: z.number().optional(),
+  belief_exists: z.number().optional(),
+  effect_direction: z.enum(["positive", "negative"]).optional(),
   // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
@@ -523,13 +528,22 @@ export async function draftGraphWithAnthropic(
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs
+    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
         from: e.from,
         to: e.to,
-        weight: e.weight,
-        belief: e.belief,
+        // V4 nested format (from LLM)
+        strength: e.strength,
+        exists_probability: e.exists_probability,
+        // V4 flat format (from normaliseDraftResponse)
+        strength_mean: e.strength_mean,
+        strength_std: e.strength_std,
+        belief_exists: e.belief_exists,
+        effect_direction: e.effect_direction,
+        // Legacy format (for backwards compatibility)
+        weight: e.weight ?? e.strength_mean,
+        belief: e.belief ?? e.belief_exists,
         provenance: e.provenance,
         provenance_source: e.provenance_source,
       }))
@@ -999,13 +1013,22 @@ export async function repairGraphWithAnthropic(
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs
+    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
         from: e.from,
         to: e.to,
-        weight: e.weight,
-        belief: e.belief,
+        // V4 nested format (from LLM)
+        strength: e.strength,
+        exists_probability: e.exists_probability,
+        // V4 flat format (from normaliseDraftResponse)
+        strength_mean: e.strength_mean,
+        strength_std: e.strength_std,
+        belief_exists: e.belief_exists,
+        effect_direction: e.effect_direction,
+        // Legacy format (for backwards compatibility)
+        weight: e.weight ?? e.strength_mean,
+        belief: e.belief ?? e.belief_exists,
         provenance: e.provenance,
         provenance_source: e.provenance_source,
       }))

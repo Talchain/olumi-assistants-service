@@ -94,12 +94,38 @@ export function isStoreBackendConfigured(): boolean {
  * Selects implementation based on config.prompts.storeType:
  * - 'file' (default): FilePromptStore with JSON file backend
  * - 'postgres': PostgresPromptStore with database backend
+ * - 'supabase': SupabasePromptStore with Supabase backend
+ *
+ * Auto-detection: When storeType is 'file' (default) but database credentials
+ * are present, automatically selects the appropriate database store.
  *
  * @param overrideConfig - Optional configuration overrides (for testing)
  */
 export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPromptStore {
   if (!defaultStore) {
-    const storeType = config.prompts?.storeType ?? 'file';
+    let storeType = config.prompts?.storeType ?? 'file';
+
+    // Auto-detect store type from credentials if using default 'file'
+    if (storeType === 'file') {
+      const hasSupabaseCreds = Boolean(config.prompts?.supabaseUrl && config.prompts?.supabaseServiceRoleKey);
+      const hasPostgresCreds = Boolean(config.prompts?.postgresUrl);
+
+      if (hasSupabaseCreds) {
+        log.info({
+          event: 'prompt.store.type_inferred',
+          inferred: 'supabase',
+          reason: 'credentials_detected',
+        }, 'Auto-selecting Supabase store - credentials detected but PROMPTS_STORE_TYPE not set');
+        storeType = 'supabase';
+      } else if (hasPostgresCreds) {
+        log.info({
+          event: 'prompt.store.type_inferred',
+          inferred: 'postgres',
+          reason: 'credentials_detected',
+        }, 'Auto-selecting Postgres store - credentials detected but PROMPTS_STORE_TYPE not set');
+        storeType = 'postgres';
+      }
+    }
 
     if (storeType === 'supabase') {
       const url = config.prompts?.supabaseUrl;
