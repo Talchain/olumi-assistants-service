@@ -60,6 +60,8 @@ export {
   initializePromptStore,
   isPromptStoreInitialized,
   isPromptStoreHealthy,
+  isDbBackedStoreHealthy,
+  isStoreBackendConfigured,
   getPromptStoreStatus,
   type PromptStoreConfig,
 } from './store.js';

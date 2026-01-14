@@ -7,7 +7,7 @@
  */
 
 import { type CeeTaskId, interpolatePrompt } from './schema.js';
-import { getPromptStore } from './store.js';
+import { getPromptStore, isDbBackedStoreHealthy } from './store.js';
 import { log, emit } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
@@ -69,11 +69,20 @@ export interface LoadedPrompt {
 
 /**
  * Check if prompt management is enabled
+ * Returns true if:
+ * - config.prompts.enabled is explicitly true, OR
+ * - A database-backed store (Supabase/Postgres) is healthy
+ *
+ * File store does NOT auto-enable - requires explicit PROMPTS_ENABLED=true
  */
 function isPromptManagementEnabled(): boolean {
   try {
-    // Feature flag in config
-    return config.prompts?.enabled === true;
+    // Feature flag in config - explicit enablement
+    if (config.prompts?.enabled === true) {
+      return true;
+    }
+    // Auto-enable only for database-backed stores (not file store)
+    return isDbBackedStoreHealthy();
   } catch {
     return false;
   }

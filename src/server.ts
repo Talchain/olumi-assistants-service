@@ -60,7 +60,7 @@ import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
 import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
-import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, initializePromptStore } from "./prompts/index.js";
+import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
@@ -627,8 +627,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }
 
-  // Admin routes for prompt management (enabled via config)
-  if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+  // Always initialize prompt store if database credentials are configured
+  // This ensures prompts can be loaded from Supabase/Postgres even if PROMPTS_ENABLED is not set
+  const storeBackendConfigured = isStoreBackendConfigured();
+  const promptSystemEnabled = config.prompts?.enabled || config.prompts?.adminApiKey || storeBackendConfigured;
+
+  if (promptSystemEnabled) {
     await initializePromptStore();
 
     // Initialize store, seed defaults, and warm cache
@@ -641,18 +645,22 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         app.log.info({ warmResult }, 'Prompt cache warmed from store');
       }
     }
-    await adminPromptRoutes(app);
-    await adminUIRoutes(app);
-    await adminDraftFailureRoutes(app);
-    await adminLLMOutputRoutes(app);
-    app.log.info('Admin prompt management routes registered');
 
-    startDraftFailureRetentionJob();
+    // Only register admin routes if explicitly enabled or admin key is set
+    if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+      await adminPromptRoutes(app);
+      await adminUIRoutes(app);
+      await adminDraftFailureRoutes(app);
+      await adminLLMOutputRoutes(app);
+      app.log.info('Admin prompt management routes registered');
 
-    // Initialize Braintrust experiment tracking if enabled
-    if (config.prompts?.braintrustEnabled) {
-      const braintrust = getBraintrustManager();
-      await braintrust.initialize();
+      startDraftFailureRetentionJob();
+
+      // Initialize Braintrust experiment tracking if enabled
+      if (config.prompts?.braintrustEnabled) {
+        const braintrust = getBraintrustManager();
+        await braintrust.initialize();
+      }
     }
   }
 

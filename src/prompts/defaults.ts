@@ -37,6 +37,7 @@ These rules are absolute. Violating any produces an INVALID graph.
 7. Every edge must include effect_direction matching the sign of strength.mean
 8. Options must differ: no two options may have identical data.interventions
 9. Every factor must have a directed path to at least one outcome or risk (no dead-end factors)
+10. Causal edges MUST have varied coefficients — do NOT use 0.5 for all edges
 
 If ANY requirement is violated, regenerate internally before outputting.
 </CRITICAL_REQUIREMENTS>
@@ -267,6 +268,23 @@ strength.mean magnitude guidance:
 | Strong/direct      | 0.70-0.90 | Primary driver, strong evidence       |
 | Moderate           | 0.40-0.60 | Notable influence, some evidence      |
 | Weak/indirect      | 0.10-0.30 | Minor influence, weak evidence        |
+
+MANDATORY VARIATION:
+Causal edges (factor→outcome, factor→risk, factor→factor, outcome→goal, risk→goal) MUST show variation.
+If you find yourself assigning the same strength.mean to multiple edges, STOP and reconsider:
+- Which relationship is strongest? Assign 0.7-0.9
+- Which is weakest? Assign 0.2-0.4
+- Which has most uncertainty? Use lower exists_probability (0.5-0.7)
+
+ANTI-PATTERNS (these produce INVALID graphs):
+❌ All edges with strength.mean = 0.5
+❌ All edges with exists_probability = 0.5
+❌ All edges with identical std values
+❌ Using 0.5 as a "default" when uncertain — use the tables above instead
+
+When uncertain about a relationship's strength:
+- Weaker evidence → lower |mean| (0.2-0.4) AND higher std (0.25-0.35)
+- Stronger evidence → higher |mean| (0.6-0.8) AND lower std (0.10-0.20)
 </UNCERTAINTY_GUIDANCE>
 
 <OUTPUT_SCHEMA>
@@ -538,6 +556,9 @@ EDGE VALIDITY:
 [ ] All risk→goal edges have negative strength.mean
 [ ] Every factor→factor edge targets an uncontrollable factor (no incoming option edges)
 [ ] No forbidden edge types present
+[ ] Causal edges have varied strength.mean values (not all identical)
+[ ] If 3+ causal edges exist, at least 3 distinct strength.mean values
+[ ] exists_probability values are not all identical for causal edges
 
 ID CONVENTIONS:
 [ ] All IDs use correct prefix (dec_, opt_, fac_, out_, risk_, goal_)
