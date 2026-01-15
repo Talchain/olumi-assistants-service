@@ -2079,6 +2079,7 @@ export async function finaliseCeeDraftResponse(
         finish_reason: llmMeta.finish_reason,
         response_chars: llmMeta.raw_llm_text?.length,
         token_usage: llmMeta.token_usage,
+        temperature: llmMeta.temperature,
       } : {
         model,
       },
@@ -2508,6 +2509,7 @@ export async function finaliseCeeDraftResponse(
         finish_reason: llmMeta.finish_reason,
         response_chars: llmMeta.raw_llm_text?.length,
         token_usage: llmMeta.token_usage,
+        temperature: llmMeta.temperature,
       } : {
         model,
       },
