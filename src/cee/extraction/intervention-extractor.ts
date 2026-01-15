@@ -553,6 +553,7 @@ function buildInterventionsFromV4Data(
  * @param existingIds - Set of existing option IDs
  * @param edgeHints - Optional V1 edges from this option to factors (high-confidence targets)
  * @param v4Interventions - Optional direct interventions from V4 prompt
+ * @param nodeId - Optional node ID from graph (used to ensure option.id matches node.id)
  * @returns Extracted option with matched interventions
  */
 export function extractInterventionsForOption(
@@ -563,10 +564,12 @@ export function extractInterventionsForOption(
   goalNodeId: string,
   existingIds: Set<string> = new Set(),
   edgeHints: EdgeHint[] = [],
-  v4Interventions?: Record<string, number>
+  v4Interventions?: Record<string, number>,
+  nodeId?: string
 ): ExtractedOption {
-  // Generate option ID
-  const id = normalizeToId(optionLabel, existingIds);
+  // Use node ID if provided (ensures option.id matches graph node.id)
+  // Fallback to normalized label for backwards compatibility
+  const id = nodeId ?? normalizeToId(optionLabel, existingIds);
 
   // V4 prompt: If interventions are provided directly, use them (high confidence)
   if (v4Interventions && Object.keys(v4Interventions).length > 0) {
@@ -904,7 +907,8 @@ export function extractOptionsFromNodes(
       goalNodeId,
       usedIds,
       hintsForOption,
-      node.v4Interventions
+      node.v4Interventions,
+      node.id
     );
     usedIds.add(option.id);
     results.push(option);
