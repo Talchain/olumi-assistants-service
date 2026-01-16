@@ -12,6 +12,7 @@ import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { validateAndFixGraph } from "../cee/structure/index.js";
 import { enrichGraphWithFactorsAsync } from "../cee/factor-extraction/enricher.js";
+import { createCorrectionCollector } from "../cee/corrections.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
@@ -449,6 +450,9 @@ async function groundAttachments(
 }
 
 export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
+  // Create correction collector for tracking graph modifications
+  const collector = createCorrectionCollector();
+
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
@@ -526,7 +530,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
           includeDebug: input.include_debug === true,
         },
-        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS }
+        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector }
       );
       break;
     } catch (error) {
@@ -660,7 +664,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
-  const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief);
+  const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief, { collector });
   const enrichedGraph = enrichmentResult.graph;
 
   // DEBUG: Track node counts after factor enrichment
@@ -695,7 +699,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     new Set<string>((cycles.flat() as string[])),
   ).slice(0, 20);
 
-  let candidate = stabiliseGraph(ensureDagAndPrune(enrichedGraph));
+  let candidate = stabiliseGraph(ensureDagAndPrune(enrichedGraph, { collector }), { collector });
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
 
@@ -724,10 +728,10 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }, "Skipping LLM repair due to time budget - using simple repair");
 
       repairFallbackReason = "budget_exceeded";
-      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId)));
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
         issues = second.violations;
       } else {
         candidate = repaired;
@@ -764,7 +768,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Wrap DAG operations in try/catch to guarantee fallback on malformed output
       let repaired: GraphT;
       try {
-        repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
+        repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph, { collector }), { collector });
       } catch (dagError) {
         log.warn({ error: dagError }, "Repaired graph failed DAG validation, using simple repair");
         repairFallbackReason = "dag_transform_failed";
@@ -774,12 +778,12 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Re-validate repaired graph
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
         issues = second.violations;
         emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
       } else {
         // Repair didn't fix all issues, fallback to simple repair
-        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired, correlationId)));
+        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired, correlationId), { collector }), { collector });
         issues = second.violations ?? issues;
         repairFallbackReason = "partial_fix";
         emit(TelemetryEvents.RepairPartial, { repair_worked: false, fallback_reason: repairFallbackReason });
@@ -792,10 +796,10 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }
       log.warn({ error, fallback_reason: repairFallbackReason }, "LLM repair failed, falling back to simple repair");
 
-      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId)));
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
         issues = second.violations;
       } else {
         candidate = repaired;
@@ -809,7 +813,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
     } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
-    candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));
+    candidate = stabiliseGraph(ensureDagAndPrune(first.normalized, { collector }), { collector });
   }
 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
@@ -918,6 +922,14 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     ? { needle_movers: docs, ...(adapterDebug || {}) }
     : undefined;
 
+  // Build trace with corrections if any were recorded
+  const tracePayload = collector.hasCorrections()
+    ? {
+        corrections: collector.getCorrections(),
+        corrections_summary: collector.getSummary(),
+      }
+    : undefined;
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -926,6 +938,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     confidence,
     clarifier_status: clarifier,
     debug: debugPayload,
+    trace: tracePayload,
   });
 
   // Check for legacy string provenance (for deprecation tracking)

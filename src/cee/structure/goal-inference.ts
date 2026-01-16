@@ -7,6 +7,8 @@
  */
 
 import type { GraphV1 } from "../../contracts/plot/engine.js";
+import type { CorrectionCollector } from "../corrections.js";
+import { formatEdgeId } from "../corrections.js";
 
 /**
  * Patterns that indicate goal/objective phrases in briefs
@@ -144,11 +146,13 @@ export function createGoalNode(
  *
  * @param graph - The graph to modify
  * @param goalId - The ID of the goal node to wire to
+ * @param collector - Optional correction collector for tracking
  * @returns Modified graph with outcome/risk edges to goal
  */
 export function wireOutcomesToGoal(
   graph: GraphV1,
-  goalId: string
+  goalId: string,
+  collector?: CorrectionCollector
 ): GraphV1 {
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
     return graph;
@@ -178,8 +182,9 @@ export function wireOutcomesToGoal(
       // Determine if outcome (positive) or risk (negative)
       const node = graph.nodes.find((n: any) => n.id === nodeId);
       const isRisk = (node as any)?.kind === "risk";
+      const kind = (node as any)?.kind;
 
-      newEdges.push({
+      const newEdge = {
         from: nodeId,
         to: goalId,
         // Use flat field names to match V3 transform expectations
@@ -187,7 +192,21 @@ export function wireOutcomesToGoal(
         strength_mean: isRisk ? -0.5 : 0.7,
         strength_std: 0.15,
         belief_exists: 0.9,
-      });
+      };
+
+      newEdges.push(newEdge);
+
+      // Record correction for added edge (Stage 18: Outcome→Goal Wiring)
+      if (collector) {
+        collector.addByStage(
+          18, // Stage 18: Outcome→Goal Wiring
+          "edge_added",
+          { edge_id: formatEdgeId(nodeId, goalId) },
+          `Wired ${kind} node to goal (missing edge)`,
+          undefined,
+          { from: nodeId, to: goalId, strength_mean: newEdge.strength_mean }
+        );
+      }
     }
   }
 
@@ -213,12 +232,14 @@ export function hasGoalNode(graph: GraphV1 | undefined): boolean {
  * @param graph - The graph to potentially modify
  * @param brief - The user's decision brief (for inference)
  * @param explicitGoal - Optional explicit goal from context.goals
+ * @param collector - Optional correction collector for tracking
  * @returns Object with modified graph and metadata about the operation
  */
 export function ensureGoalNode(
   graph: GraphV1,
   brief: string,
-  explicitGoal?: string
+  explicitGoal?: string,
+  collector?: CorrectionCollector
 ): {
   graph: GraphV1;
   goalAdded: boolean;
@@ -242,8 +263,20 @@ export function ensureGoalNode(
       nodes: [...(graph.nodes as any[]), goalNode],
     } as GraphV1;
 
+    // Record correction for added goal node (Stage 17: Goal Inference)
+    if (collector) {
+      collector.addByStage(
+        17, // Stage 17: Goal Inference
+        "node_added",
+        { node_id: goalNode.id, kind: "goal" },
+        "Goal node added from explicit context",
+        undefined,
+        { id: goalNode.id, kind: "goal", label: goalNode.label }
+      );
+    }
+
     return {
-      graph: wireOutcomesToGoal(graphWithGoal, goalNode.id),
+      graph: wireOutcomesToGoal(graphWithGoal, goalNode.id, collector),
       goalAdded: true,
       goalNodeId: goalNode.id,
       inferredFrom: "explicit",
@@ -258,8 +291,20 @@ export function ensureGoalNode(
     nodes: [...(graph.nodes as any[]), goalNode],
   } as GraphV1;
 
+  // Record correction for added goal node (Stage 17: Goal Inference)
+  if (collector) {
+    collector.addByStage(
+      17, // Stage 17: Goal Inference
+      "node_added",
+      { node_id: goalNode.id, kind: "goal" },
+      `Goal node inferred from ${inference.source}`,
+      undefined,
+      { id: goalNode.id, kind: "goal", label: goalNode.label }
+    );
+  }
+
   return {
-    graph: wireOutcomesToGoal(graphWithGoal, goalNode.id),
+    graph: wireOutcomesToGoal(graphWithGoal, goalNode.id, collector),
     goalAdded: true,
     goalNodeId: goalNode.id,
     inferredFrom: inference.source,

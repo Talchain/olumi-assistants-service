@@ -7,6 +7,7 @@
 
 import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
+import type { CorrectionCollector } from "../../cee/corrections.js";
 
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
@@ -51,6 +52,9 @@ export interface DraftGraphResult {
     prompt_version?: string;
     prompt_hash?: string;
     temperature?: number;
+    max_tokens?: number;
+    seed?: number;
+    reasoning_effort?: "low" | "medium" | "high";
     token_usage?: {
       prompt_tokens: number;
       completion_tokens: number;
@@ -226,6 +230,7 @@ export interface CallOpts {
   timeoutMs: number;
   abortSignal?: AbortSignal;
   bypassCache?: boolean; // Skip prompt cache (for testing/debugging)
+  collector?: CorrectionCollector; // Graph corrections tracking
 }
 
 /**

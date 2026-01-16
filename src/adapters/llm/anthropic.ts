@@ -16,6 +16,7 @@ import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 
 export type DraftArgs = {
   brief: string;
@@ -407,8 +408,10 @@ export type UsageMetrics = {
 };
 
 export async function draftGraphWithAnthropic(
-  args: DraftArgs
+  args: DraftArgs,
+  opts?: { collector?: CorrectionCollector }
 ): Promise<DraftGraphResult> {
+  const collector = opts?.collector;
   const prompt = buildDraftPrompt(args);
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
@@ -524,8 +527,38 @@ export async function draftGraphWithAnthropic(
       parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
-    // Filter edges to only valid node IDs
+    // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1)
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+    const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+    if (danglingEdges.length > 0) {
+      log.warn({
+        event: 'llm.draft.dangling_edges_removed',
+        removed_count: danglingEdges.length,
+        dangling_edges: danglingEdges.map(e => ({
+          from: e.from,
+          to: e.to,
+          missing_from: !nodeIds.has(e.from),
+          missing_to: !nodeIds.has(e.to),
+        })).slice(0, 10),
+      }, `Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+      // Track corrections for each dangling edge removed
+      if (collector) {
+        for (const edge of danglingEdges) {
+          const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+          collector.addByStage(
+            5,
+            "edge_removed",
+            { edge_id: formatEdgeId(edge.from, edge.to) },
+            `Node "${missingNode}" not found`,
+            edge,
+            null
+          );
+        }
+      }
+    }
+
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
     // Assign stable edge IDs - preserve V4 fields alongside legacy fields
@@ -608,6 +641,8 @@ export async function draftGraphWithAnthropic(
         prompt_version: promptMeta.prompt_version,
         prompt_hash: promptMeta.prompt_hash,
         temperature: 0,
+        max_tokens: maxTokens,
+        seed: args.seed,
         token_usage: {
           prompt_tokens: response.usage.input_tokens,
           completion_tokens: response.usage.output_tokens,
@@ -1009,8 +1044,23 @@ export async function repairGraphWithAnthropic(
       parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
-    // Filter edges to only valid node IDs
+    // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+    const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+    if (danglingEdges.length > 0) {
+      log.warn({
+        event: 'llm.repair.dangling_edges_removed',
+        removed_count: danglingEdges.length,
+        dangling_edges: danglingEdges.map(e => ({
+          from: e.from,
+          to: e.to,
+          missing_from: !nodeIds.has(e.from),
+          missing_to: !nodeIds.has(e.to),
+        })).slice(0, 10),
+      }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
+    }
+
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
     // Assign stable edge IDs - preserve V4 fields alongside legacy fields
@@ -1714,16 +1764,19 @@ export class AnthropicAdapter implements LLMAdapter {
     this.model = model || config.llm.model || 'claude-3-haiku-20240307';
   }
 
-  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
+  async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
 
     // Call existing function with compatible args, passing model from adapter
-    const result = await draftGraphWithAnthropic({
-      brief,
-      docs,
-      seed,
-      model: this.model,
-    });
+    const result = await draftGraphWithAnthropic(
+      {
+        brief,
+        docs,
+        seed,
+        model: this.model,
+      },
+      { collector: opts.collector }
+    );
 
     return {
       graph: result.graph,

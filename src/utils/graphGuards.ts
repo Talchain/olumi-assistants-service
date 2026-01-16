@@ -12,6 +12,8 @@
 import type { GraphT, NodeT, EdgeT } from "../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { log } from "./telemetry.js";
+import type { CorrectionCollector } from "../cee/corrections.js";
+import { formatEdgeId } from "../cee/corrections.js";
 
 /**
  * Normalize edge IDs to stable format: ${from}::${to}::${index}
@@ -130,11 +132,16 @@ export function isDAG(nodes: NodeT[], edges: EdgeT[]): boolean {
  * For dense graphs with multiple edges between same nodes,
  * only remove the specific offending edge ID, not all edges for the pair.
  */
-export function breakCycles(nodes: NodeT[], edges: EdgeT[]): EdgeT[] {
+export function breakCycles(
+  nodes: NodeT[],
+  edges: EdgeT[],
+  collector?: CorrectionCollector
+): EdgeT[] {
   const cycles = detectCycles(nodes, edges);
   if (cycles.length === 0) return edges;
 
   const edgeIdsToRemove = new Set<string>();
+  const edgesToRemove: EdgeT[] = [];
 
   for (const cycle of cycles) {
     // Identify the from::to pair to break (last edge in cycle)
@@ -149,7 +156,11 @@ export function breakCycles(nodes: NodeT[], edges: EdgeT[]): EdgeT[] {
       if (matchingEdges.length > 0) {
         matchingEdges.sort((a, b) => (a.id || "").localeCompare(b.id || ""));
         const edgeToRemove = matchingEdges[0];
-        edgeIdsToRemove.add(edgeToRemove.id || `${from}::${to}::0`);
+        const edgeId = edgeToRemove.id || `${from}::${to}::0`;
+        if (!edgeIdsToRemove.has(edgeId)) {
+          edgeIdsToRemove.add(edgeId);
+          edgesToRemove.push(edgeToRemove);
+        }
       }
     }
   }
@@ -165,6 +176,20 @@ export function breakCycles(nodes: NodeT[], edges: EdgeT[]): EdgeT[] {
     cycles: cycles.map(c => c.join(" -> ")),
     removed_edge_ids: Array.from(edgeIdsToRemove)
   }, "Removed specific edge IDs to break cycles");
+
+  // Record corrections for removed edges
+  if (collector && edgesToRemove.length > 0) {
+    for (const edge of edgesToRemove) {
+      collector.addByStage(
+        22, // Stage 22: Cycle Breaking
+        "edge_removed",
+        { edge_id: formatEdgeId(edge.from, edge.to) },
+        "Edge removed to break cycle (enforce DAG)",
+        { from: edge.from, to: edge.to, id: edge.id },
+        undefined
+      );
+    }
+  }
 
   return filtered;
 }
@@ -195,7 +220,11 @@ const PROTECTED_KINDS = new Set(["goal", "decision"]);
  * Prune isolated nodes from graph.
  * Protected kinds (goal, decision) are never pruned regardless of connectivity.
  */
-export function pruneIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): NodeT[] {
+export function pruneIsolatedNodes(
+  nodes: NodeT[],
+  edges: EdgeT[],
+  collector?: CorrectionCollector
+): NodeT[] {
   // Don't prune if there's only one node (isolated single nodes are still valid graphs)
   if (nodes.length <= 1) {
     return nodes;
@@ -231,6 +260,21 @@ export function pruneIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): NodeT[] {
       protected_count: protectedButIsolated.length,
       protected_ids: protectedButIsolated,
     }, "Pruning isolated nodes (goal/decision protected)");
+  }
+
+  // Record corrections for pruned nodes
+  if (collector && nodesToPrune.size > 0) {
+    for (const nodeId of nodesToPrune) {
+      const node = nodes.find(n => n.id === nodeId);
+      collector.addByStage(
+        23, // Stage 23: Isolated Node Pruning
+        "node_removed",
+        { node_id: nodeId, kind: (node as any)?.kind },
+        "Isolated node with no edges (not protected kind)",
+        { id: nodeId, kind: (node as any)?.kind, label: (node as any)?.label },
+        undefined
+      );
+    }
   }
 
   return nodes.filter(n => !nodesToPrune.has(n.id));
@@ -331,9 +375,10 @@ export function enforceGraphCompliance(
   options: {
     maxNodes?: number;
     maxEdges?: number;
+    collector?: CorrectionCollector;
   } = {}
 ): GraphT {
-  const { maxNodes = GRAPH_MAX_NODES, maxEdges = GRAPH_MAX_EDGES } = options;
+  const { maxNodes = GRAPH_MAX_NODES, maxEdges = GRAPH_MAX_EDGES, collector } = options;
 
   let { nodes, edges } = graph;
 
@@ -345,37 +390,89 @@ export function enforceGraphCompliance(
     return graph;
   }
 
-  // 1. Cap counts
+  // 1. Cap counts (Stage 19: Node Capping #2)
   if (nodes.length > maxNodes) {
     log.warn({ count: nodes.length, max: maxNodes }, "Capping node count");
+    const removedNodes = nodes.slice(maxNodes);
+    if (collector) {
+      for (const node of removedNodes) {
+        collector.addByStage(
+          19, // Stage 19: Node Capping #2
+          "node_removed",
+          { node_id: node.id, kind: (node as any)?.kind },
+          `Node count exceeded cap (${nodes.length} > ${maxNodes})`,
+          { id: node.id, kind: (node as any)?.kind },
+          undefined
+        );
+      }
+    }
     nodes = nodes.slice(0, maxNodes);
   }
 
+  // Stage 20: Edge Capping #2
   if (edges.length > maxEdges) {
     log.warn({ count: edges.length, max: maxEdges }, "Capping edge count");
+    const removedEdges = edges.slice(maxEdges);
+    if (collector) {
+      for (const edge of removedEdges) {
+        collector.addByStage(
+          20, // Stage 20: Edge Capping #2
+          "edge_removed",
+          { edge_id: formatEdgeId(edge.from, edge.to) },
+          `Edge count exceeded cap (${edges.length} > ${maxEdges})`,
+          { from: edge.from, to: edge.to, id: edge.id },
+          undefined
+        );
+      }
+    }
     edges = edges.slice(0, maxEdges);
   }
 
-  // 2. Filter edges to valid node IDs
+  // 2. Filter edges to valid node IDs (Stage 21: Dangling Edge Filter #2)
   const nodeIds = new Set(nodes.map(n => n.id));
-  edges = edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
+  const danglingEdges = edges.filter(e => !nodeIds.has(e.from) || !nodeIds.has(e.to));
 
-  // 3. Break cycles to enforce DAG
-  if (!isDAG(nodes, edges)) {
-    edges = breakCycles(nodes, edges);
+  if (danglingEdges.length > 0) {
+    log.warn({
+      event: 'graph.compliance.dangling_edges_removed',
+      removed_count: danglingEdges.length,
+      dangling_edges: danglingEdges.map(e => ({ from: e.from, to: e.to, id: e.id })).slice(0, 10),
+    }, `enforceGraphCompliance: Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+    if (collector) {
+      for (const edge of danglingEdges) {
+        const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+        collector.addByStage(
+          21, // Stage 21: Dangling Edge Filter #2
+          "edge_removed",
+          { edge_id: formatEdgeId(edge.from, edge.to) },
+          `Edge references non-existent node: ${missingNode}`,
+          { from: edge.from, to: edge.to, id: edge.id },
+          undefined
+        );
+      }
+    }
   }
 
-  // 4. Prune isolated nodes
-  nodes = pruneIsolatedNodes(nodes, edges);
+  edges = edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-  // 5. Normalize edge IDs
+  // 3. Break cycles to enforce DAG (Stage 22: Cycle Breaking)
+  if (!isDAG(nodes, edges)) {
+    const edgesBefore = edges;
+    edges = breakCycles(nodes, edges, collector);
+  }
+
+  // 4. Prune isolated nodes (Stage 23: Isolated Node Pruning)
+  nodes = pruneIsolatedNodes(nodes, edges, collector);
+
+  // 5. Normalize edge IDs (Stage 24)
   edges = normalizeEdgeIds(edges);
 
   // 6. Sort deterministically
   nodes = sortNodes(nodes);
   edges = sortEdges(edges);
 
-  // 7. Calculate metadata
+  // 7. Calculate metadata (Stage 25)
   const meta = calculateMeta(nodes, edges);
 
   return {

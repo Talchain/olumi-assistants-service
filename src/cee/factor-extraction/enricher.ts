@@ -18,6 +18,8 @@ import {
 } from "./index.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
+import type { CorrectionCollector } from "../corrections.js";
+import { formatEdgeId } from "../corrections.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -287,9 +289,9 @@ export interface EnrichmentResultAsync extends EnrichmentResult {
 export async function enrichGraphWithFactorsAsync(
   graph: GraphT,
   brief: string,
-  options: { minConfidence?: number; maxFactors?: number } = {}
+  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector } = {}
 ): Promise<EnrichmentResultAsync> {
-  const { minConfidence = 0.6, maxFactors = 10 } = options;
+  const { minConfidence = 0.6, maxFactors = 10, collector } = options;
 
   // Check feature flag for LLM-first extraction
   let useLLMFirst = false;
@@ -376,11 +378,24 @@ export async function enrichGraphWithFactorsAsync(
               ? { min: factor.rangeMin, max: factor.rangeMax }
               : undefined,
           };
+          const beforeData = enrichedGraph.nodes[nodeIndex].data;
           enrichedGraph.nodes[nodeIndex] = {
             ...enrichedGraph.nodes[nodeIndex],
             data: factorData,
           };
           factorsEnhanced++;
+
+          // Record correction for enhanced factor node (Stage 11: Factor Enrichment)
+          if (collector) {
+            collector.addByStage(
+              11, // Stage 11: Factor Enrichment
+              "node_modified",
+              { node_id: existingNode.id, kind: "factor" },
+              `Enhanced existing factor node with extracted data`,
+              beforeData,
+              factorData
+            );
+          }
         }
       } else {
         factorsSkipped++;
@@ -419,6 +434,18 @@ export async function enrichGraphWithFactorsAsync(
     enrichedGraph.nodes.push(newNode);
     existingLabels.add(factor.label.toLowerCase());
 
+    // Record correction for added factor node (Stage 11: Factor Enrichment)
+    if (collector) {
+      collector.addByStage(
+        11, // Stage 11: Factor Enrichment
+        "node_added",
+        { node_id: nodeId, kind: "factor" },
+        `Added factor node extracted from brief`,
+        undefined,
+        { id: nodeId, kind: "factor", label: factor.label }
+      );
+    }
+
     // Connect to relevant node
     const targetId = findConnectionTarget(graph, factor);
     if (targetId) {
@@ -433,6 +460,18 @@ export async function enrichGraphWithFactorsAsync(
         provenance_source: "hypothesis",
       };
       enrichedGraph.edges.push(newEdge);
+
+      // Record correction for added factor edge (Stage 11: Factor Enrichment)
+      if (collector) {
+        collector.addByStage(
+          11, // Stage 11: Factor Enrichment
+          "edge_added",
+          { edge_id: formatEdgeId(nodeId, targetId) },
+          `Added edge connecting factor to ${targetId}`,
+          undefined,
+          { from: nodeId, to: targetId, belief: factor.confidence }
+        );
+      }
     }
 
     factorsAdded++;
