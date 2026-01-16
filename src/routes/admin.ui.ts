@@ -550,6 +550,29 @@ function generateAdminUI(): string {
                             <strong>Expected:</strong> <span x-text="tc.expectedOutput.substring(0, 100) + (tc.expectedOutput.length > 100 ? '...' : '')"></span>
                           </div>
                         </template>
+                        <!-- Test Output Display -->
+                        <template x-if="tc.lastOutput">
+                          <div class="mt-2" style="border-top: 1px solid #e5e7eb; padding-top: 8px;">
+                            <div class="flex" style="justify-content: space-between; align-items: center;">
+                              <strong style="font-size: 0.85rem;">Last Output:</strong>
+                              <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.lastOutput.timestamp"></span>
+                            </div>
+                            <template x-if="tc.lastOutput.error">
+                              <div class="alert alert-error mt-2" style="padding: 8px; font-size: 0.85rem;" x-text="tc.lastOutput.error"></div>
+                            </template>
+                            <template x-if="tc.lastOutput.compiled">
+                              <div class="mt-2">
+                                <div class="text-muted" style="font-size: 0.8rem;">
+                                  <span x-text="tc.lastOutput.charCount + ' chars'"></span>
+                                  <template x-if="tc.lastOutput.validation && tc.lastOutput.validation.issues && tc.lastOutput.validation.issues.length > 0">
+                                    <span class="test-result-fail" x-text="' | ' + tc.lastOutput.validation.issues.length + ' issue(s)'"></span>
+                                  </template>
+                                </div>
+                                <pre style="max-height: 150px; overflow-y: auto; font-size: 0.75rem; margin-top: 5px; background: #f9fafb; padding: 8px; border-radius: 4px;" x-text="tc.lastOutput.compiled.substring(0, 500) + (tc.lastOutput.compiled.length > 500 ? '\\n... (truncated)' : '')"></pre>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
                       </div>
                     </template>
                   </div>
@@ -1178,6 +1201,14 @@ function generateAdminUI(): string {
 
         async createVersion() {
           this.error = null;
+
+          // Prevent creating duplicate version with unchanged content
+          const currentContent = this.getVersionContent(this.selectedPrompt.activeVersion);
+          if (this.newVersion.content.trim() === currentContent.trim()) {
+            this.showToast('No changes detected. Content is identical to the current version.', 'warning');
+            return;
+          }
+
           try {
             const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/versions', {
               method: 'POST',
@@ -1383,6 +1414,12 @@ function generateAdminUI(): string {
         },
 
         async runSingleTestCase(tc) {
+          // Guard: Require prompt selection before running test
+          if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
+            this.showToast('Please select a prompt before running tests', 'warning');
+            return;
+          }
+
           this.showToast('Running test...', 'info');
           try {
             const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test', {
@@ -1400,6 +1437,13 @@ function generateAdminUI(): string {
             });
             if (res.ok) {
               const data = await res.json();
+              // Store test output for display
+              tc.lastOutput = {
+                compiled: data.compiled_prompt ?? null,
+                charCount: data.char_count ?? 0,
+                validation: data.validation ?? {},
+                timestamp: new Date().toISOString(),
+              };
               if (data.validation.valid) {
                 tc.lastResult = 'pass';
                 this.showToast('Test passed - ' + data.char_count + ' chars compiled', 'success');
@@ -1410,10 +1454,12 @@ function generateAdminUI(): string {
             } else {
               tc.lastResult = 'fail';
               const data = await res.json();
+              tc.lastOutput = { error: data.message || 'Unknown error', timestamp: new Date().toISOString() };
               this.showToast(data.message || 'Test failed', 'error');
             }
           } catch (e) {
             tc.lastResult = 'fail';
+            tc.lastOutput = { error: 'Network or server error', timestamp: new Date().toISOString() };
             this.showToast('Test execution failed', 'error');
           }
         },
