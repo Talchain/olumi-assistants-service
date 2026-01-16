@@ -672,7 +672,7 @@ function generateAdminUI(): string {
             <pre x-text="getVersionContent(selectedVersionNum)"></pre>
 
             <div class="flex mt-2" style="flex-wrap: wrap;">
-              <button class="btn btn-secondary" @click="showNewVersionModal = true">+ New Version</button>
+              <button class="btn btn-secondary" @click="openNewVersionWithContent()">+ New Version</button>
               <template x-if="selectedPrompt.versions.length >= 2">
                 <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
               </template>
@@ -1026,7 +1026,18 @@ function generateAdminUI(): string {
         },
 
         editPrompt(prompt) {
-          this.viewPrompt(prompt);
+          // Open view modal AND pre-fill new version with current content for editing
+          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
+          this.selectedVersionNum = prompt.activeVersion;
+          // Pre-fill the new version form with current content
+          const currentContent = this.getVersionContent(prompt.activeVersion);
+          this.newVersion = {
+            content: currentContent,
+            changeNote: '',
+            createdBy: 'admin-ui'
+          };
+          // Open the new version modal directly for editing
+          this.showNewVersionModal = true;
         },
 
         selectVersion(num) {
@@ -1042,6 +1053,17 @@ function generateAdminUI(): string {
           if (!this.selectedPrompt) return '';
           const version = this.selectedPrompt.versions.find(v => v.version === num);
           return version ? version.content : '';
+        },
+
+        openNewVersionWithContent() {
+          // Pre-fill the new version form with currently selected version's content
+          const currentContent = this.getVersionContent(this.selectedVersionNum);
+          this.newVersion = {
+            content: currentContent,
+            changeNote: '',
+            createdBy: 'admin-ui'
+          };
+          this.showNewVersionModal = true;
         },
 
         async approveSelectedVersion() {
