@@ -28,8 +28,10 @@ export interface ModelConfig {
   qualityScore: number;
   /** Human-readable description */
   description: string;
-  /** Whether this is a reasoning model (requires reasoning_effort parameter) */
+  /** Whether this is a reasoning model (requires reasoning_effort parameter for OpenAI) */
   reasoning?: boolean;
+  /** Whether this model supports extended thinking (Anthropic models) */
+  extendedThinking?: boolean;
 }
 
 /**
@@ -116,6 +118,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.93,
     description: "High-quality Anthropic model",
   },
+  "claude-opus-4-5-20251101": {
+    id: "claude-opus-4-5-20251101",
+    provider: "anthropic",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 16384,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 25000,
+    qualityScore: 0.99,
+    description: "Claude Opus 4.5 - highest quality reasoning with extended thinking",
+    extendedThinking: true,
+  },
 };
 
 /**
@@ -180,4 +194,12 @@ export function getModelProvider(modelId: string): ModelProvider | undefined {
  */
 export function isReasoningModel(modelId: string): boolean {
   return MODEL_REGISTRY[modelId]?.reasoning === true;
+}
+
+/**
+ * Check if a model supports extended thinking (Anthropic models)
+ * Uses registry lookup - does NOT use string matching
+ */
+export function supportsExtendedThinking(modelId: string): boolean {
+  return MODEL_REGISTRY[modelId]?.extendedThinking === true;
 }

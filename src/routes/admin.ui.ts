@@ -368,6 +368,178 @@ function generateAdminUI(): string {
     @media (max-width: 768px) {
       .diff-container { grid-template-columns: 1fr; }
     }
+    /* LLM Test Results Styles */
+    .llm-results {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-top: 12px;
+      background: white;
+    }
+    .llm-results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      border-radius: 8px 8px 0 0;
+    }
+    .llm-results-body {
+      padding: 16px;
+    }
+    .llm-metric {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #f3f4f6;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-right: 8px;
+      margin-bottom: 6px;
+    }
+    .llm-metric-label { color: #6b7280; }
+    .llm-metric-value { font-weight: 600; color: #1f2937; }
+    .llm-metric-good { background: #d1fae5; }
+    .llm-metric-good .llm-metric-value { color: #065f46; }
+    .llm-metric-warn { background: #fef3c7; }
+    .llm-metric-warn .llm-metric-value { color: #92400e; }
+    .llm-metric-bad { background: #fee2e2; }
+    .llm-metric-bad .llm-metric-value { color: #dc2626; }
+    .collapsible-section {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .collapsible-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: #f9fafb;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+    .collapsible-header:hover { background: #f3f4f6; }
+    .collapsible-content {
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      border-top: 1px solid #e5e7eb;
+    }
+    .collapsible-content pre {
+      margin: 0;
+      font-size: 0.75rem;
+      background: transparent;
+      padding: 0;
+      white-space: pre-wrap;
+    }
+    .repairs-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+    .repairs-list li {
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+    }
+    .stage-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: #f9fafb;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-size: 0.85rem;
+    }
+    .stage-name { font-weight: 500; }
+    .stage-status { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; }
+    .stage-status-success { background: #d1fae5; color: #065f46; }
+    .stage-status-success_with_repairs { background: #fef3c7; color: #92400e; }
+    .stage-status-failed { background: #fee2e2; color: #dc2626; }
+    .stage-status-skipped { background: #f3f4f6; color: #6b7280; }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #4f46e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .btn-llm {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: white;
+    }
+    .btn-llm:hover { opacity: 0.9; }
+    .progress-bar {
+      height: 4px;
+      background: #e5e7eb;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4f46e5, #8b5cf6);
+      transition: width 0.3s ease;
+    }
+    .batch-summary {
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-top: 12px;
+    }
+    .batch-summary-stat {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .batch-summary-stat:last-child { border-bottom: none; }
+    .history-item {
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .history-item:hover { background: #f9fafb; }
+    .version-compare-results {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    @media (max-width: 768px) {
+      .version-compare-results { grid-template-columns: 1fr; }
+    }
+    .compare-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .compare-panel-header {
+      padding: 10px 14px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+    }
+    .compare-panel-body { padding: 12px; }
+    .compare-delta {
+      font-size: 0.75rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 8px;
+    }
+    .compare-delta-better { background: #d1fae5; color: #065f46; }
+    .compare-delta-worse { background: #fee2e2; color: #dc2626; }
+    .compare-delta-same { background: #f3f4f6; color: #6b7280; }
   </style>
 </head>
 <body>
@@ -510,7 +682,7 @@ function generateAdminUI(): string {
 
                 <template x-if="selectedTestPromptId && selectedTestPrompt">
                   <div>
-                    <div class="flex mb-2" style="justify-content: space-between; align-items: center;">
+                    <div class="flex mb-2" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                       <div>
                         <label>Version</label>
                         <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
@@ -519,8 +691,93 @@ function generateAdminUI(): string {
                           </template>
                         </select>
                       </div>
-                      <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
+                      <div class="flex" style="gap: 8px; flex-wrap: wrap;">
+                        <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
+                        <template x-if="currentTestCases.length > 0">
+                          <button class="btn btn-llm btn-sm" @click="runAllTestCasesWithLLM()" :disabled="llmBatchRunning || llmRateLimitCooldown > 0">
+                            <template x-if="llmBatchRunning">
+                              <span><span class="spinner"></span> Running...</span>
+                            </template>
+                            <template x-if="!llmBatchRunning && llmRateLimitCooldown > 0">
+                              <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                            </template>
+                            <template x-if="!llmBatchRunning && llmRateLimitCooldown === 0">
+                              <span>Run All with LLM</span>
+                            </template>
+                          </button>
+                        </template>
+                        <button class="btn btn-secondary btn-sm" @click="openLLMCompareModal()">Compare Versions (LLM)</button>
+                        <button class="btn btn-secondary btn-sm" @click="showHistoryModal = true; loadTestHistory()">History</button>
+                      </div>
+
+                      <!-- LLM Testing Options -->
+                      <div class="mt-2" style="padding: 10px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
+                        <div class="flex" style="gap: 15px; flex-wrap: wrap; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Model:</label>
+                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()">
+                              <option value="">Default</option>
+                              <template x-for="m in llmAvailableModels" :key="m.id">
+                                <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                              </template>
+                            </select>
+                          </div>
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="checkbox" id="skipRepairs" x-model="llmSkipRepairs" style="width: 16px; height: 16px;">
+                            <label for="skipRepairs" style="font-size: 0.85rem;">Skip repairs (raw LLM output)</label>
+                          </div>
+                          <template x-if="llmRateLimitCooldown > 0">
+                            <div style="font-size: 0.85rem; color: #dc2626;">
+                              Rate limit: <span x-text="llmRateLimitCooldown"></span>s remaining
+                            </div>
+                          </template>
+                        </div>
+                      </div>
                     </div>
+
+                    <!-- Batch Progress -->
+                    <template x-if="llmBatchRunning">
+                      <div class="mt-2 mb-2">
+                        <div class="text-muted" style="font-size: 0.85rem;">
+                          Running test <span x-text="llmBatchProgress.current"></span> of <span x-text="llmBatchProgress.total"></span>...
+                        </div>
+                        <div class="progress-bar">
+                          <div class="progress-bar-fill" :style="'width: ' + (llmBatchProgress.total > 0 ? (llmBatchProgress.current / llmBatchProgress.total * 100) : 0) + '%'"></div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Batch Summary -->
+                    <template x-if="llmBatchResults.length > 0 && !llmBatchRunning">
+                      <div class="batch-summary">
+                        <h4 style="margin-bottom: 10px;">Batch Results Summary</h4>
+                        <div class="batch-summary-stat">
+                          <span>Total Tests:</span>
+                          <span x-text="llmBatchResults.length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Passed:</span>
+                          <span class="test-result-pass" x-text="llmBatchResults.filter(r => r.success).length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Failed:</span>
+                          <span class="test-result-fail" x-text="llmBatchResults.filter(r => !r.success).length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Avg Node Count:</span>
+                          <span x-text="Math.round(llmBatchResults.filter(r => r.nodeCount).reduce((a, b) => a + b.nodeCount, 0) / llmBatchResults.filter(r => r.nodeCount).length) || 'N/A'"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Avg Latency:</span>
+                          <span x-text="Math.round(llmBatchResults.filter(r => r.latencyMs).reduce((a, b) => a + b.latencyMs, 0) / llmBatchResults.filter(r => r.latencyMs).length) + 'ms' || 'N/A'"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Tests Requiring Repairs:</span>
+                          <span x-text="llmBatchResults.filter(r => r.repairsApplied > 0).length"></span>
+                        </div>
+                        <button class="btn btn-secondary btn-sm mt-2" @click="llmBatchResults = []">Clear Summary</button>
+                      </div>
+                    </template>
 
                     <template x-if="currentTestCases.length === 0">
                       <p class="text-muted">No test cases for this version. Add one to get started.</p>
@@ -535,9 +792,20 @@ function generateAdminUI(): string {
                             <template x-if="tc.lastResult">
                               <span :class="'test-result-' + tc.lastResult" x-text="' [' + tc.lastResult.toUpperCase() + ']'"></span>
                             </template>
+                            <template x-if="tc.llmResult">
+                              <span :class="tc.llmResult.success ? 'test-result-pass' : 'test-result-fail'" x-text="' [LLM: ' + (tc.llmResult.success ? 'PASS' : 'FAIL') + ']'"></span>
+                            </template>
                           </div>
-                          <div class="flex" style="gap: 5px;">
-                            <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run</button>
+                          <div class="flex" style="gap: 5px; flex-wrap: wrap;">
+                            <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run (Dry)</button>
+                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning">
+                              <template x-if="tc.llmRunning">
+                                <span><span class="spinner"></span></span>
+                              </template>
+                              <template x-if="!tc.llmRunning">
+                                <span>Run with LLM</span>
+                              </template>
+                            </button>
                             <button class="btn btn-secondary btn-sm" @click="editTestCase(tc)">Edit</button>
                             <button class="btn btn-danger btn-sm" @click="deleteTestCase(idx)">Delete</button>
                           </div>
@@ -550,11 +818,11 @@ function generateAdminUI(): string {
                             <strong>Expected:</strong> <span x-text="tc.expectedOutput.substring(0, 100) + (tc.expectedOutput.length > 100 ? '...' : '')"></span>
                           </div>
                         </template>
-                        <!-- Test Output Display -->
+                        <!-- Dry-Run Test Output Display -->
                         <template x-if="tc.lastOutput">
                           <div class="mt-2" style="border-top: 1px solid #e5e7eb; padding-top: 8px;">
                             <div class="flex" style="justify-content: space-between; align-items: center;">
-                              <strong style="font-size: 0.85rem;">Last Output:</strong>
+                              <strong style="font-size: 0.85rem;">Dry-Run Output:</strong>
                               <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.lastOutput.timestamp"></span>
                             </div>
                             <template x-if="tc.lastOutput.error">
@@ -571,6 +839,130 @@ function generateAdminUI(): string {
                                 <pre style="max-height: 150px; overflow-y: auto; font-size: 0.75rem; margin-top: 5px; background: #f9fafb; padding: 8px; border-radius: 4px;" x-text="tc.lastOutput.compiled.substring(0, 500) + (tc.lastOutput.compiled.length > 500 ? '\\n... (truncated)' : '')"></pre>
                               </div>
                             </template>
+                          </div>
+                        </template>
+
+                        <!-- LLM Test Results Display -->
+                        <template x-if="tc.llmResult">
+                          <div class="llm-results">
+                            <div class="llm-results-header">
+                              <div>
+                                <strong>LLM Test Result</strong>
+                                <span :class="tc.llmResult.success ? 'test-result-pass' : 'test-result-fail'" x-text="' — ' + (tc.llmResult.success ? 'PASSED' : 'FAILED')"></span>
+                              </div>
+                              <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.llmResult.timestamp"></span>
+                            </div>
+                            <div class="llm-results-body">
+                              <!-- Error Display -->
+                              <template x-if="tc.llmResult.error">
+                                <div class="alert alert-error" style="padding: 10px; font-size: 0.85rem;" x-text="tc.llmResult.error"></div>
+                              </template>
+
+                              <!-- Success Metrics -->
+                              <template x-if="!tc.llmResult.error">
+                                <div>
+                                  <!-- Key Metrics -->
+                                  <div style="margin-bottom: 12px;">
+                                    <div class="llm-metric" :class="tc.llmResult.nodeCount >= 3 ? 'llm-metric-good' : 'llm-metric-warn'">
+                                      <span class="llm-metric-label">Nodes:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.nodeCount"></span>
+                                    </div>
+                                    <div class="llm-metric">
+                                      <span class="llm-metric-label">Edges:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.edgeCount"></span>
+                                    </div>
+                                    <div class="llm-metric" :class="tc.llmResult.repairsApplied === 0 ? 'llm-metric-good' : 'llm-metric-warn'">
+                                      <span class="llm-metric-label">Repairs:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.repairsApplied"></span>
+                                    </div>
+                                    <div class="llm-metric">
+                                      <span class="llm-metric-label">Latency:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.latencyMs + 'ms'"></span>
+                                    </div>
+                                    <template x-if="tc.llmResult.tokenUsage">
+                                      <div class="llm-metric">
+                                        <span class="llm-metric-label">Tokens:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.tokenUsage.total_tokens"></span>
+                                      </div>
+                                    </template>
+                                    <template x-if="tc.llmResult.model">
+                                      <div class="llm-metric">
+                                        <span class="llm-metric-label">Model:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.model"></span>
+                                      </div>
+                                    </template>
+                                  </div>
+
+                                  <!-- Pipeline Stages -->
+                                  <template x-if="tc.llmResult.stages && tc.llmResult.stages.length > 0">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showStages = !tc.llmResult.showStages">
+                                        <span>Pipeline Stages (<span x-text="tc.llmResult.stages.length"></span>)</span>
+                                        <span x-text="tc.llmResult.showStages ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showStages">
+                                        <div class="collapsible-content">
+                                          <template x-for="stage in tc.llmResult.stages" :key="stage.name">
+                                            <div class="stage-item">
+                                              <span class="stage-name" x-text="stage.name"></span>
+                                              <div>
+                                                <span class="stage-status" :class="'stage-status-' + stage.status" x-text="stage.status"></span>
+                                                <span class="text-muted" style="font-size: 0.75rem; margin-left: 8px;" x-text="stage.duration_ms + 'ms'"></span>
+                                              </div>
+                                            </div>
+                                          </template>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Raw Output Preview -->
+                                  <template x-if="tc.llmResult.rawOutputPreview">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showRaw = !tc.llmResult.showRaw">
+                                        <span>Raw LLM Output Preview</span>
+                                        <span x-text="tc.llmResult.showRaw ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showRaw">
+                                        <div class="collapsible-content">
+                                          <pre x-text="tc.llmResult.rawOutputPreview"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Full Trace -->
+                                  <template x-if="tc.llmResult.fullTrace">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showTrace = !tc.llmResult.showTrace">
+                                        <span>Full Trace</span>
+                                        <span x-text="tc.llmResult.showTrace ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showTrace">
+                                        <div class="collapsible-content">
+                                          <pre x-text="JSON.stringify(tc.llmResult.fullTrace, null, 2)"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Graph Summary -->
+                                  <template x-if="tc.llmResult.graphSummary">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showGraph = !tc.llmResult.showGraph">
+                                        <span>Validated Graph</span>
+                                        <span x-text="tc.llmResult.showGraph ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showGraph">
+                                        <div class="collapsible-content">
+                                          <pre x-text="JSON.stringify(tc.llmResult.graphSummary, null, 2)"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
                           </div>
                         </template>
                       </div>
@@ -879,6 +1271,280 @@ function generateAdminUI(): string {
           </div>
         </div>
       </template>
+
+      <!-- LLM Compare Modal -->
+      <template x-if="showLLMCompareModal && selectedTestPrompt">
+        <div class="modal" @click.self="showLLMCompareModal = false">
+          <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+              <h2>Compare Prompt Versions with LLM</h2>
+              <span class="close" @click="showLLMCompareModal = false">&times;</span>
+            </div>
+
+            <!-- Rate limit indicator -->
+            <template x-if="llmRateLimitCooldown > 0">
+              <div class="alert alert-warning" style="margin-bottom: 16px; padding: 12px;">
+                <strong>Rate limit active:</strong> Please wait <span x-text="llmRateLimitCooldown"></span> seconds before running more tests.
+              </div>
+            </template>
+
+            <div class="flex mb-2" style="gap: 20px; flex-wrap: wrap;">
+              <div class="form-group flex-1">
+                <label>Version A</label>
+                <select x-model="llmCompareVersionA">
+                  <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label>Version B</label>
+                <select x-model="llmCompareVersionB">
+                  <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Test Brief</label>
+              <textarea x-model="llmCompareBrief" placeholder="Enter a test brief to run against both versions" style="min-height: 100px;"></textarea>
+            </div>
+
+            <div class="flex mb-2" style="gap: 10px;">
+              <button class="btn btn-llm" @click="runLLMComparison()" :disabled="llmCompareRunning || !llmCompareBrief || llmCompareVersionA === llmCompareVersionB || llmRateLimitCooldown > 0">
+                <template x-if="llmCompareRunning">
+                  <span><span class="spinner"></span> Running comparison...</span>
+                </template>
+                <template x-if="!llmCompareRunning && llmRateLimitCooldown > 0">
+                  <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                </template>
+                <template x-if="!llmCompareRunning && llmRateLimitCooldown === 0">
+                  <span>Run Comparison</span>
+                </template>
+              </button>
+            </div>
+
+            <template x-if="llmCompareResults">
+              <div>
+                <!-- Prompt Hash Comparison -->
+                <div class="mb-2" style="padding: 10px; background: #f0fdf4; border: 1px solid #22c55e; border-radius: 6px;">
+                  <template x-if="llmCompareResults.promptsAreDifferent">
+                    <div style="color: #166534;">
+                      <strong>&#10003; Different prompt versions confirmed</strong> - Content hashes are different.
+                    </div>
+                  </template>
+                  <template x-if="!llmCompareResults.promptsAreDifferent">
+                    <div style="color: #dc2626;">
+                      <strong>&#10007; Warning:</strong> Same prompt hash for both versions - versions may have identical content.
+                    </div>
+                  </template>
+                </div>
+
+                <div class="version-compare-results">
+                  <!-- Version A Results -->
+                  <div class="compare-panel">
+                    <div class="compare-panel-header">
+                      Version <span x-text="llmCompareVersionA"></span>
+                      <template x-if="llmCompareResults.versionA.success">
+                        <span class="test-result-pass"> (Success)</span>
+                      </template>
+                      <template x-if="!llmCompareResults.versionA.success">
+                        <span class="test-result-fail"> (Failed)</span>
+                      </template>
+                    </div>
+                    <div class="compare-panel-body">
+                      <template x-if="llmCompareResults.versionA.error">
+                        <div class="alert alert-error" x-text="llmCompareResults.versionA.error"></div>
+                      </template>
+                      <template x-if="!llmCompareResults.versionA.error">
+                        <div>
+                          <div class="llm-metric" style="margin-bottom: 8px;">
+                            <span class="llm-metric-label">Prompt Hash:</span>
+                            <span class="llm-metric-value" style="font-family: monospace; font-size: 0.75rem;" x-text="(llmCompareResults.versionA.promptHash || '').substring(0, 12) + '...'"></span>
+                          </div>
+                          <template x-if="llmCompareResults.versionA.model">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Model:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.model"></span>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Nodes:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.nodeCount"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Edges:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.edgeCount"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Repairs:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.repairsApplied"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Latency:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.latencyMs + 'ms'"></span>
+                          </div>
+                          <template x-if="llmCompareResults.versionA.tokenUsage">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Tokens:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.tokenUsage.total"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Version B Results -->
+                  <div class="compare-panel">
+                    <div class="compare-panel-header">
+                      Version <span x-text="llmCompareVersionB"></span>
+                      <template x-if="llmCompareResults.versionB.success">
+                        <span class="test-result-pass"> (Success)</span>
+                      </template>
+                      <template x-if="!llmCompareResults.versionB.success">
+                        <span class="test-result-fail"> (Failed)</span>
+                      </template>
+                    </div>
+                    <div class="compare-panel-body">
+                      <template x-if="llmCompareResults.versionB.error">
+                        <div class="alert alert-error" x-text="llmCompareResults.versionB.error"></div>
+                      </template>
+                      <template x-if="!llmCompareResults.versionB.error">
+                        <div>
+                          <div class="llm-metric" style="margin-bottom: 8px;">
+                            <span class="llm-metric-label">Prompt Hash:</span>
+                            <span class="llm-metric-value" style="font-family: monospace; font-size: 0.75rem;" x-text="(llmCompareResults.versionB.promptHash || '').substring(0, 12) + '...'"></span>
+                          </div>
+                          <template x-if="llmCompareResults.versionB.model">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Model:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.model"></span>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Nodes:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.nodeCount"></span>
+                            <template x-if="llmCompareResults.deltas.nodeCount !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.nodeCount > 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.nodeCount > 0 ? '+' : '') + llmCompareResults.deltas.nodeCount"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Edges:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.edgeCount"></span>
+                            <template x-if="llmCompareResults.deltas.edgeCount !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.edgeCount > 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.edgeCount > 0 ? '+' : '') + llmCompareResults.deltas.edgeCount"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Repairs:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.repairsApplied"></span>
+                            <template x-if="llmCompareResults.deltas.repairs !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.repairs < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.repairs > 0 ? '+' : '') + llmCompareResults.deltas.repairs"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Latency:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.latencyMs + 'ms'"></span>
+                            <template x-if="llmCompareResults.deltas.latency !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.latency < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.latency > 0 ? '+' : '') + llmCompareResults.deltas.latency + 'ms'"></span>
+                            </template>
+                          </div>
+                          <template x-if="llmCompareResults.versionB.tokenUsage">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Tokens:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.tokenUsage.total"></span>
+                              <template x-if="llmCompareResults.deltas.tokens !== 0">
+                                <span class="compare-delta" :class="llmCompareResults.deltas.tokens < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.tokens > 0 ? '+' : '') + llmCompareResults.deltas.tokens"></span>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showLLMCompareModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- History Modal -->
+      <template x-if="showHistoryModal">
+        <div class="modal" @click.self="showHistoryModal = false">
+          <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+              <h2>Test History</h2>
+              <span class="close" @click="showHistoryModal = false">&times;</span>
+            </div>
+
+            <template x-if="testHistory.length === 0">
+              <p class="text-muted">No test history available. Run some LLM tests to see history.</p>
+            </template>
+
+            <template x-if="testHistory.length > 0">
+              <div>
+                <div class="batch-summary mb-2">
+                  <div class="batch-summary-stat">
+                    <span>Total Tests:</span>
+                    <span x-text="testHistory.length"></span>
+                  </div>
+                  <div class="batch-summary-stat">
+                    <span>Pass Rate:</span>
+                    <span x-text="Math.round(testHistory.filter(h => h.success).length / testHistory.length * 100) + '%'"></span>
+                  </div>
+                  <div class="batch-summary-stat">
+                    <span>Avg Latency:</span>
+                    <span x-text="Math.round(testHistory.filter(h => h.latencyMs).reduce((a, b) => a + b.latencyMs, 0) / testHistory.filter(h => h.latencyMs).length) + 'ms' || 'N/A'"></span>
+                  </div>
+                </div>
+
+                <div style="max-height: 400px; overflow-y: auto;">
+                  <template x-for="(item, idx) in testHistory.slice().reverse()" :key="idx">
+                    <div class="history-item">
+                      <div class="flex" style="justify-content: space-between; align-items: center;">
+                        <div>
+                          <strong x-text="item.testName"></strong>
+                          <span :class="item.success ? 'test-result-pass' : 'test-result-fail'" x-text="' [' + (item.success ? 'PASS' : 'FAIL') + ']'"></span>
+                        </div>
+                        <span class="text-muted" style="font-size: 0.75rem;" x-text="item.timestamp"></span>
+                      </div>
+                      <div class="text-muted" style="font-size: 0.85rem; margin-top: 4px;">
+                        <span x-text="'v' + item.version"></span> |
+                        <span x-text="item.nodeCount + ' nodes'"></span> |
+                        <span x-text="item.latencyMs + 'ms'"></span>
+                        <template x-if="item.repairsApplied > 0">
+                          <span x-text="' | ' + item.repairsApplied + ' repairs'"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="flex mt-2">
+                  <button class="btn btn-secondary btn-sm" @click="clearTestHistory()">Clear History</button>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showHistoryModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -928,6 +1594,29 @@ function generateAdminUI(): string {
         compareVersionA: 1,
         compareVersionB: 1,
         comparisonData: null,
+
+        // LLM Testing
+        llmTestRunning: false,
+        llmBatchRunning: false,
+        llmBatchProgress: { current: 0, total: 0 },
+        llmBatchResults: [],
+        showLLMCompareModal: false,
+        llmCompareVersionA: 1,
+        llmCompareVersionB: 1,
+        llmCompareBrief: '',
+        llmCompareRunning: false,
+        llmCompareResults: null,
+        testHistory: [],
+        showHistoryModal: false,
+        // LLM Testing options
+        llmModelOverride: '',
+        llmSkipRepairs: false,
+        llmAvailableModels: [],
+        // Rate limit handling
+        llmRateLimitCooldown: 0,
+        llmRateLimitTimer: null,
+        // Abort controllers for cancellation
+        llmAbortController: null,
 
         // Form data
         newPrompt: {
@@ -1439,7 +2128,7 @@ function generateAdminUI(): string {
               const data = await res.json();
               // Store test output for display
               tc.lastOutput = {
-                compiled: data.compiled_prompt ?? null,
+                compiled: data.compiled_content ?? data.compiled_prompt ?? null,
                 charCount: data.char_count ?? 0,
                 validation: data.validation ?? {},
                 timestamp: new Date().toISOString(),
@@ -1462,6 +2151,434 @@ function generateAdminUI(): string {
             tc.lastOutput = { error: 'Network or server error', timestamp: new Date().toISOString() };
             this.showToast('Test execution failed', 'error');
           }
+        },
+
+        // ========== LLM Testing ==========
+
+        // Load available models from the new endpoint
+        async loadAvailableModels() {
+          try {
+            const res = await fetch('/admin/v1/test-prompt-llm/models', {
+              headers: { 'X-Admin-Key': this.adminKey },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              this.llmAvailableModels = data.models || [];
+            }
+          } catch (e) {
+            console.warn('Failed to load available models:', e);
+          }
+        },
+
+        // Cancel current LLM test
+        cancelLLMTest() {
+          if (this.llmAbortController) {
+            this.llmAbortController.abort();
+            this.llmAbortController = null;
+            this.showToast('Test cancelled', 'info');
+          }
+        },
+
+        // Handle rate limit with countdown
+        startRateLimitCooldown(retryAfterSeconds) {
+          this.llmRateLimitCooldown = retryAfterSeconds;
+          if (this.llmRateLimitTimer) clearInterval(this.llmRateLimitTimer);
+          this.llmRateLimitTimer = setInterval(() => {
+            this.llmRateLimitCooldown--;
+            if (this.llmRateLimitCooldown <= 0) {
+              clearInterval(this.llmRateLimitTimer);
+              this.llmRateLimitTimer = null;
+            }
+          }, 1000);
+        },
+
+        async runSingleTestCaseWithLLM(tc) {
+          if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
+            this.showToast('Please select a prompt before running tests', 'warning');
+            return;
+          }
+
+          // Check rate limit cooldown
+          if (this.llmRateLimitCooldown > 0) {
+            this.showToast('Rate limit cooldown active. Wait ' + this.llmRateLimitCooldown + 's before retrying.', 'warning');
+            return;
+          }
+
+          tc.llmRunning = true;
+          this.showToast('Running LLM test (this may take up to 2 minutes)...', 'info');
+
+          // Create AbortController for cancellation
+          const controller = new AbortController();
+          this.llmAbortController = controller;
+          const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+          try {
+            // Build request for new admin endpoint
+            const requestBody = {
+              prompt_id: this.selectedTestPromptId,
+              version: this.selectedTestVersionNum,
+              brief: tc.input,
+              options: {},
+            };
+
+            // Add model override if set
+            if (this.llmModelOverride) {
+              requestBody.options.model = this.llmModelOverride;
+            }
+
+            // Add skip repairs option
+            if (this.llmSkipRepairs) {
+              requestBody.options.skip_repairs = true;
+            }
+
+            const res = await fetch('/admin/v1/test-prompt-llm', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.adminKey,
+              },
+              body: JSON.stringify(requestBody),
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+            this.llmAbortController = null;
+
+            const requestId = res.headers.get('X-Request-ID');
+
+            // Handle 429 rate limit with Retry-After
+            if (res.status === 429) {
+              const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10);
+              this.startRateLimitCooldown(retryAfter);
+
+              tc.llmResult = {
+                success: false,
+                timestamp: new Date().toISOString(),
+                requestId,
+                error: 'Rate limit exceeded. Please wait ' + retryAfter + ' seconds before running more tests.',
+                isRateLimited: true,
+              };
+              this.showToast('Rate limit exceeded. Cooldown: ' + retryAfter + 's', 'error');
+              return;
+            }
+
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+              const pipeline = data.pipeline || {};
+              const stages = pipeline.stages || [];
+              const llmData = data.llm || {};
+              const result = data.result || {};
+              const promptData = data.prompt || {};
+
+              // Count repairs from stages
+              const repairsApplied = (pipeline.repairs_applied || []).length;
+
+              tc.llmResult = {
+                success: true,
+                timestamp: new Date().toISOString(),
+                requestId: data.request_id,
+                nodeCount: result.graph?.nodes?.length ?? 0,
+                edgeCount: result.graph?.edges?.length ?? 0,
+                repairsApplied,
+                latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
+                tokenUsage: llmData.token_usage,
+                model: llmData.model,
+                provider: llmData.provider,
+                stages,
+                rawOutputPreview: (llmData.raw_output || '').substring(0, 2000),
+                rawOutputFull: llmData.raw_output,
+                promptHash: promptData.content_hash,
+                promptPreview: promptData.content_preview,
+                fullResponse: data,
+                graphSummary: {
+                  node_count: result.graph?.nodes?.length,
+                  edge_count: result.graph?.edges?.length,
+                  node_kinds: [...new Set((result.graph?.nodes || []).map(n => n.kind))],
+                  node_counts: pipeline.node_counts,
+                },
+                showStages: false,
+                showRaw: false,
+                showTrace: false,
+                showGraph: false,
+              };
+
+              this.showToast('LLM test passed - ' + tc.llmResult.nodeCount + ' nodes, ' + tc.llmResult.latencyMs + 'ms', 'success');
+
+              // Save to history
+              this.saveTestToHistory({
+                testId: tc.id,
+                testName: tc.name,
+                promptId: this.selectedTestPromptId,
+                version: this.selectedTestVersionNum,
+                promptHash: promptData.content_hash,
+                model: llmData.model,
+                success: true,
+                nodeCount: tc.llmResult.nodeCount,
+                edgeCount: tc.llmResult.edgeCount,
+                repairsApplied,
+                latencyMs: tc.llmResult.latencyMs,
+                timestamp: tc.llmResult.timestamp,
+              });
+            } else {
+              tc.llmResult = {
+                success: false,
+                timestamp: new Date().toISOString(),
+                requestId: data.request_id || requestId,
+                error: data.error || data.message || 'Unknown error',
+                fullResponse: data,
+              };
+              this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
+
+              // Save failure to history
+              this.saveTestToHistory({
+                testId: tc.id,
+                testName: tc.name,
+                promptId: this.selectedTestPromptId,
+                version: this.selectedTestVersionNum,
+                success: false,
+                error: tc.llmResult.error,
+                timestamp: tc.llmResult.timestamp,
+              });
+            }
+          } catch (e) {
+            clearTimeout(timeoutId);
+            const isTimeout = e.name === 'AbortError';
+            tc.llmResult = {
+              success: false,
+              timestamp: new Date().toISOString(),
+              error: isTimeout
+                ? 'Request timed out after 2 minutes. The LLM may be under heavy load.'
+                : 'Network error: ' + (e.message || 'Unknown error'),
+              isTimeout,
+            };
+            this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
+          } finally {
+            tc.llmRunning = false;
+          }
+        },
+
+        async runAllTestCasesWithLLM() {
+          if (!this.selectedTestPromptId || this.currentTestCases.length === 0) {
+            this.showToast('No test cases to run', 'warning');
+            return;
+          }
+
+          this.llmBatchRunning = true;
+          this.llmBatchProgress = { current: 0, total: this.currentTestCases.length };
+          this.llmBatchResults = [];
+
+          for (let i = 0; i < this.currentTestCases.length; i++) {
+            this.llmBatchProgress.current = i + 1;
+            const tc = this.currentTestCases[i];
+            await this.runSingleTestCaseWithLLM(tc);
+
+            this.llmBatchResults.push({
+              testId: tc.id,
+              testName: tc.name,
+              success: tc.llmResult?.success ?? false,
+              nodeCount: tc.llmResult?.nodeCount ?? 0,
+              edgeCount: tc.llmResult?.edgeCount ?? 0,
+              repairsApplied: tc.llmResult?.repairsApplied ?? 0,
+              latencyMs: tc.llmResult?.latencyMs ?? 0,
+              error: tc.llmResult?.error,
+            });
+
+            // Small delay between tests to avoid overwhelming the server
+            if (i < this.currentTestCases.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+
+          this.llmBatchRunning = false;
+          const passCount = this.llmBatchResults.filter(r => r.success).length;
+          const failCount = this.llmBatchResults.filter(r => !r.success).length;
+          this.showToast('Batch complete: ' + passCount + ' passed, ' + failCount + ' failed', passCount === this.llmBatchResults.length ? 'success' : 'warning');
+        },
+
+        openLLMCompareModal() {
+          if (!this.selectedTestPrompt || this.selectedTestPrompt.versions.length < 2) {
+            this.showToast('Need at least 2 versions to compare', 'warning');
+            return;
+          }
+          this.llmCompareVersionA = this.selectedTestPrompt.versions[0].version;
+          this.llmCompareVersionB = this.selectedTestPrompt.activeVersion;
+          this.llmCompareBrief = '';
+          this.llmCompareResults = null;
+          this.showLLMCompareModal = true;
+        },
+
+        async runLLMComparison() {
+          if (!this.llmCompareBrief || this.llmCompareVersionA === this.llmCompareVersionB) {
+            this.showToast('Please enter a brief and select different versions', 'warning');
+            return;
+          }
+
+          // Check rate limit cooldown
+          if (this.llmRateLimitCooldown > 0) {
+            this.showToast('Rate limit cooldown active. Wait ' + this.llmRateLimitCooldown + 's before retrying.', 'warning');
+            return;
+          }
+
+          this.llmCompareRunning = true;
+          this.llmCompareResults = null;
+
+          const runForVersion = async (version) => {
+            // Create AbortController with 2-minute timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+            try {
+              // Use new admin endpoint with actual version specification
+              const requestBody = {
+                prompt_id: this.selectedTestPromptId,
+                version: version,
+                brief: this.llmCompareBrief,
+                options: {},
+              };
+
+              // Add model override if set
+              if (this.llmModelOverride) {
+                requestBody.options.model = this.llmModelOverride;
+              }
+
+              const res = await fetch('/admin/v1/test-prompt-llm', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Admin-Key': this.adminKey,
+                },
+                body: JSON.stringify(requestBody),
+                signal: controller.signal,
+              });
+
+              clearTimeout(timeoutId);
+
+              // Handle 429 rate limit with Retry-After
+              if (res.status === 429) {
+                const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10);
+                this.startRateLimitCooldown(retryAfter);
+                return {
+                  success: false,
+                  error: 'Rate limit exceeded. Wait ' + retryAfter + 's.',
+                  isRateLimited: true,
+                };
+              }
+
+              const data = await res.json();
+
+              if (res.ok && data.success) {
+                const pipeline = data.pipeline || {};
+                const llmData = data.llm || {};
+                const result = data.result || {};
+                const promptData = data.prompt || {};
+
+                return {
+                  success: true,
+                  version: version,
+                  promptHash: promptData.content_hash,
+                  promptPreview: promptData.content_preview,
+                  nodeCount: result.graph?.nodes?.length ?? 0,
+                  edgeCount: result.graph?.edges?.length ?? 0,
+                  repairsApplied: (pipeline.repairs_applied || []).length,
+                  latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
+                  tokenUsage: llmData.token_usage,
+                  model: llmData.model,
+                  provider: llmData.provider,
+                  nodeCounts: pipeline.node_counts,
+                };
+              } else {
+                return {
+                  success: false,
+                  version: version,
+                  error: data.error || data.message || 'Unknown error',
+                };
+              }
+            } catch (e) {
+              clearTimeout(timeoutId);
+              const isTimeout = e.name === 'AbortError';
+              return {
+                success: false,
+                version: version,
+                error: isTimeout
+                  ? 'Request timed out after 2 minutes.'
+                  : 'Network error: ' + (e.message || 'Unknown'),
+                isTimeout,
+              };
+            }
+          };
+
+          this.showToast('Running comparison (this may take 2-4 minutes)...', 'info');
+
+          // Run both versions sequentially to respect rate limits
+          const resultA = await runForVersion(this.llmCompareVersionA);
+
+          // Small delay between runs
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const resultB = await runForVersion(this.llmCompareVersionB);
+
+          // Check if prompts are actually different
+          const promptsAreDifferent = resultA.promptHash !== resultB.promptHash;
+
+          this.llmCompareResults = {
+            versionA: { ...resultA, versionNum: this.llmCompareVersionA },
+            versionB: { ...resultB, versionNum: this.llmCompareVersionB },
+            promptsAreDifferent,
+            deltas: {
+              nodeCount: (resultB.nodeCount ?? 0) - (resultA.nodeCount ?? 0),
+              edgeCount: (resultB.edgeCount ?? 0) - (resultA.edgeCount ?? 0),
+              repairs: (resultB.repairsApplied ?? 0) - (resultA.repairsApplied ?? 0),
+              latency: (resultB.latencyMs ?? 0) - (resultA.latencyMs ?? 0),
+              tokens: ((resultB.tokenUsage?.total ?? 0) - (resultA.tokenUsage?.total ?? 0)),
+            },
+          };
+
+          this.llmCompareRunning = false;
+
+          if (promptsAreDifferent) {
+            this.showToast('Comparison complete - different prompt versions confirmed', 'success');
+          } else {
+            this.showToast('Warning: Same prompt hash for both versions', 'warning');
+          }
+        },
+
+        loadTestHistory() {
+          try {
+            const stored = localStorage.getItem('cee_test_history_' + this.selectedTestPromptId);
+            this.testHistory = stored ? JSON.parse(stored) : [];
+          } catch (e) {
+            this.testHistory = [];
+          }
+        },
+
+        saveTestToHistory(item) {
+          try {
+            const key = 'cee_test_history_' + this.selectedTestPromptId;
+            let history = [];
+            try {
+              history = JSON.parse(localStorage.getItem(key) || '[]');
+            } catch (e) {}
+
+            history.push(item);
+
+            // Keep only last 100 entries
+            if (history.length > 100) {
+              history = history.slice(-100);
+            }
+
+            localStorage.setItem(key, JSON.stringify(history));
+            this.testHistory = history;
+          } catch (e) {
+            console.warn('Failed to save test history:', e);
+          }
+        },
+
+        clearTestHistory() {
+          if (!confirm('Clear all test history for this prompt?')) return;
+          localStorage.removeItem('cee_test_history_' + this.selectedTestPromptId);
+          this.testHistory = [];
+          this.showToast('History cleared', 'success');
         },
 
         // ========== Version Comparison ==========

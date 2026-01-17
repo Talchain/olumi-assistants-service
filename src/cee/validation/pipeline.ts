@@ -38,6 +38,7 @@ import {
 } from "../clarifier/index.js";
 import { randomUUID, createHash } from "node:crypto";
 import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
+import { createCorrectionCollector, type CorrectionCollector } from "../corrections.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -929,6 +930,9 @@ export async function finaliseCeeDraftResponse(
   let nodeCountsValidated: Record<string, number> = {};
   let validationSummary: ValidationSummaryEntry | undefined;
 
+  // Corrections collector for tracking all graph modifications
+  const collector = createCorrectionCollector();
+
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
   let lastError: Error | null = null;
@@ -1311,7 +1315,7 @@ export async function finaliseCeeDraftResponse(
   // Ensures factor nodes have value/baseline/unit data for ISL sensitivity analysis.
   // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
   if (graph) {
-    const enrichmentResult = await enrichGraphWithFactorsAsync(graph as any, input.brief);
+    const enrichmentResult = await enrichGraphWithFactorsAsync(graph as any, input.brief, { collector });
     graph = enrichmentResult.graph as GraphV1;
     payload.graph = graph as any;
 
@@ -1580,7 +1584,7 @@ export async function finaliseCeeDraftResponse(
       ? input.context.goals[0]
       : undefined;
 
-    const goalResult = ensureGoalNode(graph!, input.brief, explicitGoal);
+    const goalResult = ensureGoalNode(graph!, input.brief, explicitGoal, collector);
 
     if (goalResult.goalAdded) {
       graph = goalResult.graph;
@@ -1666,7 +1670,7 @@ export async function finaliseCeeDraftResponse(
       const edgeCountBefore = graph.edges?.length ?? 0;
 
       // Wire outcomes and risks to the goal
-      graph = wireOutcomesToGoal(graph, foundGoalId);
+      graph = wireOutcomesToGoal(graph, foundGoalId, collector);
       payload.graph = graph as any;
 
       const edgeCountAfter = graph.edges?.length ?? 0;
@@ -2075,11 +2079,15 @@ export async function finaliseCeeDraftResponse(
       llm_metadata: llmMeta ? {
         model: llmMeta.model ?? model,
         prompt_version: llmMeta.prompt_version,
+        prompt_hash: llmMeta.prompt_hash,
         duration_ms: llmMeta.provider_latency_ms,
         finish_reason: llmMeta.finish_reason,
         response_chars: llmMeta.raw_llm_text?.length,
         token_usage: llmMeta.token_usage,
         temperature: llmMeta.temperature,
+        max_tokens: llmMeta.max_tokens,
+        seed: llmMeta.seed,
+        reasoning_effort: llmMeta.reasoning_effort,
       } : {
         model,
       },
@@ -2505,11 +2513,15 @@ export async function finaliseCeeDraftResponse(
       llm_metadata: llmMeta ? {
         model: llmMeta.model ?? model,
         prompt_version: llmMeta.prompt_version,
+        prompt_hash: llmMeta.prompt_hash,
         duration_ms: llmMeta.provider_latency_ms,
         finish_reason: llmMeta.finish_reason,
         response_chars: llmMeta.raw_llm_text?.length,
         token_usage: llmMeta.token_usage,
         temperature: llmMeta.temperature,
+        max_tokens: llmMeta.max_tokens,
+        seed: llmMeta.seed,
+        reasoning_effort: llmMeta.reasoning_effort,
       } : {
         model,
       },
@@ -2525,6 +2537,9 @@ export async function finaliseCeeDraftResponse(
       transforms: transforms.length > 0 ? transforms : undefined,
       // LLM raw output preview (safe to include in all responses)
       llm_raw: llmRawTrace,
+      // Graph corrections made during pipeline (all post-LLM modifications)
+      corrections: collector.hasCorrections() ? collector.getCorrections() : undefined,
+      corrections_summary: collector.hasCorrections() ? collector.getSummary() : undefined,
     };
 
     // Include final graph summary for debugging (safe)
