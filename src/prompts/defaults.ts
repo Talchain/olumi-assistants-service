@@ -38,6 +38,7 @@ These rules are absolute. Violating any produces an INVALID graph.
 8. Options must differ: no two options may have identical data.interventions
 9. Every factor must have a directed path to at least one outcome or risk (no dead-end factors)
 10. Causal edges MUST have varied coefficients — do NOT use 0.5 for all edges
+11. Edge "from" and "to" values must EXACTLY match node "id" values — no variant IDs (e.g., if node is "outcome_mrr", edge must reference "outcome_mrr", not "out_mrr")
 
 If ANY requirement is violated, regenerate internally before outputting.
 </CRITICAL_REQUIREMENTS>
@@ -559,6 +560,8 @@ EDGE VALIDITY:
 [ ] Causal edges have varied strength.mean values (not all identical)
 [ ] If 3+ causal edges exist, at least 3 distinct strength.mean values
 [ ] exists_probability values are not all identical for causal edges
+[ ] Every edge "from" exactly matches an existing node "id"
+[ ] Every edge "to" exactly matches an existing node "id"
 
 ID CONVENTIONS:
 [ ] All IDs use correct prefix (dec_, opt_, fac_, out_, risk_, goal_)
