@@ -283,6 +283,12 @@ ANTI-PATTERNS (these produce INVALID graphs):
 ❌ All edges with identical std values
 ❌ Using 0.5 as a "default" when uncertain — use the tables above instead
 
+ONLY structural edges (decision→option, option→factor) may use:
+- strength.mean = 1.0
+- strength.std = 0.01
+- exists_probability = 1.0
+Causal edges MUST vary and should never copy structural defaults.
+
 When uncertain about a relationship's strength:
 - Weaker evidence → lower |mean| (0.2-0.4) AND higher std (0.25-0.35)
 - Stronger evidence → higher |mean| (0.6-0.8) AND lower std (0.10-0.20)

@@ -206,6 +206,38 @@ function ensureStoreHealthy(reply: FastifyReply): boolean {
 }
 
 // ============================================================================
+// Error Sanitization
+// ============================================================================
+
+/**
+ * Sanitize error messages for external responses.
+ * Removes stack traces and internal file paths while preserving useful error info.
+ */
+function sanitizeErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    // Extract just the message, removing any stack trace
+    let message = error.message;
+
+    // Remove file paths that might leak internal structure
+    message = message.replace(/\/[^\s:]+\.(ts|js|mjs)/g, '<path>');
+
+    // Remove line/column numbers
+    message = message.replace(/:\d+:\d+/g, '');
+
+    // Truncate very long messages
+    if (message.length > 500) {
+      message = message.substring(0, 497) + '...';
+    }
+
+    return message;
+  }
+
+  // For non-Error objects, convert to string but limit length
+  const str = String(error);
+  return str.length > 500 ? str.substring(0, 497) + '...' : str;
+}
+
+// ============================================================================
 // LLM Call helpers
 // ============================================================================
 
@@ -329,7 +361,7 @@ async function callAnthropicWithPrompt(
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : String(error),
+      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
       duration_ms,
       temperature,
       max_tokens: maxTokens,
@@ -422,7 +454,7 @@ async function callOpenAIWithPrompt(
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : String(error),
+      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
       duration_ms,
       temperature,
       max_tokens: maxTokens,
@@ -869,20 +901,22 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(200).send(response);
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Keep full error for logging, sanitize for external response
+      const fullErrorMessage = error instanceof Error ? error.message : String(error);
+      const sanitizedMessage = sanitizeErrorMessage(error);
 
       log.error({
         request_id: requestId,
         prompt_id,
         version,
-        error: errorMessage,
+        error: fullErrorMessage,
         event: 'admin.test_prompt.error',
       }, 'Admin prompt test failed');
 
       return reply.status(500).send({
         request_id: requestId,
         success: false,
-        error: `Internal error: ${errorMessage}`,
+        error: `Internal error: ${sanitizedMessage}`,
       });
     }
   });

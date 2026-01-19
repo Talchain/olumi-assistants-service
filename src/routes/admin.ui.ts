@@ -984,7 +984,7 @@ function generateAdminUI(): string {
                                     <template x-if="tc.llmResult.tokenUsage">
                                       <div class="llm-metric">
                                         <span class="llm-metric-label">Tokens:</span>
-                                        <span class="llm-metric-value" x-text="tc.llmResult.tokenUsage.total_tokens"></span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.tokenUsage.total"></span>
                                       </div>
                                     </template>
                                     <template x-if="tc.llmResult.model">

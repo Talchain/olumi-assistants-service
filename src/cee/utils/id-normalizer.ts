@@ -1,12 +1,16 @@
+import { log } from "../../utils/telemetry.js";
+
 /**
  * ID Normalizer Utility
  *
  * Converts human-readable labels into valid node IDs following the pattern:
- * ^[a-z0-9_:-]+$
+ * ^[A-Za-z][A-Za-z0-9_-]*$
  *
  * Used by V3 schema to generate consistent IDs for option nodes and
  * intervention targets.
  */
+
+const PRESERVED_ID_REGEX = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /**
  * Normalize a label into a valid node ID.
@@ -36,17 +40,28 @@ export function normalizeToId(
     return generateUniqueId("unknown", existingIds);
   }
 
+  if (PRESERVED_ID_REGEX.test(label)) {
+    const uniqueId = generateUniqueId(label, existingIds);
+    if (uniqueId !== label) {
+      log.warn(
+        { original_id: label, normalized_id: uniqueId, reason: "collision" },
+        "Normalized ID to resolve collision"
+      );
+    }
+    return uniqueId;
+  }
+
   // Step 1: Lowercase
   let id = label.toLowerCase();
 
   // Step 2: Replace common separators with underscores
-  id = id.replace(/[\s\-–—]/g, "_");
+  id = id.replace(/[\s\-–—:]/g, "_");
 
   // Step 3: Remove parentheses but keep content
   id = id.replace(/[()[\]{}]/g, "_");
 
   // Step 4: Remove characters not in allowed set
-  id = id.replace(/[^a-z0-9_:-]/g, "");
+  id = id.replace(/[^a-z0-9_-]/g, "");
 
   // Step 5: Collapse multiple underscores/colons/hyphens
   id = id.replace(/_{2,}/g, "_");
@@ -62,7 +77,14 @@ export function normalizeToId(
   }
 
   // Step 8: Handle duplicates
-  return generateUniqueId(id, existingIds);
+  const uniqueId = generateUniqueId(id, existingIds);
+  if (uniqueId !== label) {
+    log.warn(
+      { original_id: label, normalized_id: uniqueId, reason: "normalized" },
+      "Normalized ID to match policy"
+    );
+  }
+  return uniqueId;
 }
 
 /**
@@ -125,7 +147,7 @@ export function normalizeLabelsToIds(
  * @returns true if valid, false otherwise
  */
 export function isValidId(id: string): boolean {
-  return /^[a-z0-9_:-]+$/.test(id);
+  return PRESERVED_ID_REGEX.test(id);
 }
 
 /**
@@ -139,6 +161,6 @@ export function isValidId(id: string): boolean {
  * extractIdPrefix("factor:marketing") // "factor"
  */
 export function extractIdPrefix(id: string): string {
-  const match = id.match(/^([a-z]+)[_:]/);
+  const match = id.match(/^([A-Za-z]+)[_:\/]/);
   return match ? match[1] : id;
 }

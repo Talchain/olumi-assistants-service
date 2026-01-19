@@ -75,8 +75,34 @@ describe("CEE Schema V3 Integration", () => {
       // Options should also be in the options array with intervention metadata
       expect(v3Response.options.length).toBeGreaterThan(0);
 
-      // Count should match (IDs may differ due to extraction normalization)
-      expect(v3Response.options.length).toBe(optionNodesInGraph.length);
+      // Count and IDs should match (graph node IDs are source of truth)
+      const optionNodeIds = optionNodesInGraph.map((n) => n.id).sort();
+      const optionIds = v3Response.options.map((o) => o.id).sort();
+      expect(optionIds).toEqual(optionNodeIds);
+    });
+
+    it("preserves option IDs without normalization", () => {
+      const responseWithSpecialIds: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_profit", kind: "goal", label: "Grow Profit" },
+            { id: "factor_price", kind: "factor", label: "Price", data: { value: 42, unit: "USD" } },
+            { id: "Opt_Premium_Tier", kind: "option", label: "Premium Tier", body: "Set price to $59" },
+            { id: "outcome_margin", kind: "outcome", label: "Margin" },
+          ],
+          edges: [
+            { from: "Opt_Premium_Tier", to: "factor_price", weight: 0.7, belief: 0.8 },
+            { from: "factor_price", to: "outcome_margin", weight: 0.8, belief: 0.9, effect_direction: "positive" },
+            { from: "outcome_margin", to: "goal_profit", weight: 1.0, belief: 1.0, effect_direction: "positive" },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(responseWithSpecialIds);
+      const optionNode = v3Response.nodes.find((n) => n.kind === "option");
+      expect(optionNode?.id).toBe("Opt_Premium_Tier");
+      expect(v3Response.options[0]?.id).toBe("Opt_Premium_Tier");
     });
 
     it("transforms edges to V3 format with strength_mean", () => {

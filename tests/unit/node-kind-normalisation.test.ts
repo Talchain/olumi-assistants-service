@@ -129,6 +129,29 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[1].belief).toBe(0.9);
     });
 
+    it("preserves flat V4 edge fields when provided", () => {
+      const input = {
+        nodes: [{ id: "n1", kind: "goal" }, { id: "n2", kind: "outcome" }],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength_mean: 0.7,
+            strength_std: 0.2,
+            belief_exists: 0.8,
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.5,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[0].strength_std).toBe(0.2);
+      expect(result.edges[0].belief_exists).toBe(0.8);
+    });
+
     it("handles responses without edges", () => {
       const input = {
         nodes: [{ id: "n1", kind: "evidence" }],

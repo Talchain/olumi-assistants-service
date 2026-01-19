@@ -113,11 +113,15 @@ function mapKindToV3(kind: string): NodeV3T["kind"] {
 /**
  * Transform a V1 node to V3 format.
  */
-export function transformNodeToV3(node: V1Node): NodeV3T {
-  const id = normalizeToId(node.id, new Set());
+export function transformNodeToV3(
+  node: V1Node,
+  existingIds: Set<string> = new Set()
+): NodeV3T {
+  const id = normalizeToId(node.id, existingIds);
+  existingIds.add(id);
 
   const v3Node: NodeV3T = {
-    id: id.toLowerCase() === node.id.toLowerCase() ? node.id : id,
+    id,
     kind: mapKindToV3(node.kind),
     label: node.label ?? node.id,
     description: node.body,
@@ -368,6 +372,30 @@ function extractEdgeHints(graph: V1Graph): EdgeHint[] {
     }));
 }
 
+interface OptionIdMismatchSummary {
+  optionNodeIds: string[];
+  optionIds: string[];
+  missingOptionIds: string[];
+  extraOptionIds: string[];
+}
+
+function getOptionIdMismatchSummary(
+  graph: GraphV3T,
+  options: OptionV3T[]
+): OptionIdMismatchSummary {
+  const optionNodeIds = graph.nodes.filter((n) => n.kind === "option").map((n) => n.id);
+  const optionIds = options.map((option) => option.id);
+  const optionIdSet = new Set(optionIds);
+  const optionNodeIdSet = new Set(optionNodeIds);
+
+  return {
+    optionNodeIds,
+    optionIds,
+    missingOptionIds: optionNodeIds.filter((id) => !optionIdSet.has(id)),
+    extraOptionIds: optionIds.filter((id) => !optionNodeIdSet.has(id)),
+  };
+}
+
 /**
  * Transform V1 graph to V3 format.
  * Keeps ALL nodes including options for graph connectivity (decision→option→factor).
@@ -378,7 +406,8 @@ export function transformGraphToV3(graph: V1Graph): GraphV3T {
   const allNodeIds = new Set(graph.nodes.map((n) => n.id));
 
   // Transform all nodes
-  const v3Nodes = graph.nodes.map(transformNodeToV3);
+  const usedNodeIds = new Set<string>();
+  const v3Nodes = graph.nodes.map((node) => transformNodeToV3(node, usedNodeIds));
 
   // Keep ALL valid edges (including decision→option and option→factor)
   const validEdges = graph.edges.filter(
@@ -429,13 +458,17 @@ export function transformResponseToV3(
   // Transform graph (without option nodes)
   const v3Graph = transformGraphToV3(graph);
 
+  const v3NodeIdByV1Id = new Map(
+    graph.nodes.map((node, index) => [node.id, v3Graph.nodes[index]?.id ?? node.id])
+  );
+
   // Convert option nodes to V3 options with intervention extraction
   const v3NodesTyped = v3Graph.nodes as NodeV3T[];
   const v3EdgesTyped = v3Graph.edges as EdgeV3T[];
 
   const extractedOptions = extractOptionsFromNodes(
     optionNodes.map((n) => ({
-      id: n.id,
+      id: v3NodeIdByV1Id.get(n.id) ?? n.id,
       label: n.label ?? n.id,
       description: n.body,
       // V4 prompt outputs interventions directly on option nodes - use them if present
@@ -448,6 +481,28 @@ export function transformResponseToV3(
   );
 
   const v3Options = toOptionsV3(extractedOptions);
+
+  const optionIdSummary = getOptionIdMismatchSummary(v3Graph, v3Options);
+  if (optionIdSummary.missingOptionIds.length > 0) {
+    log.warn(
+      {
+        requestId: context.requestId,
+        missingOptionIds: optionIdSummary.missingOptionIds,
+        optionNodeIds: optionIdSummary.optionNodeIds,
+      },
+      "Option node IDs missing from options[]"
+    );
+  }
+  if (optionIdSummary.extraOptionIds.length > 0) {
+    log.warn(
+      {
+        requestId: context.requestId,
+        extraOptionIds: optionIdSummary.extraOptionIds,
+        optionIds: optionIdSummary.optionIds,
+      },
+      "Options[] contains IDs not present in graph option nodes"
+    );
+  }
 
   // Generate validation warnings
   const validationWarnings = generateValidationWarnings(
@@ -553,6 +608,7 @@ function generateValidationWarnings(
 ): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const nodeIds = new Set(graph.nodes.map((n) => n.id));
+  const optionIdSummary = getOptionIdMismatchSummary(graph, options);
 
   // Check goal node exists
   if (!nodeIds.has(goalNodeId)) {
@@ -568,6 +624,26 @@ function generateValidationWarnings(
   // Options also exist in the options[] array with intervention metadata
 
   // Check options
+  for (const missingOptionId of optionIdSummary.missingOptionIds) {
+    warnings.push({
+      code: "OPTION_ID_MISMATCH",
+      severity: "warning",
+      message: `Option node "${missingOptionId}" has no matching entry in options[]`,
+      affected_option_id: missingOptionId,
+      suggestion: "Ensure options[] IDs match option node IDs in the graph",
+    });
+  }
+
+  for (const extraOptionId of optionIdSummary.extraOptionIds) {
+    warnings.push({
+      code: "OPTION_ID_MISMATCH",
+      severity: "warning",
+      message: `Option "${extraOptionId}" exists in options[] but no option node matches`,
+      affected_option_id: extraOptionId,
+      suggestion: "Ensure options[] IDs match option node IDs in the graph",
+    });
+  }
+
   for (const option of options) {
     // Check for empty interventions on ready options
     if (option.status === "ready" && Object.keys(option.interventions).length === 0) {

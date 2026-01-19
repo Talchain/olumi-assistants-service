@@ -8,6 +8,8 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { formatEdgeId } from "../../cee/corrections.js";
+import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
@@ -375,6 +377,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
+    const collector = opts.collector;
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
     const systemPrompt = getSystemPrompt('draft_graph');
@@ -425,21 +428,29 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] draft_graph request parameters");
 
-      const response = await apiClient.chat.completions.create(
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              // V4: Use system + user messages (same as Anthropic adapter)
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userContent },
+              ],
+              response_format: { type: "json_object" },
+              seed: seed, // OpenAI supports deterministic seed
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
+          adapter: "openai",
           model: this.model,
-          // V4: Use system + user messages (same as Anthropic adapter)
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userContent },
-          ],
-          response_format: { type: "json_object" },
-          seed: seed, // OpenAI supports deterministic seed
-          ...modelParams,
-        },
-        {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          operation: "draft_graph",
         }
       );
 
@@ -513,8 +524,41 @@ export class OpenAIAdapter implements LLMAdapter {
         parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
+      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1)
+      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+      if (danglingEdges.length > 0) {
+        log.warn({
+          event: "llm.draft.dangling_edges_removed",
+          removed_count: danglingEdges.length,
+          dangling_edges: danglingEdges.map((e) => ({
+            from: e.from,
+            to: e.to,
+            missing_from: !nodeIds.has(e.from),
+            missing_to: !nodeIds.has(e.to),
+          })).slice(0, 10),
+        }, `Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+        if (collector) {
+          for (const edge of danglingEdges) {
+            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+            collector.addByStage(
+              5,
+              "edge_removed",
+              { edge_id: formatEdgeId(edge.from, edge.to) },
+              `Node "${missingNode}" not found`,
+              edge,
+              null
+            );
+          }
+        }
+      }
+
+      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
       // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: parsed.edges });
+      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
 
       // Calculate roots and leaves
       const roots = sorted.nodes
@@ -662,16 +706,24 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] suggest_options request parameters");
 
-      const response = await apiClient.chat.completions.create(
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
+          adapter: "openai",
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-          ...modelParams,
-        },
-        {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          operation: "suggest_options",
         }
       );
 
@@ -744,6 +796,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
     const { graph, violations } = args;
+    const collector = opts.collector;
     const prompt = buildRepairPrompt(graph, violations);
 
     // V04: Generate idempotency key for request traceability
@@ -774,16 +827,24 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] repair_graph request parameters");
 
-      const response = await apiClient.chat.completions.create(
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
+          adapter: "openai",
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-          ...modelParams,
-        },
-        {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          operation: "repair_graph",
         }
       );
 
@@ -835,8 +896,41 @@ export class OpenAIAdapter implements LLMAdapter {
         parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
+      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
+      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+      if (danglingEdges.length > 0) {
+        log.warn({
+          event: "llm.repair.dangling_edges_removed",
+          removed_count: danglingEdges.length,
+          dangling_edges: danglingEdges.map((e) => ({
+            from: e.from,
+            to: e.to,
+            missing_from: !nodeIds.has(e.from),
+            missing_to: !nodeIds.has(e.to),
+          })).slice(0, 10),
+        }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+        if (collector) {
+          for (const edge of danglingEdges) {
+            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+            collector.addByStage(
+              5,
+              "edge_removed",
+              { edge_id: formatEdgeId(edge.from, edge.to) },
+              `Node "${missingNode}" not found`,
+              edge,
+              null
+            );
+          }
+        }
+      }
+
+      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
       // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: parsed.edges });
+      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
 
       const repairedGraph: GraphT = {
         ...graph,
@@ -930,17 +1024,25 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] clarify_brief request parameters");
 
-      const response = await client.chat.completions.create(
+      const response = await withRetry(
+        async () =>
+          client.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...(seed !== undefined ? { seed } : {}),
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+            },
+          ),
         {
+          adapter: "openai",
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-          ...(seed !== undefined ? { seed } : {}),
-          ...modelParams,
-        },
-        {
-          signal: abortController.signal as any,
-        },
+          operation: "clarify_brief",
+        }
       );
 
       clearTimeout(timeoutId);

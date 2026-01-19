@@ -120,23 +120,23 @@ describe("P1 CEE Verification", () => {
   // ==========================================================================
   describe("Task 3: ID Collision Uses __2 Suffix", () => {
     it("uses double underscore (__2) for ID collisions, NOT single underscore (_2)", () => {
-      const existingIds = new Set(["price"]);
+      const existingIds = new Set(["Price"]);
       const newId = normalizeToId("Price", existingIds);
 
       // MUST use __2 (double underscore)
-      expect(newId).toBe("price__2");
+      expect(newId).toBe("Price__2");
       // MUST NOT use _2 (single underscore)
       expect(newId).not.toBe("price_2");
     });
 
     it("increments collision suffix correctly (__2, __3, __4, ...)", () => {
-      const existingIds = new Set(["price", "price__2", "price__3"]);
+      const existingIds = new Set(["Price", "Price__2", "Price__3"]);
       const newId = normalizeToId("Price", existingIds);
 
-      expect(newId).toBe("price__4");
+      expect(newId).toBe("Price__4");
     });
 
-    it("all generated IDs match regex ^[a-z0-9_:-]+$", () => {
+    it("all generated IDs match regex ^[A-Za-z][A-Za-z0-9_-]*$", () => {
       const testLabels = [
         "Price",
         "Price Premium",
@@ -147,7 +147,7 @@ describe("P1 CEE Verification", () => {
       ];
 
       const ids = normalizeLabelsToIds(testLabels);
-      const validIdRegex = /^[a-z0-9_:-]+$/;
+      const validIdRegex = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
       for (const id of ids) {
         expect(id).toMatch(validIdRegex);
@@ -158,9 +158,9 @@ describe("P1 CEE Verification", () => {
       const labels = ["Price", "Price Premium", "Price"];
       const ids = normalizeLabelsToIds(labels);
 
-      expect(ids[0]).toBe("price");
+      expect(ids[0]).toBe("Price");
       expect(ids[1]).toBe("price_premium");
-      expect(ids[2]).toBe("price__2"); // Collision with first "Price"
+      expect(ids[2]).toBe("Price__2"); // Collision with first "Price"
     });
   });
 

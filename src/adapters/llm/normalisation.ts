@@ -148,9 +148,42 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       let strength_std: number | undefined = undefined;
       let belief_exists: number | undefined = undefined;
 
+      // Preserve flat V4 fields if already provided
+      if (e.strength_mean !== undefined && e.strength_mean !== null) {
+        const parsedMean = Number(e.strength_mean);
+        if (!Number.isNaN(parsedMean)) {
+          strength_mean = parsedMean;
+        }
+      }
+
+      if (e.strength_std !== undefined && e.strength_std !== null) {
+        const parsedStd = Number(e.strength_std);
+        if (!Number.isNaN(parsedStd) && parsedStd > 0) {
+          strength_std = parsedStd;
+        }
+      }
+
+      if (e.belief_exists !== undefined && e.belief_exists !== null) {
+        const rawBeliefExists = Number(e.belief_exists);
+        if (!Number.isNaN(rawBeliefExists)) {
+          if (rawBeliefExists < 0 || rawBeliefExists > 1) {
+            belief_exists = Math.max(0, Math.min(1, rawBeliefExists));
+            log.warn({
+              event: 'llm.normalisation.belief_exists_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw: rawBeliefExists,
+              clamped: belief_exists,
+            }, `V4 belief_exists ${rawBeliefExists} clamped to ${belief_exists}`);
+          } else {
+            belief_exists = rawBeliefExists;
+          }
+        }
+      }
+
       // Handle V4 nested strength object
       // Use Number() coercion to handle string numbers (e.g., "0.7" → 0.7)
-      if (e.strength && typeof e.strength === 'object') {
+      if (strength_mean === undefined && e.strength && typeof e.strength === 'object') {
         const strength = e.strength as { mean?: unknown; std?: unknown };
         const parsedMean = Number(strength.mean);
         if (!Number.isNaN(parsedMean) && strength.mean !== undefined && strength.mean !== null) {
@@ -164,14 +197,14 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           }, 'V4 strength.mean extracted');
         }
         const parsedStd = Number(strength.std);
-        if (!Number.isNaN(parsedStd) && parsedStd > 0) {
+        if (strength_std === undefined && !Number.isNaN(parsedStd) && parsedStd > 0) {
           strength_std = parsedStd;
         }
       }
 
       // Handle V4 exists_probability
       // Use Number() coercion to handle string numbers
-      if (e.exists_probability !== undefined && e.exists_probability !== null) {
+      if (belief_exists === undefined && e.exists_probability !== undefined && e.exists_probability !== null) {
         const rawProb = Number(e.exists_probability);
         if (!Number.isNaN(rawProb)) {
           if (rawProb < 0 || rawProb > 1) {

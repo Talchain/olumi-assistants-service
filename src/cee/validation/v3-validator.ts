@@ -65,6 +65,7 @@ export function validateV3Response(
         code: "SCHEMA_VALIDATION_ERROR",
         severity: "error",
         message: `Schema validation error at ${issue.path.join(".")}: ${issue.message}`,
+        stage: "schema_validation",
       });
     }
 
@@ -506,7 +507,7 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
         severity: "error",
         message: `Bidirectional edges detected: ${edge.from} ↔ ${edge.to}`,
         affected_node_id: edge.from,
-        affected_edge_id: `${edge.from}↔${edge.to}`,
+        affected_edge_id: `${edge.from}→${edge.to}`,
         suggestion: "Remove one direction to maintain DAG structure. Bidirectional causality is not supported.",
         stage,
       });
