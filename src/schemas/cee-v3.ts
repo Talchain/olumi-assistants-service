@@ -53,8 +53,8 @@ export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
  * V3 node schema.
  */
 export const NodeV3 = z.object({
-  /** Node ID - pattern: ^[a-z0-9_:-]+$ */
-  id: z.string().regex(/^[a-z0-9_:-]+$/, "Node ID must be lowercase alphanumeric with underscores, colons, or hyphens"),
+  /** Node ID - must start with letter, contain only alphanumeric, underscores, or hyphens */
+  id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, "Node ID must start with letter and contain only alphanumeric, underscores, or hyphens"),
   /** Node kind */
   kind: NodeKindV3,
   /** Human-readable label */
@@ -203,8 +203,8 @@ export type OptionStatusV3T = z.infer<typeof OptionStatusV3>;
  * - status: "needs_encoding" when raw values exist but aren't yet encoded
  */
 export const OptionV3 = z.object({
-  /** Option ID - pattern: ^[a-z0-9_:-]+$ */
-  id: z.string().regex(/^[a-z0-9_:-]+$/, "Option ID must be lowercase alphanumeric with underscores, colons, or hyphens"),
+  /** Option ID - must start with letter, contain only alphanumeric, underscores, or hyphens */
+  id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, "Option ID must start with letter and contain only alphanumeric, underscores, or hyphens"),
   /** Human-readable label */
   label: z.string(),
   /** Optional description */

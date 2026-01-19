@@ -10,6 +10,7 @@ export type CeeSeverity = "error" | "warning" | "info";
 const ERROR_CODES = [
   "LIMIT_EXCEEDED",
   "CIRCULAR_DEPENDENCY",
+  "GRAPH_CONTAINS_CYCLE", // Spec-aligned cycle detection code
   "SELF_LOOP_DETECTED",
   "BIDIRECTIONAL_EDGE",
   "MISSING_REQUIRED_NODE",
@@ -27,6 +28,10 @@ const ERROR_CODES = [
   "INVALID_OPTION_ID",
   "OPTION_NOT_READY",
   "INVALID_INTERVENTION_TARGET",
+  // Topology errors - always block execution per spec
+  "INVALID_EDGE_TYPE",
+  "INVALID_FACTOR_TO_CONTROLLABLE",
+  "STRENGTH_OUT_OF_RANGE",
 ] as const;
 
 // WARNING - Degrades quality but runs
@@ -37,10 +42,6 @@ const WARNING_CODES = [
   "OUTCOME_ORPHAN",
   "HIGH_EDGE_DENSITY",
   "STALE_EVIDENCE", // Evidence is too old but still usable
-  // V4 topology warnings (promoted to ERROR when strictTopologyValidation enabled)
-  "INVALID_EDGE_TYPE",
-  "INVALID_FACTOR_TO_CONTROLLABLE",
-  "STRENGTH_OUT_OF_RANGE",
   // V6.0.2 structural warnings
   "GOAL_NODE_WRONG_KIND",
   "DECISION_HAS_INCOMING_EDGES",

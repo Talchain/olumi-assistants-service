@@ -154,14 +154,15 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
     seenIds.add(node.id);
 
-    // Check ID format
-    if (!/^[a-z0-9_:-]+$/.test(node.id)) {
+    // Check ID format - must start with letter, contain only alphanumeric, underscores, or hyphens
+    // Aligned with PRESERVED_ID_REGEX from id-normalizer
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(node.id)) {
       warnings.push({
         code: "INVALID_NODE_ID",
         severity: "error",
-        message: `Invalid node ID format: "${node.id}" (must be lowercase alphanumeric with underscores, colons, or hyphens)`,
+        message: `Invalid node ID format: "${node.id}" (must start with letter, contain only alphanumeric, underscores, or hyphens)`,
         affected_node_id: node.id,
-        suggestion: "Use only lowercase letters, numbers, underscores, colons, and hyphens",
+        suggestion: "Use IDs starting with a letter followed by alphanumeric characters, underscores, or hyphens",
       });
     }
 
@@ -345,11 +346,10 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         (p) => p.from === fromKind && p.to === toKind
       );
       if (!isAllowed) {
-        // Severity controlled by strictTopologyValidation feature flag
-        const severity = config.features.strictTopologyValidation ? "error" : "warning";
+        // Always ERROR per spec - topology violations must block execution
         warnings.push({
           code: "INVALID_EDGE_TYPE",
-          severity,
+          severity: "error",
           message: `Edge ${edge.from} → ${edge.to}: ${fromKind} → ${toKind} is not allowed (closed-world violation)`,
           suggestion: `Valid patterns: ${ALLOWED_EDGE_PATTERNS.map((p) => `${p.from}→${p.to}`).join(", ")}`,
         });
@@ -358,11 +358,10 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       // Additional check: factor→factor only allowed if target is exogenous (not controllable)
       if (fromKind === "factor" && toKind === "factor") {
         if (controllableFactors.has(edge.to)) {
-          // Severity controlled by strictTopologyValidation feature flag
-          const factorSeverity = config.features.strictTopologyValidation ? "error" : "warning";
+          // Always ERROR per spec - topology violations must block execution
           warnings.push({
             code: "INVALID_FACTOR_TO_CONTROLLABLE",
-            severity: factorSeverity,
+            severity: "error",
             message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (targeted by option interventions)`,
             suggestion: "Controllable factors should only be set by option interventions, not influenced by other factors",
           });
@@ -401,11 +400,10 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 
     // Check strength_mean is in canonical [-1, +1] range (P1-CEE-2)
     if (edge.strength_mean < MIN_STRENGTH || edge.strength_mean > MAX_STRENGTH) {
-      // Severity controlled by strictTopologyValidation feature flag
-      const rangeSeverity = config.features.strictTopologyValidation ? "error" : "warning";
+      // Always ERROR per spec - out of range values must block execution
       warnings.push({
         code: "STRENGTH_OUT_OF_RANGE",
-        severity: rangeSeverity,
+        severity: "error",
         message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
         suggestion: "Standardised coefficients should be in [-1, +1] range.",
       });
@@ -487,7 +485,7 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
       continue;
     }
     warnings.push({
-      code: "CIRCULAR_DEPENDENCY",
+      code: "GRAPH_CONTAINS_CYCLE",
       severity: "error",
       message: `Cycle detected in graph: ${cycle.join(" → ")}`,
       affected_node_id: cycle[0],

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import { validateV3Response } from "../../src/cee/validation/v3-validator.js";
 import type { CEEGraphResponseV3T } from "../../src/schemas/cee-v3.js";
@@ -78,42 +78,42 @@ function makeV3Response(
 
 describe("V3 Validator - Graph Structure Validation", () => {
   describe("Cycle Detection", () => {
-    it("detects simple cycle and returns CIRCULAR_DEPENDENCY error", () => {
+    it("detects simple cycle and returns GRAPH_CONTAINS_CYCLE error", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factor_a", kind: "factor", label: "A" },
-          { id: "factor_b", kind: "factor", label: "B" },
-          { id: "factor_c", kind: "factor", label: "C" },
+          { id: "factorA", kind: "factor", label: "A" },
+          { id: "factorB", kind: "factor", label: "B" },
+          { id: "factorC", kind: "factor", label: "C" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factor_a",
-            to: "factor_b",
+            from: "factorA",
+            to: "factorB",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factor_b",
-            to: "factor_c",
+            from: "factorB",
+            to: "factorC",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factor_c",
-            to: "factor_a",
+            from: "factorC",
+            to: "factorA",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           }, // Creates cycle: A → B → C → A
           {
-            from: "factor_c",
+            from: "factorC",
             to: "outcome_1",
             strength_mean: 0.5,
             strength_std: 0.1,
@@ -135,11 +135,11 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const result = validateV3Response(response);
 
       expect(result.valid).toBe(false);
-      expect(result.errors.some((e) => e.code === "CIRCULAR_DEPENDENCY")).toBe(
+      expect(result.errors.some((e) => e.code === "GRAPH_CONTAINS_CYCLE")).toBe(
         true
       );
       const cycleError = result.errors.find(
-        (e) => e.code === "CIRCULAR_DEPENDENCY"
+        (e) => e.code === "GRAPH_CONTAINS_CYCLE"
       );
       expect(cycleError?.message).toMatch(/cycle detected/i);
     });
@@ -151,7 +151,7 @@ describe("V3 Validator - Graph Structure Validation", () => {
 
       // Should not have cycle-related errors
       expect(
-        result.errors.some((e) => e.code === "CIRCULAR_DEPENDENCY")
+        result.errors.some((e) => e.code === "GRAPH_CONTAINS_CYCLE")
       ).toBe(false);
       expect(result.errors.some((e) => e.code === "SELF_LOOP_DETECTED")).toBe(
         false
@@ -167,20 +167,20 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factor_a", kind: "factor", label: "A" },
+          { id: "factorA", kind: "factor", label: "A" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factor_a",
-            to: "factor_a",
+            from: "factorA",
+            to: "factorA",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           }, // Self-loop
           {
-            from: "factor_a",
+            from: "factorA",
             to: "outcome_1",
             strength_mean: 0.5,
             strength_std: 0.1,
@@ -208,7 +208,7 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const selfLoopError = result.errors.find(
         (e) => e.code === "SELF_LOOP_DETECTED"
       );
-      expect(selfLoopError?.affected_node_id).toBe("factor_a");
+      expect(selfLoopError?.affected_node_id).toBe("factorA");
       expect(selfLoopError?.message).toMatch(/self-loop/i);
     });
   });
@@ -218,29 +218,29 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factor_a", kind: "factor", label: "A" },
-          { id: "factor_b", kind: "factor", label: "B" },
+          { id: "factorA", kind: "factor", label: "A" },
+          { id: "factorB", kind: "factor", label: "B" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factor_a",
-            to: "factor_b",
+            from: "factorA",
+            to: "factorB",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factor_b",
-            to: "factor_a",
+            from: "factorB",
+            to: "factorA",
             strength_mean: 0.3,
             strength_std: 0.1,
             belief_exists: 0.8,
             effect_direction: "positive",
           }, // Bidirectional: A ↔ B
           {
-            from: "factor_b",
+            from: "factorB",
             to: "outcome_1",
             strength_mean: 0.5,
             strength_std: 0.1,
@@ -273,29 +273,29 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factor_a", kind: "factor", label: "A" },
-          { id: "factor_b", kind: "factor", label: "B" },
+          { id: "factorA", kind: "factor", label: "A" },
+          { id: "factorB", kind: "factor", label: "B" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factor_a",
-            to: "factor_b",
+            from: "factorA",
+            to: "factorB",
             strength_mean: 0.5,
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factor_b",
-            to: "factor_a",
+            from: "factorB",
+            to: "factorA",
             strength_mean: 0.3,
             strength_std: 0.1,
             belief_exists: 0.8,
             effect_direction: "positive",
           },
           {
-            from: "factor_b",
+            from: "factorB",
             to: "outcome_1",
             strength_mean: 0.5,
             strength_std: 0.1,
@@ -324,26 +324,8 @@ describe("V3 Validator - Graph Structure Validation", () => {
     });
   });
 
-  describe("Severity Flag Controlled Validations", () => {
-    let originalStrictTopologyValidation: boolean;
-
-    beforeEach(async () => {
-      // Import config dynamically to get current value
-      const { config } = await import("../../src/config/index.js");
-      originalStrictTopologyValidation = config.features.strictTopologyValidation;
-    });
-
-    afterEach(async () => {
-      // Restore original config value
-      const { config } = await import("../../src/config/index.js");
-      (config.features as any).strictTopologyValidation =
-        originalStrictTopologyValidation;
-    });
-
-    it("INVALID_EDGE_TYPE is warning by default", async () => {
-      const { config } = await import("../../src/config/index.js");
-      (config.features as any).strictTopologyValidation = false;
-
+  describe("Topology Validation (Always Error)", () => {
+    it("INVALID_EDGE_TYPE is always an error", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
@@ -373,58 +355,17 @@ describe("V3 Validator - Graph Structure Validation", () => {
 
       const result = validateV3Response(response);
 
-      // INVALID_EDGE_TYPE should be a warning, not an error
-      expect(
-        result.warningsOnly.some((w) => w.code === "INVALID_EDGE_TYPE")
-      ).toBe(true);
-      expect(result.errors.some((e) => e.code === "INVALID_EDGE_TYPE")).toBe(
-        false
-      );
-    });
-
-    it("INVALID_EDGE_TYPE is error when strict mode enabled", async () => {
-      const { config } = await import("../../src/config/index.js");
-      (config.features as any).strictTopologyValidation = true;
-
-      const response = makeV3Response({
-        nodes: [
-          { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "option_1", kind: "option", label: "Option" },
-          { id: "outcome_1", kind: "outcome", label: "Outcome" },
-        ],
-        edges: [
-          {
-            from: "option_1",
-            to: "outcome_1",
-            strength_mean: 0.5,
-            strength_std: 0.1,
-            belief_exists: 0.9,
-            effect_direction: "positive",
-          }, // Invalid: option→outcome not allowed
-          {
-            from: "outcome_1",
-            to: "goal_1",
-            strength_mean: 0.5,
-            strength_std: 0.1,
-            belief_exists: 0.9,
-            effect_direction: "positive",
-          },
-        ],
-        options: [],
-      });
-
-      const result = validateV3Response(response);
-
+      // INVALID_EDGE_TYPE is always an error per spec
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.code === "INVALID_EDGE_TYPE")).toBe(
         true
       );
+      expect(
+        result.warningsOnly.some((w) => w.code === "INVALID_EDGE_TYPE")
+      ).toBe(false);
     });
 
-    it("STRENGTH_OUT_OF_RANGE is warning by default", async () => {
-      const { config } = await import("../../src/config/index.js");
-      (config.features as any).strictTopologyValidation = false;
-
+    it("STRENGTH_OUT_OF_RANGE is always an error", () => {
       const response = makeV3Response({
         edges: [
           {
@@ -464,61 +405,14 @@ describe("V3 Validator - Graph Structure Validation", () => {
 
       const result = validateV3Response(response);
 
-      expect(
-        result.warningsOnly.some((w) => w.code === "STRENGTH_OUT_OF_RANGE")
-      ).toBe(true);
-      expect(
-        result.errors.some((e) => e.code === "STRENGTH_OUT_OF_RANGE")
-      ).toBe(false);
-    });
-
-    it("STRENGTH_OUT_OF_RANGE is error when strict mode enabled", async () => {
-      const { config } = await import("../../src/config/index.js");
-      (config.features as any).strictTopologyValidation = true;
-
-      const response = makeV3Response({
-        edges: [
-          {
-            from: "decision_1",
-            to: "option_1",
-            strength_mean: 1.0,
-            strength_std: 0.1,
-            belief_exists: 1.0,
-            effect_direction: "positive",
-          },
-          {
-            from: "option_1",
-            to: "factor_1",
-            strength_mean: 1.0,
-            strength_std: 0.1,
-            belief_exists: 1.0,
-            effect_direction: "positive",
-          },
-          {
-            from: "factor_1",
-            to: "outcome_1",
-            strength_mean: 2.5,
-            strength_std: 0.15,
-            belief_exists: 0.9,
-            effect_direction: "positive",
-          }, // Out of range
-          {
-            from: "outcome_1",
-            to: "goal_1",
-            strength_mean: 0.8,
-            strength_std: 0.1,
-            belief_exists: 0.95,
-            effect_direction: "positive",
-          },
-        ],
-      });
-
-      const result = validateV3Response(response);
-
+      // STRENGTH_OUT_OF_RANGE is always an error per spec
       expect(result.valid).toBe(false);
       expect(
         result.errors.some((e) => e.code === "STRENGTH_OUT_OF_RANGE")
       ).toBe(true);
+      expect(
+        result.warningsOnly.some((w) => w.code === "STRENGTH_OUT_OF_RANGE")
+      ).toBe(false);
     });
   });
 });

@@ -8,9 +8,10 @@ import {
 
 describe("CEE ID Normalizer", () => {
   describe("normalizeToId", () => {
-    it("converts to lowercase", () => {
-      expect(normalizeToId("Marketing")).toBe("marketing");
-      expect(normalizeToId("PRICE")).toBe("price");
+    it("preserves valid IDs without normalization", () => {
+      expect(normalizeToId("Marketing")).toBe("Marketing");
+      expect(normalizeToId("PRICE")).toBe("PRICE");
+      expect(normalizeToId("Opt_Premium-1")).toBe("Opt_Premium-1");
     });
 
     it("replaces spaces with underscores", () => {
@@ -18,8 +19,8 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("monthly cost")).toBe("monthly_cost");
     });
 
-    it("replaces hyphens with underscores", () => {
-      expect(normalizeToId("marketing-spend")).toBe("marketing_spend");
+    it("normalizes hyphens when normalization is required", () => {
+      expect(normalizeToId("Marketing Spend-2024")).toBe("marketing_spend_2024");
     });
 
     it("removes parentheses and keeps content", () => {
@@ -31,9 +32,11 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("cost#1")).toBe("cost1");
     });
 
-    it("collapses multiple underscores", () => {
+    it("collapses multiple underscores during normalization", () => {
+      // Multiple spaces -> underscores -> collapsed
       expect(normalizeToId("marketing  spend")).toBe("marketing_spend");
-      expect(normalizeToId("marketing___spend")).toBe("marketing_spend");
+      // Already valid ID per PRESERVED_ID_REGEX, so preserved as-is
+      expect(normalizeToId("marketing___spend")).toBe("marketing___spend");
     });
 
     it("trims leading and trailing underscores", () => {
@@ -60,12 +63,13 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("Option A", existingIds)).toBe("option_a__4");
     });
 
-    it("allows colons in IDs", () => {
-      expect(normalizeToId("factor:price")).toBe("factor:price");
+    it("normalizes colons to underscores", () => {
+      expect(normalizeToId("factor:price")).toBe("factor_price");
     });
 
     it("allows hyphens in output", () => {
       const result = normalizeToId("my-id");
+      expect(result).toBe("my-id");
       expect(isValidId(result)).toBe(true);
     });
   });
@@ -98,16 +102,17 @@ describe("CEE ID Normalizer", () => {
   describe("isValidId", () => {
     it("returns true for valid IDs", () => {
       expect(isValidId("marketing_spend")).toBe(true);
-      expect(isValidId("factor:price")).toBe(true);
       expect(isValidId("option-1")).toBe(true);
       expect(isValidId("abc123")).toBe(true);
+      expect(isValidId("UPPERCASE")).toBe(true);
     });
 
     it("returns false for invalid IDs", () => {
       expect(isValidId("Marketing Spend")).toBe(false);
       expect(isValidId("price@100")).toBe(false);
-      expect(isValidId("UPPERCASE")).toBe(false);
       expect(isValidId("has space")).toBe(false);
+      expect(isValidId("factor:price")).toBe(false);
+      expect(isValidId("1option")).toBe(false);
     });
   });
 
