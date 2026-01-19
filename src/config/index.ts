@@ -143,6 +143,7 @@ const ConfigSchema = z.object({
     piiGuard: booleanString.default(false),
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
+    strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
   }),
 
   // Prompt Cache Configuration

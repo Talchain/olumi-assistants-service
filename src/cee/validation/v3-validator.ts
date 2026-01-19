@@ -11,6 +11,8 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
+import { detectCycles } from "../../utils/graphGuards.js";
+import { config } from "../../config/index.js";
 
 /**
  * Validation result with detailed findings.
@@ -75,6 +77,7 @@ export function validateV3Response(
   warnings.push(...validateGoalNode(v3Response));
   warnings.push(...validateNodes(v3Response));
   warnings.push(...validateEdges(v3Response));
+  warnings.push(...validateGraphStructure(v3Response)); // Cycle, self-loop, bidirectional detection
   warnings.push(...validateOptions(v3Response, options));
   warnings.push(...validateInterventions(v3Response, options));
 
@@ -342,11 +345,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         (p) => p.from === fromKind && p.to === toKind
       );
       if (!isAllowed) {
-        // Using "warning" severity to maintain backwards compatibility with existing graphs
-        // TODO: Promote to "error" once all fixtures are updated to V4 topology
+        // Severity controlled by strictTopologyValidation feature flag
+        const severity = config.features.strictTopologyValidation ? "error" : "warning";
         warnings.push({
           code: "INVALID_EDGE_TYPE",
-          severity: "warning",
+          severity,
           message: `Edge ${edge.from} → ${edge.to}: ${fromKind} → ${toKind} is not allowed (closed-world violation)`,
           suggestion: `Valid patterns: ${ALLOWED_EDGE_PATTERNS.map((p) => `${p.from}→${p.to}`).join(", ")}`,
         });
@@ -355,10 +358,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       // Additional check: factor→factor only allowed if target is exogenous (not controllable)
       if (fromKind === "factor" && toKind === "factor") {
         if (controllableFactors.has(edge.to)) {
-          // Using "warning" severity for backwards compatibility
+          // Severity controlled by strictTopologyValidation feature flag
+          const factorSeverity = config.features.strictTopologyValidation ? "error" : "warning";
           warnings.push({
             code: "INVALID_FACTOR_TO_CONTROLLABLE",
-            severity: "warning",
+            severity: factorSeverity,
             message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (targeted by option interventions)`,
             suggestion: "Controllable factors should only be set by option interventions, not influenced by other factors",
           });
@@ -397,9 +401,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 
     // Check strength_mean is in canonical [-1, +1] range (P1-CEE-2)
     if (edge.strength_mean < MIN_STRENGTH || edge.strength_mean > MAX_STRENGTH) {
+      // Severity controlled by strictTopologyValidation feature flag
+      const rangeSeverity = config.features.strictTopologyValidation ? "error" : "warning";
       warnings.push({
         code: "STRENGTH_OUT_OF_RANGE",
-        severity: "warning",
+        severity: rangeSeverity,
         message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
         suggestion: "Standardised coefficients should be in [-1, +1] range.",
       });
@@ -426,6 +432,73 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 }
 
 /**
+ * Validate graph structure: cycles, self-loops, bidirectional edges.
+ * These are critical structural issues that would break the inference engine.
+ */
+function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
+  const warnings: ValidationWarningV3T[] = [];
+
+  // Build edge set for bidirectional detection
+  const edgeSet = new Set<string>();
+  for (const edge of response.edges) {
+    edgeSet.add(`${edge.from}::${edge.to}`);
+  }
+
+  // Track which bidirectional pairs we've reported to avoid duplicates
+  const reportedBidirectional = new Set<string>();
+
+  // Check for self-loops and bidirectional edges in a single pass
+  for (const edge of response.edges) {
+    // Self-loop detection: node pointing to itself
+    if (edge.from === edge.to) {
+      warnings.push({
+        code: "SELF_LOOP_DETECTED",
+        severity: "error",
+        message: `Self-loop detected: ${edge.from} → ${edge.to}`,
+        affected_node_id: edge.from,
+        suggestion: "Remove self-referential edge. Nodes cannot influence themselves directly.",
+      });
+    }
+
+    // Bidirectional edge detection: A→B and B→A
+    const reverseKey = `${edge.to}::${edge.from}`;
+    const sortedKey = [edge.from, edge.to].sort().join("::");
+    if (edgeSet.has(reverseKey) && !reportedBidirectional.has(sortedKey) && edge.from !== edge.to) {
+      reportedBidirectional.add(sortedKey);
+      warnings.push({
+        code: "BIDIRECTIONAL_EDGE",
+        severity: "error",
+        message: `Bidirectional edges detected: ${edge.from} ↔ ${edge.to}`,
+        affected_node_id: edge.from,
+        suggestion: "Remove one direction to maintain DAG structure. Bidirectional causality is not supported.",
+      });
+    }
+  }
+
+  // Cycle detection using DFS from graphGuards
+  // Adapt V3 response to format expected by detectCycles
+  const nodes = response.nodes.map((n) => ({ id: n.id, kind: n.kind as any }));
+  const edges = response.edges.map((e) => ({ from: e.from, to: e.to }));
+
+  const cycles = detectCycles(nodes, edges);
+  for (const cycle of cycles) {
+    // Skip self-loops (already reported above with clearer message)
+    if (cycle.length === 2 && cycle[0] === cycle[1]) {
+      continue;
+    }
+    warnings.push({
+      code: "CIRCULAR_DEPENDENCY",
+      severity: "error",
+      message: `Cycle detected in graph: ${cycle.join(" → ")}`,
+      affected_node_id: cycle[0],
+      suggestion: "Remove or redirect edges to eliminate the cycle. CEE graphs must be DAGs.",
+    });
+  }
+
+  return warnings;
+}
+
+/**
  * Validate options.
  */
 function validateOptions(
@@ -434,6 +507,34 @@ function validateOptions(
 ): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const seenIds = new Set<string>();
+  const optionNodeIds = response.nodes.filter((n) => n.kind === "option").map((n) => n.id);
+  const optionIds = response.options.map((option) => option.id);
+  const optionIdSet = new Set(optionIds);
+  const optionNodeIdSet = new Set(optionNodeIds);
+
+  for (const optionNodeId of optionNodeIds) {
+    if (!optionIdSet.has(optionNodeId)) {
+      warnings.push({
+        code: "OPTION_ID_MISMATCH",
+        severity: "warning",
+        message: `Option node "${optionNodeId}" has no matching entry in options[]`,
+        affected_option_id: optionNodeId,
+        suggestion: "Ensure options[] IDs match option node IDs in the graph",
+      });
+    }
+  }
+
+  for (const optionId of optionIds) {
+    if (!optionNodeIdSet.has(optionId)) {
+      warnings.push({
+        code: "OPTION_ID_MISMATCH",
+        severity: "warning",
+        message: `Option "${optionId}" exists in options[] but no option node matches`,
+        affected_option_id: optionId,
+        suggestion: "Ensure options[] IDs match option node IDs in the graph",
+      });
+    }
+  }
 
   // Track intervention signatures to detect identical options
   const interventionSignatures = new Map<string, string>();
