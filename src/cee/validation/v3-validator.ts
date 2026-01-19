@@ -107,6 +107,7 @@ function categorizeWarnings(warnings: ValidationWarningV3T[]): V3ValidationResul
 function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const nodeIds = new Set(response.nodes.map((n) => n.id));
+  const stage = "goal_validation";
 
   // goal_node_id must reference an existing node
   if (!nodeIds.has(response.goal_node_id)) {
@@ -116,6 +117,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
       message: `goal_node_id "${response.goal_node_id}" does not reference an existing node`,
       affected_node_id: response.goal_node_id,
       suggestion: "Ensure goal_node_id references a node in the graph",
+      stage,
     });
     return warnings;
   }
@@ -129,6 +131,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
       message: `goal_node_id "${response.goal_node_id}" references a node with kind="${goalNode.kind}", expected "goal"`,
       affected_node_id: response.goal_node_id,
       suggestion: "Set the node kind to 'goal' or use a different goal_node_id",
+      stage,
     });
   }
 
@@ -141,6 +144,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
 function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const seenIds = new Set<string>();
+  const stage = "node_validation";
 
   for (const node of response.nodes) {
     // Check for duplicate IDs
@@ -150,6 +154,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         severity: "error",
         message: `Duplicate node ID: "${node.id}"`,
         affected_node_id: node.id,
+        stage,
       });
     }
     seenIds.add(node.id);
@@ -163,6 +168,7 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         message: `Invalid node ID format: "${node.id}" (must start with letter, contain only alphanumeric, underscores, or hyphens)`,
         affected_node_id: node.id,
         suggestion: "Use IDs starting with a letter followed by alphanumeric characters, underscores, or hyphens",
+        stage,
       });
     }
 
@@ -202,6 +208,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
   const nodeIds = new Set(response.nodes.map((n) => n.id));
   const nodeKindMap = new Map(response.nodes.map((n) => [n.id, n.kind]));
+  const stage = "edge_validation";
 
   // Track which factors are controllable (targeted by interventions in options[])
   // In V3, options are in a separate array (as well as in nodes[] for graph connectivity)
@@ -234,6 +241,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
           message: `Decision node "${node.id}" has ${incoming.length} incoming edge(s) but should have none`,
           affected_node_id: node.id,
           suggestion: "Decision nodes should not have any incoming edges",
+          stage,
         });
       }
     }
@@ -248,6 +256,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
           message: `${node.kind} node "${node.id}" has no outgoing edge to goal`,
           affected_node_id: node.id,
           suggestion: `${node.kind} nodes must connect to the goal node`,
+          stage,
         });
       } else if (outgoing.length > 1) {
         warnings.push({
@@ -256,6 +265,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
           message: `${node.kind} node "${node.id}" has ${outgoing.length} outgoing edges (expected exactly 1 to goal)`,
           affected_node_id: node.id,
           suggestion: `${node.kind} nodes should have exactly one outgoing edge to the goal`,
+          stage,
         });
       } else {
         // Exactly 1 outgoing - verify it goes to goal
@@ -266,7 +276,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
             severity: "warning",
             message: `${node.kind} node "${node.id}" connects to "${outgoing[0]}" (${targetKind}) instead of goal`,
             affected_node_id: node.id,
+            affected_edge_id: `${node.id}→${outgoing[0]}`,
             suggestion: `${node.kind} nodes should only connect to the goal node`,
+            stage,
           });
         }
       }
@@ -297,6 +309,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         severity: "warning",
         message: `All ${causalStrengths.length} causal edges have identical strength (${causalStrengths[0].toFixed(2)}). This will produce undifferentiated results.`,
         suggestion: "Review edge strengths — different relationships should have different effect sizes.",
+        stage,
       });
     }
   }
@@ -311,12 +324,14 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         severity: "info",
         message: `All ${causalStrengths.length} causal edges are ${allPositive ? "positive" : "negative"}. Most real-world models have mixed directions.`,
         suggestion: "Consider whether any relationships are inverse (e.g., cost reduces profit).",
+        stage,
       });
     }
   }
 
   for (let i = 0; i < response.edges.length; i++) {
     const edge = response.edges[i];
+    const edgeId = `${edge.from}→${edge.to}`;
 
     // Check from node exists
     if (!nodeIds.has(edge.from)) {
@@ -325,6 +340,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         severity: "error",
         message: `Edge ${i}: 'from' node "${edge.from}" not found in graph`,
         affected_node_id: edge.from,
+        affected_edge_id: edgeId,
+        stage,
       });
     }
 
@@ -335,6 +352,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         severity: "error",
         message: `Edge ${i}: 'to' node "${edge.to}" not found in graph`,
         affected_node_id: edge.to,
+        affected_edge_id: edgeId,
+        stage,
       });
     }
 
@@ -351,7 +370,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
           code: "INVALID_EDGE_TYPE",
           severity: "error",
           message: `Edge ${edge.from} → ${edge.to}: ${fromKind} → ${toKind} is not allowed (closed-world violation)`,
+          affected_edge_id: edgeId,
           suggestion: `Valid patterns: ${ALLOWED_EDGE_PATTERNS.map((p) => `${p.from}→${p.to}`).join(", ")}`,
+          stage,
         });
       }
 
@@ -363,7 +384,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
             code: "INVALID_FACTOR_TO_CONTROLLABLE",
             severity: "error",
             message: `Edge ${edge.from} → ${edge.to}: factor cannot target controllable factor (targeted by option interventions)`,
+            affected_edge_id: edgeId,
             suggestion: "Controllable factors should only be set by option interventions, not influenced by other factors",
+            stage,
           });
         }
       }
@@ -376,7 +399,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "EFFECT_DIRECTION_MISMATCH",
         severity: "warning",
         message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength_mean=${edge.strength_mean} suggests "${expectedDirection}"`,
+        affected_edge_id: edgeId,
         suggestion: "Ensure effect_direction matches the sign of strength_mean",
+        stage: "coefficient_normalisation",
       });
     }
 
@@ -386,6 +411,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "INVALID_STRENGTH_STD",
         severity: "error",
         message: `Edge ${edge.from} → ${edge.to}: strength_std must be positive, got ${edge.strength_std}`,
+        affected_edge_id: edgeId,
+        stage: "coefficient_normalisation",
       });
     }
 
@@ -395,6 +422,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "INVALID_BELIEF_EXISTS",
         severity: "error",
         message: `Edge ${edge.from} → ${edge.to}: belief_exists must be in [0, 1], got ${edge.belief_exists}`,
+        affected_edge_id: edgeId,
+        stage: "coefficient_normalisation",
       });
     }
 
@@ -405,7 +434,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "STRENGTH_OUT_OF_RANGE",
         severity: "error",
         message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
-        suggestion: "Standardised coefficients should be in [-1, +1] range.",
+        affected_edge_id: edgeId,
+        suggestion: "Clamp value to [-1, +1] range",
+        stage: "coefficient_normalisation",
       });
     }
 
@@ -421,7 +452,9 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         code: "NEGLIGIBLE_STRENGTH",
         severity: "info",
         message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength_mean.toFixed(2)}). Consider removing.`,
+        affected_edge_id: edgeId,
         suggestion: "Edges with |strength| < 0.05 have minimal impact on outcomes.",
+        stage: "coefficient_normalisation",
       });
     }
   }
@@ -435,6 +468,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  */
 function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   const warnings: ValidationWarningV3T[] = [];
+  const stage = "connectivity_check";
 
   // Build edge set for bidirectional detection
   const edgeSet = new Set<string>();
@@ -447,6 +481,8 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
 
   // Check for self-loops and bidirectional edges in a single pass
   for (const edge of response.edges) {
+    const edgeId = `${edge.from}→${edge.to}`;
+
     // Self-loop detection: node pointing to itself
     if (edge.from === edge.to) {
       warnings.push({
@@ -454,7 +490,9 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
         severity: "error",
         message: `Self-loop detected: ${edge.from} → ${edge.to}`,
         affected_node_id: edge.from,
+        affected_edge_id: edgeId,
         suggestion: "Remove self-referential edge. Nodes cannot influence themselves directly.",
+        stage,
       });
     }
 
@@ -468,7 +506,9 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
         severity: "error",
         message: `Bidirectional edges detected: ${edge.from} ↔ ${edge.to}`,
         affected_node_id: edge.from,
+        affected_edge_id: `${edge.from}↔${edge.to}`,
         suggestion: "Remove one direction to maintain DAG structure. Bidirectional causality is not supported.",
+        stage,
       });
     }
   }
@@ -489,7 +529,8 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
       severity: "error",
       message: `Cycle detected in graph: ${cycle.join(" → ")}`,
       affected_node_id: cycle[0],
-      suggestion: "Remove or redirect edges to eliminate the cycle. CEE graphs must be DAGs.",
+      suggestion: "Break cycle by removing one edge. CEE graphs must be DAGs.",
+      stage,
     });
   }
 
@@ -509,6 +550,7 @@ function validateOptions(
   const optionIds = response.options.map((option) => option.id);
   const optionIdSet = new Set(optionIds);
   const optionNodeIdSet = new Set(optionNodeIds);
+  const stage = "option_validation";
 
   for (const optionNodeId of optionNodeIds) {
     if (!optionIdSet.has(optionNodeId)) {
@@ -518,6 +560,7 @@ function validateOptions(
         message: `Option node "${optionNodeId}" has no matching entry in options[]`,
         affected_option_id: optionNodeId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
+        stage,
       });
     }
   }
@@ -530,6 +573,7 @@ function validateOptions(
         message: `Option "${optionId}" exists in options[] but no option node matches`,
         affected_option_id: optionId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
+        stage,
       });
     }
   }
@@ -545,6 +589,7 @@ function validateOptions(
         severity: "error",
         message: `Duplicate option ID: "${option.id}"`,
         affected_option_id: option.id,
+        stage,
       });
     }
     seenIds.add(option.id);
@@ -564,6 +609,7 @@ function validateOptions(
         message: `Options "${option.id}" and "${existingOptionId}" have identical interventions`,
         affected_option_id: option.id,
         suggestion: "Options must differ in at least one intervention value",
+        stage,
       });
     } else {
       interventionSignatures.set(interventionEntries, option.id);
@@ -577,6 +623,7 @@ function validateOptions(
         message: `Invalid option ID format: "${option.id}"`,
         affected_option_id: option.id,
         suggestion: "Use only lowercase letters, numbers, underscores, colons, and hyphens",
+        stage,
       });
     }
 
@@ -589,6 +636,7 @@ function validateOptions(
         message: `Option "${option.id}" has status='ready' but no interventions`,
         affected_option_id: option.id,
         suggestion: "Add interventions or change status to 'needs_user_mapping'",
+        stage,
       });
     }
 
@@ -599,6 +647,7 @@ function validateOptions(
         severity: "error",
         message: `Option "${option.id}" has status='${option.status}' but ready is required`,
         affected_option_id: option.id,
+        stage,
       });
     }
 
@@ -614,6 +663,7 @@ function validateOptions(
         message: `Option "${option.id}" needs user mapping but has no user_questions or unresolved_targets`,
         affected_option_id: option.id,
         suggestion: "Add user_questions to guide the user on what to provide",
+        stage,
       });
     }
   }
@@ -632,6 +682,7 @@ function validateInterventions(
   const nodeIds = new Set(response.nodes.map((n) => n.id));
   const factorNodes = response.nodes.filter((n) => n.kind === "factor");
   const factorIds = new Set(factorNodes.map((n) => n.id));
+  const stage = "intervention_validation";
 
   for (const option of response.options) {
     for (const [factorId, intervention] of Object.entries(option.interventions)) {
@@ -643,6 +694,7 @@ function validateInterventions(
           message: `Option "${option.id}": intervention target "${intervention.target_match.node_id}" not found`,
           affected_option_id: option.id,
           affected_node_id: intervention.target_match.node_id,
+          stage,
         });
         continue;
       }
@@ -656,6 +708,7 @@ function validateInterventions(
           affected_option_id: option.id,
           affected_node_id: intervention.target_match.node_id,
           suggestion: "Interventions should target factor nodes",
+          stage,
         });
       }
 
@@ -674,6 +727,7 @@ function validateInterventions(
             affected_option_id: option.id,
             affected_node_id: intervention.target_match.node_id,
             suggestion: "Ensure intervention targets are connected to the goal",
+            stage,
           });
         }
       }
@@ -686,6 +740,7 @@ function validateInterventions(
           message: `Option "${option.id}": intervention value must be numeric, got ${typeof intervention.value}`,
           affected_option_id: option.id,
           affected_node_id: factorId,
+          stage,
         });
       }
 
@@ -705,6 +760,7 @@ function validateInterventions(
           affected_option_id: option.id,
           affected_node_id: factorId,
           suggestion: "Verify units are compatible or intended to differ",
+          stage,
         });
       }
 
@@ -717,6 +773,7 @@ function validateInterventions(
           affected_option_id: option.id,
           affected_node_id: factorId,
           suggestion: "Review the target mapping for accuracy",
+          stage,
         });
       }
     }

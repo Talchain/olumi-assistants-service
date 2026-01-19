@@ -36,6 +36,19 @@ const TestPromptLLMRequestSchema = z.object({
 
 type TestPromptLLMRequest = z.infer<typeof TestPromptLLMRequestSchema>;
 
+/**
+ * Extended validation issue with rich metadata for debugging.
+ */
+interface ExtendedValidationIssue {
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  suggestion?: string;
+  affected_node_id?: string;
+  affected_edge_id?: string;
+  stage?: string;
+}
+
 interface TestPromptLLMResponse {
   request_id: string;
   success: boolean;
@@ -86,7 +99,10 @@ interface TestPromptLLMResponse {
     };
     validation: {
       passed: boolean;
-      issues: Array<{ code: string; message: string }>;
+      issues: ExtendedValidationIssue[];
+      error_count: number;
+      warning_count: number;
+      info_count: number;
     };
   };
 }
@@ -426,6 +442,156 @@ interface ParsedGraph {
   node_counts: Record<string, number>;
 }
 
+/**
+ * Run basic structural validation on parsed graph.
+ * Returns extended validation issues with severity, suggestions, etc.
+ */
+function runBasicValidation(graph: ParsedGraph): ExtendedValidationIssue[] {
+  const issues: ExtendedValidationIssue[] = [];
+  const nodeIds = new Set<string>();
+  const nodeKindMap = new Map<string, string>();
+
+  // Validate nodes
+  for (const node of graph.nodes) {
+    const nodeRecord = node as Record<string, unknown>;
+    const id = nodeRecord.id as string;
+    const kind = (nodeRecord.kind ?? nodeRecord.type ?? 'unknown') as string;
+
+    if (!id) {
+      issues.push({
+        code: 'MISSING_NODE_ID',
+        severity: 'error',
+        message: 'Node is missing an id field',
+        stage: 'node_validation',
+      });
+      continue;
+    }
+
+    // Check for duplicate IDs
+    if (nodeIds.has(id)) {
+      issues.push({
+        code: 'DUPLICATE_NODE_ID',
+        severity: 'error',
+        message: `Duplicate node ID: "${id}"`,
+        affected_node_id: id,
+        suggestion: 'Ensure all node IDs are unique',
+        stage: 'node_validation',
+      });
+    }
+    nodeIds.add(id);
+    nodeKindMap.set(id, kind);
+  }
+
+  // Validate edges
+  const edgeSet = new Set<string>();
+  for (const edge of graph.edges) {
+    const edgeRecord = edge as Record<string, unknown>;
+    const from = edgeRecord.from as string;
+    const to = edgeRecord.to as string;
+
+    if (!from || !to) {
+      issues.push({
+        code: 'MALFORMED_EDGE',
+        severity: 'error',
+        message: 'Edge is missing from or to field',
+        stage: 'edge_validation',
+      });
+      continue;
+    }
+
+    const edgeId = `${from}→${to}`;
+
+    // Check self-loops
+    if (from === to) {
+      issues.push({
+        code: 'SELF_LOOP_DETECTED',
+        severity: 'error',
+        message: `Self-loop detected: ${from} → ${to}`,
+        affected_node_id: from,
+        affected_edge_id: edgeId,
+        suggestion: 'Remove self-referential edge',
+        stage: 'connectivity_check',
+      });
+    }
+
+    // Check edge endpoints exist
+    if (!nodeIds.has(from)) {
+      issues.push({
+        code: 'EDGE_FROM_NOT_FOUND',
+        severity: 'error',
+        message: `Edge 'from' node "${from}" not found in graph`,
+        affected_node_id: from,
+        affected_edge_id: edgeId,
+        stage: 'edge_validation',
+      });
+    }
+
+    if (!nodeIds.has(to)) {
+      issues.push({
+        code: 'EDGE_TO_NOT_FOUND',
+        severity: 'error',
+        message: `Edge 'to' node "${to}" not found in graph`,
+        affected_node_id: to,
+        affected_edge_id: edgeId,
+        stage: 'edge_validation',
+      });
+    }
+
+    // Check for bidirectional edges
+    const reverseKey = `${to}::${from}`;
+    const forwardKey = `${from}::${to}`;
+    if (edgeSet.has(reverseKey) && from !== to) {
+      issues.push({
+        code: 'BIDIRECTIONAL_EDGE',
+        severity: 'error',
+        message: `Bidirectional edges detected: ${from} ↔ ${to}`,
+        affected_node_id: from,
+        affected_edge_id: `${from}↔${to}`,
+        suggestion: 'Remove one direction to maintain DAG structure',
+        stage: 'connectivity_check',
+      });
+    }
+    edgeSet.add(forwardKey);
+
+    // Validate strength if present
+    const strengthMean = edgeRecord.strength_mean as number | undefined;
+    if (strengthMean !== undefined && (strengthMean < -1 || strengthMean > 1)) {
+      issues.push({
+        code: 'STRENGTH_OUT_OF_RANGE',
+        severity: 'error',
+        message: `Edge ${edgeId}: strength_mean ${strengthMean.toFixed(2)} outside canonical range [-1, +1]`,
+        affected_edge_id: edgeId,
+        suggestion: 'Clamp value to [-1, +1] range',
+        stage: 'coefficient_normalisation',
+      });
+    }
+  }
+
+  // Check for goal node
+  const goalNodes = graph.nodes.filter(
+    (n) => (n as Record<string, unknown>).kind === 'goal'
+  );
+  if (goalNodes.length === 0) {
+    issues.push({
+      code: 'NO_GOAL_NODE',
+      severity: 'error',
+      message: 'Graph has no goal node',
+      suggestion: 'Add a node with kind="goal"',
+      stage: 'goal_validation',
+    });
+  } else if (goalNodes.length > 1) {
+    issues.push({
+      code: 'MULTIPLE_GOALS',
+      severity: 'error',
+      message: `Graph has ${goalNodes.length} goal nodes, expected exactly 1`,
+      suggestion: 'Keep only one goal node',
+      stage: 'goal_validation',
+    });
+  }
+
+  return issues;
+}
+
 function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?: ParsedGraph; error?: string } {
   try {
     // Handle markdown code blocks
@@ -616,14 +782,39 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         const graphParse = parseGraphFromLLMOutput(llmResult.raw_output);
 
         if (graphParse.success && graphParse.graph) {
+          // Build validation issues with extended schema
+          const validationIssues: ExtendedValidationIssue[] = [];
+
+          if (graphParse.graph.nodes.length === 0) {
+            validationIssues.push({
+              code: 'EMPTY_GRAPH',
+              severity: 'error',
+              message: 'Graph has no nodes',
+              suggestion: 'Ensure the LLM output includes a nodes array with at least one node',
+              stage: 'json_parse',
+            });
+          }
+
+          // Run basic structural validation
+          const basicValidation = runBasicValidation(graphParse.graph);
+          validationIssues.push(...basicValidation);
+
+          // Count issues by severity
+          const errorCount = validationIssues.filter((i) => i.severity === 'error').length;
+          const warningCount = validationIssues.filter((i) => i.severity === 'warning').length;
+          const infoCount = validationIssues.filter((i) => i.severity === 'info').length;
+
           response.result = {
             graph: {
               nodes: graphParse.graph.nodes,
               edges: graphParse.graph.edges,
             },
             validation: {
-              passed: graphParse.graph.nodes.length > 0,
-              issues: graphParse.graph.nodes.length === 0 ? [{ code: 'EMPTY_GRAPH', message: 'Graph has no nodes' }] : [],
+              passed: errorCount === 0,
+              issues: validationIssues,
+              error_count: errorCount,
+              warning_count: warningCount,
+              info_count: infoCount,
             },
           };
 
@@ -631,6 +822,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
             stages: [
               { name: 'llm_draft', status: 'success', duration_ms: llmResult.duration_ms },
               { name: 'json_parse', status: 'success', duration_ms: 0 },
+              { name: 'validation', status: errorCount === 0 ? 'success' : 'failed', duration_ms: 0 },
             ],
             repairs_applied: [],
             node_counts: {

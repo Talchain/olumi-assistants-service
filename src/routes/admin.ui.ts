@@ -460,6 +460,101 @@ function generateAdminUI(): string {
     .stage-status-success_with_repairs { background: #fef3c7; color: #92400e; }
     .stage-status-failed { background: #fee2e2; color: #dc2626; }
     .stage-status-skipped { background: #f3f4f6; color: #6b7280; }
+    /* Validation Issues Styles */
+    .validation-issues-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .validation-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .validation-badge-error { background: #fee2e2; color: #dc2626; }
+    .validation-badge-warning { background: #fef3c7; color: #d97706; }
+    .validation-badge-info { background: #dbeafe; color: #2563eb; }
+    .validation-filter {
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      background: white;
+      cursor: pointer;
+    }
+    .validation-issue {
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      font-size: 0.85rem;
+    }
+    .validation-issue.severity-error {
+      border-left-color: #dc2626;
+      background: #fef2f2;
+    }
+    .validation-issue.severity-warning {
+      border-left-color: #d97706;
+      background: #fffbeb;
+    }
+    .validation-issue.severity-info {
+      border-left-color: #2563eb;
+      background: #eff6ff;
+    }
+    .validation-issue-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .validation-issue-icon {
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    .validation-issue-icon.error { color: #dc2626; }
+    .validation-issue-icon.warning { color: #d97706; }
+    .validation-issue-icon.info { color: #2563eb; }
+    .validation-issue-code {
+      font-family: monospace;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #374151;
+    }
+    .validation-issue-copy {
+      margin-left: auto;
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .validation-issue-copy:hover { background: #e5e7eb; }
+    .validation-issue-message {
+      color: #4b5563;
+      margin-bottom: 4px;
+    }
+    .validation-issue-details {
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+    .validation-issue-suggestion {
+      font-size: 0.75rem;
+      color: #059669;
+      margin-top: 4px;
+    }
+    .validation-issue-stage {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+    .validation-regression { color: #dc2626; font-weight: 600; }
+    .validation-improvement { color: #059669; font-weight: 600; }
     .spinner {
       display: inline-block;
       width: 16px;
@@ -764,6 +859,13 @@ function generateAdminUI(): string {
                           <span class="test-result-fail" x-text="llmBatchResults.filter(r => !r.success).length"></span>
                         </div>
                         <div class="batch-summary-stat">
+                          <span>Validation Issues:</span>
+                          <span>
+                            <span class="validation-badge validation-badge-error" x-text="'● ' + llmBatchResults.reduce((sum, r) => sum + (r.validationErrors || 0), 0)"></span>
+                            <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + llmBatchResults.reduce((sum, r) => sum + (r.validationWarnings || 0), 0)"></span>
+                          </span>
+                        </div>
+                        <div class="batch-summary-stat">
                           <span>Avg Node Count:</span>
                           <span x-text="Math.round(llmBatchResults.filter(r => r.nodeCount).reduce((a, b) => a + b.nodeCount, 0) / llmBatchResults.filter(r => r.nodeCount).length) || 'N/A'"></span>
                         </div>
@@ -909,6 +1011,64 @@ function generateAdminUI(): string {
                                                 <span class="stage-status" :class="'stage-status-' + stage.status" x-text="stage.status"></span>
                                                 <span class="text-muted" style="font-size: 0.75rem; margin-left: 8px;" x-text="stage.duration_ms + 'ms'"></span>
                                               </div>
+                                            </div>
+                                          </template>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Validation Issues -->
+                                  <template x-if="tc.llmResult.fullResponse?.result?.validation?.issues?.length > 0">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showValidation = !tc.llmResult.showValidation" :class="tc.llmResult.fullResponse.result.validation.error_count > 0 ? 'validation-has-errors' : ''">
+                                        <div class="validation-issues-header">
+                                          <span>Validation Issues</span>
+                                          <span class="validation-badge validation-badge-error" x-show="tc.llmResult.fullResponse.result.validation.error_count > 0">
+                                            ● <span x-text="tc.llmResult.fullResponse.result.validation.error_count"></span>
+                                          </span>
+                                          <span class="validation-badge validation-badge-warning" x-show="tc.llmResult.fullResponse.result.validation.warning_count > 0">
+                                            ⚠ <span x-text="tc.llmResult.fullResponse.result.validation.warning_count"></span>
+                                          </span>
+                                          <span class="validation-badge validation-badge-info" x-show="tc.llmResult.fullResponse.result.validation.info_count > 0">
+                                            ℹ <span x-text="tc.llmResult.fullResponse.result.validation.info_count"></span>
+                                          </span>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                          <select class="validation-filter" x-model="tc.llmResult.validationFilter" @click.stop>
+                                            <option value="all">All</option>
+                                            <option value="error">Errors</option>
+                                            <option value="warning">Warnings</option>
+                                            <option value="info">Info</option>
+                                          </select>
+                                          <span x-text="tc.llmResult.showValidation ? '▼' : '▶'"></span>
+                                        </div>
+                                      </div>
+                                      <template x-if="tc.llmResult.showValidation">
+                                        <div class="collapsible-content">
+                                          <template x-for="issue in tc.llmResult.fullResponse.result.validation.issues.filter(i => (tc.llmResult.validationFilter || 'all') === 'all' || i.severity === tc.llmResult.validationFilter)" :key="issue.code + (issue.affected_node_id || '') + (issue.affected_edge_id || '')">
+                                            <div class="validation-issue" :class="'severity-' + issue.severity">
+                                              <div class="validation-issue-header">
+                                                <span class="validation-issue-icon" :class="issue.severity" x-text="issue.severity === 'error' ? '●' : issue.severity === 'warning' ? '⚠' : 'ℹ'"></span>
+                                                <span class="validation-issue-code" x-text="issue.code"></span>
+                                                <button class="validation-issue-copy" @click="copyValidationIssue(issue)" title="Copy as JSON">Copy</button>
+                                              </div>
+                                              <div class="validation-issue-message" x-text="issue.message"></div>
+                                              <template x-if="issue.affected_node_id || issue.affected_edge_id">
+                                                <div class="validation-issue-details">
+                                                  Affected: <span x-text="issue.affected_edge_id || issue.affected_node_id"></span>
+                                                </div>
+                                              </template>
+                                              <template x-if="issue.suggestion">
+                                                <div class="validation-issue-suggestion">
+                                                  Fix: <span x-text="issue.suggestion"></span>
+                                                </div>
+                                              </template>
+                                              <template x-if="issue.stage">
+                                                <div class="validation-issue-stage">
+                                                  Stage: <span x-text="issue.stage"></span>
+                                                </div>
+                                              </template>
                                             </div>
                                           </template>
                                         </div>
@@ -1392,6 +1552,13 @@ function generateAdminUI(): string {
                               <span class="llm-metric-value" x-text="llmCompareResults.versionA.tokenUsage.total"></span>
                             </div>
                           </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Validation:</span>
+                            <span>
+                              <span class="validation-badge validation-badge-error" x-text="'● ' + (llmCompareResults.versionA.validationErrors || 0)"></span>
+                              <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionA.validationWarnings || 0)"></span>
+                            </span>
+                          </div>
                         </div>
                       </template>
                     </div>
@@ -1461,14 +1628,21 @@ function generateAdminUI(): string {
                               </template>
                             </div>
                           </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Validation:</span>
+                            <span>
+                              <span class="validation-badge validation-badge-error" x-text="'● ' + (llmCompareResults.versionB.validationErrors || 0)"></span>
+                              <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionB.validationWarnings || 0)"></span>
+                              <template x-if="llmCompareResults.deltas?.validationErrors !== 0">
+                                <span :class="llmCompareResults.deltas?.validationErrors > 0 ? 'validation-regression' : 'validation-improvement'"
+                                  x-text="(llmCompareResults.deltas?.validationErrors > 0 ? '▲ ' : '▼ ') + Math.abs(llmCompareResults.deltas?.validationErrors || 0) + ' errors'">
+                                </span>
+                              </template>
+                            </span>
+                          </div>
                         </div>
                       </template>
                     </div>
-                  </div>
-                </div>
-              </div>
-                      </div>
-                    </template>
                   </div>
                 </div>
               </div>
@@ -1640,6 +1814,16 @@ function generateAdminUI(): string {
           setTimeout(() => {
             this.toasts = this.toasts.filter(t => t.id !== id);
           }, duration);
+        },
+
+        // Copy validation issue as JSON
+        copyValidationIssue(issue) {
+          const json = JSON.stringify(issue, null, 2);
+          navigator.clipboard.writeText(json).then(() => {
+            this.showToast('Copied issue to clipboard', 'success', 2000);
+          }).catch(() => {
+            this.showToast('Failed to copy', 'error');
+          });
         },
 
         // Initialize - check for saved session
@@ -2301,6 +2485,8 @@ function generateAdminUI(): string {
                 showRaw: false,
                 showTrace: false,
                 showGraph: false,
+                showValidation: result.validation?.error_count > 0, // Auto-expand if errors
+                validationFilter: 'all',
               };
 
               this.showToast('LLM test passed - ' + tc.llmResult.nodeCount + ' nodes, ' + tc.llmResult.latencyMs + 'ms', 'success');
@@ -2382,6 +2568,8 @@ function generateAdminUI(): string {
               repairsApplied: tc.llmResult?.repairsApplied ?? 0,
               latencyMs: tc.llmResult?.latencyMs ?? 0,
               error: tc.llmResult?.error,
+              validationErrors: tc.llmResult?.fullResponse?.result?.validation?.error_count ?? 0,
+              validationWarnings: tc.llmResult?.fullResponse?.result?.validation?.warning_count ?? 0,
             });
 
             // Small delay between tests to avoid overwhelming the server
@@ -2486,6 +2674,8 @@ function generateAdminUI(): string {
                   model: llmData.model,
                   provider: llmData.provider,
                   nodeCounts: pipeline.node_counts,
+                  validationErrors: result.validation?.error_count ?? 0,
+                  validationWarnings: result.validation?.warning_count ?? 0,
                 };
               } else {
                 return {
@@ -2531,6 +2721,8 @@ function generateAdminUI(): string {
               repairs: (resultB.repairsApplied ?? 0) - (resultA.repairsApplied ?? 0),
               latency: (resultB.latencyMs ?? 0) - (resultA.latencyMs ?? 0),
               tokens: ((resultB.tokenUsage?.total ?? 0) - (resultA.tokenUsage?.total ?? 0)),
+              validationErrors: (resultB.validationErrors ?? 0) - (resultA.validationErrors ?? 0),
+              validationWarnings: (resultB.validationWarnings ?? 0) - (resultA.validationWarnings ?? 0),
             },
           };
 

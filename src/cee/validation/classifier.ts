@@ -124,23 +124,71 @@ export function summariseValidationIssues(issues: CEEValidationIssue[]): CeeVali
   };
 }
 
+/**
+ * Deterministic suggestion mappings for validation codes.
+ * These provide actionable fix guidance for common issues.
+ */
+const SUGGESTION_MAP: Record<string, string> = {
+  STRENGTH_OUT_OF_RANGE: "Clamp value to [-1, +1] range",
+  SELF_LOOP_DETECTED: "Remove self-referential edge",
+  GRAPH_CONTAINS_CYCLE: "Break cycle by removing one edge",
+  DISCONNECTED_NODE: "Connect node to graph or remove it",
+  BIDIRECTIONAL_EDGE: "Remove one direction to maintain DAG structure",
+  INVALID_EDGE_TYPE: "Use only allowed edge patterns: decision→option, option→factor, factor→outcome/risk/factor, outcome/risk→goal",
+  INVALID_FACTOR_TO_CONTROLLABLE: "Controllable factors should only be set by interventions, not influenced by other factors",
+  DUPLICATE_NODE_ID: "Ensure all node IDs are unique",
+  INVALID_NODE_ID: "Use IDs starting with a letter followed by alphanumeric characters, underscores, or hyphens",
+  GOAL_NODE_MISSING: "Add a goal node or ensure goal_node_id references an existing node",
+  EMPTY_INTERVENTIONS_READY: "Add interventions or change status to 'needs_user_mapping'",
+  UNIFORM_STRENGTHS: "Review edge strengths — different relationships should have different effect sizes",
+  EFFECT_DIRECTION_MISMATCH: "Ensure effect_direction matches the sign of strength_mean",
+  INVALID_STRENGTH_STD: "strength_std must be positive",
+  INVALID_BELIEF_EXISTS: "belief_exists must be in [0, 1] range",
+};
+
+/**
+ * Get deterministic suggestion for a validation code.
+ */
+export function getSuggestionForCode(code: string): string | undefined {
+  return SUGGESTION_MAP[code.toUpperCase()];
+}
+
 export function createValidationIssue(input: {
   code: string;
   message?: string;
   field?: string;
   details?: Record<string, unknown>;
+  suggestion?: string;
+  affected_node_id?: string;
+  affected_edge_id?: string;
+  stage?: string;
   // Optional explicit severity override; when omitted we derive it from the code.
   severityOverride?: CeeSeverity;
 }): CEEValidationIssue {
   const severity = input.severityOverride ?? classifyIssueSeverity(input.code);
+
+  // Use provided suggestion or fall back to deterministic mapping
+  const suggestion = input.suggestion ?? getSuggestionForCode(input.code);
 
   const issue: CEEValidationIssue = {
     code: input.code,
     severity,
     ...(input.field ? { field: input.field } : {}),
     ...(input.message ? { message: input.message } : {}),
+    ...(suggestion ? { suggestion } : {}),
     ...(input.details ? { details: input.details } : {}),
+    // Store affected_node_id, affected_edge_id, stage in meta for API compatibility
+    meta: {
+      ...(input.affected_node_id ? { affected_node_id: input.affected_node_id } : {}),
+      ...(input.affected_edge_id ? { affected_edge_id: input.affected_edge_id } : {}),
+      ...(input.stage ? { stage: input.stage } : {}),
+    },
   };
+
+  // Clean up empty meta object
+  if (issue.meta && Object.keys(issue.meta).length === 0) {
+    delete issue.meta;
+  }
 
   return issue;
 }

@@ -260,8 +260,12 @@ export const ValidationWarningV3 = z.object({
   affected_option_id: z.string().optional(),
   /** Affected node ID */
   affected_node_id: z.string().optional(),
+  /** Affected edge ID in format "from_id→to_id" */
+  affected_edge_id: z.string().optional(),
   /** Suggested fix */
   suggestion: z.string().optional(),
+  /** Pipeline stage that detected this issue */
+  stage: z.string().optional(),
 });
 export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
 
