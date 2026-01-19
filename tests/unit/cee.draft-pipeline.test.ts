@@ -180,7 +180,8 @@ describe("CEE draft pipeline - finaliseCeeDraftResponse", () => {
     expect(success.trace).toBeDefined();
     expect(success.trace.request_id).toBe("cee-unit-req-1");
     expect(success.trace.correlation_id).toBe("cee-unit-req-1");
-    expect(success.trace.engine).toEqual({ provider: "fixtures", model: "fixture-v1" });
+    expect(success.trace.engine).toMatchObject({ provider: "fixtures", model: "fixture-v1" });
+    expect(success.trace.engine.version).toBeDefined();
 
     expect(success.quality).toBeDefined();
     expect(typeof success.quality.overall).toBe("number");

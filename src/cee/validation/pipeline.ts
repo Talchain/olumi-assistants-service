@@ -39,6 +39,7 @@ import {
 import { randomUUID, createHash } from "node:crypto";
 import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
 import { createCorrectionCollector, type CorrectionCollector } from "../corrections.js";
+import { SERVICE_VERSION } from "../../version.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -1233,7 +1234,7 @@ export async function finaliseCeeDraftResponse(
       trace: {
         request_id: requestId,
         correlation_id: requestId,
-        engine: { provider, model },
+        engine: { provider, model, version: SERVICE_VERSION },
         pipeline: {
           status: "success",
           total_duration_ms: Date.now() - start,
@@ -2176,6 +2177,7 @@ export async function finaliseCeeDraftResponse(
     engine: {
       provider,
       model,
+      version: SERVICE_VERSION,
     },
     ...(llmMeta ? {
       prompt_version: llmMeta.prompt_version,
