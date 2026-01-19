@@ -1,6 +1,12 @@
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { Ambiguity } from "./ambiguity-detector.js";
 
+/**
+ * Clarifier uses reduced caps (30 nodes, 50 edges) for iterative refinement.
+ * This allows expansion headroom before hitting the hard limits (50 nodes, 200 edges)
+ * defined in graphCaps.ts. During clarification, the graph may grow as the user
+ * provides more detail, so we start with conservative limits.
+ */
 export const ANSWER_INCORPORATION_SYSTEM_PROMPT = `You are an expert at refining decision graphs based on user clarification.
 
 Your task is to minimally adjust an existing decision graph to incorporate new information from the user's answer to a clarifying question.
