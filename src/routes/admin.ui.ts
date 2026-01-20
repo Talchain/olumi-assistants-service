@@ -2343,7 +2343,7 @@ function generateAdminUI(): string {
         async loadAvailableModels() {
           try {
             const res = await fetch('/admin/v1/test-prompt-llm/models', {
-              headers: { 'X-Admin-Key': this.adminKey },
+              headers: { 'X-Admin-Key': this.apiKey },
             });
             if (res.ok) {
               const data = await res.json();
@@ -2419,7 +2419,7 @@ function generateAdminUI(): string {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'X-Admin-Key': this.adminKey,
+                'X-Admin-Key': this.apiKey,
               },
               body: JSON.stringify(requestBody),
               signal: controller.signal,
@@ -2634,7 +2634,7 @@ function generateAdminUI(): string {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'X-Admin-Key': this.adminKey,
+                  'X-Admin-Key': this.apiKey,
                 },
                 body: JSON.stringify(requestBody),
                 signal: controller.signal,
