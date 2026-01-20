@@ -1506,7 +1506,7 @@ function generateAdminUI(): string {
                   <!-- Version A Results -->
                   <div class="compare-panel">
                     <div class="compare-panel-header">
-                      Version <span x-text="llmCompareVersionA"></span>
+                      Version <span x-text="llmCompareResults.versionA.versionNum || llmCompareVersionA"></span>
                       <template x-if="llmCompareResults.versionA.success">
                         <span class="test-result-pass"> (Success)</span>
                       </template>
@@ -1567,7 +1567,7 @@ function generateAdminUI(): string {
                   <!-- Version B Results -->
                   <div class="compare-panel">
                     <div class="compare-panel-header">
-                      Version <span x-text="llmCompareVersionB"></span>
+                      Version <span x-text="llmCompareResults.versionB.versionNum || llmCompareVersionB"></span>
                       <template x-if="llmCompareResults.versionB.success">
                         <span class="test-result-pass"> (Success)</span>
                       </template>

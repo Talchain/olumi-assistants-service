@@ -18,7 +18,21 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider } from '../config/models.js';
+import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel } from '../config/models.js';
+
+/**
+ * Check if a model requires max_completion_tokens instead of max_tokens.
+ * This applies to reasoning models and all GPT-5.x models.
+ */
+function needsMaxCompletionTokens(model: string): boolean {
+  // Reasoning models always need max_completion_tokens
+  if (isReasoningModel(model)) return true;
+  // GPT-5.x models (including gpt-5-mini, gpt-5.2, etc.) require max_completion_tokens
+  if (model.startsWith('gpt-5')) return true;
+  // o1 models also need it
+  if (model.startsWith('o1')) return true;
+  return false;
+}
 
 // ============================================================================
 // Types
@@ -397,11 +411,20 @@ async function callOpenAIWithPrompt(
   const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
 
   try {
+    // Build request params - GPT-5.x and reasoning models need max_completion_tokens
+    const useMaxCompletionTokens = needsMaxCompletionTokens(model);
+    const tokenParam = useMaxCompletionTokens
+      ? { max_completion_tokens: maxTokens }
+      : { max_tokens: maxTokens };
+
+    // Reasoning models don't support temperature
+    const tempParam = isReasoningModel(model) ? {} : { temperature };
+
     const response = await client.chat.completions.create(
       {
         model,
-        max_tokens: maxTokens,
-        temperature,
+        ...tokenParam,
+        ...tempParam,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
@@ -850,6 +873,12 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
             },
           };
 
+          // Mark test as failed if there are validation errors
+          if (errorCount > 0) {
+            response.success = false;
+            response.error = `Validation failed with ${errorCount} error(s)`;
+          }
+
           response.pipeline = {
             stages: [
               { name: 'llm_draft', status: 'success', duration_ms: llmResult.duration_ms },
@@ -864,6 +893,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
             total_duration_ms: Date.now() - startTime,
           };
         } else {
+          // JSON parse failed - mark overall test as failed
+          response.success = false;
           response.error = graphParse.error;
           response.pipeline = {
             stages: [
