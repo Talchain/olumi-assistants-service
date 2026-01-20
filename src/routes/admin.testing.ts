@@ -34,6 +34,20 @@ function needsMaxCompletionTokens(model: string): boolean {
   return false;
 }
 
+/**
+ * Check if a model doesn't support custom temperature values.
+ * GPT-5.x models only support temperature=1 (default).
+ */
+function doesNotSupportCustomTemperature(model: string): boolean {
+  // Reasoning models don't support temperature at all
+  if (isReasoningModel(model)) return true;
+  // GPT-5.x models only support default temperature (1)
+  if (model.startsWith('gpt-5')) return true;
+  // o1 models don't support temperature
+  if (model.startsWith('o1')) return true;
+  return false;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -417,8 +431,8 @@ async function callOpenAIWithPrompt(
       ? { max_completion_tokens: maxTokens }
       : { max_tokens: maxTokens };
 
-    // Reasoning models don't support temperature
-    const tempParam = isReasoningModel(model) ? {} : { temperature };
+    // GPT-5.x and reasoning models don't support custom temperature
+    const tempParam = doesNotSupportCustomTemperature(model) ? {} : { temperature };
 
     const response = await client.chat.completions.create(
       {
