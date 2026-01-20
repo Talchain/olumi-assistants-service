@@ -10,6 +10,53 @@
 
 import { registerDefaultPrompt } from './loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
+import { getDraftGraphPromptV8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
+import { log } from '../utils/telemetry.js';
+
+// ============================================================================
+// Prompt Version Selection
+// ============================================================================
+
+/**
+ * Supported prompt versions for draft_graph.
+ * Use PROMPT_VERSION env var to select: 'v6' (default), 'v8', or future versions.
+ *
+ * Examples:
+ *   PROMPT_VERSION=v6  -> Use v6.0.2 (verbose, explicit checklist)
+ *   PROMPT_VERSION=v8  -> Use v8.2 (concise, reasoning-optimized)
+ */
+export type PromptVersion = 'v6' | 'v8';
+
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8']);
+const DEFAULT_VERSION: PromptVersion = 'v6';
+
+/**
+ * Get the configured prompt version from environment.
+ * Returns the version string and whether it was explicitly set.
+ */
+export function getPromptVersion(): { version: PromptVersion; explicit: boolean } {
+  const envValue = process.env.PROMPT_VERSION?.toLowerCase().trim();
+
+  if (!envValue) {
+    return { version: DEFAULT_VERSION, explicit: false };
+  }
+
+  // Normalize: accept 'v6', '6', 'v8', '8' etc.
+  const normalized = envValue.startsWith('v') ? envValue : `v${envValue}`;
+
+  if (VALID_VERSIONS.has(normalized as PromptVersion)) {
+    return { version: normalized as PromptVersion, explicit: true };
+  }
+
+  log.warn(
+    { envValue, defaultVersion: DEFAULT_VERSION },
+    `Invalid PROMPT_VERSION "${envValue}", falling back to "${DEFAULT_VERSION}"`
+  );
+  return { version: DEFAULT_VERSION, explicit: false };
+}
+
+// Re-export v8 schema for adapters that need it
+export { GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 };
 
 // ============================================================================
 // Draft Graph Prompt
@@ -914,12 +961,32 @@ Respond ONLY with valid JSON.`;
 /**
  * Register all default prompts.
  * Called during server initialization to populate the fallback registry.
+ *
+ * The draft_graph prompt version is selected via PROMPT_VERSION env var:
+ * - v6 (default): Verbose v6.0.2 with explicit checklist
+ * - v8: Concise v8.2 optimized for reasoning LLMs
  */
 export function registerAllDefaultPrompts(): void {
-  // Interpolate graph caps into draft prompt
-  const draftPromptWithCaps = DRAFT_GRAPH_PROMPT
-    .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
-    .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+  // Select draft_graph prompt version based on env var
+  const { version, explicit } = getPromptVersion();
+
+  let draftPromptWithCaps: string;
+  if (version === 'v8') {
+    draftPromptWithCaps = getDraftGraphPromptV8();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v8.2 (${explicit ? 'explicitly configured' : 'env override'})`
+    );
+  } else {
+    // Default: v6.0.2
+    draftPromptWithCaps = DRAFT_GRAPH_PROMPT
+      .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
+      .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v6.0.2 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  }
 
   registerDefaultPrompt('draft_graph', draftPromptWithCaps);
   registerDefaultPrompt('suggest_options', SUGGEST_OPTIONS_PROMPT);
@@ -941,6 +1008,8 @@ export function registerAllDefaultPrompts(): void {
  */
 export const PROMPT_TEMPLATES = {
   draft_graph: DRAFT_GRAPH_PROMPT,
+  draft_graph_v6: DRAFT_GRAPH_PROMPT,
+  draft_graph_v8: getDraftGraphPromptV8(),
   suggest_options: SUGGEST_OPTIONS_PROMPT,
   repair_graph: REPAIR_GRAPH_PROMPT,
   clarify_brief: CLARIFY_BRIEF_PROMPT,
@@ -949,3 +1018,16 @@ export const PROMPT_TEMPLATES = {
   bias_check: BIAS_CHECK_PROMPT,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
+
+/**
+ * Get prompt template by version.
+ * Useful for A/B testing or explicit version selection in tests.
+ */
+export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v8') {
+    return getDraftGraphPromptV8();
+  }
+  return DRAFT_GRAPH_PROMPT
+    .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
+    .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+}
