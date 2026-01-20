@@ -761,7 +761,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       if (!model) {
         // Default models based on task
         if (prompt.taskId === 'draft_graph') {
-          model = 'gpt-4o';
+          model = 'gpt-5.2';
         } else {
           model = 'gpt-4o-mini';
         }
