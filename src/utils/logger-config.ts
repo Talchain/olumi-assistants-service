@@ -38,6 +38,10 @@ export const REDACT_PATHS = [
   "*.headers.x-hmac-signature",
   "*.headers.x-share-token",
   "*.headers.cookie",
+  // HMAC auth headers (timing attack vectors if exposed)
+  "*.headers.x-olumi-signature",
+  "*.headers.x-olumi-nonce",
+  "*.headers.x-olumi-timestamp",
 
   // PII fields
   "*.email",

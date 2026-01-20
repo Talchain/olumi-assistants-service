@@ -50,7 +50,7 @@ describe("CEE hero journey: engine degraded mode", () => {
 
     const draftRes = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for trace/validation_issues tests
       headers: {
         "X-Olumi-Assist-Key": "cee-hero-degraded-key",
         [SSE_DEGRADED_HEADER_NAME]: SSE_DEGRADED_REDIS_REASON,

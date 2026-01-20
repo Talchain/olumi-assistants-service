@@ -8,6 +8,20 @@ export const REQUEST_ID_HEADER = 'X-Request-Id';
 export const REQUEST_ID_HEADER_LOWER = 'x-request-id';
 
 /**
+ * Safe request ID pattern - alphanumeric with dots, underscores, hyphens
+ * Max 64 characters to prevent header injection and log pollution
+ */
+export const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * Check if request ID matches safe pattern
+ */
+export function isValidRequestId(id: string | undefined | null): boolean {
+  if (!id || typeof id !== "string") return false;
+  return SAFE_REQUEST_ID_PATTERN.test(id);
+}
+
+/**
  * Generate a new request ID (UUID v4)
  */
 export function generateRequestId(): string {
@@ -16,9 +30,11 @@ export function generateRequestId(): string {
 
 /**
  * Extract request ID from incoming headers or generate a new one
+ * Validates against SAFE_REQUEST_ID_PATTERN and regenerates on violation
  *
  * @param request Fastify request object
- * @returns Request ID string
+ * @param logger Optional logger for warnings on invalid IDs
+ * @returns Request ID string (always safe)
  */
 export function getOrGenerateRequestId(request: FastifyRequest): string {
   if (!request || !request.headers) {
@@ -29,11 +45,21 @@ export function getOrGenerateRequestId(request: FastifyRequest): string {
   const incomingId = request.headers[REQUEST_ID_HEADER_LOWER]
     || request.headers[REQUEST_ID_HEADER];
 
-  if (typeof incomingId === 'string' && incomingId.trim().length > 0) {
-    return incomingId.trim();
+  if (typeof incomingId === 'string') {
+    const trimmed = incomingId.trim();
+    if (isValidRequestId(trimmed)) {
+      return trimmed;
+    }
+    // Log warning for invalid request ID (header injection attempt or malformed)
+    if (trimmed.length > 0 && request.log) {
+      request.log.warn(
+        { invalidRequestId: trimmed.substring(0, 100) },
+        'Invalid request ID rejected, generating new ID'
+      );
+    }
   }
 
-  // Generate new ID if not provided
+  // Generate new ID if not provided or invalid
   return generateRequestId();
 }
 

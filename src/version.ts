@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -31,3 +32,28 @@ export const SERVICE_VERSION =
       }
     }
   })();
+
+/**
+ * Git commit SHA (for deployment tracking)
+ *
+ * Sources (in order of precedence):
+ * 1. GIT_COMMIT_SHA env var (explicit override)
+ * 2. RENDER_GIT_COMMIT env var (auto-set by Render)
+ * 3. Git rev-parse HEAD (for local development)
+ * 4. "unknown" fallback
+ */
+export const GIT_COMMIT_SHA =
+  process.env.GIT_COMMIT_SHA ??
+  process.env.RENDER_GIT_COMMIT ??
+  ((): string => {
+    try {
+      return execSync('git rev-parse HEAD', { encoding: 'utf-8', timeout: 1000 }).trim();
+    } catch {
+      return 'unknown';
+    }
+  })();
+
+/**
+ * Short git commit SHA (first 7 characters)
+ */
+export const GIT_COMMIT_SHORT = GIT_COMMIT_SHA.slice(0, 7);

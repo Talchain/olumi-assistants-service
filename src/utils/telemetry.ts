@@ -1,7 +1,23 @@
 import { env } from "node:process";
+import { createHash, randomBytes } from "crypto";
 import pino from "pino";
 import { StatsD } from "hot-shots";
 import { createLoggerConfig } from "./logger-config.js";
+
+/**
+ * Server salt for IP hashing (stable for session correlation, not stored)
+ * Uses IP_HASH_SALT env var or generates once at boot.
+ * Centralized here to ensure consistent hashing across all modules.
+ */
+const IP_HASH_SALT = env.IP_HASH_SALT || randomBytes(16).toString('hex');
+
+/**
+ * Hash IP address for telemetry/logging (avoids storing raw PII)
+ * Returns first 12 chars of SHA-256 hash (enough for correlation, not reconstruction)
+ */
+export function hashIP(ip: string): string {
+  return createHash('sha256').update(IP_HASH_SALT + ip).digest('hex').substring(0, 12);
+}
 
 /**
  * Pino logger with secret/PII redaction
@@ -104,6 +120,29 @@ export const TelemetryEvents = {
   CeeExplainPolicyCompleted: "cee.explain_policy.completed",
   CeeExplainPolicyFailed: "cee.explain_policy.failed",
 
+  // CEE Preference Elicitation events (Brief 9)
+  CeeElicitPreferencesRequested: "cee.elicit_preferences.requested",
+  CeeElicitPreferencesSucceeded: "cee.elicit_preferences.succeeded",
+  CeeElicitPreferencesFailed: "cee.elicit_preferences.failed",
+
+  CeeElicitPreferencesAnswerRequested: "cee.elicit_preferences_answer.requested",
+  CeeElicitPreferencesAnswerSucceeded: "cee.elicit_preferences_answer.succeeded",
+  CeeElicitPreferencesAnswerFailed: "cee.elicit_preferences_answer.failed",
+
+  CeeExplainTradeoffRequested: "cee.explain_tradeoff.requested",
+  CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
+  CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
+
+  // CEE Ask endpoint events (Working Set)
+  CeeAskRequested: "cee.ask.requested",
+  CeeAskCompleted: "cee.ask.completed",
+  CeeAskFailed: "cee.ask.failed",
+
+  // CEE Review endpoint events (M1 Orchestrator)
+  CeeReviewRequested: "cee.review.requested",
+  CeeReviewSucceeded: "cee.review.succeeded",
+  CeeReviewFailed: "cee.review.failed",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",
@@ -134,7 +173,24 @@ export const TelemetryEvents = {
   CeeVerificationSucceeded: "cee.verification.succeeded",
   CeeVerificationFailed: "cee.verification.failed",
 
+  // Edge direction validation events (Brief G)
+  EdgeDirectionViolationDetected: "cee.edge_direction.violation_detected",
+  EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
+
+  // Uniform strength detection (LLM output quality)
+  CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
+
+  // Goal inference (defence-in-depth for missing goal nodes)
+  CeeGoalInferred: "cee.draft_graph.goal_inferred",
+
+  // Connectivity validation (P0 diagnostics)
+  CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
+
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
+  FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
+
+  // Goal generation tracking (prompt tuning)
+  GoalGeneration: "cee.goal_generation",
 
   // Clarification enforcement events (v1.14 - Phase 5)
   ClarificationRequired: "cee.clarification.required",
@@ -273,6 +329,8 @@ export const TelemetryEvents = {
   PromptStoreCacheHit: "prompt.store.cache.hit",
   PromptStoreCacheMiss: "prompt.store.cache.miss",
   PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+  PromptStoreCacheWarmed: "prompt.store.cache.warmed",
+  PromptStoreBackgroundRefresh: "prompt.store.background_refresh",
 
   // Prompt Test Sandbox events (v2.1)
   PromptTestExecuted: "prompt.test.executed",
@@ -294,6 +352,38 @@ export const TelemetryEvents = {
   CeeGraphValidation: "cee.graph.validation",
   CeeGraphGoalsMerged: "cee.graph.goals_merged",
   CeeGraphSizeExceeded: "cee.graph.size_exceeded",
+
+  // Factor Extraction events (v2.3)
+  FactorExtractionComplete: "cee.factor_extraction.complete",
+
+  // Schema v2 Transform events (v2.3)
+  SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
+
+  // Schema v3 Transform events (v3.0)
+  SchemaV3TransformComplete: "cee.schema_v3.transform_complete",
+  InterventionExtraction: "cee.intervention_extraction",
+
+  // Edge coefficient clamping events (P1-CEE-2)
+  EdgeStrengthClamped: "cee.edge.strength_clamped",
+  EdgeStrengthNegligible: "cee.edge.strength_negligible",
+  EdgeStrengthLow: "cee.edge.strength_low",
+
+  // Analysis-Ready Output events (P0)
+  AnalysisReadyBuilt: "cee.analysis_ready.built",
+  AnalysisReadyValidationFailed: "cee.analysis_ready.validation_failed",
+
+  // ISL Synthesis events (v2.3)
+  IslSynthesisRequested: "cee.isl_synthesis.requested",
+  IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
+  IslSynthesisFailed: "cee.isl_synthesis.failed",
+
+  // Boundary logging events (observability v1)
+  BoundaryRequest: "boundary.request",
+  BoundaryResponse: "boundary.response",
+
+  // Performance timing events (observability v2)
+  LlmCall: "llm.call",
+  DownstreamCall: "downstream.call",
 } as const;
 
 /**
@@ -346,6 +436,26 @@ function sanitizeTelemetryValue(
   }
 
   if (Array.isArray(value)) {
+    // Cap arrays to avoid high-cardinality telemetry
+    const MAX_ARRAY_ITEMS = 10;
+    const SAMPLE_SIZE = 3;
+
+    if (value.length > MAX_ARRAY_ITEMS) {
+      // Truncate large arrays to a summary object
+      const sample: Array<TelemetryLeaf | TelemetryShape> = [];
+      for (let i = 0; i < Math.min(SAMPLE_SIZE, value.length); i++) {
+        const sanitizedItem = sanitizeTelemetryValue(value[i]);
+        if (sanitizedItem !== undefined) {
+          sample.push(sanitizedItem as TelemetryLeaf | TelemetryShape);
+        }
+      }
+      return {
+        truncated: true,
+        count: value.length,
+        sample,
+      } as TelemetryShape;
+    }
+
     const sanitizedArray: Array<TelemetryLeaf | TelemetryShape> = [];
     for (const item of value) {
       const sanitizedItem = sanitizeTelemetryValue(item);
@@ -412,6 +522,14 @@ const ANTHROPIC_PRICING = {
 } as const;
 
 const OPENAI_PRICING = {
+  "gpt-5.2": {
+    input_per_1k: 0.015,   // $15 per million input tokens (reasoning model)
+    output_per_1k: 0.06,   // $60 per million output tokens (reasoning model)
+  },
+  "gpt-5-mini": {
+    input_per_1k: 0.0003,  // $0.30 per million input tokens (fast tier)
+    output_per_1k: 0.0012, // $1.20 per million output tokens (fast tier)
+  },
   "gpt-4o": {
     input_per_1k: 0.0025,  // $2.50 per million input tokens
     output_per_1k: 0.01,   // $10 per million output tokens
@@ -1484,6 +1602,65 @@ export function emit(event: string, data: Event) {
             reason: String((eventData.reason as string) || "unknown"),
             task_id: String((eventData.taskId as string) || "all"),
           });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreCacheWarmed: {
+          datadogClient.gauge("prompt.store.cache.warmed", Number(eventData.warmed) || 0);
+          datadogClient.gauge("prompt.store.cache.warmed_failed", Number(eventData.failed) || 0);
+          datadogClient.gauge("prompt.store.cache.warmed_skipped", Number(eventData.skipped) || 0);
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreBackgroundRefresh: {
+          datadogClient.increment("prompt.store.background_refresh", 1, {
+            task_id: String((eventData.taskId as string) || "unknown"),
+          });
+          break;
+        }
+
+        // Performance timing events (observability v2)
+        case TelemetryEvents.LlmCall: {
+          datadogClient.increment("llm.call", 1, {
+            step: String((eventData.step as string) || "unknown"),
+            model: String((eventData.model as string) || "unknown"),
+            provider: String((eventData.provider as string) || "unknown"),
+          });
+          if (typeof eventData.elapsed_ms === "number") {
+            datadogClient.histogram("llm.call.latency_ms", eventData.elapsed_ms as number, {
+              step: String((eventData.step as string) || "unknown"),
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.tokens_prompt === "number") {
+            datadogClient.histogram("llm.call.tokens_prompt", eventData.tokens_prompt as number, {
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.tokens_completion === "number") {
+            datadogClient.histogram("llm.call.tokens_completion", eventData.tokens_completion as number, {
+              model: String((eventData.model as string) || "unknown"),
+            });
+          }
+          break;
+        }
+
+        case TelemetryEvents.DownstreamCall: {
+          datadogClient.increment("downstream.call", 1, {
+            target: String((eventData.target as string) || "unknown"),
+            operation: String((eventData.operation as string) || "unknown"),
+          });
+          if (typeof eventData.elapsed_ms === "number") {
+            datadogClient.histogram("downstream.call.latency_ms", eventData.elapsed_ms as number, {
+              target: String((eventData.target as string) || "unknown"),
+            });
+          }
+          if (typeof eventData.status === "number") {
+            datadogClient.increment("downstream.call.status", 1, {
+              target: String((eventData.target as string) || "unknown"),
+              status: String(eventData.status),
+            });
+          }
           break;
         }
 

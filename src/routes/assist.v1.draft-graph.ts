@@ -10,6 +10,12 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import {
+  parseSchemaVersion,
+  transformResponseToV2,
+  transformResponseToV3,
+  validateStrictModeV3,
+} from "../cee/transforms/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -97,6 +103,21 @@ function checkCeeDraftLimit(key: string, limit: number): { allowed: boolean; ret
 export default async function route(app: FastifyInstance) {
   const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
+
+  function isUnsafeCaptureRequested(req: any): boolean {
+    const query = (req.query as Record<string, unknown>) ?? {};
+    const unsafeQuery = query.unsafe;
+    const unsafeHeader = req.headers?.["x-olumi-unsafe"];
+    return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
+  }
+
+  function isAdminAuthorized(req: any): boolean {
+    const providedKey = req.headers?.["x-admin-key"] as string | undefined;
+    if (!providedKey) return false;
+    const adminKey = config.prompts?.adminApiKey;
+    const adminKeyRead = config.prompts?.adminApiKeyRead;
+    return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
+  }
 
   app.post("/assist/v1/draft-graph", async (req, reply) => {
     const start = Date.now();
@@ -193,6 +214,19 @@ export default async function route(app: FastifyInstance) {
       seed?: string;
       archetype_hint?: string;
     };
+
+    const unsafeCaptureEnabled = isUnsafeCaptureRequested(req) && isAdminAuthorized(req);
+    // Override any client-provided include_debug. Unsafe capture is admin-only.
+    (baseInput as any).include_debug = unsafeCaptureEnabled;
+    if (unsafeCaptureEnabled) {
+      const existingFlags = typeof (baseInput as any).flags === "object" && (baseInput as any).flags !== null
+        ? ((baseInput as any).flags as Record<string, unknown>)
+        : undefined;
+      (baseInput as any).flags = {
+        ...(existingFlags ?? {}),
+        unsafe_capture: true,
+      };
+    }
 
     // Preflight validation - check brief readiness before LLM call
     if (config.cee.preflightEnabled) {
@@ -339,7 +373,21 @@ export default async function route(app: FastifyInstance) {
 
     const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
 
-    reply.header("X-CEE-API-Version", "v1");
+    // Check for schema version request via query parameter
+    // Default is V3 (includes analysis_ready) - V1/V2 are deprecated
+    const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
+    const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
+
+    // Log deprecation warning for legacy schema versions
+    if (schemaVersion === "v1" || schemaVersion === "v2") {
+      log.warn({
+        request_id: requestId,
+        schema_version: schemaVersion,
+        event: "cee.deprecated_schema_requested",
+      }, `Deprecated schema ${schemaVersion} requested - consider upgrading to V3 for analysis_ready support`);
+    }
+
+    reply.header("X-CEE-API-Version", schemaVersion);
     reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
     reply.header("X-CEE-Request-ID", requestId);
 
@@ -350,6 +398,77 @@ export default async function route(app: FastifyInstance) {
     }
 
     reply.code(statusCode);
+
+    // Log response delivery attempt for debugging premature close issues
+    log.info({
+      request_id: requestId,
+      returned_response: true,
+      status_code: statusCode,
+      latency_ms: Date.now() - start,
+      is_error: statusCode >= 400,
+      schema_version: schemaVersion,
+    }, "Draft-graph response ready for delivery");
+
+    // Transform to requested schema if response is successful
+    if (statusCode === 200 && body && typeof body === "object" && "graph" in body) {
+      if (schemaVersion === "v3") {
+        // DEBUG: Log V1 trace.pipeline before transform
+        const v1Trace = (body as any).trace;
+        log.info({
+          request_id: requestId,
+          v1_trace_keys: v1Trace ? Object.keys(v1Trace) : [],
+          v1_has_pipeline: !!(v1Trace?.pipeline),
+          v1_pipeline_status: v1Trace?.pipeline?.status,
+          event: "cee.pipeline.debug.v1",
+        }, `[DEBUG] V1 trace before V3 transform`);
+
+        const v3Body = transformResponseToV3(body as any, {
+          brief: baseInput.brief,
+          requestId,
+          strictMode,
+        });
+
+        // DEBUG: Log V3 trace.pipeline after transform
+        log.info({
+          request_id: requestId,
+          v3_trace_keys: v3Body.trace ? Object.keys(v3Body.trace) : [],
+          v3_has_pipeline: !!(v3Body.trace?.pipeline),
+          v3_pipeline_status: (v3Body.trace as any)?.pipeline?.status,
+          event: "cee.pipeline.debug.v3",
+        }, `[DEBUG] V3 trace after transform`);
+
+        // Validate in strict mode
+        if (strictMode) {
+          try {
+            validateStrictModeV3(v3Body);
+          } catch (err) {
+            log.warn({
+              request_id: requestId,
+              error: (err as Error).message,
+            }, "V3 strict mode validation failed");
+            // In strict mode, return 422 with validation errors
+            reply.code(422);
+            return reply.send({
+              error: {
+                code: "CEE_V3_VALIDATION_FAILED",
+                message: (err as Error).message,
+                validation_warnings: v3Body.validation_warnings,
+              },
+            });
+          }
+        }
+
+        log.debug({ request_id: requestId, schema_version: "v3" }, "Transformed response to v3 schema");
+        return reply.send(v3Body);
+      }
+
+      if (schemaVersion === "v2") {
+        const v2Body = transformResponseToV2(body as any);
+        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
+        return reply.send(v2Body);
+      }
+    }
+
     return reply.send(body);
   });
 }

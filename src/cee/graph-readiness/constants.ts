@@ -8,11 +8,12 @@ import type { QualityFactorName, ImpactLevel } from "./types.js";
 
 /** Factor weights for overall score calculation (must sum to 1.0) */
 export const FACTOR_WEIGHTS: Record<QualityFactorName, number> = {
-  causal_detail: 0.25,       // Highest: causal relationships are core to quality
-  weight_refinement: 0.20,   // Critical for accurate inference
-  risk_coverage: 0.20,       // Important for decision completeness
-  outcome_balance: 0.20,     // Ensures fair option comparison
-  option_diversity: 0.15,    // Foundational but less critical
+  causal_detail: 0.20,            // Causal relationships are core to quality
+  weight_refinement: 0.15,        // Critical for accurate inference
+  risk_coverage: 0.15,            // Important for decision completeness
+  outcome_balance: 0.15,          // Ensures fair option comparison
+  option_diversity: 0.15,         // Foundational but less critical
+  goal_outcome_linkage: 0.20,     // High: outcomes must connect to goals for meaningful analysis
 };
 
 /** Factor impact on overall quality */
@@ -22,6 +23,7 @@ export const FACTOR_IMPACTS: Record<QualityFactorName, ImpactLevel> = {
   risk_coverage: "medium",
   outcome_balance: "medium",
   option_diversity: "low",
+  goal_outcome_linkage: "high",  // High: disconnected outcomes make analysis meaningless
 };
 
 /** Readiness level thresholds (0-100 scale) */
@@ -116,6 +118,23 @@ export const OPTION_DIVERSITY_SCORING = {
   optimalRangeMax: 5,
   manyOptionsBonus: 15,
   disconnectedOptionPenalty: -10,
+};
+
+/** Scoring adjustments for goal_outcome_linkage factor */
+export const GOAL_OUTCOME_LINKAGE_SCORING = {
+  /** Score when no goals or no outcomes present */
+  missingDataScore: 30,
+  /** Base score when goals and outcomes exist */
+  baseScore: 50,
+  /** Bonus per outcome that has path to/from goal (max 40) */
+  connectedOutcomeBonus: 10,
+  connectedOutcomeMaxBonus: 40,
+  /** Penalty per outcome orphaned from goal */
+  orphanedOutcomePenalty: -15,
+  /** Severe penalty if zero outcomes connect to goal */
+  noConnectedOutcomesPenalty: -30,
+  /** Bonus for direct goal→outcome or outcome→goal edges */
+  directLinkageBonus: 5,
 };
 
 /** Potential improvement estimation parameters */

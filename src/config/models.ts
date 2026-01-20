@@ -28,6 +28,10 @@ export interface ModelConfig {
   qualityScore: number;
   /** Human-readable description */
   description: string;
+  /** Whether this is a reasoning model (requires reasoning_effort parameter for OpenAI) */
+  reasoning?: boolean;
+  /** Whether this model supports extended thinking (Anthropic models) */
+  extendedThinking?: boolean;
 }
 
 /**
@@ -57,6 +61,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.75,
     description: "Fast, cost-effective model for simple tasks",
   },
+  "gpt-5-mini": {
+    id: "gpt-5-mini",
+    provider: "openai",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 0.30,
+    averageLatencyMs: 600,
+    qualityScore: 0.82,
+    description: "Fast GPT-5 variant for simple generation tasks",
+    reasoning: false,
+  },
   "gpt-4o": {
     id: "gpt-4o",
     provider: "openai",
@@ -67,6 +83,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     averageLatencyMs: 2000,
     qualityScore: 0.92,
     description: "High-quality model for complex reasoning",
+  },
+  "gpt-5.2": {
+    id: "gpt-5.2",
+    provider: "openai",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 16384,
+    costPer1kTokens: 15.0, // Reasoning models are more expensive
+    averageLatencyMs: 15000, // Reasoning takes longer
+    qualityScore: 0.98,
+    description: "OpenAI reasoning model with extended thinking capabilities",
+    reasoning: true,
   },
   "claude-sonnet-4-20250514": {
     id: "claude-sonnet-4-20250514",
@@ -89,6 +117,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     averageLatencyMs: 2200,
     qualityScore: 0.93,
     description: "High-quality Anthropic model",
+  },
+  "claude-opus-4-5-20251101": {
+    id: "claude-opus-4-5-20251101",
+    provider: "anthropic",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 16384,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 25000,
+    qualityScore: 0.99,
+    description: "Claude Opus 4.5 - highest quality reasoning with extended thinking",
+    extendedThinking: true,
   },
 };
 
@@ -146,4 +186,20 @@ export function isKnownModel(modelId: string): boolean {
  */
 export function getModelProvider(modelId: string): ModelProvider | undefined {
   return MODEL_REGISTRY[modelId]?.provider;
+}
+
+/**
+ * Check if a model is a reasoning model (requires reasoning_effort parameter)
+ * Uses registry lookup - does NOT use string matching
+ */
+export function isReasoningModel(modelId: string): boolean {
+  return MODEL_REGISTRY[modelId]?.reasoning === true;
+}
+
+/**
+ * Check if a model supports extended thinking (Anthropic models)
+ * Uses registry lookup - does NOT use string matching
+ */
+export function supportsExtendedThinking(modelId: string): boolean {
+  return MODEL_REGISTRY[modelId]?.extendedThinking === true;
 }

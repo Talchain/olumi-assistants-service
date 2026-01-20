@@ -2,18 +2,22 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import type { DocPreview } from "../../services/docProcessing.js";
-import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { formatEdgeId } from "../../cee/corrections.js";
+import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { isReasoningModel } from "../../config/models.js";
 
 // ============================================================================
 // Zod schemas for OpenAI response validation (same as Anthropic)
@@ -22,11 +26,28 @@ const OpenAINode = z.object({
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
+  data: NodeData.optional(),
 });
+
+// V4 edge strength schema (nested object from LLM)
+const EdgeStrength = z.object({
+  mean: z.number(),
+  std: z.number().positive(),
+}).optional();
 
 const OpenAIEdge = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
+  // V4 format (preferred) - from v4 prompt (nested)
+  strength: EdgeStrength,
+  exists_probability: z.number().min(0).max(1).optional(),
+  // V4 format (flat) - added by normaliseDraftResponse()
+  strength_mean: z.number().optional(),
+  strength_std: z.number().optional(),
+  belief_exists: z.number().optional(),
+  effect_direction: z.enum(["positive", "negative"]).optional(),
+  // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
   provenance: StructuredProvenance.optional(),
@@ -100,53 +121,47 @@ function getClient(): OpenAI {
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 
-function buildDraftPrompt(brief: string, docs: DocPreview[]): string {
-  const docContext = docs.length
-    ? `\n\n## Attached Documents\n${docs
-        .map((d) => {
-          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-        })
-        .join("\n\n")}`
-    : "";
-
-  return `You are an expert at drafting small decision graphs from plain-English briefs.
-
-## Brief
-${brief}
-${docContext}
-
-## Your Task
-Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
-  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
-- ≤${GRAPH_MAX_EDGES} edges
-- For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, you MUST adjust the belief values so they sum to 1.0 before returning the JSON; a response that does not satisfy this is considered incorrect.
-- Every edge with belief or weight MUST have structured provenance:
-  - source: document filename, metric name, or "hypothesis"
-  - quote: short citation or statement (≤100 chars)
-  - location: extract from document markers ([PAGE N], [ROW N], line N:) when citing documents
-  - provenance_source: "document" | "metric" | "hypothesis"
-- Documents include location markers:
-  - PDFs: [PAGE 1], [PAGE 2], etc. marking page boundaries
-  - CSVs: [ROW 1] for header, [ROW 2], [ROW 3], etc. for data rows
-  - TXT/MD: Line numbers like "1:", "2:", "3:", etc. at start of each line
-- When citing documents, use these markers to determine the correct location value
-- Node IDs: lowercase with underscores (e.g., "goal_1", "opt_extend_trial")
-- Stable topology: goal → decision → options → outcomes
-
-## Output Format (JSON)
-Return ONLY valid JSON matching this schema:
-{
-  "nodes": [{"id": "goal_1", "kind": "goal", "label": "Your goal here", "body": "Optional description"}],
-  "edges": [{"from": "goal_1", "to": "dec_1", "belief": 0.8, "provenance": {"source": "hypothesis", "quote": "reasoning here"}, "provenance_source": "hypothesis"}],
-  "rationales": [{"target": "node_id", "why": "explanation"}] // optional
+/**
+ * Get the appropriate timeout for a model.
+ * Reasoning models get extended timeout (180s), standard models get default (110s).
+ */
+function getTimeoutForModel(model: string): number {
+  return isReasoningModel(model) ? REASONING_MODEL_TIMEOUT_MS : TIMEOUT_MS;
 }
 
-IMPORTANT:
-- ALL edges must cite provenance (document quotes, metric data, or hypothesis reasoning)
-- NEVER fabricate "needle movers" or "influence scores" - these come only from the engine
-- Return ONLY the JSON object, no markdown formatting`;
+/**
+ * Build model-specific parameters for OpenAI API calls.
+ * Reasoning models require different parameters than standard models.
+ *
+ * @param model - The model ID being used
+ * @param temperature - The temperature value for non-reasoning models
+ * @param maxTokens - The max tokens value
+ * @returns Object with appropriate parameters for the model type
+ */
+/** @internal Exported for testing only */
+export function buildModelParams(
+  model: string,
+  temperature: number,
+  maxTokens?: number
+): {
+  temperature?: number;
+  max_tokens?: number;
+  max_completion_tokens?: number;
+  reasoning_effort?: "low" | "medium" | "high";
+} {
+  if (isReasoningModel(model)) {
+    // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
+    return {
+      reasoning_effort: "medium",
+      ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
+    };
+  } else {
+    // Standard models: use temperature and max_tokens
+    return {
+      temperature,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    };
+  }
 }
 
 function buildRepairPrompt(graph: GraphT, violations: string[]): string {
@@ -165,6 +180,22 @@ Fix ALL violations while preserving as much structure as possible:
 - Cap at ${GRAPH_MAX_NODES} nodes and ${GRAPH_MAX_EDGES} edges
 - Maintain structured provenance on all edges
 - Keep stable node IDs (don't change IDs unless necessary)
+
+## CRITICAL: Edge Direction Rules
+Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
+
+**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
+
+Correct directions:
+- decision → option (frames options)
+- option → outcome (leads to outcome)
+- outcome → goal (contributes to goal)
+- factor → option (affects viability)
+- risk → goal (detracts from goal)
+
+**WRONG directions to FIX:**
+- goal → anything (reverse these edges or remove)
+- outcome → option (reverse or remove)
 
 ## Output Format (JSON)
 Return ONLY the repaired graph as valid JSON:
@@ -285,6 +316,32 @@ Return ONLY valid JSON:
 Return ONLY the JSON object, no markdown formatting`;
 }
 
+/**
+ * Max size for raw LLM output in debug trace (chars).
+ * Truncates large responses to prevent payload bloat.
+ */
+const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
+
+const RAW_LLM_TEXT_MAX_CHARS = 10_000;
+const RAW_LLM_PREVIEW_MAX_CHARS = 500;
+
+/**
+ * Truncate raw LLM output for debug tracing.
+ * Returns the output with a truncation flag if over limit.
+ */
+function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
+  const jsonStr = JSON.stringify(raw);
+  if (jsonStr.length <= RAW_LLM_OUTPUT_MAX_CHARS) {
+    return { output: raw, truncated: false };
+  }
+  // Truncate and add marker
+  const truncatedStr = jsonStr.slice(0, RAW_LLM_OUTPUT_MAX_CHARS);
+  return {
+    output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
+    truncated: true,
+  };
+}
+
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
   const nodesSorted = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -314,13 +371,28 @@ export class OpenAIAdapter implements LLMAdapter {
   readonly model: string;
 
   constructor(model?: string) {
-    // Default to GPT-4o-mini for cost efficiency
+    // Default to gpt-4o-mini; task routing (e.g., draft_graph → gpt-5.2) handled by model-routing.ts
     this.model = model || config.llm.model || 'gpt-4o-mini';
   }
 
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
-    const prompt = buildDraftPrompt(brief, docs);
+    const collector = opts.collector;
+
+    // V4: Use shared prompt management system (same as Anthropic adapter)
+    const systemPrompt = getSystemPrompt('draft_graph');
+    const promptMeta = getSystemPromptMeta('draft_graph');
+
+    // Build user content with brief and documents
+    const docContext = docs.length
+      ? `\n\n## Attached Documents\n${docs
+          .map((d) => {
+            const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+            return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+          })
+          .join("\n\n")}`
+      : "";
+    const userContent = `## Brief\n${brief}${docContext}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -332,23 +404,53 @@ export class OpenAIAdapter implements LLMAdapter {
     );
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('draft_graph');
-      const response = await apiClient.chat.completions.create(
-        {
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0,
-          response_format: { type: "json_object" },
-          seed: seed, // OpenAI supports deterministic seed
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      const modelParams = buildModelParams(this.model, 0, maxTokens);
+      const temperature = 'temperature' in modelParams
+        ? (modelParams as any).temperature as number
+        : undefined;
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
         },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] draft_graph request parameters");
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              // V4: Use system + user messages (same as Anthropic adapter)
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userContent },
+              ],
+              response_format: { type: "json_object" },
+              seed: seed, // OpenAI supports deterministic seed
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          adapter: "openai",
+          model: this.model,
+          operation: "draft_graph",
         }
       );
 
@@ -361,18 +463,41 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      // Parse, normalise non-standard node kinds, then validate with Zod
+      const finishReason = response.choices[0]?.finish_reason;
+
+      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
+      const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
+        ? ((rawJson as any).nodes as any[])
+          .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+          .filter(Boolean)
+        : [];
       const normalised = normaliseDraftResponse(rawJson);
-      const parseResult = OpenAIDraftResponse.safeParse(normalised);
+      const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
+      if (defaultedFactors.length > 0) {
+        log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
+      }
+      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 
       if (!parseResult.success) {
         const flatErrors = parseResult.error.flatten();
+
+        // Capture truncated raw output for debugging (before throwing)
+        const rawOutputSample = (() => {
+          try {
+            const serialized = JSON.stringify(rawJson);
+            return serialized.length > 500 ? serialized.slice(0, 500) + '...[truncated]' : serialized;
+          } catch {
+            return '[serialization failed]';
+          }
+        })();
+
         log.error({
           errors: flatErrors,
           raw_node_kinds: Array.isArray(rawJson?.nodes)
             ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
             : [],
+          raw_output_sample: rawOutputSample,
           event: 'llm.validation.schema_failed'
         }, "OpenAI response failed schema validation after normalisation");
 
@@ -399,8 +524,41 @@ export class OpenAIAdapter implements LLMAdapter {
         parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
+      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1)
+      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+      if (danglingEdges.length > 0) {
+        log.warn({
+          event: "llm.draft.dangling_edges_removed",
+          removed_count: danglingEdges.length,
+          dangling_edges: danglingEdges.map((e) => ({
+            from: e.from,
+            to: e.to,
+            missing_from: !nodeIds.has(e.from),
+            missing_to: !nodeIds.has(e.to),
+          })).slice(0, 10),
+        }, `Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+        if (collector) {
+          for (const edge of danglingEdges) {
+            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+            collector.addByStage(
+              5,
+              "edge_removed",
+              { edge_id: formatEdgeId(edge.from, edge.to) },
+              `Node "${missingNode}" not found`,
+              edge,
+              null
+            );
+          }
+        }
+      }
+
+      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
       // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: parsed.edges });
+      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
 
       // Calculate roots and leaves
       const roots = sorted.nodes
@@ -423,9 +581,50 @@ export class OpenAIAdapter implements LLMAdapter {
         },
       };
 
+      // Capture raw LLM output for debug tracing (before normalisation)
+      const rawOutput = truncateRawOutput(rawJson);
+
+      const unsafeCaptureEnabled = args.includeDebug === true && args.flags?.unsafe_capture === true;
+      const rawTextTruncated = content.length > RAW_LLM_TEXT_MAX_CHARS
+        ? content.slice(0, RAW_LLM_TEXT_MAX_CHARS)
+        : content;
+      const rawPreview = content.length > RAW_LLM_PREVIEW_MAX_CHARS
+        ? content.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
+        : content;
+
+      const tokenUsage = {
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0,
+        total_tokens: response.usage?.total_tokens || ((response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)),
+      };
+
       return {
         graph,
         rationales: parsed.rationales || [],
+        debug: unsafeCaptureEnabled ? {
+          raw_llm_output: rawOutput.output,
+          raw_llm_output_truncated: rawOutput.truncated,
+        } : undefined,
+        meta: {
+          model: this.model,
+          prompt_version: promptMeta.prompt_version,
+          prompt_hash: promptMeta.prompt_hash,
+          temperature,
+          max_tokens: maxTokens,
+          seed,
+          reasoning_effort: isReasoningModel(this.model) ? "medium" : undefined,
+          token_usage: tokenUsage,
+          finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+          provider_latency_ms: _elapsedMs,
+          node_kinds_raw_json: rawNodeKinds,
+          // Always include raw output for LLM observability trace (preview + full text for storage)
+          raw_output_preview: rawPreview,
+          raw_llm_text: rawTextTruncated,
+          // Only include parsed JSON when unsafe capture is enabled (admin-gated)
+          ...(unsafeCaptureEnabled ? {
+            raw_llm_json: rawOutput.output,
+          } : {}),
+        },
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
           output_tokens: response.usage?.completion_tokens || 0,
@@ -438,7 +637,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI draft_graph timed out",
             "openai",
@@ -486,22 +685,45 @@ export class OpenAIAdapter implements LLMAdapter {
     log.info({ goal_chars: goal.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for options");
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('suggest_options');
-      const response = await apiClient.chat.completions.create(
-        {
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.7, // Slightly higher for creativity in options
-          response_format: { type: "json_object" },
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      const modelParams = buildModelParams(this.model, 0.7, maxTokens); // 0.7 for creativity in options
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
         },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] suggest_options request parameters");
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          adapter: "openai",
+          model: this.model,
+          operation: "suggest_options",
         }
       );
 
@@ -536,7 +758,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI options call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI options call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI suggest_options timed out",
             "openai",
@@ -574,6 +796,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
     const { graph, violations } = args;
+    const collector = opts.collector;
     const prompt = buildRepairPrompt(graph, violations);
 
     // V04: Generate idempotency key for request traceability
@@ -583,22 +806,45 @@ export class OpenAIAdapter implements LLMAdapter {
     log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for repair");
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), opts.timeoutMs || TIMEOUT_MS);
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
+    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('repair_graph');
-      const response = await apiClient.chat.completions.create(
-        {
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0,
-          response_format: { type: "json_object" },
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      const modelParams = buildModelParams(this.model, 0, maxTokens);
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
         },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] repair_graph request parameters");
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+            }
+          ),
         {
-          signal: abortController.signal as any,
-          headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+          adapter: "openai",
+          model: this.model,
+          operation: "repair_graph",
         }
       );
 
@@ -611,10 +857,14 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      // Parse, normalise non-standard node kinds, then validate with Zod
+      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
       const normalised = normaliseDraftResponse(rawJson);
-      const parseResult = OpenAIDraftResponse.safeParse(normalised);
+      const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
+      if (repairDefaultedFactors.length > 0) {
+        log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
+      }
+      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 
       if (!parseResult.success) {
         const flatErrors = parseResult.error.flatten();
@@ -646,8 +896,41 @@ export class OpenAIAdapter implements LLMAdapter {
         parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
       }
 
+      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
+      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+      if (danglingEdges.length > 0) {
+        log.warn({
+          event: "llm.repair.dangling_edges_removed",
+          removed_count: danglingEdges.length,
+          dangling_edges: danglingEdges.map((e) => ({
+            from: e.from,
+            to: e.to,
+            missing_from: !nodeIds.has(e.from),
+            missing_to: !nodeIds.has(e.to),
+          })).slice(0, 10),
+        }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+        if (collector) {
+          for (const edge of danglingEdges) {
+            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+            collector.addByStage(
+              5,
+              "edge_removed",
+              { edge_id: formatEdgeId(edge.from, edge.to) },
+              `Node "${missingNode}" not found`,
+              edge,
+              null
+            );
+          }
+        }
+      }
+
+      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+
       // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: parsed.edges });
+      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
 
       const repairedGraph: GraphT = {
         ...graph,
@@ -670,7 +953,7 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: opts.timeoutMs || TIMEOUT_MS, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
           throw new UpstreamTimeoutError(
             "OpenAI repair_graph timed out",
             "openai",
@@ -716,27 +999,50 @@ export class OpenAIAdapter implements LLMAdapter {
     const prompt = buildClarifyBriefPrompt(brief, round, previous_answers);
 
     const client = getClient();
+    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
 
     try {
       const abortController = new AbortController();
       const timeoutId = setTimeout(
         () => abortController.abort(),
-        opts.timeoutMs || TIMEOUT_MS,
+        effectiveTimeout,
       );
 
       const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
-      const response = await client.chat.completions.create(
+      const modelParams = buildModelParams(this.model, 0.5, maxTokens); // 0.5 for consistent questions
+
+      // Debug: Log model parameters for runtime validation
+      log.debug({
+        model: this.model,
+        reasoning: isReasoningModel(this.model),
+        params: {
+          has_temperature: 'temperature' in modelParams,
+          has_reasoning_effort: 'reasoning_effort' in modelParams,
+          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
+          has_max_tokens: 'max_tokens' in modelParams,
+        },
+        timeout_ms: effectiveTimeout,
+      }, "[OpenAI] clarify_brief request parameters");
+
+      const response = await withRetry(
+        async () =>
+          client.chat.completions.create(
+            {
+              model: this.model,
+              messages: [{ role: "user", content: prompt }],
+              response_format: { type: "json_object" },
+              ...(seed !== undefined ? { seed } : {}),
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+            },
+          ),
         {
+          adapter: "openai",
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.5, // Slightly lower temp for more consistent questions
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-          ...(seed !== undefined ? { seed } : {}),
-        },
-        {
-          signal: abortController.signal as any,
-        },
+          operation: "clarify_brief",
+        }
       );
 
       clearTimeout(timeoutId);

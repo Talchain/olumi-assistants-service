@@ -32,18 +32,25 @@ import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js"
 import ceeGenerateRecommendationRouteV1 from "./routes/assist.v1.generate-recommendation.js";
 import ceeNarrateConditionsRouteV1 from "./routes/assist.v1.narrate-conditions.js";
 import ceeExplainPolicyRouteV1 from "./routes/assist.v1.explain-policy.js";
+import ceeElicitPreferencesRouteV1 from "./routes/assist.v1.elicit-preferences.js";
+import ceeElicitPreferencesAnswerRouteV1 from "./routes/assist.v1.elicit-preferences-answer.js";
+import ceeExplainTradeoffRouteV1 from "./routes/assist.v1.explain-tradeoff.js";
+import ceeIslSynthesisRouteV1 from "./routes/assist.v1.isl-synthesis.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
+import ceeAskRouteV1 from "./routes/assist.v1.ask.js";
+import ceeReviewRouteV1 from "./routes/assist.v1.review.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter } from "./adapters/llm/router.js";
-import { SERVICE_VERSION } from "./version.js";
+import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
+import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
@@ -51,16 +58,39 @@ import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
-import { initializePromptStore, getBraintrustManager, registerAllDefaultPrompts, getPromptStoreStatus, isPromptStoreHealthy } from "./prompts/index.js";
-import { getActiveExperiments } from "./adapters/llm/prompt-loader.js";
+import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
+import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
+import { adminTestRoutes } from "./routes/admin.testing.js";
+import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
+import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
 import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
+import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 
-const DEFAULT_ORIGINS = [
+export const DEFAULT_ORIGINS = [
   "https://olumi.app",
   "https://app.olumi.app",
   "http://localhost:5173",
+  "http://localhost:5174",
   "http://localhost:3000",
+];
+
+export const DEFAULT_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Authorization",
+  "X-Olumi-Assist-Key",
+  "X-Admin-Key",
+  "X-Olumi-Signature",
+  "X-Olumi-Timestamp",
+  "X-Olumi-Nonce",
+  "X-Requested-With",
+  "X-CEE-API-Version",
+  "X-CEE-Feature-Version",
+  "X-CEE-Request-ID",
+  "X-CEE-Readiness-Score",
+  "X-Olumi-Client-Build",
+  "X-Olumi-Payload-Hash",
+  "X-Olumi-Unsafe",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -75,6 +105,10 @@ function resolveAllowedOrigins(): string[] {
   if (env.NODE_ENV === "production" && origins.some((origin) => origin === "*" || origin === '"*"')) {
     throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
   }
+
+  // Diagnostic: log parsed origins at startup
+  console.log("[CORS] Raw ALLOWED_ORIGINS env:", raw ? `"${raw}"` : "(not set, using defaults)");
+  console.log("[CORS] Parsed origins:", JSON.stringify(origins));
 
   return origins;
 }
@@ -127,6 +161,10 @@ export async function build() {
     bodyLimit: BODY_LIMIT_BYTES,
     connectionTimeout: ROUTE_TIMEOUT_MS,
     requestTimeout: ROUTE_TIMEOUT_MS,
+    // Trust proxy for correct IP resolution behind load balancers/reverse proxies
+    // Required for accurate rate limiting, IP allowlisting, and X-Forwarded-* headers
+    // Production: Render, Railway, etc. all proxy requests through their edge
+    trustProxy: nodeEnv === "production",
   });
 
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
@@ -134,6 +172,23 @@ export async function build() {
 
   await app.register(cors, {
     origin: allowedOrigins,
+    allowedHeaders: DEFAULT_ALLOWED_HEADERS,
+    exposedHeaders: [
+      "x-olumi-service",
+      "x-olumi-service-build",
+      "x-olumi-response-hash",
+      "x-olumi-trace-received",
+      "x-olumi-downstream-calls",
+    ],
+  });
+
+  // Diagnostic: log incoming origin headers (temporary for debugging CORS issues)
+  app.addHook("onRequest", async (request) => {
+    const origin = request.headers.origin;
+    if (origin) {
+      const isAllowed = allowedOrigins.includes(origin);
+      request.log.info({ origin, isAllowed, allowedOrigins }, "[CORS] Incoming request origin");
+    }
   });
 
   // Security headers: Standard HTTP security headers for defense-in-depth
@@ -223,8 +278,11 @@ await app.register(rateLimit, {
   // Note: authPlugin uses getRequestId() which now has correct ID from above hook
   await app.register(authPlugin);
 
-  // Response hash: Add X-Olumi-Response-Hash header (v1.5 PR N)
+  // Response hash: Add x-olumi-response-hash header (v1.5 PR N)
   await app.register(responseHashPlugin);
+
+  // Boundary logging: Service headers + boundary events (observability v1)
+  await app.register(boundaryLoggingPlugin);
 
   // Response hook: Add X-Request-Id header to every response
   app.addHook("onSend", async (request, reply, payload) => {
@@ -374,17 +432,73 @@ app.get("/healthz", async () => {
   // Prompt store health (degraded if unhealthy but not critical)
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
-  const isDegraded = promptStoreStatus.enabled && !promptStoreHealthy;
+
+  let promptCounts:
+    | {
+        total: number;
+        production: number;
+      }
+    | undefined;
+
+  if (promptStoreStatus.enabled && promptStoreHealthy) {
+    try {
+      const store = getPromptStore();
+      const allPrompts = await store.list();
+      promptCounts = {
+        total: allPrompts.length,
+        production: allPrompts.filter((p) => p.status === 'production').length,
+      };
+    } catch {
+      // ignore
+    }
+  }
+
+  // Check auth configuration
+  const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
+  const hasHmacSecret = !!env.SHARE_SECRET;
+
+  // Check LLM configuration (provider-specific)
+  const llmProvider = adapter.name;
+  const hasLlmKey =
+    llmProvider === 'fixtures' ? true :
+    llmProvider === 'anthropic' ? !!env.ANTHROPIC_API_KEY :
+    llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
+    false;
+
+  // Determine degradation reasons
+  const degradationReasons: string[] = [];
+  if (promptStoreStatus.enabled && !promptStoreHealthy) {
+    degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (!hasAuthKeys && !hasHmacSecret) {
+    degradationReasons.push('no_auth_configured');
+  }
+  if (!hasLlmKey) {
+    degradationReasons.push('no_llm_key_configured');
+  }
+
+  const isDegraded = degradationReasons.length > 0;
 
   return {
     ok: true,
     degraded: isDegraded,
+    degraded_reasons: degradationReasons.length > 0 ? degradationReasons : undefined,
     service: "assistants",
     version: SERVICE_VERSION,
+    commit: GIT_COMMIT_SHORT,
+    commit_full: GIT_COMMIT_SHA,
     provider: adapter.name,
     model: adapter.model,
     limits_source: env.ENGINE_BASE_URL ? "engine" : "config",
     feature_flags: getAllFeatureFlags(),
+    auth: {
+      keys_configured: hasAuthKeys,
+      hmac_configured: hasHmacSecret,
+    },
+    llm: {
+      provider: llmProvider,
+      key_configured: hasLlmKey,
+    },
     cee: {
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
       config: ceeConfig,
@@ -408,7 +522,9 @@ app.get("/healthz", async () => {
     prompts: {
       enabled: promptStoreStatus.enabled,
       healthy: promptStoreHealthy,
-      degraded_reason: isDegraded ? 'prompt_store_unhealthy' : undefined,
+      degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
+      store: promptStoreStatus,
+      counts: promptCounts,
     },
   };
 });
@@ -501,22 +617,52 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeGenerateRecommendationRouteV1(app);
   await ceeNarrateConditionsRouteV1(app);
   await ceeExplainPolicyRouteV1(app);
+  await ceeElicitPreferencesRouteV1(app);
+  await ceeElicitPreferencesAnswerRouteV1(app);
+  await ceeExplainTradeoffRouteV1(app);
+  await ceeIslSynthesisRouteV1(app);
   await ceeHealthRouteV1(app);
+  await ceeAskRouteV1(app);
+  await ceeReviewRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }
 
-  // Admin routes for prompt management (enabled via config)
-  if (config.prompts?.enabled || config.prompts?.adminApiKey) {
-    await initializePromptStore();
-    await adminPromptRoutes(app);
-    await adminUIRoutes(app);
-    app.log.info('Admin prompt management routes registered');
+  // Always initialize prompt store if database credentials are configured
+  // This ensures prompts can be loaded from Supabase/Postgres even if PROMPTS_ENABLED is not set
+  const storeBackendConfigured = isStoreBackendConfigured();
+  const promptSystemEnabled = config.prompts?.enabled || config.prompts?.adminApiKey || storeBackendConfigured;
 
-    // Initialize Braintrust experiment tracking if enabled
-    if (config.prompts?.braintrustEnabled) {
-      const braintrust = getBraintrustManager();
-      await braintrust.initialize();
+  if (promptSystemEnabled) {
+    await initializePromptStore();
+
+    // Initialize store, seed defaults, and warm cache
+    if (config.prompts?.enabled) {
+      const seedResult = await initializeAndSeedPrompts();
+      app.log.info({ seedResult }, 'Prompt system initialized');
+
+      if (isPromptStoreHealthy()) {
+        const warmResult = await warmPromptCacheFromStore();
+        app.log.info({ warmResult }, 'Prompt cache warmed from store');
+      }
+    }
+
+    // Only register admin routes if explicitly enabled or admin key is set
+    if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+      await adminPromptRoutes(app);
+      await adminUIRoutes(app);
+      await adminDraftFailureRoutes(app);
+      await adminLLMOutputRoutes(app);
+      await adminTestRoutes(app);
+      app.log.info('Admin prompt management routes registered');
+
+      startDraftFailureRetentionJob();
+
+      // Initialize Braintrust experiment tracking if enabled
+      if (config.prompts?.braintrustEnabled) {
+        const braintrust = getBraintrustManager();
+        await braintrust.initialize();
+      }
     }
   }
 

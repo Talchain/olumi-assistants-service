@@ -18,6 +18,12 @@
  * - POST   /admin/prompts/:id/approve  - Approve version for production
  * - GET    /admin/prompts/:id/diff     - Compare versions
  *
+ * Observation routes (Supabase store only):
+ * - GET    /admin/prompts/:id/observations                  - List observations for prompt
+ * - GET    /admin/prompts/:id/versions/:version/observations - List observations for version
+ * - POST   /admin/prompts/:id/observations                  - Add observation
+ * - DELETE /admin/prompts/:id/observations/:obsId           - Remove observation
+ *
  * Experiment routes:
  * - GET    /admin/experiments     - List experiments
  * - POST   /admin/experiments     - Start experiment
@@ -48,9 +54,11 @@ import {
   logExperimentEnded,
   interpolatePrompt,
 } from '../prompts/index.js';
+import type { PromptObservation, ObservationType, ObservationsResult } from '../prompts/stores/supabase.js';
+import { SupabasePromptStore } from '../prompts/stores/supabase.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
-import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
+import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 /**
@@ -107,12 +115,14 @@ function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean 
     (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
 
   if (!isAllowed) {
+    // Use hashed IP in telemetry/logs to avoid PII leakage
+    const ipHash = hashIP(requestIP);
     emit(AdminTelemetryEvents.AdminIPBlocked, {
-      ip: requestIP,
+      ip_hash: ipHash,
       path: request.url,
       allowedCount: allowedIPs.size,
     });
-    log.warn({ ip: requestIP, path: request.url }, 'Admin access blocked by IP allowlist');
+    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin access blocked by IP allowlist');
     reply.status(403).send({
       error: 'ip_not_allowed',
       message: 'Your IP address is not authorized for admin access',
@@ -300,6 +310,40 @@ const UpdateTestCasesSchema = z.object({
   version: z.number().int().positive(),
   /** The test cases array (replaces existing) */
   testCases: z.array(PromptTestCaseSchema),
+});
+
+/**
+ * Observation request schema
+ */
+const CreateObservationSchema = z.object({
+  /** Version this observation applies to */
+  version: z.number().int().positive(),
+  /** Type of observation */
+  observationType: z.enum(['note', 'rating', 'failure', 'success']),
+  /** Content/description (required for note, failure, success) */
+  content: z.string().max(10000).optional(),
+  /** Rating 1-5 (optional, used with rating type) */
+  rating: z.number().int().min(1).max(5).optional(),
+  /** Hash of the payload that triggered this observation */
+  payloadHash: z.string().max(128).optional(),
+  /** Who created this observation */
+  createdBy: z.string().max(255).optional(),
+});
+
+/**
+ * Observation ID params schema
+ */
+const ObservationIdParamsSchema = z.object({
+  id: z.string().min(1),
+  obsId: z.string().uuid(),
+});
+
+/**
+ * Version params schema for observations
+ */
+const VersionParamsSchema = z.object({
+  id: z.string().min(1),
+  version: z.coerce.number().int().positive(),
 });
 
 
@@ -1528,5 +1572,268 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.status(200).send(stats);
+  });
+
+  // =========================================================================
+  // Observation Routes
+  // =========================================================================
+
+  /**
+   * Helper to get Supabase store with observation methods
+   * Returns null if store is not Supabase
+   */
+  function getSupabaseStore(): SupabasePromptStore | null {
+    const store = getPromptStore();
+    if (store instanceof SupabasePromptStore) {
+      return store;
+    }
+    return null;
+  }
+
+  /**
+   * GET /admin/prompts/:id/observations - List observations for prompt
+   * Permission: read
+   *
+   * Returns all observations for a prompt with average rating.
+   */
+  app.get('/admin/prompts/:id/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const supabaseStore = getSupabaseStore();
+    if (!supabaseStore) {
+      return reply.status(501).send({
+        error: 'not_implemented',
+        message: 'Observations are only available with Supabase store',
+      });
+    }
+
+    const params = PromptIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    try {
+      const result = await supabaseStore.getObservations(params.data.id);
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'list_observations',
+        promptId: params.data.id,
+        count: result.totalCount,
+      });
+
+      return reply.status(200).send(result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * GET /admin/prompts/:id/versions/:version/observations - List observations for specific version
+   * Permission: read
+   *
+   * Returns observations for a specific prompt version with average rating.
+   */
+  app.get('/admin/prompts/:id/versions/:version/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const supabaseStore = getSupabaseStore();
+    if (!supabaseStore) {
+      return reply.status(501).send({
+        error: 'not_implemented',
+        message: 'Observations are only available with Supabase store',
+      });
+    }
+
+    const params = VersionParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    try {
+      const result = await supabaseStore.getObservations(params.data.id, params.data.version);
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'list_version_observations',
+        promptId: params.data.id,
+        version: params.data.version,
+        count: result.totalCount,
+      });
+
+      return reply.status(200).send(result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * POST /admin/prompts/:id/observations - Add observation
+   * Permission: write
+   *
+   * Creates a new observation for a prompt version.
+   * Validates that content is provided for note/failure/success types.
+   */
+  app.post('/admin/prompts/:id/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const supabaseStore = getSupabaseStore();
+    if (!supabaseStore) {
+      return reply.status(501).send({
+        error: 'not_implemented',
+        message: 'Observations are only available with Supabase store',
+      });
+    }
+
+    const params = PromptIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    const body = CreateObservationSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: body.error.flatten(),
+      });
+    }
+
+    try {
+      const observation = await supabaseStore.addObservation({
+        promptId: params.data.id,
+        version: body.data.version,
+        observationType: body.data.observationType as ObservationType,
+        content: body.data.content,
+        rating: body.data.rating,
+        payloadHash: body.data.payloadHash,
+        createdBy: body.data.createdBy ?? getActorFromRequest(request),
+      });
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'create_observation',
+        promptId: params.data.id,
+        version: body.data.version,
+        type: body.data.observationType,
+      });
+
+      return reply.status(201).send(observation);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          return reply.status(404).send({
+            error: 'not_found',
+            message: error.message,
+          });
+        }
+        if (error.message.includes('Invalid') || error.message.includes('required') || error.message.includes('must be')) {
+          return reply.status(400).send({
+            error: 'validation_error',
+            message: error.message,
+          });
+        }
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * DELETE /admin/prompts/:id/observations/:obsId - Remove observation
+   * Permission: write
+   *
+   * Deletes a specific observation by ID.
+   */
+  app.delete('/admin/prompts/:id/observations/:obsId', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    if (!isPromptManagementEnabled()) {
+      return reply.status(503).send({
+        error: 'feature_disabled',
+        message: 'Prompt management is not enabled',
+      });
+    }
+
+    if (!ensureStoreHealthy(reply)) return;
+
+    const supabaseStore = getSupabaseStore();
+    if (!supabaseStore) {
+      return reply.status(501).send({
+        error: 'not_implemented',
+        message: 'Observations are only available with Supabase store',
+      });
+    }
+
+    const params = ObservationIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        details: params.error.flatten(),
+      });
+    }
+
+    try {
+      await supabaseStore.deleteObservation(params.data.obsId);
+
+      emit(AdminTelemetryEvents.AdminPromptAccess, {
+        action: 'delete_observation',
+        promptId: params.data.id,
+        observationId: params.data.obsId,
+      });
+
+      return reply.status(204).send();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: error.message,
+        });
+      }
+      throw error;
+    }
   });
 }

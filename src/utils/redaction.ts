@@ -193,6 +193,15 @@ export function redactHeaders(headers: Record<string, unknown>): Record<string, 
     'x-auth-token',
     'cookie',
     'set-cookie',
+    // Olumi-specific auth headers
+    'x-olumi-assist-key',
+    'x-admin-key',
+    'x-hmac-signature',
+    'x-share-token',
+    // HMAC auth headers (timing attack vectors if exposed)
+    'x-olumi-signature',
+    'x-olumi-nonce',
+    'x-olumi-timestamp',
   ];
 
   for (const [key, value] of Object.entries(headers)) {
@@ -214,9 +223,13 @@ const SAFE_STAT_KEYS = new Set([
   'count', 'mean', 'median', 'p50', 'p90', 'p95', 'p99', 'min', 'max', 'std', 'variance'
 ]);
 
-/** Sensitive header keys (lowercase) */
+/** Sensitive header keys (lowercase) - must align with logger-config.ts */
 const SENSITIVE_HEADER_KEYS = new Set([
-  'authorization', 'x-api-key', 'api-key', 'x-auth-token', 'cookie', 'set-cookie'
+  'authorization', 'x-api-key', 'api-key', 'x-auth-token', 'cookie', 'set-cookie',
+  // Olumi-specific auth headers
+  'x-olumi-assist-key', 'x-admin-key', 'x-hmac-signature', 'x-share-token',
+  // HMAC auth headers (timing attack vectors if exposed)
+  'x-olumi-signature', 'x-olumi-nonce', 'x-olumi-timestamp',
 ]);
 
 /**

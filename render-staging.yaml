@@ -33,7 +33,7 @@ services:
       - key: COST_MAX_USD
         value: "1.00"
       - key: ALLOWED_ORIGINS
-        value: "https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:3000"
+        value: "https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:5174,http://localhost:3000"
       - key: INFO_SAMPLE_RATE
         value: "1.0"
       - key: PORT

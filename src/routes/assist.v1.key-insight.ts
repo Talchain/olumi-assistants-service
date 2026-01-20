@@ -4,7 +4,7 @@ import {
   CEEKeyInsightResponseV1Schema,
   type CEEKeyInsightResponseV1T,
 } from "../schemas/ceeResponses.js";
-import { generateKeyInsight, type RankedAction, type Driver } from "../cee/key-insight/index.js";
+import { generateKeyInsight, type RankedAction, type Driver, type GoalInfo, type Identifiability } from "../cee/key-insight/index.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -181,6 +181,8 @@ export default async function route(app: FastifyInstance) {
         label: a.label,
         expected_utility: a.expected_utility,
         dominant: a.dominant,
+        outcome_quality: a.outcome_quality,
+        primary_outcome: a.primary_outcome,
       }));
 
       const topDrivers: Driver[] | undefined = input.top_drivers?.map((d) => ({
@@ -188,13 +190,38 @@ export default async function route(app: FastifyInstance) {
         label: d.label,
         impact_pct: d.impact_pct,
         direction: d.direction,
+        kind: d.kind,
       }));
 
-      // Generate key insight
+      // Map goals if provided
+      const goals: GoalInfo[] | undefined = input.goals?.map((g) => ({
+        id: g.id,
+        text: g.text,
+        type: g.type,
+        is_primary: g.is_primary,
+      }));
+
+      // Map identifiability if provided
+      const identifiability: Identifiability | undefined = input.identifiability
+        ? {
+            identifiable: input.identifiability.identifiable,
+            method: input.identifiability.method,
+            adjustment_set: input.identifiability.adjustment_set,
+            explanation: input.identifiability.explanation,
+          }
+        : undefined;
+
+      // Generate key insight with goal context and identifiability
       const insight = generateKeyInsight({
         graph: input.graph as GraphV1,
         ranked_actions: rankedActions,
         top_drivers: topDrivers,
+        goal_text: input.goal_text,
+        goal_type: input.goal_type,
+        goal_id: input.goal_id,
+        goals,
+        primary_goal_id: input.primary_goal_id,
+        identifiability,
       });
 
       // Compute quality
@@ -208,9 +235,14 @@ export default async function route(app: FastifyInstance) {
       // Build response
       const response: CEEKeyInsightResponseV1T = {
         headline: insight.headline,
+        headline_structured: insight.headline_structured,
         primary_driver: insight.primary_driver,
         confidence_statement: insight.confidence_statement,
         caveat: insight.caveat,
+        evidence: insight.evidence,
+        next_steps: insight.next_steps,
+        recommendation_status: insight.recommendation_status,
+        identifiability_note: insight.identifiability_note,
         quality,
         trace: {
           request_id: requestId,

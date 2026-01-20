@@ -29,6 +29,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     ],
     uncertainNodeIds: ["n1"],
   }),
+  detectUniformStrengths: () => ({
+    detected: false,
+    totalEdges: 0,
+    defaultStrengthCount: 0,
+    defaultStrengthPercentage: 0,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -39,6 +45,17 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  // Goal inference utilities
+  hasGoalNode: (graph: any) => {
+    if (!graph || !Array.isArray(graph.nodes)) return false;
+    return graph.nodes.some((n: any) => n.kind === "goal");
+  },
+  ensureGoalNode: (graph: any) => ({
+    graph,
+    goalAdded: false,
+    inferredFrom: undefined,
+    goalNodeId: undefined,
   }),
 }));
 
@@ -52,7 +69,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     // Allow multiple API keys so tests can use independent buckets
     vi.stubEnv(
       "ASSIST_API_KEYS",
-      "cee-key-1,cee-key-2,cee-key-3,cee-key-limit,cee-telemetry-success,cee-telemetry-validation,cee-telemetry-limit"
+      "cee-key-1,cee-key-2,cee-key-3,cee-key-limit,cee-telemetry-success,cee-telemetry-validation,cee-telemetry-limit,cee-raw-output-1,cee-raw-output-2"
     );
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-model-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "2");
@@ -88,7 +105,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("returns CEEDraftGraphResponseV1 for valid request with fixtures", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for V1 response test
       headers: headersKey1,
       payload: {
         brief: "A sufficiently long decision brief for CEE v1 draft-graph happy-path tests.",
@@ -159,7 +176,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("emits draft_warnings and confidence_flags when structural warnings are enabled", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for legacy field tests
       headers: headersKey1,
       payload: {
         brief: "A sufficiently long decision brief for CEE structural warnings tests.",
@@ -182,7 +199,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("propagates seed and archetype_hint through sanitizer and finaliser", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for seed echo test
       headers: headersKey2,
       payload: {
         brief: "A long pricing decision brief for archetype testing in CEE v1.",
@@ -204,7 +221,7 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
   it("accepts refinement fields when refinement flag is enabled", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: headersKey2,
       payload: {
         brief: "A sufficiently long decision brief for refinement tests in CEE v1.",
@@ -294,5 +311,66 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     const retryAfter = limited.headers["retry-after"];
     expect(retryAfter).toBeDefined();
     expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+
+  describe("raw_output mode", () => {
+    const headersRawOutput1 = { "X-Olumi-Assist-Key": "cee-raw-output-1" } as const;
+    const headersRawOutput2 = { "X-Olumi-Assist-Key": "cee-raw-output-2" } as const;
+
+    it("skips post-processing repairs when raw_output=true", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph?schema=v3",
+        headers: headersRawOutput1,
+        payload: {
+          brief: "A sufficiently long decision brief for raw output mode testing in CEE.",
+          raw_output: true,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // V3: nodes and edges at root level
+      expect(body.nodes).toBeDefined();
+      expect(body.edges).toBeDefined();
+
+      // Trace should indicate raw_output_mode
+      expect(body.trace).toBeDefined();
+      expect(body.trace.pipeline).toBeDefined();
+      expect(body.trace.pipeline.raw_output_mode).toBe(true);
+      expect(body.trace.pipeline.status).toBe("success");
+
+      // Should only have llm_draft stage (no factor enrichment, goal repair, etc.)
+      const stages = body.trace.pipeline.stages;
+      expect(Array.isArray(stages)).toBe(true);
+      expect(stages.length).toBe(1);
+      expect(stages[0].name).toBe("llm_draft");
+    });
+
+    it("logs raw_output event with node/edge counts", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph?schema=v3",
+        headers: headersRawOutput2,
+        payload: {
+          brief: "A sufficiently long decision brief for raw output event logging test.",
+          raw_output: true,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // V3: nodes and edges at root level
+      expect(body.nodes).toBeDefined();
+      expect(body.edges).toBeDefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
+      expect(Array.isArray(body.edges)).toBe(true);
+
+      // Quality should be zeroed in raw mode (not computed)
+      expect(body.quality).toBeDefined();
+      expect(body.quality.overall).toBe(0);
+    });
   });
 });

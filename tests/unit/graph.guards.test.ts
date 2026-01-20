@@ -275,6 +275,65 @@ describe("Graph Guards", () => {
       expect(pruned).toHaveLength(2);
       expect(pruned.find(n => n.id === "isolated")).toBeUndefined();
     });
+
+    it("NEVER prunes isolated goal nodes (protected kind)", () => {
+      const nodes: NodeT[] = [
+        { id: "decision_1", kind: "decision" },
+        { id: "option_1", kind: "option" },
+        { id: "goal_isolated", kind: "goal" }, // Isolated goal - should NOT be pruned
+      ];
+
+      const edges: EdgeT[] = [{ from: "decision_1", to: "option_1" }];
+
+      const pruned = pruneIsolatedNodes(nodes, edges);
+
+      // Goal should be preserved even though it's isolated
+      expect(pruned.find(n => n.id === "goal_isolated")).toBeDefined();
+      expect(pruned).toHaveLength(3); // All nodes preserved
+    });
+
+    it("NEVER prunes isolated decision nodes (protected kind)", () => {
+      const nodes: NodeT[] = [
+        { id: "goal_1", kind: "goal" },
+        { id: "option_1", kind: "option" },
+        { id: "decision_isolated", kind: "decision" }, // Isolated decision - should NOT be pruned
+      ];
+
+      const edges: EdgeT[] = [{ from: "goal_1", to: "option_1" }];
+
+      const pruned = pruneIsolatedNodes(nodes, edges);
+
+      // Decision should be preserved even though it's isolated
+      expect(pruned.find(n => n.id === "decision_isolated")).toBeDefined();
+      expect(pruned).toHaveLength(3); // All nodes preserved
+    });
+
+    it("prunes non-protected isolated nodes while preserving goal/decision/outcome/risk", () => {
+      const nodes: NodeT[] = [
+        { id: "decision_1", kind: "decision" },
+        { id: "option_1", kind: "option" },
+        { id: "goal_isolated", kind: "goal" }, // Isolated but protected
+        { id: "factor_isolated", kind: "factor" }, // Isolated and NOT protected - should be pruned
+        { id: "outcome_isolated", kind: "outcome" }, // Isolated but protected - should be preserved
+        { id: "risk_isolated", kind: "risk" }, // Isolated but protected - should be preserved
+      ];
+
+      const edges: EdgeT[] = [{ from: "decision_1", to: "option_1" }];
+
+      const pruned = pruneIsolatedNodes(nodes, edges);
+
+      // Protected nodes preserved (goal, decision, outcome, risk)
+      expect(pruned.find(n => n.id === "goal_isolated")).toBeDefined();
+      expect(pruned.find(n => n.id === "decision_1")).toBeDefined();
+      expect(pruned.find(n => n.id === "option_1")).toBeDefined();
+      expect(pruned.find(n => n.id === "outcome_isolated")).toBeDefined();
+      expect(pruned.find(n => n.id === "risk_isolated")).toBeDefined();
+
+      // Non-protected isolated nodes pruned (factor, option without edges)
+      expect(pruned.find(n => n.id === "factor_isolated")).toBeUndefined();
+
+      expect(pruned).toHaveLength(5);
+    });
   });
 
   describe("calculateMeta", () => {

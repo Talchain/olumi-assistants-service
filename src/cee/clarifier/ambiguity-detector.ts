@@ -23,6 +23,7 @@ interface NodeInfo {
 interface EdgeInfo {
   from: string;
   to: string;
+  // Normalized belief value (V4 takes precedence over legacy)
   belief?: number;
 }
 
@@ -38,11 +39,15 @@ function extractNodes(graph: GraphV1): NodeInfo[] {
 function extractEdges(graph: GraphV1): EdgeInfo[] {
   const edges = (graph as any).edges;
   if (!edges || !Array.isArray(edges)) return [];
-  return edges.map((e: any) => ({
-    from: e.from as string,
-    to: e.to as string,
-    belief: typeof e.belief === "number" ? e.belief : undefined,
-  }));
+  return edges.map((e: any) => {
+    // V4 field takes precedence, fallback to legacy
+    const belief = e.belief_exists ?? e.belief;
+    return {
+      from: e.from as string,
+      to: e.to as string,
+      belief: typeof belief === "number" ? belief : undefined,
+    };
+  });
 }
 
 function findMissingNodeAmbiguities(

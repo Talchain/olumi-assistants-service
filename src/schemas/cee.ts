@@ -145,6 +145,10 @@ export const RankedActionSchema = z.object({
   label: z.string(),
   expected_utility: z.number(),
   dominant: z.boolean().optional(),
+  // Outcome quality affects headline phrasing (negative = risk-minimizing language)
+  outcome_quality: z.enum(["positive", "neutral", "negative", "mixed"]).optional(),
+  // Primary outcome label for context
+  primary_outcome: z.string().optional(),
 });
 
 // Key Insight - drivers from PLoT inference
@@ -153,6 +157,28 @@ export const DriverSchema = z.object({
   label: z.string(),
   impact_pct: z.number().min(0).max(100).optional(),
   direction: z.enum(["positive", "negative", "neutral"]).optional(),
+  // Node kind helps distinguish external factors from controllable actions
+  kind: z.string().optional(),
+});
+
+// Goal info for multi-goal scenarios
+export const GoalInfoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  type: z.enum(["binary", "continuous", "compound"]),
+  is_primary: z.boolean(),
+});
+
+// Identifiability status from ISL causal analysis
+export const IdentifiabilitySchema = z.object({
+  // Whether causal effects are identifiable from the model structure
+  identifiable: z.boolean(),
+  // Method used for identification (e.g., "backdoor", "frontdoor", "instrumental")
+  method: z.string().nullable().optional(),
+  // Variables in the adjustment set for causal identification
+  adjustment_set: z.array(z.string()).nullable().optional(),
+  // Human-readable explanation of identifiability status
+  explanation: z.string().nullable().optional(),
 });
 
 export const CEEKeyInsightInput = z
@@ -161,6 +187,16 @@ export const CEEKeyInsightInput = z
     ranked_actions: z.array(RankedActionSchema).min(1),
     top_drivers: z.array(DriverSchema).optional(),
     context_id: z.string().optional(),
+    // Goal-anchored headline fields (optional for backward compatibility)
+    goal_text: z.string().nullable().optional(),
+    goal_type: z.enum(["binary", "continuous", "compound"]).nullable().optional(),
+    goal_id: z.string().nullable().optional(),
+    // Multi-goal support
+    goals: z.array(GoalInfoSchema).optional(),
+    primary_goal_id: z.string().optional(),
+    // Identifiability from ISL - optional for backward compatibility
+    // If not provided, assumes identifiable (current behaviour)
+    identifiability: IdentifiabilitySchema.optional(),
   })
   .strict();
 
@@ -299,3 +335,173 @@ export const CEEExplainPolicyInput = z
   .strict();
 
 export type CEEExplainPolicyInputT = z.infer<typeof CEEExplainPolicyInput>;
+
+// ============================================================================
+// Preference Elicitation Schemas
+// ============================================================================
+
+// Preference Question Types
+export const PreferenceQuestionTypeSchema = z.enum([
+  "risk_reward", // Type 1: Risk vs Reward Trade-off
+  "goal_tradeoff", // Type 2: Goal Trade-off (Multi-Goal)
+  "loss_aversion", // Type 3: Loss Aversion
+  "time_preference", // Type 4: Time Preference
+]);
+
+export type PreferenceQuestionTypeT = z.infer<typeof PreferenceQuestionTypeSchema>;
+
+// Option in a preference question
+export const PreferenceOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  outcome_value: z.number().optional(),
+  probability: z.number().min(0).max(1).optional(),
+  timeframe: z.string().optional(),
+});
+
+export type PreferenceOptionT = z.infer<typeof PreferenceOptionSchema>;
+
+// Preference Question
+export const PreferenceQuestionSchema = z.object({
+  id: z.string(),
+  type: PreferenceQuestionTypeSchema,
+  question: z.string(),
+  options: z.array(PreferenceOptionSchema).length(2),
+  estimated_value: z.number().min(0).max(1),
+  context_node_ids: z.array(z.string()).optional(),
+});
+
+export type PreferenceQuestionT = z.infer<typeof PreferenceQuestionSchema>;
+
+// User Preferences (output from CEE, input to ISL)
+export const UserPreferencesDerivedFromSchema = z.object({
+  questions_answered: z.number().int().min(0),
+  last_updated: z.string(),
+});
+
+export const UserPreferencesSchema = z.object({
+  risk_aversion: z.number().min(0).max(1),
+  loss_aversion: z.number().min(1).max(3),
+  goal_weights: z.record(z.string(), z.number()),
+  time_discount: z.number().min(0).max(1),
+  confidence: z.enum(["low", "medium", "high"]),
+  derived_from: UserPreferencesDerivedFromSchema,
+});
+
+export type UserPreferencesT = z.infer<typeof UserPreferencesSchema>;
+
+// Option for elicit preferences request
+export const ElicitPreferencesOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  expected_value: z.number().optional(),
+  risk_level: z.number().min(0).max(1).optional(),
+});
+
+// Elicit Preferences Request
+export const CEEElicitPreferencesInput = z
+  .object({
+    graph_id: z.string(),
+    goal_ids: z.array(z.string()),
+    options: z.array(ElicitPreferencesOptionSchema),
+    current_preferences: UserPreferencesSchema.optional(),
+    max_questions: z.number().int().min(1).max(5).default(3),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEElicitPreferencesInputT = z.infer<typeof CEEElicitPreferencesInput>;
+
+// Elicit Preferences Answer Request
+export const CEEElicitPreferencesAnswerInput = z
+  .object({
+    question_id: z.string(),
+    answer: z.enum(["A", "B"]),
+    graph_id: z.string(),
+    current_preferences: UserPreferencesSchema.optional(),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEElicitPreferencesAnswerInputT = z.infer<typeof CEEElicitPreferencesAnswerInput>;
+
+// Explain Tradeoff Request
+export const CEEExplainTradeoffInput = z
+  .object({
+    option_a: z.string(),
+    option_b: z.string(),
+    user_preferences: UserPreferencesSchema,
+    goal_context: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict();
+
+export type CEEExplainTradeoffInputT = z.infer<typeof CEEExplainTradeoffInput>;
+
+// =============================================================================
+// ISL Synthesis Input Schema
+// =============================================================================
+
+// Sensitivity analysis result from ISL
+export const ISLSensitivityResultSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  sensitivity: z.number(),
+  direction: z.enum(["positive", "negative"]).optional(),
+  impact_description: z.string().optional(),
+});
+
+// Value of Information result from ISL
+export const ISLVoIResultSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  voi: z.number(),
+  recommended_research: z.string().optional(),
+});
+
+// Tipping point result from ISL
+export const ISLTippingPointSchema = z.object({
+  factor_id: z.string(),
+  factor_label: z.string().optional(),
+  threshold_value: z.number(),
+  current_value: z.number().optional(),
+  optimal_before: z.string().optional(),
+  optimal_after: z.string().optional(),
+});
+
+// Robustness result from ISL
+export const ISLRobustnessResultSchema = z.object({
+  recommendation_id: z.string(),
+  recommendation_label: z.string().optional(),
+  robustness_score: z.number().min(0).max(1),
+  scenarios_tested: z.number().optional(),
+  scenarios_dominant: z.number().optional(),
+});
+
+// ISL Synthesis Input
+export const CEEIslSynthesisInput = z
+  .object({
+    // Required: at least one analysis type
+    sensitivity: z.array(ISLSensitivityResultSchema).optional(),
+    voi: z.array(ISLVoIResultSchema).optional(),
+    tipping_points: z.array(ISLTippingPointSchema).optional(),
+    robustness: z.array(ISLRobustnessResultSchema).optional(),
+    // Context
+    goal_label: z.string().optional(),
+    recommendation_label: z.string().optional(),
+    context_id: z.string().optional(),
+  })
+  .strict()
+  .refine(
+    (data) =>
+      data.sensitivity?.length ||
+      data.voi?.length ||
+      data.tipping_points?.length ||
+      data.robustness?.length,
+    {
+      message: "At least one analysis result (sensitivity, voi, tipping_points, or robustness) is required",
+    }
+  );
+
+export type CEEIslSynthesisInputT = z.infer<typeof CEEIslSynthesisInput>;

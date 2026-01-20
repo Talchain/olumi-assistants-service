@@ -12,6 +12,21 @@
  *
  * This module caches loaded prompts to avoid repeated file system access
  * while still allowing dynamic updates when prompts change.
+ *
+ * ## Provider Prompt Strategy
+ *
+ * **Anthropic adapter** (`src/adapters/llm/anthropic.ts`):
+ *   Uses this centralized prompt management system via `getSystemPrompt()`.
+ *   Supports A/B experiments, dynamic updates, and prompt versioning.
+ *   Operations: draft_graph, suggest_options, repair_graph, clarify_brief, critique_graph
+ *
+ * **OpenAI adapter** (`src/adapters/llm/openai.ts`):
+ *   Uses this centralized prompt management system for `draft_graph` via `getSystemPrompt()`.
+ *   Other operations (suggest_options, repair_graph, clarify_brief) use inline prompts.
+ *   This partial integration is intentional:
+ *   - OpenAI's API structure differs from Anthropic (user-only vs system+user)
+ *   - OpenAI integration is secondary/fallback; Anthropic is primary
+ *   - Operations `critiqueGraph` and `explainDiff` are not implemented for OpenAI
  */
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
@@ -47,6 +62,7 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   critique_graph: 'critique_graph',
   explainer: 'explainer',
   bias_check: 'bias_check',
+  // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 
 /**
@@ -56,10 +72,17 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
 interface CacheEntry {
   content: string;
   loadedAt: number;
+  source?: LoadedPrompt["source"];
+  promptId?: string;
+  version?: number;
+  promptHash?: string;
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
 const CACHE_TTL_MS = 60_000; // 1 minute
+
+// Track in-flight background refreshes to prevent thundering herd
+const inflightRefresh = new Map<CeeTaskId, Promise<void>>();
 
 /**
  * Get the system prompt for an LLM operation.
@@ -86,8 +109,10 @@ export function getSystemPrompt(
     throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
   }
 
+  const hasVariables = Boolean(variables && Object.keys(variables).length > 0);
+
   const now = Date.now();
-  const cached = promptCache.get(taskId);
+  const cached = hasVariables ? undefined : promptCache.get(taskId);
 
   // Return cached value if still fresh
   if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
@@ -101,15 +126,52 @@ export function getSystemPrompt(
     reason: cached ? 'expired' : 'not_cached',
   });
 
-  // Load from prompt system
+  // Load from prompt system (sync path for immediate return)
   try {
     const content = loadPromptSync(taskId, variables ?? {});
 
-    // Cache the result
-    promptCache.set(taskId, {
-      content,
-      loadedAt: now,
-    });
+    const promptHash = createHash('sha256').update(content).digest('hex');
+
+    // Only cache static prompts (no variables) to avoid cache poisoning
+    if (!hasVariables) {
+      promptCache.set(taskId, {
+        content,
+        loadedAt: now,
+        source: 'default',
+        promptHash,
+      });
+    }
+
+    // Trigger background refresh from store to update cache for next request
+    // Only if not already in-flight (prevents thundering herd on cache expiry)
+    if (!hasVariables && !inflightRefresh.has(taskId)) {
+      const refreshPromise = loadPrompt(taskId, { variables: variables ?? {} })
+        .then((loaded) => {
+          if (loaded.source === 'store' && !hasVariables) {
+            const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
+            promptCache.set(taskId, {
+              content: loaded.content,
+              loadedAt: Date.now(),
+              source: loaded.source,
+              promptId: loaded.promptId,
+              version: loaded.version,
+              promptHash: refreshedHash,
+            });
+            emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
+              taskId,
+              promptId: loaded.promptId,
+              version: loaded.version,
+            });
+          }
+        })
+        .catch((err) => {
+          log.debug({ taskId, error: String(err) }, 'Background prompt refresh failed (non-fatal)');
+        })
+        .finally(() => {
+          inflightRefresh.delete(taskId);
+        });
+      inflightRefresh.set(taskId, refreshPromise);
+    }
 
     return content;
   } catch (error) {
@@ -122,12 +184,106 @@ export function getSystemPrompt(
   }
 }
 
+export function getSystemPromptMeta(operation: string): {
+  taskId: CeeTaskId;
+  source: 'store' | 'default';
+  promptId?: string;
+  version?: number;
+  prompt_version: string;
+  prompt_hash?: string;
+} {
+  ensureDefaultsRegistered();
+
+  const taskId = OPERATION_TO_TASK_ID[operation];
+  if (!taskId) {
+    throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
+  }
+
+  const cached = promptCache.get(taskId);
+  const source: 'store' | 'default' = cached?.source ?? 'default';
+  const promptId = cached?.promptId;
+  const version = cached?.version;
+  const promptHash = cached?.promptHash;
+
+  const promptVersion = source === 'store' && promptId && typeof version === 'number'
+    ? `${promptId}@v${version}`
+    : `default:${taskId}`;
+
+  return {
+    taskId,
+    source,
+    promptId,
+    version,
+    prompt_version: promptVersion,
+    prompt_hash: promptHash,
+  };
+}
+
 /**
  * Clear the prompt cache (for testing or forced refresh)
  */
 export function clearPromptCache(): void {
   promptCache.clear();
   defaultsInitialized = false;
+}
+
+/**
+ * Warm the prompt cache from the managed prompt store
+ *
+ * Called at server startup to pre-load all prompts from the store.
+ * This ensures the sync `getSystemPrompt()` returns managed prompts
+ * instead of falling back to defaults.
+ *
+ * @returns Statistics about the warming operation
+ */
+export async function warmPromptCacheFromStore(): Promise<{
+  warmed: number;
+  failed: number;
+  skipped: number;
+}> {
+  ensureDefaultsRegistered();
+
+  const taskIds = Object.values(OPERATION_TO_TASK_ID) as CeeTaskId[];
+  let warmed = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const taskId of taskIds) {
+    try {
+      const loaded = await loadPrompt(taskId);
+
+      const promptHash = createHash('sha256').update(loaded.content).digest('hex');
+
+      promptCache.set(taskId, {
+        content: loaded.content,
+        loadedAt: Date.now(),
+        source: loaded.source,
+        promptId: loaded.promptId,
+        version: loaded.version,
+        promptHash,
+      });
+
+      if (loaded.source === 'store') {
+        warmed++;
+        log.debug({ taskId, source: loaded.source, promptId: loaded.promptId }, 'Cached prompt from store');
+      } else {
+        skipped++;
+        log.debug({ taskId, source: loaded.source }, 'Cached prompt from defaults (no managed prompt)');
+      }
+    } catch (error) {
+      failed++;
+      log.warn({ taskId, error: String(error) }, 'Failed to warm cache for task');
+    }
+  }
+
+  log.info(
+    { warmed, failed, skipped, total: taskIds.length },
+    'Prompt cache warming complete'
+  );
+
+  emit(TelemetryEvents.PromptStoreCacheWarmed, { warmed, failed, skipped });
+
+  return { warmed, failed, skipped };
 }
 
 /**

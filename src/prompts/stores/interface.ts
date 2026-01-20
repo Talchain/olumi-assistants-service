@@ -140,7 +140,7 @@ export interface IPromptStore {
 /**
  * Store type identifiers
  */
-export type PromptStoreType = 'file' | 'postgres' | 'memory';
+export type PromptStoreType = 'file' | 'postgres' | 'supabase' | 'memory';
 
 /**
  * Base configuration shared by all store types
@@ -177,6 +177,17 @@ export interface PostgresStoreConfig extends BaseStoreConfig {
 }
 
 /**
+ * Supabase store configuration
+ */
+export interface SupabaseStoreConfig extends BaseStoreConfig {
+  type: 'supabase';
+  /** Supabase project URL */
+  url: string;
+  /** Supabase service role key */
+  serviceRoleKey: string;
+}
+
+/**
  * Memory store configuration (for testing)
  */
 export interface MemoryStoreConfig extends BaseStoreConfig {
@@ -186,4 +197,4 @@ export interface MemoryStoreConfig extends BaseStoreConfig {
 /**
  * Union of all store configurations
  */
-export type PromptStoreConfig = FileStoreConfig | PostgresStoreConfig | MemoryStoreConfig;
+export type PromptStoreConfig = FileStoreConfig | PostgresStoreConfig | SupabaseStoreConfig | MemoryStoreConfig;

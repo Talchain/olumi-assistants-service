@@ -7,6 +7,7 @@
 
 import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
+import type { CorrectionCollector } from "../../cee/corrections.js";
 
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
@@ -39,6 +40,36 @@ export interface DraftGraphResult {
   debug?: {
     influence_scores?: Array<{ node_id: string; score: number }>;
     [key: string]: unknown;
+  };
+  /**
+   * Provider/prompt observability metadata.
+   * Safe fields should always be populated when available.
+   * Unsafe fields must only be populated when explicitly gated by the caller.
+   */
+  meta?: {
+    // Safe
+    model: string;
+    prompt_version?: string;
+    prompt_hash?: string;
+    temperature?: number;
+    max_tokens?: number;
+    seed?: number;
+    reasoning_effort?: "low" | "medium" | "high";
+    token_usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    finish_reason?: string;
+    provider_latency_ms?: number;
+
+    // Safe diagnostics
+    node_kinds_raw_json?: string[];
+
+    // Unsafe (admin-gated)
+    raw_output_preview?: string;
+    raw_llm_text?: string;
+    raw_llm_json?: unknown;
   };
   usage: UsageMetrics;
 }
@@ -199,6 +230,7 @@ export interface CallOpts {
   timeoutMs: number;
   abortSignal?: AbortSignal;
   bypassCache?: boolean; // Skip prompt cache (for testing/debugging)
+  collector?: CorrectionCollector; // Graph corrections tracking
 }
 
 /**

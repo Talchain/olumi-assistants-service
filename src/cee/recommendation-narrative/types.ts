@@ -16,13 +16,29 @@ export interface RankedAction {
   label: string;
   score: number; // 0-100
   rank: number; // 1-based
+  /** Optional outcome quality indicator - used to avoid contradictory messaging */
+  outcome_quality?: "positive" | "neutral" | "negative" | "mixed";
+  /** Optional: whether this option has associated risks */
+  has_risks?: boolean;
+  /** Optional: primary outcome label for context */
+  primary_outcome?: string;
 }
 
 export interface GenerateRecommendationInput {
   ranked_actions: RankedAction[];
   goal_label?: string;
+  /** User's original decision brief for context extraction */
+  brief?: string;
   context?: string;
   tone?: Tone;
+  /** Top drivers influencing the recommendation */
+  drivers?: Array<{
+    id?: string;
+    label: string;
+    /** Impact as a percentage (0-100) */
+    impact_pct?: number;
+    direction?: "positive" | "negative" | "neutral";
+  }>;
 }
 
 export interface GenerateRecommendationOutput {
@@ -31,6 +47,8 @@ export interface GenerateRecommendationOutput {
   confidence_statement: string;
   alternatives_summary?: string;
   caveat?: string;
+  /** Why this option is recommended, including driver impact */
+  why?: string;
   provenance: "cee";
 }
 

@@ -1,6 +1,12 @@
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { Ambiguity } from "./ambiguity-detector.js";
 
+/**
+ * Clarifier uses reduced caps (30 nodes, 50 edges) for iterative refinement.
+ * This allows expansion headroom before hitting the hard limits (50 nodes, 200 edges)
+ * defined in graphCaps.ts. During clarification, the graph may grow as the user
+ * provides more detail, so we start with conservative limits.
+ */
 export const ANSWER_INCORPORATION_SYSTEM_PROMPT = `You are an expert at refining decision graphs based on user clarification.
 
 Your task is to minimally adjust an existing decision graph to incorporate new information from the user's answer to a clarifying question.
@@ -29,7 +35,14 @@ export function buildAnswerIncorporationPrompt(
           .join("\n\n")}`
       : "";
 
-  return `ORIGINAL BRIEF:
+  // Include ANSWER_INCORPORATION_SYSTEM_PROMPT instructions in the user prompt
+  // since draftGraph uses the draft_graph system prompt by default.
+  // This ensures the clarifier-specific constraints are applied.
+  return `<CLARIFIER_REFINEMENT_INSTRUCTIONS>
+${ANSWER_INCORPORATION_SYSTEM_PROMPT}
+</CLARIFIER_REFINEMENT_INSTRUCTIONS>
+
+ORIGINAL BRIEF:
 ${brief}
 
 CURRENT GRAPH:
@@ -47,6 +60,9 @@ Refine the graph to incorporate this clarification. Make minimal, targeted chang
 2. If the answer clarifies edge direction/strength → adjust belief values
 3. If the answer resolves ambiguity → make structural change to reflect clarity
 4. If the answer provides new constraints → add risk/outcome nodes as appropriate
+
+CRITICAL: Preserve existing structure. Do NOT remove outcome or risk nodes unless explicitly requested.
+Every edge "from" and "to" must EXACTLY match an existing node "id".
 
 Return the complete refined graph as valid JSON.`;
 }

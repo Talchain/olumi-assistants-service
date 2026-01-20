@@ -48,7 +48,7 @@ describe("CEE hero journey (health): truncation and validation scenarios", () =>
     // 1) Draft My Model
     const draftRes = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: { "X-Olumi-Assist-Key": "cee-hero-health-key" },
       payload: {
         brief: `Truncation journey decision with secret marker ${SECRET}`,

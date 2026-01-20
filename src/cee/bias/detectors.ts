@@ -10,7 +10,16 @@ type Category = CEEBiasFindingV1["category"];
 
 type NodeLike = { id?: string; kind?: string; label?: string } & Record<string, unknown>;
 
-type EdgeLike = { from?: string; to?: string; weight?: number } & Record<string, unknown>;
+type EdgeLike = {
+  from?: string;
+  to?: string;
+  // V4 fields (preferred)
+  strength_mean?: number;
+  belief_exists?: number;
+  // Legacy fields (fallback)
+  weight?: number;
+  belief?: number;
+} & Record<string, unknown>;
 
 function getNodes(graph: GraphV1 | undefined): NodeLike[] {
   if (!graph || !Array.isArray((graph as any).nodes)) return [];
@@ -145,13 +154,14 @@ export function detectOverconfidenceBias(graph: GraphV1 | undefined): CEEBiasFin
   const edges = getEdges(graph) as any[];
   if (edges.length === 0) return null;
 
-  const edgesWithBelief = edges.filter((e) =>
-    typeof e?.belief === "number" && Number.isFinite(e.belief),
-  );
+  // V4 field takes precedence, fallback to legacy
+  const edgesWithBelief = edges
+    .map((e) => ({ ...e, _belief: e?.belief_exists ?? e?.belief }))
+    .filter((e) => typeof e._belief === "number" && Number.isFinite(e._belief));
 
   if (edgesWithBelief.length < 3) return null;
 
-  const beliefs = edgesWithBelief.map((e) => e.belief as number);
+  const beliefs = edgesWithBelief.map((e) => e._belief as number);
   const minBelief = Math.min(...beliefs);
   const maxBelief = Math.max(...beliefs);
 

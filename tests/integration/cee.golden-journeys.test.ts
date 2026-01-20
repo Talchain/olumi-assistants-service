@@ -28,9 +28,10 @@ async function runGoldenJourney(
 ): Promise<{ envelopes: CeeJourneyEnvelopes; snapshot: CeeGoldenJourneySnapshot }> {
   const headers = { "X-Olumi-Assist-Key": "cee-golden-journeys-key" } as const;
 
+  // Use V1 schema since downstream endpoints (/options, /bias-check) expect V1 graph format
   const draftRes = await app.inject({
     method: "POST",
-    url: "/assist/v1/draft-graph",
+    url: "/assist/v1/draft-graph?schema=v1",
     headers,
     payload: {
       brief: fixture.inputs.draft?.brief ?? "Synthetic CEE golden journey",

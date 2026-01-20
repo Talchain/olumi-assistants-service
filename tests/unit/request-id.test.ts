@@ -5,6 +5,8 @@ import {
   attachRequestId,
   getRequestId,
   REQUEST_ID_HEADER,
+  SAFE_REQUEST_ID_PATTERN,
+  isValidRequestId,
 } from "../../src/utils/request-id.js";
 
 describe("request-id utilities", () => {
@@ -244,6 +246,128 @@ describe("request-id utilities", () => {
       // Fastify normalizes headers to lowercase, so this tests our handling
       // In practice, Fastify would convert this to lowercase
       expect(id).toBeDefined();
+    });
+  });
+
+  describe("SAFE_REQUEST_ID_PATTERN", () => {
+    it("should match valid alphanumeric IDs", () => {
+      expect(SAFE_REQUEST_ID_PATTERN.test("abc123")).toBe(true);
+      expect(SAFE_REQUEST_ID_PATTERN.test("ABC123")).toBe(true);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test-id")).toBe(true);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test_id")).toBe(true);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test.id")).toBe(true);
+    });
+
+    it("should match UUIDs", () => {
+      expect(SAFE_REQUEST_ID_PATTERN.test("550e8400-e29b-41d4-a716-446655440000")).toBe(true);
+    });
+
+    it("should reject IDs with special characters", () => {
+      expect(SAFE_REQUEST_ID_PATTERN.test("test<script>")).toBe(false);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test\ninjection")).toBe(false);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test;drop")).toBe(false);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test&id")).toBe(false);
+      expect(SAFE_REQUEST_ID_PATTERN.test("test id")).toBe(false);
+    });
+
+    it("should reject IDs longer than 64 characters", () => {
+      const longId = "a".repeat(65);
+      expect(SAFE_REQUEST_ID_PATTERN.test(longId)).toBe(false);
+    });
+
+    it("should accept IDs up to 64 characters", () => {
+      const maxId = "a".repeat(64);
+      expect(SAFE_REQUEST_ID_PATTERN.test(maxId)).toBe(true);
+    });
+
+    it("should reject empty strings", () => {
+      expect(SAFE_REQUEST_ID_PATTERN.test("")).toBe(false);
+    });
+  });
+
+  describe("isValidRequestId", () => {
+    it("should return true for valid IDs", () => {
+      expect(isValidRequestId("valid-id-123")).toBe(true);
+      expect(isValidRequestId("another_valid.id")).toBe(true);
+    });
+
+    it("should return false for invalid IDs", () => {
+      expect(isValidRequestId("invalid<id>")).toBe(false);
+      expect(isValidRequestId("id with spaces")).toBe(false);
+    });
+
+    it("should return false for null/undefined", () => {
+      expect(isValidRequestId(null)).toBe(false);
+      expect(isValidRequestId(undefined)).toBe(false);
+    });
+
+    it("should return false for empty string", () => {
+      expect(isValidRequestId("")).toBe(false);
+    });
+
+    it("should return false for non-strings", () => {
+      expect(isValidRequestId(123 as any)).toBe(false);
+      expect(isValidRequestId({} as any)).toBe(false);
+    });
+  });
+
+  describe("request ID validation in getOrGenerateRequestId", () => {
+    it("should accept valid request IDs", () => {
+      const mockRequest: any = {
+        headers: {
+          "x-request-id": "valid-request-id-123",
+        },
+      };
+
+      const id = getOrGenerateRequestId(mockRequest);
+      expect(id).toBe("valid-request-id-123");
+    });
+
+    it("should reject and regenerate for invalid request IDs", () => {
+      const mockRequest: any = {
+        headers: {
+          "x-request-id": "invalid<script>id",
+        },
+        log: {
+          warn: () => {},
+        },
+      };
+
+      const id = getOrGenerateRequestId(mockRequest);
+
+      // Should NOT return the invalid ID
+      expect(id).not.toBe("invalid<script>id");
+      // Should return a valid UUID
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      expect(id).toMatch(uuidRegex);
+    });
+
+    it("should reject IDs with newlines (log injection prevention)", () => {
+      const mockRequest: any = {
+        headers: {
+          "x-request-id": "id-with\nnewline",
+        },
+        log: {
+          warn: () => {},
+        },
+      };
+
+      const id = getOrGenerateRequestId(mockRequest);
+      expect(id).not.toContain("\n");
+    });
+
+    it("should reject overly long IDs", () => {
+      const mockRequest: any = {
+        headers: {
+          "x-request-id": "a".repeat(100),
+        },
+        log: {
+          warn: () => {},
+        },
+      };
+
+      const id = getOrGenerateRequestId(mockRequest);
+      expect(id.length).toBeLessThanOrEqual(64);
     });
   });
 });

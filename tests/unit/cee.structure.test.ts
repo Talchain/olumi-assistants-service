@@ -93,7 +93,7 @@ describe("detectStructuralWarnings", () => {
     expect(uncertainNodeIds).toEqual(expect.arrayContaining(["n1", "n2"]));
   });
 
-  it("emits decision_after_outcome for backwards edges from outcome to decision/option/goal", () => {
+  it("emits decision_after_outcome for backwards edges from outcome to decision/option", () => {
     const graph = makeGraph({
       nodes: [
         { id: "out1", kind: "outcome" } as any,
@@ -113,6 +113,28 @@ describe("detectStructuralWarnings", () => {
     expect(w?.node_ids).toEqual(expect.arrayContaining(["out1", "dec1", "opt1"]));
     expect(w?.edge_ids).toEqual(["e1", "e2"]);
     expect(uncertainNodeIds).toEqual(expect.arrayContaining(["out1", "dec1", "opt1"]));
+  });
+
+  it("does NOT emit decision_after_outcome for valid outcome→goal edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "out1", kind: "outcome" } as any,
+        { id: "out2", kind: "outcome" } as any,
+        { id: "goal1", kind: "goal" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "out1", to: "goal1" } as any,
+        { id: "e2", from: "out2", to: "goal1" } as any,
+      ],
+    });
+
+    const { warnings, uncertainNodeIds } = detectStructuralWarnings(graph, undefined);
+
+    // outcome→goal is VALID V4 topology - goals aggregate outcomes
+    const w = warnings.find((x) => x.id === "decision_after_outcome");
+    expect(w).toBeUndefined();
+    expect(uncertainNodeIds).not.toContain("out1");
+    expect(uncertainNodeIds).not.toContain("goal1");
   });
 });
 

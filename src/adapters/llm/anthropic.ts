@@ -6,22 +6,24 @@ import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt } from "./prompt-loader.js";
+import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 
 export type DraftArgs = {
   brief: string;
   docs: DocPreview[];
   seed: number;
   model?: string;
+  includeDebug?: boolean;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -35,17 +37,57 @@ type AnthropicSystemBlock = {
   cache_control?: { type: "ephemeral" };
 };
 
+/**
+ * Max size for raw LLM output in debug trace (chars).
+ * Truncates large responses to prevent payload bloat.
+ */
+const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
+
+/**
+ * Truncate raw LLM output for debug tracing.
+ * Returns the output with a truncation flag if over limit.
+ */
+function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
+  const jsonStr = JSON.stringify(raw);
+  if (jsonStr.length <= RAW_LLM_OUTPUT_MAX_CHARS) {
+    return { output: raw, truncated: false };
+  }
+  // Truncate and add marker
+  const truncatedStr = jsonStr.slice(0, RAW_LLM_OUTPUT_MAX_CHARS);
+  return {
+    output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
+    truncated: true,
+  };
+}
+
 // Zod schemas for Anthropic response validation
 const AnthropicNode = z.object({
   id: z.string().min(1),
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
+  data: NodeData.optional(),
 });
+
+// V4 edge strength schema (nested object from LLM)
+const EdgeStrength = z.object({
+  mean: z.number(),
+  std: z.number().positive(),
+}).optional();
 
 const AnthropicEdge = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
+  // V4 format (preferred) - from v4 prompt (nested)
+  strength: EdgeStrength,
+  exists_probability: z.number().min(0).max(1).optional(),
+  // V4 format (flat) - added by normaliseDraftResponse()
+  strength_mean: z.number().optional(),
+  strength_std: z.number().optional(),
+  belief_exists: z.number().optional(),
+  effect_direction: z.enum(["positive", "negative"]).optional(),
+  // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
   provenance: StructuredProvenance.optional(),
@@ -139,7 +181,11 @@ function getClient(): Anthropic {
   return client;
 }
 
-const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
+const TIMEOUT_MS = 45_000; // 45 seconds
+
+const RAW_LLM_TEXT_MAX_CHARS = 10_000;
+const RAW_LLM_PREVIEW_MAX_CHARS = 500;
+
 function isAnthropicPromptCacheEnabled(): boolean {
   return config.promptCache.anthropicEnabled;
 }
@@ -171,10 +217,15 @@ const _DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graph
 
 ## Your Task
 Draft a small decision graph with:
-- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action
-  (Do NOT use kinds like "evidence", "constraint", "factor", "benefit" - these are NOT valid)
+- ≤${GRAPH_MAX_NODES} nodes using ONLY these allowed kinds: goal, decision, option, outcome, risk, action, factor
+  (Do NOT use kinds like "evidence", "constraint", "benefit" - these are NOT valid)
 - ≤${GRAPH_MAX_EDGES} edges
 - For each decision node, when you connect it to 2+ option nodes, treat the belief values on those decision→option edges as probabilities that must sum to 1.0 across that set (within normal rounding error). If this is not true for any decision node, your graph is incorrect and you must adjust the belief values so they form a proper probability distribution before responding.
+
+## NODE KIND DISTINCTIONS
+- **factor**: External variables OUTSIDE user control (market demand, competitor actions, economic conditions)
+- **action**: Steps the user CAN take (hire contractor, buy insurance, run pilot, train team)
+
 - Every edge with belief or weight MUST have structured provenance:
   - source: document filename, metric name, or "hypothesis"
   - quote: short citation or statement (≤100 chars)
@@ -357,9 +408,12 @@ export type UsageMetrics = {
 };
 
 export async function draftGraphWithAnthropic(
-  args: DraftArgs
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
+  args: DraftArgs,
+  opts?: { collector?: CorrectionCollector }
+): Promise<DraftGraphResult> {
+  const collector = opts?.collector;
   const prompt = buildDraftPrompt(args);
+  const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
 
@@ -398,6 +452,8 @@ export async function draftGraphWithAnthropic(
 
     clearTimeout(timeoutId);
 
+    const providerLatencyMs = Date.now() - startTime;
+
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
@@ -412,18 +468,39 @@ export async function draftGraphWithAnthropic(
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    // Parse, normalise non-standard node kinds, then validate with Zod
+    // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
     const rawJson = JSON.parse(jsonText);
+    const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
+      ? ((rawJson as any).nodes as any[])
+        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+        .filter(Boolean)
+      : [];
     const normalised = normaliseDraftResponse(rawJson);
-    const parseResult = AnthropicDraftResponse.safeParse(normalised);
+    const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
+    if (defaultedFactors.length > 0) {
+      log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
+    }
+    const parseResult = AnthropicDraftResponse.safeParse(withBaselines);
 
     if (!parseResult.success) {
       const flatErrors = parseResult.error.flatten();
+
+      // Capture truncated raw output for debugging (before throwing)
+      const rawOutputSample = (() => {
+        try {
+          const serialized = JSON.stringify(rawJson);
+          return serialized.length > 500 ? serialized.slice(0, 500) + '...[truncated]' : serialized;
+        } catch {
+          return '[serialization failed]';
+        }
+      })();
+
       log.error({
         errors: flatErrors,
         raw_node_kinds: Array.isArray(rawJson?.nodes)
           ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
           : [],
+        raw_output_sample: rawOutputSample,
         event: 'llm.validation.schema_failed'
       }, "Anthropic response failed schema validation after normalisation");
 
@@ -450,17 +527,56 @@ export async function draftGraphWithAnthropic(
       parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
-    // Filter edges to only valid node IDs
+    // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1)
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+    const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+    if (danglingEdges.length > 0) {
+      log.warn({
+        event: 'llm.draft.dangling_edges_removed',
+        removed_count: danglingEdges.length,
+        dangling_edges: danglingEdges.map(e => ({
+          from: e.from,
+          to: e.to,
+          missing_from: !nodeIds.has(e.from),
+          missing_to: !nodeIds.has(e.to),
+        })).slice(0, 10),
+      }, `Removed ${danglingEdges.length} edge(s) with dangling node references`);
+
+      // Track corrections for each dangling edge removed
+      if (collector) {
+        for (const edge of danglingEdges) {
+          const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
+          collector.addByStage(
+            5,
+            "edge_removed",
+            { edge_id: formatEdgeId(edge.from, edge.to) },
+            `Node "${missingNode}" not found`,
+            edge,
+            null
+          );
+        }
+      }
+    }
+
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs
+    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
         from: e.from,
         to: e.to,
-        weight: e.weight,
-        belief: e.belief,
+        // V4 nested format (from LLM)
+        strength: e.strength,
+        exists_probability: e.exists_probability,
+        // V4 flat format (from normaliseDraftResponse)
+        strength_mean: e.strength_mean,
+        strength_std: e.strength_std,
+        belief_exists: e.belief_exists,
+        effect_direction: e.effect_direction,
+        // Legacy format (for backwards compatibility)
+        weight: e.weight ?? e.strength_mean,
+        belief: e.belief ?? e.belief_exists,
         provenance: e.provenance,
         provenance_source: e.provenance_source,
       }))
@@ -500,9 +616,49 @@ export async function draftGraphWithAnthropic(
       "draft complete"
     );
 
+    // Capture raw LLM output for debug tracing (before normalisation)
+    const rawOutput = truncateRawOutput(rawJson);
+
+    const unsafeCaptureEnabled = args.includeDebug === true && (args as any).flags?.unsafe_capture === true;
+    const rawTextTruncated = jsonText.length > RAW_LLM_TEXT_MAX_CHARS
+      ? jsonText.slice(0, RAW_LLM_TEXT_MAX_CHARS)
+      : jsonText;
+    const rawPreview = jsonText.length > RAW_LLM_PREVIEW_MAX_CHARS
+      ? jsonText.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
+      : jsonText;
+
+    const finishReason = (response as any)?.stop_reason || (response as any)?.stopReason;
+
     return {
       graph,
       rationales: parsed.rationales || [],
+      debug: unsafeCaptureEnabled ? {
+        raw_llm_output: rawOutput.output,
+        raw_llm_output_truncated: rawOutput.truncated,
+      } : undefined,
+      meta: {
+        model,
+        prompt_version: promptMeta.prompt_version,
+        prompt_hash: promptMeta.prompt_hash,
+        temperature: 0,
+        max_tokens: maxTokens,
+        seed: args.seed,
+        token_usage: {
+          prompt_tokens: response.usage.input_tokens,
+          completion_tokens: response.usage.output_tokens,
+          total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+        },
+        finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+        provider_latency_ms: providerLatencyMs,
+        node_kinds_raw_json: rawNodeKinds,
+        // Always include raw output for LLM observability trace (preview + full text for storage)
+        raw_output_preview: rawPreview,
+        raw_llm_text: rawTextTruncated,
+        // Only include parsed JSON when unsafe capture is enabled (admin-gated)
+        ...(unsafeCaptureEnabled ? {
+          raw_llm_json: rawOutput.output,
+        } : {}),
+      },
       usage: {
         input_tokens: response.usage.input_tokens,
         output_tokens: response.usage.output_tokens,
@@ -739,7 +895,7 @@ Fix the graph to resolve ALL violations. Common fixes:
 - Remove isolated nodes (all nodes must be connected)
 - Ensure edge endpoints reference valid node IDs
 - Ensure belief values are between 0 and 1
-- Ensure node kinds are valid (goal, decision, option, outcome)
+- Ensure node kinds are valid (goal, decision, option, outcome, risk, action, factor)
 - Maintain graph topology where possible
 
 ## Output Format (JSON)
@@ -848,10 +1004,14 @@ export async function repairGraphWithAnthropic(
       jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
     }
 
-    // Parse, normalise non-standard node kinds, then validate with Zod
+    // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
     const rawJson = JSON.parse(jsonText);
     const normalised = normaliseDraftResponse(rawJson);
-    const parseResult = AnthropicDraftResponse.safeParse(normalised);
+    const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
+    if (repairDefaultedFactors.length > 0) {
+      log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
+    }
+    const parseResult = AnthropicDraftResponse.safeParse(withBaselines);
 
     if (!parseResult.success) {
       const flatErrors = parseResult.error.flatten();
@@ -884,17 +1044,41 @@ export async function repairGraphWithAnthropic(
       parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
     }
 
-    // Filter edges to only valid node IDs
+    // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
     const nodeIds = new Set(parsed.nodes.map((n) => n.id));
+    const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
+
+    if (danglingEdges.length > 0) {
+      log.warn({
+        event: 'llm.repair.dangling_edges_removed',
+        removed_count: danglingEdges.length,
+        dangling_edges: danglingEdges.map(e => ({
+          from: e.from,
+          to: e.to,
+          missing_from: !nodeIds.has(e.from),
+          missing_to: !nodeIds.has(e.to),
+        })).slice(0, 10),
+      }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
+    }
+
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs
+    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
         from: e.from,
         to: e.to,
-        weight: e.weight,
-        belief: e.belief,
+        // V4 nested format (from LLM)
+        strength: e.strength,
+        exists_probability: e.exists_probability,
+        // V4 flat format (from normaliseDraftResponse)
+        strength_mean: e.strength_mean,
+        strength_std: e.strength_std,
+        belief_exists: e.belief_exists,
+        effect_direction: e.effect_direction,
+        // Legacy format (for backwards compatibility)
+        weight: e.weight ?? e.strength_mean,
+        belief: e.belief ?? e.belief_exists,
         provenance: e.provenance,
         provenance_source: e.provenance_source,
       }))
@@ -1580,16 +1764,19 @@ export class AnthropicAdapter implements LLMAdapter {
     this.model = model || config.llm.model || 'claude-3-haiku-20240307';
   }
 
-  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
+  async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
 
     // Call existing function with compatible args, passing model from adapter
-    const result = await draftGraphWithAnthropic({
-      brief,
-      docs,
-      seed,
-      model: this.model,
-    });
+    const result = await draftGraphWithAnthropic(
+      {
+        brief,
+        docs,
+        seed,
+        model: this.model,
+      },
+      { collector: opts.collector }
+    );
 
     return {
       graph: result.graph,

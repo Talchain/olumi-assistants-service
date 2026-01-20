@@ -54,7 +54,7 @@ describe("CEE hero journey: heavy truncation and journey helpers", () => {
     // 1) Draft My Model
     const draftRes = await app.inject({
       method: "POST",
-      url: "/assist/v1/draft-graph",
+      url: "/assist/v1/draft-graph?schema=v1",
       headers: { "X-Olumi-Assist-Key": "cee-hero-heavy-key" },
       payload: {
         brief: `Heavy truncation journey with secret marker ${SECRET_HEAVY}`,

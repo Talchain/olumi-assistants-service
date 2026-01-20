@@ -11,6 +11,8 @@ import { validateGraph } from "../services/validateClientWithCache.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { validateAndFixGraph } from "../cee/structure/index.js";
+import { enrichGraphWithFactorsAsync } from "../cee/factor-extraction/enricher.js";
+import { createCorrectionCollector } from "../cee/corrections.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { hasLegacyProvenance } from "../schemas/graph.js";
 import { fixtureGraph } from "../utils/fixtures.js";
@@ -40,6 +42,29 @@ const SSE_HEADERS = {
 } as const;
 
 const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
+
+// Time budget configuration - skip LLM repair if draft takes too long
+// This prevents client timeouts by ensuring faster responses
+const DEFAULT_DRAFT_BUDGET_MS = 25000; // 25 seconds total budget
+const DEFAULT_REPAIR_TIMEOUT_MS = 10000; // 10 seconds for repair call
+
+function getDraftBudgetMs(): number {
+  const envVal = process.env.CEE_DRAFT_BUDGET_MS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_DRAFT_BUDGET_MS;
+}
+
+function getRepairTimeoutMs(): number {
+  const envVal = process.env.CEE_REPAIR_TIMEOUT_MS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_REPAIR_TIMEOUT_MS;
+}
 
 // Lazy config access to avoid module-level initialization issues
 function getDeprecationSunset(): string {
@@ -100,8 +125,8 @@ function buildRefinementBrief(
     ? `\n- Follow these refinement instructions: ${safeInstructions}`
     : "";
 
-  const maxNodes = 12;
-  const maxEdges = 24;
+  const maxNodes = 20;
+  const maxEdges = 40;
   const maxLabelLen = 80;
 
   const nodes = Array.isArray(previousGraph.nodes) ? previousGraph.nodes.slice(0, maxNodes) : [];
@@ -214,6 +239,7 @@ export function sanitizeDraftGraphInput(
     refinement_mode,
     refinement_instructions,
     preserve_nodes,
+    raw_output,
   } = input;
 
   const base = {
@@ -228,6 +254,7 @@ export function sanitizeDraftGraphInput(
     refinement_mode,
     refinement_instructions,
     preserve_nodes,
+    raw_output,
   };
 
   const passthrough: Record<string, unknown> = {};
@@ -253,18 +280,49 @@ export function sanitizeDraftGraphInput(
     passthrough.archetype_hint = archetypeHintValue;
   }
 
+  // Limit sim_* passthrough to prevent DOS via payload bloat
+  const MAX_SIM_FIELDS = 10;
+  const MAX_SIM_STRING_LENGTH = 500;
+  let simFieldCount = 0;
+
   for (const [key, value] of Object.entries(extrasSource)) {
     if (!key.startsWith("sim_")) continue;
     // Skip unsafe keys to prevent prototype pollution
     if (UNSAFE_KEYS.has(key)) continue;
+    // Enforce field count limit
+    if (simFieldCount >= MAX_SIM_FIELDS) {
+      log.warn({ key, limit: MAX_SIM_FIELDS }, "Ignoring sim_* field: count limit exceeded");
+      continue;
+    }
     const valueType = typeof value;
-    if (valueType === "string" || valueType === "number" || valueType === "boolean") {
+    if (valueType === "string") {
+      // Enforce string length limit
+      const strValue = value as string;
+      if (strValue.length > MAX_SIM_STRING_LENGTH) {
+        log.warn({ key, length: strValue.length, limit: MAX_SIM_STRING_LENGTH }, "Truncating sim_* string value");
+        Object.defineProperty(passthrough, key, {
+          value: strValue.slice(0, MAX_SIM_STRING_LENGTH),
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      } else {
+        Object.defineProperty(passthrough, key, {
+          value: strValue,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      }
+      simFieldCount++;
+    } else if (valueType === "number" || valueType === "boolean") {
       Object.defineProperty(passthrough, key, {
         value,
         writable: true,
         enumerable: true,
         configurable: true,
       });
+      simFieldCount++;
     }
   }
 
@@ -279,6 +337,7 @@ type PipelineResult =
       cost_usd: number;
       provider: string;
       model: string;
+      llm_meta?: DraftGraphResult["meta"];
       structural_meta?: StructuralMeta;
     }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
@@ -391,6 +450,9 @@ async function groundAttachments(
 }
 
 export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
+  // Create correction collector for tracking graph modifications
+  const collector = createCorrectionCollector();
+
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
@@ -461,8 +523,14 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
     try {
       draftResult = await draftAdapter.draftGraph(
-        { brief: effectiveBrief, docs, seed: 17 },
-        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS }
+        {
+          brief: effectiveBrief,
+          docs,
+          seed: 17,
+          flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
+          includeDebug: input.include_debug === true,
+        },
+        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector }
       );
       break;
     } catch (error) {
@@ -494,8 +562,26 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     throw new Error("draft_graph_missing_result");
   }
 
-  const { graph, rationales, usage: draftUsage } = draftResult;
+  const { graph, rationales, usage: draftUsage, debug: adapterDebug, meta: llmMeta } = draftResult;
   const llmDuration = Date.now() - llmStartTime;
+
+  // Time budget check: skip LLM repair if we've used too much time on draft
+  const draftBudgetMs = getDraftBudgetMs();
+  const repairTimeoutMs = getRepairTimeoutMs();
+  const remainingBudget = draftBudgetMs - llmDuration;
+  const skipRepairDueToBudget = remainingBudget < repairTimeoutMs;
+
+  if (skipRepairDueToBudget) {
+    log.warn({
+      stage: "repair_budget_check",
+      draft_duration_ms: llmDuration,
+      budget_ms: draftBudgetMs,
+      remaining_ms: remainingBudget,
+      repair_timeout_ms: repairTimeoutMs,
+      skip_repair: true,
+      correlation_id: correlationId,
+    }, "Time budget exceeded - will skip LLM repair and use simple repair if needed");
+  }
 
   // V04: Emit upstream telemetry for successful calls
   emit(TelemetryEvents.DraftUpstreamSuccess, {
@@ -508,6 +594,42 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   const initialNodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
   const initialEdgeCount = Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0;
+
+  // DEBUG: Track node counts through pipeline stages
+  log.info({
+    stage: "1_llm_draft",
+    node_count: initialNodeCount,
+    edge_count: initialEdgeCount,
+    node_kinds: graph.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: LLM draft complete");
+
+  // Track goal vs outcome node generation for prompt tuning
+  const goalNodes = graph.nodes.filter((n: any) => n.kind === "goal");
+  const outcomeNodes = graph.nodes.filter((n: any) => n.kind === "outcome");
+
+  emit(TelemetryEvents.GoalGeneration ?? "cee.goal_generation", {
+    goal_count: goalNodes.length,
+    outcome_count: outcomeNodes.length,
+    goal_labels: goalNodes.map((n: any) => n.label),
+    outcome_labels: outcomeNodes.map((n: any) => n.label),
+    correlation_id: correlationId,
+  });
+
+  if (goalNodes.length === 0) {
+    log.warn({
+      event: "cee.no_goal_node",
+      outcome_labels: outcomeNodes.map((n: any) => n.label),
+      correlation_id: correlationId,
+    }, "LLM did not generate a goal node - prompt may need improvement");
+  } else if (goalNodes.length > 1) {
+    log.warn({
+      event: "cee.multiple_goal_nodes",
+      goal_count: goalNodes.length,
+      goal_labels: goalNodes.map((n: any) => n.label),
+      correlation_id: correlationId,
+    }, "LLM generated multiple goal nodes - will be merged");
+  }
 
   if (initialNodeCount === 0) {
     emit(TelemetryEvents.GuardViolation, {
@@ -540,6 +662,25 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
+  // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
+  const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief, { collector });
+  const enrichedGraph = enrichmentResult.graph;
+
+  // DEBUG: Track node counts after factor enrichment
+  log.info({
+    stage: "2_factor_enrichment",
+    node_count: enrichedGraph.nodes.length,
+    edge_count: enrichedGraph.edges.length,
+    factors_added: enrichmentResult.factorsAdded,
+    factors_enhanced: enrichmentResult.factorsEnhanced,
+    factors_skipped: enrichmentResult.factorsSkipped,
+    extraction_mode: enrichmentResult.extractionMode,
+    llm_success: enrichmentResult.llmSuccess,
+    node_kinds: enrichedGraph.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: Factor enrichment complete");
+
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
 
@@ -551,34 +692,70 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let repairProviderName: string | null = null;
   let repairModelName: string | null = null;
 
-  const initialNodeIds = new Set<string>(graph.nodes.map((n: any) => (n as any).id as string));
-  const cycles = detectCycles(graph.nodes as any, graph.edges as any);
+  const initialNodeIds = new Set<string>(enrichedGraph.nodes.map((n: any) => (n as any).id as string));
+  const cycles = detectCycles(enrichedGraph.nodes as any, enrichedGraph.edges as any);
   const hadCycles = cycles.length > 0;
   const cycleNodeIds: string[] = Array.from(
     new Set<string>((cycles.flat() as string[])),
   ).slice(0, 20);
 
-  let candidate = stabiliseGraph(ensureDagAndPrune(graph));
+  let candidate = stabiliseGraph(ensureDagAndPrune(enrichedGraph, { collector }), { collector });
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
+
+  // DEBUG: Track node counts after first stabiliseGraph (DAG + prune + 20 node cap)
+  log.info({
+    stage: "3_first_stabilise",
+    node_count: candidate.nodes.length,
+    edge_count: candidate.edges.length,
+    had_cycles: hadCycles,
+    cycle_node_ids: cycleNodeIds.slice(0, 5),
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: First stabiliseGraph complete (20 node cap applied)");
 
   const first = await validateGraph(candidate);
   if (!first.ok) {
     issues = first.violations;
 
-    // LLM-guided repair: use violations as hints
-    try {
-      emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+    // If time budget exceeded, skip LLM repair and use simple repair directly
+    if (skipRepairDueToBudget) {
+      log.info({
+        stage: "repair_skipped",
+        violation_count: issues?.length ?? 0,
+        reason: "budget_exceeded",
+        correlation_id: correlationId,
+      }, "Skipping LLM repair due to time budget - using simple repair");
 
-      // Get repair adapter (may be different provider than draft)
-      const repairAdapter = getAdapter('repair_graph');
-      const repairResult = await repairAdapter.repairGraph(
-        {
-          graph: candidate,
-          violations: issues || [],
-        },
-        { requestId: `repair_${Date.now()}`, timeoutMs: 10000 }
-      );
+      repairFallbackReason = "budget_exceeded";
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
+      const second = await validateGraph(repaired);
+      if (second.ok && second.normalized) {
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
+        issues = second.violations;
+      } else {
+        candidate = repaired;
+        issues = second.violations ?? issues;
+      }
+      emit(TelemetryEvents.RepairFallback, {
+        fallback: "simple_repair",
+        reason: "budget_exceeded",
+        error_type: "none",
+      });
+    } else {
+      // LLM-guided repair: use violations as hints
+      try {
+        emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+
+        // Get repair adapter (may be different provider than draft)
+        const repairAdapter = getAdapter('repair_graph');
+        const repairResult = await repairAdapter.repairGraph(
+          {
+            graph: candidate,
+            violations: issues || [],
+          },
+          { requestId: `repair_${Date.now()}`, timeoutMs: repairTimeoutMs }
+        );
 
       // Calculate repair cost separately (may use different provider/pricing)
       repairCost = calculateCost(repairAdapter.model, repairResult.usage.input_tokens, repairResult.usage.output_tokens);
@@ -591,7 +768,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Wrap DAG operations in try/catch to guarantee fallback on malformed output
       let repaired: GraphT;
       try {
-        repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph));
+        repaired = stabiliseGraph(ensureDagAndPrune(repairResult.graph, { collector }), { collector });
       } catch (dagError) {
         log.warn({ error: dagError }, "Repaired graph failed DAG validation, using simple repair");
         repairFallbackReason = "dag_transform_failed";
@@ -601,12 +778,12 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Re-validate repaired graph
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
         issues = second.violations;
         emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
       } else {
         // Repair didn't fix all issues, fallback to simple repair
-        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired)));
+        candidate = stabiliseGraph(ensureDagAndPrune(simpleRepair(repaired, correlationId), { collector }), { collector });
         issues = second.violations ?? issues;
         repairFallbackReason = "partial_fix";
         emit(TelemetryEvents.RepairPartial, { repair_worked: false, fallback_reason: repairFallbackReason });
@@ -619,10 +796,10 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }
       log.warn({ error, fallback_reason: repairFallbackReason }, "LLM repair failed, falling back to simple repair");
 
-      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate)));
+      const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized));
+        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
         issues = second.violations;
       } else {
         candidate = repaired;
@@ -634,15 +811,17 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
         error_type: errorType,
       });
     }
+    } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
-    candidate = stabiliseGraph(ensureDagAndPrune(first.normalized));
+    candidate = stabiliseGraph(ensureDagAndPrune(first.normalized, { collector }), { collector });
   }
 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)
   candidate = enforceStableEdgeIds(candidate);
 
   // Enforce single goal and other graph invariants (fix for multiple goal nodes bug)
-  const graphValidation = validateAndFixGraph(candidate, undefined, {
+  // Type assertion needed: validateAndFixGraph uses generic handling internally
+  const graphValidation = validateAndFixGraph(candidate as any, undefined, {
     enforceSingleGoal: config.cee.enforceSingleGoal,
     checkSizeLimits: false, // Already handled by adapter
   });
@@ -657,6 +836,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       });
     }
   }
+
+  // DEBUG: Track node counts after goal merging and validation fixes
+  log.info({
+    stage: "4_goal_merge_and_fix",
+    node_count: candidate.nodes.length,
+    edge_count: candidate.edges.length,
+    single_goal_applied: graphValidation.fixes?.singleGoalApplied ?? false,
+    original_goal_count: graphValidation.fixes?.originalGoalCount,
+    merged_goal_ids: graphValidation.fixes?.mergedGoalIds,
+    outcome_beliefs_filled: graphValidation.fixes?.outcomeBeliefsFilled ?? 0,
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: Goal merge and validation fixes complete");
 
   const finalNodeIds = new Set<string>(candidate.nodes.map((n: any) => (n as any).id as string));
   let hadPrunedNodes = false;
@@ -679,6 +871,20 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
   const nodeCount = Array.isArray((candidate as any).nodes) ? (candidate as any).nodes.length : 0;
   const edgeCount = Array.isArray((candidate as any).edges) ? (candidate as any).edges.length : 0;
+
+  // DEBUG: Final pipeline summary with node delta analysis
+  log.info({
+    stage: "5_final_output",
+    initial_node_count: initialNodeCount,
+    final_node_count: nodeCount,
+    node_delta: nodeCount - initialNodeCount,
+    initial_edge_count: initialEdgeCount,
+    final_edge_count: edgeCount,
+    had_cycles: hadCycles,
+    had_pruned_nodes: hadPrunedNodes,
+    node_kinds: candidate.nodes.map((n: any) => n.kind),
+    correlation_id: correlationId,
+  }, "Pipeline stage: FINAL - Node count summary");
 
   if (nodeCount === 0) {
     emit(TelemetryEvents.GuardViolation, {
@@ -711,6 +917,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // Build debug payload: merge adapter debug (raw_llm_output) with internal debug (needle_movers)
+  const debugPayload = input.include_debug
+    ? { needle_movers: docs, ...(adapterDebug || {}) }
+    : undefined;
+
+  // Build trace with corrections if any were recorded
+  const tracePayload = collector.hasCorrections()
+    ? {
+        corrections: collector.getCorrections(),
+        corrections_summary: collector.getSummary(),
+      }
+    : undefined;
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -718,7 +937,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     issues: issues?.length ? issues : undefined,
     confidence,
     clarifier_status: clarifier,
-    debug: input.include_debug ? { needle_movers: docs } : undefined
+    debug: debugPayload,
+    trace: tracePayload,
   });
 
   // Check for legacy string provenance (for deprecation tracking)
@@ -784,6 +1004,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   emit(TelemetryEvents.DraftCompleted, telemetryData);
 
+  // Log successful response generation for debugging premature close issues
+  log.info({
+    correlation_id: correlationId,
+    returned_response: true,
+    status: "success",
+    node_count: nodeCount,
+    edge_count: edgeCount,
+    total_latency_ms: Date.now() - llmStartTime,
+    repair_skipped: skipRepairDueToBudget,
+    repair_fallback_reason: repairFallbackReason,
+  }, "Draft-graph pipeline complete - response ready for delivery");
+
   return {
     kind: "success",
     payload,
@@ -791,6 +1023,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     cost_usd: totalCost,
     provider: draftAdapter.name,
     model: draftAdapter.model,
+    llm_meta: llmMeta,
     structural_meta: (structuralMeta.had_cycles || structuralMeta.had_pruned_nodes) ? structuralMeta : undefined,
   };
 }

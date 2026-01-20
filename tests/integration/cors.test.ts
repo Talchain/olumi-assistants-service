@@ -9,6 +9,7 @@ describe("CORS integration", () => {
     "https://olumi.app",
     "https://app.olumi.app",
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://localhost:3000",
   ];
 

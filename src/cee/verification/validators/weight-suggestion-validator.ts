@@ -82,8 +82,9 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
       if (optionEdges.length < 2) continue;
 
       // Check if all beliefs are equal (uniform distribution)
+      // V4 field takes precedence, fallback to legacy
       const beliefs = optionEdges
-        .map(({ edge }) => edge.belief)
+        .map(({ edge }) => edge.belief_exists ?? edge.belief)
         .filter((b): b is number => typeof b === "number" && Number.isFinite(b));
 
       if (beliefs.length < 2) continue;
@@ -96,7 +97,8 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
         for (const { edge } of optionEdges) {
           const from = edge.from as string;
           const to = edge.to as string;
-          const belief = typeof edge.belief === "number" ? edge.belief : 0;
+          // V4 field takes precedence, fallback to legacy
+          const belief = edge.belief_exists ?? edge.belief ?? 0;
 
           suggestions.push({
             edge_id: `${from}->${to}`,
@@ -114,7 +116,9 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
     for (const edge of edges) {
       const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
       const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
-      const belief = typeof edge?.belief === "number" ? edge.belief : undefined;
+      // V4 field takes precedence, fallback to legacy
+      const rawBelief = edge?.belief_exists ?? edge?.belief;
+      const belief = typeof rawBelief === "number" ? rawBelief : undefined;
 
       if (!from || !to || belief === undefined) continue;
 
@@ -157,8 +161,9 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
       if (outcomeEdges.length < 3) continue;
 
       // Check if all weights are equal (uniform weights)
+      // V4 field takes precedence, fallback to legacy
       const weights = outcomeEdges
-        .map(({ edge }) => edge.weight)
+        .map(({ edge }) => edge.strength_mean ?? edge.weight)
         .filter((w): w is number => typeof w === "number" && Number.isFinite(w));
 
       if (weights.length < 3) continue;
@@ -171,8 +176,9 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
         for (const { edge } of outcomeEdges) {
           const from = edge.from as string;
           const to = edge.to as string;
-          const weight = typeof edge.weight === "number" ? edge.weight : 1.0;
-          const belief = typeof edge.belief === "number" ? edge.belief : 0.5;
+          // V4 fields take precedence, fallback to legacy
+          const weight = edge.strength_mean ?? edge.weight ?? 1.0;
+          const belief = edge.belief_exists ?? edge.belief ?? 0.5;
 
           // Skip if already flagged
           const edgeId = `${from}->${to}`;
@@ -195,8 +201,10 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
     for (const edge of edges) {
       const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
       const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
-      const weight = typeof edge?.weight === "number" ? edge.weight : undefined;
-      const belief = typeof edge?.belief === "number" ? edge.belief : 0.5;
+      // V4 fields take precedence, fallback to legacy
+      const rawWeight = edge?.strength_mean ?? edge?.weight;
+      const weight = typeof rawWeight === "number" ? rawWeight : undefined;
+      const belief = edge?.belief_exists ?? edge?.belief ?? 0.5;
 
       if (!from || !to || weight === undefined) continue;
 
@@ -222,7 +230,7 @@ export class WeightSuggestionValidator implements VerificationStage<unknown, unk
           current_belief: belief,
           current_weight: weight,
           reason: "weight_too_high",
-          suggestion: `Edge weight (${weight.toFixed(2)}) exceeds recommended maximum (${this.weightHighThreshold}). Consider 1.2 for strong amplification.`,
+          suggestion: `Edge weight (${weight.toFixed(2)}) exceeds recommended maximum (${this.weightHighThreshold}). Consider 1.2-1.3 for amplifying effects.`,
         });
       }
     }

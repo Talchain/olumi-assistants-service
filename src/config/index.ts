@@ -143,6 +143,7 @@ const ConfigSchema = z.object({
     piiGuard: booleanString.default(false),
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
+    strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
   }),
 
   // Prompt Cache Configuration
@@ -198,9 +199,15 @@ const ConfigSchema = z.object({
     biasCheckFeatureVersion: z.string().optional(),
     biasStructuralEnabled: booleanString.default(false),
     biasMitigationPatchesEnabled: booleanString.default(false),
+    biasLlmDetectionEnabled: booleanString.default(false), // If true, use LLM for nuanced bias detection fallback
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
+    reviewFeatureVersion: z.string().optional(),
+    reviewArchetypesEnabled: booleanString.default(true), // Enable archetype inference for review endpoint
+    reviewPlaceholdersEnabled: booleanString.default(false), // If false, return empty blocks (M1 scaffolding gated)
     causalValidationEnabled: booleanString.default(false),
+    // LLM-first extraction settings
+    llmFirstExtractionEnabled: booleanString.default(false), // If true, use LLM for factor/constraint extraction (regex as fallback)
     // Preflight validation settings
     preflightEnabled: booleanString.default(false), // Enable input validation before draft
     preflightStrict: booleanString.default(false), // If true, reject on preflight failure
@@ -226,6 +233,8 @@ const ConfigSchema = z.object({
     cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
     // Graph structure validation (Phase: Graph Validation)
     enforceSingleGoal: booleanString.default(true), // If true, merge multiple goals into compound goal
+    // Session cache (for /ask endpoint)
+    sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Per-operation model selection for tiered cost optimization
     models: z.object({
       draft: z.string().optional(),
@@ -234,6 +243,7 @@ const ConfigSchema = z.object({
       clarification: z.string().optional(),
       critique: z.string().optional(),
       validation: z.string().optional(),
+      extraction: z.string().optional(), // Model for LLM-first factor/constraint extraction
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -243,6 +253,7 @@ const ConfigSchema = z.object({
       clarification: z.coerce.number().int().positive().optional(),
       critique: z.coerce.number().int().positive().optional(),
       validation: z.coerce.number().int().positive().optional(),
+      extraction: z.coerce.number().int().positive().optional(), // Max tokens for LLM-first extraction
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -319,13 +330,15 @@ const ConfigSchema = z.object({
   // Prompt Management
   prompts: z.object({
     enabled: booleanString.default(false), // Master switch for prompt management
-    storeType: z.enum(["file", "postgres"]).default("file"), // Storage backend type
+    storeType: z.enum(["file", "postgres", "supabase"]).default("file"), // Storage backend type
     storePath: z.string().default("data/prompts.json"), // Path to prompts JSON file (file store)
     backupEnabled: booleanString.default(true), // Create backups before writes (file store)
     maxBackups: z.coerce.number().int().positive().default(10), // Max backup files to keep (file store)
     postgresUrl: z.string().optional(), // PostgreSQL connection string (postgres store)
     postgresPoolSize: z.coerce.number().int().positive().default(10), // Connection pool size (postgres store)
     postgresSsl: booleanString.default(false), // Use SSL for PostgreSQL connection
+    supabaseUrl: z.string().optional(), // Supabase project URL (supabase store)
+    supabaseServiceRoleKey: z.string().optional(), // Supabase service role key (supabase store)
     braintrustEnabled: booleanString.default(false), // Enable Braintrust experiment tracking
     braintrustProject: z.string().default("olumi-prompts"), // Braintrust project name
     adminApiKey: z.string().optional(), // Admin API key for prompt management (full access)
@@ -422,9 +435,14 @@ function parseConfig(): Config {
       biasCheckFeatureVersion: env.CEE_BIAS_CHECK_FEATURE_VERSION,
       biasStructuralEnabled: env.CEE_BIAS_STRUCTURAL_ENABLED,
       biasMitigationPatchesEnabled: env.CEE_BIAS_MITIGATION_PATCHES_ENABLED,
+      biasLlmDetectionEnabled: env.CEE_BIAS_LLM_DETECTION_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
+      reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
+      reviewArchetypesEnabled: env.CEE_REVIEW_ARCHETYPES_ENABLED,
+      reviewPlaceholdersEnabled: env.CEE_REVIEW_PLACEHOLDERS_ENABLED,
       causalValidationEnabled: env.CEE_CAUSAL_VALIDATION_ENABLED,
+      llmFirstExtractionEnabled: env.CEE_LLM_FIRST_EXTRACTION_ENABLED,
       preflightEnabled: env.CEE_PREFLIGHT_ENABLED,
       preflightStrict: env.CEE_PREFLIGHT_STRICT,
       preflightReadinessThreshold: env.CEE_PREFLIGHT_READINESS_THRESHOLD,
@@ -449,6 +467,8 @@ function parseConfig(): Config {
       cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
       // Graph structure validation
       enforceSingleGoal: env.CEE_ENFORCE_SINGLE_GOAL,
+      // Session cache TTL
+      sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Per-operation model selection
       models: {
         draft: env.CEE_MODEL_DRAFT,
@@ -457,6 +477,7 @@ function parseConfig(): Config {
         clarification: env.CEE_MODEL_CLARIFICATION,
         critique: env.CEE_MODEL_CRITIQUE,
         validation: env.CEE_MODEL_VALIDATION,
+        extraction: env.CEE_MODEL_EXTRACTION,
       },
       // Per-operation max tokens limits
       maxTokens: {
@@ -530,6 +551,8 @@ function parseConfig(): Config {
       postgresUrl: env.PROMPTS_POSTGRES_URL,
       postgresPoolSize: env.PROMPTS_POSTGRES_POOL_SIZE,
       postgresSsl: env.PROMPTS_POSTGRES_SSL,
+      supabaseUrl: env.SUPABASE_URL,
+      supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
       braintrustEnabled: env.PROMPTS_BRAINTRUST_ENABLED,
       braintrustProject: env.BRAINTRUST_PROJECT,
       adminApiKey: env.ADMIN_API_KEY,

@@ -97,7 +97,7 @@ export type {
   CeeJourneyHealth,
   CeeJourneySummary,
   CeeUiFlags,
-  CeeDecisionReviewPayload,
+  CeeDecisionReviewPayload as CeeDecisionReviewPayloadLegacy,  // Legacy - use CeeDecisionReviewPayload from types/review.js
   CeeErrorMetadata,
   CeeErrorViewModel,
   CeeEngineStatus,
@@ -130,7 +130,7 @@ export type {
   StructuralIssue as CeeStructuralIssue,
   StructuralIssueSeverity as CeeStructuralIssueSeverity,
   QualityBand as CeeQualityBand,
-  Trace as CeeReviewTrace,
+  Trace as CeeReviewTraceLegacy,  // Legacy - use CeeReviewTrace from types/review.js
   Meta as CeeReviewMeta,
 } from "./types/cee-decision-review.js";
 
@@ -138,3 +138,62 @@ export {
   isCeeDecisionReviewPayloadV1,
   createMinimalReviewPayload,
 } from "./types/cee-decision-review.js";
+
+// ============================================================================
+// CEE Client for PLoT Integration (M1 CEE Orchestrator)
+// ============================================================================
+
+export { CeeClient, createCeeClient } from "./client/CeeClient.js";
+export type { CeeClientConfig } from "./client/CeeClient.js";
+
+export {
+  CeeClientError,
+  isCeeClientError,
+  fromNetworkError,
+  fromHttpResponse,
+} from "./errors/CeeClientError.js";
+export type { CeeClientErrorOptions } from "./errors/CeeClientError.js";
+
+// M1 Review Types (PLoT Integration)
+export type {
+  // Request types
+  CeeReviewRequest,
+  CeeReviewOptions,
+  CeeGraphSnapshot,
+  CeeInferenceResults,
+  CeeMarketContext,
+  CeeReviewIntent,
+  // ISL Robustness payload types
+  CeeIslRobustnessPayload,
+  CeeIslSensitivity,
+  CeeIslPredictionInterval,
+  CeeIslCriticalAssumption,
+  // Response types
+  CeeReviewResponse,
+  CeeDecisionReviewPayload,
+  CeeReviewTrace,
+  CeeReviewBlock,
+  CeeReviewBlock as ReviewBlock,  // Alias for backwards compatibility
+  // Block component types
+  CeeBlockId,
+  CeeBlockStatus,
+  CeeBlockSource,
+  CeeBlockSeverity,
+  CeeBlockPriority,
+  CeeBlockItem,
+  // Robustness block types
+  CeeRobustnessStatus,
+  CeeRobustnessFindingType,
+  CeeRobustnessFinding,
+  CeeRobustnessBlock,
+  // Readiness types
+  CeeReadiness,
+  CeeReadinessLevel,
+  CeeReadinessFactor,
+  CeeFactorStatus,
+  CeeAnalysisState,
+  // Error types
+  CeeClientErrorCode,
+  // Legacy aliases
+  CeeGraphSnapshot as ReviewGraphSnapshot,
+} from "./types/review.js";

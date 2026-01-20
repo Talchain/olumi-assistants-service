@@ -17,6 +17,16 @@ export interface ErrorV1 {
   message: string;
   details?: Record<string, unknown>;
   request_id?: string;
+  stage?: string;  // Pipeline stage where error occurred (for debugging)
+}
+
+/**
+ * Options for building error responses
+ */
+export interface BuildErrorV1Options {
+  details?: Record<string, unknown>;
+  requestId?: string;
+  stage?: string;  // Pipeline stage for debugging (e.g., 'llm_draft', 'repair', 'validation')
 }
 
 /**
@@ -25,9 +35,26 @@ export interface ErrorV1 {
 export function buildErrorV1(
   code: ErrorCode,
   message: string,
-  details?: Record<string, unknown>,
+  detailsOrOptions?: Record<string, unknown> | BuildErrorV1Options,
   requestId?: string
 ): ErrorV1 {
+  // Handle both old signature (details, requestId) and new signature (options)
+  let details: Record<string, unknown> | undefined;
+  let reqId: string | undefined;
+  let stage: string | undefined;
+
+  if (detailsOrOptions && 'stage' in detailsOrOptions) {
+    // New signature with options object
+    const opts = detailsOrOptions as BuildErrorV1Options;
+    details = opts.details;
+    reqId = opts.requestId;
+    stage = opts.stage;
+  } else {
+    // Legacy signature
+    details = detailsOrOptions as Record<string, unknown> | undefined;
+    reqId = requestId;
+  }
+
   const error: ErrorV1 = {
     schema: 'error.v1',
     code,
@@ -38,8 +65,12 @@ export function buildErrorV1(
     error.details = details;
   }
 
-  if (requestId) {
-    error.request_id = requestId;
+  if (reqId) {
+    error.request_id = reqId;
+  }
+
+  if (stage) {
+    error.stage = stage;
   }
 
   return error;
@@ -60,18 +91,40 @@ export function zodErrorToErrorV1(error: ZodError, requestId?: string): ErrorV1 
 }
 
 /**
+ * Options for converting errors to ErrorV1
+ */
+export interface ToErrorV1Options {
+  request?: FastifyRequest;
+  stage?: string;  // Pipeline stage where error occurred
+}
+
+/**
  * Convert any error to ErrorV1 (safe, never leaks stack/PII)
  *
  * @param error The error to convert
- * @param request Optional Fastify request for context
+ * @param requestOrOptions Optional Fastify request or options object
  * @returns ErrorV1 response object
  */
-export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
+export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | ToErrorV1Options): ErrorV1 {
+  // Handle both old signature (request) and new signature (options)
+  let request: FastifyRequest | undefined;
+  let stage: string | undefined;
+
+  if (requestOrOptions && 'stage' in requestOrOptions) {
+    const opts = requestOrOptions as ToErrorV1Options;
+    request = opts.request;
+    stage = opts.stage;
+  } else {
+    request = requestOrOptions as FastifyRequest | undefined;
+  }
+
   const requestId = request ? getRequestId(request) : undefined;
 
   // Zod validation errors
   if (error instanceof ZodError) {
-    return zodErrorToErrorV1(error, requestId);
+    const result = zodErrorToErrorV1(error, requestId);
+    if (stage) result.stage = stage;
+    return result;
   }
 
   // Standard Error objects
@@ -81,12 +134,14 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
     // Rate limit errors - check status code first
     if (err.statusCode === 429 || err.status === 429 || error.message.toLowerCase().includes('rate limit')) {
       const retryAfter = err.retryAfter || err.retry_after || 60;
-      return buildErrorV1(
+      const result = buildErrorV1(
         'RATE_LIMITED',
         'Too many requests',
         { retry_after_seconds: retryAfter },
         requestId
       );
+      if (stage) result.stage = stage;
+      return result;
     }
 
     // Body limit errors
@@ -95,12 +150,14 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
       error.message.includes('Body limit exceeded') ||
       error.message.includes('payload too large')
     ) {
-      return buildErrorV1(
+      const result = buildErrorV1(
         'BAD_INPUT',
         'Request body too large',
         { max_size_bytes: 1048576 },
         requestId
       );
+      if (stage) result.stage = stage;
+      return result;
     }
 
     // Sanitize error message - remove potential PII and paths
@@ -117,7 +174,9 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
     message = redactLogMessage(message);
 
     // Generic error - safe message only, no stack
-    return buildErrorV1('INTERNAL', message, undefined, requestId);
+    const result = buildErrorV1('INTERNAL', message, undefined, requestId);
+    if (stage) result.stage = stage;
+    return result;
   }
 
   // Handle string errors
@@ -131,11 +190,15 @@ export function toErrorV1(error: unknown, request?: FastifyRequest): ErrorV1 {
 
     message = redactLogMessage(message);
 
-    return buildErrorV1('INTERNAL', message, undefined, requestId);
+    const result = buildErrorV1('INTERNAL', message, undefined, requestId);
+    if (stage) result.stage = stage;
+    return result;
   }
 
   // Unknown error type - minimal info
-  return buildErrorV1('INTERNAL', 'An unexpected error occurred', undefined, requestId);
+  const result = buildErrorV1('INTERNAL', 'An unexpected error occurred', undefined, requestId);
+  if (stage) result.stage = stage;
+  return result;
 }
 
 /**

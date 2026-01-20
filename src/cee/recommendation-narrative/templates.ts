@@ -12,43 +12,349 @@ import type {
   RankedAction,
   Condition,
   PolicyStep,
+  GenerateRecommendationInput,
 } from "./types.js";
 
 // Confidence thresholds
 const HIGH_SCORE_GAP = 15; // Clear winner
 const MEDIUM_SCORE_GAP = 5; // Moderate advantage
 
+// Goal context extraction settings
+const MAX_GOAL_CONTEXT_LENGTH = 50;
+
+// =============================================================================
+// Goal Context Extraction
+// =============================================================================
+
+/**
+ * Extract a concise goal context from the user's brief.
+ * Looks for patterns like "to achieve X", "for Y", "goal is Z".
+ * Falls back to first sentence, truncated to ~50 chars.
+ */
+export function extractGoalContext(brief: string | undefined, goalLabel: string | undefined): string | undefined {
+  // Prefer explicit goal label if provided
+  if (goalLabel) {
+    return truncateContext(sanitiseLabel(goalLabel));
+  }
+
+  if (!brief || brief.trim().length === 0) {
+    return undefined;
+  }
+
+  const normalised = brief.trim();
+
+  // Pattern 1: "to achieve X" / "to maximize X" / "to improve X"
+  const achieveMatch = normalised.match(/\bto\s+(achieve|maximize|maximise|improve|increase|reduce|minimize|minimise|ensure|optimize|optimise)\s+([^.,;]+)/i);
+  if (achieveMatch?.[2]) {
+    return truncateContext(sanitiseLabel(achieveMatch[2].trim()));
+  }
+
+  // Pattern 2: "goal is X" / "objective is X" / "aim is X"
+  const goalMatch = normalised.match(/\b(goal|objective|aim|target)\s+(?:is|:)\s*([^.,;]+)/i);
+  if (goalMatch?.[2]) {
+    return truncateContext(sanitiseLabel(goalMatch[2].trim()));
+  }
+
+  // Pattern 3: "for X" at end of first sentence
+  const forMatch = normalised.match(/\bfor\s+([^.,;]+)(?:\.|,|;|$)/i);
+  if (forMatch?.[1] && forMatch[1].split(/\s+/).length <= 8) {
+    return truncateContext(sanitiseLabel(forMatch[1].trim()));
+  }
+
+  // Pattern 4: "deciding whether to X" / "decision about X"
+  const decisionMatch = normalised.match(/\b(?:deciding|decision)\s+(?:whether\s+to|about|on)\s+([^.,;]+)/i);
+  if (decisionMatch?.[1]) {
+    return truncateContext(sanitiseLabel(decisionMatch[1].trim()));
+  }
+
+  // Fallback: No clear goal pattern found
+  return undefined;
+}
+
+/**
+ * Truncate context to max length, adding ellipsis if needed.
+ */
+function truncateContext(text: string): string {
+  if (text.length <= MAX_GOAL_CONTEXT_LENGTH) {
+    return text;
+  }
+  // Try to break at word boundary
+  const truncated = text.slice(0, MAX_GOAL_CONTEXT_LENGTH - 3);
+  const lastSpace = truncated.lastIndexOf(" ");
+  if (lastSpace > MAX_GOAL_CONTEXT_LENGTH * 0.6) {
+    return truncated.slice(0, lastSpace) + "...";
+  }
+  return truncated + "...";
+}
+
+// =============================================================================
+// Driver Impact Templates
+// =============================================================================
+
+/**
+ * Generate a "why" explanation including driver impact.
+ */
+export function generateWhyExplanation(
+  winner: RankedAction,
+  drivers: GenerateRecommendationInput["drivers"],
+  goalLabel: string | undefined,
+): string | undefined {
+  if (!drivers || drivers.length === 0) {
+    return undefined;
+  }
+
+  const topDriver = drivers[0];
+  const driverLabel = sanitiseLabel(topDriver.label);
+
+  // Build impact phrase
+  let impactPhrase = "";
+  if (topDriver.impact_pct !== undefined && topDriver.impact_pct > 0) {
+    impactPhrase = ` (${Math.round(topDriver.impact_pct)}% of the decision)`;
+  }
+
+  // Build direction phrase
+  let directionPhrase = "positively influences";
+  if (topDriver.direction === "negative") {
+    directionPhrase = "significantly affects";
+  }
+
+  // With goal context
+  if (goalLabel) {
+    return `${labelForDisplay(winner.label)} ${directionPhrase} ${driverLabel}${impactPhrase}, which is the key factor for achieving ${sanitiseLabel(goalLabel)}.`;
+  }
+
+  // Without goal context
+  return `${labelForDisplay(winner.label)} ${directionPhrase} ${driverLabel}${impactPhrase}, which is the most influential factor in this decision.`;
+}
+
+/**
+ * Patterns that indicate a baseline/status quo option.
+ * These should be framed as "maintaining current state" rather than "negative impact".
+ */
+const BASELINE_PATTERNS = [
+  /^(do\s+)?nothing$/i,
+  /^no\s+action$/i,
+  /^status\s+quo$/i,
+  /^keep\s+(current|existing)/i,
+  /^maintain\s+(current|existing)/i,
+  /^stay\s+(the\s+)?(course|same)/i,
+  /^current\s+(state|approach|strategy)/i,
+  /^don't\s+change/i,
+  /^wait(\s+and\s+see)?$/i,
+  /^defer\s+decision/i,
+  /^hold\s+(off|steady)/i,
+];
+
+/**
+ * Check if an option label represents a baseline/status quo choice.
+ */
+function isBaselineOption(label: string): boolean {
+  const normalised = label.trim().toLowerCase();
+  return BASELINE_PATTERNS.some((pattern) => pattern.test(normalised));
+}
+
+/**
+ * Reframe baseline option label for more neutral phrasing.
+ * "Do nothing" → "Maintaining current state"
+ * "Status quo" → "Current approach"
+ */
+function reframeBaselineLabel(label: string): string {
+  const lower = label.toLowerCase().trim();
+
+  if (/^(do\s+)?nothing$/i.test(lower)) {
+    return "maintaining current state";
+  }
+  if (/^no\s+action$/i.test(lower)) {
+    return "deferring action";
+  }
+  if (/^status\s+quo$/i.test(lower)) {
+    return "the current approach";
+  }
+  if (/^wait(\s+and\s+see)?$/i.test(lower)) {
+    return "waiting for more information";
+  }
+
+  // Return original if no specific reframe
+  return sanitiseLabel(label);
+}
+
 /**
  * Generate a headline for the recommendation.
+ *
+ * IMPORTANT: Checks outcome_quality to avoid contradictory messaging.
+ * If outcome is negative, uses cautionary phrasing instead of recommending.
+ * Baseline options (do nothing, status quo) are reframed neutrally.
+ *
+ * @param winner - The winning ranked action
+ * @param runnerUp - The second-place option (if any)
+ * @param tone - "formal" or "conversational"
+ * @param goalContext - Optional goal context extracted from brief (e.g., "maximizing Q4 revenue")
+ * @param confidence - Optional confidence level for inclusion in headline
  */
 export function generateHeadline(
   winner: RankedAction,
   runnerUp: RankedAction | undefined,
   tone: Tone,
+  goalContext?: string,
+  confidence?: Confidence,
 ): string {
-  const winnerLabel = labelForDisplay(winner.label);
+  // Check if winner is a baseline option - use neutral reframing
+  const winnerIsBaseline = isBaselineOption(winner.label);
+  const winnerLabel = winnerIsBaseline
+    ? capitaliseFirst(reframeBaselineLabel(winner.label))
+    : labelForDisplay(winner.label);
+
   const scoreGap = runnerUp ? winner.score - runnerUp.score : 100;
 
+  // Build goal phrase if context available
+  const goalPhrase = goalContext ? ` for ${goalContext}` : "";
+
+  // Build confidence phrase if available
+  const confidencePhrase = confidence
+    ? ` with ${confidence} confidence`
+    : "";
+
+  // Special handling for baseline winners - avoid negative framing
+  if (winnerIsBaseline) {
+    return generateBaselineHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase, confidencePhrase);
+  }
+
+  // Check for negative outcome - avoid recommending options with poor expected results
+  if (winner.outcome_quality === "negative") {
+    return generateNegativeOutcomeHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase);
+  }
+
+  // Check for mixed outcomes with risks
+  if (winner.outcome_quality === "mixed" || winner.has_risks) {
+    return generateCautiousHeadline(winnerLabel, runnerUp, scoreGap, tone, goalPhrase);
+  }
+
+  // Standard positive/neutral outcome handling with context
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is the recommended course of action`
-      : `${winnerLabel} is your best bet`;
+      ? `${winnerLabel} is recommended${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} is your best bet${goalPhrase}${confidencePhrase}`;
   }
 
   if (scoreGap >= MEDIUM_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} emerges as the stronger option`
-      : `${winnerLabel} looks like the better choice`;
+      ? `${winnerLabel} emerges as the stronger option${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} looks like the better choice${goalPhrase}${confidencePhrase}`;
   }
 
   // Close call
   return tone === "formal"
-    ? `${winnerLabel} holds a slight advantage`
-    : `${winnerLabel} edges ahead, but it's close`;
+    ? `${winnerLabel} holds a slight advantage${goalPhrase}${confidencePhrase}`
+    : `${winnerLabel} edges ahead${goalPhrase}, but it's close`;
+}
+
+/**
+ * Capitalise first letter of a string.
+ */
+function capitaliseFirst(str: string): string {
+  if (!str) return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Generate headline when winner is a baseline/status quo option.
+ * Frames as "maintaining current state is advisable" rather than "do nothing has impact".
+ */
+function generateBaselineHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+  goalPhrase: string = "",
+  confidencePhrase: string = "",
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is the recommended approach${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} is your best move${goalPhrase}${confidencePhrase}`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is advisable${goalPhrase}${confidencePhrase}`
+      : `${winnerLabel} makes sense for now${goalPhrase}${confidencePhrase}`;
+  }
+
+  // Close call - suggest waiting may be appropriate
+  const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
+  return tone === "formal"
+    ? `${winnerLabel} is marginally preferred to ${runnerUpLabel}${goalPhrase}`
+    : `${winnerLabel} slightly edges out ${runnerUpLabel}${goalPhrase}`;
+}
+
+/**
+ * Generate headline when winner has negative expected outcome.
+ * Avoids contradictory "proceed with X" when X leads to bad results.
+ */
+function generateNegativeOutcomeHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+  goalPhrase: string = "",
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerLabel} is the only option${goalPhrase}, though outcomes carry risk`
+      : `${winnerLabel} is your only option${goalPhrase}, but expect some challenges`;
+  }
+
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} minimises negative impact${goalPhrase} compared to alternatives`
+      : `${winnerLabel} is the least bad option here${goalPhrase}`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} offers relatively better outcomes${goalPhrase} despite risks`
+      : `${winnerLabel} looks better than the alternatives${goalPhrase}, though neither is great`;
+  }
+
+  return tone === "formal"
+    ? `${winnerLabel} and alternatives both carry significant risk${goalPhrase}`
+    : `${winnerLabel} edges ahead${goalPhrase}, but all options have downsides`;
+}
+
+/**
+ * Generate headline when winner has mixed outcomes or known risks.
+ * Uses cautionary phrasing with plain English trade-off descriptions.
+ */
+function generateCautiousHeadline(
+  winnerLabel: string,
+  runnerUp: RankedAction | undefined,
+  scoreGap: number,
+  tone: Tone,
+  goalPhrase: string = "",
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} is recommended${goalPhrase}, though outcomes are less predictable`
+      : `${winnerLabel} is your best bet${goalPhrase}, but expect some ups and downs`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerLabel} emerges as the stronger option${goalPhrase} with higher potential but less certainty`
+      : `${winnerLabel} looks better${goalPhrase}—more upside potential, though less predictable`;
+  }
+
+  const runnerUpLabel = runnerUp ? labelForDisplay(runnerUp.label) : "";
+  return tone === "formal"
+    ? `${winnerLabel} holds a slight advantage${goalPhrase}; both options balance reward against predictability`
+    : `${winnerLabel} edges ahead of ${runnerUpLabel}${goalPhrase}—both have pros and cons to weigh`;
 }
 
 /**
  * Generate the main recommendation narrative.
+ *
+ * Handles negative outcomes by using cautionary language.
+ * Baseline options are reframed neutrally.
  */
 export function generateNarrative(
   winner: RankedAction,
@@ -56,10 +362,25 @@ export function generateNarrative(
   goalLabel: string | undefined,
   tone: Tone,
 ): string {
-  const winnerAction = labelForSentence(winner.label, "subject");
+  // Check if winner is a baseline option - use neutral reframing
+  const winnerIsBaseline = isBaselineOption(winner.label);
+  const winnerAction = winnerIsBaseline
+    ? capitaliseFirst(reframeBaselineLabel(winner.label))
+    : labelForSentence(winner.label, "subject");
+
   const goalPhrase = goalLabel
     ? ` toward ${sanitiseLabel(goalLabel)}`
     : "";
+
+  // Handle baseline options with neutral framing
+  if (winnerIsBaseline) {
+    return generateBaselineNarrative(winnerAction, runnerUp, goalPhrase, tone);
+  }
+
+  // Handle negative outcomes with appropriate caution
+  if (winner.outcome_quality === "negative") {
+    return generateNegativeOutcomeNarrative(winnerAction, runnerUp, goalPhrase, tone);
+  }
 
   if (!runnerUp) {
     return tone === "formal"
@@ -69,6 +390,11 @@ export function generateNarrative(
 
   const runnerUpLabel = sanitiseLabel(runnerUp.label);
   const scoreGap = winner.score - runnerUp.score;
+
+  // Handle mixed outcomes
+  if (winner.outcome_quality === "mixed" || winner.has_risks) {
+    return generateCautiousNarrative(winnerAction, runnerUpLabel, scoreGap, goalPhrase, tone);
+  }
 
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
@@ -86,6 +412,79 @@ export function generateNarrative(
   return tone === "formal"
     ? `${winnerAction} and ${runnerUpLabel} present comparable value${goalPhrase}. The margin between them is narrow, warranting careful consideration of contextual factors.`
     : `${winnerAction} and ${runnerUpLabel} are neck and neck${goalPhrase}. You'll want to think carefully here.`;
+}
+
+/**
+ * Generate narrative when winner has negative expected outcome.
+ */
+function generateNegativeOutcomeNarrative(
+  winnerAction: string,
+  runnerUp: RankedAction | undefined,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerAction} is the only available option${goalPhrase}, though the analysis indicates challenging outcomes. Proceed with awareness of the risks involved.`
+      : `${winnerAction} is your only option${goalPhrase}, but don't expect smooth sailing. Keep the risks in mind.`;
+  }
+
+  const runnerUpLabel = sanitiseLabel(runnerUp.label);
+  return tone === "formal"
+    ? `${winnerAction} presents fewer downsides than ${runnerUpLabel}${goalPhrase}. While neither option shows strongly positive outcomes, this choice minimises potential negative impact.`
+    : `${winnerAction} is the better of two tough choices compared to ${runnerUpLabel}${goalPhrase}. Neither is great, but this one hurts less.`;
+}
+
+/**
+ * Generate narrative when winner has mixed outcomes or risks.
+ * Uses plain English to explain trade-offs between options.
+ */
+function generateCautiousNarrative(
+  winnerAction: string,
+  runnerUpLabel: string,
+  scoreGap: number,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (scoreGap >= HIGH_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerAction} outperforms ${runnerUpLabel}${goalPhrase}. It offers higher potential reward but comes with less predictable outcomes. The analysis favors this direction while acknowledging the uncertainty.`
+      : `${winnerAction} beats ${runnerUpLabel}${goalPhrase}. More upside potential here, but the path is less predictable.`;
+  }
+
+  if (scoreGap >= MEDIUM_SCORE_GAP) {
+    return tone === "formal"
+      ? `${winnerAction} shows advantages over ${runnerUpLabel}${goalPhrase}. While both options balance reward against predictability, this one offers a better overall profile.`
+      : `${winnerAction} has the edge over ${runnerUpLabel}${goalPhrase}. Better upside, even accounting for the bumpier ride.`;
+  }
+
+  return tone === "formal"
+    ? `${winnerAction} and ${runnerUpLabel} are closely matched${goalPhrase}. Each balances potential reward against predictability differently—${winnerAction} offers slightly more upside but ${runnerUpLabel} provides steadier outcomes.`
+    : `${winnerAction} and ${runnerUpLabel} are neck and neck${goalPhrase}. One's got more upside potential, the other's more predictable—your call.`;
+}
+
+/**
+ * Generate narrative when winner is a baseline/status quo option.
+ * Uses neutral framing: "maintaining current state preserves value" rather than
+ * "do nothing has negative impact".
+ */
+function generateBaselineNarrative(
+  winnerAction: string,
+  runnerUp: RankedAction | undefined,
+  goalPhrase: string,
+  tone: Tone,
+): string {
+  if (!runnerUp) {
+    return tone === "formal"
+      ? `${winnerAction} represents a stable path${goalPhrase}. Without alternative options requiring change, continuing current operations is appropriate.`
+      : `${winnerAction} keeps things steady${goalPhrase}. No pressing reason to change course here.`;
+  }
+
+  const runnerUpLabel = sanitiseLabel(runnerUp.label);
+
+  return tone === "formal"
+    ? `${winnerAction} is advisable compared to ${runnerUpLabel}${goalPhrase}. The analysis suggests that preserving the current approach offers better value than the proposed changes.`
+    : `${winnerAction} beats ${runnerUpLabel}${goalPhrase}. Sometimes not rocking the boat is the smart move.`;
 }
 
 /**

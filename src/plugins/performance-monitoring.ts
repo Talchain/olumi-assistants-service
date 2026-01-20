@@ -80,8 +80,56 @@ export function resetPerformanceMetrics(): void {
   metrics.requestsByRoute.clear();
 }
 
+// Typed StatsD client interface
+interface StatsdClient {
+  histogram: (name: string, value: number, tags: string[]) => void;
+  increment: (name: string, value: number, tags: string[]) => void;
+  gauge: (name: string, value: number, tags: string[]) => void;
+}
+
+// Cached statsd client reference (loaded once at plugin init)
+let statsdClient: StatsdClient | null = null;
+
+/**
+ * Initialize StatsD client once during plugin startup
+ * This avoids Promise overhead on every metric emission
+ */
+async function initStatsdClient(): Promise<void> {
+  try {
+    // Dynamic import for ESM compatibility
+    const telemetry = await import('../utils/telemetry.js');
+    statsdClient = telemetry?.statsd ?? null;
+  } catch {
+    statsdClient = null;
+  }
+}
+
+/**
+ * Normalize route path for metrics to prevent high-cardinality.
+ * - Uses Fastify's route template (routeOptions.url) when available
+ * - Falls back to URL path with query string stripped
+ * - Replaces dynamic segments like UUIDs/IDs with placeholders
+ */
+function normalizeRoute(request: FastifyRequest): string {
+  // Prefer Fastify's route template (e.g., "/assist/v1/draft-graph/:id")
+  const routeTemplate = request.routeOptions?.url;
+  if (routeTemplate) {
+    return routeTemplate;
+  }
+
+  // Fallback: strip query string and normalize dynamic segments
+  const urlPath = request.url.split('?')[0];
+
+  // Replace common dynamic patterns to prevent cardinality explosion
+  return urlPath
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:uuid')
+    .replace(/\/[0-9a-f]{24,}/gi, '/:id')
+    .replace(/\/\d+/g, '/:num');
+}
+
 /**
  * Emit metrics to StatsD/Datadog if configured
+ * Uses synchronous cached client reference (no Promise overhead per call)
  */
 function emitMetric(
   metricType: 'histogram' | 'counter' | 'gauge',
@@ -89,35 +137,31 @@ function emitMetric(
   value: number,
   tags: Record<string, string | number> = {}
 ): void {
-  if (!METRICS_ENABLED) return;
+  if (!METRICS_ENABLED || !statsdClient) return;
 
-  // Try to use existing statsd client from telemetry if available
   try {
-    // Dynamic import to avoid circular dependency - telemetry exports statsd client
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const telemetry = require('../utils/telemetry.js');
-    const statsd = telemetry?.statsd;
-    if (statsd) {
-      const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
+    const tagArray = Object.entries(tags).map(([k, v]) => `${k}:${v}`);
 
-      switch (metricType) {
-        case 'histogram':
-          statsd.histogram(metricName, value, tagArray);
-          break;
-        case 'counter':
-          statsd.increment(metricName, value, tagArray);
-          break;
-        case 'gauge':
-          statsd.gauge(metricName, value, tagArray);
-          break;
-      }
+    switch (metricType) {
+      case 'histogram':
+        statsdClient.histogram(metricName, value, tagArray);
+        break;
+      case 'counter':
+        statsdClient.increment(metricName, value, tagArray);
+        break;
+      case 'gauge':
+        statsdClient.gauge(metricName, value, tagArray);
+        break;
     }
   } catch {
-    // StatsD not configured or not available - metrics will only be tracked in-memory
+    // StatsD emission failed - continue silently
   }
 }
 
 export const performanceMonitoring: FastifyPluginAsync = async (app) => {
+  // Initialize StatsD client once at plugin startup (avoid Promise per-request)
+  await initStatsdClient();
+
   // Hook 1: Record request start time
   app.addHook('onRequest', async (request: FastifyRequest) => {
     request.startTime = Date.now();
@@ -128,7 +172,7 @@ export const performanceMonitoring: FastifyPluginAsync = async (app) => {
     if (!request.startTime) return;
 
     const duration = Date.now() - request.startTime;
-    const route = request.routerPath || request.url;
+    const route = normalizeRoute(request); // Use normalized route to prevent high-cardinality
     const method = request.method;
     const statusCode = reply.statusCode;
 

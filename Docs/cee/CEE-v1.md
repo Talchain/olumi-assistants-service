@@ -1241,3 +1241,115 @@ Model selection is feature-flagged for safe rollout:
 3. **Phase 3:** Default enablement
    - Enable for all traffic once validated
    - Keep quality gates enforced
+
+
+## 9. Schema v2.2 Features
+
+### 9.1 Overview
+
+Schema v2.2 adds derived uncertainty fields to support ISL (Inference & Structure
+Learning) sensitivity analysis. These fields are computed by CEE and included when
+clients request the v2 schema format.
+
+**Query parameter:** `?schema=v2` (or `?schema=2` or `?schema=2.2`)
+**Header:** `X-CEE-API-Version: v2`
+**Response marker:** `schema_version: "2.2"`
+
+### 9.2 Factor Value Uncertainty (`value_std`)
+
+When factor nodes have extracted values from the brief, CEE derives an uncertainty
+estimate (`value_std`) based on extraction context.
+
+**Location:** `graph.nodes[].observed_state.value_std`
+
+**Derivation formula:**
+
+```
+For explicit/inferred extractions:
+  baseCV = 0.2 * (1 - confidence) + 0.05    // CV ∈ [0.05, 0.25]
+  typeMultiplier = { explicit: 1.0, inferred: 1.5 }
+  value_std = max(floor, baseCV * |value| * typeMultiplier)
+
+For range extractions:
+  value_std = (rangeMax - rangeMin) / 4     // ~95% within range
+```
+
+**Extraction types:**
+
+- `explicit` – Direct statement in brief (e.g., "price is £59") → low uncertainty
+- `inferred` – Approximate or context-derived (e.g., "around £60") → higher uncertainty
+- `range` – Bounds given (e.g., "between £50-70") → range-based derivation
+
+**Floor values:**
+
+- Relative floor: `0.01 * |value|`
+- Absolute floor: `0.01` (for zero or very small values)
+
+**Example v2 node with `value_std`:**
+
+```json
+{
+  "id": "factor_price",
+  "type": "factor",
+  "label": "Price",
+  "observed_state": {
+    "value": 59,
+    "unit": "£",
+    "source": "brief_extraction",
+    "value_std": 3.54
+  }
+}
+```
+
+### 9.3 Parameter Uncertainties
+
+The v2 graph includes a `parameter_uncertainties` array that aggregates all factor
+uncertainties for ISL consumption.
+
+**Location:** `graph.parameter_uncertainties`
+
+**Structure:**
+
+```typescript
+interface ParameterUncertainty {
+  node_id: string;           // Factor node ID
+  std: number;               // Standard deviation (same as value_std)
+  distribution: "normal";    // Distribution type
+}
+```
+
+**Example:**
+
+```json
+{
+  "graph": {
+    "nodes": [...],
+    "edges": [...],
+    "parameter_uncertainties": [
+      { "node_id": "factor_price", "std": 3.54, "distribution": "normal" },
+      { "node_id": "factor_volume", "std": 150.0, "distribution": "normal" }
+    ]
+  }
+}
+```
+
+**Usage by ISL:**
+
+ISL uses `parameter_uncertainties` to perform sensitivity analysis on factor values:
+
+- Sample factor values from `Normal(observed_state.value, std)`
+- Run Monte Carlo simulation to compute sensitivity scores
+- Report which factors have the largest impact on decision outcomes
+
+### 9.4 Implementation Files
+
+- **Value uncertainty derivation:** `src/cee/transforms/value-uncertainty-derivation.ts`
+- **Schema v2 transformation:** `src/cee/transforms/schema-v2.ts`
+- **Tests:** `tests/unit/cee.value-uncertainty.test.ts`, `tests/unit/cee.schema-v2.test.ts`
+
+### 9.5 Backward Compatibility
+
+- `value_std` and `parameter_uncertainties` are only included in v2 responses
+- v1 responses remain unchanged
+- If extraction metadata is unavailable, `value_std` is omitted (graceful degradation)
+- `parameter_uncertainties` is only included when at least one factor has `value_std`

@@ -106,7 +106,8 @@ export function detectStructuralWarnings(
     } as CEEStructuralWarningV1);
   }
 
-  // 4) decision_after_outcome: edges flowing from outcome back into decision/goal/option.
+  // 4) decision_after_outcome: edges flowing from outcome back into decision/option.
+  // NOTE: outcome→goal is VALID V4 topology (outcomes aggregate into goals)
   const backwardsEdgeNodeIds = new Set<string>();
   const backwardsEdgeIds: string[] = [];
 
@@ -118,7 +119,7 @@ export function detectStructuralWarnings(
     const fromKind = getKind(from);
     const toKind = getKind(to);
 
-    if (fromKind === "outcome" && (toKind === "decision" || toKind === "goal" || toKind === "option")) {
+    if (fromKind === "outcome" && (toKind === "decision" || toKind === "option")) {
       backwardsEdgeNodeIds.add(from);
       backwardsEdgeNodeIds.add(to);
       const edgeId = (e as any)?.id;
@@ -199,7 +200,8 @@ export function normaliseDecisionBranchBeliefs(
     const values: number[] = [];
 
     for (const edgeIndex of indices) {
-      const raw = (normalisedEdges[edgeIndex] as any).belief;
+      // V4 fields take precedence, fallback to legacy for backwards compatibility
+      const raw = (normalisedEdges[edgeIndex] as any).belief_exists ?? (normalisedEdges[edgeIndex] as any).belief;
       if (typeof raw === "number" && Number.isFinite(raw)) {
         const clamped = Math.max(0, Math.min(1, raw));
         numericIndices.push(edgeIndex);
@@ -218,7 +220,10 @@ export function normaliseDecisionBranchBeliefs(
     for (let i = 0; i < numericIndices.length; i += 1) {
       const edgeIndex = numericIndices[i];
       const value = values[i];
-      (normalisedEdges[edgeIndex] as any).belief = value / sum;
+      const normalizedValue = value / sum;
+      // Write to both V4 and legacy fields during transition
+      (normalisedEdges[edgeIndex] as any).belief_exists = normalizedValue;
+      (normalisedEdges[edgeIndex] as any).belief = normalizedValue;
     }
   }
 
@@ -304,7 +309,8 @@ function edgePriority(edge: any): number {
   let score = 0;
   if (edge?.provenance?.source) score += 100;
   if (edge?.provenance?.quote) score += 50;
-  if (typeof edge?.belief === "number") score += 10;
+  // V4 field takes precedence, fallback to legacy
+  if (typeof edge?.belief_exists === "number" || typeof edge?.belief === "number") score += 10;
   if (typeof edge?.id === "string") score += 1;
   return score;
 }
@@ -402,8 +408,11 @@ export function enforceSingleGoal(
   // Normalize beliefs on edges leaving the compound goal to 1.0
   // After goal merge, there's only one path from compound goal, so belief should be 100%
   const dedupedEdges = Array.from(edgesByKey.values()).map((edge) => {
-    if ((edge as any)?.from === primaryId && typeof (edge as any)?.belief === "number") {
-      return { ...edge, belief: 1.0 };
+    // V4 field takes precedence, fallback to legacy
+    const hasBeliefValue = typeof (edge as any)?.belief_exists === "number" || typeof (edge as any)?.belief === "number";
+    if ((edge as any)?.from === primaryId && hasBeliefValue) {
+      // Write to both V4 and legacy fields during transition
+      return { ...edge, belief_exists: 1.0, belief: 1.0 };
     }
     return edge;
   });
@@ -467,7 +476,8 @@ export function fixMissingOutcomeEdgeBeliefs(
   const updatedEdges = edges.map((edge) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
-    const belief = (edge as any)?.belief;
+    // V4 field takes precedence, fallback to legacy
+    const belief = (edge as any)?.belief_exists ?? (edge as any)?.belief;
     const edgeId = (edge as any)?.id;
 
     // Only fix option→outcome edges
@@ -485,6 +495,8 @@ export function fixMissingOutcomeEdgeBeliefs(
         }
         return {
           ...(edge as any),
+          // Write to both V4 and legacy fields during transition
+          belief_exists: defaultBelief,
           belief: defaultBelief,
         };
       }
@@ -665,3 +677,164 @@ export function validateAndFixGraph(
     warnings,
   };
 }
+
+/**
+ * Uniform strength detection result
+ */
+export interface UniformStrengthResult {
+  /** Whether uniform strengths were detected (>80% edges have default 0.5) */
+  detected: boolean;
+  /** Total number of edges analyzed */
+  totalEdges: number;
+  /** Number of edges with default 0.5 strength */
+  defaultStrengthCount: number;
+  /** Percentage of edges with default strength */
+  defaultStrengthPercentage: number;
+  /** Warning to include in draft_warnings if detected */
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Structural edge types that should be excluded from uniform strength detection.
+ * These edges don't carry meaningful causal weights:
+ * - decision→option: represents branching, not causal influence
+ * - option→factor: represents intervention targeting, not causal influence
+ * Aligned with V3 validator logic (src/cee/validation/v3-validator.ts:213)
+ */
+const STRUCTURAL_EDGE_TYPES = new Set(["decision-option", "option-factor"]);
+
+/**
+ * Detect uniform edge strengths indicating LLM did not output varied coefficients.
+ *
+ * When >80% of CAUSAL edges have strength_mean === 0.5 (the default), this indicates
+ * the LLM failed to output the V4 `strength: {mean, std}` nested object and
+ * the pipeline fell back to defaults. This defeats sensitivity analysis.
+ *
+ * Structural edges (decision→option, option→factor) are excluded from this check
+ * as they don't carry meaningful causal weights.
+ *
+ * @param graph - Graph to analyze
+ * @param threshold - Percentage threshold for detection (default: 0.8 = 80%)
+ * @returns Detection result with optional warning
+ */
+export function detectUniformStrengths(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.8,
+): UniformStrengthResult {
+  const DEFAULT_STRENGTH = 0.5;
+  const EPSILON = 0.001; // Tolerance for floating point comparison
+
+  if (!graph || !Array.isArray((graph as any).edges) || !Array.isArray((graph as any).nodes)) {
+    return {
+      detected: false,
+      totalEdges: 0,
+      defaultStrengthCount: 0,
+      defaultStrengthPercentage: 0,
+    };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  if (edges.length === 0) {
+    return {
+      detected: false,
+      totalEdges: 0,
+      defaultStrengthCount: 0,
+      defaultStrengthPercentage: 0,
+    };
+  }
+
+  // Build node kind map for edge type classification
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof node?.id === "string" ? node.id : undefined;
+    const kind = typeof node?.kind === "string" ? node.kind : undefined;
+    if (id && kind) {
+      nodeKindMap.set(id, kind);
+    }
+  }
+
+  let defaultStrengthCount = 0;
+  let causalEdgeCount = 0;
+  const affectedEdgeIds: string[] = [];
+
+  for (const edge of edges) {
+    const from = edge?.from;
+    const to = edge?.to;
+    const fromKind = typeof from === "string" ? nodeKindMap.get(from) : undefined;
+    const toKind = typeof to === "string" ? nodeKindMap.get(to) : undefined;
+
+    // Skip structural edges (don't carry meaningful causal weights)
+    if (fromKind && toKind) {
+      const edgeType = `${fromKind}-${toKind}`;
+      if (STRUCTURAL_EDGE_TYPES.has(edgeType)) {
+        continue;
+      }
+    }
+
+    causalEdgeCount++;
+
+    // Check V4 field (strength_mean) first, fallback to legacy (weight)
+    const strength = edge?.strength_mean ?? edge?.weight ?? DEFAULT_STRENGTH;
+
+    if (typeof strength === "number" && Math.abs(strength - DEFAULT_STRENGTH) < EPSILON) {
+      defaultStrengthCount++;
+      const edgeId = edge?.id;
+      if (typeof edgeId === "string" && affectedEdgeIds.length < 10) {
+        affectedEdgeIds.push(edgeId);
+      }
+    }
+  }
+
+  // Handle case where all edges are structural
+  if (causalEdgeCount === 0) {
+    return {
+      detected: false,
+      totalEdges: edges.length,
+      defaultStrengthCount: 0,
+      defaultStrengthPercentage: 0,
+    };
+  }
+
+  const defaultStrengthPercentage = defaultStrengthCount / causalEdgeCount;
+  const detected = defaultStrengthPercentage >= threshold;
+
+  if (!detected) {
+    return {
+      detected: false,
+      totalEdges: causalEdgeCount,
+      defaultStrengthCount,
+      defaultStrengthPercentage,
+    };
+  }
+
+  const warning: CEEStructuralWarningV1 = {
+    id: "uniform_edge_strengths",
+    severity: "medium",
+    node_ids: [],
+    edge_ids: affectedEdgeIds,
+    explanation: `${Math.round(defaultStrengthPercentage * 100)}% of causal edges have default strength (0.5). ` +
+      `The LLM may not have output varied edge coefficients, which reduces sensitivity analysis accuracy. ` +
+      `Consider reviewing edge strengths or refining the brief with more causal detail.`,
+  };
+
+  return {
+    detected: true,
+    totalEdges: causalEdgeCount,
+    defaultStrengthCount,
+    defaultStrengthPercentage,
+    warning,
+  };
+}
+
+// Re-export goal inference utilities
+export {
+  inferGoalFromBrief,
+  ensureGoalNode,
+  hasGoalNode,
+  createGoalNode,
+  wireOutcomesToGoal,
+  DEFAULT_GOAL_LABEL,
+  type GoalInferenceResult,
+} from "./goal-inference.js";

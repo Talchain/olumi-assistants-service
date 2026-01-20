@@ -7,6 +7,7 @@ import { MetadataEnricher } from "./validators/metadata-enricher.js";
 import { BranchProbabilityValidator } from "./validators/branch-probability-validator.js";
 import { WeightSuggestionValidator } from "./validators/weight-suggestion-validator.js";
 import { ComparisonDetector } from "./validators/comparison-detector.js";
+import { EdgeDirectionValidator } from "./validators/edge-direction-validator.js";
 import { generateWeightSuggestions } from "./generators/weight-suggestion-generator.js";
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import type { CEEWeightSuggestionV1T } from "../../schemas/ceeResponses.js";
@@ -22,6 +23,7 @@ export class VerificationPipeline {
   private readonly engineValidator = new EngineValidator();
   private readonly numericalValidator = new NumericalValidator();
   private readonly branchProbabilityValidator = new BranchProbabilityValidator();
+  private readonly edgeDirectionValidator = new EdgeDirectionValidator();
   private readonly weightSuggestionValidator = new WeightSuggestionValidator();
   private readonly comparisonDetector = new ComparisonDetector();
   private readonly metadataEnricher = new MetadataEnricher();
@@ -69,6 +71,10 @@ export class VerificationPipeline {
 
     const branchResult = await this.branchProbabilityValidator.validate(typed as any, context);
     results.push(branchResult);
+
+    // Stage 3b: edge direction validation (causal direction check)
+    const edgeDirectionResult = await this.edgeDirectionValidator.validate(typed as any, context);
+    results.push(edgeDirectionResult);
 
     // Stage 4: weight suggestions (graph quality enhancement)
     const weightResult = await this.weightSuggestionValidator.validate(typed as any, context);

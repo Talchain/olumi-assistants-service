@@ -226,8 +226,8 @@ describe("Golden Brief Archetypes", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
 
-      // Validate graph structure matches archetype
-      expect(body.graph.nodes.length).toBe(6);
+      // Validate graph structure matches archetype (≥6 nodes: factor enricher may add quantitative factors)
+      expect(body.graph.nodes.length).toBeGreaterThanOrEqual(6);
       expect(body.graph.default_seed).toBe(17);
 
       // Verify decision graph pattern: goal → decision → options → outcomes

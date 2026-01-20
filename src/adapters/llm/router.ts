@@ -2,11 +2,14 @@
  * Provider router for multi-provider LLM orchestration.
  *
  * Selects LLM adapter (Anthropic, OpenAI, Fixtures) based on:
- * 1. Task-specific overrides (config/providers.json)
- * 2. Environment variables (LLM_PROVIDER, LLM_MODEL)
- * 3. Hard-coded defaults
+ * 1. LLM_FAILOVER_PROVIDERS → FailoverAdapter (if configured)
+ * 2. providers.json overrides → task-specific provider
+ * 3. CEE_MODEL_* env vars → explicit operator override (e.g., CEE_MODEL_DRAFT)
+ * 4. TASK_MODEL_DEFAULTS → code defaults (e.g., draft_graph → gpt-5.2)
+ * 5. LLM_PROVIDER / LLM_MODEL → global defaults
+ * 6. Adapter default → gpt-4o-mini
  *
- * Precedence: task override → env → default
+ * Precedence: failover → providers.json → CEE_MODEL_* → TASK_MODEL_DEFAULTS → env → default
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -18,6 +21,7 @@ import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
+import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
 
 /**
  * Map task names to CEE model config keys.
@@ -139,9 +143,38 @@ class FixturesAdapter implements LLMAdapter {
     // Import fixture dynamically to avoid circular deps
     const { fixtureGraph } = await import("../../utils/fixtures.js");
 
+    const unsafeCaptureEnabled = Boolean(_args?.includeDebug === true && _args?.flags?.unsafe_capture === true);
+    const rawNodeKinds = Array.isArray((fixtureGraph as any)?.nodes)
+      ? ((fixtureGraph as any).nodes as any[])
+        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+        .filter(Boolean)
+      : [];
+
     return {
       graph: fixtureGraph,
       rationales: [],
+      debug: unsafeCaptureEnabled ? {
+        raw_llm_output: { _fixture: true, graph: fixtureGraph },
+        raw_llm_output_truncated: false,
+      } : undefined,
+      meta: {
+        model: this.model,
+        prompt_version: 'fixture:draft_graph',
+        temperature: 0,
+        token_usage: {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+        },
+        finish_reason: 'fixture',
+        provider_latency_ms: 0,
+        node_kinds_raw_json: rawNodeKinds,
+        ...(unsafeCaptureEnabled ? {
+          raw_output_preview: '{"_fixture":true}',
+          raw_llm_text: '{"_fixture":true}',
+          raw_llm_json: { _fixture: true, graph: fixtureGraph },
+        } : {}),
+      },
       usage: {
         input_tokens: 0,
         output_tokens: 0,
@@ -433,14 +466,24 @@ export function getAdapter(task?: string): LLMAdapter {
   }
 
   // CEE tiered model selection: override model based on task if configured
-  // This allows per-operation model selection (e.g., gpt-4o for draft, gpt-4o-mini for clarification)
+  // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
   const ceeModel = getModelFromConfig(task);
   if (ceeModel && selectedModel !== ceeModel) {
     log.info(
-      { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_config' },
-      "Using CEE task-specific model"
+      { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
+      "Using CEE task-specific model from environment"
     );
     selectedModel = ceeModel;
+  } else if (!ceeModel && task && isValidCeeTask(task)) {
+    // No env override - use TASK_MODEL_DEFAULTS
+    const taskDefault = getDefaultModelForTask(task);
+    if (taskDefault && selectedModel !== taskDefault) {
+      log.info(
+        { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
+        "Using task default model from TASK_MODEL_DEFAULTS"
+      );
+      selectedModel = taskDefault;
+    }
   }
 
   // Reuse cached wrapper to preserve cache state across requests
@@ -471,117 +514,3 @@ export function resetAdapterCache(): void {
   configCache = undefined;
 }
 
-// ============================================================================
-// Tiered Model Selection Integration
-// ============================================================================
-
-import { config as appConfig } from "../../config/index.js";
-import {
-  selectModel,
-  getModelResponseHeaders,
-  type ModelSelectionResult,
-  type ModelSelectionInput,
-} from "../../services/model-selector.js";
-import { isValidCeeTask, type CeeTask } from "../../config/model-routing.js";
-import { getModelProvider } from "../../config/models.js";
-
-/**
- * Extended adapter result with model selection metadata
- */
-export interface AdapterWithSelection {
-  adapter: LLMAdapter;
-  selection: ModelSelectionResult;
-  headers: Record<string, string>;
-}
-
-/**
- * Get adapter with intelligent model selection
- *
- * Uses the tiered model selector when enabled, falling back to
- * the legacy getAdapter() when disabled.
- *
- * @param task - CEE task being performed
- * @param override - Optional model override from X-CEE-Model-Override header
- * @param correlationId - Correlation ID for telemetry
- */
-export function getAdapterWithSelection(
-  task: string,
-  override?: string,
-  correlationId?: string
-): AdapterWithSelection {
-  // Check if model selection feature is enabled
-  let modelSelectionEnabled = false;
-  try {
-    modelSelectionEnabled = appConfig.cee.modelSelection.enabled;
-  } catch {
-    // Config validation failed - use legacy
-  }
-
-  // If feature disabled or task is not a CEE task, use legacy adapter
-  if (!modelSelectionEnabled || !isValidCeeTask(task)) {
-    const adapter = getAdapter(task);
-    return {
-      adapter,
-      selection: {
-        modelId: adapter.model,
-        provider: adapter.name as "openai" | "anthropic",
-        tier: "quality", // Default assumption
-        source: "legacy",
-        warnings: [],
-      },
-      headers: {
-        "X-CEE-Model-Used": adapter.model,
-        "X-CEE-Model-Tier": "quality",
-        "X-CEE-Model-Source": "legacy",
-      },
-    };
-  }
-
-  // Use model selector for intelligent selection
-  const selectionInput: ModelSelectionInput = {
-    task: task as CeeTask,
-    override,
-    correlationId,
-  };
-
-  const selection = selectModel(selectionInput);
-
-  // Get the appropriate adapter for the selected model
-  const provider = getModelProvider(selection.modelId);
-  let adapter: LLMAdapter;
-
-  if (provider) {
-    adapter = getAdapterInstance(provider, selection.modelId);
-  } else {
-    // Fallback to OpenAI if provider not found
-    adapter = getAdapterInstance("openai", selection.modelId);
-  }
-
-  // Wrap with caching
-  const cacheKey = `selection:${selection.modelId}`;
-  if (!wrappedAdapters.has(cacheKey)) {
-    wrappedAdapters.set(cacheKey, withCaching(adapter));
-  }
-
-  return {
-    adapter: wrappedAdapters.get(cacheKey)!,
-    selection,
-    headers: getModelResponseHeaders(selection),
-  };
-}
-
-/**
- * Extract model override from request headers
- */
-export function extractModelOverride(
-  headers: Record<string, string | string[] | undefined>
-): string | undefined {
-  const override = headers["x-cee-model-override"];
-  if (typeof override === "string") {
-    return override.trim() || undefined;
-  }
-  if (Array.isArray(override) && override.length > 0) {
-    return override[0].trim() || undefined;
-  }
-  return undefined;
-}

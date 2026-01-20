@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normaliseNodeKind, normaliseDraftResponse } from "../../src/adapters/llm/normalisation.js";
+import { normaliseNodeKind, normaliseDraftResponse, ensureControllableFactorBaselines } from "../../src/adapters/llm/normalisation.js";
 
 describe("NodeKind Normalisation", () => {
   describe("normaliseNodeKind", () => {
@@ -25,13 +25,19 @@ describe("NodeKind Normalisation", () => {
 
     it("maps evidence-like kinds to option", () => {
       expect(normaliseNodeKind("evidence")).toBe("option");
-      expect(normaliseNodeKind("factor")).toBe("option");
       expect(normaliseNodeKind("consideration")).toBe("option");
       expect(normaliseNodeKind("alternative")).toBe("option");
       expect(normaliseNodeKind("choice")).toBe("option");
       expect(normaliseNodeKind("input")).toBe("option");
       expect(normaliseNodeKind("criteria")).toBe("option");
       expect(normaliseNodeKind("criterion")).toBe("option");
+    });
+
+    it("preserves factor as canonical kind", () => {
+      // factor is now a canonical kind (external uncertainties), not mapped to option
+      expect(normaliseNodeKind("factor")).toBe("factor");
+      expect(normaliseNodeKind("Factor")).toBe("factor");
+      expect(normaliseNodeKind("FACTOR")).toBe("factor");
     });
 
     it("maps constraint-like kinds to risk", () => {
@@ -121,6 +127,29 @@ describe("NodeKind Normalisation", () => {
       expect(typeof result.edges[0].belief).toBe("number");
       expect(result.edges[1].weight).toBe(0.3);
       expect(result.edges[1].belief).toBe(0.9);
+    });
+
+    it("preserves flat V4 edge fields when provided", () => {
+      const input = {
+        nodes: [{ id: "n1", kind: "goal" }, { id: "n2", kind: "outcome" }],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength_mean: 0.7,
+            strength_std: 0.2,
+            belief_exists: 0.8,
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.5,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[0].strength_std).toBe(0.2);
+      expect(result.edges[0].belief_exists).toBe(0.8);
     });
 
     it("handles responses without edges", () => {
@@ -298,7 +327,7 @@ describe("NodeKind Normalisation", () => {
       expect(result.edges[4].weight).toBe(0.3);
     });
 
-    it("handles NaN weight/belief values by coercing to NaN number", () => {
+    it("handles NaN weight/belief values by setting to undefined", () => {
       const input = {
         nodes: [],
         edges: [
@@ -308,9 +337,9 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // Number("invalid") === NaN
-      expect(Number.isNaN(result.edges[0].weight)).toBe(true);
-      expect(Number.isNaN(result.edges[0].belief)).toBe(true);
+      // NaN values are set to undefined (Zod will handle validation)
+      expect(result.edges[0].weight).toBeUndefined();
+      expect(result.edges[0].belief).toBeUndefined();
     });
 
     it("handles null/undefined weight/belief values", () => {
@@ -323,8 +352,8 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // null coerced to 0, undefined stays undefined
-      expect(result.edges[0].weight).toBe(0);
+      // null/undefined → undefined (Zod will handle validation)
+      expect(result.edges[0].weight).toBeUndefined();
       expect(result.edges[0].belief).toBeUndefined();
     });
 
@@ -366,11 +395,13 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
+      // weight is not clamped (can be any number)
       expect(result.edges[0].weight).toBe(Number.MAX_SAFE_INTEGER);
-      expect(result.edges[0].belief).toBe(999.99);
+      // belief is clamped to [0, 1]
+      expect(result.edges[0].belief).toBe(1);
     });
 
-    it("handles negative weight/belief values", () => {
+    it("clamps negative belief values to 0", () => {
       const input = {
         nodes: [],
         edges: [
@@ -380,9 +411,418 @@ describe("NodeKind Normalisation", () => {
 
       const result = normaliseDraftResponse(input) as any;
 
-      // Negative values are coerced correctly (Zod will validate constraints later)
+      // weight is not clamped (can be negative for inverse relationships)
       expect(result.edges[0].weight).toBe(-0.5);
-      expect(result.edges[0].belief).toBe(-1);
+      // belief is clamped to [0, 1]
+      expect(result.edges[0].belief).toBe(0);
     });
+
+    it("clamps belief values greater than 1 to 1", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", belief: 1.5 },
+          { from: "n2", to: "n3", belief: "2.0" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief).toBe(1);
+      expect(result.edges[1].belief).toBe(1);
+    });
+
+    it("preserves belief values within [0, 1] range", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", belief: 0 },
+          { from: "n2", to: "n3", belief: 0.5 },
+          { from: "n3", to: "n4", belief: 1 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief).toBe(0);
+      expect(result.edges[1].belief).toBe(0.5);
+      expect(result.edges[2].belief).toBe(1);
+    });
+  });
+
+  describe("V4 format edge handling", () => {
+    it("extracts V4 strength.mean and strength.std from nested object", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 0.8, std: 0.15 },
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.8);
+      expect(result.edges[0].strength_std).toBe(0.15);
+    });
+
+    it("extracts V4 exists_probability to belief_exists", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            exists_probability: 0.9,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(0.9);
+    });
+
+    it("clamps exists_probability to [0, 1]", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: 1.5 },
+          { from: "n2", to: "n3", exists_probability: -0.5 },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(1);
+      expect(result.edges[1].belief_exists).toBe(0);
+    });
+
+    it("handles mixed V4 and legacy fields", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 1.2, std: 0.1 },
+            exists_probability: 0.85,
+            weight: 0.5, // legacy - should be preserved
+            belief: 0.6, // legacy - should be preserved
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // V4 fields extracted
+      expect(result.edges[0].strength_mean).toBe(1.2);
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[0].belief_exists).toBe(0.85);
+      // Legacy fields preserved from input
+      expect(result.edges[0].weight).toBe(0.5);
+      expect(result.edges[0].belief).toBe(0.6);
+    });
+
+    it("does NOT map V4 fields to legacy fields (Phase 2d)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 1.5 },
+            exists_probability: 0.9,
+            // No legacy fields provided
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // V4 fields extracted
+      expect(result.edges[0].strength_mean).toBe(1.5);
+      expect(result.edges[0].belief_exists).toBe(0.9);
+      // Legacy fields should be undefined (NOT mapped from V4)
+      expect(result.edges[0].weight).toBeUndefined();
+      expect(result.edges[0].belief).toBeUndefined();
+    });
+
+    it("handles V4 strength object with only mean (no std)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: 0.7 },
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[0].strength_std).toBeUndefined();
+    });
+
+    it("ignores invalid strength.std values (negative or zero)", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: 1.0, std: 0 } },
+          { from: "n2", to: "n3", strength: { mean: 1.0, std: -0.1 } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      // std must be > 0, otherwise ignored
+      expect(result.edges[0].strength_std).toBeUndefined();
+      expect(result.edges[1].strength_std).toBeUndefined();
+    });
+
+    it("ignores non-numeric strength values that cannot be coerced", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: "invalid" } },
+          { from: "n2", to: "n3", strength: "not_an_object" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBeUndefined();
+      expect(result.edges[1].strength_mean).toBeUndefined();
+    });
+
+    it("coerces string numbers in V4 strength.mean", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: "0.7" } },
+          { from: "n2", to: "n3", strength: { mean: "-0.5" } },
+          { from: "n3", to: "n4", strength: { mean: "1.2" } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.7);
+      expect(result.edges[1].strength_mean).toBe(-0.5);
+      expect(result.edges[2].strength_mean).toBe(1.2);
+    });
+
+    it("coerces string numbers in V4 strength.std", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", strength: { mean: 0.5, std: "0.1" } },
+          { from: "n2", to: "n3", strength: { mean: 0.5, std: "0.25" } },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[1].strength_std).toBe(0.25);
+    });
+
+    it("coerces string numbers in V4 exists_probability", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: "0.85" },
+          { from: "n2", to: "n3", exists_probability: "0.5" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(0.85);
+      expect(result.edges[1].belief_exists).toBe(0.5);
+    });
+
+    it("clamps string exists_probability values to [0, 1]", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          { from: "n1", to: "n2", exists_probability: "1.5" },
+          { from: "n2", to: "n3", exists_probability: "-0.3" },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].belief_exists).toBe(1);
+      expect(result.edges[1].belief_exists).toBe(0);
+    });
+
+    it("handles mixed string and number V4 fields", () => {
+      const input = {
+        nodes: [],
+        edges: [
+          {
+            from: "n1",
+            to: "n2",
+            strength: { mean: "0.8", std: 0.1 },
+            exists_probability: 0.9,
+          },
+        ],
+      };
+
+      const result = normaliseDraftResponse(input) as any;
+
+      expect(result.edges[0].strength_mean).toBe(0.8);
+      expect(result.edges[0].strength_std).toBe(0.1);
+      expect(result.edges[0].belief_exists).toBe(0.9);
+    });
+  });
+});
+
+describe("ensureControllableFactorBaselines", () => {
+  it("adds default baseline to controllable factors without data.value", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor without value" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },  // Makes fac_1 controllable
+        { from: "fac_1", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const fac1 = nodes.find((n: any) => n.id === "fac_1");
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
+    expect(fac1.data.value).toBe(1.0);
+    expect(fac1.data.extractionType).toBe("inferred");
+  });
+
+  it("preserves existing data.value on controllable factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor with value", data: { value: 49, unit: "£" } },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const fac1 = nodes.find((n: any) => n.id === "fac_1");
+
+    expect(defaultedFactors).toEqual([]);
+    expect(fac1.data.value).toBe(49);
+    expect(fac1.data.unit).toBe("£");
+  });
+
+  it("does not add baseline to exogenous factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Controllable factor" },
+        { id: "fac_exog", kind: "factor", label: "Exogenous factor" },  // No incoming option edge
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },  // Only fac_1 is controllable
+        { from: "fac_1", to: "out_1" },
+        { from: "fac_exog", to: "out_1" },  // fac_exog influences outcome but not controllable
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const facExog = nodes.find((n: any) => n.id === "fac_exog");
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
+    expect(facExog.data).toBeUndefined();  // Exogenous factor should NOT get default
+  });
+
+  it("handles multiple controllable factors", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_a", kind: "factor", label: "Factor A" },
+        { id: "fac_b", kind: "factor", label: "Factor B", data: { value: 100 } },
+        { id: "fac_c", kind: "factor", label: "Factor C" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_a" },
+        { from: "opt_1", to: "fac_b" },
+        { from: "opt_1", to: "fac_c" },
+        { from: "fac_a", to: "out_1" },
+        { from: "fac_b", to: "out_1" },
+        { from: "fac_c", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+
+    // fac_a and fac_c should get defaults (no value), fac_b should keep its value
+    expect(defaultedFactors).toContain("fac_a");
+    expect(defaultedFactors).toContain("fac_c");
+    expect(defaultedFactors).not.toContain("fac_b");
+    expect(defaultedFactors.length).toBe(2);
+
+    const facA = nodes.find((n: any) => n.id === "fac_a");
+    const facB = nodes.find((n: any) => n.id === "fac_b");
+    const facC = nodes.find((n: any) => n.id === "fac_c");
+
+    expect(facA.data.value).toBe(1.0);
+    expect(facA.data.extractionType).toBe("inferred");
+    expect(facB.data.value).toBe(100);
+    expect(facC.data.value).toBe(1.0);
+  });
+
+  it("returns unchanged response when no nodes or edges", () => {
+    const emptyResponse = { nodes: [], edges: [] };
+    const { response, defaultedFactors } = ensureControllableFactorBaselines(emptyResponse);
+
+    expect(response).toEqual(emptyResponse);
+    expect(defaultedFactors).toEqual([]);
+  });
+
+  it("handles source/target edge format", () => {
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option 1" },
+        { id: "fac_1", kind: "factor", label: "Factor" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        { source: "dec_1", target: "opt_1" },
+        { source: "opt_1", target: "fac_1" },  // source/target format
+        { source: "fac_1", target: "out_1" },
+      ],
+    };
+
+    const { defaultedFactors } = ensureControllableFactorBaselines(response);
+
+    expect(defaultedFactors).toEqual(["fac_1"]);
   });
 });

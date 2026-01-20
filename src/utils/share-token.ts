@@ -15,13 +15,18 @@ export interface ShareTokenPayload {
 }
 
 /**
- * Get share signing secret from centralized config
- * Falls back to first ASSIST_API_KEYS entry if SHARE_SECRET not set
+ * Get share signing secret from centralized config.
+ *
+ * SECURITY: Requires dedicated SHARE_SECRET - does NOT fall back to API keys.
+ * This prevents coupling authentication secrets to share-token signing.
  */
 function getShareSecret(): string {
-  const secret = config.auth.shareSecret || config.auth.assistApiKeys?.[0];
+  const secret = config.auth.shareSecret;
   if (!secret) {
-    throw new Error("SHARE_SECRET or ASSIST_API_KEYS must be set");
+    throw new Error(
+      "SHARE_SECRET must be set for share token signing. " +
+      "Do not reuse ASSIST_API_KEYS for this purpose."
+    );
   }
   return secret;
 }

@@ -1194,6 +1194,305 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/elicit/preferences:
+    post:
+      summary: Generate preference elicitation questions (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Preference Elicitation** endpoint.
+
+        Generates preference questions based on the user's decision context to capture:
+        - Risk tolerance vs reward trade-offs
+        - Goal prioritisation (multi-goal scenarios)
+        - Loss aversion preferences
+        - Time preference (immediate vs delayed outcomes)
+
+        Questions are prioritised by information gain to efficiently calibrate user preferences.
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+
+        Use with `/assist/v1/elicit/preferences/answer` to process responses incrementally.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEElicitPreferencesRequestV1'
+            examples:
+              basic:
+                summary: Basic preference elicitation
+                value:
+                  graph_id: "graph_123"
+                  goal_ids: ["goal_revenue", "goal_retention"]
+                  options:
+                    - id: "opt_expand"
+                      label: "Expand to US market"
+                      expected_value: 100000
+                    - id: "opt_focus"
+                      label: "Focus on UK market"
+                      expected_value: 50000
+                  max_questions: 3
+              with_existing_preferences:
+                summary: Refine existing preferences
+                value:
+                  graph_id: "graph_456"
+                  goal_ids: ["goal_growth"]
+                  options:
+                    - id: "opt_a"
+                      label: "Option A"
+                  current_preferences:
+                    risk_aversion: 0.6
+                    loss_aversion: 1.8
+                    goal_weights: {}
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 2
+                      last_updated: "2025-01-01T00:00:00Z"
+                  max_questions: 2
+      responses:
+        '200':
+          description: Preference questions generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Preference Elicitation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEElicitPreferencesResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/elicit/preferences/answer:
+    post:
+      summary: Process preference answer (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Preference Answer Processing** endpoint.
+
+        Processes a user's answer to a preference question and returns:
+        - Updated preference profile
+        - Impact statement explaining how recommendations change
+        - Count of remaining questions for full confidence
+        - Optional next question to ask
+
+        Answers incrementally refine the user's preference profile, improving
+        recommendation personalisation with each response.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+      tags:
+        - Graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEElicitPreferencesAnswerRequestV1'
+            examples:
+              risk_answer:
+                summary: Answer to risk/reward question
+                value:
+                  question_id: "pref_risk_1234"
+                  answer: "A"
+                  graph_id: "graph_123"
+              with_existing_preferences:
+                summary: Answer with existing preferences
+                value:
+                  question_id: "pref_loss_5678"
+                  answer: "B"
+                  graph_id: "graph_456"
+                  current_preferences:
+                    risk_aversion: 0.4
+                    loss_aversion: 1.5
+                    goal_weights: {}
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 1
+                      last_updated: "2025-01-01T00:00:00Z"
+      responses:
+        '200':
+          description: Preference answer processed (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Preference Elicitation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEElicitPreferencesAnswerResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '404':
+          description: Question not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
+  /assist/v1/explain/tradeoff:
+    post:
+      summary: Explain option trade-offs (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Trade-off Explanation** endpoint.
+
+        Generates plain-language explanations of trade-offs between two options
+        based on the user's preference profile. Returns:
+        - Natural language explanation
+        - Key factors influencing the comparison
+        - Preference alignment scores for each option
+        - Recommendation (A, B, or neutral)
+
+        Use this to help users understand how their preferences affect option rankings.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets sub-50ms latency.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEExplainTradeoffRequestV1'
+            examples:
+              basic:
+                summary: Compare two options
+                value:
+                  option_a: "Launch now with basic features"
+                  option_b: "Wait 6 months for full feature set"
+                  user_preferences:
+                    risk_aversion: 0.7
+                    loss_aversion: 2.0
+                    goal_weights:
+                      goal_revenue: 0.6
+                      goal_quality: 0.4
+                    time_discount: 0.1
+                    confidence: "medium"
+                    derived_from:
+                      questions_answered: 2
+                      last_updated: "2025-01-01T00:00:00Z"
+              with_context:
+                summary: With goal context
+                value:
+                  option_a: "Expand to US market"
+                  option_b: "Focus on UK market"
+                  user_preferences:
+                    risk_aversion: 0.5
+                    loss_aversion: 1.5
+                    goal_weights: {}
+                    time_discount: 0.05
+                    confidence: "high"
+                    derived_from:
+                      questions_answered: 3
+                      last_updated: "2025-01-01T00:00:00Z"
+                  goal_context: "international expansion"
+      responses:
+        '200':
+          description: Trade-off explanation generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Trade-off Explanation feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEExplainTradeoffResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/suggest-edge-function:
     post:
       summary: Suggest edge function type (CEE v1)
@@ -1524,6 +1823,111 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/isl-synthesis:
+    post:
+      summary: Synthesize ISL analysis into human-readable narratives (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **ISL Synthesis** endpoint.
+
+        Converts ISL (Inference & Structure Learning) quantitative analysis results
+        into human-readable narratives. Takes sensitivity, VoI (Value of Information),
+        tipping point, and robustness data and generates clear explanations for
+        decision-makers.
+
+        This endpoint is deterministic, does **not** call any LLMs, and targets
+        sub-50ms latency.
+
+        Use this after running ISL analysis to generate narrative explanations
+        suitable for executive presentation.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEIslSynthesisRequestV1'
+            examples:
+              full_analysis:
+                summary: Full ISL analysis with all components
+                value:
+                  sensitivity:
+                    - factor_id: factor_price
+                      factor_label: Pro Plan Price
+                      sensitivity: 0.85
+                      direction: negative
+                    - factor_id: factor_churn
+                      factor_label: Churn Rate
+                      sensitivity: 0.72
+                      direction: negative
+                  robustness:
+                    - recommendation_id: opt_raise_price
+                      recommendation_label: Raise price to £59
+                      robustness_score: 0.78
+                      scenarios_tested: 100
+                      scenarios_dominant: 78
+                  tipping_points:
+                    - factor_id: factor_churn
+                      factor_label: Churn Rate
+                      threshold_value: 0.08
+                      current_value: 0.05
+                      optimal_before: Raise price
+                      optimal_after: Maintain price
+                  goal_label: Maximize revenue
+                  recommendation_label: Raise price to £59
+              sensitivity_only:
+                summary: Sensitivity analysis only
+                value:
+                  sensitivity:
+                    - factor_id: factor_1
+                      factor_label: Market Growth
+                      sensitivity: 0.92
+                      direction: positive
+      responses:
+        '200':
+          description: ISL synthesis generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE ISL Synthesis feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEIslSynthesisResponseV1'
+        '400':
+          description: CEE validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for ISL Synthesis
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEErrorResponseV1'
+
   /assist/v1/narrate-conditions:
     post:
       summary: Generate conditional recommendation narratives (CEE v1)
@@ -1727,6 +2131,141 @@ paths:
               schema:
                 $ref: '#/components/schemas/CEEErrorResponseV1'
 
+  /assist/v1/ask:
+    post:
+      summary: Ask questions about a decision model (CEE v1)
+      description: |
+        Cognitive Enhancement Engine (CEE) v1 **Ask** endpoint.
+
+        UI-facing entrypoint for the "ask about this decision" experience.
+        Accepts questions anchored to the graph and returns model-bound responses
+        that always contain actionable content.
+
+        **Key Features:**
+        - Intent inference from message text if not explicitly provided
+        - Model-bound invariant: responses always contain model_actions, highlights, or follow_up_question
+        - Graph ID validation for all responses
+        - Redis session caching with graceful degradation
+
+        **Supported Intents:**
+        - `explain` / `clarify`: Grounded to selected nodes/edges; includes highlights
+        - `repair`: Propose concrete model_actions to fix/improve structure
+        - `ideate`: Generate alternatives or new ideas
+        - `compare`: Compare options or paths
+        - `challenge`: Challenge assumptions or beliefs
+
+        **Model-Bound Invariant:**
+        Every response MUST contain at least one of:
+        - `model_actions`: Array of graph patch operations
+        - `highlights`: Array of elements to visually emphasize
+        - `follow_up_question`: Clarifying question for the user
+
+        This endpoint provides the foundation for collaborative decision modeling
+        where the AI assistant helps users understand, improve, and refine their
+        decision graphs.
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEAskRequestV1'
+            examples:
+              explain_node:
+                summary: Explain a selected node
+                value:
+                  request_id: "550e8400-e29b-41d4-a716-446655440000"
+                  scenario_id: "cloud-provider-decision"
+                  graph_schema_version: "2.2"
+                  brief: "We need to decide on a cloud provider for our SaaS platform."
+                  message: "Why is cost important for this decision?"
+                  intent: "explain"
+                  selection:
+                    node_id: "factor_cost"
+                  graph_snapshot:
+                    nodes:
+                      - id: "goal_1"
+                        kind: "goal"
+                        label: "Choose Cloud Provider"
+                      - id: "factor_cost"
+                        kind: "factor"
+                        label: "Cost"
+                    edges:
+                      - from: "factor_cost"
+                        to: "goal_1"
+                        belief: 0.8
+                  market_context:
+                    id: "ctx_1"
+                    version: "1.0"
+                    hash: "abc123"
+              repair_model:
+                summary: Request repairs to the model
+                value:
+                  request_id: "550e8400-e29b-41d4-a716-446655440001"
+                  scenario_id: "cloud-provider-decision"
+                  graph_schema_version: "2.2"
+                  brief: "We need to decide on a cloud provider for our SaaS platform."
+                  message: "Can you fix any issues with this model?"
+                  intent: "repair"
+                  graph_snapshot:
+                    nodes:
+                      - id: "goal_1"
+                        kind: "goal"
+                        label: "Choose Cloud Provider"
+                      - id: "orphan_factor"
+                        kind: "factor"
+                        label: "Disconnected Factor"
+                    edges: []
+                  market_context:
+                    id: "ctx_1"
+                    version: "1.0"
+                    hash: "abc123"
+      responses:
+        '200':
+          description: Ask response generated (CEE v1)
+          headers:
+            X-CEE-API-Version:
+              description: CEE API version used to process this request.
+              schema:
+                type: string
+                enum: ["v1"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE Ask feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskResponseV1'
+        '400':
+          description: CEE validation error (invalid graph, missing context, ID not found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+        '429':
+          description: CEE per-feature rate limit exceeded for Ask
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+        '500':
+          description: CEE internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CEEAskErrorResponseV1'
+
 components:
   schemas:
     DraftGraphInput:
@@ -1795,6 +2334,24 @@ components:
           type: boolean
           description: Include debug information in response
           default: false
+        context:
+          type: object
+          description: |
+            Optional structured context to guide graph generation.
+
+            **goals:** When provided, the first goal is used as the explicit goal node
+            instead of inferring one from the brief. This prevents GOAL_INFERRED warnings.
+          properties:
+            goals:
+              type: array
+              description: |
+                Explicit goal(s) for the decision. The first entry becomes the goal node.
+                If empty or not provided, CEE will infer a goal from the brief.
+              maxItems: 5
+              items:
+                type: string
+                minLength: 5
+                maxLength: 200
         previous_graph:
           $ref: '#/components/schemas/Graph'
           description: |
@@ -2144,6 +2701,52 @@ components:
               enum: [assistant, fixtures]
               description: Origin of this graph
 
+    FactorData:
+      type: object
+      description: Quantitative data for factor nodes (enables ISL sensitivity, VoI, and tipping point analysis)
+      required:
+        - value
+      properties:
+        value:
+          type: number
+          description: Current or proposed value
+          example: 59
+        baseline:
+          type: number
+          description: Baseline/original value (e.g., from "from X to Y" language)
+          example: 49
+        unit:
+          type: string
+          description: Unit of measurement (£, $, %, etc.)
+          example: "£"
+        range:
+          type: object
+          description: Valid range for sensitivity analysis
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+        extractionType:
+          type: string
+          enum: [explicit, inferred, range]
+          description: How the value was extracted from the brief
+          example: "explicit"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence in the extracted value (0-1) for uncertainty derivation
+          example: 0.9
+        rangeMin:
+          type: number
+          description: Minimum of range (when extractionType is 'range')
+          example: 50
+        rangeMax:
+          type: number
+          description: Maximum of range (when extractionType is 'range')
+          example: 70
+
     Node:
       type: object
       required:
@@ -2157,7 +2760,7 @@ components:
           example: "goal_1"
         kind:
           type: string
-          enum: [goal, decision, option, outcome, risk, action]
+          enum: [goal, decision, option, outcome, risk, action, factor]
           description: Node type
         label:
           type: string
@@ -2167,6 +2770,9 @@ components:
           type: string
           maxLength: 200
           description: Optional detailed description
+        data:
+          $ref: '#/components/schemas/FactorData'
+          description: Quantitative data for factor nodes (used by ISL)
 
     Edge:
       type: object
@@ -2190,8 +2796,25 @@ components:
           type: number
           minimum: 0
           maximum: 1
-          description: Confidence in this connection
+          description: Confidence in this connection (maps to exists_probability in v2.2)
           example: 0.85
+        effect_direction:
+          type: string
+          enum: [positive, negative]
+          description: |
+            Direction of causal effect (v2.2).
+            - positive: increasing parent increases child
+            - negative: increasing parent decreases child
+          example: positive
+        strength_std:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: |
+            Standard deviation of effect magnitude for parametric uncertainty (v2.2).
+            Used by ISL for Monte Carlo sampling.
+            If absent, derived from belief and provenance_source.
+          example: 0.15
         provenance:
           oneOf:
             - $ref: '#/components/schemas/StructuredProvenance'
@@ -2314,6 +2937,125 @@ components:
           type: object
           description: Additional trace metadata
           additionalProperties: true
+        goal_handling:
+          type: object
+          description: Goal node handling trace for observability
+          properties:
+            goal_source:
+              type: string
+              enum: [llm_generated, retry_generated, inferred, placeholder]
+              description: |
+                How the goal node was obtained:
+                - llm_generated: LLM included goal in initial response
+                - retry_generated: LLM included goal after reinforced retry
+                - inferred: Goal was extracted from brief patterns
+                - placeholder: Default placeholder goal was used
+            retry_attempted:
+              type: boolean
+              description: Whether a reinforced retry was attempted before repair
+            original_missing_kinds:
+              type: array
+              description: Node kinds that were missing before any repair
+              items:
+                type: string
+            goal_node_id:
+              type: string
+              description: ID of the goal node if one was added via repair
+        pipeline:
+          type: object
+          description: Pipeline execution trace for debugging and observability
+          properties:
+            status:
+              type: string
+              enum: [success, failed, repaired]
+              description: Overall pipeline status
+            total_duration_ms:
+              type: number
+              description: Total pipeline execution time in milliseconds
+            llm_call_count:
+              type: integer
+              description: Number of LLM calls made (including retries)
+            stages:
+              type: array
+              description: Individual pipeline stages with timing
+              items:
+                type: object
+                required:
+                  - name
+                  - status
+                  - duration_ms
+                properties:
+                  name:
+                    type: string
+                    enum: [llm_draft, node_validation, connectivity_check, goal_repair, edge_repair, final_validation]
+                    description: Stage name
+                  status:
+                    type: string
+                    enum: [success, failed, skipped, repaired]
+                    description: Stage outcome
+                  duration_ms:
+                    type: number
+                    description: Stage duration in milliseconds
+                  details:
+                    type: object
+                    additionalProperties: true
+                    description: Stage-specific diagnostic details
+            connectivity:
+              type: object
+              description: Connectivity validation diagnostic
+              properties:
+                checked:
+                  type: boolean
+                  description: Whether connectivity check was performed
+                passed:
+                  type: boolean
+                  description: Whether connectivity check passed
+                decision_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: IDs of decision nodes found
+                reachable_options:
+                  type: array
+                  items:
+                    type: string
+                  description: Option node IDs reachable from decision
+                reachable_goals:
+                  type: array
+                  items:
+                    type: string
+                  description: Goal node IDs reachable from decision
+                unreachable_nodes:
+                  type: array
+                  items:
+                    type: string
+                  description: Node IDs not reachable from any decision
+            llm_calls:
+              type: array
+              description: Detailed LLM call information (dev/staging only)
+              items:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  duration_ms:
+                    type: number
+                  raw_output_truncated:
+                    type: boolean
+            final_graph:
+              type: object
+              description: Final graph summary (dev/staging only)
+              properties:
+                node_count:
+                  type: integer
+                edge_count:
+                  type: integer
+                node_kinds:
+                  type: array
+                  items:
+                    type: string
 
     CEEValidationIssue:
       type: object
@@ -2438,12 +3180,14 @@ components:
         - CEE_TIMEOUT
         - CEE_RATE_LIMIT
         - CEE_GRAPH_INVALID
+        - CEE_GRAPH_CONNECTIVITY_FAILED
         - CEE_VALIDATION_FAILED
         - CEE_CLARIFICATION_REQUIRED
         - CEE_INTERNAL_ERROR
         - CEE_SERVICE_UNAVAILABLE
         - CEE_ENGINE_DEGRADED
         - CEE_REPRO_MISMATCH
+        - CEE_LLM_VALIDATION_FAILED
 
     CEEErrorResponseV1:
       type: object
@@ -2985,7 +3729,7 @@ components:
         id:
           type: string
           description: Stable identifier for this warning type
-          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome]
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred]
         severity:
           type: string
           enum: [low, medium, high]
@@ -3324,6 +4068,20 @@ components:
           type: boolean
           description: Whether this option is clearly dominant over alternatives
           example: false
+        outcome_quality:
+          type: string
+          enum: [positive, neutral, negative, mixed]
+          description: |
+            Quality of expected outcomes. Affects headline phrasing:
+            - positive: "best path" phrasing
+            - negative: "minimises risk" phrasing
+            - mixed: cautionary language
+            - neutral: standard recommendations
+          example: positive
+        primary_outcome:
+          type: string
+          description: Primary outcome label for context
+          example: Increased revenue
 
     DriverV1:
       type: object
@@ -3352,6 +4110,75 @@ components:
           enum: [positive, negative, neutral]
           description: Direction of influence
           example: positive
+        kind:
+          type: string
+          description: |
+            Node kind - helps distinguish external factors from controllable actions.
+            - factor: External variable outside user control (e.g., market demand)
+            - action: Controllable step the user can take
+          example: factor
+
+    GoalInfoV1:
+      type: object
+      description: Goal information for multi-goal scenarios
+      required:
+        - id
+        - text
+        - type
+        - is_primary
+      properties:
+        id:
+          type: string
+          description: Goal node ID
+          example: goal-1
+        text:
+          type: string
+          description: Goal text for display
+          example: Reach £20k MRR in 12 months
+        type:
+          type: string
+          enum: [binary, continuous, compound]
+          description: |
+            Goal type classification:
+            - binary: Yes/no decision ("Should we...?")
+            - continuous: Optimization goal ("Maximize revenue")
+            - compound: Multiple competing objectives
+          example: continuous
+        is_primary:
+          type: boolean
+          description: Whether this is the primary goal (for multi-goal scenarios)
+          example: true
+
+    IdentifiabilityV1:
+      type: object
+      description: |
+        Identifiability status from ISL causal analysis. Indicates whether
+        causal effects can be identified from the model structure using
+        backdoor, frontdoor, or instrumental variable methods.
+      required:
+        - identifiable
+      properties:
+        identifiable:
+          type: boolean
+          description: Whether causal effects are identifiable from the model structure
+          example: true
+        method:
+          type: string
+          nullable: true
+          description: Method used for identification (e.g., "backdoor", "frontdoor", "instrumental")
+          example: backdoor
+        adjustment_set:
+          type: array
+          nullable: true
+          description: Variables in the adjustment set for causal identification
+          items:
+            type: string
+          example: [age, income, education]
+        explanation:
+          type: string
+          nullable: true
+          description: Human-readable explanation of identifiability status
+          example: Causal effect identified via backdoor criterion adjusting for confounders.
 
     CEEKeyInsightRequestV1:
       type: object
@@ -3376,6 +4203,98 @@ components:
         context_id:
           type: string
           description: Optional context identifier for tracing
+        goal_text:
+          type: string
+          nullable: true
+          description: |
+            Goal text for anchored headlines. When provided, headlines will reference
+            the user's stated goal (e.g., "Your best path to [goal]...").
+          example: Reach £20k MRR in 12 months
+        goal_type:
+          type: string
+          nullable: true
+          enum: [binary, continuous, compound]
+          description: |
+            Goal type classification:
+            - binary: Yes/no decisions → "To [goal], proceed with..."
+            - continuous: Optimization → "[Option] is your best path to [goal]"
+            - compound: Multiple goals → "[Option] best balances [goal1] and [goal2]"
+          example: continuous
+        goal_id:
+          type: string
+          nullable: true
+          description: Goal node ID for reference
+          example: goal-1
+        goals:
+          type: array
+          description: Multiple goals for compound decisions
+          items:
+            $ref: '#/components/schemas/GoalInfoV1'
+        primary_goal_id:
+          type: string
+          description: ID of the primary goal (for multi-goal scenarios)
+        identifiability:
+          $ref: '#/components/schemas/IdentifiabilityV1'
+          description: |
+            Identifiability status from ISL causal analysis. If not provided,
+            the system assumes causal effects are identifiable (default behavior).
+            When identifiable=false, headlines and evidence use exploratory language.
+
+    HeadlineStructuredV1:
+      type: object
+      description: Structured headline data for flexible UI rendering
+      required:
+        - goal_text
+        - action
+        - outcome_type
+        - likelihood
+        - vs_baseline
+        - vs_baseline_direction
+        - ranking_confidence
+        - is_close_race
+      properties:
+        goal_text:
+          type: string
+          nullable: true
+          description: Goal text (null if no goal provided)
+          example: Reach £20k MRR in 12 months
+        action:
+          type: string
+          description: The recommended action label
+          example: Increase price to £59
+        outcome_type:
+          type: string
+          enum: [positive, negative, neutral]
+          description: Outcome type classification
+          example: positive
+        likelihood:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Likelihood of success (0-1)
+          example: 0.75
+        vs_baseline:
+          type: number
+          format: double
+          nullable: true
+          description: Delta vs baseline option (null if no baseline)
+          example: 0.25
+        vs_baseline_direction:
+          type: string
+          nullable: true
+          enum: [better, worse, same]
+          description: Direction compared to baseline
+          example: better
+        ranking_confidence:
+          type: string
+          enum: [low, medium, high]
+          description: Confidence in the ranking
+          example: high
+        is_close_race:
+          type: boolean
+          description: Whether this is a close race between options (margin < 5%)
+          example: false
 
     CEEKeyInsightResponseV1:
       type: object
@@ -3390,8 +4309,13 @@ components:
       properties:
         headline:
           type: string
-          description: Main recommendation headline (sanitised, no question marks)
-          example: Implementing time-tracking software is the stronger option
+          description: |
+            Main recommendation headline (sanitised, no question marks).
+            When goal_text is provided in the request, the headline will reference
+            the user's stated goal for more compelling, contextual recommendations.
+          example: Increase price to £59 is your best path to reach £20k MRR in 12 months — 25% better than alternatives
+        headline_structured:
+          $ref: '#/components/schemas/HeadlineStructuredV1'
         primary_driver:
           type: string
           description: Primary driver explanation
@@ -3404,6 +4328,36 @@ components:
           type: string
           description: Optional caveat if the recommendation is close
           example: Consider that manual tracking is a close second—sensitivity analysis recommended.
+        evidence:
+          type: array
+          description: Evidence points supporting the recommendation
+          items:
+            type: string
+          example:
+            - Expected utility of 75% indicates strong likelihood of success.
+            - Revenue impact accounts for 45% of the outcome.
+        next_steps:
+          type: array
+          description: Suggested next steps (max 3-4 depending on identifiability)
+          items:
+            type: string
+          example:
+            - Validate key assumptions with stakeholders before proceeding.
+            - Define success metrics for measuring progress toward the goal.
+        recommendation_status:
+          type: string
+          enum: [actionable, exploratory]
+          description: |
+            Recommendation status based on causal identifiability:
+            - actionable: Causal effects confirmed, proceed with confidence
+            - exploratory: Treat as scenario analysis, gather more data before committing
+          example: actionable
+        identifiability_note:
+          type: string
+          description: |
+            Human-readable note about identifiability status for transparency.
+            Present when identifiability is provided or when non-identifiable.
+          example: Causal effects confirmed via backdoor criterion.
         quality:
           $ref: '#/components/schemas/CEEQualityMeta'
         trace:
@@ -3823,6 +4777,391 @@ components:
         trace:
           $ref: '#/components/schemas/CEETraceMeta'
 
+    # Preference Elicitation Schemas
+
+    CEEPreferenceQuestionTypeV1:
+      type: string
+      description: Type of preference question
+      enum: [risk_reward, goal_tradeoff, loss_aversion, time_preference]
+
+    CEEPreferenceOptionV1:
+      type: object
+      description: Option in a preference question
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          description: Option identifier (A or B)
+          enum: ["A", "B"]
+          example: "A"
+        label:
+          type: string
+          description: Short label for the option
+          example: "70% chance of £15,000 outcome"
+        description:
+          type: string
+          description: Detailed description of the option
+        outcome_value:
+          type: number
+          description: Monetary value of the outcome
+          example: 15000
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Probability of the outcome
+          example: 0.7
+        timeframe:
+          type: string
+          description: Timeframe for the outcome
+          example: "immediate"
+
+    CEEPreferenceQuestionV1:
+      type: object
+      description: Preference elicitation question
+      required:
+        - id
+        - type
+        - question
+        - options
+        - estimated_value
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this question
+          example: "pref_risk_1734012345678"
+        type:
+          $ref: '#/components/schemas/CEEPreferenceQuestionTypeV1'
+        question:
+          type: string
+          description: The question text
+          example: "Would you prefer:"
+        options:
+          type: array
+          description: Available response options (always 2)
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CEEPreferenceOptionV1'
+        estimated_value:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Estimated information gain from this question
+          example: 0.4
+        context_node_ids:
+          type: array
+          description: IDs of nodes this question relates to (for goal_tradeoff)
+          items:
+            type: string
+
+    CEEUserPreferencesDerivedFromV1:
+      type: object
+      description: Metadata about how preferences were derived
+      required:
+        - questions_answered
+        - last_updated
+      properties:
+        questions_answered:
+          type: integer
+          minimum: 0
+          description: Number of questions answered
+          example: 2
+        last_updated:
+          type: string
+          format: date-time
+          description: When preferences were last updated
+          example: "2025-01-01T00:00:00Z"
+
+    CEEUserPreferencesV1:
+      type: object
+      description: User preference profile
+      required:
+        - risk_aversion
+        - loss_aversion
+        - goal_weights
+        - time_discount
+        - confidence
+        - derived_from
+      properties:
+        risk_aversion:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Risk aversion level (0 = risk seeking, 1 = risk averse)
+          example: 0.5
+        loss_aversion:
+          type: number
+          minimum: 1
+          maximum: 3
+          description: Loss aversion coefficient (1 = neutral, 3 = highly loss averse)
+          example: 1.5
+        goal_weights:
+          type: object
+          additionalProperties:
+            type: number
+          description: Relative importance weights for each goal
+          example:
+            goal_revenue: 0.6
+            goal_quality: 0.4
+        time_discount:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Time discount rate (higher = prefer near-term outcomes)
+          example: 0.1
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          description: Confidence in preference profile
+          example: "medium"
+        derived_from:
+          $ref: '#/components/schemas/CEEUserPreferencesDerivedFromV1'
+
+    CEEElicitPreferencesOptionV1:
+      type: object
+      description: Option context for preference elicitation
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          description: Option identifier
+          example: "opt_expand"
+        label:
+          type: string
+          description: Option label
+          example: "Expand to US market"
+        expected_value:
+          type: number
+          description: Expected monetary value
+          example: 100000
+        risk_level:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Risk level (0 = safe, 1 = risky)
+          example: 0.6
+
+    CEEElicitPreferencesRequestV1:
+      type: object
+      description: Request for preference elicitation questions
+      required:
+        - graph_id
+        - goal_ids
+        - options
+      properties:
+        graph_id:
+          type: string
+          description: Graph identifier
+          example: "graph_123"
+        goal_ids:
+          type: array
+          description: Goal node IDs in the graph
+          items:
+            type: string
+          example: ["goal_revenue", "goal_retention"]
+        options:
+          type: array
+          description: Option context for question generation
+          items:
+            $ref: '#/components/schemas/CEEElicitPreferencesOptionV1'
+        current_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        max_questions:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 3
+          description: Maximum number of questions to return
+          example: 3
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEElicitPreferencesResponseV1:
+      type: object
+      description: Response containing preference elicitation questions
+      required:
+        - questions
+        - estimated_value
+        - provenance
+      properties:
+        questions:
+          type: array
+          description: Preference questions sorted by information gain
+          items:
+            $ref: '#/components/schemas/CEEPreferenceQuestionV1'
+        estimated_value:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Total estimated information gain from all questions
+          example: 0.84
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEElicitPreferencesAnswerRequestV1:
+      type: object
+      description: Request to process a preference answer
+      required:
+        - question_id
+        - answer
+        - graph_id
+      properties:
+        question_id:
+          type: string
+          description: ID of the question being answered
+          example: "pref_risk_1734012345678"
+        answer:
+          type: string
+          enum: ["A", "B"]
+          description: Selected option (A or B)
+          example: "A"
+        graph_id:
+          type: string
+          description: Graph identifier
+          example: "graph_123"
+        current_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEElicitPreferencesAnswerResponseV1:
+      type: object
+      description: Response after processing a preference answer
+      required:
+        - updated_preferences
+        - recommendation_impact
+        - remaining_questions
+        - provenance
+      properties:
+        updated_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        recommendation_impact:
+          type: string
+          description: How this answer affects recommendations
+          example: "You prefer higher potential returns even with uncertainty."
+        remaining_questions:
+          type: integer
+          minimum: 0
+          description: Number of questions needed for full confidence
+          example: 2
+        next_question:
+          $ref: '#/components/schemas/CEEPreferenceQuestionV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
+    CEEExplainTradeoffRequestV1:
+      type: object
+      description: Request to explain trade-offs between options
+      required:
+        - option_a
+        - option_b
+        - user_preferences
+      properties:
+        option_a:
+          type: string
+          description: First option to compare
+          example: "Launch now with basic features"
+        option_b:
+          type: string
+          description: Second option to compare
+          example: "Wait 6 months for full feature set"
+        user_preferences:
+          $ref: '#/components/schemas/CEEUserPreferencesV1'
+        goal_context:
+          type: string
+          description: Optional goal context for the comparison
+          example: "international expansion"
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEKeyFactorV1:
+      type: object
+      description: Key factor influencing the trade-off
+      required:
+        - factor
+        - impact
+      properties:
+        factor:
+          type: string
+          description: Name of the factor
+          example: "Risk preference"
+        impact:
+          type: string
+          description: How this factor affects the comparison
+          example: "You tend to prefer safer options with more certain outcomes."
+
+    CEEPreferenceAlignmentV1:
+      type: object
+      description: Preference alignment scores for options
+      required:
+        - option_a_score
+        - option_b_score
+        - recommended
+      properties:
+        option_a_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Alignment score for option A
+          example: 0.45
+        option_b_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Alignment score for option B
+          example: 0.55
+        recommended:
+          type: string
+          enum: ["A", "B", "neutral"]
+          description: Recommended option based on preferences
+          example: "neutral"
+
+    CEEExplainTradeoffResponseV1:
+      type: object
+      description: Response explaining trade-offs between options
+      required:
+        - explanation
+        - key_factors
+        - preference_alignment
+        - provenance
+      properties:
+        explanation:
+          type: string
+          description: Natural language explanation of the trade-off
+          example: "You're comparing Launch now with basic features against Wait 6 months for full feature set. Your preference for safety suggests..."
+        key_factors:
+          type: array
+          description: Key factors influencing the comparison
+          items:
+            $ref: '#/components/schemas/CEEKeyFactorV1'
+        preference_alignment:
+          $ref: '#/components/schemas/CEEPreferenceAlignmentV1'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+
     CEENodeInfoV1:
       type: object
       description: Node information for edge function suggestion
@@ -3841,7 +5180,7 @@ components:
           example: Marketing spend
         kind:
           type: string
-          description: Node kind (goal, decision, option, outcome, risk)
+          description: Node kind (goal, decision, option, outcome, risk, action, factor)
           example: option
 
     CEEEdgeFunctionSuggestionRequestV1:
@@ -4366,6 +5705,193 @@ components:
           description: Always 'cee' to indicate CEE generated this response
           example: cee
 
+    ISLSensitivityResult:
+      type: object
+      description: Sensitivity analysis result for a factor
+      required:
+        - factor_id
+        - sensitivity
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_price
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Pro Plan Price
+        sensitivity:
+          type: number
+          description: Sensitivity score (0-1)
+          example: 0.85
+        direction:
+          type: string
+          enum: [positive, negative]
+          description: Direction of correlation
+        impact_description:
+          type: string
+          description: Description of impact
+
+    ISLVoIResult:
+      type: object
+      description: Value of Information result for a factor
+      required:
+        - factor_id
+        - voi
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_churn
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Churn Rate
+        voi:
+          type: number
+          description: Expected value of resolving this uncertainty
+          example: 12.5
+        recommended_research:
+          type: string
+          description: Suggested way to gather more information
+
+    ISLTippingPoint:
+      type: object
+      description: Tipping point where optimal decision changes
+      required:
+        - factor_id
+        - threshold_value
+      properties:
+        factor_id:
+          type: string
+          description: ID of the factor node
+          example: factor_churn
+        factor_label:
+          type: string
+          description: Human-readable label
+          example: Churn Rate
+        threshold_value:
+          type: number
+          description: Value at which optimal decision changes
+          example: 0.08
+        current_value:
+          type: number
+          description: Current value for proximity calculation
+          example: 0.05
+        optimal_before:
+          type: string
+          description: Optimal choice below threshold
+          example: Raise price
+        optimal_after:
+          type: string
+          description: Optimal choice above threshold
+          example: Maintain price
+
+    ISLRobustnessResult:
+      type: object
+      description: Robustness analysis for a recommendation
+      required:
+        - recommendation_id
+        - robustness_score
+      properties:
+        recommendation_id:
+          type: string
+          description: ID of the recommendation/option
+          example: opt_raise_price
+        recommendation_label:
+          type: string
+          description: Human-readable label
+          example: Raise price to £59
+        robustness_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of scenarios where this option is optimal
+          example: 0.78
+        scenarios_tested:
+          type: number
+          description: Total scenarios tested
+          example: 100
+        scenarios_dominant:
+          type: number
+          description: Scenarios where this option dominated
+          example: 78
+
+    CEEIslSynthesisRequestV1:
+      type: object
+      description: CEE ISL synthesis request payload
+      properties:
+        sensitivity:
+          type: array
+          description: Sensitivity analysis results
+          items:
+            $ref: '#/components/schemas/ISLSensitivityResult'
+        voi:
+          type: array
+          description: Value of Information results
+          items:
+            $ref: '#/components/schemas/ISLVoIResult'
+        tipping_points:
+          type: array
+          description: Tipping point analysis results
+          items:
+            $ref: '#/components/schemas/ISLTippingPoint'
+        robustness:
+          type: array
+          description: Robustness analysis results
+          items:
+            $ref: '#/components/schemas/ISLRobustnessResult'
+        goal_label:
+          type: string
+          description: Goal context for narrative
+          example: Maximize revenue
+        recommendation_label:
+          type: string
+          description: Current recommendation for context
+          example: Raise price to £59
+        context_id:
+          type: string
+          description: Optional context identifier for tracing
+
+    CEEIslSynthesisResponseV1:
+      type: object
+      description: Generated ISL narrative synthesis
+      required:
+        - executive_summary
+        - trace
+        - quality
+        - provenance
+      properties:
+        robustness_narrative:
+          type: string
+          description: Narrative explaining robustness analysis
+          example: The recommendation to raise price to £59 is highly robust with a 78% confidence score across 100 tested scenarios.
+        sensitivity_narrative:
+          type: string
+          description: Narrative explaining sensitivity analysis
+          example: The outcome is most sensitive to Pro Plan Price and Churn Rate. Small changes in these factors could significantly impact the expected value.
+        voi_narrative:
+          type: string
+          description: Narrative explaining value of information
+          example: Resolving uncertainty about Churn Rate has the highest expected value of information.
+        tipping_narrative:
+          type: string
+          description: Narrative explaining tipping points
+          example: If Churn Rate exceeds 8%, the optimal choice shifts from Raise price to Maintain price.
+        executive_summary:
+          type: string
+          description: One-paragraph executive summary
+          example: "Goal: Maximize revenue. Recommended action: Raise price to £59. Robustness: 78%."
+        trace:
+          $ref: '#/components/schemas/CEETraceMeta'
+        quality:
+          $ref: '#/components/schemas/CEEQualityMeta'
+        provenance:
+          type: string
+          enum: [cee]
+          description: Always 'cee' to indicate CEE generated this response
+          example: cee
+
     CEEConditionBranchV1:
       type: object
       description: A branch outcome for a condition
@@ -4589,6 +6115,369 @@ components:
           enum: [cee]
           description: Always 'cee' to indicate CEE generated this response
           example: cee
+
+    # CEE Ask Endpoint Schemas (v1)
+    CEEAskIntentV1:
+      type: string
+      description: User intent for the /ask request
+      enum:
+        - clarify
+        - explain
+        - ideate
+        - repair
+        - compare
+        - challenge
+
+    CEEAskSelectionV1:
+      type: object
+      description: User selection context - what the user is focused on
+      properties:
+        node_id:
+          type: string
+          description: Selected node ID
+        edge_id:
+          type: string
+          description: Selected edge ID (format "from->to")
+        panel_section:
+          type: string
+          description: Selected panel section
+
+    CEEAskTurnV1:
+      type: object
+      description: Conversation turn for context
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          maxLength: 2000
+        referenced_ids:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    CEEAskMarketContextRefV1:
+      type: object
+      description: Market context reference
+      required:
+        - id
+        - version
+        - hash
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        hash:
+          type: string
+
+    CEEAskRequestV1:
+      type: object
+      description: Working Set Request - input to /assist/v1/ask
+      required:
+        - request_id
+        - scenario_id
+        - graph_schema_version
+        - brief
+        - message
+        - graph_snapshot
+        - market_context
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier
+        scenario_id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Scenario identifier for session tracking
+        graph_schema_version:
+          type: string
+          enum: ["2.2"]
+          description: Graph schema version (must be "2.2")
+        brief:
+          type: string
+          minLength: 10
+          maxLength: 10000
+          description: Decision brief text
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User's question or message
+        graph_snapshot:
+          type: object
+          description: Current graph state (authoritative source of truth)
+          required:
+            - nodes
+            - edges
+          properties:
+            nodes:
+              type: array
+              items:
+                type: object
+                required:
+                  - id
+                  - kind
+                properties:
+                  id:
+                    type: string
+                  kind:
+                    type: string
+                  label:
+                    type: string
+                  body:
+                    type: string
+            edges:
+              type: array
+              items:
+                type: object
+                required:
+                  - from
+                  - to
+                properties:
+                  from:
+                    type: string
+                  to:
+                    type: string
+                  belief:
+                    type: number
+            default_seed:
+              type: integer
+        market_context:
+          $ref: '#/components/schemas/CEEAskMarketContextRefV1'
+        selection:
+          $ref: '#/components/schemas/CEEAskSelectionV1'
+        turns_recent:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CEEAskTurnV1'
+        decision_state_summary:
+          type: string
+          maxLength: 1000
+        intent:
+          $ref: '#/components/schemas/CEEAskIntentV1'
+
+    CEEAskModelActionOpV1:
+      type: string
+      description: Model action operation type
+      enum:
+        - add_node
+        - add_edge
+        - update_node
+        - update_edge
+        - delete_node
+        - delete_edge
+
+    CEEAskModelActionV1:
+      type: object
+      description: Model action - a strict graph patch operation
+      required:
+        - action_id
+        - op
+        - payload
+      properties:
+        action_id:
+          type: string
+          format: uuid
+        op:
+          $ref: '#/components/schemas/CEEAskModelActionOpV1'
+        target_id:
+          type: string
+          description: Required for update/delete operations
+        payload:
+          type: object
+          description: Action payload
+        reason_code:
+          type: string
+          maxLength: 50
+        label:
+          type: string
+          maxLength: 100
+
+    CEEAskHighlightStyleV1:
+      type: string
+      enum:
+        - primary
+        - secondary
+        - warning
+        - error
+
+    CEEAskHighlightV1:
+      type: object
+      description: Highlight - visual emphasis on graph elements
+      required:
+        - type
+        - ids
+      properties:
+        type:
+          type: string
+          enum: [node, edge, path]
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        style:
+          $ref: '#/components/schemas/CEEAskHighlightStyleV1'
+        label:
+          type: string
+          maxLength: 100
+
+    CEEAskProvenanceSourceV1:
+      type: string
+      enum:
+        - brief
+        - graph
+        - market_context
+        - validator
+        - engine
+        - user_edit
+
+    CEEAskProvenanceConfidenceV1:
+      type: string
+      enum:
+        - high
+        - medium
+        - low
+
+    CEEAskProvenanceItemV1:
+      type: object
+      description: Provenance - source attribution for responses
+      required:
+        - source
+        - confidence
+        - note
+      properties:
+        source:
+          $ref: '#/components/schemas/CEEAskProvenanceSourceV1'
+        confidence:
+          $ref: '#/components/schemas/CEEAskProvenanceConfidenceV1'
+        note:
+          type: string
+          maxLength: 500
+        references:
+          type: object
+          properties:
+            node_ids:
+              type: array
+              items:
+                type: string
+            edge_ids:
+              type: array
+              items:
+                type: string
+
+    CEEAskAttributionV1:
+      type: object
+      description: Attribution metadata for audit
+      required:
+        - provider
+        - model_id
+        - timestamp
+        - assistant_response_hash
+      properties:
+        provider:
+          type: string
+        model_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        assistant_response_hash:
+          type: string
+        seed:
+          type: integer
+
+    CEEAskResponseV1:
+      type: object
+      description: |
+        Ask response - model-bound response from /assist/v1/ask.
+        At least one of model_actions, highlights, or follow_up_question MUST be present.
+      required:
+        - request_id
+        - message
+        - attribution
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          maxLength: 1000
+          description: Response message to display to user
+        model_actions:
+          type: array
+          description: Graph patch operations to propose
+          items:
+            $ref: '#/components/schemas/CEEAskModelActionV1'
+        highlights:
+          type: array
+          description: Elements to visually emphasize
+          items:
+            $ref: '#/components/schemas/CEEAskHighlightV1'
+        follow_up_question:
+          type: string
+          maxLength: 500
+          description: Clarifying question for the user
+        why:
+          type: array
+          description: Provenance information
+          items:
+            $ref: '#/components/schemas/CEEAskProvenanceItemV1'
+        updated_decision_state_summary:
+          type: string
+          maxLength: 1000
+        attribution:
+          $ref: '#/components/schemas/CEEAskAttributionV1'
+
+    CEEAskErrorCodeV1:
+      type: string
+      description: Error codes specific to /ask endpoint
+      enum:
+        - CEE_ASK_INVALID_GRAPH
+        - CEE_ASK_MISSING_CONTEXT
+        - CEE_ASK_ID_NOT_FOUND
+        - CEE_ASK_ID_COLLISION
+        - CEE_ASK_NOT_MODEL_BOUND
+        - CEE_ASK_INTENT_UNKNOWN
+        - CEE_ASK_LLM_ERROR
+        - CEE_ASK_RATE_LIMITED
+
+    CEEAskErrorResponseV1:
+      type: object
+      description: Error response from /assist/v1/ask
+      required:
+        - request_id
+        - error
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              $ref: '#/components/schemas/CEEAskErrorCodeV1'
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
 
     DecisionStorySummaryV1:
       type: object

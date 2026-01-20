@@ -19,6 +19,10 @@ export const DraftGraphInput = z.object({
   focus_areas: z
     .array(z.enum(["structure", "completeness", "feasibility", "provenance"]))
     .optional(),
+  // Optional structured context for graph generation
+  context: z.object({
+    goals: z.array(z.string().min(5).max(200)).max(5).optional(),
+  }).optional(),
   // Optional refinement context for iterative drafting (Phase B)
   previous_graph: Graph.optional(),
   refinement_mode: z
@@ -39,6 +43,40 @@ export const DraftGraphInput = z.object({
     answer: z.string(),
   })).optional(),
   max_clarifier_rounds: z.number().int().min(0).max(10).default(5).optional(),
+  // Raw output mode - skip all post-processing repairs (factor enrichment, goal repair, etc.)
+  // Returns LLM output directly after basic schema validation
+  raw_output: z.boolean().optional(),
+});
+
+// Graph correction tracking schema
+export const GraphCorrectionSchema = z.object({
+  id: z.string(),
+  stage: z.number().int().min(1).max(25),
+  stage_name: z.string(),
+  layer: z.enum(["adapter", "pipeline", "guards"]),
+  type: z.enum([
+    "node_added", "node_removed", "node_modified",
+    "edge_added", "edge_removed", "edge_modified",
+    "kind_normalised", "coefficient_adjusted"
+  ]),
+  target: z.object({
+    node_id: z.string().optional(),
+    edge_id: z.string().optional(),
+    kind: z.string().optional(),
+  }),
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  reason: z.string(),
+});
+
+export const CorrectionsSummarySchema = z.object({
+  total: z.number().int().min(0),
+  by_layer: z.object({
+    adapter: z.number().int().min(0),
+    pipeline: z.number().int().min(0),
+    guards: z.number().int().min(0),
+  }),
+  by_type: z.record(z.string(), z.number().int().min(0)),
 });
 
 export const DraftGraphOutput = z.object({
@@ -63,7 +101,12 @@ export const DraftGraphOutput = z.object({
     })
     .optional(),
   debug: z.object({ needle_movers: z.any().optional() }).optional(),
-  confidence: z.number().min(0).max(1).optional()
+  confidence: z.number().min(0).max(1).optional(),
+  // Graph corrections tracking
+  trace: z.object({
+    corrections: z.array(GraphCorrectionSchema).optional(),
+    corrections_summary: CorrectionsSummarySchema.optional(),
+  }).optional(),
 });
 
 export const SuggestOptionsInput = z.object({

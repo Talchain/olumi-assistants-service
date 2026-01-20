@@ -134,6 +134,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
         CeeDraftGraphFailed: "cee.draft_graph.failed",
 
+        // Connectivity validation (P0 diagnostics)
+        CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
+
+        // Uniform strength detection (LLM output quality)
+        CeeUniformStrengthsDetected: "cee.draft_graph.uniform_strengths_detected",
+
+        // Goal inference (defence-in-depth for missing goal nodes)
+        CeeGoalInferred: "cee.draft_graph.goal_inferred",
+
         // CEE v1 Explain Graph events (v1.12.0)
         CeeExplainGraphRequested: "cee.explain_graph.requested",
         CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
@@ -176,6 +185,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // LLM Normalization events (Phase 1 NodeKind normalization)
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
+
+        // Goal generation tracking (prompt tuning)
+        GoalGeneration: "cee.goal_generation",
 
         // CEE Clarification enforcement events (Phase 5)
         ClarificationRequired: "cee.clarification.required",
@@ -223,6 +235,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PromptStoreCacheHit: "prompt.store.cache.hit",
         PromptStoreCacheMiss: "prompt.store.cache.miss",
         PromptStoreCacheInvalidated: "prompt.store.cache.invalidated",
+        PromptStoreCacheWarmed: "prompt.store.cache.warmed",
+        PromptStoreBackgroundRefresh: "prompt.store.background_refresh",
 
         // Prompt Test Sandbox events (v2.1)
         PromptTestExecuted: "prompt.test.executed",
@@ -275,6 +289,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEdgeFunctionCompleted: "cee.edge_function.completed",
         CeeEdgeFunctionFailed: "cee.edge_function.failed",
 
+        // Edge Direction Validation events (Brief G)
+        EdgeDirectionViolationDetected: "cee.edge_direction.violation_detected",
+        EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
+
         // Phase 4: Recommendation Narratives events
         CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
         CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
@@ -287,6 +305,60 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeExplainPolicyRequested: "cee.explain_policy.requested",
         CeeExplainPolicyCompleted: "cee.explain_policy.completed",
         CeeExplainPolicyFailed: "cee.explain_policy.failed",
+
+        // Phase 5: Preference Elicitation events
+        CeeElicitPreferencesRequested: "cee.elicit_preferences.requested",
+        CeeElicitPreferencesSucceeded: "cee.elicit_preferences.succeeded",
+        CeeElicitPreferencesFailed: "cee.elicit_preferences.failed",
+        CeeElicitPreferencesAnswerRequested: "cee.elicit_preferences_answer.requested",
+        CeeElicitPreferencesAnswerSucceeded: "cee.elicit_preferences_answer.succeeded",
+        CeeElicitPreferencesAnswerFailed: "cee.elicit_preferences_answer.failed",
+        CeeExplainTradeoffRequested: "cee.explain_tradeoff.requested",
+        CeeExplainTradeoffSucceeded: "cee.explain_tradeoff.succeeded",
+        CeeExplainTradeoffFailed: "cee.explain_tradeoff.failed",
+
+        // Factor Extraction events (v2.3)
+        FactorExtractionComplete: "cee.factor_extraction.complete",
+        FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
+
+        // Schema v2 Transform events (v2.3)
+        SchemaV2TransformComplete: "cee.schema_v2.transform_complete",
+
+        // Schema v3 Transform events (v3.0)
+        SchemaV3TransformComplete: "cee.schema_v3.transform_complete",
+        InterventionExtraction: "cee.intervention_extraction",
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        EdgeStrengthClamped: "cee.edge.strength_clamped",
+        EdgeStrengthNegligible: "cee.edge.strength_negligible",
+        EdgeStrengthLow: "cee.edge.strength_low",
+
+        // Analysis-Ready Output events (P0)
+        AnalysisReadyBuilt: "cee.analysis_ready.built",
+        AnalysisReadyValidationFailed: "cee.analysis_ready.validation_failed",
+
+        // ISL Synthesis events (v2.3)
+        IslSynthesisRequested: "cee.isl_synthesis.requested",
+        IslSynthesisSucceeded: "cee.isl_synthesis.succeeded",
+        IslSynthesisFailed: "cee.isl_synthesis.failed",
+
+        // CEE Ask events (Working Set API)
+        CeeAskRequested: "cee.ask.requested",
+        CeeAskCompleted: "cee.ask.completed",
+        CeeAskFailed: "cee.ask.failed",
+
+        // CEE Review events (M1 Orchestrator)
+        CeeReviewRequested: "cee.review.requested",
+        CeeReviewSucceeded: "cee.review.succeeded",
+        CeeReviewFailed: "cee.review.failed",
+
+        // Boundary logging events (Observability v1)
+        BoundaryRequest: "boundary.request",
+        BoundaryResponse: "boundary.response",
+
+        // Performance timing events (Observability v2)
+        LlmCall: "llm.call",
+        DownstreamCall: "downstream.call",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -312,7 +384,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|generate_recommendation|narrate_conditions|explain_policy)\.|llm\.normalization\.|isl\.config\.|prompt\.(store_error|store\.cache\.|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -501,6 +573,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.requested": [TelemetryEvents.CeeDraftGraphRequested],
         "cee.draft_graph.succeeded": [TelemetryEvents.CeeDraftGraphSucceeded],
         "cee.draft_graph.failed": [TelemetryEvents.CeeDraftGraphFailed],
+        "cee.draft_graph.connectivity_check": [TelemetryEvents.CeeConnectivityCheck],
+        "cee.draft_graph.uniform_strengths_detected": [TelemetryEvents.CeeUniformStrengthsDetected],
+        "cee.draft_graph.goal_inferred": [TelemetryEvents.CeeGoalInferred],
         "cee.explain_graph.requested": [TelemetryEvents.CeeExplainGraphRequested],
         "cee.explain_graph.succeeded": [TelemetryEvents.CeeExplainGraphSucceeded],
         "cee.explain_graph.failed": [TelemetryEvents.CeeExplainGraphFailed],
@@ -575,6 +650,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.completed": [TelemetryEvents.CeeEdgeFunctionCompleted],
         "cee.edge_function.failed": [TelemetryEvents.CeeEdgeFunctionFailed],
 
+        // Edge Direction Validation events (Brief G)
+        "cee.edge_direction.violation_detected": [TelemetryEvents.EdgeDirectionViolationDetected],
+        "cee.edge_direction.validation_passed": [TelemetryEvents.EdgeDirectionValidationPassed],
+
         // Phase 4: Recommendation Narratives events
         "cee.generate_recommendation.requested": [TelemetryEvents.CeeGenerateRecommendationRequested],
         "cee.generate_recommendation.completed": [TelemetryEvents.CeeGenerateRecommendationCompleted],
@@ -588,10 +667,53 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_policy.completed": [TelemetryEvents.CeeExplainPolicyCompleted],
         "cee.explain_policy.failed": [TelemetryEvents.CeeExplainPolicyFailed],
 
+        // Phase 5: Preference Elicitation events
+        "cee.elicit_preferences.requested": [TelemetryEvents.CeeElicitPreferencesRequested],
+        "cee.elicit_preferences.succeeded": [TelemetryEvents.CeeElicitPreferencesSucceeded],
+        "cee.elicit_preferences.failed": [TelemetryEvents.CeeElicitPreferencesFailed],
+        "cee.elicit_preferences_answer.requested": [TelemetryEvents.CeeElicitPreferencesAnswerRequested],
+        "cee.elicit_preferences_answer.succeeded": [TelemetryEvents.CeeElicitPreferencesAnswerSucceeded],
+        "cee.elicit_preferences_answer.failed": [TelemetryEvents.CeeElicitPreferencesAnswerFailed],
+        "cee.explain_tradeoff.requested": [TelemetryEvents.CeeExplainTradeoffRequested],
+        "cee.explain_tradeoff.succeeded": [TelemetryEvents.CeeExplainTradeoffSucceeded],
+        "cee.explain_tradeoff.failed": [TelemetryEvents.CeeExplainTradeoffFailed],
+
+        // Factor Extraction events (v2.3)
+        "cee.factor_extraction.complete": [TelemetryEvents.FactorExtractionComplete],
+
+        // Schema v2 Transform events (v2.3)
+        "cee.schema_v2.transform_complete": [TelemetryEvents.SchemaV2TransformComplete],
+
+        // Schema v3 Transform events (v3.0)
+        "cee.schema_v3.transform_complete": [TelemetryEvents.SchemaV3TransformComplete],
+        "cee.intervention_extraction": [TelemetryEvents.InterventionExtraction],
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        "cee.edge.strength_clamped": [TelemetryEvents.EdgeStrengthClamped],
+        "cee.edge.strength_negligible": [TelemetryEvents.EdgeStrengthNegligible],
+        "cee.edge.strength_low": [TelemetryEvents.EdgeStrengthLow],
+
+        // ISL Synthesis events (v2.3)
+        "cee.isl_synthesis.requested": [TelemetryEvents.IslSynthesisRequested],
+        "cee.isl_synthesis.succeeded": [TelemetryEvents.IslSynthesisSucceeded],
+        "cee.isl_synthesis.failed": [TelemetryEvents.IslSynthesisFailed],
+
+        // CEE Ask events (Working Set API)
+        "cee.ask.requested": [TelemetryEvents.CeeAskRequested],
+        "cee.ask.completed": [TelemetryEvents.CeeAskCompleted],
+        "cee.ask.failed": [TelemetryEvents.CeeAskFailed],
+
+        // CEE Review events (M1 Orchestrator)
+        "cee.review.requested": [TelemetryEvents.CeeReviewRequested],
+        "cee.review.succeeded": [TelemetryEvents.CeeReviewSucceeded],
+        "cee.review.failed": [TelemetryEvents.CeeReviewFailed],
+
         // Prompt Store Cache events (v2.0 Phase 4.3)
         "prompt.store.cache.hit": [TelemetryEvents.PromptStoreCacheHit],
         "prompt.store.cache.miss": [TelemetryEvents.PromptStoreCacheMiss],
         "prompt.store.cache.invalidated": [TelemetryEvents.PromptStoreCacheInvalidated],
+        "prompt.store.cache.warmed": [TelemetryEvents.PromptStoreCacheWarmed],
+        "prompt.store.background_refresh": [TelemetryEvents.PromptStoreBackgroundRefresh],
 
         // Prompt Test Sandbox events (v2.1)
         "prompt.test.executed": [TelemetryEvents.PromptTestExecuted],
@@ -608,6 +730,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.approval.required": [TelemetryEvents.PromptApprovalRequired],
         "prompt.approval.granted": [TelemetryEvents.PromptApprovalGranted],
         "prompt.approval.rejected": [TelemetryEvents.PromptApprovalRejected],
+
+        // Performance timing events (Observability v2)
+        "llm.call": [TelemetryEvents.LlmCall],
+        "llm.call.latency_ms": [TelemetryEvents.LlmCall],
+        "llm.call.tokens_prompt": [TelemetryEvents.LlmCall],
+        "llm.call.tokens_completion": [TelemetryEvents.LlmCall],
+        "downstream.call": [TelemetryEvents.DownstreamCall],
+        "downstream.call.latency_ms": [TelemetryEvents.DownstreamCall],
+        "downstream.call.status": [TelemetryEvents.DownstreamCall],
       };
 
       // Verify all events are documented, except debug-only events
@@ -634,6 +765,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.PreflightReadinessAssessed,
         TelemetryEvents.PreflightRejected,
         TelemetryEvents.NodeKindNormalized,
+        TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
         TelemetryEvents.ClarificationBypassAllowed,
         // Multi-turn clarifier events (Phase 1 - diagnostic only)
@@ -653,6 +785,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeGraphValidation,
         TelemetryEvents.CeeGraphGoalsMerged,
         TelemetryEvents.CeeGraphSizeExceeded,
+        // Boundary logging events (observability, no Datadog counters initially)
+        TelemetryEvents.BoundaryRequest,
+        TelemetryEvents.BoundaryResponse,
+        // Analysis-Ready Output events (P0 - diagnostic only)
+        TelemetryEvents.AnalysisReadyBuilt,
+        TelemetryEvents.AnalysisReadyValidationFailed,
+        // Factor baseline defaulting (diagnostic only)
+        TelemetryEvents.FactorBaselineDefaulted,
       ];
 
       for (const event of allEvents) {
@@ -747,6 +887,15 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.requested",
         "cee.draft_graph.succeeded",
         "cee.draft_graph.failed",
+
+        // Connectivity validation (P0 diagnostics)
+        "cee.draft_graph.connectivity_check",
+
+        // Uniform strength detection (LLM output quality)
+        "cee.draft_graph.uniform_strengths_detected",
+
+        // Goal inference (defence-in-depth for missing goal nodes)
+        "cee.draft_graph.goal_inferred",
 
         // CEE v1 Explain Graph events
         "cee.explain_graph.requested",
@@ -848,6 +997,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.hit",
         "prompt.store.cache.miss",
         "prompt.store.cache.invalidated",
+        "prompt.store.cache.warmed",
+        "prompt.store.background_refresh",
 
         // Prompt Test Sandbox events (v2.1)
         "prompt.test.executed",
@@ -900,10 +1051,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_function.completed",
         "cee.edge_function.failed",
 
+        // Edge Direction Validation events (Brief G)
+        "cee.edge_direction.violation_detected",
+        "cee.edge_direction.validation_passed",
+
         // Phase 4: Recommendation Narratives events
         "cee.generate_recommendation.requested",
         "cee.generate_recommendation.completed",
         "cee.generate_recommendation.failed",
+
+        // Goal generation tracking (prompt tuning)
+        "cee.goal_generation",
 
         "cee.narrate_conditions.requested",
         "cee.narrate_conditions.completed",
@@ -912,6 +1070,60 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.explain_policy.requested",
         "cee.explain_policy.completed",
         "cee.explain_policy.failed",
+
+        // Phase 5: Preference Elicitation events
+        "cee.elicit_preferences.requested",
+        "cee.elicit_preferences.succeeded",
+        "cee.elicit_preferences.failed",
+        "cee.elicit_preferences_answer.requested",
+        "cee.elicit_preferences_answer.succeeded",
+        "cee.elicit_preferences_answer.failed",
+        "cee.explain_tradeoff.requested",
+        "cee.explain_tradeoff.succeeded",
+        "cee.explain_tradeoff.failed",
+
+        // Factor Extraction events (v2.3)
+        "cee.factor_extraction.complete",
+        "cee.factor.baseline_defaulted",
+
+        // Schema v2 Transform events (v2.3)
+        "cee.schema_v2.transform_complete",
+
+        // Schema v3 Transform events (v3.0)
+        "cee.schema_v3.transform_complete",
+        "cee.intervention_extraction",
+
+        // Edge coefficient clamping events (P1-CEE-2)
+        "cee.edge.strength_clamped",
+        "cee.edge.strength_negligible",
+        "cee.edge.strength_low",
+
+        // Analysis-Ready Output events (P0)
+        "cee.analysis_ready.built",
+        "cee.analysis_ready.validation_failed",
+
+        // ISL Synthesis events (v2.3)
+        "cee.isl_synthesis.requested",
+        "cee.isl_synthesis.succeeded",
+        "cee.isl_synthesis.failed",
+
+        // CEE Ask events (Working Set API)
+        "cee.ask.requested",
+        "cee.ask.completed",
+        "cee.ask.failed",
+
+        // CEE Review events (M1 Orchestrator)
+        "cee.review.requested",
+        "cee.review.succeeded",
+        "cee.review.failed",
+
+        // Boundary logging events (Observability v1)
+        "boundary.request",
+        "boundary.response",
+
+        // Performance timing events (Observability v2)
+        "llm.call",
+        "downstream.call",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

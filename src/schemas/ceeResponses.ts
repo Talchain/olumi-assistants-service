@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DraftGraphOutput } from "./assist.js";
+import { PreferenceQuestionSchema, UserPreferencesSchema } from "./cee.js";
 
 // Minimal Zod schemas for CEE response envelopes used by the verification
 // pipeline. These are intentionally conservative and focus on required
@@ -60,12 +61,211 @@ export const CEEWeightSuggestionV1Schema = z.object({
 
 export type CEEWeightSuggestionV1T = z.infer<typeof CEEWeightSuggestionV1Schema>;
 
+// ============================================================================
+// Pipeline Trace Schemas (P0 Diagnostics)
+// ============================================================================
+
+// ============================================================================
+// LLM Observability Trace Schemas (Enhanced Diagnostics)
+// ============================================================================
+
+/** Node kind counts at each pipeline stage */
+export const NodeExtractionSchema = z.object({
+  /** Counts from parsed LLM JSON, before any processing */
+  raw: z.record(z.string(), z.number()),
+  /** Counts after coefficient_normalisation */
+  normalised: z.record(z.string(), z.number()),
+  /** Counts at final validation */
+  validated: z.record(z.string(), z.number()),
+});
+
+export type NodeExtractionT = z.infer<typeof NodeExtractionSchema>;
+
+/** LLM call metadata for observability */
+export const LLMMetadataSchema = z.object({
+  model: z.string(),
+  prompt_version: z.string().optional(),
+  duration_ms: z.number().optional(),
+  finish_reason: z.string().optional(),
+  response_chars: z.number().optional(),
+  token_usage: z.object({
+    prompt_tokens: z.number(),
+    completion_tokens: z.number(),
+    total_tokens: z.number(),
+  }).optional(),
+  parse_error: z.string().optional(),
+});
+
+export type LLMMetadataT = z.infer<typeof LLMMetadataSchema>;
+
+/** LLM raw output preview pattern */
+export const LLMRawSchema = z.object({
+  /** First 2000 chars of raw LLM text */
+  output_preview: z.string(),
+  /** SHA-256 of stored output (may be truncated by adapters) */
+  output_hash: z.string(),
+  /** Quick check: how many nodes in parsed output */
+  output_node_count: z.number(),
+  /** Quick check: how many edges in parsed output */
+  output_edge_count: z.number(),
+  /** True if preview was truncated */
+  truncated: z.boolean(),
+  /** True if full output stored for later retrieval */
+  full_output_available: z.boolean(),
+});
+
+export type LLMRawT = z.infer<typeof LLMRawSchema>;
+
+/** Explicit validation result */
+export const ValidationSummarySchema = z.object({
+  status: z.enum(["valid", "invalid"]),
+  required_kinds: z.array(z.string()),
+  present_kinds: z.array(z.string()),
+  missing_kinds: z.array(z.string()),
+  message: z.string().optional(),
+  suggestion: z.string().optional(),
+});
+
+export type ValidationSummaryT = z.infer<typeof ValidationSummarySchema>;
+
+/** Coefficient modification record */
+export const CoefficientModificationSchema = z.object({
+  edge_id: z.string(),
+  field: z.string(),
+  before: z.number(),
+  after: z.number(),
+  reason: z.string(),
+});
+
+export type CoefficientModificationT = z.infer<typeof CoefficientModificationSchema>;
+
+/** Transform record for pipeline stages */
+export const TransformSchema = z.object({
+  stage: z.string(),
+  kind: z.enum(["normalisation", "repair"]),
+  trigger: z.string(),
+  changes_summary: z.string(),
+  repair_attempted: z.boolean(),
+  repair_success: z.boolean(),
+  /** Node counts before transform */
+  before_counts: z.record(z.string(), z.number()),
+  /** Node counts after transform */
+  after_counts: z.record(z.string(), z.number()),
+  /** Coefficient modifications (when relevant) */
+  coefficients_modified: z.array(CoefficientModificationSchema).optional(),
+  nodes_added_count: z.number().optional(),
+  nodes_removed_count: z.number().optional(),
+  edges_added_count: z.number().optional(),
+  edges_removed_count: z.number().optional(),
+});
+
+export type TransformT = z.infer<typeof TransformSchema>;
+
+/** Pipeline stage status */
+export const PipelineStageStatusSchema = z.enum([
+  "success",
+  "failed",
+  "skipped",
+  "success_with_repairs",
+]);
+
+/** Pipeline stage name */
+export const PipelineStageNameSchema = z.enum([
+  "llm_draft",
+  "coefficient_normalisation",
+  "node_validation",
+  "connectivity_check",
+  "goal_repair",
+  "edge_repair",
+  "final_validation",
+]);
+
+/** Individual pipeline stage */
+export const PipelineStageSchema = z.object({
+  name: PipelineStageNameSchema,
+  status: PipelineStageStatusSchema,
+  duration_ms: z.number(),
+  details: z.record(z.unknown()).optional(),
+});
+
+export type PipelineStageT = z.infer<typeof PipelineStageSchema>;
+
+/** LLM call trace (for debugging) */
+export const LlmCallTraceSchema = z.object({
+  id: z.string(),
+  model: z.string(),
+  duration_ms: z.number(),
+  prompt_tokens: z.number().optional(),
+  completion_tokens: z.number().optional(),
+  // Full request/response only in dev/staging (not production)
+  request: z.record(z.unknown()).optional(),
+  response: z.record(z.unknown()).optional(),
+});
+
+export type LlmCallTraceT = z.infer<typeof LlmCallTraceSchema>;
+
+/** Connectivity diagnostic info */
+export const ConnectivityDiagnosticSchema = z.object({
+  checked: z.boolean(),
+  passed: z.boolean(),
+  decision_ids: z.array(z.string()),
+  reachable_options: z.array(z.string()),
+  reachable_goals: z.array(z.string()),
+  unreachable_nodes: z.array(z.string()),
+  edges_added: z.array(z.object({
+    from: z.string(),
+    to: z.string(),
+  })).optional(),
+});
+
+export type ConnectivityDiagnosticT = z.infer<typeof ConnectivityDiagnosticSchema>;
+
+/** Final graph summary in trace */
+export const FinalGraphTraceSchema = z.object({
+  node_count: z.number(),
+  edge_count: z.number(),
+  // Full nodes/edges only in dev/staging
+  nodes: z.array(z.record(z.unknown())).optional(),
+  edges: z.array(z.record(z.unknown())).optional(),
+});
+
+export type FinalGraphTraceT = z.infer<typeof FinalGraphTraceSchema>;
+
+/** Pipeline overall status */
+export const PipelineStatusSchema = z.enum([
+  "success",
+  "success_with_repairs",
+  "failed",
+]);
+
+/** Complete pipeline trace */
+export const PipelineTraceSchema = z.object({
+  status: PipelineStatusSchema,
+  total_duration_ms: z.number(),
+  llm_call_count: z.number(),
+  stages: z.array(PipelineStageSchema),
+  connectivity: ConnectivityDiagnosticSchema.optional(),
+  llm_calls: z.array(LlmCallTraceSchema).optional(),
+  final_graph: FinalGraphTraceSchema.optional(),
+});
+
+export type PipelineTraceT = z.infer<typeof PipelineTraceSchema>;
+
 export const CEETraceMetaSchema = z
   .object({
     request_id: z.string().optional(),
     correlation_id: z.string().optional(),
     engine: z.record(z.any()).optional(),
     context_id: z.string().optional(),
+    // Pipeline diagnostics (P0)
+    pipeline: PipelineTraceSchema.optional(),
+    // Goal handling (existing)
+    goal_handling: z.object({
+      goal_source: z.enum(["llm_generated", "retry_generated", "inferred", "placeholder"]),
+      retry_attempted: z.boolean(),
+      original_missing_kinds: z.array(z.string()).optional(),
+      goal_node_id: z.string().optional(),
+    }).optional(),
   })
   .passthrough();
 
@@ -226,13 +426,36 @@ export const CEEGraphReadinessResponseV1Schema = z
 
 export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;
 
+// Headline structured data for flexible UI rendering
+export const CEEHeadlineStructuredV1Schema = z.object({
+  goal_text: z.string().nullable(),
+  action: z.string(),
+  outcome_type: z.enum(["positive", "negative", "neutral"]),
+  likelihood: z.number().min(0).max(1),
+  vs_baseline: z.number().nullable(),
+  vs_baseline_direction: z.enum(["better", "worse", "same"]).nullable(),
+  ranking_confidence: z.enum(["low", "medium", "high"]),
+  is_close_race: z.boolean(),
+});
+
+export type CEEHeadlineStructuredV1T = z.infer<typeof CEEHeadlineStructuredV1Schema>;
+
 // Key Insight Response schema
 export const CEEKeyInsightResponseV1Schema = z
   .object({
     headline: z.string(),
+    headline_structured: CEEHeadlineStructuredV1Schema.optional(),
     primary_driver: z.string(),
     confidence_statement: z.string(),
     caveat: z.string().optional(),
+    evidence: z.array(z.string()).optional(),
+    next_steps: z.array(z.string()).optional(),
+    // Recommendation status based on identifiability
+    // actionable = causal effects confirmed, proceed with confidence
+    // exploratory = treat as scenario analysis, gather more data
+    recommendation_status: z.enum(["actionable", "exploratory"]).optional(),
+    // Identifiability acknowledgement for transparency
+    identifiability_note: z.string().optional(),
     quality: CEEQualityMetaSchema,
     trace: CEETraceMetaSchema,
     provenance: z.literal("cee"),
@@ -451,4 +674,93 @@ export const CEEExplainPolicyResponseV1Schema = z
 
 export type CEEExplainPolicyResponseV1T = z.infer<
   typeof CEEExplainPolicyResponseV1Schema
+>;
+
+// ============================================================================
+// Preference Elicitation Response Schemas
+// ============================================================================
+
+// Elicit Preferences Response
+export const CEEElicitPreferencesResponseV1Schema = z
+  .object({
+    questions: z.array(PreferenceQuestionSchema),
+    estimated_value: z.number().min(0).max(1),
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEElicitPreferencesResponseV1T = z.infer<
+  typeof CEEElicitPreferencesResponseV1Schema
+>;
+
+// Elicit Preferences Answer Response
+export const CEEElicitPreferencesAnswerResponseV1Schema = z
+  .object({
+    updated_preferences: UserPreferencesSchema,
+    recommendation_impact: z.string(),
+    remaining_questions: z.number().int().min(0),
+    next_question: PreferenceQuestionSchema.optional(),
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEElicitPreferencesAnswerResponseV1T = z.infer<
+  typeof CEEElicitPreferencesAnswerResponseV1Schema
+>;
+
+// Key Factor for trade-off explanation
+export const CEEKeyFactorV1Schema = z.object({
+  factor: z.string(),
+  impact: z.string(),
+});
+
+export type CEEKeyFactorV1T = z.infer<typeof CEEKeyFactorV1Schema>;
+
+// Preference Alignment for trade-off explanation
+export const CEEPreferenceAlignmentV1Schema = z.object({
+  option_a_score: z.number(),
+  option_b_score: z.number(),
+  recommended: z.enum(["A", "B", "neutral"]),
+});
+
+export type CEEPreferenceAlignmentV1T = z.infer<typeof CEEPreferenceAlignmentV1Schema>;
+
+// Explain Tradeoff Response
+export const CEEExplainTradeoffResponseV1Schema = z
+  .object({
+    explanation: z.string(),
+    key_factors: z.array(CEEKeyFactorV1Schema),
+    preference_alignment: CEEPreferenceAlignmentV1Schema,
+    trace: CEETraceMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEExplainTradeoffResponseV1T = z.infer<
+  typeof CEEExplainTradeoffResponseV1Schema
+>;
+
+// ============================================================================
+// ISL Synthesis Response Schema
+// ============================================================================
+
+export const CEEIslSynthesisResponseV1Schema = z
+  .object({
+    // Generated narratives
+    robustness_narrative: z.string().optional(),
+    sensitivity_narrative: z.string().optional(),
+    voi_narrative: z.string().optional(),
+    tipping_narrative: z.string().optional(),
+    executive_summary: z.string(),
+    // Metadata
+    trace: CEETraceMetaSchema,
+    quality: CEEQualityMetaSchema,
+    provenance: z.literal("cee"),
+  })
+  .passthrough();
+
+export type CEEIslSynthesisResponseV1T = z.infer<
+  typeof CEEIslSynthesisResponseV1Schema
 >;

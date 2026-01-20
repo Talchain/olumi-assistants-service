@@ -85,71 +85,71 @@ describe("selectModel", () => {
   describe("default selection", () => {
     it("returns fast tier for clarification task", () => {
       const result = selectModel({ task: "clarification" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-5-mini");
       expect(result.tier).toBe("fast");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for draft_graph task", () => {
+    it("returns premium tier for draft_graph task (reasoning model)", () => {
       const result = selectModel({ task: "draft_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5.2");
+      expect(result.tier).toBe("premium");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for bias_check task", () => {
+    it("returns premium tier for bias_check task (reasoning model)", () => {
       const result = selectModel({ task: "bias_check" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5.2");
+      expect(result.tier).toBe("premium");
       expect(result.source).toBe("default");
     });
 
     it("returns fast tier for evidence_helper task", () => {
       const result = selectModel({ task: "evidence_helper" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-5-mini");
       expect(result.tier).toBe("fast");
       expect(result.source).toBe("default");
     });
 
     it("returns fast tier for explainer task", () => {
       const result = selectModel({ task: "explainer" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-5-mini");
       expect(result.tier).toBe("fast");
       expect(result.source).toBe("default");
     });
 
     it("returns fast tier for preflight task", () => {
       const result = selectModel({ task: "preflight" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-5-mini");
       expect(result.tier).toBe("fast");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for sensitivity_coach task", () => {
+    it("returns fast tier for sensitivity_coach task", () => {
       const result = selectModel({ task: "sensitivity_coach" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5-mini");
+      expect(result.tier).toBe("fast");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for options task", () => {
+    it("returns premium tier for options task (reasoning model)", () => {
       const result = selectModel({ task: "options" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5.2");
+      expect(result.tier).toBe("premium");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for repair_graph task", () => {
+    it("returns premium tier for repair_graph task (reasoning model)", () => {
       const result = selectModel({ task: "repair_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5.2");
+      expect(result.tier).toBe("premium");
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for critique_graph task", () => {
+    it("returns premium tier for critique_graph task (reasoning model)", () => {
       const result = selectModel({ task: "critique_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
-      expect(result.tier).toBe("quality");
+      expect(result.modelId).toBe("gpt-5.2");
+      expect(result.tier).toBe("premium");
       expect(result.source).toBe("default");
     });
   });
@@ -178,7 +178,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "gpt-5-turbo" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o-mini"); // Falls back to default
+      expect(result.modelId).toBe("gpt-5-mini"); // Falls back to default
       expect(result.warnings).toContainEqual(
         expect.stringContaining("Unknown model")
       );
@@ -189,7 +189,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "claude-sonnet-4-20250514" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o-mini"); // Falls back to default
+      expect(result.modelId).toBe("gpt-5-mini"); // Falls back to default
       expect(result.source).toBe("default");
       expect(result.warnings.length).toBeGreaterThan(0);
     });
@@ -199,7 +199,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "gpt-4o" },
         noOverrideConfig
       );
-      expect(result.modelId).toBe("gpt-4o-mini"); // Uses default
+      expect(result.modelId).toBe("gpt-5-mini"); // Uses default
       expect(result.source).toBe("default");
       expect(result.warnings).toContainEqual(
         expect.stringContaining("override is disabled")
@@ -213,7 +213,7 @@ describe("selectModel", () => {
         { task: "draft_graph", override: "gpt-4o-mini" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o"); // Upgraded
+      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
       expect(result.warnings).toContainEqual(
         expect.stringContaining("requires quality tier")
       );
@@ -224,7 +224,7 @@ describe("selectModel", () => {
         { task: "bias_check", override: "gpt-4o-mini" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o"); // Upgraded
+      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
       expect(result.warnings).toContainEqual(
         expect.stringContaining("requires quality tier")
       );
@@ -235,7 +235,7 @@ describe("selectModel", () => {
         { task: "bias_check", override: "_fast" },
         enabledConfig
       );
-      expect(result.tier).toBe("quality");
+      expect(result.tier).toBe("premium"); // bias_check now uses gpt-5.2 (premium)
       expect(result.warnings).toContainEqual(
         expect.stringContaining("requires quality tier")
       );
@@ -285,7 +285,7 @@ describe("selectModel", () => {
         enabledConfig
       );
       expect(result.source).toBe("default");
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-5-mini");
     });
 
     it("_fast blocked for draft_graph (quality-required)", () => {
@@ -293,7 +293,7 @@ describe("selectModel", () => {
         { task: "draft_graph", override: "_fast" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o"); // Quality enforced
+      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
       expect(result.warnings.length).toBeGreaterThan(0);
     });
   });

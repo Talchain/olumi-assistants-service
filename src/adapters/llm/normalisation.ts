@@ -11,7 +11,7 @@ import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 // Types
 // ============================================================================
 
-export type CanonicalNodeKind = 'goal' | 'decision' | 'option' | 'outcome' | 'risk' | 'action';
+export type CanonicalNodeKind = 'goal' | 'decision' | 'option' | 'outcome' | 'risk' | 'action' | 'factor';
 
 // ============================================================================
 // Mappings
@@ -30,10 +30,10 @@ export const NODE_KIND_MAP: Record<string, CanonicalNodeKind> = {
   'outcome': 'outcome',
   'risk': 'risk',
   'action': 'action',
+  'factor': 'factor',
 
   // Synonyms that map to 'option'
   'evidence': 'option',
-  'factor': 'option',
   'consideration': 'option',
   'alternative': 'option',
   'choice': 'option',
@@ -131,16 +131,148 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
-  // Coerce string numbers to numbers for belief/weight on edges
+  // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
+  // Also handle V4 format (strength.mean, strength.std, exists_probability)
   if (Array.isArray(obj.edges)) {
     obj.edges = obj.edges.map((edge: unknown) => {
       if (!edge || typeof edge !== 'object') return edge;
       const e = edge as Record<string, unknown>;
 
+      // ========================================================================
+      // V4 FORMAT HANDLING: strength.mean/std and exists_probability
+      // Convert to internal representation (strength_mean, strength_std, belief_exists)
+      // while preserving backwards compatibility with legacy weight/belief fields
+      // ========================================================================
+
+      let strength_mean: number | undefined = undefined;
+      let strength_std: number | undefined = undefined;
+      let belief_exists: number | undefined = undefined;
+
+      // Preserve flat V4 fields if already provided
+      if (e.strength_mean !== undefined && e.strength_mean !== null) {
+        const parsedMean = Number(e.strength_mean);
+        if (!Number.isNaN(parsedMean)) {
+          strength_mean = parsedMean;
+        }
+      }
+
+      if (e.strength_std !== undefined && e.strength_std !== null) {
+        const parsedStd = Number(e.strength_std);
+        if (!Number.isNaN(parsedStd) && parsedStd > 0) {
+          strength_std = parsedStd;
+        }
+      }
+
+      if (e.belief_exists !== undefined && e.belief_exists !== null) {
+        const rawBeliefExists = Number(e.belief_exists);
+        if (!Number.isNaN(rawBeliefExists)) {
+          if (rawBeliefExists < 0 || rawBeliefExists > 1) {
+            belief_exists = Math.max(0, Math.min(1, rawBeliefExists));
+            log.warn({
+              event: 'llm.normalisation.belief_exists_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw: rawBeliefExists,
+              clamped: belief_exists,
+            }, `V4 belief_exists ${rawBeliefExists} clamped to ${belief_exists}`);
+          } else {
+            belief_exists = rawBeliefExists;
+          }
+        }
+      }
+
+      // Handle V4 nested strength object
+      // Use Number() coercion to handle string numbers (e.g., "0.7" → 0.7)
+      if (strength_mean === undefined && e.strength && typeof e.strength === 'object') {
+        const strength = e.strength as { mean?: unknown; std?: unknown };
+        const parsedMean = Number(strength.mean);
+        if (!Number.isNaN(parsedMean) && strength.mean !== undefined && strength.mean !== null) {
+          strength_mean = parsedMean;
+          log.debug({
+            event: 'llm.normalisation.v4_strength_mean',
+            edge_from: e.from,
+            edge_to: e.to,
+            strength_mean,
+            was_string: typeof strength.mean === 'string',
+          }, 'V4 strength.mean extracted');
+        }
+        const parsedStd = Number(strength.std);
+        if (strength_std === undefined && !Number.isNaN(parsedStd) && parsedStd > 0) {
+          strength_std = parsedStd;
+        }
+      }
+
+      // Handle V4 exists_probability
+      // Use Number() coercion to handle string numbers
+      if (belief_exists === undefined && e.exists_probability !== undefined && e.exists_probability !== null) {
+        const rawProb = Number(e.exists_probability);
+        if (!Number.isNaN(rawProb)) {
+          if (rawProb < 0 || rawProb > 1) {
+            belief_exists = Math.max(0, Math.min(1, rawProb));
+            log.warn({
+              event: 'llm.normalisation.exists_probability_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw: rawProb,
+              clamped: belief_exists,
+            }, `V4 exists_probability ${rawProb} clamped to ${belief_exists}`);
+          } else {
+            belief_exists = rawProb;
+          }
+        }
+      }
+
+      // ========================================================================
+      // LEGACY FORMAT HANDLING: weight and belief
+      // Use as fallback when V4 fields not present
+      // ========================================================================
+
+      // Parse and clamp belief to [0, 1] (legacy format)
+      let belief: number | undefined = undefined;
+      if (e.belief !== undefined && e.belief !== null) {
+        const rawBelief = Number(e.belief);
+        if (!isNaN(rawBelief)) {
+          if (rawBelief < 0 || rawBelief > 1) {
+            const clampedBelief = Math.max(0, Math.min(1, rawBelief));
+            log.warn({
+              event: 'llm.normalisation.belief_clamped',
+              edge_from: e.from,
+              edge_to: e.to,
+              raw_belief: rawBelief,
+              clamped_belief: clampedBelief,
+            }, `Edge belief value ${rawBelief} clamped to ${clampedBelief}`);
+            belief = clampedBelief;
+          } else {
+            belief = rawBelief;
+          }
+        }
+      }
+
+      // Parse weight (no clamping - can be any number for inverse relationships)
+      let weight: number | undefined = undefined;
+      if (e.weight !== undefined && e.weight !== null) {
+        const rawWeight = Number(e.weight);
+        if (!isNaN(rawWeight)) {
+          weight = rawWeight;
+        }
+      }
+
+      // ========================================================================
+      // OUTPUT: V4 fields are primary, legacy fields preserved if present
+      // Phase 2d: Downstream consumers now read V4 fields directly
+      // Legacy fields only populated from original input (not mapped from V4)
+      // ========================================================================
+
       return {
         ...e,
-        weight: e.weight !== undefined ? Number(e.weight) : undefined,
-        belief: e.belief !== undefined ? Number(e.belief) : undefined,
+        // V4 fields (primary)
+        strength_mean,
+        strength_std,
+        belief_exists,
+        // Legacy fields (only from original input, NOT from V4 mapping)
+        // Kept for backwards compatibility with old fixtures/inputs
+        weight,
+        belief,
       };
     });
   }
@@ -150,4 +282,103 @@ export function normaliseDraftResponse(raw: unknown): unknown {
   }
 
   return obj;
+}
+
+/**
+ * Ensure all controllable factors have baseline values (data.value).
+ *
+ * Controllable factors are factors with incoming option→factor edges.
+ * When LLM fails to output data.value for a controllable factor,
+ * we add a default value of 1.0 with extractionType: "inferred".
+ *
+ * This ensures ISL can compute sensitivity analysis.
+ *
+ * @param response - Draft graph response
+ * @returns Response with baseline values ensured on controllable factors
+ */
+export function ensureControllableFactorBaselines(response: unknown): {
+  response: unknown;
+  defaultedFactors: string[];
+} {
+  const defaultedFactors: string[] = [];
+
+  if (!response || typeof response !== 'object') {
+    return { response, defaultedFactors };
+  }
+
+  const obj = response as Record<string, unknown>;
+  const nodes = obj.nodes as Array<Record<string, unknown>> | undefined;
+  const edges = obj.edges as Array<Record<string, unknown>> | undefined;
+
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+    return { response, defaultedFactors };
+  }
+
+  // Build set of controllable factor IDs (factors with incoming option→factor edges)
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) {
+    if (typeof node.id === 'string' && typeof node.kind === 'string') {
+      nodeKindMap.set(node.id, node.kind);
+    }
+  }
+
+  const controllableFactorIds = new Set<string>();
+  for (const edge of edges) {
+    const fromId = edge.from ?? edge.source;
+    const toId = edge.to ?? edge.target;
+    if (typeof fromId === 'string' && typeof toId === 'string') {
+      const fromKind = nodeKindMap.get(fromId);
+      const toKind = nodeKindMap.get(toId);
+      // option→factor edge makes the factor controllable
+      if (fromKind === 'option' && toKind === 'factor') {
+        controllableFactorIds.add(toId);
+      }
+    }
+  }
+
+  // For each controllable factor, ensure data.value exists
+  const updatedNodes = nodes.map((node) => {
+    const nodeId = typeof node.id === 'string' ? node.id : undefined;
+    const nodeKind = typeof node.kind === 'string' ? node.kind : undefined;
+
+    if (!nodeId || nodeKind !== 'factor' || !controllableFactorIds.has(nodeId)) {
+      return node;
+    }
+
+    // Check if node already has data.value
+    const data = node.data as Record<string, unknown> | undefined;
+    if (data && typeof data.value === 'number') {
+      return node; // Already has value
+    }
+
+    // Add default baseline value
+    defaultedFactors.push(nodeId);
+    log.info({
+      event: 'llm.normalisation.factor_baseline_defaulted',
+      factor_id: nodeId,
+      default_value: 1.0,
+      extraction_type: 'inferred',
+    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
+
+    return {
+      ...node,
+      data: {
+        ...(data || {}),
+        value: 1.0,
+        extractionType: 'inferred',
+      },
+    };
+  });
+
+  if (defaultedFactors.length > 0) {
+    emit(TelemetryEvents.FactorBaselineDefaulted, {
+      defaulted_count: defaultedFactors.length,
+      factor_ids: defaultedFactors,
+    });
+  }
+
+  return {
+    response: { ...obj, nodes: updatedNodes },
+    defaultedFactors,
+  };
 }

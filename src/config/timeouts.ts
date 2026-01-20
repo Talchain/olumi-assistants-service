@@ -1,7 +1,13 @@
 import { env } from "node:process";
 
-const MIN_TIMEOUT_MS = 5_000; // 5s
-const MAX_TIMEOUT_MS = 5 * 60_000; // 5m
+export const MIN_TIMEOUT_MS = 5_000; // 5s
+export const MAX_TIMEOUT_MS = 5 * 60_000; // 5m
+
+/** Default timeout for standard HTTP client operations (110s) */
+export const DEFAULT_HTTP_CLIENT_TIMEOUT_MS = 110_000;
+
+/** Default timeout for reasoning model operations (180s / 3 minutes) */
+export const DEFAULT_REASONING_MODEL_TIMEOUT_MS = 180_000;
 
 function clampTimeout(value: number): number {
   if (!Number.isFinite(value)) return MIN_TIMEOUT_MS;
@@ -25,11 +31,20 @@ function parseDelayEnv(name: string, defaultMs: number): number {
 }
 
 export const HTTP_CLIENT_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("HTTP_CLIENT_TIMEOUT_MS", 110_000),
+  parseTimeoutEnv("HTTP_CLIENT_TIMEOUT_MS", DEFAULT_HTTP_CLIENT_TIMEOUT_MS),
 );
 
 export const ROUTE_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("ROUTE_TIMEOUT_MS", 115_000),
+);
+
+/**
+ * Extended timeout for reasoning models (e.g., gpt-5.2).
+ * Reasoning models require more time for extended thinking.
+ * Default: 180,000ms (3 minutes)
+ */
+export const REASONING_MODEL_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("REASONING_MODEL_TIMEOUT_MS", DEFAULT_REASONING_MODEL_TIMEOUT_MS),
 );
 
 const DEFAULT_UPSTREAM_RETRY_DELAY_MS = 800; // Default centre of ~600–900ms jitter
