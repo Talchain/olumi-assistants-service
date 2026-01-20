@@ -1076,16 +1076,26 @@ function generateAdminUI(): string {
                                     </div>
                                   </template>
 
-                                  <!-- Raw Output Preview -->
-                                  <template x-if="tc.llmResult.rawOutputPreview">
+                                  <!-- Raw Output -->
+                                  <template x-if="tc.llmResult.rawOutputPreview || tc.llmResult.rawOutputFull">
                                     <div class="collapsible-section">
                                       <div class="collapsible-header" @click="tc.llmResult.showRaw = !tc.llmResult.showRaw">
-                                        <span>Raw LLM Output Preview</span>
+                                        <span>Raw LLM Output</span>
                                         <span x-text="tc.llmResult.showRaw ? '▼' : '▶'"></span>
                                       </div>
                                       <template x-if="tc.llmResult.showRaw">
                                         <div class="collapsible-content">
-                                          <pre x-text="tc.llmResult.rawOutputPreview"></pre>
+                                          <div style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center;">
+                                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                              <input type="checkbox" x-model="tc.llmResult.showFullOutput" style="cursor: pointer;">
+                                              <span>Show Full Output</span>
+                                            </label>
+                                            <template x-if="tc.llmResult.rawOutputFull">
+                                              <span style="color: #6b7280; font-size: 0.85rem;" x-text="'(' + tc.llmResult.rawOutputFull.length + ' chars)'"></span>
+                                            </template>
+                                            <button class="btn btn-secondary btn-sm" @click="navigator.clipboard.writeText(tc.llmResult.rawOutputFull || tc.llmResult.rawOutputPreview); $dispatch('toast', {message: 'Copied to clipboard', type: 'success'})" style="margin-left: auto;">Copy</button>
+                                          </div>
+                                          <pre style="max-height: 500px; overflow: auto;" x-text="tc.llmResult.showFullOutput ? tc.llmResult.rawOutputFull : tc.llmResult.rawOutputPreview"></pre>
                                         </div>
                                       </template>
                                     </div>
@@ -2531,6 +2541,7 @@ function generateAdminUI(): string {
                 },
                 showStages: false,
                 showRaw: false,
+                showFullOutput: false,
                 showTrace: false,
                 showGraph: false,
                 showValidation: result.validation?.error_count > 0, // Auto-expand if errors
