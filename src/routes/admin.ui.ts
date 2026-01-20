@@ -2196,8 +2196,12 @@ function generateAdminUI(): string {
             });
             if (res.ok) {
               this.selectedTestPrompt = await res.json();
-              this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
-              this.loadTestCasesForVersion();
+              // Use $nextTick to wait for Alpine to render the dropdown options
+              // before setting the selected version, avoiding race conditions
+              this.$nextTick(() => {
+                this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
+                this.loadTestCasesForVersion();
+              });
             } else {
               this.showToast('Failed to load prompt', 'error');
             }
