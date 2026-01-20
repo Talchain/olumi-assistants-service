@@ -1559,6 +1559,28 @@ function generateAdminUI(): string {
                               <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionA.validationWarnings || 0)"></span>
                             </span>
                           </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionA.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionA.showValidation = !llmCompareResults.versionA.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionA.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionA.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionA.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
                         </div>
                       </template>
                     </div>
@@ -1640,6 +1662,28 @@ function generateAdminUI(): string {
                               </template>
                             </span>
                           </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionB.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionB.showValidation = !llmCompareResults.versionB.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionB.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionB.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionB.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
                         </div>
                       </template>
                     </div>
@@ -2676,6 +2720,8 @@ function generateAdminUI(): string {
                   nodeCounts: pipeline.node_counts,
                   validationErrors: result.validation?.error_count ?? 0,
                   validationWarnings: result.validation?.warning_count ?? 0,
+                  validationIssues: result.validation?.issues || [],
+                  showValidation: false,
                 };
               } else {
                 return {
@@ -2711,9 +2757,10 @@ function generateAdminUI(): string {
           // Check if prompts are actually different
           const promptsAreDifferent = resultA.promptHash !== resultB.promptHash;
 
+          // Use version from result objects (captured at call time) to avoid any async timing issues
           this.llmCompareResults = {
-            versionA: { ...resultA, versionNum: this.llmCompareVersionA },
-            versionB: { ...resultB, versionNum: this.llmCompareVersionB },
+            versionA: { ...resultA, versionNum: resultA.version },
+            versionB: { ...resultB, versionNum: resultB.version },
             promptsAreDifferent,
             deltas: {
               nodeCount: (resultB.nodeCount ?? 0) - (resultA.nodeCount ?? 0),
