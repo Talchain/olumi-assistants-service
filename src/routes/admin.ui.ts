@@ -2513,9 +2513,10 @@ function generateAdminUI(): string {
 
           try {
             // Build request for new admin endpoint
+            // Ensure version is a number (Alpine.js select may convert to string)
             const requestBody = {
               prompt_id: this.selectedTestPromptId,
-              version: this.selectedTestVersionNum,
+              version: parseInt(this.selectedTestVersionNum, 10),
               brief: tc.input,
               options: {},
             };
@@ -2732,11 +2733,14 @@ function generateAdminUI(): string {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+            // Ensure version is a number (Alpine.js select converts to string)
+            const versionNum = parseInt(version, 10);
+
             try {
               // Use new admin endpoint with actual version specification
               const requestBody = {
                 prompt_id: this.selectedTestPromptId,
-                version: version,
+                version: versionNum,
                 brief: this.llmCompareBrief,
                 options: {},
               };

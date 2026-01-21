@@ -748,10 +748,18 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     // Validate request body
     const parseResult = TestPromptLLMRequestSchema.safeParse(request.body);
     if (!parseResult.success) {
+      // Extract human-readable error messages from Zod
+      const flattened = parseResult.error.flatten();
+      const fieldErrors = Object.entries(flattened.fieldErrors)
+        .map(([field, errors]) => `${field}: ${(errors as string[]).join(', ')}`)
+        .join('; ');
+      const formErrors = flattened.formErrors.join('; ');
+      const errorMessage = fieldErrors || formErrors || 'Invalid request body';
+
       return reply.status(400).send({
         error: 'validation_error',
-        message: 'Invalid request body',
-        details: parseResult.error.flatten(),
+        message: errorMessage,
+        details: flattened,
       });
     }
 
