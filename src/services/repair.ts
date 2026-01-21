@@ -25,14 +25,42 @@ function isEdgeAllowed(fromKind: string, toKind: string): boolean {
 }
 
 /**
+ * Node kinds that must be preserved during repair, even if it means exceeding the soft cap.
+ * These are structurally required for a valid decision graph.
+ */
+const PROTECTED_KINDS = new Set(["goal", "decision", "outcome", "risk"]);
+
+/**
  * Simple repair that trims counts to caps.
  *
  * IMPORTANT: Does NOT filter edges by closed-world rules to preserve graph connectivity.
  * Invalid edge patterns are logged for monitoring but kept in the graph.
  * The v3-validator will emit warnings for invalid patterns during validation.
+ *
+ * Protected node kinds (goal, decision, outcome, risk) are ALWAYS preserved
+ * regardless of their position in the array, to prevent structural validation failures.
  */
 export function simpleRepair(g: GraphT, requestId?: string): GraphT {
-  const nodes = g.nodes.slice(0, 12);
+  // Separate protected and unprotected nodes
+  const protectedNodes = g.nodes.filter((n) => PROTECTED_KINDS.has(n.kind));
+  const unprotectedNodes = g.nodes.filter((n) => !PROTECTED_KINDS.has(n.kind));
+
+  // Always keep protected nodes, then fill with unprotected up to cap
+  const maxUnprotected = Math.max(0, 12 - protectedNodes.length);
+  const nodes = [...protectedNodes, ...unprotectedNodes.slice(0, maxUnprotected)];
+
+  if (protectedNodes.length > 0 || unprotectedNodes.length > 12) {
+    log.info({
+      event: "cee.simple_repair.protected_nodes_preserved",
+      request_id: requestId,
+      protected_count: protectedNodes.length,
+      protected_kinds: protectedNodes.map((n) => n.kind),
+      unprotected_kept: Math.min(unprotectedNodes.length, maxUnprotected),
+      unprotected_dropped: Math.max(0, unprotectedNodes.length - maxUnprotected),
+      total_nodes: nodes.length,
+    }, "simpleRepair preserved protected node kinds");
+  }
+
   const nodeIds = new Set(nodes.map((node) => node.id));
   const nodeKindMap = new Map(nodes.map((node) => [node.id, node.kind]));
 
