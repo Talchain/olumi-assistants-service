@@ -2248,8 +2248,8 @@ function generateAdminUI(): string {
             this.currentTestCases = [];
             return;
           }
-          // Save current version if we need to preserve it
-          const currentVersion = preserveVersion ? this.selectedTestVersionNum : null;
+          // Save current version if we need to preserve it (convert to number for comparison)
+          const currentVersion = preserveVersion ? parseInt(this.selectedTestVersionNum, 10) : null;
           try {
             const res = await fetch('/admin/prompts/' + this.selectedTestPromptId, {
               headers: { 'X-Admin-Key': this.apiKey }
@@ -2260,8 +2260,8 @@ function generateAdminUI(): string {
               // before setting the selected version, avoiding race conditions
               this.$nextTick(() => {
                 // If preserving version, keep the current selection; otherwise use active version
-                if (currentVersion !== null) {
-                  // Validate the version still exists
+                if (currentVersion !== null && !isNaN(currentVersion)) {
+                  // Validate the version still exists (compare numbers)
                   const versionExists = this.selectedTestPrompt.versions.some(v => v.version === currentVersion);
                   this.selectedTestVersionNum = versionExists ? currentVersion : this.selectedTestPrompt.activeVersion;
                 } else {
@@ -2279,7 +2279,9 @@ function generateAdminUI(): string {
 
         loadTestCasesForVersion() {
           if (!this.selectedTestPrompt) return;
-          const version = this.selectedTestPrompt.versions.find(v => v.version === this.selectedTestVersionNum);
+          // Convert to number for comparison (Alpine.js select may return string)
+          const versionNum = parseInt(this.selectedTestVersionNum, 10);
+          const version = this.selectedTestPrompt.versions.find(v => v.version === versionNum);
           this.currentTestCases = version?.testCases || [];
         },
 
