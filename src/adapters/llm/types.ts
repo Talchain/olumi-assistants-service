@@ -356,5 +356,8 @@ export interface GraphCappedEvent {
     max: number;
     capped: boolean;
   };
+  /** Caller-provided request ID for distributed tracing */
   request_id?: string;
+  /** Anthropic API idempotency key (adapter-specific) */
+  idempotency_key?: string;
 }

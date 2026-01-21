@@ -778,13 +778,25 @@ function generateAdminUI(): string {
                 <template x-if="selectedTestPromptId && selectedTestPrompt">
                   <div>
                     <div class="flex mb-2" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                      <div>
-                        <label>Version</label>
-                        <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
-                          <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                            <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
-                          </template>
-                        </select>
+                      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <div>
+                          <label>Version</label>
+                          <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
+                            <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                              <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
+                            </template>
+                          </select>
+                        </div>
+                        <template x-if="selectedTestVersionNum !== selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (not production) - safe to test without affecting live traffic
+                          </div>
+                        </template>
+                        <template x-if="selectedTestVersionNum === selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 4px; color: #166534;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (production version)
+                          </div>
+                        </template>
                       </div>
                       <div class="flex" style="gap: 8px; flex-wrap: wrap;">
                         <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
@@ -1388,7 +1400,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="compareVersionA" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1396,7 +1408,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="compareVersionB" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1468,7 +1480,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="llmCompareVersionA">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1476,7 +1488,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="llmCompareVersionB">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (active)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
                   </template>
                 </select>
               </div>

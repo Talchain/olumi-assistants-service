@@ -885,6 +885,7 @@ export type RepairArgs = {
   graph: GraphT;
   violations: string[];
   model?: string;
+  requestId?: string;
 };
 
 const _REPAIR_SYSTEM_PROMPT = `You are an expert at fixing decision graph violations.
@@ -1067,7 +1068,8 @@ export async function repairGraphWithAnthropic(
           max: GRAPH_MAX_EDGES,
           capped: edgesCapped,
         },
-        request_id: idempotencyKey,
+        request_id: args.requestId,
+        idempotency_key: idempotencyKey,
       };
       log.warn(cappedEvent, "Anthropic repair graph capped to limits");
     }
@@ -1825,13 +1827,14 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: RepairGraphArgs, _opts: CallOpts): Promise<RepairGraphResult> {
+  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
     const { graph, violations } = args;
 
     const result = await repairGraphWithAnthropic({
       graph,
       violations,
       model: this.model,
+      requestId: opts.requestId,
     });
 
     return {
