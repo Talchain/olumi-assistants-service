@@ -912,11 +912,14 @@ function generateAdminUI(): string {
                           </div>
                           <div class="flex" style="gap: 5px; flex-wrap: wrap;">
                             <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run (Dry)</button>
-                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning">
+                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning || llmRateLimitCooldown > 0">
                               <template x-if="tc.llmRunning">
                                 <span><span class="spinner"></span></span>
                               </template>
-                              <template x-if="!tc.llmRunning">
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown > 0">
+                                <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                              </template>
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown === 0">
                                 <span>Run with LLM</span>
                               </template>
                             </button>
