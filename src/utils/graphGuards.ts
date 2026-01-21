@@ -213,14 +213,17 @@ export function findIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): string[] {
 /**
  * Node kinds that should never be pruned, even if isolated.
  * Goals and decisions are essential structural nodes that must be preserved.
+ * Options are required alternatives (validation requires at least 2).
  * Outcomes and risks are structurally required (validation requires at least one).
  * Pruning them hides connectivity bugs rather than fixing them.
+ *
+ * IMPORTANT: This must match PROTECTED_KINDS in src/services/repair.ts
  */
-const PROTECTED_KINDS = new Set(["goal", "decision", "outcome", "risk"]);
+const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"]);
 
 /**
  * Prune isolated nodes from graph.
- * Protected kinds (goal, decision, outcome, risk) are never pruned regardless of connectivity.
+ * Protected kinds (goal, decision, option, outcome, risk) are never pruned regardless of connectivity.
  */
 export function pruneIsolatedNodes(
   nodes: NodeT[],
@@ -261,7 +264,7 @@ export function pruneIsolatedNodes(
       pruned_ids: Array.from(nodesToPrune),
       protected_count: protectedButIsolated.length,
       protected_ids: protectedButIsolated,
-    }, "Pruning isolated nodes (goal/decision protected)");
+    }, "Pruning isolated nodes (goal/decision/option/outcome/risk protected)");
   }
 
   // Record corrections for pruned nodes

@@ -1,5 +1,6 @@
 import type { GraphT } from "../schemas/graph.js";
 import { log } from "../utils/telemetry.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 /**
  * Allowed edge patterns (closed-world).
@@ -42,8 +43,10 @@ const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"
  * Invalid edge patterns are logged for monitoring but kept in the graph.
  * The v3-validator will emit warnings for invalid patterns during validation.
  *
- * Protected node kinds (goal, decision, outcome, risk) are ALWAYS preserved
+ * Protected node kinds (goal, decision, option, outcome, risk) are ALWAYS preserved
  * regardless of their position in the array, to prevent structural validation failures.
+ *
+ * Node/edge caps use GRAPH_MAX_NODES (50) and GRAPH_MAX_EDGES (200) from graphCaps.ts.
  */
 export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   // Separate protected and unprotected nodes
@@ -51,10 +54,10 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   const unprotectedNodes = g.nodes.filter((n) => !PROTECTED_KINDS.has(n.kind));
 
   // Always keep protected nodes, then fill with unprotected up to cap
-  const maxUnprotected = Math.max(0, 12 - protectedNodes.length);
+  const maxUnprotected = Math.max(0, GRAPH_MAX_NODES - protectedNodes.length);
   const nodes = [...protectedNodes, ...unprotectedNodes.slice(0, maxUnprotected)];
 
-  if (protectedNodes.length > 0 || unprotectedNodes.length > 12) {
+  if (protectedNodes.length > 0 || unprotectedNodes.length > GRAPH_MAX_NODES) {
     log.info({
       event: "cee.simple_repair.protected_nodes_preserved",
       request_id: requestId,
@@ -63,6 +66,7 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
       unprotected_kept: Math.min(unprotectedNodes.length, maxUnprotected),
       unprotected_dropped: Math.max(0, unprotectedNodes.length - maxUnprotected),
       total_nodes: nodes.length,
+      max_nodes: GRAPH_MAX_NODES,
     }, "simpleRepair preserved protected node kinds");
   }
 
@@ -95,7 +99,7 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   }
 
   const edges = validEdges
-    .slice(0, 24)
+    .slice(0, GRAPH_MAX_EDGES)
     .map((edge, idx) => ({ ...edge, id: edge.id || `${edge.from}::${edge.to}::${idx}` }))
     .sort((a, b) => a.id!.localeCompare(b.id!));
 
