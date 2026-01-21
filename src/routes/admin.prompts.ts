@@ -1266,9 +1266,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     const body = UpdateTestCasesSchema.safeParse(request.body);
     if (!body.success) {
+      // Extract human-readable error messages from Zod
+      const flattened = body.error.flatten();
+      const fieldErrors = Object.entries(flattened.fieldErrors)
+        .map(([field, errors]) => `${field}: ${(errors as string[]).join(', ')}`)
+        .join('; ');
+      const formErrors = flattened.formErrors.join('; ');
+      const errorMessage = fieldErrors || formErrors || 'Invalid request body';
+
       return reply.status(400).send({
         error: 'validation_error',
-        details: body.error.flatten(),
+        message: errorMessage,
+        details: flattened,
       });
     }
 

@@ -2044,7 +2044,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedVersionNum,
+                version: parseInt(this.selectedVersionNum, 10),
                 approvedBy: 'admin-ui',
                 notes: 'Approved via admin UI'
               })
@@ -2353,7 +2353,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 testCases: updatedTestCases,
               })
             });
@@ -2385,7 +2385,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 testCases: updatedTestCases,
               })
             });
@@ -2417,7 +2417,7 @@ function generateAdminUI(): string {
                 'X-Admin-Key': this.apiKey
               },
               body: JSON.stringify({
-                version: this.selectedTestVersionNum,
+                version: parseInt(this.selectedTestVersionNum, 10),
                 input: { brief: tc.input },
                 variables: tc.variables || {},
                 dry_run: true,
