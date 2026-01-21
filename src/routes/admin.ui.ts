@@ -2497,6 +2497,15 @@ function generateAdminUI(): string {
         },
 
         async runSingleTestCaseWithLLM(tc) {
+          // Debug: log function entry
+          console.log('runSingleTestCaseWithLLM called', { tc, selectedTestPromptId: this.selectedTestPromptId, selectedTestPrompt: this.selectedTestPrompt });
+
+          if (!tc) {
+            this.showToast('Error: Test case not found', 'error');
+            console.error('tc is undefined');
+            return;
+          }
+
           if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
             this.showToast('Please select a prompt before running tests', 'warning');
             return;
