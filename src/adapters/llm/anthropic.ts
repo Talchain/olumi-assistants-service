@@ -9,7 +9,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -1036,12 +1036,40 @@ export async function repairGraphWithAnthropic(
 
     const parsed = parseResult.data;
 
-    // Cap node/edge counts
-    if (parsed.nodes.length > GRAPH_MAX_NODES) {
+    // Cap node/edge counts with structured telemetry
+    const nodesBefore = parsed.nodes.length;
+    const edgesBefore = parsed.edges.length;
+    const nodesCapped = nodesBefore > GRAPH_MAX_NODES;
+    const edgesCapped = edgesBefore > GRAPH_MAX_EDGES;
+
+    if (nodesCapped) {
       parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
     }
-    if (parsed.edges.length > GRAPH_MAX_EDGES) {
+    if (edgesCapped) {
       parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
+    }
+
+    // Emit single structured event if any capping occurred
+    if (nodesCapped || edgesCapped) {
+      const cappedEvent: GraphCappedEvent = {
+        event: 'cee.repair.graph_capped',
+        adapter: 'anthropic',
+        path: 'repair',
+        nodes: {
+          before: nodesBefore,
+          after: parsed.nodes.length,
+          max: GRAPH_MAX_NODES,
+          capped: nodesCapped,
+        },
+        edges: {
+          before: edgesBefore,
+          after: parsed.edges.length,
+          max: GRAPH_MAX_EDGES,
+          capped: edgesCapped,
+        },
+        request_id: idempotencyKey,
+      };
+      log.warn(cappedEvent, "Anthropic repair graph capped to limits");
     }
 
     // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)

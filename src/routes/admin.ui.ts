@@ -1261,7 +1261,12 @@ function generateAdminUI(): string {
               <template x-if="selectedPrompt.versions.length >= 2">
                 <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
               </template>
-              <template x-if="selectedVersionNum !== selectedPrompt.activeVersion">
+              <template x-if="selectedVersionNum > selectedPrompt.activeVersion">
+                <button class="btn btn-primary" @click="activateVersion()">
+                  Activate v<span x-text="selectedVersionNum"></span>
+                </button>
+              </template>
+              <template x-if="selectedVersionNum < selectedPrompt.activeVersion">
                 <button class="btn btn-warning" @click="rollbackToVersion()">
                   Rollback to v<span x-text="selectedVersionNum"></span>
                 </button>
@@ -2162,8 +2167,39 @@ function generateAdminUI(): string {
           }
         },
 
+        async activateVersion() {
+          if (!confirm('Activate version ' + this.selectedVersionNum + ' as the new production version?')) return;
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/rollback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                targetVersion: this.selectedVersionNum,
+                rolledBackBy: 'admin-ui',
+                reason: 'Activated via admin UI'
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('Activated v' + this.selectedVersionNum + ' as production', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to activate version', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to activate version', 'error');
+          }
+        },
+
         async rollbackToVersion() {
-          if (!confirm('Rollback to version ' + this.selectedVersionNum + '?')) return;
+          if (!confirm('Rollback to version ' + this.selectedVersionNum + '? This will revert to an older version.')) return;
 
           this.error = null;
           try {
@@ -2194,12 +2230,14 @@ function generateAdminUI(): string {
         },
 
         // ========== Test Case Management ==========
-        async loadTestCasesForPrompt() {
+        async loadTestCasesForPrompt(preserveVersion = false) {
           if (!this.selectedTestPromptId) {
             this.selectedTestPrompt = null;
             this.currentTestCases = [];
             return;
           }
+          // Save current version if we need to preserve it
+          const currentVersion = preserveVersion ? this.selectedTestVersionNum : null;
           try {
             const res = await fetch('/admin/prompts/' + this.selectedTestPromptId, {
               headers: { 'X-Admin-Key': this.apiKey }
@@ -2209,7 +2247,14 @@ function generateAdminUI(): string {
               // Use $nextTick to wait for Alpine to render the dropdown options
               // before setting the selected version, avoiding race conditions
               this.$nextTick(() => {
-                this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
+                // If preserving version, keep the current selection; otherwise use active version
+                if (currentVersion !== null) {
+                  // Validate the version still exists
+                  const versionExists = this.selectedTestPrompt.versions.some(v => v.version === currentVersion);
+                  this.selectedTestVersionNum = versionExists ? currentVersion : this.selectedTestPrompt.activeVersion;
+                } else {
+                  this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
+                }
                 this.loadTestCasesForVersion();
               });
             } else {
@@ -2304,8 +2349,8 @@ function generateAdminUI(): string {
               this.currentTestCases = updatedTestCases;
               this.showTestCaseModal = false;
               this.showToast(this.editingTestCase ? 'Test case updated' : 'Test case added', 'success');
-              // Reload the prompt to get updated data
-              await this.loadTestCasesForPrompt();
+              // Reload the prompt to get updated data, preserving the current version
+              await this.loadTestCasesForPrompt(true);
             } else {
               const data = await res.json();
               this.showToast(data.message || 'Failed to save test case', 'error');

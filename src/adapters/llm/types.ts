@@ -335,3 +335,26 @@ export type DraftStreamEvent =
   | { type: 'partial'; graph: Partial<GraphT> }
   | { type: 'complete'; result: DraftGraphResult }
   | { type: 'error'; error: string };
+
+/**
+ * Structured event for graph capping telemetry.
+ * Used by both OpenAI and Anthropic adapters for consistent log aggregation.
+ */
+export interface GraphCappedEvent {
+  event: 'cee.repair.graph_capped';
+  adapter: 'openai' | 'anthropic';
+  path: 'repair' | 'draft';
+  nodes: {
+    before: number;
+    after: number;
+    max: number;
+    capped: boolean;
+  };
+  edges: {
+    before: number;
+    after: number;
+    max: number;
+    capped: boolean;
+  };
+  request_id?: string;
+}

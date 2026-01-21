@@ -19,6 +19,7 @@ import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
 import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel } from '../config/models.js';
+import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -795,13 +796,13 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
 
       // Determine model to use
       let model = modelOverride;
+      if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
+        // Use task-specific default from TASK_MODEL_DEFAULTS
+        model = getDefaultModelForTask(prompt.taskId);
+      }
       if (!model) {
-        // Default models based on task
-        if (prompt.taskId === 'draft_graph') {
-          model = 'gpt-5.2';
-        } else {
-          model = 'gpt-4o-mini';
-        }
+        // Last resort fallback for non-CEE tasks
+        model = 'gpt-4o-mini';
       }
 
       // Validate model if specified
