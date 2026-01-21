@@ -2615,7 +2615,7 @@ function generateAdminUI(): string {
                 success: false,
                 timestamp: new Date().toISOString(),
                 requestId: data.request_id || requestId,
-                error: data.error || data.message || 'Unknown error',
+                error: data.message || data.error || 'Unknown error',
                 fullResponse: data,
               };
               this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
@@ -2784,10 +2784,12 @@ function generateAdminUI(): string {
                   showValidation: false,
                 };
               } else {
+                // Prefer detailed message over generic error type
+                const errorMsg = data.message || data.error || 'Unknown error';
                 return {
                   success: false,
                   version: version,
-                  error: data.error || data.message || 'Unknown error',
+                  error: errorMsg,
                 };
               }
             } catch (e) {
