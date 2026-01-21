@@ -26,9 +26,14 @@ function isEdgeAllowed(fromKind: string, toKind: string): boolean {
 
 /**
  * Node kinds that must be preserved during repair, even if it means exceeding the soft cap.
- * These are structurally required for a valid decision graph.
+ * These are structurally required for a valid decision graph:
+ * - goal: Required target node
+ * - decision: Required root node
+ * - option: Required alternatives (at least 2)
+ * - outcome: Required positive consequences
+ * - risk: Required negative consequences
  */
-const PROTECTED_KINDS = new Set(["goal", "decision", "outcome", "risk"]);
+const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"]);
 
 /**
  * Simple repair that trims counts to caps.
