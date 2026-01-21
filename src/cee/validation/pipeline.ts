@@ -1845,9 +1845,13 @@ export async function finaliseCeeDraftResponse(
       : "CEE_GRAPH_INVALID";
 
     // Extract observability fields for error diagnosis
-    const rawNodeKinds = Array.isArray(graph?.nodes)
-      ? (graph!.nodes as any[]).map((n: any) => n?.kind).filter(Boolean)
-      : [];
+    // Use adapter-reported raw node kinds (from LLM output BEFORE normalisation)
+    // Fallback to graph extraction only if adapter didn't provide raw kinds
+    const rawNodeKinds = nodeKindsRawJsonFromAdapter.length > 0
+      ? nodeKindsRawJsonFromAdapter
+      : (Array.isArray(graph?.nodes)
+          ? (graph!.nodes as any[]).map((n: any) => n?.kind).filter(Boolean)
+          : []);
     // Count nodes with labels for observability (avoid PII in telemetry)
     const labeledNodeCount = Array.isArray(graph?.nodes)
       ? (graph!.nodes as any[]).filter((n: any) => typeof n?.label === "string" && n.label.length > 0).length
