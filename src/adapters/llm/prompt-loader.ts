@@ -77,6 +77,8 @@ interface CacheEntry {
   promptId?: string;
   version?: number;
   promptHash?: string;
+  /** Whether this is a staging version (for non-production environments) */
+  isStaging?: boolean;
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
@@ -145,8 +147,10 @@ export function getSystemPrompt(
 
     // Trigger background refresh from store to update cache for next request
     // Only if not already in-flight (prevents thundering herd on cache expiry)
+    // Use staging in non-production environments to maintain consistency
     if (!hasVariables && !inflightRefresh.has(taskId)) {
-      const refreshPromise = loadPrompt(taskId, { variables: variables ?? {} })
+      const useStaging = !isProduction();
+      const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
         .then((loaded) => {
           if (loaded.source === 'store' && !hasVariables) {
             const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
@@ -157,11 +161,13 @@ export function getSystemPrompt(
               promptId: loaded.promptId,
               version: loaded.version,
               promptHash: refreshedHash,
+              isStaging: loaded.isStaging,
             });
             emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
               taskId,
               promptId: loaded.promptId,
               version: loaded.version,
+              isStaging: loaded.isStaging,
             });
           }
         })
@@ -192,6 +198,7 @@ export function getSystemPromptMeta(operation: string): {
   version?: number;
   prompt_version: string;
   prompt_hash?: string;
+  isStaging?: boolean;
 } {
   ensureDefaultsRegistered();
 
@@ -205,10 +212,20 @@ export function getSystemPromptMeta(operation: string): {
   const promptId = cached?.promptId;
   const version = cached?.version;
   const promptHash = cached?.promptHash;
+  const isStaging = cached?.isStaging ?? false;
 
-  const promptVersion = source === 'store' && promptId && typeof version === 'number'
-    ? `${promptId}@v${version}`
-    : `default:${taskId}`;
+  // Format prompt_version to clearly indicate staging/production
+  // Examples:
+  //   "draft_graph_default@v6 (staging)" - staging version from store
+  //   "draft_graph_default@v8 (production)" - production version from store
+  //   "default:draft_graph" - hardcoded default
+  let promptVersion: string;
+  if (source === 'store' && promptId && typeof version === 'number') {
+    const envLabel = isStaging ? 'staging' : 'production';
+    promptVersion = `${promptId}@v${version} (${envLabel})`;
+  } else {
+    promptVersion = `default:${taskId}`;
+  }
 
   return {
     taskId,
@@ -217,6 +234,7 @@ export function getSystemPromptMeta(operation: string): {
     version,
     prompt_version: promptVersion,
     prompt_hash: promptHash,
+    isStaging,
   };
 }
 
@@ -268,6 +286,7 @@ export async function warmPromptCacheFromStore(): Promise<{
         promptId: loaded.promptId,
         version: loaded.version,
         promptHash,
+        isStaging: loaded.isStaging,
       });
 
       if (loaded.source === 'store') {
@@ -275,9 +294,9 @@ export async function warmPromptCacheFromStore(): Promise<{
         // Track if staging version was used
         if (useStaging && loaded.isStaging) {
           usedStaging++;
-          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version }, 'Cached STAGING prompt from store');
+          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version, isStaging: true }, 'Cached STAGING prompt from store');
         } else {
-          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version }, 'Cached prompt from store');
+          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version, isStaging: false }, 'Cached prompt from store');
         }
       } else {
         skipped++;
