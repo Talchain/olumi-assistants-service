@@ -438,6 +438,13 @@ app.get("/healthz", async () => {
         total: number;
         production: number;
         taskIds: string[];
+        draft_graph_debug?: {
+          exists: boolean;
+          status?: string;
+          activeVersion?: number;
+          stagingVersion?: number | null;
+          compiledOk?: boolean;
+        };
       }
     | undefined;
 
@@ -445,10 +452,32 @@ app.get("/healthz", async () => {
     try {
       const store = getPromptStore();
       const allPrompts = await store.list();
+
+      // Find draft_graph prompt for debugging
+      const draftGraphPrompt = allPrompts.find((p) => p.taskId === 'draft_graph');
+      let draftGraphDebug: typeof promptCounts extends undefined ? never : NonNullable<typeof promptCounts>['draft_graph_debug'] = {
+        exists: !!draftGraphPrompt,
+      };
+
+      if (draftGraphPrompt) {
+        draftGraphDebug.status = draftGraphPrompt.status;
+        draftGraphDebug.activeVersion = draftGraphPrompt.activeVersion;
+        draftGraphDebug.stagingVersion = draftGraphPrompt.stagingVersion ?? null;
+
+        // Test if getCompiled works
+        try {
+          const compiled = await store.getCompiled('draft_graph', {}, { useStaging: true });
+          draftGraphDebug.compiledOk = !!compiled;
+        } catch {
+          draftGraphDebug.compiledOk = false;
+        }
+      }
+
       promptCounts = {
         total: allPrompts.length,
         production: allPrompts.filter((p) => p.status === 'production').length,
         taskIds: [...new Set(allPrompts.map((p) => p.taskId))].sort(),
+        draft_graph_debug: draftGraphDebug,
       };
     } catch {
       // ignore
