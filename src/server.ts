@@ -63,7 +63,7 @@ import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
-import { config, isProduction } from "./config/index.js";
+import { config } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 
@@ -647,17 +647,18 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       }
     }
 
-    // Only register admin routes in non-production environments
-    // Admin UI should only be accessible in staging/development for safety
-    if (isProduction()) {
-      app.log.info('Admin routes disabled in production environment');
+    // Register admin routes if enabled and configured
+    // Set ADMIN_ROUTES_ENABLED=false in production to disable
+    const adminRoutesEnabled = config.prompts?.adminRoutesEnabled !== false;
+    if (!adminRoutesEnabled) {
+      app.log.info('Admin routes disabled via ADMIN_ROUTES_ENABLED=false');
     } else if (config.prompts?.enabled || config.prompts?.adminApiKey) {
       await adminPromptRoutes(app);
       await adminUIRoutes(app);
       await adminDraftFailureRoutes(app);
       await adminLLMOutputRoutes(app);
       await adminTestRoutes(app);
-      app.log.info({ env: config.server.nodeEnv }, 'Admin prompt management routes registered (non-production)');
+      app.log.info('Admin prompt management routes registered');
 
       startDraftFailureRetentionJob();
 

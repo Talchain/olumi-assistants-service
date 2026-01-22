@@ -344,6 +344,7 @@ const ConfigSchema = z.object({
     adminApiKey: z.string().optional(), // Admin API key for prompt management (full access)
     adminApiKeyRead: z.string().optional(), // Read-only admin API key
     adminAllowedIPs: z.string().optional(), // Comma-separated list of allowed IPs (empty = all allowed)
+    adminRoutesEnabled: booleanString.default(true), // Enable admin routes (set to false in production)
   }),
 });
 
@@ -558,6 +559,7 @@ function parseConfig(): Config {
       adminApiKey: env.ADMIN_API_KEY,
       adminApiKeyRead: env.ADMIN_API_KEY_READ,
       adminAllowedIPs: env.ADMIN_ALLOWED_IPS,
+      adminRoutesEnabled: env.ADMIN_ROUTES_ENABLED,
     },
   };
 
