@@ -437,6 +437,7 @@ app.get("/healthz", async () => {
     | {
         total: number;
         production: number;
+        taskIds: string[];
       }
     | undefined;
 
@@ -447,6 +448,7 @@ app.get("/healthz", async () => {
       promptCounts = {
         total: allPrompts.length,
         production: allPrompts.filter((p) => p.status === 'production').length,
+        taskIds: [...new Set(allPrompts.map((p) => p.taskId))].sort(),
       };
     } catch {
       // ignore
