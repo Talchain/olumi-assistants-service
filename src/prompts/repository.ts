@@ -18,7 +18,7 @@ import { SupabasePromptStore } from './stores/supabase.js';
 import { FilePromptStore } from './stores/file.js';
 import { getDefaultPrompts } from './loader.js';
 import { log } from '../utils/telemetry.js';
-import { config } from '../config/index.js';
+import { config, shouldUseStagingPrompts } from '../config/index.js';
 
 /**
  * Fallback cooldown duration in milliseconds (30 seconds)
@@ -377,19 +377,37 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
   async warmCache(): Promise<void> {
     if (!this.store) return;
 
+    const useStaging = shouldUseStagingPrompts();
+
     try {
-      const allPrompts = await this.store.list({ status: 'production' });
+      // In staging mode, load prompts with staging status; otherwise load production prompts
+      // Also load production prompts as fallback for tasks without staging prompts
+      const statusFilter = useStaging ? 'staging' : 'production';
+      const allPrompts = await this.store.list({ status: statusFilter });
 
-      for (const prompt of allPrompts) {
+      // If in staging mode but no staging prompts found, fall back to production
+      const fallbackPrompts = useStaging && allPrompts.length === 0
+        ? await this.store.list({ status: 'production' })
+        : [];
+
+      const promptsToCache = [...allPrompts, ...fallbackPrompts];
+
+      for (const prompt of promptsToCache) {
         const taskId = prompt.taskId as CeeTaskId;
-        const activeVersion = prompt.versions.find(v => v.version === prompt.activeVersion);
 
-        if (activeVersion) {
-          const contentHash = activeVersion.contentHash ?? computeContentHash(activeVersion.content);
+        // In staging mode, prefer staging version; otherwise use active version
+        const targetVersionNum = useStaging && prompt.stagingVersion
+          ? prompt.stagingVersion
+          : prompt.activeVersion;
+
+        const targetVersion = prompt.versions.find(v => v.version === targetVersionNum);
+
+        if (targetVersion) {
+          const contentHash = targetVersion.contentHash ?? computeContentHash(targetVersion.content);
 
           this.cache.set(taskId, {
             prompt,
-            version: prompt.activeVersion,
+            version: targetVersionNum,
             contentHash,
             cachedAt: Date.now(),
           });
@@ -399,7 +417,9 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       log.info({
         event: 'prompt.cache.warmed',
         count: this.cache.size,
-      }, 'Prompt cache warmed');
+        useStaging,
+        statusFilter,
+      }, useStaging ? 'Prompt cache warmed (staging mode)' : 'Prompt cache warmed (production mode)');
     } catch (error) {
       log.warn({
         event: 'prompt.cache.warm_failed',

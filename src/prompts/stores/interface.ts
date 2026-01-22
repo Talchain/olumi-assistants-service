@@ -120,9 +120,17 @@ export interface IPromptStore {
   delete(id: string, hard?: boolean): Promise<void>;
 
   /**
-   * Get compiled prompt content for a task with variables interpolated
-   * Finds the production prompt for the task, interpolates variables
-   * @returns null if no production prompt exists for task
+   * Get compiled prompt content for a task with variables interpolated.
+   *
+   * Finds a non-archived prompt (draft/staging/production) for the task.
+   * When multiple prompts exist, the most recently updated one is selected.
+   *
+   * Version selection:
+   * - If options.version is specified, uses that exact version
+   * - If options.useStaging is true and staging_version exists, uses staging_version
+   * - Otherwise uses active_version
+   *
+   * @returns null if no non-archived prompt exists for task, or if the target version doesn't exist
    */
   getCompiled(
     taskId: string,
@@ -131,8 +139,12 @@ export interface IPromptStore {
   ): Promise<CompiledPrompt | null>;
 
   /**
-   * Get the active prompt for a task
-   * @returns null if no production prompt exists for task
+   * Get the active prompt for a task.
+   *
+   * Finds a non-archived prompt (draft/staging/production) for the task.
+   * When multiple prompts exist, the most recently updated one is selected.
+   *
+   * @returns null if no non-archived prompt exists for task
    */
   getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null>;
 }

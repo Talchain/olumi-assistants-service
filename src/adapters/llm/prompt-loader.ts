@@ -33,7 +33,7 @@ import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type Loa
 import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash } from 'node:crypto';
-import { isProduction } from '../../config/index.js';
+import { shouldUseStagingPrompts } from '../../config/index.js';
 
 // Flag to track if defaults have been initialized in this module instance
 let defaultsInitialized = false;
@@ -149,7 +149,7 @@ export function getSystemPrompt(
     // Only if not already in-flight (prevents thundering herd on cache expiry)
     // Use staging in non-production environments to maintain consistency
     if (!hasVariables && !inflightRefresh.has(taskId)) {
-      const useStaging = !isProduction();
+      const useStaging = shouldUseStagingPrompts();
       const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
         .then((loaded) => {
           if (loaded.source === 'store' && !hasVariables) {
@@ -265,7 +265,7 @@ export async function warmPromptCacheFromStore(): Promise<{
 
   // In non-production environments, use staging version if available
   // This enables testing new prompts in staging without affecting production
-  const useStaging = !isProduction();
+  const useStaging = shouldUseStagingPrompts();
 
   const taskIds = Object.values(OPERATION_TO_TASK_ID) as CeeTaskId[];
   let warmed = 0;

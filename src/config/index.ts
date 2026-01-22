@@ -345,6 +345,8 @@ const ConfigSchema = z.object({
     adminApiKeyRead: z.string().optional(), // Read-only admin API key
     adminAllowedIPs: z.string().optional(), // Comma-separated list of allowed IPs (empty = all allowed)
     adminRoutesEnabled: booleanString.default(true), // Enable admin routes (set to false in production)
+    useStaging: booleanString.optional(), // Explicit override: true = use staging prompts, false = use production prompts
+    environment: z.string().optional(), // Environment name for prompt selection (e.g., "staging", "production"). Falls back to DD_ENV.
   }),
 });
 
@@ -560,6 +562,8 @@ function parseConfig(): Config {
       adminApiKeyRead: env.ADMIN_API_KEY_READ,
       adminAllowedIPs: env.ADMIN_ALLOWED_IPS,
       adminRoutesEnabled: env.ADMIN_ROUTES_ENABLED,
+      useStaging: env.PROMPTS_USE_STAGING,
+      environment: env.PROMPTS_ENVIRONMENT ?? env.DD_ENV, // PROMPTS_ENVIRONMENT takes precedence over DD_ENV
     },
   };
 
@@ -665,4 +669,32 @@ export function isDevelopment(): boolean {
  */
 export function isTest(): boolean {
   return config.server.nodeEnv === "test" || config.testing.isVitest;
+}
+
+/**
+ * Determine if staging prompts should be used.
+ *
+ * Resolution order:
+ * 1. PROMPTS_USE_STAGING env var (explicit override) - if set, use its value
+ * 2. PROMPTS_ENVIRONMENT or DD_ENV - if "staging", use staging prompts
+ * 3. NODE_ENV - if not "production", use staging prompts (legacy fallback)
+ *
+ * This separates the "prompt environment" from the "runtime environment" (NODE_ENV).
+ * A staging server can run in production mode (NODE_ENV=production) while still
+ * using staging prompts (DD_ENV=staging or PROMPTS_USE_STAGING=true).
+ */
+export function shouldUseStagingPrompts(): boolean {
+  // 1. Explicit override takes precedence
+  if (config.prompts?.useStaging !== undefined) {
+    return config.prompts.useStaging;
+  }
+
+  // 2. Check prompt environment (PROMPTS_ENVIRONMENT or DD_ENV)
+  const promptEnv = config.prompts?.environment?.toLowerCase();
+  if (promptEnv) {
+    return promptEnv === 'staging';
+  }
+
+  // 3. Legacy fallback: use NODE_ENV (for backwards compatibility)
+  return !isProduction();
 }

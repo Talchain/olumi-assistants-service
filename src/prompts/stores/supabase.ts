@@ -578,11 +578,14 @@ export class SupabasePromptStore implements IPromptStore {
 
     // Find prompt for task (exclude archived, allow draft/staging/production)
     // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
+    // Deterministic selection: most recently updated non-archived prompt wins
+    // This ensures predictable behavior when multiple prompts exist for the same task
     const { data: prompts, error: promptError } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
       .neq('status', 'archived')
+      .order('updated_at', { ascending: false }) // Most recently updated first
       .limit(1);
 
     if (promptError || !prompts || prompts.length === 0) {
@@ -623,11 +626,13 @@ export class SupabasePromptStore implements IPromptStore {
     const client = this.ensureInitialized();
 
     // Find prompt for task (exclude archived, allow draft/staging/production)
+    // Deterministic selection: most recently updated non-archived prompt wins
     const { data: prompts, error } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
       .neq('status', 'archived')
+      .order('updated_at', { ascending: false }) // Most recently updated first
       .limit(1);
 
     if (error || !prompts || prompts.length === 0) {
