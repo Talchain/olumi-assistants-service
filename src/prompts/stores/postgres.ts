@@ -583,11 +583,12 @@ export class PostgresPromptStore implements IPromptStore {
     const sql = this.ensureInitialized();
 
     try {
-      // Find production prompt for this task
+      // Find prompt for this task (exclude archived, allow draft/staging/production)
+      // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
       const prompts = await sql`
         SELECT id, active_version, staging_version
         FROM prompts
-        WHERE task_id = ${taskId} AND status = 'production'
+        WHERE task_id = ${taskId} AND status != 'archived'
       `;
 
       if (prompts.length === 0) {
@@ -651,10 +652,11 @@ export class PostgresPromptStore implements IPromptStore {
     const sql = this.ensureInitialized();
 
     try {
+      // Find prompt for this task (exclude archived, allow draft/staging/production)
       const prompts = await sql<PromptRow[]>`
         SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
         FROM prompts
-        WHERE task_id = ${taskId} AND status = 'production'
+        WHERE task_id = ${taskId} AND status != 'archived'
       `;
 
       if (prompts.length === 0) {

@@ -591,9 +591,10 @@ export class FilePromptStore implements IPromptStore {
   ): Promise<CompiledPrompt | null> {
     const data = this.ensureInitialized();
 
-    // Find production prompt for this task
+    // Find prompt for this task (exclude archived, allow draft/staging/production)
+    // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
     const prompt = Object.values(data.prompts).find(
-      p => p.taskId === taskId && p.status === 'production'
+      p => p.taskId === taskId && p.status !== 'archived'
     );
 
     if (!prompt) {
@@ -638,8 +639,9 @@ export class FilePromptStore implements IPromptStore {
   async getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null> {
     const data = this.ensureInitialized();
 
+    // Find prompt for this task (exclude archived, allow draft/staging/production)
     const prompt = Object.values(data.prompts).find(
-      p => p.taskId === taskId && p.status === 'production'
+      p => p.taskId === taskId && p.status !== 'archived'
     );
 
     if (!prompt) {

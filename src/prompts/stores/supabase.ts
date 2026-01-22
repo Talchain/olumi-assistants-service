@@ -576,12 +576,13 @@ export class SupabasePromptStore implements IPromptStore {
   ): Promise<CompiledPrompt | null> {
     const client = this.ensureInitialized();
 
-    // Find production prompt for task
+    // Find prompt for task (exclude archived, allow draft/staging/production)
+    // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
     const { data: prompts, error: promptError } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
-      .eq('status', 'production')
+      .neq('status', 'archived')
       .limit(1);
 
     if (promptError || !prompts || prompts.length === 0) {
@@ -621,11 +622,12 @@ export class SupabasePromptStore implements IPromptStore {
   async getActivePromptForTask(taskId: string): Promise<ActivePromptResult | null> {
     const client = this.ensureInitialized();
 
+    // Find prompt for task (exclude archived, allow draft/staging/production)
     const { data: prompts, error } = await client
       .from('cee_prompts')
       .select('*')
       .eq('task_id', taskId)
-      .eq('status', 'production')
+      .neq('status', 'archived')
       .limit(1);
 
     if (error || !prompts || prompts.length === 0) {
