@@ -215,10 +215,10 @@ Brief: "Should we expand into the European market given our goal of doubling ann
 {
   "nodes": [
     {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
-    {"id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": {"interventions": {"fac_europe_entry": 1, "fac_investment": 500000}}},
-    {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic", "data": {"interventions": {"fac_europe_entry": 0, "fac_investment": 100000}}},
+    {"id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": {"interventions": {"fac_europe_entry": 1, "fac_investment_pressure": 0.5}}},
+    {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic", "data": {"interventions": {"fac_europe_entry": 0, "fac_investment_pressure": 0.1}}},
     {"id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry (0/1)", "data": {"value": 0, "extractionType": "inferred"}},
-    {"id": "fac_investment", "kind": "factor", "label": "Expansion Investment", "data": {"value": 100000, "unit": "£", "extractionType": "inferred"}},
+    {"id": "fac_investment_pressure", "kind": "factor", "label": "Investment Pressure (0-1, share of £1M cap)", "data": {"value": 0.1, "extractionType": "inferred"}},
     {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity"},
     {"id": "fac_regulations", "kind": "factor", "label": "Regulatory Complexity"},
     {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
@@ -231,14 +231,14 @@ Brief: "Should we expand into the European market given our goal of doubling ann
     {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_expand", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
-    {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_expand", "to": "fac_investment_pressure", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_hold", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
-    {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hold", "to": "fac_investment_pressure", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "out_revenue", "strength": {"mean": 0.8, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "out_market_share", "strength": {"mean": 0.7, "std": 0.20}, "exists_probability": 0.85, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "risk_operational", "strength": {"mean": 0.6, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
-    {"from": "fac_investment", "to": "out_revenue", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
-    {"from": "fac_investment", "to": "risk_financial", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
+    {"from": "fac_investment_pressure", "to": "out_revenue", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+    {"from": "fac_investment_pressure", "to": "risk_financial", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
     {"from": "fac_competition", "to": "out_market_share", "strength": {"mean": -0.4, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
     {"from": "fac_regulations", "to": "risk_operational", "strength": {"mean": 0.5, "std": 0.25}, "exists_probability": 0.70, "effect_direction": "positive"},
     {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.85, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
@@ -251,7 +251,7 @@ Brief: "Should we expand into the European market given our goal of doubling ann
 KEY PATTERNS DEMONSTRATED:
 - Coefficient variation: strongest=0.85, weakest=0.4 (not uniform)
 - exists_probability variation: 0.70 to 0.95 (reflects confidence differences)
-- Options differ: fac_europe_entry 1 vs 0, fac_investment 500000 vs 100000
+- Options differ: fac_europe_entry 1 vs 0, fac_investment_pressure 0.5 vs 0.1 (share of £1M cap)
 - Controllable factors have data.value; uncontrollable factors have none
 - outcome->goal positive strength; risk->goal negative strength (MANDATORY)
 </ANNOTATED_EXAMPLE>
