@@ -135,6 +135,44 @@ BINARY/CATEGORICAL:
   WARNING: Integer encoding (0/1/2) implies ordering - value 2 propagates twice the effect of 1.
 
 STATUS QUO: If brief implies only one option, add "Status Quo" option setting factors to baseline values.
+
+SCALE DISCIPLINE (REQUIRED):
+Intervention values must be on comparable scales so edge strengths (0–1) determine influence, not raw magnitudes.
+
+WHEN TO NORMALISE:
+- Normalise if any intervention value would exceed ~10
+- Always normalise: cost, revenue, salary, users, time, headcount beyond small teams
+- Small counts (0–10) are acceptable without normalisation
+
+HOW TO REPRESENT:
+| Type | Range | Example |
+| Binary | 0 or 1 | Tech lead hired: 1 |
+| Small count | 0–10 | Developer hires: 2 |
+| Percentage/ratio | 0–1 decimal | Conversion rate: 0.15 |
+| Large quantity | 0–1 proportion | Cost pressure: 0.6 |
+
+Percentages must be 0–1 decimals (15% → 0.15), never 0–100.
+
+CAP SELECTION (for large quantities):
+1. Use cap explicitly stated by user (e.g., "budget is £300k")
+2. If user provides any numeric anchor, derive a round plausible cap from it
+3. Otherwise, use qualitative scale: Low=0.2, Medium=0.5, High=0.8
+   Label must state: "Cost pressure (0–1 qualitative scale)"
+
+CONSISTENCY:
+If ANY factor requires normalisation, normalise ALL large-quantity factors in the model. Partial normalisation recreates the scale mismatch problem.
+
+FACTOR ID RULE:
+Do not change factor IDs. Use exactly the factor IDs derived from the scenario. Normalisation is expressed via value and label only.
+
+EXAMPLES:
+WRONG: label="Compensation Cost", value=180000
+WRONG: label="Conversion Rate", value=15 (should be 0.15)
+WRONG: Normalising cost (0.6) but leaving revenue as 50000
+RIGHT: label="Compensation Cost Pressure (0–1, share of £300k cap)", value=0.6
+
+WHY:
+This PoC treats edge strengths as unitless (0–1). Mixing binary (0–1) factors with raw large values (180000) causes the largest magnitude to dominate outcomes regardless of causal strength, making results unreliable.
 </EXTRACTION_RULES>
 
 <OUTPUT_SCHEMA>
