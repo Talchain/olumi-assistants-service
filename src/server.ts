@@ -62,7 +62,8 @@ import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
-import { getActiveExperiments, warmPromptCacheFromStore } from "./adapters/llm/prompt-loader.js";
+import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics } from "./adapters/llm/prompt-loader.js";
+import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -445,6 +446,19 @@ app.get("/healthz", async () => {
           stagingVersion?: number | null;
           compiledOk?: boolean;
         };
+        runtime_diagnostics?: {
+          isPromptManagementEnabled: boolean;
+          loaderCacheSize: number;
+          draftGraphCacheEntry: {
+            taskId: string;
+            source: 'store' | 'default';
+            promptId?: string;
+            version?: number;
+            isStaging?: boolean;
+            ageMs: number;
+            isExpired: boolean;
+          } | null;
+        };
       }
     | undefined;
 
@@ -477,11 +491,21 @@ app.get("/healthz", async () => {
         }
       }
 
+      // Get prompt-loader cache diagnostics (this is what runtime actually uses)
+      const loaderCacheDiagnostics = getPromptLoaderCacheDiagnostics();
+      const draftGraphCacheEntry = loaderCacheDiagnostics.entries.find(e => e.taskId === 'draft_graph');
+
       promptCounts = {
         total: allPrompts.length,
         production: allPrompts.filter((p) => p.status === 'production').length,
         taskIds: [...new Set(allPrompts.map((p) => p.taskId))].sort(),
         draft_graph_debug: draftGraphDebug,
+        // Runtime diagnostics - what the actual LLM calls will use
+        runtime_diagnostics: {
+          isPromptManagementEnabled: isPromptManagementEnabled(),
+          loaderCacheSize: loaderCacheDiagnostics.cacheSize,
+          draftGraphCacheEntry: draftGraphCacheEntry ?? null,
+        },
       };
     } catch {
       // ignore

@@ -370,6 +370,51 @@ export function getSupportedOperations(): string[] {
   return Object.keys(OPERATION_TO_TASK_ID);
 }
 
+/**
+ * Get diagnostic info about the prompt-loader cache state
+ * Used by healthz to diagnose cache issues
+ */
+export function getPromptLoaderCacheDiagnostics(): {
+  cacheSize: number;
+  entries: Array<{
+    taskId: string;
+    source: 'store' | 'default';
+    promptId?: string;
+    version?: number;
+    isStaging?: boolean;
+    ageMs: number;
+    isExpired: boolean;
+  }>;
+} {
+  const now = Date.now();
+  const entries: Array<{
+    taskId: string;
+    source: 'store' | 'default';
+    promptId?: string;
+    version?: number;
+    isStaging?: boolean;
+    ageMs: number;
+    isExpired: boolean;
+  }> = [];
+
+  for (const [taskId, entry] of promptCache.entries()) {
+    entries.push({
+      taskId,
+      source: entry.source ?? 'default',
+      promptId: entry.promptId,
+      version: entry.version,
+      isStaging: entry.isStaging,
+      ageMs: now - entry.loadedAt,
+      isExpired: now - entry.loadedAt > CACHE_TTL_MS,
+    });
+  }
+
+  return {
+    cacheSize: promptCache.size,
+    entries,
+  };
+}
+
 // ============================================================================
 // Staging and A/B Experiment Support
 // ============================================================================

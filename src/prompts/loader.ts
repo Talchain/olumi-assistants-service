@@ -77,7 +77,7 @@ export interface LoadedPrompt {
  *
  * File store does NOT auto-enable - requires explicit PROMPTS_ENABLED=true
  */
-function isPromptManagementEnabled(): boolean {
+export function isPromptManagementEnabled(): boolean {
   try {
     // Feature flag in config - explicit enablement
     if (config.prompts?.enabled === true) {
