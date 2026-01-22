@@ -33,6 +33,7 @@ import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type Loa
 import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash } from 'node:crypto';
+import { isProduction } from '../../config/index.js';
 
 // Flag to track if defaults have been initialized in this module instance
 let defaultsInitialized = false;
@@ -240,17 +241,23 @@ export async function warmPromptCacheFromStore(): Promise<{
   warmed: number;
   failed: number;
   skipped: number;
+  usedStaging: number;
 }> {
   ensureDefaultsRegistered();
+
+  // In non-production environments, use staging version if available
+  // This enables testing new prompts in staging without affecting production
+  const useStaging = !isProduction();
 
   const taskIds = Object.values(OPERATION_TO_TASK_ID) as CeeTaskId[];
   let warmed = 0;
   let failed = 0;
   let skipped = 0;
+  let usedStaging = 0;
 
   for (const taskId of taskIds) {
     try {
-      const loaded = await loadPrompt(taskId);
+      const loaded = await loadPrompt(taskId, { useStaging });
 
       const promptHash = createHash('sha256').update(loaded.content).digest('hex');
 
@@ -265,7 +272,13 @@ export async function warmPromptCacheFromStore(): Promise<{
 
       if (loaded.source === 'store') {
         warmed++;
-        log.debug({ taskId, source: loaded.source, promptId: loaded.promptId }, 'Cached prompt from store');
+        // Track if staging version was used
+        if (useStaging && loaded.isStaging) {
+          usedStaging++;
+          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version }, 'Cached STAGING prompt from store');
+        } else {
+          log.debug({ taskId, source: loaded.source, promptId: loaded.promptId, version: loaded.version }, 'Cached prompt from store');
+        }
       } else {
         skipped++;
         log.debug({ taskId, source: loaded.source }, 'Cached prompt from defaults (no managed prompt)');
@@ -277,13 +290,13 @@ export async function warmPromptCacheFromStore(): Promise<{
   }
 
   log.info(
-    { warmed, failed, skipped, total: taskIds.length },
-    'Prompt cache warming complete'
+    { warmed, failed, skipped, usedStaging, total: taskIds.length, useStaging },
+    useStaging ? 'Prompt cache warming complete (staging mode)' : 'Prompt cache warming complete (production mode)'
   );
 
-  emit(TelemetryEvents.PromptStoreCacheWarmed, { warmed, failed, skipped });
+  emit(TelemetryEvents.PromptStoreCacheWarmed, { warmed, failed, skipped, usedStaging });
 
-  return { warmed, failed, skipped };
+  return { warmed, failed, skipped, usedStaging };
 }
 
 /**

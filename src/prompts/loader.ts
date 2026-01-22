@@ -65,6 +65,8 @@ export interface LoadedPrompt {
   promptId?: string;
   /** Version number (if from store) */
   version?: number;
+  /** Whether this is a staging version (true if useStaging was requested and staging version was used) */
+  isStaging?: boolean;
 }
 
 /**
@@ -127,16 +129,31 @@ export async function loadPrompt(
     });
 
     if (compiled) {
+      // Check if staging version was used by comparing against prompt's activeVersion
+      // If useStaging was requested and version differs from activeVersion, it's staging
+      let isStaging = false;
+      if (useStaging) {
+        try {
+          const prompt = await store.get(compiled.promptId);
+          if (prompt && prompt.stagingVersion && compiled.version === prompt.stagingVersion) {
+            isStaging = true;
+          }
+        } catch {
+          // Ignore errors checking staging status
+        }
+      }
+
       emit(LoaderTelemetryEvents.PromptLoadedFromStore, {
         taskId,
         promptId: compiled.promptId,
         version: compiled.version,
+        isStaging,
         correlationId,
       });
 
       log.debug(
-        { taskId, promptId: compiled.promptId, version: compiled.version },
-        'Prompt loaded from store'
+        { taskId, promptId: compiled.promptId, version: compiled.version, isStaging },
+        isStaging ? 'Staging prompt loaded from store' : 'Prompt loaded from store'
       );
 
       return {
@@ -144,6 +161,7 @@ export async function loadPrompt(
         source: 'store',
         promptId: compiled.promptId,
         version: compiled.version,
+        isStaging,
       };
     }
 

@@ -297,6 +297,8 @@ function generateAdminUI(): string {
       to { transform: translateX(0); opacity: 1; }
     }
     .btn-warning { background: #d97706; color: white; }
+    .btn-staging { background: #f59e0b; color: white; }
+    .btn-staging:hover { background: #d97706; }
     pre {
       background: #f3f4f6;
       padding: 15px;
@@ -783,18 +785,23 @@ function generateAdminUI(): string {
                           <label>Version</label>
                           <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
                             <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                              <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
+                              <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
                             </template>
                           </select>
                         </div>
-                        <template x-if="parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion">
+                        <template x-if="selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion">
                           <div style="font-size: 0.8rem; padding: 4px 8px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
-                            Testing v<span x-text="selectedTestVersionNum"></span> (not production) - safe to test without affecting live traffic
+                            Testing v<span x-text="selectedTestVersionNum"></span> (staging version) - this version will be used in staging environment
+                          </div>
+                        </template>
+                        <template x-if="parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion && (!selectedTestPrompt.stagingVersion || parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.stagingVersion)">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #e5e7eb; border: 1px solid #9ca3af; border-radius: 4px; color: #4b5563;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (draft) - not in use anywhere
                           </div>
                         </template>
                         <template x-if="parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.activeVersion">
                           <div style="font-size: 0.8rem; padding: 4px 8px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 4px; color: #166534;">
-                            Testing v<span x-text="selectedTestVersionNum"></span> (production version)
+                            Testing v<span x-text="selectedTestVersionNum"></span> (production version) - this version is live
                           </div>
                         </template>
                       </div>
@@ -1255,10 +1262,13 @@ function generateAdminUI(): string {
                   <div class="text-muted" x-text="'by ' + version.createdBy"></div>
                   <div class="flex" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
                     <template x-if="version.version === selectedPrompt.activeVersion">
-                      <span class="status status-production">Active</span>
+                      <span class="status status-production">Production</span>
+                    </template>
+                    <template x-if="selectedPrompt.stagingVersion && version.version === selectedPrompt.stagingVersion">
+                      <span class="status status-staging">Staging</span>
                     </template>
                     <template x-if="version.requiresApproval && version.approvedBy">
-                      <span class="status status-production" x-text="'Approved by ' + version.approvedBy"></span>
+                      <span class="status status-approved" x-text="'Approved by ' + version.approvedBy"></span>
                     </template>
                     <template x-if="version.requiresApproval && !version.approvedBy">
                       <span class="status status-draft">Needs Approval</span>
@@ -1271,17 +1281,35 @@ function generateAdminUI(): string {
             <h3 class="mt-2 mb-2">Content (v<span x-text="selectedVersionNum"></span>)</h3>
             <pre x-text="getVersionContent(selectedVersionNum)"></pre>
 
+            <!-- Version status badges -->
+            <div class="flex mt-2 mb-2" style="gap: 8px;">
+              <template x-if="selectedVersionNum == selectedPrompt.activeVersion">
+                <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">PRODUCTION</span>
+              </template>
+              <template x-if="selectedPrompt.stagingVersion && selectedVersionNum == selectedPrompt.stagingVersion">
+                <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">STAGING</span>
+              </template>
+            </div>
+
             <div class="flex mt-2" style="flex-wrap: wrap;">
               <button class="btn btn-secondary" @click="openNewVersionWithContent()">+ New Version</button>
               <template x-if="selectedPrompt.versions.length >= 2">
                 <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
               </template>
-              <template x-if="selectedVersionNum > selectedPrompt.activeVersion">
-                <button class="btn btn-primary" @click="activateVersion()">
-                  Activate v<span x-text="selectedVersionNum"></span>
+              <!-- Set as Staging: available for any version not currently staging -->
+              <template x-if="selectedVersionNum != selectedPrompt.stagingVersion">
+                <button class="btn btn-staging" @click="setAsStaging()">
+                  Set v<span x-text="selectedVersionNum"></span> as Staging
                 </button>
               </template>
-              <template x-if="selectedVersionNum < selectedPrompt.activeVersion">
+              <!-- Promote to Production: available for staging version or any newer version -->
+              <template x-if="selectedVersionNum != selectedPrompt.activeVersion && (selectedVersionNum == selectedPrompt.stagingVersion || selectedVersionNum > selectedPrompt.activeVersion)">
+                <button class="btn btn-primary" @click="promoteToProduction()">
+                  Promote to Production
+                </button>
+              </template>
+              <!-- Rollback: only for older versions not in staging -->
+              <template x-if="selectedVersionNum < selectedPrompt.activeVersion && selectedVersionNum != selectedPrompt.stagingVersion">
                 <button class="btn btn-warning" @click="rollbackToVersion()">
                   Rollback to v<span x-text="selectedVersionNum"></span>
                 </button>
@@ -1403,7 +1431,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="compareVersionA" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1411,7 +1439,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="compareVersionB" @change="loadComparison()">
                   <template x-for="v in selectedPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1483,7 +1511,7 @@ function generateAdminUI(): string {
                 <label>Version A</label>
                 <select x-model="llmCompareVersionA">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1491,7 +1519,7 @@ function generateAdminUI(): string {
                 <label>Version B</label>
                 <select x-model="llmCompareVersionB">
                   <template x-for="v in selectedTestPrompt.versions" :key="v.version">
-                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '')"></option>
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
                   </template>
                 </select>
               </div>
@@ -1992,15 +2020,18 @@ function generateAdminUI(): string {
         viewPrompt(prompt) {
           // Clone the prompt and store previous status for potential revert
           this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
-          this.selectedVersionNum = prompt.activeVersion;
+          // Default to staging version if set, otherwise production version
+          // This encourages testing staging versions first in the admin UI
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
         },
 
         editPrompt(prompt) {
           // Open view modal AND pre-fill new version with current content for editing
           this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
-          this.selectedVersionNum = prompt.activeVersion;
-          // Pre-fill the new version form with current content
-          const currentContent = this.getVersionContent(prompt.activeVersion);
+          // Default to staging version if set, otherwise production version
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Pre-fill the new version form with current content (from selected version)
+          const currentContent = this.getVersionContent(this.selectedVersionNum);
           this.newVersion = {
             content: currentContent,
             changeNote: '',
@@ -2182,8 +2213,53 @@ function generateAdminUI(): string {
           }
         },
 
-        async activateVersion() {
-          if (!confirm('Activate version ' + this.selectedVersionNum + ' as the new production version?')) return;
+        async setAsStaging() {
+          if (!confirm('Set version ' + this.selectedVersionNum + ' as the staging version?\\n\\nThis will NOT affect production traffic.')) return;
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                stagingVersion: this.selectedVersionNum
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('v' + this.selectedVersionNum + ' is now the staging version', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to set staging version', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to set staging version', 'error');
+          }
+        },
+
+        async promoteToProduction() {
+          // Stronger confirmation for production promotion
+          const currentProd = this.selectedPrompt.activeVersion;
+          const newProd = this.selectedVersionNum;
+
+          const confirmMsg = 'PROMOTE TO PRODUCTION\\n\\n' +
+            'Current production: v' + currentProd + '\\n' +
+            'New production: v' + newProd + '\\n\\n' +
+            'This will IMMEDIATELY affect ALL live traffic.\\n\\n' +
+            'Type "PROMOTE" to confirm:';
+
+          const userInput = prompt(confirmMsg);
+          if (userInput !== 'PROMOTE') {
+            if (userInput !== null) {
+              this.showToast('Promotion cancelled - confirmation text did not match', 'warning');
+            }
+            return;
+          }
 
           this.error = null;
           try {
@@ -2196,21 +2272,26 @@ function generateAdminUI(): string {
               body: JSON.stringify({
                 targetVersion: this.selectedVersionNum,
                 rolledBackBy: 'admin-ui',
-                reason: 'Activated via admin UI'
+                reason: 'Promoted to production via admin UI'
               })
             });
             if (res.ok) {
               const updated = await res.json();
               this.selectedPrompt = updated;
-              this.showToast('Activated v' + this.selectedVersionNum + ' as production', 'success');
+              this.showToast('v' + this.selectedVersionNum + ' is now in PRODUCTION', 'success');
               this.loadPrompts();
             } else {
               const data = await res.json();
-              this.showToast(data.message || 'Failed to activate version', 'error');
+              this.showToast(data.message || 'Failed to promote to production', 'error');
             }
           } catch (e) {
-            this.showToast('Failed to activate version', 'error');
+            this.showToast('Failed to promote to production', 'error');
           }
+        },
+
+        // Legacy function - kept for backwards compatibility
+        async activateVersion() {
+          return this.promoteToProduction();
         },
 
         async rollbackToVersion() {
@@ -2262,13 +2343,16 @@ function generateAdminUI(): string {
               // Use $nextTick to wait for Alpine to render the dropdown options
               // before setting the selected version, avoiding race conditions
               this.$nextTick(() => {
-                // If preserving version, keep the current selection; otherwise use active version
+                // If preserving version, keep the current selection
+                // Otherwise default to staging version (if set), then production version
+                // This encourages testing staging versions first
                 if (currentVersion !== null && !isNaN(currentVersion)) {
                   // Validate the version still exists (compare numbers)
                   const versionExists = this.selectedTestPrompt.versions.some(v => v.version === currentVersion);
-                  this.selectedTestVersionNum = versionExists ? currentVersion : this.selectedTestPrompt.activeVersion;
+                  this.selectedTestVersionNum = versionExists ? currentVersion : (this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion);
                 } else {
-                  this.selectedTestVersionNum = this.selectedTestPrompt.activeVersion;
+                  // Default to staging version if set, otherwise production
+                  this.selectedTestVersionNum = this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion;
                 }
                 this.loadTestCasesForVersion();
               });
