@@ -787,12 +787,12 @@ function generateAdminUI(): string {
                             </template>
                           </select>
                         </div>
-                        <template x-if="selectedTestVersionNum !== selectedTestPrompt.activeVersion">
+                        <template x-if="parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion">
                           <div style="font-size: 0.8rem; padding: 4px 8px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
                             Testing v<span x-text="selectedTestVersionNum"></span> (not production) - safe to test without affecting live traffic
                           </div>
                         </template>
-                        <template x-if="selectedTestVersionNum === selectedTestPrompt.activeVersion">
+                        <template x-if="parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.activeVersion">
                           <div style="font-size: 0.8rem; padding: 4px 8px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 4px; color: #166534;">
                             Testing v<span x-text="selectedTestVersionNum"></span> (production version)
                           </div>
