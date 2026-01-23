@@ -275,8 +275,24 @@ function sanitizeErrorMessage(error: unknown): string {
 // LLM Call helpers
 // ============================================================================
 
-const LLM_TIMEOUT_MS = 120_000; // 2 minutes
-const REQUEST_TIMEOUT_MS = 150_000; // 2.5 minutes total
+const LLM_TIMEOUT_MS = 120_000; // 2 minutes for standard models
+const REASONING_TIMEOUT_MS = 180_000; // 3 minutes for reasoning models (medium effort)
+const REASONING_HIGH_TIMEOUT_MS = 300_000; // 5 minutes for reasoning models with HIGH effort
+const REQUEST_TIMEOUT_MS = 350_000; // 5.5 minutes total (to exceed max LLM timeout)
+
+/**
+ * Get appropriate timeout based on model type and reasoning effort.
+ */
+function getLLMTimeout(model: string, reasoningEffort?: 'low' | 'medium' | 'high'): number {
+  if (!isReasoningModel(model)) {
+    return LLM_TIMEOUT_MS;
+  }
+  // Reasoning models need more time, especially with HIGH effort
+  if (reasoningEffort === 'high') {
+    return REASONING_HIGH_TIMEOUT_MS;
+  }
+  return REASONING_TIMEOUT_MS;
+}
 
 interface LLMCallOptions {
   temperature?: number | null;
@@ -448,7 +464,8 @@ async function callOpenAIWithPrompt(
 
   const client = new OpenAI({ apiKey });
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
+  const effectiveTimeout = getLLMTimeout(model, reasoningEffort);
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
   // Determine if this is a reasoning model
   const isReasoning = isReasoningModel(model);
@@ -529,10 +546,11 @@ async function callOpenAIWithPrompt(
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
     const isTimeout = error instanceof Error && error.name === 'AbortError';
+    const timeoutMinutes = Math.round(effectiveTimeout / 60000);
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
+      error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
       duration_ms,
       temperature,
       max_tokens: maxTokens,
