@@ -64,6 +64,8 @@ const TestPromptLLMRequestSchema = z.object({
     reasoning_effort: z.enum(['low', 'medium', 'high']).optional(),
     temperature: z.number().min(0).max(2).optional(),
     max_tokens: z.number().int().positive().max(32768).optional(),
+    seed: z.number().int().optional(), // For reproducibility (OpenAI deterministic seed)
+    top_p: z.number().min(0).max(1).optional(), // Nucleus sampling (default 1.0)
   }).optional(),
 });
 
@@ -110,6 +112,8 @@ interface TestPromptLLMResponse {
     temperature: number | null;
     max_tokens: number;
     reasoning_effort?: 'low' | 'medium' | 'high';
+    seed?: number;
+    top_p?: number;
   };
 
   pipeline?: {
@@ -298,6 +302,8 @@ interface LLMCallOptions {
   temperature?: number | null;
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
+  seed?: number;
+  topP?: number;
 }
 
 interface LLMCallResult {
@@ -317,6 +323,8 @@ interface LLMCallResult {
   model: string;
   provider: string;
   reasoning_effort?: 'low' | 'medium' | 'high';
+  seed?: number;
+  top_p?: number;
 }
 
 async function callLLMWithPrompt(
@@ -339,10 +347,14 @@ async function callLLMWithPrompt(
   // Reasoning effort only applies to reasoning models
   const reasoningEffort = options?.reasoningEffort;
 
+  // Extract seed and top_p for reproducibility and sampling control
+  const seed = options?.seed;
+  const topP = options?.topP;
+
   if (provider === 'anthropic') {
     return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
   } else {
-    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, reasoningEffort);
+    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, reasoningEffort, seed, topP);
   }
 }
 
@@ -448,6 +460,8 @@ async function callOpenAIWithPrompt(
   temperature: number | null,
   startTime: number,
   reasoningEffort?: 'low' | 'medium' | 'high',
+  seed?: number,
+  topP?: number,
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.openaiApiKey;
   if (!apiKey) {
@@ -490,12 +504,20 @@ async function callOpenAIWithPrompt(
       ? { reasoning_effort: reasoningEffort ?? 'medium' }
       : {};
 
+    // Add seed for reproducibility (OpenAI deterministic seed)
+    const seedParam = seed !== undefined ? { seed } : {};
+
+    // Add top_p for nucleus sampling (default is 1.0 when not specified)
+    const topPParam = topP !== undefined ? { top_p: topP } : {};
+
     const response = await client.chat.completions.create(
       {
         model,
         ...tokenParam,
         ...tempParam,
         ...reasoningParam,
+        ...seedParam,
+        ...topPParam,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
@@ -541,6 +563,8 @@ async function callOpenAIWithPrompt(
       model,
       provider: 'openai',
       reasoning_effort: isReasoning ? (reasoningEffort ?? 'medium') : undefined,
+      seed,
+      top_p: topP,
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -827,6 +851,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     const reasoningEffort = options?.reasoning_effort;
     const temperatureOverride = options?.temperature;
     const maxTokensOverride = options?.max_tokens;
+    const seedOverride = options?.seed;
+    const topPOverride = options?.top_p;
 
     log.info({
       request_id: requestId,
@@ -838,6 +864,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       reasoning_effort: reasoningEffort,
       temperature_override: temperatureOverride,
       max_tokens_override: maxTokensOverride,
+      seed_override: seedOverride,
+      top_p_override: topPOverride,
       event: 'admin.test_prompt.started',
     }, 'Admin prompt test started');
 
@@ -930,6 +958,12 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       if (reasoningEffort !== undefined) {
         llmOptions.reasoningEffort = reasoningEffort;
       }
+      if (seedOverride !== undefined) {
+        llmOptions.seed = seedOverride;
+      }
+      if (topPOverride !== undefined) {
+        llmOptions.topP = topPOverride;
+      }
 
       // Call LLM with options
       const llmResult = await callLLMWithPrompt(compiledContent, userContent, model, llmOptions);
@@ -956,6 +990,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           temperature: llmResult.temperature,
           max_tokens: llmResult.max_tokens,
           reasoning_effort: llmResult.reasoning_effort,
+          seed: llmResult.seed,
+          top_p: llmResult.top_p,
         },
       };
 

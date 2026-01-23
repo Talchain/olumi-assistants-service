@@ -861,6 +861,20 @@ function generateAdminUI(): string {
                             <input type="number" x-model.number="llmMaxTokensOverride" placeholder="default" min="100" max="32768"
                                    style="width: 90px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
                           </div>
+                          <!-- Seed (for reproducibility) -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Seed:</label>
+                            <input type="number" x-model.number="llmSeed" placeholder="random" min="0" max="2147483647"
+                                   style="width: 110px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
+                          <!-- Top P (nucleus sampling) - only for non-reasoning models -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Top P:</label>
+                              <input type="number" x-model.number="llmTopP" placeholder="1.0" min="0" max="1" step="0.05"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
                           <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="checkbox" id="skipRepairs" x-model="llmSkipRepairs" style="width: 16px; height: 16px;">
                             <label for="skipRepairs" style="font-size: 0.85rem;">Skip repairs (raw LLM output)</label>
@@ -1917,6 +1931,8 @@ function generateAdminUI(): string {
         llmReasoningEffort: 'medium',
         llmTemperature: null,
         llmMaxTokensOverride: null,
+        llmSeed: null,
+        llmTopP: null,
         // Rate limit handling
         llmRateLimitCooldown: 0,
         llmRateLimitTimer: null,
@@ -2689,6 +2705,16 @@ function generateAdminUI(): string {
               requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
             }
 
+            // Add seed for reproducibility if specified
+            if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+              requestBody.options.seed = Number(this.llmSeed);
+            }
+
+            // Add top_p for non-reasoning models if specified
+            if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+              requestBody.options.top_p = Number(this.llmTopP);
+            }
+
             const res = await fetch('/admin/v1/test-prompt-llm', {
               method: 'POST',
               headers: {
@@ -2921,6 +2947,16 @@ function generateAdminUI(): string {
               // Add max tokens override if specified
               if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
                 requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
+              }
+
+              // Add seed for reproducibility if specified
+              if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+                requestBody.options.seed = Number(this.llmSeed);
+              }
+
+              // Add top_p for non-reasoning models if specified
+              if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+                requestBody.options.top_p = Number(this.llmTopP);
               }
 
               const res = await fetch('/admin/v1/test-prompt-llm', {
