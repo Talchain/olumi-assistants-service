@@ -2093,6 +2093,11 @@ export async function finaliseCeeDraftResponse(
         max_tokens: llmMeta.max_tokens,
         seed: llmMeta.seed,
         reasoning_effort: llmMeta.reasoning_effort,
+        // Prompt cache diagnostics for debugging multi-instance issues
+        instance_id: llmMeta.instance_id,
+        cache_age_ms: llmMeta.cache_age_ms,
+        cache_status: llmMeta.cache_status,
+        use_staging_mode: llmMeta.use_staging_mode,
       } : {
         model,
       },
@@ -2528,6 +2533,11 @@ export async function finaliseCeeDraftResponse(
         max_tokens: llmMeta.max_tokens,
         seed: llmMeta.seed,
         reasoning_effort: llmMeta.reasoning_effort,
+        // Prompt cache diagnostics for debugging multi-instance issues
+        instance_id: llmMeta.instance_id,
+        cache_age_ms: llmMeta.cache_age_ms,
+        cache_status: llmMeta.cache_status,
+        use_staging_mode: llmMeta.use_staging_mode,
       } : {
         model,
       },
