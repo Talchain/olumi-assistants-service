@@ -576,14 +576,6 @@ export class SupabasePromptStore implements IPromptStore {
   ): Promise<CompiledPrompt | null> {
     const client = this.ensureInitialized();
 
-    // TEMPORARY: Debug logging to trace Supabase query (remove after fixing)
-    console.log('[SUPABASE_QUERY_DEBUG] getCompiled called:', JSON.stringify({
-      taskId,
-      useStaging: options?.useStaging,
-      version: options?.version,
-      supabaseUrl: this.config.url,
-    }));
-
     // Find prompt for task (exclude archived, allow draft/staging/production)
     // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
     // Deterministic selection: most recently updated non-archived prompt wins
@@ -596,39 +588,12 @@ export class SupabasePromptStore implements IPromptStore {
       .order('updated_at', { ascending: false }) // Most recently updated first
       .limit(1);
 
-    // TEMPORARY: Debug logging to trace query result (remove after fixing)
-    console.log('[SUPABASE_QUERY_DEBUG] cee_prompts query result:', JSON.stringify({
-      taskId,
-      found: prompts?.length ?? 0,
-      error: promptError?.message ?? null,
-      promptId: prompts?.[0]?.id ?? null,
-      promptStatus: prompts?.[0]?.status ?? null,
-      activeVersion: prompts?.[0]?.active_version ?? null,
-      stagingVersion: prompts?.[0]?.staging_version ?? null,
-    }));
-
     if (promptError || !prompts || prompts.length === 0) {
-      // TEMPORARY: Log why we're returning null (remove after fixing)
-      console.log('[SUPABASE_QUERY_DEBUG] getCompiled returning null:', JSON.stringify({
-        taskId,
-        reason: promptError ? 'query_error' : 'no_prompts_found',
-        error: promptError?.message ?? null,
-      }));
       return null;
     }
 
     const prompt = prompts[0] as PromptRow;
     const targetVersion = options?.version ?? (options?.useStaging ? prompt.staging_version : null) ?? prompt.active_version;
-
-    // TEMPORARY: Debug logging to trace version selection (remove after fixing)
-    console.log('[SUPABASE_QUERY_DEBUG] Version selection:', JSON.stringify({
-      promptId: prompt.id,
-      requestedVersion: options?.version,
-      useStaging: options?.useStaging,
-      stagingVersion: prompt.staging_version,
-      activeVersion: prompt.active_version,
-      targetVersion,
-    }));
 
     // Get the version
     const { data: versions, error: versionError } = await client
@@ -638,36 +603,13 @@ export class SupabasePromptStore implements IPromptStore {
       .eq('version', targetVersion)
       .single();
 
-    // TEMPORARY: Debug logging to trace version query result (remove after fixing)
-    console.log('[SUPABASE_QUERY_DEBUG] cee_prompt_versions query result:', JSON.stringify({
-      promptId: prompt.id,
-      targetVersion,
-      found: versions ? true : false,
-      error: versionError?.message ?? null,
-      contentLength: versions?.content?.length ?? null,
-    }));
-
     if (versionError || !versions) {
-      // TEMPORARY: Log why we're returning null (remove after fixing)
-      console.log('[SUPABASE_QUERY_DEBUG] getCompiled returning null (version):', JSON.stringify({
-        promptId: prompt.id,
-        targetVersion,
-        reason: versionError ? 'version_query_error' : 'version_not_found',
-        error: versionError?.message ?? null,
-      }));
       return null;
     }
 
     const version = versions as VersionRow;
     const versionVariables = JSON.parse(version.variables || '[]');
     const content = interpolatePrompt(version.content, variables, versionVariables);
-
-    // TEMPORARY: Debug logging to trace successful compilation (remove after fixing)
-    console.log('[SUPABASE_QUERY_DEBUG] getCompiled SUCCESS:', JSON.stringify({
-      promptId: prompt.id,
-      version: version.version,
-      contentLength: content.length,
-    }));
 
     return {
       promptId: prompt.id,

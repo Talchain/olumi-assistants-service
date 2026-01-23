@@ -85,17 +85,8 @@ export function isPromptManagementEnabled(): boolean {
     }
     // Auto-enable only for database-backed stores (not file store)
     const dbHealthy = isDbBackedStoreHealthy();
-    // TEMPORARY: Debug logging to trace prompt management check (remove after fixing)
-    // Note: This can be noisy, only log when result is false (unexpected)
-    if (!dbHealthy && !config.prompts?.enabled) {
-      console.log('[LOAD_PROMPT_DEBUG] isPromptManagementEnabled=false:', JSON.stringify({
-        configEnabled: config.prompts?.enabled,
-        dbBackedHealthy: dbHealthy,
-      }));
-    }
     return dbHealthy;
-  } catch (err) {
-    console.log('[LOAD_PROMPT_DEBUG] isPromptManagementEnabled threw:', String(err));
+  } catch {
     return false;
   }
 }
@@ -125,22 +116,8 @@ export async function loadPrompt(
     correlationId,
   } = options;
 
-  // TEMPORARY: Debug logging to trace loadPrompt call (remove after fixing)
-  const promptMgmtEnabled = isPromptManagementEnabled();
-  console.log('[LOAD_PROMPT_DEBUG] loadPrompt called:', JSON.stringify({
-    taskId,
-    forceDefault,
-    useStaging,
-    version,
-    promptMgmtEnabled,
-  }));
-
   // Check if we should use defaults
-  if (forceDefault || !promptMgmtEnabled) {
-    console.log('[LOAD_PROMPT_DEBUG] Using defaults:', JSON.stringify({
-      taskId,
-      reason: forceDefault ? 'forceDefault' : 'prompt_mgmt_disabled',
-    }));
+  if (forceDefault || !isPromptManagementEnabled()) {
     return loadDefaultPrompt(taskId, variables, correlationId);
   }
 
@@ -151,14 +128,6 @@ export async function loadPrompt(
       version,
       useStaging,
     });
-
-    // TEMPORARY: Debug logging to trace store result (remove after fixing)
-    console.log('[LOAD_PROMPT_DEBUG] store.getCompiled result:', JSON.stringify({
-      taskId,
-      found: compiled !== null,
-      promptId: compiled?.promptId ?? null,
-      version: compiled?.version ?? null,
-    }));
 
     if (compiled) {
       // Check if staging version was used by comparing against prompt's activeVersion
@@ -198,20 +167,10 @@ export async function loadPrompt(
     }
 
     // No managed prompt found, fall back to default
-    // TEMPORARY: Debug logging to trace fallback (remove after fixing)
-    console.log('[LOAD_PROMPT_DEBUG] Falling back to default (no managed prompt):', JSON.stringify({
-      taskId,
-      useStaging,
-    }));
     log.debug({ taskId }, 'No managed prompt found, using default');
     return loadDefaultPrompt(taskId, variables, correlationId);
   } catch (error) {
     // Error loading from store, fall back to default
-    // TEMPORARY: Debug logging to trace error fallback (remove after fixing)
-    console.log('[LOAD_PROMPT_DEBUG] Falling back to default (error):', JSON.stringify({
-      taskId,
-      error: String(error),
-    }));
     log.warn(
       { taskId, error, correlationId },
       'Error loading prompt from store, falling back to default'

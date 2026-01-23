@@ -321,7 +321,7 @@ export function getSystemPromptMeta(operation: string): {
     promptVersion = `default:${taskId}`;
   }
 
-  const result = {
+  return {
     taskId,
     source,
     promptId,
@@ -334,21 +334,6 @@ export function getSystemPromptMeta(operation: string): {
     cache_status: cacheStatus,
     use_staging_mode: useStagingMode,
   };
-
-  // TEMPORARY: Debug logging to trace prompt meta flow (remove after fixing)
-  console.log('[PROMPT_META_DEBUG] getSystemPromptMeta result:', JSON.stringify({
-    operation,
-    taskId,
-    source,
-    promptId,
-    version,
-    prompt_version: promptVersion,
-    cache_status: cacheStatus,
-    use_staging_mode: useStagingMode,
-    instance_id: INSTANCE_ID,
-  }));
-
-  return result;
 }
 
 /**
@@ -380,9 +365,6 @@ export async function warmPromptCacheFromStore(): Promise<{
   // This enables testing new prompts in staging without affecting production
   const useStaging = shouldUseStagingPrompts();
 
-  // TEMPORARY: Debug logging to trace cache warming (remove after fixing)
-  console.log('[PROMPT_CACHE_WARM_DEBUG] Starting cache warm, useStaging:', useStaging);
-
   const taskIds = Object.values(OPERATION_TO_TASK_ID) as CeeTaskId[];
   let warmed = 0;
   let failed = 0;
@@ -405,15 +387,6 @@ export async function warmPromptCacheFromStore(): Promise<{
         isStaging: loaded.isStaging,
       });
 
-      // TEMPORARY: Debug logging to trace each prompt loaded during warming
-      console.log('[PROMPT_CACHE_WARM_DEBUG] Loaded prompt:', JSON.stringify({
-        taskId,
-        source: loaded.source,
-        promptId: loaded.promptId,
-        version: loaded.version,
-        isStaging: loaded.isStaging,
-      }));
-
       if (loaded.source === 'store') {
         warmed++;
         // Track if staging version was used
@@ -432,17 +405,6 @@ export async function warmPromptCacheFromStore(): Promise<{
       log.warn({ taskId, error: String(error) }, 'Failed to warm cache for task');
     }
   }
-
-  // TEMPORARY: Debug logging to trace cache warming results (remove after fixing)
-  console.log('[PROMPT_CACHE_WARM_DEBUG] Warming complete:', JSON.stringify({
-    warmed,
-    failed,
-    skipped,
-    usedStaging,
-    total: taskIds.length,
-    useStaging,
-    instanceId: INSTANCE_ID,
-  }));
 
   log.info(
     { warmed, failed, skipped, usedStaging, total: taskIds.length, useStaging },

@@ -636,15 +636,6 @@ export async function draftGraphWithAnthropic(
 
     const finishReason = (response as any)?.stop_reason || (response as any)?.stopReason;
 
-    // TEMPORARY: Debug logging to trace prompt meta in response (remove after fixing)
-    console.log('[PROMPT_META_DEBUG] anthropic draftGraph meta:', JSON.stringify({
-      prompt_version: promptMeta.prompt_version,
-      instance_id: promptMeta.instance_id,
-      cache_status: promptMeta.cache_status,
-      use_staging_mode: promptMeta.use_staging_mode,
-      source: promptMeta.source,
-    }));
-
     return {
       graph,
       rationales: parsed.rationales || [],
