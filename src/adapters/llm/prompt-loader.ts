@@ -86,12 +86,11 @@ interface CacheEntry {
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
-const CACHE_TTL_MS = 300_000; // 5 minutes - triggers background refresh after this
-const STALE_GRACE_PERIOD_MS = 3600_000; // 1 hour - return stale store prompts rather than falling back to defaults
-// Note: The grace period is intentionally long because:
-// - Returning a stale store prompt is MUCH better than falling back to hardcoded defaults
-// - Background refresh will update the cache for subsequent requests
-// - Only truly empty cache (cold start) should ever return defaults
+const CACHE_TTL_MS = 300_000; // 5 minutes - cache is considered "fresh" for this long
+const PROACTIVE_REFRESH_THRESHOLD = 0.8; // Trigger background refresh at 80% of TTL (4 min)
+const STALE_GRACE_PERIOD_MS = 600_000; // 10 minutes - return stale store prompts rather than defaults
+// Note: With proactive refresh at 80% TTL, cache should rarely go stale.
+// The grace period is a safety net for when background refresh fails.
 
 // Track in-flight background refreshes to prevent thundering herd
 const inflightRefresh = new Map<CeeTaskId, Promise<void>>();
@@ -130,6 +129,14 @@ export function getSystemPrompt(
   // Return cached value if still fresh
   if (cached && cacheAge < CACHE_TTL_MS) {
     emit(TelemetryEvents.PromptStoreCacheHit, { taskId });
+
+    // Proactive refresh: trigger background refresh when cache is > 80% through TTL
+    // This ensures cache stays fresh without blocking requests
+    const proactiveThresholdMs = CACHE_TTL_MS * PROACTIVE_REFRESH_THRESHOLD;
+    if (cacheAge > proactiveThresholdMs && !hasVariables) {
+      triggerBackgroundRefresh(taskId, variables);
+    }
+
     return cached.content;
   }
 
