@@ -60,6 +60,10 @@ const TestPromptLLMRequestSchema = z.object({
   options: z.object({
     model: z.string().optional(),
     skip_repairs: z.boolean().optional(),
+    // LLM parameter overrides
+    reasoning_effort: z.enum(['low', 'medium', 'high']).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    max_tokens: z.number().int().positive().max(32768).optional(),
   }).optional(),
 });
 
@@ -103,8 +107,9 @@ interface TestPromptLLMResponse {
       total: number;
     };
     finish_reason: string;
-    temperature: number;
+    temperature: number | null;
     max_tokens: number;
+    reasoning_effort?: 'low' | 'medium' | 'high';
   };
 
   pipeline?: {
@@ -273,6 +278,12 @@ function sanitizeErrorMessage(error: unknown): string {
 const LLM_TIMEOUT_MS = 120_000; // 2 minutes
 const REQUEST_TIMEOUT_MS = 150_000; // 2.5 minutes total
 
+interface LLMCallOptions {
+  temperature?: number | null;
+  maxTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+}
+
 interface LLMCallResult {
   success: boolean;
   error?: string;
@@ -285,27 +296,37 @@ interface LLMCallResult {
     total: number;
   };
   finish_reason?: string;
-  temperature: number;
+  temperature: number | null;
   max_tokens: number;
   model: string;
   provider: string;
+  reasoning_effort?: 'low' | 'medium' | 'high';
 }
 
 async function callLLMWithPrompt(
   systemPrompt: string,
   userContent: string,
   model: string,
+  options?: LLMCallOptions,
 ): Promise<LLMCallResult> {
   const startTime = Date.now();
   const modelConfig = getModelConfig(model);
   const provider = modelConfig?.provider ?? getModelProvider(model) ?? 'openai';
-  const maxTokens = modelConfig?.maxTokens ?? 4096;
-  const temperature = 0;
+
+  // Use provided maxTokens or fall back to model config
+  const maxTokens = options?.maxTokens ?? modelConfig?.maxTokens ?? 4096;
+
+  // Temperature: null means "not set" (use model default), 0 is valid for deterministic output
+  // Default to 0 for admin testing if not explicitly set
+  const temperature = options?.temperature ?? 0;
+
+  // Reasoning effort only applies to reasoning models
+  const reasoningEffort = options?.reasoningEffort;
 
   if (provider === 'anthropic') {
     return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
   } else {
-    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
+    return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, reasoningEffort);
   }
 }
 
@@ -314,7 +335,7 @@ async function callAnthropicWithPrompt(
   userContent: string,
   model: string,
   maxTokens: number,
-  temperature: number,
+  temperature: number | null,
   startTime: number,
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.anthropicApiKey;
@@ -334,12 +355,15 @@ async function callAnthropicWithPrompt(
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
 
+  // Effective temperature: default to 0 if null (deterministic for testing)
+  const effectiveTemperature = temperature ?? 0;
+
   try {
     const response = await client.messages.create(
       {
         model,
         max_tokens: maxTokens,
-        temperature,
+        temperature: effectiveTemperature,
         system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],
       },
@@ -405,8 +429,9 @@ async function callOpenAIWithPrompt(
   userContent: string,
   model: string,
   maxTokens: number,
-  temperature: number,
+  temperature: number | null,
   startTime: number,
+  reasoningEffort?: 'low' | 'medium' | 'high',
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.openaiApiKey;
   if (!apiKey) {
@@ -425,6 +450,9 @@ async function callOpenAIWithPrompt(
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
 
+  // Determine if this is a reasoning model
+  const isReasoning = isReasoningModel(model);
+
   try {
     // Build request params - GPT-5.x and reasoning models need max_completion_tokens
     const useMaxCompletionTokens = needsMaxCompletionTokens(model);
@@ -433,13 +461,24 @@ async function callOpenAIWithPrompt(
       : { max_tokens: maxTokens };
 
     // GPT-5.x and reasoning models don't support custom temperature
-    const tempParam = doesNotSupportCustomTemperature(model) ? {} : { temperature };
+    // temperature=null means don't send temperature at all (use model default)
+    const tempParam = doesNotSupportCustomTemperature(model)
+      ? {}
+      : temperature !== null
+        ? { temperature }
+        : {};
+
+    // Add reasoning_effort for reasoning models
+    const reasoningParam = isReasoning
+      ? { reasoning_effort: reasoningEffort ?? 'medium' }
+      : {};
 
     const response = await client.chat.completions.create(
       {
         model,
         ...tokenParam,
         ...tempParam,
+        ...reasoningParam,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
@@ -484,6 +523,7 @@ async function callOpenAIWithPrompt(
       max_tokens: maxTokens,
       model,
       provider: 'openai',
+      reasoning_effort: isReasoning ? (reasoningEffort ?? 'medium') : undefined,
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -766,6 +806,9 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     const { prompt_id, version, brief, options } = parseResult.data;
     const skipRepairs = options?.skip_repairs ?? false;
     const modelOverride = options?.model;
+    const reasoningEffort = options?.reasoning_effort;
+    const temperatureOverride = options?.temperature;
+    const maxTokensOverride = options?.max_tokens;
 
     log.info({
       request_id: requestId,
@@ -774,6 +817,9 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       brief_length: brief.length,
       skip_repairs: skipRepairs,
       model_override: modelOverride,
+      reasoning_effort: reasoningEffort,
+      temperature_override: temperatureOverride,
+      max_tokens_override: maxTokensOverride,
       event: 'admin.test_prompt.started',
     }, 'Admin prompt test started');
 
@@ -821,11 +867,54 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // Validate parameter combinations
+      const isReasoning = isReasoningModel(model);
+      const supportsTemp = !doesNotSupportCustomTemperature(model);
+      const modelConfig = getModelConfig(model);
+
+      // reasoning_effort is only valid for reasoning models
+      if (reasoningEffort !== undefined && !isReasoning) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: `reasoning_effort is only valid for reasoning models. ${model} is not a reasoning model.`,
+        });
+      }
+
+      // temperature is only valid for models that support it
+      if (temperatureOverride !== undefined && !supportsTemp) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: `Temperature is not supported for model ${model}. This model uses fixed temperature.`,
+        });
+      }
+
+      // max_tokens must not exceed model limit
+      if (maxTokensOverride !== undefined && modelConfig) {
+        if (maxTokensOverride > modelConfig.maxTokens) {
+          return reply.status(400).send({
+            error: 'validation_error',
+            message: `max_tokens (${maxTokensOverride}) exceeds model limit (${modelConfig.maxTokens}) for ${model}`,
+          });
+        }
+      }
+
       // Build user content (similar to production flow)
       const userContent = `## Brief\n${brief}`;
 
-      // Call LLM
-      const llmResult = await callLLMWithPrompt(compiledContent, userContent, model);
+      // Build LLM call options
+      const llmOptions: LLMCallOptions = {};
+      if (temperatureOverride !== undefined) {
+        llmOptions.temperature = temperatureOverride;
+      }
+      if (maxTokensOverride !== undefined) {
+        llmOptions.maxTokens = maxTokensOverride;
+      }
+      if (reasoningEffort !== undefined) {
+        llmOptions.reasoningEffort = reasoningEffort;
+      }
+
+      // Call LLM with options
+      const llmResult = await callLLMWithPrompt(compiledContent, userContent, model, llmOptions);
 
       // Build response
       const response: TestPromptLLMResponse = {
@@ -848,6 +937,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           finish_reason: llmResult.finish_reason ?? 'unknown',
           temperature: llmResult.temperature,
           max_tokens: llmResult.max_tokens,
+          reasoning_effort: llmResult.reasoning_effort,
         },
       };
 
@@ -978,7 +1068,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /admin/v1/test-prompt-llm/models
    *
-   * List available models for testing.
+   * List available models for testing with capability flags.
    */
   app.get('/admin/v1/test-prompt-llm/models', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
@@ -991,6 +1081,9 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         tier: config.tier,
         description: config.description,
         max_tokens: config.maxTokens,
+        // Capability flags for UI to show/hide appropriate controls
+        is_reasoning: isReasoningModel(id),
+        supports_temperature: !doesNotSupportCustomTemperature(id),
       }));
 
     return reply.status(200).send({ models });

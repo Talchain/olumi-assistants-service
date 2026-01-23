@@ -130,29 +130,42 @@ function getTimeoutForModel(model: string): number {
 }
 
 /**
+ * Options for building model-specific parameters.
+ */
+export interface BuildModelParamsOptions {
+  /** Max tokens override (uses model default if not specified) */
+  maxTokens?: number;
+  /** Reasoning effort for reasoning models (defaults to "medium") */
+  reasoningEffort?: "low" | "medium" | "high";
+}
+
+/**
  * Build model-specific parameters for OpenAI API calls.
  * Reasoning models require different parameters than standard models.
  *
  * @param model - The model ID being used
  * @param temperature - The temperature value for non-reasoning models
- * @param maxTokens - The max tokens value
+ * @param options - Optional parameters including maxTokens and reasoningEffort
  * @returns Object with appropriate parameters for the model type
  */
 /** @internal Exported for testing only */
 export function buildModelParams(
   model: string,
   temperature: number,
-  maxTokens?: number
+  options?: BuildModelParamsOptions
 ): {
   temperature?: number;
   max_tokens?: number;
   max_completion_tokens?: number;
   reasoning_effort?: "low" | "medium" | "high";
 } {
+  const maxTokens = options?.maxTokens;
+  const reasoningEffort = options?.reasoningEffort ?? "medium";
+
   if (isReasoningModel(model)) {
     // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
     return {
-      reasoning_effort: "medium",
+      reasoning_effort: reasoningEffort,
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
     };
   } else {
@@ -410,7 +423,7 @@ export class OpenAIAdapter implements LLMAdapter {
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('draft_graph');
-      const modelParams = buildModelParams(this.model, 0, maxTokens);
+      const modelParams = buildModelParams(this.model, 0, { maxTokens });
       const temperature = 'temperature' in modelParams
         ? (modelParams as any).temperature as number
         : undefined;
@@ -696,7 +709,7 @@ export class OpenAIAdapter implements LLMAdapter {
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('suggest_options');
-      const modelParams = buildModelParams(this.model, 0.7, maxTokens); // 0.7 for creativity in options
+      const modelParams = buildModelParams(this.model, 0.7, { maxTokens }); // 0.7 for creativity in options
 
       // Debug: Log model parameters for runtime validation
       log.debug({
@@ -817,7 +830,7 @@ export class OpenAIAdapter implements LLMAdapter {
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('repair_graph');
-      const modelParams = buildModelParams(this.model, 0, maxTokens);
+      const modelParams = buildModelParams(this.model, 0, { maxTokens });
 
       // Debug: Log model parameters for runtime validation
       log.debug({
@@ -1041,7 +1054,7 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 1500;
-      const modelParams = buildModelParams(this.model, 0.5, maxTokens); // 0.5 for consistent questions
+      const modelParams = buildModelParams(this.model, 0.5, { maxTokens }); // 0.5 for consistent questions
 
       // Debug: Log model parameters for runtime validation
       log.debug({

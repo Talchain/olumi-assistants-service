@@ -836,6 +836,31 @@ function generateAdminUI(): string {
                               </template>
                             </select>
                           </div>
+                          <!-- Reasoning Effort (only for reasoning models) -->
+                          <template x-if="isReasoningModelSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Reasoning Effort:</label>
+                              <select x-model="llmReasoningEffort" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                              </select>
+                            </div>
+                          </template>
+                          <!-- Temperature (only for non-reasoning models) -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Temperature:</label>
+                              <input type="number" x-model.number="llmTemperature" min="0" max="2" step="0.1" placeholder="0"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
+                          <!-- Max Tokens Override -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Max Tokens:</label>
+                            <input type="number" x-model.number="llmMaxTokensOverride" placeholder="default" min="100" max="32768"
+                                   style="width: 90px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
                           <div style="display: flex; align-items: center; gap: 6px;">
                             <input type="checkbox" id="skipRepairs" x-model="llmSkipRepairs" style="width: 16px; height: 16px;">
                             <label for="skipRepairs" style="font-size: 0.85rem;">Skip repairs (raw LLM output)</label>
@@ -1888,6 +1913,10 @@ function generateAdminUI(): string {
         llmModelOverride: '',
         llmSkipRepairs: false,
         llmAvailableModels: [],
+        // LLM parameter overrides (null = use model default)
+        llmReasoningEffort: 'medium',
+        llmTemperature: null,
+        llmMaxTokensOverride: null,
         // Rate limit handling
         llmRateLimitCooldown: 0,
         llmRateLimitTimer: null,
@@ -2558,6 +2587,23 @@ function generateAdminUI(): string {
           }
         },
 
+        // Check if currently selected model is a reasoning model
+        isReasoningModelSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.is_reasoning ?? false;
+        },
+
+        // Check if currently selected model supports temperature
+        supportsTemperature() {
+          if (!this.llmModelOverride) return true; // Default models support temperature
+          if (!Array.isArray(this.llmAvailableModels)) return true;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_temperature ?? true;
+          }
+        },
+
         // Cancel current LLM test
         cancelLLMTest() {
           if (this.llmAbortController) {
@@ -2627,6 +2673,21 @@ function generateAdminUI(): string {
             // Add skip repairs option
             if (this.llmSkipRepairs) {
               requestBody.options.skip_repairs = true;
+            }
+
+            // Add reasoning effort for reasoning models
+            if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+              requestBody.options.reasoning_effort = this.llmReasoningEffort;
+            }
+
+            // Add temperature for non-reasoning models (null means use default, but 0 is valid)
+            if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+              requestBody.options.temperature = Number(this.llmTemperature);
+            }
+
+            // Add max tokens override if specified
+            if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+              requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
             }
 
             const res = await fetch('/admin/v1/test-prompt-llm', {
@@ -2846,6 +2907,21 @@ function generateAdminUI(): string {
               // Add model override if set
               if (this.llmModelOverride) {
                 requestBody.options.model = this.llmModelOverride;
+              }
+
+              // Add reasoning effort for reasoning models
+              if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+                requestBody.options.reasoning_effort = this.llmReasoningEffort;
+              }
+
+              // Add temperature for non-reasoning models
+              if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+                requestBody.options.temperature = Number(this.llmTemperature);
+              }
+
+              // Add max tokens override if specified
+              if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+                requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
               }
 
               const res = await fetch('/admin/v1/test-prompt-llm', {

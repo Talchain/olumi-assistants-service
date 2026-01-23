@@ -16,7 +16,7 @@ describe("buildModelParams", () => {
     });
 
     it("uses max_completion_tokens instead of max_tokens", () => {
-      const params = buildModelParams(reasoningModel, 0, 16384);
+      const params = buildModelParams(reasoningModel, 0, { maxTokens: 16384 });
       expect(params.max_completion_tokens).toBe(16384);
       expect(params.max_tokens).toBeUndefined();
     });
@@ -28,8 +28,21 @@ describe("buildModelParams", () => {
 
     it("ignores temperature value for reasoning models", () => {
       // Even if a high temperature is passed, it should be ignored
-      const params = buildModelParams(reasoningModel, 0.9, 16384);
+      const params = buildModelParams(reasoningModel, 0.9, { maxTokens: 16384 });
       expect(params.temperature).toBeUndefined();
+      expect(params.reasoning_effort).toBe("medium");
+    });
+
+    it("uses custom reasoning_effort when provided", () => {
+      const paramsLow = buildModelParams(reasoningModel, 0, { reasoningEffort: "low" });
+      expect(paramsLow.reasoning_effort).toBe("low");
+
+      const paramsHigh = buildModelParams(reasoningModel, 0, { reasoningEffort: "high" });
+      expect(paramsHigh.reasoning_effort).toBe("high");
+    });
+
+    it("defaults reasoning_effort to medium when not specified", () => {
+      const params = buildModelParams(reasoningModel, 0, { maxTokens: 8192 });
       expect(params.reasoning_effort).toBe("medium");
     });
   });
@@ -46,7 +59,7 @@ describe("buildModelParams", () => {
     });
 
     it("uses max_tokens instead of max_completion_tokens", () => {
-      const params = buildModelParams("gpt-4o-mini", 0, 4096);
+      const params = buildModelParams("gpt-4o-mini", 0, { maxTokens: 4096 });
       expect(params.max_tokens).toBe(4096);
       expect(params.max_completion_tokens).toBeUndefined();
     });
@@ -61,11 +74,18 @@ describe("buildModelParams", () => {
       expect(buildModelParams("gpt-4o", 0.5).temperature).toBe(0.5);
       expect(buildModelParams("gpt-4o-mini", 0.7).temperature).toBe(0.7);
     });
+
+    it("ignores reasoning_effort option for standard models", () => {
+      // reasoningEffort option is ignored for non-reasoning models
+      const params = buildModelParams("gpt-4o", 0.5, { reasoningEffort: "high" });
+      expect(params.reasoning_effort).toBeUndefined();
+      expect(params.temperature).toBe(0.5);
+    });
   });
 
   describe("Unknown models", () => {
     it("treats unknown models as standard models", () => {
-      const params = buildModelParams("unknown-model", 0.3, 2048);
+      const params = buildModelParams("unknown-model", 0.3, { maxTokens: 2048 });
       expect(params.temperature).toBe(0.3);
       expect(params.max_tokens).toBe(2048);
       expect(params.reasoning_effort).toBeUndefined();
@@ -75,7 +95,7 @@ describe("buildModelParams", () => {
 
   describe("Output structure", () => {
     it("reasoning model output has only expected keys", () => {
-      const params = buildModelParams("gpt-5.2", 0, 16384);
+      const params = buildModelParams("gpt-5.2", 0, { maxTokens: 16384 });
       const keys = Object.keys(params);
       expect(keys).toContain("reasoning_effort");
       expect(keys).toContain("max_completion_tokens");
@@ -84,7 +104,7 @@ describe("buildModelParams", () => {
     });
 
     it("standard model output has only expected keys", () => {
-      const params = buildModelParams("gpt-4o", 0.5, 4096);
+      const params = buildModelParams("gpt-4o", 0.5, { maxTokens: 4096 });
       const keys = Object.keys(params);
       expect(keys).toContain("temperature");
       expect(keys).toContain("max_tokens");
