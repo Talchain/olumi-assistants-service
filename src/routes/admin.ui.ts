@@ -2601,7 +2601,6 @@ function generateAdminUI(): string {
           if (!Array.isArray(this.llmAvailableModels)) return true;
           const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
           return model?.supports_temperature ?? true;
-          }
         },
 
         // Cancel current LLM test
