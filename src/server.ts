@@ -449,6 +449,8 @@ app.get("/healthz", async () => {
         runtime_diagnostics?: {
           isPromptManagementEnabled: boolean;
           loaderCacheSize: number;
+          cacheTtlMs: number;
+          staleGracePeriodMs: number;
           draftGraphCacheEntry: {
             taskId: string;
             source: 'store' | 'default';
@@ -456,7 +458,7 @@ app.get("/healthz", async () => {
             version?: number;
             isStaging?: boolean;
             ageMs: number;
-            isExpired: boolean;
+            status: 'fresh' | 'stale' | 'expired';
           } | null;
         };
       }
@@ -504,6 +506,8 @@ app.get("/healthz", async () => {
         runtime_diagnostics: {
           isPromptManagementEnabled: isPromptManagementEnabled(),
           loaderCacheSize: loaderCacheDiagnostics.cacheSize,
+          cacheTtlMs: loaderCacheDiagnostics.cacheTtlMs,
+          staleGracePeriodMs: loaderCacheDiagnostics.staleGracePeriodMs,
           draftGraphCacheEntry: draftGraphCacheEntry ?? null,
         },
       };

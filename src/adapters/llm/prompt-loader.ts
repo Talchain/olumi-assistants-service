@@ -82,7 +82,8 @@ interface CacheEntry {
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
-const CACHE_TTL_MS = 60_000; // 1 minute
+const CACHE_TTL_MS = 300_000; // 5 minutes (matches repository cache TTL)
+const STALE_GRACE_PERIOD_MS = 60_000; // Return stale for up to 1 minute while refreshing
 
 // Track in-flight background refreshes to prevent thundering herd
 const inflightRefresh = new Map<CeeTaskId, Promise<void>>();
@@ -116,17 +117,35 @@ export function getSystemPrompt(
 
   const now = Date.now();
   const cached = hasVariables ? undefined : promptCache.get(taskId);
+  const cacheAge = cached ? now - cached.loadedAt : Infinity;
 
   // Return cached value if still fresh
-  if (cached && now - cached.loadedAt < CACHE_TTL_MS) {
+  if (cached && cacheAge < CACHE_TTL_MS) {
     emit(TelemetryEvents.PromptStoreCacheHit, { taskId });
     return cached.content;
   }
 
-  // Cache miss - log the reason
+  // Stale-while-revalidate: if cache is stale but within grace period, return stale + refresh
+  // This prevents returning defaults on cache expiry - only truly expired entries fall through
+  if (cached && cacheAge < CACHE_TTL_MS + STALE_GRACE_PERIOD_MS) {
+    emit(TelemetryEvents.PromptStoreCacheMiss, {
+      taskId,
+      reason: 'stale_while_revalidate',
+      cacheAge,
+    });
+
+    // Trigger background refresh if not already in-flight
+    triggerBackgroundRefresh(taskId, variables);
+
+    // Return stale cached value immediately (better than defaults)
+    return cached.content;
+  }
+
+  // Cache miss or very stale - log the reason
   emit(TelemetryEvents.PromptStoreCacheMiss, {
     taskId,
     reason: cached ? 'expired' : 'not_cached',
+    cacheAge: cached ? cacheAge : undefined,
   });
 
   // Load from prompt system (sync path for immediate return)
@@ -146,39 +165,7 @@ export function getSystemPrompt(
     }
 
     // Trigger background refresh from store to update cache for next request
-    // Only if not already in-flight (prevents thundering herd on cache expiry)
-    // Use staging in non-production environments to maintain consistency
-    if (!hasVariables && !inflightRefresh.has(taskId)) {
-      const useStaging = shouldUseStagingPrompts();
-      const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
-        .then((loaded) => {
-          if (loaded.source === 'store' && !hasVariables) {
-            const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
-            promptCache.set(taskId, {
-              content: loaded.content,
-              loadedAt: Date.now(),
-              source: loaded.source,
-              promptId: loaded.promptId,
-              version: loaded.version,
-              promptHash: refreshedHash,
-              isStaging: loaded.isStaging,
-            });
-            emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
-              taskId,
-              promptId: loaded.promptId,
-              version: loaded.version,
-              isStaging: loaded.isStaging,
-            });
-          }
-        })
-        .catch((err) => {
-          log.debug({ taskId, error: String(err) }, 'Background prompt refresh failed (non-fatal)');
-        })
-        .finally(() => {
-          inflightRefresh.delete(taskId);
-        });
-      inflightRefresh.set(taskId, refreshPromise);
-    }
+    triggerBackgroundRefresh(taskId, variables);
 
     return content;
   } catch (error) {
@@ -189,6 +176,55 @@ export function getSystemPrompt(
     );
     throw error;
   }
+}
+
+/**
+ * Trigger a background refresh of the prompt cache for a task
+ * Uses stale-while-revalidate pattern - existing cache serves requests while refresh happens
+ */
+function triggerBackgroundRefresh(
+  taskId: CeeTaskId,
+  variables?: Record<string, string | number>,
+): void {
+  // Skip if already in-flight (prevents thundering herd on cache expiry)
+  if (inflightRefresh.has(taskId)) {
+    return;
+  }
+
+  // Skip if variables are provided (not cached anyway)
+  if (variables && Object.keys(variables).length > 0) {
+    return;
+  }
+
+  const useStaging = shouldUseStagingPrompts();
+  const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
+    .then((loaded) => {
+      if (loaded.source === 'store') {
+        const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
+        promptCache.set(taskId, {
+          content: loaded.content,
+          loadedAt: Date.now(),
+          source: loaded.source,
+          promptId: loaded.promptId,
+          version: loaded.version,
+          promptHash: refreshedHash,
+          isStaging: loaded.isStaging,
+        });
+        emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
+          taskId,
+          promptId: loaded.promptId,
+          version: loaded.version,
+          isStaging: loaded.isStaging,
+        });
+      }
+    })
+    .catch((err) => {
+      log.debug({ taskId, error: String(err) }, 'Background prompt refresh failed (non-fatal)');
+    })
+    .finally(() => {
+      inflightRefresh.delete(taskId);
+    });
+  inflightRefresh.set(taskId, refreshPromise);
 }
 
 export function getSystemPromptMeta(operation: string): {
@@ -376,6 +412,8 @@ export function getSupportedOperations(): string[] {
  */
 export function getPromptLoaderCacheDiagnostics(): {
   cacheSize: number;
+  cacheTtlMs: number;
+  staleGracePeriodMs: number;
   entries: Array<{
     taskId: string;
     source: 'store' | 'default';
@@ -383,7 +421,7 @@ export function getPromptLoaderCacheDiagnostics(): {
     version?: number;
     isStaging?: boolean;
     ageMs: number;
-    isExpired: boolean;
+    status: 'fresh' | 'stale' | 'expired';
   }>;
 } {
   const now = Date.now();
@@ -394,23 +432,35 @@ export function getPromptLoaderCacheDiagnostics(): {
     version?: number;
     isStaging?: boolean;
     ageMs: number;
-    isExpired: boolean;
+    status: 'fresh' | 'stale' | 'expired';
   }> = [];
 
   for (const [taskId, entry] of promptCache.entries()) {
+    const ageMs = now - entry.loadedAt;
+    let status: 'fresh' | 'stale' | 'expired';
+    if (ageMs < CACHE_TTL_MS) {
+      status = 'fresh';
+    } else if (ageMs < CACHE_TTL_MS + STALE_GRACE_PERIOD_MS) {
+      status = 'stale'; // Will serve stale-while-revalidate
+    } else {
+      status = 'expired'; // Will fall back to defaults
+    }
+
     entries.push({
       taskId,
       source: entry.source ?? 'default',
       promptId: entry.promptId,
       version: entry.version,
       isStaging: entry.isStaging,
-      ageMs: now - entry.loadedAt,
-      isExpired: now - entry.loadedAt > CACHE_TTL_MS,
+      ageMs,
+      status,
     });
   }
 
   return {
     cacheSize: promptCache.size,
+    cacheTtlMs: CACHE_TTL_MS,
+    staleGracePeriodMs: STALE_GRACE_PERIOD_MS,
     entries,
   };
 }
