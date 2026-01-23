@@ -62,7 +62,7 @@ import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
-import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics } from "./adapters/llm/prompt-loader.js";
+import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
@@ -273,6 +273,20 @@ await app.register(rateLimit, {
   app.addHook("onRequest", async (request, _reply) => {
     attachRequestId(request);
     incrementRequestCount();
+
+    // Warn if request arrives before cache warming completes (race condition diagnostic)
+    // Skip healthz to avoid noise during startup probes
+    if (!isCacheWarmingComplete() && !request.url.startsWith('/healthz')) {
+      const warmingState = getCacheWarmingState();
+      request.log.warn({
+        event: 'request_before_cache_warming',
+        url: request.url,
+        method: request.method,
+        warming_completed: warmingState.completed,
+        warming_completed_at: warmingState.completedAt,
+        instance_uptime_ms: Date.now() - (warmingState.completedAt ?? Date.now()),
+      }, 'Request received before cache warming completed - may use default prompts');
+    }
   });
 
   // Auth: API key authentication with per-key quotas (v1.3.0)
@@ -532,10 +546,18 @@ app.get("/healthz", async () => {
     llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
     false;
 
+  // Get cache warming state for diagnostics
+  const warmingState = getCacheWarmingState();
+  const cacheWarmingHealthy = isCacheWarmingHealthy();
+
   // Determine degradation reasons
   const degradationReasons: string[] = [];
   if (promptStoreStatus.enabled && !promptStoreHealthy) {
     degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (promptStoreStatus.enabled && warmingState.completed && !cacheWarmingHealthy) {
+    // Cache warming completed but no prompts from store - indicates store issues
+    degradationReasons.push('cache_warming_no_store_prompts');
   }
   if (!hasAuthKeys && !hasHmacSecret) {
     degradationReasons.push('no_auth_configured');
@@ -592,6 +614,14 @@ app.get("/healthz", async () => {
       degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
       store: promptStoreStatus,
       counts: promptCounts,
+      cache_warming: {
+        completed: warmingState.completed,
+        completedAt: warmingState.completedAt ? new Date(warmingState.completedAt).toISOString() : null,
+        healthy: cacheWarmingHealthy,
+        warmed_from_store: warmingState.warmedFromStore,
+        failed_count: warmingState.failedCount,
+        skipped_count: warmingState.skippedCount,
+      },
     },
   };
 });

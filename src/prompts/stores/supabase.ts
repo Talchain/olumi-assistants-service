@@ -589,6 +589,16 @@ export class SupabasePromptStore implements IPromptStore {
       .limit(1);
 
     if (promptError || !prompts || prompts.length === 0) {
+      // Log why we're returning null - this is critical for diagnosing cache warming failures
+      log.warn({
+        event: 'prompt_store.getCompiled.no_prompt',
+        taskId,
+        useStaging: options?.useStaging,
+        hasError: !!promptError,
+        errorMessage: promptError?.message,
+        errorCode: (promptError as any)?.code,
+        promptCount: prompts?.length ?? 0,
+      }, `getCompiled returning null: ${promptError ? 'query error' : 'no prompt found for task'}`);
       return null;
     }
 
@@ -604,6 +614,19 @@ export class SupabasePromptStore implements IPromptStore {
       .single();
 
     if (versionError || !versions) {
+      // Log why version lookup failed
+      log.warn({
+        event: 'prompt_store.getCompiled.no_version',
+        taskId,
+        promptId: prompt.id,
+        targetVersion,
+        useStaging: options?.useStaging,
+        stagingVersion: prompt.staging_version,
+        activeVersion: prompt.active_version,
+        hasError: !!versionError,
+        errorMessage: versionError?.message,
+        errorCode: (versionError as any)?.code,
+      }, `getCompiled returning null: ${versionError ? 'version query error' : 'version not found'}`);
       return null;
     }
 

@@ -42,6 +42,23 @@ const INSTANCE_START_TIME = Date.now();
 // Flag to track if defaults have been initialized in this module instance
 let defaultsInitialized = false;
 
+// Cache warming readiness state - tracks whether prompts were successfully loaded from store
+interface CacheWarmingState {
+  completed: boolean;
+  completedAt: number | null;
+  warmedFromStore: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
+const cacheWarmingState: CacheWarmingState = {
+  completed: false,
+  completedAt: null,
+  warmedFromStore: 0,
+  failedCount: 0,
+  skippedCount: 0,
+};
+
 /**
  * Ensure default prompts are registered (called lazily on first access)
  */
@@ -406,14 +423,48 @@ export async function warmPromptCacheFromStore(): Promise<{
     }
   }
 
+  // Update cache warming state for readiness checks
+  cacheWarmingState.completed = true;
+  cacheWarmingState.completedAt = Date.now();
+  cacheWarmingState.warmedFromStore = warmed;
+  cacheWarmingState.failedCount = failed;
+  cacheWarmingState.skippedCount = skipped;
+
   log.info(
-    { warmed, failed, skipped, usedStaging, total: taskIds.length, useStaging },
+    { warmed, failed, skipped, usedStaging, total: taskIds.length, useStaging, instanceId: INSTANCE_ID },
     useStaging ? 'Prompt cache warming complete (staging mode)' : 'Prompt cache warming complete (production mode)'
   );
 
   emit(TelemetryEvents.PromptStoreCacheWarmed, { warmed, failed, skipped, usedStaging });
 
   return { warmed, failed, skipped, usedStaging };
+}
+
+/**
+ * Check if cache warming completed successfully
+ *
+ * Used by server to determine readiness for accepting traffic.
+ * Returns true if warming completed and at least some prompts were loaded from store.
+ */
+export function isCacheWarmingComplete(): boolean {
+  return cacheWarmingState.completed;
+}
+
+/**
+ * Check if cache warming is ready with store prompts
+ *
+ * More strict check - requires that at least one prompt was loaded from store.
+ * Returns false if all prompts fell back to defaults (indicates store connectivity issues).
+ */
+export function isCacheWarmingHealthy(): boolean {
+  return cacheWarmingState.completed && cacheWarmingState.warmedFromStore > 0;
+}
+
+/**
+ * Get cache warming state for diagnostics
+ */
+export function getCacheWarmingState(): Readonly<CacheWarmingState> {
+  return { ...cacheWarmingState };
 }
 
 /**
