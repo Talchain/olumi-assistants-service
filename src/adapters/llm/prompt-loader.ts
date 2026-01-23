@@ -228,6 +228,11 @@ function triggerBackgroundRefresh(
           promptHash: refreshedHash,
           isStaging: loaded.isStaging,
         });
+        // Log successful refresh with full identifiers for debugging
+        log.info(
+          { taskId, promptId: loaded.promptId, version: loaded.version, isStaging: loaded.isStaging, useStaging, instanceId: INSTANCE_ID },
+          'Background refresh successful - cache updated with store prompt'
+        );
         emit(TelemetryEvents.PromptStoreBackgroundRefresh, {
           taskId,
           promptId: loaded.promptId,
@@ -258,6 +263,10 @@ export function getSystemPromptMeta(operation: string): {
   instance_id?: string;
   /** Cache age in ms at request time */
   cache_age_ms?: number;
+  /** Cache status at request time: fresh, stale (serving while revalidating), or expired */
+  cache_status?: 'fresh' | 'stale' | 'expired' | 'miss';
+  /** Whether staging mode is enabled (from DD_ENV or config) */
+  use_staging_mode?: boolean;
 } {
   ensureDefaultsRegistered();
 
@@ -273,6 +282,19 @@ export function getSystemPromptMeta(operation: string): {
   const promptHash = cached?.promptHash;
   const isStaging = cached?.isStaging ?? false;
   const cacheAgeMs = cached ? Date.now() - cached.loadedAt : undefined;
+  const useStagingMode = shouldUseStagingPrompts();
+
+  // Compute cache status
+  let cacheStatus: 'fresh' | 'stale' | 'expired' | 'miss';
+  if (!cached) {
+    cacheStatus = 'miss';
+  } else if (cacheAgeMs! < CACHE_TTL_MS) {
+    cacheStatus = 'fresh';
+  } else if (cacheAgeMs! < CACHE_TTL_MS + STALE_GRACE_PERIOD_MS) {
+    cacheStatus = 'stale';
+  } else {
+    cacheStatus = 'expired';
+  }
 
   // Format prompt_version to clearly indicate staging/production
   // Include instance ID for multi-instance debugging
@@ -298,6 +320,8 @@ export function getSystemPromptMeta(operation: string): {
     isStaging,
     instance_id: INSTANCE_ID,
     cache_age_ms: cacheAgeMs,
+    cache_status: cacheStatus,
+    use_staging_mode: useStagingMode,
   };
 }
 
@@ -440,6 +464,7 @@ export function getSupportedOperations(): string[] {
 export function getPromptLoaderCacheDiagnostics(): {
   instanceId: string;
   instanceUptimeMs: number;
+  useStagingMode: boolean;
   cacheSize: number;
   cacheTtlMs: number;
   staleGracePeriodMs: number;
@@ -489,6 +514,7 @@ export function getPromptLoaderCacheDiagnostics(): {
   return {
     instanceId: INSTANCE_ID,
     instanceUptimeMs: Date.now() - INSTANCE_START_TIME,
+    useStagingMode: shouldUseStagingPrompts(),
     cacheSize: promptCache.size,
     cacheTtlMs: CACHE_TTL_MS,
     staleGracePeriodMs: STALE_GRACE_PERIOD_MS,
