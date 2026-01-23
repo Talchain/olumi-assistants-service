@@ -235,7 +235,7 @@ export interface CallOpts {
   requestId: string;
   timeoutMs: number;
   abortSignal?: AbortSignal;
-  bypassCache?: boolean; // Skip prompt cache (for testing/debugging)
+  bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (X-CEE-Refresh-Prompt header)
   collector?: CorrectionCollector; // Graph corrections tracking
 }
 

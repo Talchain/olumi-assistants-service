@@ -934,6 +934,13 @@ export async function finaliseCeeDraftResponse(
   // Corrections collector for tracking all graph modifications
   const collector = createCorrectionCollector();
 
+  // Check for X-CEE-Refresh-Prompt header to force fresh prompt load from Supabase
+  const refreshPromptsHeader = request.headers?.['x-cee-refresh-prompt'];
+  const refreshPrompts = refreshPromptsHeader === '1' || refreshPromptsHeader === 'true';
+  if (refreshPrompts) {
+    log.info({ requestId }, 'X-CEE-Refresh-Prompt header detected - will bypass prompt cache');
+  }
+
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
   let lastError: Error | null = null;
@@ -941,7 +948,7 @@ export async function finaliseCeeDraftResponse(
 
   for (let attempt = 1; attempt <= SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts; attempt++) {
     try {
-      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId);
+      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, { refreshPrompts });
       lastError = null;
       break; // Success - exit retry loop
     } catch (error) {

@@ -449,7 +449,12 @@ async function groundAttachments(
   return result;
 }
 
-export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string): Promise<PipelineResult> {
+export interface PipelineOpts {
+  /** Force refresh prompts from Supabase (bypass cache) */
+  refreshPrompts?: boolean;
+}
+
+export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string, pipelineOpts?: PipelineOpts): Promise<PipelineResult> {
   // Create correction collector for tracking graph modifications
   const collector = createCorrectionCollector();
 
@@ -530,7 +535,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
           includeDebug: input.include_debug === true,
         },
-        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector }
+        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector, bypassCache: pipelineOpts?.refreshPrompts }
       );
       break;
     } catch (error) {

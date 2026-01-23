@@ -15,7 +15,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 
 export type DraftArgs = {
@@ -409,9 +409,16 @@ export type UsageMetrics = {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
-  opts?: { collector?: CorrectionCollector }
+  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
+
+  // X-CEE-Refresh-Prompt support: invalidate cache to force fresh load from Supabase
+  if (opts?.refreshPrompts) {
+    invalidatePromptCache('draft_graph', 'header_refresh');
+    log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via X-CEE-Refresh-Prompt header');
+  }
+
   const prompt = buildDraftPrompt(args);
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
@@ -1812,6 +1819,7 @@ export class AnthropicAdapter implements LLMAdapter {
     const { brief, docs = [], seed } = args;
 
     // Call existing function with compatible args, passing model from adapter
+    // Pass bypassCache as refreshPrompts to trigger prompt cache invalidation
     const result = await draftGraphWithAnthropic(
       {
         brief,
@@ -1819,7 +1827,7 @@ export class AnthropicAdapter implements LLMAdapter {
         seed,
         model: this.model,
       },
-      { collector: opts.collector }
+      { collector: opts.collector, refreshPrompts: opts.bypassCache }
     );
 
     return {
