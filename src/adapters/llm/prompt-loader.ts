@@ -32,8 +32,12 @@
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
 import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { shouldUseStagingPrompts } from '../../config/index.js';
+
+// Unique identifier for this server instance (helps diagnose multi-instance issues)
+const INSTANCE_ID = randomBytes(4).toString('hex');
+const INSTANCE_START_TIME = Date.now();
 
 // Flag to track if defaults have been initialized in this module instance
 let defaultsInitialized = false;
@@ -141,12 +145,19 @@ export function getSystemPrompt(
     return cached.content;
   }
 
-  // Cache miss or very stale - log the reason
+  // Cache miss or very stale - log the reason with visibility in production logs
+  const missReason = cached ? 'expired' : 'not_cached';
   emit(TelemetryEvents.PromptStoreCacheMiss, {
     taskId,
-    reason: cached ? 'expired' : 'not_cached',
+    reason: missReason,
     cacheAge: cached ? cacheAge : undefined,
   });
+
+  // Log at warn level for visibility in production - this should be rare after cache warming
+  log.warn(
+    { taskId, reason: missReason, cacheAge: cached ? cacheAge : null, cacheTtlMs: CACHE_TTL_MS, staleGraceMs: STALE_GRACE_PERIOD_MS },
+    'Prompt cache miss - returning defaults. This indicates cache expiry or cold start.'
+  );
 
   // Load from prompt system (sync path for immediate return)
   try {
@@ -199,6 +210,13 @@ function triggerBackgroundRefresh(
   const useStaging = shouldUseStagingPrompts();
   const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
     .then((loaded) => {
+      // Log when background refresh returns defaults instead of store data
+      if (loaded.source !== 'store') {
+        log.warn(
+          { taskId, source: loaded.source, useStaging },
+          'Background refresh returned defaults instead of store prompt - check Supabase connectivity'
+        );
+      }
       if (loaded.source === 'store') {
         const refreshedHash = createHash('sha256').update(loaded.content).digest('hex');
         promptCache.set(taskId, {
@@ -219,7 +237,8 @@ function triggerBackgroundRefresh(
       }
     })
     .catch((err) => {
-      log.debug({ taskId, error: String(err) }, 'Background prompt refresh failed (non-fatal)');
+      // Log at warn level for visibility - background refresh failures prevent cache warming
+      log.warn({ taskId, error: String(err) }, 'Background prompt refresh failed - cache will not be updated');
     })
     .finally(() => {
       inflightRefresh.delete(taskId);
@@ -235,6 +254,10 @@ export function getSystemPromptMeta(operation: string): {
   prompt_version: string;
   prompt_hash?: string;
   isStaging?: boolean;
+  /** Server instance ID (for diagnosing multi-instance cache issues) */
+  instance_id?: string;
+  /** Cache age in ms at request time */
+  cache_age_ms?: number;
 } {
   ensureDefaultsRegistered();
 
@@ -249,12 +272,14 @@ export function getSystemPromptMeta(operation: string): {
   const version = cached?.version;
   const promptHash = cached?.promptHash;
   const isStaging = cached?.isStaging ?? false;
+  const cacheAgeMs = cached ? Date.now() - cached.loadedAt : undefined;
 
   // Format prompt_version to clearly indicate staging/production
+  // Include instance ID for multi-instance debugging
   // Examples:
-  //   "draft_graph_default@v6 (staging)" - staging version from store
-  //   "draft_graph_default@v8 (production)" - production version from store
-  //   "default:draft_graph" - hardcoded default
+  //   "draft_graph_default@v6 (staging) [inst:a1b2c3d4]" - staging version from store
+  //   "draft_graph_default@v8 (production) [inst:a1b2c3d4]" - production version from store
+  //   "default:draft_graph [inst:a1b2c3d4]" - hardcoded default
   let promptVersion: string;
   if (source === 'store' && promptId && typeof version === 'number') {
     const envLabel = isStaging ? 'staging' : 'production';
@@ -271,6 +296,8 @@ export function getSystemPromptMeta(operation: string): {
     prompt_version: promptVersion,
     prompt_hash: promptHash,
     isStaging,
+    instance_id: INSTANCE_ID,
+    cache_age_ms: cacheAgeMs,
   };
 }
 
@@ -411,6 +438,8 @@ export function getSupportedOperations(): string[] {
  * Used by healthz to diagnose cache issues
  */
 export function getPromptLoaderCacheDiagnostics(): {
+  instanceId: string;
+  instanceUptimeMs: number;
   cacheSize: number;
   cacheTtlMs: number;
   staleGracePeriodMs: number;
@@ -458,6 +487,8 @@ export function getPromptLoaderCacheDiagnostics(): {
   }
 
   return {
+    instanceId: INSTANCE_ID,
+    instanceUptimeMs: Date.now() - INSTANCE_START_TIME,
     cacheSize: promptCache.size,
     cacheTtlMs: CACHE_TTL_MS,
     staleGracePeriodMs: STALE_GRACE_PERIOD_MS,

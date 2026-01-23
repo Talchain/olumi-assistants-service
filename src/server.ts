@@ -447,6 +447,8 @@ app.get("/healthz", async () => {
           compiledOk?: boolean;
         };
         runtime_diagnostics?: {
+          instanceId: string;
+          instanceUptimeMs: number;
           isPromptManagementEnabled: boolean;
           loaderCacheSize: number;
           cacheTtlMs: number;
@@ -504,6 +506,8 @@ app.get("/healthz", async () => {
         draft_graph_debug: draftGraphDebug,
         // Runtime diagnostics - what the actual LLM calls will use
         runtime_diagnostics: {
+          instanceId: loaderCacheDiagnostics.instanceId,
+          instanceUptimeMs: loaderCacheDiagnostics.instanceUptimeMs,
           isPromptManagementEnabled: isPromptManagementEnabled(),
           loaderCacheSize: loaderCacheDiagnostics.cacheSize,
           cacheTtlMs: loaderCacheDiagnostics.cacheTtlMs,
