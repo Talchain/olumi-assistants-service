@@ -704,7 +704,14 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await initializePromptStore();
 
     // Initialize store, seed defaults, and warm cache
-    if (config.prompts?.enabled) {
+    // Use isPromptManagementEnabled() for consistency with runtime behavior
+    // This auto-enables if a healthy DB-backed store is configured (Supabase/Postgres)
+    const promptMgmtEnabled = await (async () => {
+      const { isPromptManagementEnabled } = await import('./prompts/loader.js');
+      return isPromptManagementEnabled();
+    })();
+
+    if (promptMgmtEnabled) {
       const seedResult = await initializeAndSeedPrompts();
       app.log.info({ seedResult }, 'Prompt system initialized');
 
@@ -712,6 +719,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         const warmResult = await warmPromptCacheFromStore();
         app.log.info({ warmResult }, 'Prompt cache warmed from store');
       }
+    } else if (config.prompts?.enabled) {
+      // Explicit PROMPTS_ENABLED=true but store not healthy - warn
+      app.log.warn('PROMPTS_ENABLED=true but prompt store is not healthy - cache warming skipped');
     }
 
     // Register admin routes if enabled and configured
