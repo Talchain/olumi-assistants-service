@@ -934,11 +934,14 @@ export async function finaliseCeeDraftResponse(
   // Corrections collector for tracking all graph modifications
   const collector = createCorrectionCollector();
 
-  // Check for X-CEE-Refresh-Prompt header to force fresh prompt load from Supabase
+  // Check for cache bypass via URL param (?supa=1) or header (X-CEE-Refresh-Prompt: true)
+  // URL param is easier for frontend testing: https://staging--olumi.netlify.app/#/canvas?diag=1&supa=1
+  const query = (request.query as Record<string, unknown>) ?? {};
+  const supaQueryParam = query.supa === '1' || query.supa === 'true' || query.Supa === '1' || query.Supa === 'true';
   const refreshPromptsHeader = request.headers?.['x-cee-refresh-prompt'];
-  const refreshPrompts = refreshPromptsHeader === '1' || refreshPromptsHeader === 'true';
+  const refreshPrompts = supaQueryParam || refreshPromptsHeader === '1' || refreshPromptsHeader === 'true';
   if (refreshPrompts) {
-    log.info({ requestId }, 'X-CEE-Refresh-Prompt header detected - will bypass prompt cache');
+    log.info({ requestId, source: supaQueryParam ? 'url_param_supa' : 'header' }, 'Prompt cache bypass requested - will force fresh load from Supabase');
   }
 
   // Run pipeline with single retry for schema validation failures

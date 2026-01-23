@@ -16,7 +16,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { getSystemPrompt, getSystemPromptMeta } from './prompt-loader.js';
+import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 
 // ============================================================================
@@ -391,6 +391,12 @@ export class OpenAIAdapter implements LLMAdapter {
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
     const collector = opts.collector;
+
+    // Cache bypass support: invalidate and force fresh load from Supabase
+    if (opts.bypassCache) {
+      invalidatePromptCache('draft_graph', 'header_refresh');
+      log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via bypass flag (OpenAI)');
+    }
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
     const systemPrompt = getSystemPrompt('draft_graph');
