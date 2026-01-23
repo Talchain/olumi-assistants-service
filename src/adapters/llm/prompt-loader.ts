@@ -86,8 +86,12 @@ interface CacheEntry {
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
-const CACHE_TTL_MS = 300_000; // 5 minutes (matches repository cache TTL)
-const STALE_GRACE_PERIOD_MS = 60_000; // Return stale for up to 1 minute while refreshing
+const CACHE_TTL_MS = 300_000; // 5 minutes - triggers background refresh after this
+const STALE_GRACE_PERIOD_MS = 3600_000; // 1 hour - return stale store prompts rather than falling back to defaults
+// Note: The grace period is intentionally long because:
+// - Returning a stale store prompt is MUCH better than falling back to hardcoded defaults
+// - Background refresh will update the cache for subsequent requests
+// - Only truly empty cache (cold start) should ever return defaults
 
 // Track in-flight background refreshes to prevent thundering herd
 const inflightRefresh = new Map<CeeTaskId, Promise<void>>();
