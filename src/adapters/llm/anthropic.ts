@@ -640,6 +640,11 @@ export async function draftGraphWithAnthropic(
         model,
         prompt_version: promptMeta.prompt_version,
         prompt_hash: promptMeta.prompt_hash,
+        // Diagnostic fields for prompt cache debugging
+        instance_id: promptMeta.instance_id,
+        cache_age_ms: promptMeta.cache_age_ms,
+        cache_status: promptMeta.cache_status,
+        use_staging_mode: promptMeta.use_staging_mode,
         temperature: 0,
         max_tokens: maxTokens,
         seed: args.seed,

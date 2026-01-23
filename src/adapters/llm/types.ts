@@ -66,6 +66,12 @@ export interface DraftGraphResult {
     // Safe diagnostics
     node_kinds_raw_json?: string[];
 
+    // Prompt cache diagnostics (for debugging multi-instance cache issues)
+    instance_id?: string;
+    cache_age_ms?: number;
+    cache_status?: 'fresh' | 'stale' | 'expired' | 'miss';
+    use_staging_mode?: boolean;
+
     // Unsafe (admin-gated)
     raw_output_preview?: string;
     raw_llm_text?: string;
