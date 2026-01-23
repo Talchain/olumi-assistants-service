@@ -450,8 +450,10 @@ async function groundAttachments(
 }
 
 export interface PipelineOpts {
-  /** Force refresh prompts from Supabase (bypass cache) */
+  /** Force refresh prompts from Supabase (bypass cache) - ?supa=1 URL param */
   refreshPrompts?: boolean;
+  /** Force use of hardcoded default prompt (skip store lookup) - ?default=1 URL param */
+  forceDefault?: boolean;
 }
 
 export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string, pipelineOpts?: PipelineOpts): Promise<PipelineResult> {
@@ -535,7 +537,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
           includeDebug: input.include_debug === true,
         },
-        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector, bypassCache: pipelineOpts?.refreshPrompts }
+        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector, bypassCache: pipelineOpts?.refreshPrompts, forceDefault: pipelineOpts?.forceDefault }
       );
       break;
     } catch (error) {

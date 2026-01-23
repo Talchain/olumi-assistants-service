@@ -288,7 +288,7 @@ Draft a small decision graph with:
 
 Respond ONLY with valid JSON matching this structure.`;
 
-function buildDraftPrompt(args: DraftArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): { system: AnthropicSystemBlock[]; userContent: string } {
   const docContext = args.docs.length
     ? `\n\n## Attached Documents\n${args.docs
         .map((d) => {
@@ -301,7 +301,8 @@ function buildDraftPrompt(args: DraftArgs): { system: AnthropicSystemBlock[]; us
   const userContent = `## Brief\n${args.brief}${docContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = getSystemPrompt('draft_graph');
+  // If forceDefault is true, skip store/cache and use hardcoded default directly
+  const systemPrompt = getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
@@ -409,7 +410,7 @@ export type UsageMetrics = {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
-  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean }
+  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
 
@@ -419,7 +420,7 @@ export async function draftGraphWithAnthropic(
     log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via X-CEE-Refresh-Prompt header');
   }
 
-  const prompt = buildDraftPrompt(args);
+  const prompt = buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
@@ -1811,6 +1812,7 @@ export class AnthropicAdapter implements LLMAdapter {
 
     // Call existing function with compatible args, passing model from adapter
     // Pass bypassCache as refreshPrompts to trigger prompt cache invalidation
+    // Pass forceDefault to use hardcoded default prompt instead of store prompt
     const result = await draftGraphWithAnthropic(
       {
         brief,
@@ -1818,7 +1820,7 @@ export class AnthropicAdapter implements LLMAdapter {
         seed,
         model: this.model,
       },
-      { collector: opts.collector, refreshPrompts: opts.bypassCache }
+      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault }
     );
 
     return {

@@ -399,7 +399,8 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
-    const systemPrompt = getSystemPrompt('draft_graph');
+    // If forceDefault is true, skip store/cache and use hardcoded default directly
+    const systemPrompt = getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
     const promptMeta = getSystemPromptMeta('draft_graph');
 
     // Build user content with brief and documents

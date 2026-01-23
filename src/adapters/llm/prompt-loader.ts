@@ -113,28 +113,50 @@ const STALE_GRACE_PERIOD_MS = 600_000; // 10 minutes - return stale store prompt
 const inflightRefresh = new Map<CeeTaskId, Promise<void>>();
 
 /**
+ * Options for getSystemPrompt
+ */
+export interface GetSystemPromptOptions {
+  /** Variables to interpolate into the prompt */
+  variables?: Record<string, string | number>;
+  /** Force use of hardcoded default prompt (skip store/cache lookup) - ?default=1 URL param */
+  forceDefault?: boolean;
+}
+
+/**
  * Get the system prompt for an LLM operation.
  *
  * Resolution order:
- * 1. Check cache (if not expired)
- * 2. Load from prompt management system (store -> defaults)
- * 3. Cache the result
+ * 1. If forceDefault, return hardcoded default directly
+ * 2. Check cache (if not expired)
+ * 3. Load from prompt management system (store -> defaults)
+ * 4. Cache the result
  *
  * @param operation - The LLM operation name (e.g., 'draft_graph')
- * @param variables - Optional variables to interpolate
+ * @param options - Optional configuration including variables and forceDefault
  * @returns The prompt content
  * @throws Error if no prompt is registered for the operation
  */
 export function getSystemPrompt(
   operation: string,
-  variables?: Record<string, string | number>,
+  options?: GetSystemPromptOptions,
 ): string {
+  const variables = options?.variables;
+  const forceDefault = options?.forceDefault ?? false;
   // Ensure default prompts are registered on first access
   ensureDefaultsRegistered();
 
   const taskId = OPERATION_TO_TASK_ID[operation];
   if (!taskId) {
     throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
+  }
+
+  // If forceDefault is true, skip cache and store - return hardcoded default directly
+  // Useful for A/B testing store prompts vs defaults
+  if (forceDefault) {
+    log.info({ taskId, forceDefault: true }, 'Force default prompt requested - skipping cache and store');
+    const content = loadPromptSync(taskId, variables ?? {});
+    emit(TelemetryEvents.PromptLoadedFromDefault, { taskId, reason: 'force_default' });
+    return content;
   }
 
   const hasVariables = Boolean(variables && Object.keys(variables).length > 0);

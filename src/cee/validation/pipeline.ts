@@ -944,6 +944,13 @@ export async function finaliseCeeDraftResponse(
     log.info({ requestId, source: supaQueryParam ? 'url_param_supa' : 'header' }, 'Prompt cache bypass requested - will force fresh load from Supabase');
   }
 
+  // Check for force default prompt via URL param (?default=1)
+  // Useful for A/B testing store prompts vs hardcoded defaults
+  const defaultQueryParam = query.default === '1' || query.default === 'true';
+  if (defaultQueryParam) {
+    log.info({ requestId }, 'Force default prompt requested via ?default=1 - will skip store lookup');
+  }
+
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
   let lastError: Error | null = null;
@@ -951,7 +958,7 @@ export async function finaliseCeeDraftResponse(
 
   for (let attempt = 1; attempt <= SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts; attempt++) {
     try {
-      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, { refreshPrompts });
+      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, { refreshPrompts, forceDefault: defaultQueryParam });
       lastError = null;
       break; // Success - exit retry loop
     } catch (error) {
