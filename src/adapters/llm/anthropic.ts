@@ -288,7 +288,7 @@ Draft a small decision graph with:
 
 Respond ONLY with valid JSON matching this structure.`;
 
-function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): { system: AnthropicSystemBlock[]; userContent: string } {
+async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const docContext = args.docs.length
     ? `\n\n## Attached Documents\n${args.docs
         .map((d) => {
@@ -302,7 +302,7 @@ function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): {
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
-  const systemPrompt = getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
+  const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
@@ -337,11 +337,11 @@ IMPORTANT: Each option must be distinct. Do not duplicate existing options or cr
 
 Respond ONLY with valid JSON.`;
 
-function buildSuggestPrompt(args: {
+async function buildSuggestPrompt(args: {
   goal: string;
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
-}): { system: AnthropicSystemBlock[]; userContent: string } {
+}): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const existingContext = args.existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -353,7 +353,7 @@ function buildSuggestPrompt(args: {
   const userContent = `## Goal\n${args.goal}${constraintsContext}${existingContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = getSystemPrompt('suggest_options');
+  const systemPrompt = await getSystemPrompt('suggest_options');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "suggest_options" }),
@@ -420,7 +420,7 @@ export async function draftGraphWithAnthropic(
     log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via X-CEE-Refresh-Prompt header');
   }
 
-  const prompt = buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
+  const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
@@ -742,7 +742,7 @@ export async function suggestOptionsWithAnthropic(args: {
   existingOptions?: string[];
   model?: string;
 }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
-  const prompt = buildSuggestPrompt(args);
+  const prompt = await buildSuggestPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
 
@@ -934,7 +934,7 @@ Fix the graph to resolve ALL violations. Common fixes:
 
 Respond ONLY with valid JSON matching this structure.`;
 
-function buildRepairPrompt(args: RepairArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const graphJson = JSON.stringify(
     {
       nodes: args.graph.nodes,
@@ -953,7 +953,7 @@ ${graphJson}
 ${violationsText}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = getSystemPrompt('repair_graph');
+  const systemPrompt = await getSystemPrompt('repair_graph');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "repair_graph" }),
@@ -964,7 +964,7 @@ ${violationsText}`;
 export async function repairGraphWithAnthropic(
   args: RepairArgs
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
-  const prompt = buildRepairPrompt(args);
+  const prompt = await buildRepairPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('repair_graph') ?? 4096;
 
@@ -1268,7 +1268,7 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-function buildClarifyPrompt(args: ClarifyArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const previousContext = args.previous_answers?.length
     ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
     : "";
@@ -1278,7 +1278,7 @@ ${args.brief}
 ${previousContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = getSystemPrompt('clarify_brief');
+  const systemPrompt = await getSystemPrompt('clarify_brief');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "clarify_brief" }),
@@ -1289,7 +1289,7 @@ ${previousContext}`;
 export async function clarifyBriefWithAnthropic(
   args: ClarifyArgs
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
-  const prompt = buildClarifyPrompt(args);
+  const prompt = await buildClarifyPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
 
@@ -1472,7 +1472,7 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-function buildCritiquePrompt(args: CritiqueArgs): { system: AnthropicSystemBlock[]; userContent: string } {
+async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const graphJson = JSON.stringify(
     {
       nodes: args.graph.nodes,
@@ -1492,7 +1492,7 @@ ${graphJson}
 ${briefContext}${focusContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = getSystemPrompt('critique_graph');
+  const systemPrompt = await getSystemPrompt('critique_graph');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "critique_graph" }),
@@ -1503,7 +1503,7 @@ ${briefContext}${focusContext}`;
 export async function critiqueGraphWithAnthropic(
   args: CritiqueArgs
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
-  const prompt = buildCritiquePrompt(args);
+  const prompt = await buildCritiquePrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
 

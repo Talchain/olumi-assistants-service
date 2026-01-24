@@ -31,6 +31,7 @@
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
 import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
+import { isPromptManagementEnabled } from '../../prompts/loader.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { shouldUseStagingPrompts } from '../../config/index.js';
@@ -127,19 +128,19 @@ export interface GetSystemPromptOptions {
  *
  * Resolution order:
  * 1. If forceDefault, return hardcoded default directly
- * 2. Check cache (if not expired)
- * 3. Load from prompt management system (store -> defaults)
- * 4. Cache the result
+ * 2. Check cache (if fresh or stale within grace period)
+ * 3. If cache expired, try synchronous store fetch first
+ * 4. Fall back to defaults only if store fetch fails
  *
  * @param operation - The LLM operation name (e.g., 'draft_graph')
  * @param options - Optional configuration including variables and forceDefault
  * @returns The prompt content
  * @throws Error if no prompt is registered for the operation
  */
-export function getSystemPrompt(
+export async function getSystemPrompt(
   operation: string,
   options?: GetSystemPromptOptions,
-): string {
+): Promise<string> {
   const variables = options?.variables;
   const forceDefault = options?.forceDefault ?? false;
   // Ensure default prompts are registered on first access
@@ -202,6 +203,47 @@ export function getSystemPrompt(
     reason: missReason,
     cacheAge: cached ? cacheAge : undefined,
   });
+
+  // Cache expired - try synchronous store fetch BEFORE falling back to defaults
+  // This ensures store prompts are used when available, even after cache expiry
+  if (isPromptManagementEnabled()) {
+    const useStaging = shouldUseStagingPrompts();
+    try {
+      const loaded = await loadPrompt(taskId, { variables: variables ?? {}, useStaging });
+      if (loaded.source === 'store') {
+        const promptHash = createHash('sha256').update(loaded.content).digest('hex');
+
+        // Update cache with store prompt
+        if (!hasVariables) {
+          promptCache.set(taskId, {
+            content: loaded.content,
+            loadedAt: Date.now(),
+            source: loaded.source,
+            promptId: loaded.promptId,
+            version: loaded.version,
+            promptHash,
+            isStaging: loaded.isStaging,
+          });
+        }
+
+        log.info(
+          { taskId, promptId: loaded.promptId, version: loaded.version, isStaging: loaded.isStaging, useStaging, instanceId: INSTANCE_ID },
+          'Cache expired - loaded from store synchronously'
+        );
+        emit(TelemetryEvents.PromptLoadedFromStore, { taskId, fromCache: false, reason: 'cache_expired_sync_fetch' });
+
+        return loaded.content;
+      }
+      // Store returned defaults - fall through to default handling below
+      log.debug({ taskId, useStaging }, 'Cache expired - store returned defaults, using hardcoded default');
+    } catch (err) {
+      // Store fetch failed - fall through to defaults
+      log.warn(
+        { taskId, error: String(err), useStaging },
+        'Cache expired - store fetch failed, falling back to defaults'
+      );
+    }
+  }
 
   // Log at warn level for visibility in production - this should be rare after cache warming
   log.warn(
