@@ -206,11 +206,24 @@ export async function getSystemPrompt(
 
   // Cache expired - try synchronous store fetch BEFORE falling back to defaults
   // This ensures store prompts are used when available, even after cache expiry
+  // Use a timeout to prevent blocking too long if Supabase is slow (2.5s max)
+  const STORE_FETCH_TIMEOUT_MS = 2500;
   if (isPromptManagementEnabled()) {
     const useStaging = shouldUseStagingPrompts();
     try {
-      const loaded = await loadPrompt(taskId, { variables: variables ?? {}, useStaging });
-      if (loaded.source === 'store') {
+      const fetchPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging });
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), STORE_FETCH_TIMEOUT_MS)
+      );
+      const loaded = await Promise.race([fetchPromise, timeoutPromise]);
+
+      if (loaded === null) {
+        log.warn(
+          { taskId, timeoutMs: STORE_FETCH_TIMEOUT_MS, useStaging },
+          'Cache expired - store fetch timed out, falling back to defaults'
+        );
+        // Fall through to defaults
+      } else if (loaded.source === 'store') {
         const promptHash = createHash('sha256').update(loaded.content).digest('hex');
 
         // Update cache with store prompt
@@ -233,9 +246,10 @@ export async function getSystemPrompt(
         emit(TelemetryEvents.PromptLoadedFromStore, { taskId, fromCache: false, reason: 'cache_expired_sync_fetch' });
 
         return loaded.content;
+      } else if (loaded !== null) {
+        // Store returned defaults - fall through to default handling below
+        log.debug({ taskId, useStaging }, 'Cache expired - store returned defaults, using hardcoded default');
       }
-      // Store returned defaults - fall through to default handling below
-      log.debug({ taskId, useStaging }, 'Cache expired - store returned defaults, using hardcoded default');
     } catch (err) {
       // Store fetch failed - fall through to defaults
       log.warn(
