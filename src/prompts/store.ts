@@ -41,6 +41,8 @@ const DEFAULT_STORE_PATH = 'data/prompts.json';
 let defaultStore: IPromptStore | null = null;
 let storeInitialized = false;
 let storeHealthy = false;
+/** Tracks the actual store type used (after auto-detection) - set when store is created */
+let actualStoreType: 'file' | 'postgres' | 'supabase' | null = null;
 
 /**
  * Check if a database-backed store is configured via environment variables.
@@ -127,6 +129,9 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
       }
     }
 
+    // Track the actual store type used (after auto-detection)
+    actualStoreType = storeType as 'file' | 'postgres' | 'supabase';
+
     if (storeType === 'supabase') {
       const url = config.prompts?.supabaseUrl;
       const serviceRoleKey = config.prompts?.supabaseServiceRoleKey;
@@ -137,7 +142,7 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
         url,
         serviceRoleKey,
       });
-      log.info({ storeType: 'supabase' }, 'Using Supabase prompt store');
+      log.info({ storeType: 'supabase', actualStoreType }, 'Using Supabase prompt store');
     } else if (storeType === 'postgres') {
       const connectionString = config.prompts?.postgresUrl;
       if (!connectionString) {
@@ -148,7 +153,7 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
         poolSize: config.prompts?.postgresPoolSize ?? 10,
         ssl: config.prompts?.postgresSsl ?? false,
       });
-      log.info({ storeType: 'postgres' }, 'Using PostgreSQL prompt store');
+      log.info({ storeType: 'postgres', actualStoreType }, 'Using PostgreSQL prompt store');
     } else {
       // Default to file store
       const storeConfig = {
@@ -157,7 +162,7 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
         maxBackups: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.maxBackups ?? config.prompts?.maxBackups ?? 10,
       };
       defaultStore = new FilePromptStore(storeConfig);
-      log.info({ storeType: 'file', path: storeConfig.filePath }, 'Using file-based prompt store');
+      log.info({ storeType: 'file', actualStoreType, path: storeConfig.filePath }, 'Using file-based prompt store');
     }
   }
   return defaultStore;
@@ -174,11 +179,10 @@ export async function initializePromptStore(): Promise<void> {
   }
 
   const storeType = config.prompts?.storeType ?? 'file';
-  const hasDbCredentials = storeType === 'supabase'
-    ? Boolean(config.prompts?.supabaseUrl && config.prompts?.supabaseServiceRoleKey)
-    : storeType === 'postgres'
-      ? Boolean(config.prompts?.postgresUrl)
-      : false;
+  // Use isStoreBackendConfigured() which handles auto-detection of credentials
+  // even when storeType is 'file' (the default). This ensures we initialize
+  // if Supabase/Postgres credentials are present, regardless of PROMPTS_STORE_TYPE.
+  const hasDbCredentials = isStoreBackendConfigured();
 
   // Skip initialization only if:
   // 1. Prompt management is disabled AND
@@ -241,13 +245,17 @@ export function isPromptStoreHealthy(): boolean {
  * Check if a database-backed store is healthy.
  * Returns true only when store is healthy AND using Supabase or Postgres.
  * File store returns false even if healthy - use isPromptStoreHealthy() for that.
+ *
+ * IMPORTANT: Uses actualStoreType (set when store is created) rather than config,
+ * because getPromptStore() may auto-detect the store type from credentials.
  */
 export function isDbBackedStoreHealthy(): boolean {
   if (!storeHealthy) {
     return false;
   }
-  const storeType = config.prompts?.storeType ?? 'file';
-  return storeType === 'supabase' || storeType === 'postgres';
+  // Use actual store type (determined at creation time with auto-detection),
+  // not config value which may differ from what's actually being used
+  return actualStoreType === 'supabase' || actualStoreType === 'postgres';
 }
 
 /**
@@ -258,6 +266,8 @@ export function getPromptStoreStatus(): {
   healthy: boolean;
   enabled: boolean;
   storeType: string;
+  /** Actual store type used after auto-detection (may differ from storeType config) */
+  actualStoreType?: string;
   storePath?: string;
   postgresConnected?: boolean;
   supabaseHost?: string;
@@ -268,6 +278,7 @@ export function getPromptStoreStatus(): {
     healthy: storeHealthy,
     enabled: config.prompts?.enabled ?? false,
     storeType,
+    actualStoreType: actualStoreType ?? undefined,
   };
 
   if (storeType === 'file') {
@@ -295,4 +306,5 @@ export function resetPromptStore(): void {
   defaultStore = null;
   storeInitialized = false;
   storeHealthy = false;
+  actualStoreType = null;
 }
