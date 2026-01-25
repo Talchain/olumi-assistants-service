@@ -1,12 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { DraftArgs } from "../../src/adapters/llm/anthropic.js";
 
-// TODO: TEST-001 QUARANTINED: These tests fail due to buildDraftPrompt API changes.
-// System property structure changed and tests haven't been updated.
-// Fix and re-enable when API stabilizes.
-
 // These tests focus on prompt composition and Anthropic system/cache_control usage.
-
+// TODO: TEST-001 QUARANTINED - buildDraftPrompt API changes broke these tests
 describe.skip("Anthropic prompt caching (PERF 2.1) - QUARANTINED", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();

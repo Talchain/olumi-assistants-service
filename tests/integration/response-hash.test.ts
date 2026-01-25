@@ -5,10 +5,7 @@ import { computeResponseHash, RESPONSE_HASH_LENGTH } from "../../src/utils/respo
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 import { setTestSink, TelemetryEvents } from "../../src/utils/telemetry.js";
 
-// TODO: TEST-002 QUARANTINED: Hash determinism test fails because /healthz
-// response includes varying data (timestamp, latency). Hash is computed correctly
-// but response varies. Fix test to mock time or use a truly static endpoint.
-
+// TODO: TEST-002 QUARANTINED - /healthz response has variable data (timestamp, latency)
 describe.skip("Response Hash Integration - QUARANTINED", () => {
   let app: FastifyInstance;
 
