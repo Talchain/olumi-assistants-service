@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { DraftArgs } from "../../src/adapters/llm/anthropic.js";
 
-// QUARANTINED: These tests fail due to buildDraftPrompt API changes - system property
-// structure changed and tests haven't been updated.
-// TODO: Fix and re-enable. Tracked in robustness plan.
+// TODO: TEST-001 QUARANTINED: These tests fail due to buildDraftPrompt API changes.
+// System property structure changed and tests haven't been updated.
+// Fix and re-enable when API stabilizes.
 
 // These tests focus on prompt composition and Anthropic system/cache_control usage.
 
