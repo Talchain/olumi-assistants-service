@@ -397,7 +397,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // CRITICAL: interventions must be Record<string, number>
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       expect(value).not.toBeNull();
       expect(value).not.toBeNaN();
@@ -423,7 +423,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // CRITICAL: interventions must be Record<string, number>
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       // Boolean should be encoded as 0 or 1
       expect([0, 1]).toContain(value);
@@ -505,7 +505,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     const analysisReady = transformOptionToAnalysisReady(v3Option);
 
     // All interventions must be plain numbers
-    for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+    for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
       expect(typeof value).toBe("number");
       expect(Number.isFinite(value)).toBe(true);
     }
@@ -538,7 +538,7 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
       const analysisReady = transformOptionToAnalysisReady(v3Option);
 
       // CRITICAL CONTRACT: interventions values are NEVER objects
-      for (const [factorId, value] of Object.entries(analysisReady.interventions)) {
+      for (const [_factorId, value] of Object.entries(analysisReady.interventions)) {
         expect(typeof value).toBe("number");
         expect(value).not.toEqual(expect.objectContaining({ value: expect.any(Number) }));
       }

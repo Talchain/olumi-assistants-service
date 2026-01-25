@@ -42,7 +42,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     if (!graph || !Array.isArray(graph.nodes)) return false;
     return graph.nodes.some((n: any) => n.kind === "goal");
   },
-  ensureGoalNode: (graph: any, brief: string, explicitGoal?: string) => ({
+  ensureGoalNode: (graph: any, _brief: string, _explicitGoal?: string) => ({
     graph,
     goalAdded: false,
     inferredFrom: undefined,

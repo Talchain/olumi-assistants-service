@@ -277,7 +277,7 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
 
         // Interventions must be Record<string, number> - plain numbers, not objects
         expect(typeof opt.interventions).toBe("object");
-        for (const [factorId, value] of Object.entries(opt.interventions)) {
+        for (const [_factorId, value] of Object.entries(opt.interventions)) {
           expect(typeof value).toBe("number");
         }
 

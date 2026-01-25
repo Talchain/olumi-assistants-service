@@ -7,7 +7,7 @@
  * @see CEE Workstream — Analysis-Ready Output (Complete Specification)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   transformOptionToAnalysisReady,
   buildAnalysisReadyPayload,
@@ -16,7 +16,7 @@ import {
   getAnalysisReadySummary,
 } from "../../src/cee/transforms/analysis-ready.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
-import type { OptionV3T, GraphV3T, NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
+import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
 import type { AnalysisReadyPayloadT } from "../../src/schemas/analysis-ready.js";
 import { AnalysisReadyPayload } from "../../src/schemas/analysis-ready.js";
 
@@ -179,7 +179,7 @@ describe("CEE Analysis-Ready Output - Acceptance Criteria", () => {
 
       // All intervention values should be plain numbers
       for (const option of payload.options) {
-        for (const [key, value] of Object.entries(option.interventions)) {
+        for (const [_key, value] of Object.entries(option.interventions)) {
           expect(typeof value).toBe("number");
           expect(value).not.toBeNull();
           expect(value).not.toBeUndefined();

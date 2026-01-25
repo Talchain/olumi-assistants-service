@@ -202,7 +202,7 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("all tasks use GPT-5 family models", () => {
-      for (const [task, model] of Object.entries(TASK_MODEL_DEFAULTS)) {
+      for (const [_task, model] of Object.entries(TASK_MODEL_DEFAULTS)) {
         expect(model).toMatch(/^gpt-5/);
       }
     });

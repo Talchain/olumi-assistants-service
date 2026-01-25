@@ -51,7 +51,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     if (!graph || !Array.isArray(graph.nodes)) return false;
     return graph.nodes.some((n: any) => n.kind === "goal");
   },
-  ensureGoalNode: (graph: any, brief: string, explicitGoal?: string) => {
+  ensureGoalNode: (graph: any, brief: string, _explicitGoal?: string) => {
     // Check if goal already exists
     if (graph && Array.isArray(graph.nodes)) {
       const hasGoal = graph.nodes.some((n: any) => n.kind === "goal");

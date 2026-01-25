@@ -241,7 +241,7 @@ describe("CEE Status Consistency", () => {
           expect(option.status).toBe("needs_encoding");
 
           // Verify interventions are still numeric (placeholder values)
-          for (const [factorId, value] of Object.entries(option.interventions)) {
+          for (const [_factorId, value] of Object.entries(option.interventions)) {
             expect(typeof value).toBe("number");
           }
         }

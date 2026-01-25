@@ -10,10 +10,9 @@
  * Without the env var, these tests will be skipped.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 
 const POSTGRES_URL = process.env.PROMPTS_POSTGRES_URL;
-const SKIP_MSG = 'Skipping: PROMPTS_POSTGRES_URL not set';
 
 describe.skipIf(!POSTGRES_URL)('Prompt Repository (PostgreSQL)', () => {
   let repo: Awaited<ReturnType<typeof import('../../src/prompts/repository.js').getPromptRepository>>;

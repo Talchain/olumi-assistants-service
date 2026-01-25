@@ -4,7 +4,7 @@
  * Tests for cross-service tracing headers and boundary events.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { boundaryLoggingPlugin } from "../../src/plugins/boundary-logging.js";
 import { responseHashPlugin } from "../../src/plugins/response-hash.js";

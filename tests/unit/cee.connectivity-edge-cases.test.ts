@@ -8,7 +8,7 @@
  * - The error code is CEE_GRAPH_CONNECTIVITY_FAILED
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock the pipeline internals to expose checkConnectedMinimumStructure
 vi.mock("../../src/cee/structure/index.js", () => ({

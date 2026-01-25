@@ -2,7 +2,7 @@
  * Tests for Hybrid Bias Detection Module
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   detectBiasesHybrid,
   detectBiasesHybridSync,
@@ -326,7 +326,7 @@ describe("getDebiasingSuggestion", () => {
 
 describe("DEBIASING_SUGGESTIONS", () => {
   it("provides actionable steps for each bias type", () => {
-    for (const [code, suggestion] of Object.entries(DEBIASING_SUGGESTIONS)) {
+    for (const [_code, suggestion] of Object.entries(DEBIASING_SUGGESTIONS)) {
       expect(suggestion.headline).toBeTruthy();
       expect(suggestion.explanation).toBeTruthy();
       expect(suggestion.steps.length).toBeGreaterThan(0);

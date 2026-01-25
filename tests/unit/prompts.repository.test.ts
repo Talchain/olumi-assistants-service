@@ -110,7 +110,7 @@ describe('Prompt Repository', () => {
       };
 
       // Register a default prompt first
-      const { registerDefaultPrompt, getDefaultPrompts } = await import('../../src/prompts/loader.js');
+      const { registerDefaultPrompt } = await import('../../src/prompts/loader.js');
       registerDefaultPrompt('draft_graph', 'Test draft graph prompt content');
 
       const { PromptRepository } = await import('../../src/prompts/repository.js');

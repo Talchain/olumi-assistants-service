@@ -6,7 +6,6 @@ import {
   type Driver,
   type KeyInsightInput,
   type GoalInfo,
-  type Identifiability,
 } from "../../src/cee/key-insight/index.js";
 
 describe("CEE Key Insight Generator", () => {
