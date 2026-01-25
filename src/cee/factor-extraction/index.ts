@@ -23,7 +23,7 @@ import type { ExtractionType } from "../transforms/value-uncertainty-derivation.
 import type { ResolvedContext, SupportedDomain } from "../../context/index.js";
 import { resolveContext } from "../../context/index.js";
 import { extractFactorsLLM } from "./llm-extractor.js";
-import { mergeFactors, type MergedFactor, type MergeResult } from "./merge.js";
+import { mergeFactors, type MergeResult } from "./merge.js";
 
 export interface ExtractedFactor {
   /** Human-readable label for the factor */
@@ -50,7 +50,7 @@ export interface ExtractedFactor {
 export type { ExtractionType } from "../transforms/value-uncertainty-derivation.js";
 
 // Currency symbols and their names
-const CURRENCY_MAP: Record<string, string> = {
+const _CURRENCY_MAP: Record<string, string> = {
   "£": "GBP",
   "$": "USD",
   "€": "EUR",

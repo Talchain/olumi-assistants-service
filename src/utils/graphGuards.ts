@@ -463,7 +463,7 @@ export function enforceGraphCompliance(
 
   // 3. Break cycles to enforce DAG (Stage 22: Cycle Breaking)
   if (!isDAG(nodes, edges)) {
-    const edgesBefore = edges;
+    const _edgesBefore = edges;
     edges = breakCycles(nodes, edges, collector);
   }
 

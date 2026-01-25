@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
-import type { DocPreview } from "../../services/docProcessing.js";
 import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";

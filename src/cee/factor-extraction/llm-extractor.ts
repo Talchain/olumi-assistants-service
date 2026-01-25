@@ -255,7 +255,7 @@ export async function extractFactorsLLM(
 function convertLLMFactorToExtracted(
   llmFactor: LLMFactor,
   context: ResolvedContext,
-  index: number
+  _index: number
 ): ExtractedFactor {
   // Expand any abbreviations in the label
   const expandedLabel = expandAbbreviation(context, llmFactor.label);

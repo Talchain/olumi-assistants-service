@@ -38,7 +38,7 @@ import {
 } from "../clarifier/index.js";
 import { randomUUID, createHash } from "node:crypto";
 import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
-import { createCorrectionCollector, type CorrectionCollector } from "../corrections.js";
+import { createCorrectionCollector } from "../corrections.js";
 import { SERVICE_VERSION } from "../../version.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
@@ -313,7 +313,7 @@ function checkConnectedMinimumStructure(graph: GraphV1 | undefined): Connectivit
 /**
  * Simple boolean check for backward compatibility.
  */
-function hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
+function _hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
   return checkConnectedMinimumStructure(graph).passed;
 }
 

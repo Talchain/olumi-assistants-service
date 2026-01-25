@@ -168,7 +168,7 @@ function getDebiasingSuggestion(code: string): DebiasingSuggestion | undefined {
  */
 export function detectAnchoringBias(
   graph: GraphV1 | undefined,
-  rankedOptions?: Array<{ node_id: string; score: number }>,
+  _rankedOptions?: Array<{ node_id: string; score: number }>,
 ): CEEBiasFindingV1 | null {
   const optionNodes = getNodesByKind(graph, "option");
   if (optionNodes.length < 3) return null;
@@ -265,7 +265,7 @@ export function detectConfirmationBias(graph: GraphV1 | undefined): CEEBiasFindi
   if (edges.length === 0) return null;
 
   const optionIds = toIds(optionNodes);
-  const optionIdSet = new Set(optionIds);
+  const _optionIdSet = new Set(optionIds);
 
   // Get outcomes and risks
   const outcomeNodes = getNodesByKind(graph, "outcome");
@@ -288,7 +288,7 @@ export function detectConfirmationBias(graph: GraphV1 | undefined): CEEBiasFindi
   const analyses: OptionAnalysis[] = [];
 
   // Patterns for positive/negative language in labels
-  const positivePatterns = /\b(success|gain|benefit|improve|growth|profit|win|advantage|opportunity)\b/i;
+  const _positivePatterns = /\b(success|gain|benefit|improve|growth|profit|win|advantage|opportunity)\b/i;
   const negativePatterns = /\b(fail|loss|cost|risk|decline|harm|threat|problem|issue|concern)\b/i;
 
   for (const option of optionNodes) {
@@ -515,7 +515,7 @@ export function detectIllusionOfControlEnhanced(
 // LLM Fallback Detection
 // ============================================================================
 
-const LLM_BIAS_DETECTION_PROMPT = `You are a cognitive bias expert analyzing a decision model.
+const _LLM_BIAS_DETECTION_PROMPT = `You are a cognitive bias expert analyzing a decision model.
 
 Analyze the following decision graph for subtle cognitive biases that rule-based detection might miss.
 
@@ -546,7 +546,7 @@ Only return findings with confidence >= 0.6. If no additional biases detected, r
 
 Return ONLY valid JSON array, no other text.`;
 
-interface LlmBiasFinding {
+interface _LlmBiasFinding {
   bias_type: string;
   severity: "low" | "medium" | "high";
   explanation: string;

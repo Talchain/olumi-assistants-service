@@ -13,7 +13,7 @@
  */
 
 import { getRedis, isRedisAvailable } from "../platform/redis.js";
-import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
+import { log } from "../utils/telemetry.js";
 import type { TurnT, AskIntentT } from "../schemas/working-set.js";
 import { config } from "../config/index.js";
 

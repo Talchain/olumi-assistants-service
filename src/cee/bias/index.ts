@@ -79,7 +79,7 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   const riskIds = riskNodes.map((n) => (n as any).id as string).filter(Boolean);
   const outcomeIds = outcomeNodes.map((n) => (n as any).id as string).filter(Boolean);
   const goalIds = goalNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const factorIds = factorNodes.map((n) => (n as any).id as string).filter(Boolean);
+  const _factorIds = factorNodes.map((n) => (n as any).id as string).filter(Boolean);
   const actionIds = actionNodes.map((n) => (n as any).id as string).filter(Boolean);
 
   const optionCount = optionNodes.length;

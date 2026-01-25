@@ -6,8 +6,7 @@
  * M2+: Will add LLM-enhanced assessment
  */
 
-import { randomUUID } from "node:crypto";
-import type { GraphT, NodeT } from "../../schemas/graph.js";
+import type { GraphT } from "../../schemas/graph.js";
 import type { ReviewBlockT } from "../../schemas/review.js";
 
 // =============================================================================
@@ -75,7 +74,7 @@ function scoreCompleteness(graph: GraphT): number {
   }
 
   let score = 0;
-  const total = 4; // goal, decision, option, factor/outcome
+  const _total = 4; // goal, decision, option, factor/outcome
 
   // Goal present (25%)
   if (counts.goal && counts.goal >= 1) {

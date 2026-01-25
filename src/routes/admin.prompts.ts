@@ -54,7 +54,7 @@ import {
   logExperimentEnded,
   interpolatePrompt,
 } from '../prompts/index.js';
-import type { PromptObservation, ObservationType, ObservationsResult } from '../prompts/stores/supabase.js';
+import type { ObservationType } from '../prompts/stores/supabase.js';
 import { SupabasePromptStore } from '../prompts/stores/supabase.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';

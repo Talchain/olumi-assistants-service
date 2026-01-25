@@ -209,6 +209,7 @@ export async function cleanupOldDraftFailureBundles(): Promise<void> {
   if (!client) return;
 
   const shouldRun = (() => {
+    // eslint-disable-next-line no-restricted-syntax -- Feature flag, not in config schema yet
     const envVal = process.env.CEE_DRAFT_FAILURE_RETENTION_ENABLED;
     if (envVal === 'false' || envVal === '0') return false;
     if (envVal === 'true' || envVal === '1') return true;
@@ -234,7 +235,7 @@ export async function cleanupOldDraftFailureBundles(): Promise<void> {
   }
 }
 
-let _cleanupTimer: NodeJS.Timeout | null = null;
+let _cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function startDraftFailureRetentionJob(): void {
   if (_cleanupTimer) return;

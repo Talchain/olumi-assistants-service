@@ -16,7 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { GraphT, NodeT, EdgeT, NodeDataT, FactorDataT } from "../../schemas/graph.js";
+import type { GraphT, NodeT, NodeDataT, FactorDataT } from "../../schemas/graph.js";
 import type {
   ReviewBlockT,
   ReviewBlockTypeT,

@@ -29,7 +29,6 @@ import {
   getExtractionStatistics,
   hasPriceRelatedUnresolvedTargets,
   type EdgeHint,
-  type ExtractedOption,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";

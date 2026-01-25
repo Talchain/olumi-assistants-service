@@ -5,7 +5,7 @@
  * making questions more relevant and easier to answer.
  */
 
-import type { PreferenceQuestionT, PreferenceOptionT } from "../../schemas/cee.js";
+import type { PreferenceQuestionT } from "../../schemas/cee.js";
 import type { QuestionContext } from "./types.js";
 
 /**

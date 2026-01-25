@@ -470,7 +470,7 @@ function generatePairExplanation(
   relationship: GoalRelationship,
   sharedLabels: string[],
   sharedOptionCount: number,
-  sharedOutcomeCount: number,
+  _sharedOutcomeCount: number,
 ): string {
   const sharedStr =
     sharedLabels.length > 0
@@ -549,7 +549,7 @@ function generateParetoGuidance(conflict: GoalPair): TradeOffGuidance {
  */
 function generatePrioritizationGuidance(
   strongConflicts: GoalPair[],
-  goals: NodeLike[],
+  _goals: NodeLike[],
 ): TradeOffGuidance {
   const conflictingGoals = new Set<string>();
   for (const conflict of strongConflicts) {

@@ -15,7 +15,6 @@ import {
   GlossaryTerm,
   ConstraintPattern,
   SupportedDomain,
-  SUPPORTED_DOMAINS,
   STRONG_SAAS_KEYWORDS,
   WEAK_SAAS_KEYWORDS,
   SAAS_DETECTION_THRESHOLD,
@@ -34,7 +33,9 @@ const contextCache = new Map<string, MarketContext>();
 // Works in both development and production (Render, Docker, etc.)
 function getContextDir(): string {
   // Allow override via environment variable for testing/custom deployments
+  // eslint-disable-next-line no-restricted-syntax -- Directory path, not in config schema
   if (process.env.CEE_CONTEXT_DIR) {
+    // eslint-disable-next-line no-restricted-syntax -- Directory path, not in config schema
     return process.env.CEE_CONTEXT_DIR;
   }
   return join(process.cwd(), "data/context");

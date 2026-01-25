@@ -290,7 +290,7 @@ async function callAnthropic(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0 } = options;
+  const { timeoutMs = 30000, maxTokens = 2000, temperature: _temperature = 0 } = options;
 
   try {
     const client = getAnthropicClient();

@@ -10,7 +10,7 @@
 import { FilePromptStore } from './stores/file.js';
 import { PostgresPromptStore } from './stores/postgres.js';
 import { SupabasePromptStore } from './stores/supabase.js';
-import type { IPromptStore, FileStoreConfig, PostgresStoreConfig, SupabaseStoreConfig } from './stores/interface.js';
+import type { IPromptStore, FileStoreConfig, PostgresStoreConfig } from './stores/interface.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 

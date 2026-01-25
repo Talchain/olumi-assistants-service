@@ -69,7 +69,7 @@ const TestPromptLLMRequestSchema = z.object({
   }).optional(),
 });
 
-type TestPromptLLMRequest = z.infer<typeof TestPromptLLMRequestSchema>;
+type _TestPromptLLMRequest = z.infer<typeof TestPromptLLMRequestSchema>;
 
 /**
  * Extended validation issue with rich metadata for debugging.
@@ -282,7 +282,7 @@ function sanitizeErrorMessage(error: unknown): string {
 const LLM_TIMEOUT_MS = 120_000; // 2 minutes for standard models
 const REASONING_TIMEOUT_MS = 180_000; // 3 minutes for reasoning models (medium effort)
 const REASONING_HIGH_TIMEOUT_MS = 300_000; // 5 minutes for reasoning models with HIGH effort
-const REQUEST_TIMEOUT_MS = 350_000; // 5.5 minutes total (to exceed max LLM timeout)
+const _REQUEST_TIMEOUT_MS = 350_000; // 5.5 minutes total (to exceed max LLM timeout)
 
 /**
  * Get appropriate timeout based on model type and reasoning effort.

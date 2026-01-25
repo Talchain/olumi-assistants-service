@@ -281,7 +281,7 @@ function generateNarratives(input: CEEIslSynthesisInputT): Narratives {
   return narratives;
 }
 
-function generateExecutiveSummary(input: CEEIslSynthesisInputT, narratives: Narratives): string {
+function generateExecutiveSummary(input: CEEIslSynthesisInputT, _narratives: Narratives): string {
   const parts: string[] = [];
 
   // Context

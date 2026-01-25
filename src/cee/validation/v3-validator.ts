@@ -12,7 +12,6 @@ import type {
 import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
-import { config } from "../../config/index.js";
 
 /**
  * Validation result with detailed findings.
@@ -598,7 +597,7 @@ function validateOptions(
     // Check for identical interventions (v6.0.2 rule: options must differ)
     // Normalize by sorting keys to make comparison order-insensitive
     const interventionEntries = Object.entries(option.interventions)
-      .map(([k, v]) => `${v.target_match.node_id}:${v.value}`)
+      .map(([_k, v]) => `${v.target_match.node_id}:${v.value}`)
       .sort()
       .join("|");
 

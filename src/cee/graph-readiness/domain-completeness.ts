@@ -423,7 +423,7 @@ function calculateCompletenessScore(
   let totalWeight = 0;
   let foundWeight = 0;
 
-  const foundNames = new Set<string>();
+  const _foundNames = new Set<string>();
   // We'll track by checking if foundCount covers the first N factors
   // This is a simplification - in practice we'd need the actual found names
 
@@ -446,7 +446,7 @@ function calculateCompletenessScore(
  */
 function generateFactorSuggestion(
   factor: ExpectedFactor,
-  domainName: string,
+  _domainName: string,
 ): string {
   const importanceLabel =
     factor.importance === "critical"
@@ -463,9 +463,9 @@ function generateFactorSuggestion(
  */
 function generateCompletenessSummary(
   domainName: string,
-  foundCount: number,
+  _foundCount: number,
   missingFactors: MissingFactor[],
-  score: number,
+  _score: number,
 ): string {
   const criticalMissing = missingFactors.filter((f) => f.importance === "critical");
   const recommendedMissing = missingFactors.filter((f) => f.importance === "recommended");

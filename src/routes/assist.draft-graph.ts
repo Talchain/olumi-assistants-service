@@ -49,6 +49,7 @@ const DEFAULT_DRAFT_BUDGET_MS = 25000; // 25 seconds total budget
 const DEFAULT_REPAIR_TIMEOUT_MS = 10000; // 10 seconds for repair call
 
 function getDraftBudgetMs(): number {
+  // eslint-disable-next-line no-restricted-syntax -- Runtime tuning, not in config schema
   const envVal = process.env.CEE_DRAFT_BUDGET_MS;
   if (envVal) {
     const parsed = parseInt(envVal, 10);
@@ -58,6 +59,7 @@ function getDraftBudgetMs(): number {
 }
 
 function getRepairTimeoutMs(): number {
+  // eslint-disable-next-line no-restricted-syntax -- Runtime tuning, not in config schema
   const envVal = process.env.CEE_REPAIR_TIMEOUT_MS;
   if (envVal) {
     const parsed = parseInt(envVal, 10);

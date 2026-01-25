@@ -35,6 +35,7 @@ const DEFAULT_VERSION: PromptVersion = 'v6';
  * Returns the version string and whether it was explicitly set.
  */
 export function getPromptVersion(): { version: PromptVersion; explicit: boolean } {
+  // eslint-disable-next-line no-restricted-syntax -- Prompt version override for testing
   const envValue = process.env.PROMPT_VERSION?.toLowerCase().trim();
 
   if (!envValue) {
@@ -897,7 +898,7 @@ Respond ONLY with valid JSON.`;
 // ISL Synthesis Prompt
 // ============================================================================
 
-const ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
+const _ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
 
 ## Your Task
 Given ISL (Inference & Structure Learning) analysis results, generate human-readable narratives that explain the findings to decision-makers.

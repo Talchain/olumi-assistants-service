@@ -425,7 +425,7 @@ export function resolveRelativeValue(parsed: ParsedValue, baseline: number): num
   switch (kind) {
     case "percent": {
       // relativeValue is signed: +20 means +20%, -20 means -20%
-      const percentChange = parsed.relativeValue ?? parsed.value;
+      const _percentChange = parsed.relativeValue ?? parsed.value;
       // Handle direction from legacy format
       const signedPercent = parsed.relativeValue !== undefined
         ? parsed.relativeValue
