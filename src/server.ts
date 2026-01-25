@@ -782,7 +782,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
 
 // If running directly (not imported), start the server
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(env.PORT || 3101);
+  const port = config.server.port;
 
   build()
     .then(async (app) => {

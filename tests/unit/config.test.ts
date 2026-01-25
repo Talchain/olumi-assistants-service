@@ -30,7 +30,7 @@ describe("Configuration Module", () => {
       const { config } = await import("../../src/config/index.js");
 
       expect(config.server.nodeEnv).toBe("test");
-      expect(config.server.port).toBe(3000); // default
+      expect(config.server.port).toBe(3101); // default
       expect(config.llm.provider).toBe("fixtures");
       expect(config.features.grounding).toBe(false); // conservative default - opt-in for safety
     });
@@ -43,7 +43,7 @@ describe("Configuration Module", () => {
       const { config } = await import("../../src/config/index.js");
 
       // Server defaults
-      expect(config.server.port).toBe(3000);
+      expect(config.server.port).toBe(3101);
       expect(config.server.logLevel).toBe("info");
 
       // Feature defaults
@@ -413,6 +413,45 @@ describe("Configuration Module", () => {
       expect(env).toBe("test");
       expect(grounding).toBe(false); // conservative default - opt-in for safety
       expect(redis).toBeUndefined();
+    });
+  });
+
+  describe("Port Resolution", () => {
+    it("resolves port from environment first", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        PORT: "8080",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.server.port).toBe(8080);
+    });
+
+    it("falls back to default when PORT is not set", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+      };
+      delete process.env.PORT;
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.server.port).toBe(3101); // Default aligned with server.ts
+    });
+
+    it("accepts PORT from hosting platforms (e.g., Render)", async () => {
+      vi.resetModules();
+      // Hosting platforms like Render set PORT as a string
+      process.env = {
+        NODE_ENV: "production",
+        PORT: "10000",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.server.port).toBe(10000);
     });
   });
 });

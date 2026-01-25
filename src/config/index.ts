@@ -101,7 +101,7 @@ const PIIRedactionMode = z
 const ConfigSchema = z.object({
   // Server Configuration
   server: z.object({
-    port: z.coerce.number().int().positive().default(3000),
+    port: z.coerce.number().int().positive().default(3101),
     nodeEnv: Environment.default("development"),
     logLevel: LogLevel.default("info"),
     version: z.string().default("1.0.0"),

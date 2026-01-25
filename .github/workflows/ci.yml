@@ -35,6 +35,18 @@ jobs:
       - name: Run unit tests with coverage
         run: pnpm test --coverage --coverage.threshold.lines=90 --coverage.threshold.functions=90 --coverage.threshold.branches=85 --coverage.threshold.statements=90
 
+      - name: Check for quarantined tests
+        if: always()
+        run: |
+          QUARANTINED=$(grep -r "QUARANTINED" --include="*.test.ts" --include="*.spec.ts" -l src/ tests/ 2>/dev/null || true)
+          if [ -n "$QUARANTINED" ]; then
+            COUNT=$(echo "$QUARANTINED" | wc -l | tr -d ' ')
+            echo "::warning::⚠️ $COUNT test file(s) contain QUARANTINED tests that need attention:"
+            echo "$QUARANTINED"
+            echo ""
+            echo "These tests are skipped and should be fixed or removed."
+          fi
+
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3
         if: always()
@@ -58,11 +70,22 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Check for duplicate * 2.ts files
+      - name: Check for duplicate files (prevents drift from shadow copies)
         run: |
-          if git ls-files '* 2.ts' | grep .; then
-            echo "Found duplicate * 2.ts files. Please remove or rename them (these are treated as stale shadow copies).";
-            exit 1;
+          # Fail if any duplicate-pattern files exist in tracked files
+          # Only match delimited patterns to avoid false positives (e.g., "deepcopy.ts" is legitimate)
+          PATTERNS=('* 2.ts' '* 2.js' '* copy.ts' '* copy.js' '*_copy.ts' '*_copy.js' '*-copy.ts' '*-copy.js')
+          FOUND_FILES=""
+          for pattern in "${PATTERNS[@]}"; do
+            MATCHES=$(git ls-files "$pattern" 2>/dev/null || true)
+            if [ -n "$MATCHES" ]; then
+              FOUND_FILES="$FOUND_FILES$MATCHES"$'\n'
+            fi
+          done
+          if [ -n "$FOUND_FILES" ]; then
+            echo "ERROR: Duplicate files detected (shadow copies create drift risk):"
+            echo "$FOUND_FILES"
+            exit 1
           fi
       - name: Run security audit
         run: pnpm audit --audit-level=high
