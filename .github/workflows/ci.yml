@@ -94,12 +94,12 @@ jobs:
   # See .github/workflows/spec-v04-audit.yml
 
   # Job D: Live LLM tests (optional, requires secrets)
+  # Note: GitHub Actions cannot check secret existence in job-level 'if' conditions.
+  # This job will run but skip the test step if the secret is not set.
   live-tests:
     name: Live LLM Integration Tests
     runs-on: ubuntu-latest
     needs: unit-tests  # Run after unit tests pass
-    # Only run if ANTHROPIC_API_KEY secret is set
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -113,7 +113,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run live LLM tests
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LIVE_LLM: '1'
         run: pnpm test:live
+      - name: Skip live tests (no API key)
+        if: ${{ env.ANTHROPIC_API_KEY == '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: echo "⏭️ Skipping live LLM tests - ANTHROPIC_API_KEY not configured"
