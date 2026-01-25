@@ -23,6 +23,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate OpenAPI types
+        run: pnpm openapi:generate
       - name: Lint
         run: pnpm lint
       - name: Typecheck
