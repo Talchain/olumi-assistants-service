@@ -107,7 +107,7 @@ jobs:
       - name: Comment p95 on PR
         if: github.event_name == 'pull_request'
         continue-on-error: true  # Don't fail job if comment fails due to permissions
-        uses: thollander/actions-comment-pull-request@v2
+        uses: thollander/actions-comment-pull-request@v3
         with:
           message: |
             **Performance Gate (production):**
@@ -300,7 +300,7 @@ jobs:
       - name: Comment SSE performance on PR
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        uses: thollander/actions-comment-pull-request@v2
+        uses: thollander/actions-comment-pull-request@v3
         with:
           message: |
             **SSE Live Resume Performance Gate:**
