@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload perf artefact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: perf-results
           path: perf-results.json
@@ -290,7 +290,7 @@ jobs:
 
       - name: Upload SSE performance artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: perf-sse-live-results
           path: |

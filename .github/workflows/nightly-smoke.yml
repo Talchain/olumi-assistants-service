@@ -89,7 +89,7 @@ jobs:
           echo "| A5: Feature Flags | $A5_RESULT | $A5_DETAIL |" >> $GITHUB_STEP_SUMMARY
       - name: Upload smoke test log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nightly-smoke-log
           path: nightly-smoke.log
