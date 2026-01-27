@@ -46,8 +46,11 @@ describe('PROMPT_TEMPLATES', () => {
     expect(prompt).toContain('outcome');
     expect(prompt).toContain('goal');
     expect(prompt).toContain('JSON');
-    expect(prompt).toContain('{{maxNodes}}');
-    expect(prompt).toContain('{{maxEdges}}');
+    // V12 uses hardcoded limits (50/200) for prompt admin compatibility
+    // Older versions (v6, v8, v22) use placeholders {{maxNodes}}/{{maxEdges}}
+    const hasPlaceholders = prompt.includes('{{maxNodes}}') && prompt.includes('{{maxEdges}}');
+    const hasHardcodedLimits = prompt.includes('Maximum 50 nodes') && prompt.includes('Maximum 200 edges');
+    expect(hasPlaceholders || hasHardcodedLimits).toBe(true);
   });
 
   it('suggest_options prompt contains key instructions', () => {

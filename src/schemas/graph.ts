@@ -2,6 +2,12 @@ import { z } from "zod";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine"]);
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor"]);
+
+/**
+ * Factor type classification for downstream enrichment.
+ * Shared across all prompts for consistent factor categorization.
+ */
+export const FactorType = z.enum(["cost", "time", "probability", "revenue", "demand", "quality", "other"]);
 export const Position = z.object({ x: z.number(), y: z.number() });
 
 /**
@@ -28,6 +34,16 @@ export const FactorData = z.object({
   rangeMin: z.number().optional(),
   /** For range extractions: maximum bound */
   rangeMax: z.number().optional(),
+  /**
+   * Factor type classification for downstream enrichment (V12+).
+   * One of: cost, time, probability, revenue, demand, quality, other
+   */
+  factor_type: FactorType.optional(),
+  /**
+   * 1-2 short phrases explaining sources of epistemic uncertainty (V12+).
+   * Observations only — describe what makes the value uncertain.
+   */
+  uncertainty_drivers: z.array(z.string()).max(2).optional(),
 });
 
 /**
@@ -156,6 +172,7 @@ export type OptionDataT = z.infer<typeof OptionData>;
 export type NodeDataT = z.infer<typeof NodeData>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
 export type EffectDirectionT = z.infer<typeof EffectDirection>;
+export type FactorTypeT = z.infer<typeof FactorType>;
 
 /**
  * Check if a graph contains any legacy string provenance (for deprecation tracking)

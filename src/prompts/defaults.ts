@@ -11,6 +11,7 @@
 import { registerDefaultPrompt } from './loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
+import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { log } from '../utils/telemetry.js';
 
@@ -20,17 +21,18 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v22' (default), 'v8', or 'v6' (deprecated).
+ * Use PROMPT_VERSION env var to select: 'v12' (default), 'v22', 'v8', or 'v6'.
  *
  * Examples:
- *   PROMPT_VERSION=v22 -> Use v22 (Monte Carlo optimized, scale discipline)
+ *   PROMPT_VERSION=v12 -> Use v12 (production: factor metadata, scale discipline)
+ *   PROMPT_VERSION=v22 -> Use v22 (deprecated: was misnumbering of v12 development)
  *   PROMPT_VERSION=v8  -> Use v8.2 (concise, reasoning-optimized)
  *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
-export type PromptVersion = 'v6' | 'v8' | 'v22';
+export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v22';
 
-const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v22']);
-const DEFAULT_VERSION: PromptVersion = 'v22';
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v22']);
+const DEFAULT_VERSION: PromptVersion = 'v12';
 
 /**
  * Get the configured prompt version from environment.
@@ -973,7 +975,8 @@ Respond ONLY with valid JSON.`;
  * Called during server initialization to populate the fallback registry.
  *
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
- * - v22 (default): Monte Carlo optimized with scale discipline
+ * - v12 (default): Production prompt with factor metadata (factor_type, uncertainty_drivers)
+ * - v22 (deprecated): Was misnumbering during v12 development
  * - v8: Concise v8.2 optimized for reasoning LLMs
  * - v6 (deprecated): Verbose v6.0.2 with explicit checklist
  */
@@ -982,11 +985,17 @@ export function registerAllDefaultPrompts(): void {
   const { version, explicit } = getPromptVersion();
 
   let draftPromptWithCaps: string;
-  if (version === 'v22') {
+  if (version === 'v12') {
+    draftPromptWithCaps = getDraftGraphPromptV12();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v12 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v22') {
     draftPromptWithCaps = getDraftGraphPromptV22();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v22 (${explicit ? 'explicitly configured' : 'default'})`
+      `Using draft_graph prompt v22 [DEPRECATED - use v12] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else if (version === 'v8') {
     draftPromptWithCaps = getDraftGraphPromptV8();
@@ -1022,12 +1031,14 @@ export function registerAllDefaultPrompts(): void {
 
 /**
  * Get the raw prompt templates (for testing/migration)
- * Note: These contain {{maxNodes}}/{{maxEdges}} placeholders that must be resolved
- * before use. Call getDraftGraphPromptByVersion() for resolved prompts.
+ * Note: v6/v8/v22 contain {{maxNodes}}/{{maxEdges}} placeholders that must be resolved.
+ * v12 has hardcoded limits (50/200) for prompt admin compatibility.
+ * Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT_V22,
-  draft_graph_v22: DRAFT_GRAPH_PROMPT_V22,
+  draft_graph: DRAFT_GRAPH_PROMPT_V12,
+  draft_graph_v12: DRAFT_GRAPH_PROMPT_V12,
+  draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
   draft_graph_v8: DRAFT_GRAPH_PROMPT_V8,
   draft_graph_v6: DRAFT_GRAPH_PROMPT, // deprecated
   suggest_options: SUGGEST_OPTIONS_PROMPT,
@@ -1044,6 +1055,9 @@ export const PROMPT_TEMPLATES = {
  * Useful for A/B testing or explicit version selection in tests.
  */
 export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v12') {
+    return getDraftGraphPromptV12();
+  }
   if (version === 'v22') {
     return getDraftGraphPromptV22();
   }

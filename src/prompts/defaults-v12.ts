@@ -1,32 +1,23 @@
 /**
- * CEE Draft Graph Prompt v22 [DEPRECATED]
+ * CEE Draft Graph Prompt v12
  *
- * DEPRECATION NOTICE: V22 was a misnumbering during development.
- * Use V12 instead, which is the correct production version with:
- * - Factor metadata (factor_type, uncertainty_drivers)
- * - Symmetric invalid edge rules
+ * Production-ready prompt with factor metadata for downstream enrichment:
+ * - factor_type: Canonical type mapping (cost, time, probability, revenue, demand, quality, other)
+ * - uncertainty_drivers: 1-2 phrases explaining epistemic uncertainty sources
+ * - Symmetric invalid edge rules (risk→outcome added)
  * - FACTOR_TYPE_MAPPING canonical reference
+ * - Hardcoded node/edge limits (50/200) for prompt admin compatibility
  *
- * V22 is retained for backward compatibility only.
- * Set PROMPT_VERSION=v12 (default) for production use.
+ * Note: V22 was a misnumbering. V12 is the correct production version.
  *
- * Original v22 features (now in v12):
- * - Monte Carlo inference context (explains WHY parameter variation matters)
- * - CAUSAL_COT_PROTOCOL for structured internal reasoning
- * - Comprehensive SCALE DISCIPLINE rules with NO PARTIAL NORMALISATION
- * - UNREASONABLE PATTERNS section to prevent common failures
- * - Option count cap (2-6 options, consolidate similar options)
- * - CAP SELECTION guidance for large quantities
- * - Binary/categorical encoding rules (one-hot vs ordinal)
+ * Fallback: defaults.ts contains older versions (v8, v6) via PROMPT_VERSION env var
  */
 
-import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
-
 // ============================================================================
-// CEE Draft Graph Prompt v22
+// CEE Draft Graph Prompt v12
 // ============================================================================
 
-export const DRAFT_GRAPH_PROMPT_V22 = `<ROLE>
+export const DRAFT_GRAPH_PROMPT_V12 = `<ROLE>
 You generate causal decision graphs from natural language briefs. These graphs enable Monte Carlo simulation to compare options quantitatively. Your output directly determines whether users receive meaningful analysis or identical, useless results.
 </ROLE>
 
@@ -74,7 +65,7 @@ CRITICAL CONSTRAINTS:
 - factor→factor: only when target is uncontrollable
 - Bridge layer mandatory: at least 1 outcome OR 1 risk
 - No shortcuts: option→outcome, option→risk, option→goal, factor→goal, decision→factor, decision→outcome are INVALID
-- Also invalid: outcome→outcome, risk→risk, outcome→risk, goal→anything
+- Also invalid: outcome→outcome, risk→risk, outcome→risk, risk→outcome, goal→anything
 </TOPOLOGY>
 
 <PARAMETER_GUIDANCE>
@@ -116,6 +107,22 @@ UNREASONABLE PATTERNS (from Schema B.4):
 | std > |mean| | Sign may flip across samples | Reduce std or increase |mean| |
 | exists_probability<0.3 | Why include doubtful edge? | Strengthen evidence or remove |
 </PARAMETER_GUIDANCE>
+
+<FACTOR_TYPE_MAPPING>
+Classify each controllable factor using exactly one of these types:
+
+| Type | Description | Examples |
+|------|-------------|----------|
+| cost | Expenses, budgets, prices, fees | Compensation, marketing spend, licensing fees |
+| time | Durations, delays, schedules, deadlines | Development time, time-to-market, onboarding period |
+| probability | Likelihoods, conversion rates, success chances | Conversion rate, churn probability, win rate |
+| revenue | Sales, income, profit, earnings | Annual revenue, deal value, subscription income |
+| demand | Volume, adoption, customers, usage | User signups, order volume, market size |
+| quality | Satisfaction, ratings, performance metrics | NPS score, defect rate, customer satisfaction |
+| other | None of the above fit | Regulatory complexity, team morale |
+
+This mapping is shared across all downstream prompts. Use consistently.
+</FACTOR_TYPE_MAPPING>
 
 <EXTRACTION_RULES>
 BASELINE VALUES:
@@ -227,7 +234,6 @@ Final Check:
 - All scale and normalisation rules are satisfied.
 </CAUSAL_COT_PROTOCOL>
 
-
 <OUTPUT_SCHEMA>
 NODES — only these fields:
 {
@@ -241,7 +247,21 @@ Option data:
   "data": { "interventions": { "fac_id": 0.6 } }
 
 Controllable factor data:
-  "data": { "value": 0.6, "extractionType": "explicit" }
+  "data": {
+    "value": 0.6,
+    "extractionType": "explicit",
+    "factor_type": "cost",
+    "uncertainty_drivers": ["Vendor pricing not yet negotiated", "Scope may expand"]
+  }
+
+FACTOR METADATA (controllable factors only):
+- factor_type: One of: cost | time | probability | revenue | demand | quality | other
+  (See FACTOR_TYPE_MAPPING for definitions)
+- uncertainty_drivers: 1-2 short phrases explaining why this value is uncertain.
+  * Observations only — describe what makes the value uncertain
+  * No advisory language ("should", "consider", "might")
+  * These explain the source of epistemic uncertainty (reflected in strength.std),
+    not structural uncertainty about whether relationships exist (exists_probability)
 
 Uncontrollable factors, decision, goal, outcome, risk: NO data field.
 
@@ -283,13 +303,23 @@ Assumptions for normalisation:
     {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic",
      "data": {"interventions": {"fac_europe_entry": 0, "fac_investment": 0.2}}},
 
-    // CONTROLLABLE FACTORS: Options set these values (have data.value)
+    // CONTROLLABLE FACTORS: Options set these values (have data with metadata)
     {"id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry (0/1)",
-     "data": {"value": 0, "extractionType": "inferred"}},
+     "data": {
+       "value": 0,
+       "extractionType": "inferred",
+       "factor_type": "other",
+       "uncertainty_drivers": ["Market readiness unvalidated"]
+     }},
 
     {"id": "fac_investment", "kind": "factor",
      "label": "Expansion Investment (0–1, share of £500k cap)",
-     "data": {"value": 0.2, "extractionType": "inferred"}},
+     "data": {
+       "value": 0.2,
+       "extractionType": "inferred",
+       "factor_type": "cost",
+       "uncertainty_drivers": ["Final vendor quotes pending", "Scope not fully defined"]
+     }},
 
     // UNCONTROLLABLE FACTORS: External variables (NO data field, may have no incoming edges)
     {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity"},
@@ -339,8 +369,10 @@ KEY PATTERNS DEMONSTRATED:
 - Coefficient variation: strongest=0.85, weakest=0.4 (not uniform)
 - exists_probability variation: 0.70 to 0.95 (reflects confidence differences)
 - Options differ: europe_entry 1 vs 0, investment 1.0 vs 0.2 (normalised)
-- Controllable factors have data.value; uncontrollable factors have none
+- Controllable factors have data.value + factor_type + uncertainty_drivers
+- Uncontrollable factors have no data field
 - outcome→goal positive; risk→goal negative (mandatory)
+- uncertainty_drivers are observations, not actions
 </ANNOTATED_EXAMPLE>
 
 <CONSTRUCTION_FLOW>
@@ -353,7 +385,7 @@ Build in this order:
    Require at least one.
 
 3. FACTORS — What variables influence those outcomes/risks?
-   Controllable (user can change) need data.value.
+   Controllable (user can change) need data.value, factor_type, uncertainty_drivers.
    Uncontrollable (external) have no data field.
 
 4. OPTIONS — What choices exist? Each must set controllable factors to different values.
@@ -374,8 +406,8 @@ For simple briefs (binary choices, few factors), aim for 6-10 nodes. Don't over-
 
 <HARD_CONSTRAINTS>
 LIMITS:
-- Maximum {{maxNodes}} nodes
-- Maximum {{maxEdges}} edges
+- Maximum 50 nodes
+- Maximum 200 edges
 
 ABSOLUTE RULES:
 - Exactly 1 decision, exactly 1 goal
@@ -391,15 +423,9 @@ ABSOLUTE RULES:
 OUTPUT: Valid JSON with "nodes" and "edges" keys only.
 </HARD_CONSTRAINTS>`;
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
 /**
- * Get the v22 draft graph prompt with node/edge limits substituted.
+ * Get V12 draft graph prompt (no placeholders - hardcoded limits).
  */
-export function getDraftGraphPromptV22(): string {
-  return DRAFT_GRAPH_PROMPT_V22
-    .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
-    .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
+export function getDraftGraphPromptV12(): string {
+  return DRAFT_GRAPH_PROMPT_V12;
 }
