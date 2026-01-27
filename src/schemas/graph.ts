@@ -7,7 +7,7 @@ export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk",
  * Factor type classification for downstream enrichment.
  * Shared across all prompts for consistent factor categorization.
  */
-export const FactorType = z.enum(["cost", "time", "probability", "revenue", "demand", "quality", "other"]);
+export const FactorType = z.enum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]);
 export const Position = z.object({ x: z.number(), y: z.number() });
 
 /**

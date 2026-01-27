@@ -1,20 +1,23 @@
 /**
- * CEE Draft Graph Prompt v12
+ * CEE Draft Graph Prompt v12.1
+ *
+ * V12.1 improvements over V12:
+ * - Added 'price' factor type (distinct from cost/revenue)
+ * - No-duplicate rule for uncertainty_drivers
+ * - Contrastive examples to prevent common failure modes
  *
  * Production-ready prompt with factor metadata for downstream enrichment:
- * - factor_type: Canonical type mapping (cost, time, probability, revenue, demand, quality, other)
+ * - factor_type: Canonical type mapping (cost, price, time, probability, revenue, demand, quality, other)
  * - uncertainty_drivers: 1-2 phrases explaining epistemic uncertainty sources
  * - Symmetric invalid edge rules (risk→outcome added)
  * - FACTOR_TYPE_MAPPING canonical reference
  * - Hardcoded node/edge limits (50/200) for prompt admin compatibility
  *
- * Note: V22 was a misnumbering. V12 is the correct production version.
- *
  * Fallback: defaults.ts contains older versions (v8, v6) via PROMPT_VERSION env var
  */
 
 // ============================================================================
-// CEE Draft Graph Prompt v12
+// CEE Draft Graph Prompt v12.1
 // ============================================================================
 
 export const DRAFT_GRAPH_PROMPT_V12 = `<ROLE>
@@ -113,13 +116,16 @@ Classify each controllable factor using exactly one of these types:
 
 | Type | Description | Examples |
 |------|-------------|----------|
-| cost | Expenses, budgets, prices, fees | Compensation, marketing spend, licensing fees |
+| cost | Expenses, budgets, input costs | Compensation, marketing spend, licensing fees |
+| price | Pricing levels, fees charged, rate cards | Unit price, subscription tier, discount level |
 | time | Durations, delays, schedules, deadlines | Development time, time-to-market, onboarding period |
 | probability | Likelihoods, conversion rates, success chances | Conversion rate, churn probability, win rate |
 | revenue | Sales, income, profit, earnings | Annual revenue, deal value, subscription income |
 | demand | Volume, adoption, customers, usage | User signups, order volume, market size |
 | quality | Satisfaction, ratings, performance metrics | NPS score, defect rate, customer satisfaction |
-| other | None of the above fit | Regulatory complexity, team morale |
+| other | None of the above fit | Regulatory complexity, team morale, market entry (0/1) |
+
+Note: price ≠ cost ≠ revenue. Price is what you charge; cost is what you pay; revenue is the outcome of price × demand.
 
 This mapping is shared across all downstream prompts. Use consistently.
 </FACTOR_TYPE_MAPPING>
@@ -255,13 +261,14 @@ Controllable factor data:
   }
 
 FACTOR METADATA (controllable factors only):
-- factor_type: One of: cost | time | probability | revenue | demand | quality | other
+- factor_type: One of: cost | price | time | probability | revenue | demand | quality | other
   (See FACTOR_TYPE_MAPPING for definitions)
 - uncertainty_drivers: 1-2 short phrases explaining why this value is uncertain.
   * Observations only — describe what makes the value uncertain
   * No advisory language ("should", "consider", "might")
   * These explain the source of epistemic uncertainty (reflected in strength.std),
     not structural uncertainty about whether relationships exist (exists_probability)
+  * No duplicates across factors — each factor must have context-specific drivers
 
 Uncontrollable factors, decision, goal, outcome, risk: NO data field.
 
@@ -281,6 +288,39 @@ mean=1.0, std=0.01, exists_probability=1.0
 
 If uncertain about a value, infer conservatively rather than omitting required fields.
 </OUTPUT_SCHEMA>
+
+<CONTRASTIVE_EXAMPLES>
+Common mistakes to avoid:
+
+✗ BAD: Generic uncertainty_drivers (duplicated across factors)
+  fac_uk_entry: ["Market readiness unvalidated"]
+  fac_us_entry: ["Market readiness unvalidated"]
+  fac_eu_entry: ["Market readiness unvalidated"]
+
+✓ GOOD: Context-specific per factor
+  fac_uk_entry: ["UK regulatory landscape unclear", "No UK customer validation"]
+  fac_us_entry: ["US competitor density unknown", "Market size estimates unverified"]
+  fac_eu_entry: ["GDPR compliance scope unclear", "Multi-country rollout phasing uncertain"]
+
+---
+
+✗ BAD: Wrong factor_type (confusing cause with effect)
+  fac_price_level: factor_type: "revenue"   // Price affects revenue, but isn't revenue
+
+✓ GOOD: Correct classification
+  fac_price_level: factor_type: "price"     // What you charge
+  fac_cogs: factor_type: "cost"             // What you pay
+  out_revenue: kind: "outcome"              // Result of price × demand
+
+---
+
+✗ BAD: Sparse brief with no assumption capture
+  Brief: "Should we expand internationally?"
+  fac_investment: uncertainty_drivers: ["Uncertain"]
+
+✓ GOOD: Flag gaps as observations
+  fac_investment: uncertainty_drivers: ["No budget range specified", "Target markets not identified"]
+</CONTRASTIVE_EXAMPLES>
 
 <ANNOTATED_EXAMPLE>
 This example is illustrative only. The same structure applies to personal, career, health, and non-business decisions.
@@ -424,7 +464,7 @@ OUTPUT: Valid JSON with "nodes" and "edges" keys only.
 </HARD_CONSTRAINTS>`;
 
 /**
- * Get V12 draft graph prompt (no placeholders - hardcoded limits).
+ * Get V12.1 draft graph prompt (no placeholders - hardcoded limits).
  */
 export function getDraftGraphPromptV12(): string {
   return DRAFT_GRAPH_PROMPT_V12;

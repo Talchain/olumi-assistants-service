@@ -37,9 +37,15 @@ const FACTOR_TYPE_PATTERNS: Array<{
 }> = [
   {
     type: "cost",
-    patterns: [/cost/i, /price/i, /expense/i, /budget/i, /spend/i, /fee/i, /£|€|\$/],
+    patterns: [/cost/i, /expense/i, /budget/i, /spend/i, /£|€|\$/],
     validationHint: "Get actual quotes or historical cost data",
     uncertaintyPhrase: "costs may differ from estimates",
+  },
+  {
+    type: "price",
+    patterns: [/price/i, /pricing/i, /fee/i, /rate/i, /tier/i, /discount/i],
+    validationHint: "Validate pricing assumptions with market research",
+    uncertaintyPhrase: "pricing may need adjustment",
   },
   {
     type: "time",
