@@ -50,7 +50,7 @@ describe("Model Registry", () => {
       expect(MODEL_REGISTRY["gpt-5-mini"].tier).toBe("fast");
       expect(MODEL_REGISTRY["gpt-4o"].tier).toBe("quality");
       expect(MODEL_REGISTRY["gpt-5.2"].tier).toBe("premium");
-      expect(MODEL_REGISTRY["claude-sonnet-4-20250514"].tier).toBe("premium");
+      expect(MODEL_REGISTRY["claude-sonnet-4-20250514"].tier).toBe("quality");
     });
 
     it("has correct provider assignments", () => {
@@ -89,7 +89,7 @@ describe("Model Registry", () => {
     });
 
     it("returns false for disabled models", () => {
-      expect(isModelEnabled("claude-sonnet-4-20250514")).toBe(false);
+      expect(isModelEnabled("test-disabled-model")).toBe(false);
     });
 
     it("returns false for unknown models", () => {
@@ -140,7 +140,7 @@ describe("Model Registry", () => {
   describe("getModelProvider", () => {
     it("returns provider for known models", () => {
       expect(getModelProvider("gpt-4o")).toBe("openai");
-      expect(getModelProvider("claude-3-5-sonnet-20241022")).toBe("anthropic");
+      expect(getModelProvider("claude-sonnet-4-20250514")).toBe("anthropic");
     });
 
     it("returns undefined for unknown models", () => {
@@ -161,7 +161,7 @@ describe("Model Registry", () => {
 
     it("returns false for Anthropic models", () => {
       expect(isReasoningModel("claude-sonnet-4-20250514")).toBe(false);
-      expect(isReasoningModel("claude-3-5-sonnet-20241022")).toBe(false);
+      expect(isReasoningModel("claude-opus-4-5-20251101")).toBe(false);
     });
 
     it("returns false for unknown models (registry lookup, not string matching)", () => {

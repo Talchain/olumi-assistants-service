@@ -44,6 +44,7 @@ import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter } from "./adapters/llm/router.js";
+import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/models.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
@@ -127,6 +128,22 @@ export async function build() {
   if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
   }
+
+  // Validate model registry at startup
+  // This logs enabled models and warns about deprecated/misconfigured models
+  const modelValidation = validateModelsAtStartup();
+  if (modelValidation.warnings.length > 0) {
+    console.warn('[MODEL VALIDATION] Warnings detected:');
+    for (const warning of modelValidation.warnings) {
+      console.warn(`  - ${warning}`);
+    }
+  }
+  const modelsSummary = getEnabledModelsSummary();
+  console.log('[MODEL VALIDATION] Enabled models:', JSON.stringify({
+    openai: modelsSummary.openai,
+    anthropic: modelsSummary.anthropic,
+    total: modelValidation.enabledModels,
+  }));
 
   // Fail-fast: In production, require at least one API key or HMAC secret so
   // that authentication cannot be accidentally disabled.

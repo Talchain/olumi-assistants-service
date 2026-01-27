@@ -99,25 +99,16 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   "claude-sonnet-4-20250514": {
     id: "claude-sonnet-4-20250514",
     provider: "anthropic",
-    tier: "premium",
-    enabled: false, // Disabled by default, enable via env
-    maxTokens: 4096,
-    costPer1kTokens: 3.0,
-    averageLatencyMs: 2500,
-    qualityScore: 0.95,
-    description: "Premium Anthropic model for highest quality",
-  },
-  "claude-3-5-sonnet-20241022": {
-    id: "claude-3-5-sonnet-20241022",
-    provider: "anthropic",
     tier: "quality",
     enabled: true,
     maxTokens: 4096,
     costPer1kTokens: 3.0,
-    averageLatencyMs: 2200,
-    qualityScore: 0.93,
-    description: "High-quality Anthropic model",
+    averageLatencyMs: 2500,
+    qualityScore: 0.95,
+    description: "Claude Sonnet 4 - high-quality Anthropic model",
   },
+  // DEPRECATED: claude-3-5-sonnet-20241022 removed - model sunset by Anthropic (404 errors)
+  // Replaced by claude-sonnet-4-20250514
   "claude-opus-4-5-20251101": {
     id: "claude-opus-4-5-20251101",
     provider: "anthropic",
@@ -129,6 +120,19 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.99,
     description: "Claude Opus 4.5 - highest quality reasoning with extended thinking",
     extendedThinking: true,
+  },
+  // Test-only disabled model - used for testing disabled model validation
+  // DO NOT enable in production
+  "test-disabled-model": {
+    id: "test-disabled-model",
+    provider: "openai",
+    tier: "fast",
+    enabled: false,
+    maxTokens: 4096,
+    costPer1kTokens: 0.01, // Nominal value for test validation
+    averageLatencyMs: 1000,
+    qualityScore: 0.5,
+    description: "Test model for validation tests - always disabled",
   },
 };
 
@@ -202,4 +206,158 @@ export function isReasoningModel(modelId: string): boolean {
  */
 export function supportsExtendedThinking(modelId: string): boolean {
   return MODEL_REGISTRY[modelId]?.extendedThinking === true;
+}
+
+/**
+ * Model Validation Results
+ */
+export interface ModelValidationResult {
+  modelId: string;
+  provider: ModelProvider;
+  enabled: boolean;
+  tier: ModelTier;
+  warnings: string[];
+}
+
+export interface ModelValidationSummary {
+  timestamp: string;
+  totalModels: number;
+  enabledModels: number;
+  modelsByProvider: Record<string, number>;
+  models: ModelValidationResult[];
+  warnings: string[];
+}
+
+/**
+ * Known deprecated model patterns.
+ * Add models here that have been sunset by providers.
+ * This list is checked at startup to warn about deprecated models.
+ */
+const KNOWN_DEPRECATED_MODELS: Record<string, string> = {
+  "claude-3-5-sonnet-20241022": "Sunset by Anthropic - use claude-sonnet-4-20250514",
+  "claude-3-opus-20240229": "Sunset by Anthropic - use claude-opus-4-5-20251101",
+  "claude-3-sonnet-20240229": "Sunset by Anthropic - use claude-sonnet-4-20250514",
+  "gpt-4-turbo-preview": "Replaced by gpt-4o",
+  "gpt-4-0125-preview": "Replaced by gpt-4o",
+};
+
+/**
+ * Check if a model ID matches a deprecated pattern.
+ * This helps catch models that may have been sunset by providers.
+ */
+function checkModelDeprecation(modelId: string): string | null {
+  // Check explicit deprecation list
+  if (modelId in KNOWN_DEPRECATED_MODELS) {
+    return KNOWN_DEPRECATED_MODELS[modelId];
+  }
+
+  // Check for old date patterns in Anthropic models (pre-2025)
+  const anthropicDateMatch = modelId.match(/claude-.*-(\d{4})(\d{2})(\d{2})$/);
+  if (anthropicDateMatch) {
+    const year = parseInt(anthropicDateMatch[1], 10);
+    if (year < 2025) {
+      return `Model date ${anthropicDateMatch[1]}-${anthropicDateMatch[2]}-${anthropicDateMatch[3]} may be deprecated - verify with Anthropic`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validate all models in the registry at startup.
+ * Returns validation results and warnings for logging.
+ *
+ * Call this at server startup to:
+ * 1. Log all configured models for visibility
+ * 2. Warn about potentially deprecated models
+ * 3. Detect configuration issues early
+ */
+export function validateModelsAtStartup(): ModelValidationSummary {
+  const models = Object.values(MODEL_REGISTRY);
+  const enabledModels = models.filter(m => m.enabled);
+  const warnings: string[] = [];
+
+  // Count models by provider
+  const modelsByProvider: Record<string, number> = {};
+  for (const model of enabledModels) {
+    modelsByProvider[model.provider] = (modelsByProvider[model.provider] || 0) + 1;
+  }
+
+  // Validate each model
+  const validationResults: ModelValidationResult[] = models.map(model => {
+    const modelWarnings: string[] = [];
+
+    // Check for deprecation
+    const deprecationWarning = checkModelDeprecation(model.id);
+    if (deprecationWarning) {
+      modelWarnings.push(deprecationWarning);
+      warnings.push(`Model ${model.id}: ${deprecationWarning}`);
+    }
+
+    // Check for missing required fields
+    if (!model.description) {
+      modelWarnings.push("Missing description");
+    }
+
+    // Warn if model is disabled but still in registry
+    if (!model.enabled) {
+      modelWarnings.push("Model is disabled");
+    }
+
+    return {
+      modelId: model.id,
+      provider: model.provider,
+      enabled: model.enabled,
+      tier: model.tier,
+      warnings: modelWarnings,
+    };
+  });
+
+  // Check for missing provider coverage
+  if (!modelsByProvider["openai"]) {
+    warnings.push("No OpenAI models enabled - OpenAI requests will fail");
+  }
+  if (!modelsByProvider["anthropic"]) {
+    warnings.push("No Anthropic models enabled - Anthropic requests will fail");
+  }
+
+  // Check for missing tier coverage
+  const enabledTiers = new Set(enabledModels.map(m => m.tier));
+  const allTiers: ModelTier[] = ["fast", "quality", "premium"];
+  for (const tier of allTiers) {
+    if (!enabledTiers.has(tier)) {
+      warnings.push(`No models enabled for tier: ${tier}`);
+    }
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    totalModels: models.length,
+    enabledModels: enabledModels.length,
+    modelsByProvider,
+    models: validationResults,
+    warnings,
+  };
+}
+
+/**
+ * Get a summary of enabled models for logging.
+ * Returns a compact representation suitable for startup logs.
+ */
+export function getEnabledModelsSummary(): {
+  openai: string[];
+  anthropic: string[];
+  byTier: Record<ModelTier, string[]>;
+} {
+  const enabled = getEnabledModels();
+
+  return {
+    openai: enabled.filter(m => m.provider === "openai").map(m => m.id),
+    anthropic: enabled.filter(m => m.provider === "anthropic").map(m => m.id),
+    byTier: {
+      fast: enabled.filter(m => m.tier === "fast").map(m => m.id),
+      quality: enabled.filter(m => m.tier === "quality").map(m => m.id),
+      premium: enabled.filter(m => m.tier === "premium").map(m => m.id),
+    },
+  };
 }

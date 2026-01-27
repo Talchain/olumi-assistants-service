@@ -186,7 +186,7 @@ describe("selectModel", () => {
 
     it("rejects disabled model and uses default", () => {
       const result = selectModel(
-        { task: "clarification", override: "claude-sonnet-4-20250514" },
+        { task: "clarification", override: "test-disabled-model" },
         enabledConfig
       );
       expect(result.modelId).toBe("gpt-5-mini"); // Falls back to default
@@ -368,7 +368,7 @@ describe("validateModelRequest", () => {
   });
 
   it("rejects disabled models", () => {
-    const result = validateModelRequest("claude-sonnet-4-20250514");
+    const result = validateModelRequest("test-disabled-model");
     expect(result.valid).toBe(false);
     expect(result.reason).toBe("model_disabled");
   });
