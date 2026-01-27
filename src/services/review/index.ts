@@ -60,3 +60,15 @@ export {
   type RationaleResult,
   type RationaleContext,
 } from "./rationale.js";
+
+export {
+  enrichFactors,
+  buildEnrichFactorsInput,
+  extractGoalLabel,
+  extractOutcomeLabels,
+  extractRiskLabels,
+  extractControllableFactors,
+  FACTOR_TYPE_GUIDANCE,
+  type EnrichFactorsOptions,
+  type EnrichFactorsResult,
+} from "./enrichFactors.js";

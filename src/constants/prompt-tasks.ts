@@ -29,6 +29,7 @@ export const PROMPT_TASKS = [
   'sensitivity_coach',
   'explainer',
   'preflight',
+  'enrich_factors',
 ] as const;
 
 export type PromptTask = typeof PROMPT_TASKS[number];
@@ -47,6 +48,7 @@ export const PROMPT_TASK_LABELS: Record<PromptTask, string> = {
   sensitivity_coach: 'Sensitivity Coach',
   explainer: 'Explainer',
   preflight: 'Preflight',
+  enrich_factors: 'Enrich Factors',
 };
 
 /**

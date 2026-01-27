@@ -32,6 +32,7 @@ export const CeeTaskIdSchema = z.enum([
   'sensitivity_coach',
   'explainer',
   'preflight',
+  'enrich_factors',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

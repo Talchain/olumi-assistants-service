@@ -13,6 +13,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
 import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
+import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -1021,6 +1022,7 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);
   registerDefaultPrompt('explainer', EXPLAINER_PROMPT);
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
+  registerDefaultPrompt('enrich_factors', getEnrichFactorsPrompt());
 
   // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
   // - isl_synthesis: Uses template-based narrative generation (no LLM)
@@ -1047,6 +1049,7 @@ export const PROMPT_TEMPLATES = {
   critique_graph: CRITIQUE_GRAPH_PROMPT,
   explainer: EXPLAINER_PROMPT,
   bias_check: BIAS_CHECK_PROMPT,
+  enrich_factors: ENRICH_FACTORS_PROMPT,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 
