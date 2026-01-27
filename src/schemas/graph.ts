@@ -36,7 +36,7 @@ export const FactorData = z.object({
   rangeMax: z.number().optional(),
   /**
    * Factor type classification for downstream enrichment (V12+).
-   * One of: cost, time, probability, revenue, demand, quality, other
+   * One of: cost, price, time, probability, revenue, demand, quality, other
    */
   factor_type: FactorType.optional(),
   /**
