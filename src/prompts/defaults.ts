@@ -10,7 +10,8 @@
 
 import { registerDefaultPrompt } from './loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
-import { getDraftGraphPromptV8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
+import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
+import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -19,16 +20,17 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v6' (default), 'v8', or future versions.
+ * Use PROMPT_VERSION env var to select: 'v22' (default), 'v8', or 'v6' (deprecated).
  *
  * Examples:
- *   PROMPT_VERSION=v6  -> Use v6.0.2 (verbose, explicit checklist)
+ *   PROMPT_VERSION=v22 -> Use v22 (Monte Carlo optimized, scale discipline)
  *   PROMPT_VERSION=v8  -> Use v8.2 (concise, reasoning-optimized)
+ *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
-export type PromptVersion = 'v6' | 'v8';
+export type PromptVersion = 'v6' | 'v8' | 'v22';
 
-const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8']);
-const DEFAULT_VERSION: PromptVersion = 'v6';
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v22']);
+const DEFAULT_VERSION: PromptVersion = 'v22';
 
 /**
  * Get the configured prompt version from environment.
@@ -64,7 +66,14 @@ export { GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 };
 // ============================================================================
 
 // ============================================================================
-// CEE Draft Graph Prompt v6.0.2
+// CEE Draft Graph Prompt v6.0.2 [DEPRECATED]
+//
+// DEPRECATION NOTICE: v6 is superseded by v22 as of 2026-01-27.
+// v22 provides Monte Carlo-optimized parameters, scale discipline,
+// and improved causal reasoning. v6 is retained for backward compatibility
+// and A/B testing but should not be used for new deployments.
+//
+// Original v6 features:
 // - effect_direction required on all edges
 // - Options must differ in interventions
 // - Outcome/risk outdegree exactly 1 to goal
@@ -964,28 +973,35 @@ Respond ONLY with valid JSON.`;
  * Called during server initialization to populate the fallback registry.
  *
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
- * - v6 (default): Verbose v6.0.2 with explicit checklist
+ * - v22 (default): Monte Carlo optimized with scale discipline
  * - v8: Concise v8.2 optimized for reasoning LLMs
+ * - v6 (deprecated): Verbose v6.0.2 with explicit checklist
  */
 export function registerAllDefaultPrompts(): void {
   // Select draft_graph prompt version based on env var
   const { version, explicit } = getPromptVersion();
 
   let draftPromptWithCaps: string;
-  if (version === 'v8') {
+  if (version === 'v22') {
+    draftPromptWithCaps = getDraftGraphPromptV22();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v22 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v8') {
     draftPromptWithCaps = getDraftGraphPromptV8();
     log.info(
       { version, explicit },
       `Using draft_graph prompt v8.2 (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else {
-    // Default: v6.0.2
+    // v6.0.2 (deprecated)
     draftPromptWithCaps = DRAFT_GRAPH_PROMPT
       .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
       .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v6.0.2 (${explicit ? 'explicitly configured' : 'default'})`
+      `Using draft_graph prompt v6.0.2 [DEPRECATED] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   }
 
@@ -1006,11 +1022,14 @@ export function registerAllDefaultPrompts(): void {
 
 /**
  * Get the raw prompt templates (for testing/migration)
+ * Note: These contain {{maxNodes}}/{{maxEdges}} placeholders that must be resolved
+ * before use. Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT,
-  draft_graph_v6: DRAFT_GRAPH_PROMPT,
-  draft_graph_v8: getDraftGraphPromptV8(),
+  draft_graph: DRAFT_GRAPH_PROMPT_V22,
+  draft_graph_v22: DRAFT_GRAPH_PROMPT_V22,
+  draft_graph_v8: DRAFT_GRAPH_PROMPT_V8,
+  draft_graph_v6: DRAFT_GRAPH_PROMPT, // deprecated
   suggest_options: SUGGEST_OPTIONS_PROMPT,
   repair_graph: REPAIR_GRAPH_PROMPT,
   clarify_brief: CLARIFY_BRIEF_PROMPT,
@@ -1025,9 +1044,13 @@ export const PROMPT_TEMPLATES = {
  * Useful for A/B testing or explicit version selection in tests.
  */
 export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v22') {
+    return getDraftGraphPromptV22();
+  }
   if (version === 'v8') {
     return getDraftGraphPromptV8();
   }
+  // v6 (deprecated)
   return DRAFT_GRAPH_PROMPT
     .replace(/\{\{maxNodes\}\}/g, String(GRAPH_MAX_NODES))
     .replace(/\{\{maxEdges\}\}/g, String(GRAPH_MAX_EDGES));
