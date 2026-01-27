@@ -21,12 +21,12 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v12' (default), 'v22', 'v8', or 'v6'.
+ * Use PROMPT_VERSION env var to select: 'v12' (default) or legacy versions.
  *
  * Examples:
  *   PROMPT_VERSION=v12 -> Use v12 (production: factor metadata, scale discipline)
  *   PROMPT_VERSION=v22 -> Use v22 (deprecated: was misnumbering of v12 development)
- *   PROMPT_VERSION=v8  -> Use v8.2 (concise, reasoning-optimized)
+ *   PROMPT_VERSION=v8  -> Use v8.2 (deprecated: superseded by v12)
  *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
 export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v22';
@@ -977,7 +977,7 @@ Respond ONLY with valid JSON.`;
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
  * - v12 (default): Production prompt with factor metadata (factor_type, uncertainty_drivers)
  * - v22 (deprecated): Was misnumbering during v12 development
- * - v8: Concise v8.2 optimized for reasoning LLMs
+ * - v8 (deprecated): Concise v8.2, superseded by v12
  * - v6 (deprecated): Verbose v6.0.2 with explicit checklist
  */
 export function registerAllDefaultPrompts(): void {
@@ -1001,7 +1001,7 @@ export function registerAllDefaultPrompts(): void {
     draftPromptWithCaps = getDraftGraphPromptV8();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v8.2 (${explicit ? 'explicitly configured' : 'env override'})`
+      `Using draft_graph prompt v8.2 [DEPRECATED - use v12] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else {
     // v6.0.2 (deprecated)
@@ -1039,7 +1039,7 @@ export const PROMPT_TEMPLATES = {
   draft_graph: DRAFT_GRAPH_PROMPT_V12,
   draft_graph_v12: DRAFT_GRAPH_PROMPT_V12,
   draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
-  draft_graph_v8: DRAFT_GRAPH_PROMPT_V8,
+  draft_graph_v8: DRAFT_GRAPH_PROMPT_V8, // deprecated - superseded by v12
   draft_graph_v6: DRAFT_GRAPH_PROMPT, // deprecated
   suggest_options: SUGGEST_OPTIONS_PROMPT,
   repair_graph: REPAIR_GRAPH_PROMPT,

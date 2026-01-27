@@ -1,6 +1,11 @@
 /**
- * CEE Draft Graph Prompt v8.2
+ * CEE Draft Graph Prompt v8.2 [DEPRECATED]
  *
+ * DEPRECATION NOTICE: V8 is superseded by V12 as of 2026-01-27.
+ * V12 adds factor metadata (factor_type, uncertainty_drivers) and
+ * improved scale discipline. Use PROMPT_VERSION=v12 for production.
+ *
+ * Original v8.2 features:
  * Optimised for reasoning LLMs (GPT-5.2, Claude Opus 4.5)
  * - ~185 lines (reduced from ~600 in v6.0.2)
  * - "Why" explanations from Schema v2.6 B.1/B.4
@@ -23,8 +28,6 @@
  * - Added explicit sign constraint for outcome->goal and risk->goal
  * - Added simple brief guidance to prevent over-elaboration
  * - Tightened JSON schema with additionalProperties: false on nested objects
- *
- * Fallback: defaults.ts (v6.0.2) remains available via PROMPT_VERSION=v6
  */
 
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
