@@ -38,6 +38,7 @@ interface PromptRow {
   status: string;
   active_version: number;
   staging_version: number | null;
+  design_version: string | null;
   tags: string[];
   created_at: Date | string;
   updated_at: Date | string;
@@ -140,7 +141,7 @@ export class PostgresPromptStore implements IPromptStore {
       // Insert prompt and first version in transaction
       await sql.begin(async (tx) => {
         await tx`
-          INSERT INTO prompts (id, name, description, task_id, status, active_version, tags, created_at, updated_at)
+          INSERT INTO prompts (id, name, description, task_id, status, active_version, design_version, tags, created_at, updated_at)
           VALUES (
             ${request.id},
             ${request.name},
@@ -148,6 +149,7 @@ export class PostgresPromptStore implements IPromptStore {
             ${request.taskId},
             'draft',
             1,
+            ${request.designVersion ?? null},
             ${request.tags ?? []},
             ${now},
             ${now}
@@ -188,7 +190,7 @@ export class PostgresPromptStore implements IPromptStore {
 
     try {
       const prompts = await sql<PromptRow[]>`
-        SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+        SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
         FROM prompts
         WHERE id = ${id}
       `;
@@ -224,28 +226,28 @@ export class PostgresPromptStore implements IPromptStore {
       let prompts: PromptRow[];
       if (filter?.taskId && filter?.status) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
           FROM prompts
           WHERE task_id = ${filter.taskId} AND status = ${filter.status}
           ORDER BY id
         `;
       } else if (filter?.taskId) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
           FROM prompts
           WHERE task_id = ${filter.taskId}
           ORDER BY id
         `;
       } else if (filter?.status) {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
           FROM prompts
           WHERE status = ${filter.status}
           ORDER BY id
         `;
       } else {
         prompts = await sql<PromptRow[]>`
-          SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+          SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
           FROM prompts
           ORDER BY id
         `;
@@ -346,6 +348,7 @@ export class PostgresPromptStore implements IPromptStore {
           status = ${request.status ?? existing.status},
           active_version = ${request.activeVersion ?? existing.activeVersion},
           staging_version = ${request.stagingVersion === null ? null : (request.stagingVersion ?? existing.stagingVersion ?? null)},
+          design_version = ${request.designVersion ?? existing.designVersion ?? null},
           tags = ${request.tags ?? existing.tags}
         WHERE id = ${id}
       `;
@@ -654,7 +657,7 @@ export class PostgresPromptStore implements IPromptStore {
     try {
       // Find prompt for this task (exclude archived, allow draft/staging/production)
       const prompts = await sql<PromptRow[]>`
-        SELECT id, name, description, task_id, status, active_version, staging_version, tags, created_at, updated_at
+        SELECT id, name, description, task_id, status, active_version, staging_version, design_version, tags, created_at, updated_at
         FROM prompts
         WHERE task_id = ${taskId} AND status != 'archived'
       `;
@@ -713,6 +716,7 @@ export class PostgresPromptStore implements IPromptStore {
       })),
       activeVersion: prompt.active_version,
       stagingVersion: prompt.staging_version ?? undefined,
+      designVersion: prompt.design_version ?? undefined,
       tags: prompt.tags ?? [],
       createdAt: typeof prompt.created_at === 'string' ? prompt.created_at : prompt.created_at.toISOString(),
       updatedAt: typeof prompt.updated_at === 'string' ? prompt.updated_at : prompt.updated_at.toISOString(),

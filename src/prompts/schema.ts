@@ -127,6 +127,8 @@ export const PromptDefinitionSchema = z.object({
   activeVersion: z.number().int().positive(),
   /** Version number for staging/testing (optional) */
   stagingVersion: z.number().int().positive().optional(),
+  /** Prompt design version (e.g., "v22", "v8.2") - tracks prompt generation/iteration */
+  designVersion: z.string().max(32).optional(),
   /** Tags for organization/filtering */
   tags: z.array(z.string().max(64)).max(20).default([]),
   /** When the prompt was first created */
@@ -146,6 +148,7 @@ export const CreatePromptRequestSchema = z.object({
   taskId: CeeTaskIdSchema,
   content: z.string().min(10).max(100000),
   variables: z.array(PromptVariableSchema).default([]),
+  designVersion: z.string().max(32).optional(),
   tags: z.array(z.string().max(64)).max(20).default([]),
   createdBy: z.string().min(1).max(128),
   changeNote: z.string().max(1024).optional(),
@@ -174,6 +177,7 @@ export const UpdatePromptRequestSchema = z.object({
   status: PromptStatusSchema.optional(),
   activeVersion: z.number().int().positive().optional(),
   stagingVersion: z.number().int().positive().nullable().optional(),
+  designVersion: z.string().max(32).optional(),
   tags: z.array(z.string().max(64)).max(20).optional(),
 });
 export type UpdatePromptRequest = z.infer<typeof UpdatePromptRequestSchema>;

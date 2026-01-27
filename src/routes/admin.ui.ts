@@ -730,7 +730,8 @@ function generateAdminUI(): string {
                         <th>ID</th>
                         <th>Task</th>
                         <th>Status</th>
-                        <th>Active Version</th>
+                        <th>Revision</th>
+                        <th>Design Version</th>
                         <th>Updated</th>
                         <th>Actions</th>
                       </tr>
@@ -743,7 +744,8 @@ function generateAdminUI(): string {
                           <td>
                             <span class="status" :class="'status-' + prompt.status" x-text="prompt.status"></span>
                           </td>
-                          <td x-text="'v' + prompt.activeVersion"></td>
+                          <td x-text="prompt.activeVersion"></td>
+                          <td x-text="prompt.designVersion || '-'"></td>
                           <td x-text="formatDate(prompt.updatedAt)"></td>
                           <td>
                             <button class="btn btn-secondary btn-sm" @click="viewPrompt(prompt)">View</button>
@@ -1277,14 +1279,22 @@ function generateAdminUI(): string {
                 <p class="text-muted">Status:
                   <span class="status" :class="'status-' + selectedPrompt.status" x-text="selectedPrompt.status"></span>
                 </p>
+                <p class="text-muted">Design Version:
+                  <span x-text="selectedPrompt.designVersion || '-'"></span>
+                </p>
               </div>
-              <div>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
                 <select x-model="selectedPrompt.status" @change="updatePromptStatus()">
                   <option value="draft">Draft</option>
                   <option value="staging">Staging</option>
                   <option value="production">Production</option>
                   <option value="archived">Archived</option>
                 </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="text" x-model="selectedPrompt.designVersion" placeholder="e.g., v22"
+                         style="width: 80px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                  <button class="btn btn-secondary btn-sm" @click="updateDesignVersion()">Save</button>
+                </div>
               </div>
             </div>
 
@@ -2182,6 +2192,29 @@ function generateAdminUI(): string {
             }
           } catch (e) {
             this.showToast('Failed to update status', 'error');
+          }
+        },
+
+        async updateDesignVersion() {
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({ designVersion: this.selectedPrompt.designVersion || null })
+            });
+            if (res.ok) {
+              this.showToast('Design version updated to ' + (this.selectedPrompt.designVersion || '(none)'), 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update design version', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to update design version', 'error');
           }
         },
 
