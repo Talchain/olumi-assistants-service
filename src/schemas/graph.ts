@@ -42,8 +42,12 @@ export const FactorData = z.object({
   /**
    * 1-2 short phrases explaining sources of epistemic uncertainty (V12+).
    * Observations only — describe what makes the value uncertain.
+   * Must not contain duplicate entries.
    */
-  uncertainty_drivers: z.array(z.string()).max(2).optional(),
+  uncertainty_drivers: z.array(z.string()).max(2).refine(
+    (arr) => new Set(arr).size === arr.length,
+    { message: "uncertainty_drivers must not contain duplicates" }
+  ).optional(),
 });
 
 /**
