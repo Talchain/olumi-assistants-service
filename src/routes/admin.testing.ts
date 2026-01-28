@@ -836,6 +836,38 @@ function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?
     // Clean up any trailing commas before closing brackets (common after comment removal)
     jsonText = jsonText.replace(/,\s*([\]}])/g, '$1');
 
+    // Try to find JSON object if the text doesn't start with {
+    // Models sometimes add preamble text before the JSON
+    if (!jsonText.startsWith('{') && !jsonText.startsWith('[')) {
+      // Look for the first { that might be the start of JSON
+      const jsonStartIndex = jsonText.indexOf('{');
+      if (jsonStartIndex !== -1) {
+        // Find the matching closing brace by counting braces
+        let braceCount = 0;
+        let jsonEndIndex = -1;
+        for (let i = jsonStartIndex; i < jsonText.length; i++) {
+          if (jsonText[i] === '{') braceCount++;
+          else if (jsonText[i] === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              jsonEndIndex = i;
+              break;
+            }
+          }
+        }
+        if (jsonEndIndex !== -1) {
+          jsonText = jsonText.slice(jsonStartIndex, jsonEndIndex + 1);
+        }
+      } else {
+        // No JSON object found - model returned plain text
+        const preview = raw_output.slice(0, 100).replace(/\n/g, ' ');
+        return {
+          success: false,
+          error: `Model did not return JSON. Response starts with: "${preview}..."`,
+        };
+      }
+    }
+
     const parsed = JSON.parse(jsonText);
 
     // Extract nodes and edges
@@ -854,9 +886,11 @@ function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?
       graph: { nodes, edges, node_counts },
     };
   } catch (error) {
+    // Provide more helpful error message
+    const preview = raw_output.slice(0, 100).replace(/\n/g, ' ');
     return {
       success: false,
-      error: `Failed to parse graph: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to parse graph: ${error instanceof Error ? error.message : String(error)}. Response preview: "${preview}..."`,
     };
   }
 }
