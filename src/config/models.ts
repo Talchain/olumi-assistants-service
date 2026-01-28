@@ -98,6 +98,44 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   },
 
   // ============================================================
+  // OpenAI GPT-4.1 Family (Released April 2025)
+  // Excels at coding, instruction following, 1M context window
+  // ============================================================
+  "gpt-4.1": {
+    id: "gpt-4.1",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 32768,
+    costPer1kTokens: 2.0,
+    averageLatencyMs: 1500,
+    qualityScore: 0.94,
+    description: "GPT-4.1 - optimized for coding and instruction following, 1M context",
+  },
+  "gpt-4.1-mini": {
+    id: "gpt-4.1-mini",
+    provider: "openai",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 16384,
+    costPer1kTokens: 0.4,
+    averageLatencyMs: 600,
+    qualityScore: 0.85,
+    description: "GPT-4.1 Mini - fast, beats GPT-4o in many benchmarks",
+  },
+  "gpt-4.1-nano": {
+    id: "gpt-4.1-nano",
+    provider: "openai",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 0.1,
+    averageLatencyMs: 300,
+    qualityScore: 0.78,
+    description: "GPT-4.1 Nano - ultra-fast, lowest cost",
+  },
+
+  // ============================================================
   // OpenAI GPT-5 Family
   // ============================================================
   "gpt-5-mini": {
