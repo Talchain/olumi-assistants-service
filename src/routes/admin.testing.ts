@@ -20,7 +20,7 @@ import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
 import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
-import { checkModelAvailability, getModelErrorSummary, recordModelError } from '../services/model-availability.js';
+import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -1309,11 +1309,39 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/v1/test-prompt-llm/models
    *
    * List available models for testing with capability flags.
+   *
+   * Query parameters:
+   * - include_provider_models: boolean - When true, fetches all available models from
+   *   provider APIs and includes models not in our registry (marked as source: 'provider')
+   *
+   * Response model fields:
+   * - source: 'registry' | 'provider' - Where the model comes from
+   * - in_registry: boolean - Whether the model is in our registry (for provider models)
    */
-  app.get('/admin/v1/test-prompt-llm/models', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/test-prompt-llm/models', async (
+    request: FastifyRequest<{ Querystring: { include_provider_models?: string } }>,
+    reply: FastifyReply
+  ) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
-    const models = Object.entries(MODEL_REGISTRY)
+    const includeProviderModels = request.query.include_provider_models === 'true';
+
+    // Type for model entries (supports both registry and provider-only models)
+    type ModelEntry = {
+      id: string;
+      provider: string;
+      tier: string;
+      description: string;
+      max_tokens: number;
+      is_reasoning: boolean;
+      supports_extended_thinking: boolean;
+      supports_temperature: boolean;
+      source: 'registry' | 'provider';
+      in_registry: boolean;
+    };
+
+    // Always include enabled registry models
+    const registryModels: ModelEntry[] = Object.entries(MODEL_REGISTRY)
       .filter(([_, config]) => config.enabled)
       .map(([id, config]) => ({
         id,
@@ -1325,9 +1353,100 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         is_reasoning: isReasoningModel(id),
         supports_extended_thinking: supportsExtendedThinking(id),
         supports_temperature: !doesNotSupportCustomTemperature(id),
+        // Source tracking
+        source: 'registry' as const,
+        in_registry: true,
       }));
 
-    return reply.status(200).send({ models });
+    if (!includeProviderModels) {
+      return reply.status(200).send({ models: registryModels });
+    }
+
+    // Fetch all models from provider APIs
+    try {
+      const [openaiModels, anthropicModels] = await Promise.all([
+        fetchOpenAIModels(),
+        Promise.resolve(getAnthropicModels()),
+      ]);
+
+      // Create a set of registry model IDs for quick lookup
+      const registryModelIds = new Set(Object.keys(MODEL_REGISTRY));
+
+      // Add provider models that aren't in the registry
+      const providerOnlyModels: ModelEntry[] = [];
+
+      for (const model of openaiModels) {
+        if (!registryModelIds.has(model.id)) {
+          providerOnlyModels.push({
+            id: model.id,
+            provider: 'openai',
+            tier: 'unknown', // Provider models don't have tier classification
+            description: `OpenAI model (not in registry)`,
+            max_tokens: 4096, // Default, unknown for provider-only models
+            is_reasoning: false,
+            supports_extended_thinking: false,
+            supports_temperature: true,
+            source: 'provider',
+            in_registry: false,
+          });
+        }
+      }
+
+      for (const model of anthropicModels) {
+        if (!registryModelIds.has(model.id)) {
+          providerOnlyModels.push({
+            id: model.id,
+            provider: 'anthropic',
+            tier: 'unknown',
+            description: `Anthropic model (not in registry)`,
+            max_tokens: 4096,
+            is_reasoning: false,
+            supports_extended_thinking: false,
+            supports_temperature: true,
+            source: 'provider',
+            in_registry: false,
+          });
+        }
+      }
+
+      // Combine registry and provider-only models
+      const allModels = [...registryModels, ...providerOnlyModels];
+
+      // Sort: registry models first (by provider, then id), then provider-only models
+      allModels.sort((a, b) => {
+        if (a.source !== b.source) {
+          return a.source === 'registry' ? -1 : 1;
+        }
+        if (a.provider !== b.provider) {
+          return a.provider.localeCompare(b.provider);
+        }
+        return a.id.localeCompare(b.id);
+      });
+
+      return reply.status(200).send({
+        models: allModels,
+        provider_fetch: {
+          success: true,
+          openai_count: openaiModels.length,
+          anthropic_count: anthropicModels.length,
+          provider_only_count: providerOnlyModels.length,
+        },
+      });
+    } catch (error) {
+      // If provider fetch fails, still return registry models with an error note
+      log.warn({
+        event: 'admin.models.provider_fetch_failed',
+        error: error instanceof Error ? error.message : String(error),
+      }, 'Failed to fetch provider models, returning registry only');
+
+      return reply.status(200).send({
+        models: registryModels,
+        provider_fetch: {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   });
 
   /**

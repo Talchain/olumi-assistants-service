@@ -100,9 +100,10 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   // ============================================================
   // OpenAI GPT-4.1 Family (Released April 2025)
   // Excels at coding, instruction following, 1M context window
+  // Model IDs use date suffix: gpt-4.1-2025-04-14
   // ============================================================
-  "gpt-4.1": {
-    id: "gpt-4.1",
+  "gpt-4.1-2025-04-14": {
+    id: "gpt-4.1-2025-04-14",
     provider: "openai",
     tier: "quality",
     enabled: true,
@@ -112,8 +113,8 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.94,
     description: "GPT-4.1 - optimized for coding and instruction following, 1M context",
   },
-  "gpt-4.1-mini": {
-    id: "gpt-4.1-mini",
+  "gpt-4.1-mini-2025-04-14": {
+    id: "gpt-4.1-mini-2025-04-14",
     provider: "openai",
     tier: "fast",
     enabled: true,
@@ -123,8 +124,8 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.85,
     description: "GPT-4.1 Mini - fast, beats GPT-4o in many benchmarks",
   },
-  "gpt-4.1-nano": {
-    id: "gpt-4.1-nano",
+  "gpt-4.1-nano-2025-04-14": {
+    id: "gpt-4.1-nano-2025-04-14",
     provider: "openai",
     tier: "fast",
     enabled: true,
