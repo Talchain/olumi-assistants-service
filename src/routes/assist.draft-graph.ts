@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { getOrGenerateRequestId } from "../utils/request-id.js";
+import { getRequestId } from "../utils/request-id.js";
 import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
@@ -1553,7 +1553,7 @@ export default async function route(app: FastifyInstance) {
     }
   }, async (req, reply) => {
     // V04: Use X-Request-Id header if provided, otherwise generate new UUID
-    const correlationId = getOrGenerateRequestId(req);
+    const correlationId = getRequestId(req);
 
     // v1.11: Detect Redis-unavailable degraded mode for SSE streaming
     // When Redis is unavailable, we still stream normally but explicitly signal
@@ -1906,7 +1906,7 @@ export default async function route(app: FastifyInstance) {
   // For production SSE streaming, use dedicated /assist/draft-graph/stream endpoint (20 RPM limit)
   app.post("/assist/draft-graph", async (req, reply) => {
     // V04: Use X-Request-Id header if provided, otherwise generate new UUID
-    const correlationId = getOrGenerateRequestId(req);
+    const correlationId = getRequestId(req);
 
     const wantsSse = req.headers.accept?.includes(EVENT_STREAM) ?? false;
 
