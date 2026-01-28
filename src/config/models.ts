@@ -223,8 +223,8 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     description: "Claude Sonnet 4 - high-quality balanced model",
     extendedThinking: true,
   },
-  "claude-sonnet-4-5-20250514": {
-    id: "claude-sonnet-4-5-20250514",
+  "claude-sonnet-4-5-20250929": {
+    id: "claude-sonnet-4-5-20250929",
     provider: "anthropic",
     tier: "quality",
     enabled: true,

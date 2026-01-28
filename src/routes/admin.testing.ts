@@ -391,7 +391,8 @@ async function callAnthropicWithPrompt(
   const client = new Anthropic({ apiKey });
   const abortController = new AbortController();
 
-  // Extended thinking models need longer timeout
+  // Extended thinking models need longer timeout AND streaming
+  // Anthropic requires streaming for operations that may take >10 minutes
   const hasExtendedThinking = supportsExtendedThinking(model) && budgetTokens !== undefined;
   const effectiveTimeout = hasExtendedThinking ? REASONING_HIGH_TIMEOUT_MS : LLM_TIMEOUT_MS;
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
@@ -406,40 +407,94 @@ async function callAnthropicWithPrompt(
       ? { thinking: { type: 'enabled' as const, budget_tokens: budgetTokens } }
       : {};
 
-    const response = await client.messages.create(
-      {
-        model,
-        max_tokens: maxTokens,
-        temperature: effectiveTemperature,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
-        ...thinkingParam,
-      },
-      {
-        signal: abortController.signal,
+    // Use streaming for extended thinking (required by Anthropic for long operations)
+    // and also recommended for Opus models which can have long response times
+    const useStreaming = hasExtendedThinking || model.includes('opus');
+
+    let raw_output = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let stopReason = 'unknown';
+
+    if (useStreaming) {
+      // Use streaming API for extended thinking and Opus models
+      const stream = client.messages.stream(
+        {
+          model,
+          max_tokens: maxTokens,
+          temperature: effectiveTemperature,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+          ...thinkingParam,
+        },
+        {
+          signal: abortController.signal,
+        }
+      );
+
+      // Collect the streamed response
+      const response = await stream.finalMessage();
+
+      // Handle response - find the text content block
+      const textContent = response.content.find(c => c.type === 'text');
+      if (!textContent || textContent.type !== 'text') {
+        clearTimeout(timeoutId);
+        return {
+          success: false,
+          error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
+          duration_ms: Date.now() - startTime,
+          temperature: effectiveTemperature,
+          max_tokens: maxTokens,
+          model,
+          provider: 'anthropic',
+          budget_tokens: budgetTokens,
+        };
       }
-    );
+
+      raw_output = textContent.text;
+      inputTokens = response.usage.input_tokens;
+      outputTokens = response.usage.output_tokens;
+      stopReason = response.stop_reason ?? 'unknown';
+    } else {
+      // Use non-streaming for standard models
+      const response = await client.messages.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          temperature: effectiveTemperature,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+          ...thinkingParam,
+        },
+        {
+          signal: abortController.signal,
+        }
+      );
+
+      // Handle response - find the text content block
+      const textContent = response.content.find(c => c.type === 'text');
+      if (!textContent || textContent.type !== 'text') {
+        clearTimeout(timeoutId);
+        return {
+          success: false,
+          error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
+          duration_ms: Date.now() - startTime,
+          temperature: effectiveTemperature,
+          max_tokens: maxTokens,
+          model,
+          provider: 'anthropic',
+          budget_tokens: budgetTokens,
+        };
+      }
+
+      raw_output = textContent.text;
+      inputTokens = response.usage.input_tokens;
+      outputTokens = response.usage.output_tokens;
+      stopReason = response.stop_reason ?? 'unknown';
+    }
 
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
-
-    // Handle extended thinking response - find the text content block
-    // Extended thinking responses may have multiple content blocks (thinking + text)
-    const textContent = response.content.find(c => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      return {
-        success: false,
-        error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
-        duration_ms,
-        temperature: effectiveTemperature,
-        max_tokens: maxTokens,
-        model,
-        provider: 'anthropic',
-        budget_tokens: budgetTokens,
-      };
-    }
-
-    const raw_output = textContent.text;
     const raw_output_hash = createHash('sha256').update(raw_output).digest('hex');
 
     return {
@@ -448,11 +503,11 @@ async function callAnthropicWithPrompt(
       raw_output_hash,
       duration_ms,
       token_usage: {
-        prompt: response.usage.input_tokens,
-        completion: response.usage.output_tokens,
-        total: response.usage.input_tokens + response.usage.output_tokens,
+        prompt: inputTokens,
+        completion: outputTokens,
+        total: inputTokens + outputTokens,
       },
-      finish_reason: response.stop_reason ?? 'unknown',
+      finish_reason: stopReason,
       temperature: effectiveTemperature,
       max_tokens: maxTokens,
       model,

@@ -120,7 +120,7 @@ export function getAnthropicModels(): ProviderModel[] {
   return [
     // Claude 4.5 Family
     { id: 'claude-opus-4-5-20251101', provider: 'anthropic' },
-    { id: 'claude-sonnet-4-5-20250514', provider: 'anthropic' },
+    { id: 'claude-sonnet-4-5-20250929', provider: 'anthropic' },
     // Claude 4 Family
     { id: 'claude-opus-4-20250514', provider: 'anthropic' },
     { id: 'claude-sonnet-4-20250514', provider: 'anthropic' },
