@@ -513,3 +513,116 @@ describe("buildRepairPromptContext", () => {
     expect(context).toContain("Fix ALL the errors");
   });
 });
+
+// =============================================================================
+// validateAndRepairGraph Tests
+// =============================================================================
+
+import {
+  validateAndRepairGraph,
+  type ValidateAndRepairInput,
+  type RepairOnlyAdapter,
+} from "../../src/cee/graph-orchestrator.js";
+
+describe("validateAndRepairGraph", () => {
+  describe("valid graph without repair adapter", () => {
+    it("returns validated graph when graph is valid", async () => {
+      const validGraph = createValidGraph();
+
+      const result = await validateAndRepairGraph({
+        graph: validGraph,
+        brief: "Test decision",
+        requestId: "test-123",
+      });
+
+      expect(result.graph).toBeDefined();
+      expect(result.repairUsed).toBe(false);
+      expect(result.repairAttempts).toBe(0);
+      expect(result.graph.nodes).toHaveLength(6);
+    });
+
+    it("throws GraphValidationError when graph is invalid and no repair adapter", async () => {
+      const invalidGraph = createInvalidGraphMissingGoal();
+
+      await expect(
+        validateAndRepairGraph({
+          graph: invalidGraph,
+          brief: "Test decision",
+          requestId: "test-456",
+        })
+      ).rejects.toThrow(GraphValidationError);
+    });
+  });
+
+  describe("with repair adapter", () => {
+    it("repairs invalid graph and returns validated result", async () => {
+      const invalidGraph = createInvalidGraphMissingGoal();
+      const validGraph = createValidGraph();
+
+      const repairAdapter: RepairOnlyAdapter = {
+        repairGraph: vi.fn().mockResolvedValue({
+          graph: validGraph,
+          usage: { input_tokens: 100, output_tokens: 50 },
+        }),
+      };
+
+      const result = await validateAndRepairGraph(
+        {
+          graph: invalidGraph,
+          brief: "Test decision",
+          requestId: "test-789",
+          maxRetries: 1,
+        },
+        repairAdapter
+      );
+
+      expect(result.graph).toBeDefined();
+      expect(result.repairUsed).toBe(true);
+      expect(result.repairAttempts).toBeGreaterThan(0);
+      expect(repairAdapter.repairGraph).toHaveBeenCalled();
+    });
+
+    it("throws GraphValidationError after max retries exceeded", async () => {
+      const invalidGraph = createInvalidGraphMissingGoal();
+
+      const repairAdapter: RepairOnlyAdapter = {
+        repairGraph: vi.fn().mockResolvedValue({
+          graph: invalidGraph, // Return same invalid graph
+          usage: { input_tokens: 100, output_tokens: 50 },
+        }),
+      };
+
+      await expect(
+        validateAndRepairGraph(
+          {
+            graph: invalidGraph,
+            brief: "Test decision",
+            requestId: "test-max-retries",
+            maxRetries: 1,
+          },
+          repairAdapter
+        )
+      ).rejects.toThrow(GraphValidationError);
+
+      // Should have tried repair once
+      expect(repairAdapter.repairGraph).toHaveBeenCalled();
+    });
+  });
+
+  describe("Zod validation", () => {
+    it("catches malformed graphs via Zod", async () => {
+      const malformedGraph = {
+        version: "1",
+        // Missing nodes and edges entirely
+      };
+
+      await expect(
+        validateAndRepairGraph({
+          graph: malformedGraph,
+          brief: "Test",
+          requestId: "test-zod",
+        })
+      ).rejects.toThrow(GraphValidationError);
+    });
+  });
+});

@@ -687,10 +687,12 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   // === ORCHESTRATOR VALIDATION: Zod + deterministic validation with repair loop ===
   // Validates the LLM output before proceeding with factor enrichment
+  // Only runs when CEE_ORCHESTRATOR_VALIDATION_ENABLED=true (off by default)
   let validatedGraph: GraphT = graph;
   let orchestratorRepairUsed = false;
   let orchestratorWarnings: Array<{ code: string; message: string }> = [];
 
+  if (config.cee.orchestratorValidationEnabled) {
   try {
     // Create repair adapter wrapper if budget allows
     let repairOnlyAdapter: RepairOnlyAdapter | undefined;
@@ -793,6 +795,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     // Re-throw non-validation errors
     throw error;
   }
+  } // End of orchestratorValidationEnabled block
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true

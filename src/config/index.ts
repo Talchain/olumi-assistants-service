@@ -233,6 +233,7 @@ const ConfigSchema = z.object({
     cacheResponseMaxSize: z.coerce.number().min(1).default(100), // Maximum cache entries
     // Graph structure validation (Phase: Graph Validation)
     enforceSingleGoal: booleanString.default(true), // If true, merge multiple goals into compound goal
+    orchestratorValidationEnabled: booleanString.default(false), // If true, enable deterministic validator in draft pipeline
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Per-operation model selection for tiered cost optimization
@@ -470,6 +471,7 @@ function parseConfig(): Config {
       cacheResponseMaxSize: env.CEE_CACHE_RESPONSE_MAX_SIZE,
       // Graph structure validation
       enforceSingleGoal: env.CEE_ENFORCE_SINGLE_GOAL,
+      orchestratorValidationEnabled: env.CEE_ORCHESTRATOR_VALIDATION_ENABLED,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Per-operation model selection
