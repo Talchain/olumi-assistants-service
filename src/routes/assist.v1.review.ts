@@ -429,19 +429,19 @@ export default async function route(app: FastifyInstance) {
       let factorEnrichments: ReviewResponseT["factor_enrichments"];
       const factorSensitivity = input.robustness_data?.factor_sensitivity;
       if (factorSensitivity && Array.isArray(factorSensitivity) && factorSensitivity.length > 0) {
-        // Check if ranks already provided by upstream (ISL)
+        // Check if ranks already provided by upstream (ISL) via importance_rank field
         const hasExistingRanks = factorSensitivity.every(
-          (f: { rank?: number }) => typeof f.rank === "number" && f.rank >= 1
+          (f) => typeof f.importance_rank === "number" && f.importance_rank >= 1
         );
 
         let sensitivityWithRanks: Array<{ factor_id: string; elasticity: number; rank: number }>;
 
         if (hasExistingRanks) {
-          // Use existing ranks from ISL
-          sensitivityWithRanks = factorSensitivity.map((f: { factor_id: string; elasticity: number; rank: number }) => ({
+          // Use existing ranks from ISL (importance_rank field)
+          sensitivityWithRanks = factorSensitivity.map((f) => ({
             factor_id: f.factor_id,
             elasticity: f.elasticity,
-            rank: f.rank,
+            rank: f.importance_rank!,
           }));
         } else {
           // Compute ranks from elasticity with deterministic tie-breaker

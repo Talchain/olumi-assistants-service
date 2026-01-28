@@ -160,10 +160,19 @@ export async function checkModelAvailability(
     (m): m is ModelConfig => m.provider === provider
   );
 
+  // Define the status item type explicitly to allow all status values
+  type RegistryStatusItem = {
+    model_id: string;
+    in_registry: boolean;
+    enabled: boolean;
+    available_from_provider: boolean;
+    status: 'ok' | 'missing_from_provider' | 'not_in_registry' | 'disabled';
+  };
+
   // Check registry models against provider availability
-  const registryStatus = registryModels.map(model => {
+  const registryStatus: RegistryStatusItem[] = registryModels.map(model => {
     const availableFromProvider = providerModelIds.has(model.id);
-    let status: 'ok' | 'missing_from_provider' | 'not_in_registry' | 'disabled';
+    let status: RegistryStatusItem['status'];
 
     if (!model.enabled) {
       status = 'disabled';
