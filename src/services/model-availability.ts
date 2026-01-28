@@ -65,7 +65,10 @@ export async function fetchOpenAIModels(): Promise<ProviderModel[]> {
 
     const models: ProviderModel[] = [];
     for await (const model of response) {
-      // Filter to chat models only (gpt-*, o1-*, o3-*)
+      // Filter to chat/reasoning models only (gpt-*, o1-*, o3-*)
+      // This excludes embedding models (text-embedding-*), audio models (whisper-*),
+      // image models (dall-e-*), and other non-chat models.
+      // NOTE: If OpenAI introduces new chat model prefixes, add them here.
       if (model.id.startsWith('gpt-') ||
           model.id.startsWith('o1') ||
           model.id.startsWith('o3')) {
@@ -107,6 +110,9 @@ export async function fetchOpenAIModels(): Promise<ProviderModel[]> {
  *
  * Note: Anthropic doesn't have a public model list API,
  * so we maintain a curated list of known models.
+ *
+ * IMPORTANT: This list should match MODEL_REGISTRY Anthropic entries.
+ * Do not add deprecated models here - they belong in KNOWN_DEPRECATED_MODELS.
  */
 export function getAnthropicModels(): ProviderModel[] {
   // Curated list of known Anthropic models (updated 2026-01)
@@ -120,7 +126,7 @@ export function getAnthropicModels(): ProviderModel[] {
     { id: 'claude-sonnet-4-20250514', provider: 'anthropic' },
     // Claude 3.5 Family
     { id: 'claude-3-5-haiku-20241022', provider: 'anthropic' },
-    { id: 'claude-3-5-sonnet-20241022', provider: 'anthropic' }, // Legacy but may still work
+    // Note: claude-3-5-sonnet-20241022 is deprecated (sunset by Anthropic)
   ];
 }
 
