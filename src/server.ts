@@ -553,7 +553,7 @@ app.get("/healthz", async () => {
 
   // Check auth configuration
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
-  const hasHmacSecret = !!env.SHARE_SECRET;
+  const hasHmacSecret = !!(env.CEE_HMAC_SECRET || env.HMAC_SECRET);
 
   // Check LLM configuration (provider-specific)
   const llmProvider = adapter.name;
