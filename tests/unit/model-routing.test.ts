@@ -35,7 +35,7 @@ describe("Model Registry", () => {
       expect(model.provider).toBe("openai");
       expect(model.tier).toBe("premium");
       expect(model.enabled).toBe(true);
-      expect(model.maxTokens).toBe(16384);
+      expect(model.maxTokens).toBe(100000);
     });
 
     it("non-reasoning models do not have reasoning flag or have it set to false", () => {

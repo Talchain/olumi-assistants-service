@@ -42,25 +42,64 @@ export interface ModelConfig {
  *
  * MAINTENANCE NOTE:
  * The costPer1kTokens values should be reviewed quarterly or when providers
- * announce pricing changes. Current prices as of 2024-12:
+ * announce pricing changes. Current prices as of 2025-01:
  * - OpenAI: https://openai.com/pricing
  * - Anthropic: https://www.anthropic.com/pricing
  *
  * When adding new models, ensure costPer1kTokens reflects input token pricing
  * (output pricing is typically higher but we use input for cost estimation).
+ *
+ * REASONING EFFORT (OpenAI):
+ * Models with reasoning: true support the reasoning_effort parameter:
+ * - 'low': Faster, less thorough reasoning
+ * - 'medium': Balanced (default)
+ * - 'high': Most thorough, higher latency and cost
+ *
+ * EXTENDED THINKING (Anthropic):
+ * Models with extendedThinking: true support the budget_tokens parameter
+ * for controlling thinking depth.
  */
 export const MODEL_REGISTRY: Record<string, ModelConfig> = {
+  // ============================================================
+  // OpenAI GPT-4 Family (Standard Models)
+  // ============================================================
   "gpt-4o-mini": {
     id: "gpt-4o-mini",
     provider: "openai",
     tier: "fast",
     enabled: true,
-    maxTokens: 4096,
+    maxTokens: 16384,
     costPer1kTokens: 0.15,
     averageLatencyMs: 800,
     qualityScore: 0.75,
-    description: "Fast, cost-effective model for simple tasks",
+    description: "GPT-4o Mini - fast, cost-effective for simple tasks",
   },
+  "gpt-4o": {
+    id: "gpt-4o",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 16384,
+    costPer1kTokens: 2.5,
+    averageLatencyMs: 2000,
+    qualityScore: 0.92,
+    description: "GPT-4o - high-quality multimodal model",
+  },
+  "gpt-4-turbo": {
+    id: "gpt-4-turbo",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 4096,
+    costPer1kTokens: 10.0,
+    averageLatencyMs: 3000,
+    qualityScore: 0.90,
+    description: "GPT-4 Turbo - legacy high-quality model",
+  },
+
+  // ============================================================
+  // OpenAI GPT-5 Family
+  // ============================================================
   "gpt-5-mini": {
     id: "gpt-5-mini",
     provider: "openai",
@@ -70,57 +109,148 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     costPer1kTokens: 0.30,
     averageLatencyMs: 600,
     qualityScore: 0.82,
-    description: "Fast GPT-5 variant for simple generation tasks",
+    description: "GPT-5 Mini - fast generation, no reasoning",
     reasoning: false,
-  },
-  "gpt-4o": {
-    id: "gpt-4o",
-    provider: "openai",
-    tier: "quality",
-    enabled: true,
-    maxTokens: 4096,
-    costPer1kTokens: 2.5,
-    averageLatencyMs: 2000,
-    qualityScore: 0.92,
-    description: "High-quality model for complex reasoning",
   },
   "gpt-5.2": {
     id: "gpt-5.2",
     provider: "openai",
     tier: "premium",
     enabled: true,
-    maxTokens: 16384,
-    costPer1kTokens: 15.0, // Reasoning models are more expensive
-    averageLatencyMs: 15000, // Reasoning takes longer
+    maxTokens: 100000,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 15000,
     qualityScore: 0.98,
-    description: "OpenAI reasoning model with extended thinking capabilities",
+    description: "GPT-5.2 - reasoning model with extended thinking",
     reasoning: true,
   },
+
+  // ============================================================
+  // OpenAI o1 Reasoning Family
+  // ============================================================
+  "o1": {
+    id: "o1",
+    provider: "openai",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 100000,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 20000,
+    qualityScore: 0.97,
+    description: "o1 - advanced reasoning model",
+    reasoning: true,
+  },
+  "o1-mini": {
+    id: "o1-mini",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 65536,
+    costPer1kTokens: 3.0,
+    averageLatencyMs: 8000,
+    qualityScore: 0.88,
+    description: "o1 Mini - faster reasoning at lower cost",
+    reasoning: true,
+  },
+  "o1-preview": {
+    id: "o1-preview",
+    provider: "openai",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 32768,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 25000,
+    qualityScore: 0.96,
+    description: "o1 Preview - preview reasoning model",
+    reasoning: true,
+  },
+
+  // ============================================================
+  // OpenAI o3 Reasoning Family (Latest)
+  // ============================================================
+  "o3": {
+    id: "o3",
+    provider: "openai",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 100000,
+    costPer1kTokens: 20.0,
+    averageLatencyMs: 30000,
+    qualityScore: 0.99,
+    description: "o3 - most advanced reasoning model",
+    reasoning: true,
+  },
+  "o3-mini": {
+    id: "o3-mini",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 65536,
+    costPer1kTokens: 4.0,
+    averageLatencyMs: 10000,
+    qualityScore: 0.92,
+    description: "o3 Mini - efficient advanced reasoning",
+    reasoning: true,
+  },
+
+  // ============================================================
+  // Anthropic Claude 3.5 Family
+  // ============================================================
+  "claude-3-5-haiku-20241022": {
+    id: "claude-3-5-haiku-20241022",
+    provider: "anthropic",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 0.25,
+    averageLatencyMs: 500,
+    qualityScore: 0.78,
+    description: "Claude 3.5 Haiku - fastest Anthropic model",
+  },
+
+  // ============================================================
+  // Anthropic Claude 4 Family
+  // ============================================================
   "claude-sonnet-4-20250514": {
     id: "claude-sonnet-4-20250514",
     provider: "anthropic",
     tier: "quality",
     enabled: true,
-    maxTokens: 4096,
+    maxTokens: 8192,
     costPer1kTokens: 3.0,
     averageLatencyMs: 2500,
     qualityScore: 0.95,
-    description: "Claude Sonnet 4 - high-quality Anthropic model",
+    description: "Claude Sonnet 4 - high-quality balanced model",
+    extendedThinking: true,
   },
-  // DEPRECATED: claude-3-5-sonnet-20241022 removed - model sunset by Anthropic (404 errors)
-  // Replaced by claude-sonnet-4-20250514
-  "claude-opus-4-5-20251101": {
-    id: "claude-opus-4-5-20251101",
+  "claude-opus-4-20250514": {
+    id: "claude-opus-4-20250514",
     provider: "anthropic",
     tier: "premium",
     enabled: true,
     maxTokens: 16384,
     costPer1kTokens: 15.0,
-    averageLatencyMs: 25000,
-    qualityScore: 0.99,
-    description: "Claude Opus 4.5 - highest quality reasoning with extended thinking",
+    averageLatencyMs: 20000,
+    qualityScore: 0.98,
+    description: "Claude Opus 4 - premium reasoning model",
     extendedThinking: true,
   },
+  "claude-opus-4-5-20251101": {
+    id: "claude-opus-4-5-20251101",
+    provider: "anthropic",
+    tier: "premium",
+    enabled: true,
+    maxTokens: 32768,
+    costPer1kTokens: 15.0,
+    averageLatencyMs: 25000,
+    qualityScore: 0.99,
+    description: "Claude Opus 4.5 - highest quality with extended thinking",
+    extendedThinking: true,
+  },
+
+  // ============================================================
+  // Test Model (Disabled)
+  // ============================================================
   // Test-only disabled model - used for testing disabled model validation
   // DO NOT enable in production
   "test-disabled-model": {
@@ -129,7 +259,7 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     tier: "fast",
     enabled: false,
     maxTokens: 4096,
-    costPer1kTokens: 0.01, // Nominal value for test validation
+    costPer1kTokens: 0.01,
     averageLatencyMs: 1000,
     qualityScore: 0.5,
     description: "Test model for validation tests - always disabled",

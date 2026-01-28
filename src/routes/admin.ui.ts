@@ -838,7 +838,7 @@ function generateAdminUI(): string {
                               </template>
                             </select>
                           </div>
-                          <!-- Reasoning Effort (only for reasoning models) -->
+                          <!-- Reasoning Effort (only for OpenAI reasoning models) -->
                           <template x-if="isReasoningModelSelected()">
                             <div style="display: flex; align-items: center; gap: 6px;">
                               <label style="font-size: 0.85rem; font-weight: 500;">Reasoning Effort:</label>
@@ -847,6 +847,15 @@ function generateAdminUI(): string {
                                 <option value="medium">Medium</option>
                                 <option value="high">High</option>
                               </select>
+                            </div>
+                          </template>
+                          <!-- Extended Thinking Budget (only for Anthropic models with extended thinking) -->
+                          <template x-if="supportsExtendedThinkingSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Thinking Budget:</label>
+                              <input type="number" x-model.number="llmBudgetTokens" placeholder="none" min="1024" max="128000" step="1024"
+                                     style="width: 100px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                              <span style="font-size: 0.75rem; color: #6b7280;">tokens</span>
                             </div>
                           </template>
                           <!-- Temperature (only for non-reasoning models) -->
@@ -1939,6 +1948,7 @@ function generateAdminUI(): string {
         llmAvailableModels: [],
         // LLM parameter overrides (null = use model default)
         llmReasoningEffort: 'medium',
+        llmBudgetTokens: null, // Anthropic extended thinking budget
         llmTemperature: null,
         llmMaxTokensOverride: null,
         llmSeed: null,
@@ -2652,6 +2662,14 @@ function generateAdminUI(): string {
           return model?.supports_temperature ?? true;
         },
 
+        // Check if currently selected model supports extended thinking (Anthropic)
+        supportsExtendedThinkingSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_extended_thinking ?? false;
+        },
+
         // Cancel current LLM test
         cancelLLMTest() {
           if (this.llmAbortController) {
@@ -2723,9 +2741,14 @@ function generateAdminUI(): string {
               requestBody.options.skip_repairs = true;
             }
 
-            // Add reasoning effort for reasoning models
+            // Add reasoning effort for OpenAI reasoning models
             if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
               requestBody.options.reasoning_effort = this.llmReasoningEffort;
+            }
+
+            // Add budget_tokens for Anthropic extended thinking models
+            if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+              requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
             }
 
             // Add temperature for non-reasoning models (null means use default, but 0 is valid)
@@ -2967,9 +2990,14 @@ function generateAdminUI(): string {
                 requestBody.options.model = this.llmModelOverride;
               }
 
-              // Add reasoning effort for reasoning models
+              // Add reasoning effort for OpenAI reasoning models
               if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
                 requestBody.options.reasoning_effort = this.llmReasoningEffort;
+              }
+
+              // Add budget_tokens for Anthropic extended thinking models
+              if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+                requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
               }
 
               // Add temperature for non-reasoning models

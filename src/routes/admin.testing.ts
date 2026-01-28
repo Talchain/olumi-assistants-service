@@ -18,7 +18,7 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel } from '../config/models.js';
+import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 
 /**
@@ -61,9 +61,10 @@ const TestPromptLLMRequestSchema = z.object({
     model: z.string().optional(),
     skip_repairs: z.boolean().optional(),
     // LLM parameter overrides
-    reasoning_effort: z.enum(['low', 'medium', 'high']).optional(),
+    reasoning_effort: z.enum(['low', 'medium', 'high']).optional(), // OpenAI reasoning models only
+    budget_tokens: z.number().int().positive().max(128000).optional(), // Anthropic extended thinking (thinking budget)
     temperature: z.number().min(0).max(2).optional(),
-    max_tokens: z.number().int().positive().max(32768).optional(),
+    max_tokens: z.number().int().positive().max(128000).optional(),
     seed: z.number().int().optional(), // For reproducibility (OpenAI deterministic seed)
     top_p: z.number().min(0).max(1).optional(), // Nucleus sampling (default 1.0)
   }).optional(),
@@ -112,6 +113,7 @@ interface TestPromptLLMResponse {
     temperature: number | null;
     max_tokens: number;
     reasoning_effort?: 'low' | 'medium' | 'high';
+    budget_tokens?: number; // Anthropic extended thinking
     seed?: number;
     top_p?: number;
   };
@@ -301,7 +303,8 @@ function getLLMTimeout(model: string, reasoningEffort?: 'low' | 'medium' | 'high
 interface LLMCallOptions {
   temperature?: number | null;
   maxTokens?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: 'low' | 'medium' | 'high'; // OpenAI reasoning models
+  budgetTokens?: number; // Anthropic extended thinking (thinking budget)
   seed?: number;
   topP?: number;
 }
@@ -322,7 +325,8 @@ interface LLMCallResult {
   max_tokens: number;
   model: string;
   provider: string;
-  reasoning_effort?: 'low' | 'medium' | 'high';
+  reasoning_effort?: 'low' | 'medium' | 'high'; // OpenAI reasoning models
+  budget_tokens?: number; // Anthropic extended thinking
   seed?: number;
   top_p?: number;
 }
@@ -351,8 +355,11 @@ async function callLLMWithPrompt(
   const seed = options?.seed;
   const topP = options?.topP;
 
+  // Extract budgetTokens for Anthropic extended thinking
+  const budgetTokens = options?.budgetTokens;
+
   if (provider === 'anthropic') {
-    return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime);
+    return callAnthropicWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, budgetTokens);
   } else {
     return callOpenAIWithPrompt(systemPrompt, userContent, model, maxTokens, temperature, startTime, reasoningEffort, seed, topP);
   }
@@ -365,6 +372,7 @@ async function callAnthropicWithPrompt(
   maxTokens: number,
   temperature: number | null,
   startTime: number,
+  budgetTokens?: number,
 ): Promise<LLMCallResult> {
   const apiKey = config.llm?.anthropicApiKey;
   if (!apiKey) {
@@ -381,12 +389,22 @@ async function callAnthropicWithPrompt(
 
   const client = new Anthropic({ apiKey });
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), LLM_TIMEOUT_MS);
+
+  // Extended thinking models need longer timeout
+  const hasExtendedThinking = supportsExtendedThinking(model) && budgetTokens !== undefined;
+  const effectiveTimeout = hasExtendedThinking ? REASONING_HIGH_TIMEOUT_MS : LLM_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
   // Effective temperature: default to 0 if null (deterministic for testing)
-  const effectiveTemperature = temperature ?? 0;
+  // Note: Extended thinking mode requires temperature=1
+  const effectiveTemperature = hasExtendedThinking ? 1 : (temperature ?? 0);
 
   try {
+    // Build request params - add thinking block for extended thinking models
+    const thinkingParam = hasExtendedThinking
+      ? { thinking: { type: 'enabled' as const, budget_tokens: budgetTokens } }
+      : {};
+
     const response = await client.messages.create(
       {
         model,
@@ -394,6 +412,7 @@ async function callAnthropicWithPrompt(
         temperature: effectiveTemperature,
         system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],
+        ...thinkingParam,
       },
       {
         signal: abortController.signal,
@@ -403,20 +422,23 @@ async function callAnthropicWithPrompt(
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== 'text') {
+    // Handle extended thinking response - find the text content block
+    // Extended thinking responses may have multiple content blocks (thinking + text)
+    const textContent = response.content.find(c => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
       return {
         success: false,
-        error: `Unexpected response type: ${content.type}`,
+        error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
         duration_ms,
-        temperature,
+        temperature: effectiveTemperature,
         max_tokens: maxTokens,
         model,
         provider: 'anthropic',
+        budget_tokens: budgetTokens,
       };
     }
 
-    const raw_output = content.text;
+    const raw_output = textContent.text;
     const raw_output_hash = createHash('sha256').update(raw_output).digest('hex');
 
     return {
@@ -430,24 +452,27 @@ async function callAnthropicWithPrompt(
         total: response.usage.input_tokens + response.usage.output_tokens,
       },
       finish_reason: response.stop_reason ?? 'unknown',
-      temperature,
+      temperature: effectiveTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
+      budget_tokens: budgetTokens,
     };
   } catch (error) {
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
     const isTimeout = error instanceof Error && error.name === 'AbortError';
+    const timeoutMinutes = Math.round(effectiveTimeout / 60000);
 
     return {
       success: false,
-      error: isTimeout ? 'LLM request timed out after 2 minutes' : sanitizeErrorMessage(error),
+      error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
       duration_ms,
-      temperature,
+      temperature: effectiveTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
+      budget_tokens: budgetTokens,
     };
   }
 }
@@ -849,6 +874,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     const skipRepairs = options?.skip_repairs ?? false;
     const modelOverride = options?.model;
     const reasoningEffort = options?.reasoning_effort;
+    const budgetTokensOverride = options?.budget_tokens;
     const temperatureOverride = options?.temperature;
     const maxTokensOverride = options?.max_tokens;
     const seedOverride = options?.seed;
@@ -862,6 +888,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       skip_repairs: skipRepairs,
       model_override: modelOverride,
       reasoning_effort: reasoningEffort,
+      budget_tokens: budgetTokensOverride,
       temperature_override: temperatureOverride,
       max_tokens_override: maxTokensOverride,
       seed_override: seedOverride,
@@ -918,11 +945,20 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const supportsTemp = !doesNotSupportCustomTemperature(model);
       const modelConfig = getModelConfig(model);
 
-      // reasoning_effort is only valid for reasoning models
+      // reasoning_effort is only valid for OpenAI reasoning models
       if (reasoningEffort !== undefined && !isReasoning) {
         return reply.status(400).send({
           error: 'validation_error',
           message: `reasoning_effort is only valid for reasoning models. ${model} is not a reasoning model.`,
+        });
+      }
+
+      // budget_tokens is only valid for Anthropic extended thinking models
+      const hasExtThinking = supportsExtendedThinking(model);
+      if (budgetTokensOverride !== undefined && !hasExtThinking) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: `budget_tokens is only valid for Anthropic models with extended thinking. ${model} does not support extended thinking.`,
         });
       }
 
@@ -958,6 +994,9 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       if (reasoningEffort !== undefined) {
         llmOptions.reasoningEffort = reasoningEffort;
       }
+      if (budgetTokensOverride !== undefined) {
+        llmOptions.budgetTokens = budgetTokensOverride;
+      }
       if (seedOverride !== undefined) {
         llmOptions.seed = seedOverride;
       }
@@ -990,6 +1029,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           temperature: llmResult.temperature,
           max_tokens: llmResult.max_tokens,
           reasoning_effort: llmResult.reasoning_effort,
+          budget_tokens: llmResult.budget_tokens,
           seed: llmResult.seed,
           top_p: llmResult.top_p,
         },
@@ -1137,6 +1177,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         max_tokens: config.maxTokens,
         // Capability flags for UI to show/hide appropriate controls
         is_reasoning: isReasoningModel(id),
+        supports_extended_thinking: supportsExtendedThinking(id),
         supports_temperature: !doesNotSupportCustomTemperature(id),
       }));
 
