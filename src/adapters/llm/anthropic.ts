@@ -6,7 +6,7 @@ import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent } from "./types.js";
@@ -66,6 +66,8 @@ const AnthropicNode = z.object({
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  // Factor category (V12.4+): controllable, observable, external
+  category: FactorCategory.optional(),
   // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
   data: NodeData.optional(),
 });

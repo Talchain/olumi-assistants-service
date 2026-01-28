@@ -4,7 +4,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData } from "../../schemas/graph.js";
+import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
@@ -25,6 +25,8 @@ const OpenAINode = z.object({
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  // Factor category (V12.4+): controllable, observable, external
+  category: FactorCategory.optional(),
   // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
   data: NodeData.optional(),
 });
