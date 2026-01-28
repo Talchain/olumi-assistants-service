@@ -32,6 +32,12 @@ import {
 import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config } from "../config/index.js";
+import {
+  validateAndRepairGraph,
+  GraphValidationError,
+  type ValidateAndRepairResult,
+  type RepairOnlyAdapter,
+} from "../cee/graph-orchestrator.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -592,6 +598,14 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }, "Time budget exceeded - will skip LLM repair and use simple repair if needed");
   }
 
+  // Track cache hits across draft and repair (needed for orchestrator repair tracking)
+  let totalCacheReadTokens = draftUsage.cache_read_input_tokens || 0;
+
+  // Track repair costs separately (may use different provider)
+  let repairCost = 0;
+  let repairProviderName: string | null = null;
+  let repairModelName: string | null = null;
+
   // V04: Emit upstream telemetry for successful calls
   emit(TelemetryEvents.DraftUpstreamSuccess, {
     status_code: upstreamStatusCode,
@@ -671,9 +685,118 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // === ORCHESTRATOR VALIDATION: Zod + deterministic validation with repair loop ===
+  // Validates the LLM output before proceeding with factor enrichment
+  let validatedGraph: GraphT = graph;
+  let orchestratorRepairUsed = false;
+  let orchestratorWarnings: Array<{ code: string; message: string }> = [];
+
+  try {
+    // Create repair adapter wrapper if budget allows
+    let repairOnlyAdapter: RepairOnlyAdapter | undefined;
+
+    if (!skipRepairDueToBudget) {
+      const repairAdapter = getAdapter('repair_graph');
+      repairOnlyAdapter = {
+        async repairGraph(brief, failedGraph, errors, reqId) {
+          // Convert ValidationIssue[] to string[] for the legacy adapter
+          const violations = errors.map((e) => {
+            const location = e.path ? ` at ${e.path}` : "";
+            return `[${e.code}]${location}: ${e.message}`;
+          });
+
+          const result = await repairAdapter.repairGraph(
+            { graph: failedGraph, violations, brief, docs },
+            { requestId: reqId || `repair_${Date.now()}`, timeoutMs: repairTimeoutMs }
+          );
+
+          // Track repair cost
+          repairCost += calculateCost(repairAdapter.model, result.usage.input_tokens, result.usage.output_tokens);
+          repairProviderName = repairAdapter.name;
+          repairModelName = repairAdapter.model;
+          totalCacheReadTokens += result.usage.cache_read_input_tokens || 0;
+
+          return {
+            graph: result.graph,
+            usage: {
+              input_tokens: result.usage.input_tokens,
+              output_tokens: result.usage.output_tokens,
+            },
+          };
+        },
+      };
+    }
+
+    const validationResult = await validateAndRepairGraph(
+      {
+        graph,
+        brief: effectiveBrief,
+        requestId: correlationId,
+        maxRetries: skipRepairDueToBudget ? 0 : 1, // 0 retries if budget exceeded
+      },
+      repairOnlyAdapter
+    );
+
+    validatedGraph = validationResult.graph;
+    orchestratorRepairUsed = validationResult.repairUsed;
+    orchestratorWarnings = validationResult.warnings.map((w) => ({
+      code: w.code,
+      message: w.message,
+    }));
+
+    log.info({
+      stage: "1b_orchestrator_validation",
+      repair_used: orchestratorRepairUsed,
+      repair_attempts: validationResult.repairAttempts,
+      warning_count: orchestratorWarnings.length,
+      correlation_id: correlationId,
+    }, "Pipeline stage: Orchestrator validation complete");
+
+  } catch (error) {
+    if (error instanceof GraphValidationError) {
+      // Validation failed after max retries - return 422 with validation errors
+      log.warn({
+        stage: "orchestrator_validation_failed",
+        error_count: error.errors.length,
+        attempts: error.attempts,
+        correlation_id: correlationId,
+      }, "Orchestrator validation failed after all retries");
+
+      emit(TelemetryEvents.GuardViolation, {
+        violation_type: "orchestrator_validation_failed",
+        error_count: error.errors.length,
+      });
+
+      return {
+        kind: "error",
+        statusCode: 422,
+        envelope: buildError(
+          "BAD_INPUT",
+          `Graph validation failed after ${error.attempts} attempt(s)`,
+          {
+            stage: "orchestrator_validation",
+            validation_errors: error.errors.map((e) => ({
+              code: e.code,
+              message: e.message,
+              path: e.path,
+            })),
+            attempts: error.attempts,
+            cee_error_code: "CEE_GRAPH_VALIDATION_FAILED",
+            recovery: {
+              suggestion: "Review the validation errors and adjust your decision brief.",
+              hint: "The graph structure may have issues that automatic repair couldn't fix.",
+            },
+          }
+        ),
+      };
+    }
+    // Re-throw non-validation errors
+    throw error;
+  }
+
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
-  const enrichmentResult = await enrichGraphWithFactorsAsync(graph, effectiveBrief, { collector });
+  const enrichmentResult = await enrichGraphWithFactorsAsync(validatedGraph, effectiveBrief, { collector });
   const enrichedGraph = enrichmentResult.graph;
 
   // DEBUG: Track node counts after factor enrichment
@@ -692,14 +815,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
-
-  // Track cache hits across draft and repair
-  let totalCacheReadTokens = draftUsage.cache_read_input_tokens || 0;
-
-  // Track repair costs separately (may use different provider)
-  let repairCost = 0;
-  let repairProviderName: string | null = null;
-  let repairModelName: string | null = null;
 
   const initialNodeIds = new Set<string>(enrichedGraph.nodes.map((n: any) => (n as any).id as string));
   const cycles = detectCycles(enrichedGraph.nodes as any, enrichedGraph.edges as any);

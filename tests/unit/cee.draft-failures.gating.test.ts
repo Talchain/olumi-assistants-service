@@ -49,7 +49,8 @@ describe('CEE draft failures unsafe gating', () => {
       },
     });
 
-    expect(res.statusCode).toBe(400);
+    // 422 Unprocessable Entity: validation failed (correct syntax, invalid semantics)
+    expect(res.statusCode).toBe(422);
     expect(persistMock).toHaveBeenCalledTimes(1);
 
     const call = persistMock.mock.calls[0]?.[0] as any;
@@ -80,7 +81,8 @@ describe('CEE draft failures unsafe gating', () => {
       },
     });
 
-    expect(res.statusCode).toBe(400);
+    // 422 Unprocessable Entity: validation failed (correct syntax, invalid semantics)
+    expect(res.statusCode).toBe(422);
     expect(persistMock).toHaveBeenCalledTimes(1);
 
     const call = persistMock.mock.calls[0]?.[0] as any;

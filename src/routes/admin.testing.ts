@@ -828,6 +828,14 @@ function parseGraphFromLLMOutput(raw_output: string): { success: boolean; graph?
       jsonText = jsonText.replace(/^```\n/, '').replace(/\n```$/, '');
     }
 
+    // Strip JavaScript-style comments that some models include in JSON output
+    // Remove single-line comments (// ...) but preserve URLs (http://, https://)
+    jsonText = jsonText.replace(/(?<![:"'])\/\/(?!\/)[^\n]*/g, '');
+    // Remove multi-line comments (/* ... */)
+    jsonText = jsonText.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Clean up any trailing commas before closing brackets (common after comment removal)
+    jsonText = jsonText.replace(/,\s*([\]}])/g, '$1');
+
     const parsed = JSON.parse(jsonText);
 
     // Extract nodes and edges
