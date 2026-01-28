@@ -20,6 +20,7 @@ import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
 import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
+import { checkModelAvailability, getModelErrorSummary, recordModelError } from '../services/model-availability.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -464,6 +465,30 @@ async function callAnthropicWithPrompt(
     const isTimeout = error instanceof Error && error.name === 'AbortError';
     const timeoutMinutes = Math.round(effectiveTimeout / 60000);
 
+    // Track model errors for deprecation detection
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorType: 'not_found' | 'invalid_model' | 'deprecated' | 'rate_limit' | 'other' = 'other';
+
+    if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+      errorType = 'not_found';
+    } else if (errorMessage.includes('invalid model') || errorMessage.includes('invalid_model')) {
+      errorType = 'invalid_model';
+    } else if (errorMessage.includes('deprecated')) {
+      errorType = 'deprecated';
+    } else if (errorMessage.includes('rate limit') || errorMessage.includes('rate_limit')) {
+      errorType = 'rate_limit';
+    }
+
+    if (!isTimeout) {
+      recordModelError({
+        model_id: model,
+        provider: 'anthropic',
+        error_type: errorType,
+        error_message: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     return {
       success: false,
       error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
@@ -596,6 +621,30 @@ async function callOpenAIWithPrompt(
     const duration_ms = Date.now() - startTime;
     const isTimeout = error instanceof Error && error.name === 'AbortError';
     const timeoutMinutes = Math.round(effectiveTimeout / 60000);
+
+    // Track model errors for deprecation detection
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorType: 'not_found' | 'invalid_model' | 'deprecated' | 'rate_limit' | 'other' = 'other';
+
+    if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+      errorType = 'not_found';
+    } else if (errorMessage.includes('invalid model') || errorMessage.includes('invalid_model') || errorMessage.includes('model_not_found')) {
+      errorType = 'invalid_model';
+    } else if (errorMessage.includes('deprecated')) {
+      errorType = 'deprecated';
+    } else if (errorMessage.includes('rate limit') || errorMessage.includes('rate_limit')) {
+      errorType = 'rate_limit';
+    }
+
+    if (!isTimeout) {
+      recordModelError({
+        model_id: model,
+        provider: 'openai',
+        error_type: errorType,
+        error_message: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return {
       success: false,
@@ -1182,5 +1231,58 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       }));
 
     return reply.status(200).send({ models });
+  });
+
+  /**
+   * GET /admin/v1/available-models/:provider
+   *
+   * Check model availability from provider API.
+   * Compares registry models against what's actually available from the provider.
+   *
+   * For OpenAI: Fetches from the models API
+   * For Anthropic: Uses curated list (no public API)
+   */
+  app.get('/admin/v1/available-models/:provider', async (
+    request: FastifyRequest<{ Params: { provider: string } }>,
+    reply: FastifyReply
+  ) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const { provider } = request.params;
+
+    if (provider !== 'openai' && provider !== 'anthropic') {
+      return reply.status(400).send({
+        error: 'invalid_provider',
+        message: 'Provider must be "openai" or "anthropic"',
+      });
+    }
+
+    try {
+      const result = await checkModelAvailability(provider);
+      return reply.status(200).send(result);
+    } catch (error) {
+      log.error({
+        event: 'admin.available_models.error',
+        provider,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'Failed to check model availability');
+
+      return reply.status(500).send({
+        error: 'fetch_failed',
+        message: `Failed to fetch available models: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
+  /**
+   * GET /admin/v1/model-errors
+   *
+   * Get summary of model errors for deprecation detection.
+   */
+  app.get('/admin/v1/model-errors', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const summary = getModelErrorSummary();
+    return reply.status(200).send(summary);
   });
 }

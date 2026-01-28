@@ -837,6 +837,9 @@ function generateAdminUI(): string {
                                 <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
                               </template>
                             </select>
+                            <button type="button" @click="openModelAvailabilityModal()" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.75rem;" title="Check model availability from providers">
+                              Verify
+                            </button>
                           </div>
                           <!-- Reasoning Effort (only for OpenAI reasoning models) -->
                           <template x-if="isReasoningModelSelected()">
@@ -1879,6 +1882,150 @@ function generateAdminUI(): string {
           </div>
         </div>
       </template>
+
+      <!-- Model Availability Modal -->
+      <template x-if="showModelAvailabilityModal">
+        <div class="modal" @click.self="showModelAvailabilityModal = false">
+          <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+            <div class="flex justify-between align-center mb-2">
+              <h2>Model Availability</h2>
+              <span class="close" @click="showModelAvailabilityModal = false">&times;</span>
+            </div>
+
+            <template x-if="modelAvailabilityLoading">
+              <div class="text-center p-4">
+                <span class="spinner"></span> Loading model availability from providers...
+              </div>
+            </template>
+
+            <template x-if="!modelAvailabilityLoading">
+              <div>
+                <!-- Error Summary -->
+                <template x-if="modelErrorSummary && modelErrorSummary.potential_deprecations.length > 0">
+                  <div style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                    <h4 style="color: #dc2626; margin-bottom: 8px;">Potential Deprecations Detected</h4>
+                    <p style="font-size: 0.85rem; color: #7f1d1d;">
+                      The following models have had recent errors that may indicate deprecation:
+                    </p>
+                    <ul style="margin: 8px 0; padding-left: 20px;">
+                      <template x-for="model in modelErrorSummary.potential_deprecations" :key="model">
+                        <li style="color: #dc2626;" x-text="model"></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+
+                <!-- OpenAI Models -->
+                <div style="margin-bottom: 20px;">
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #10b981;">
+                    OpenAI Models
+                    <template x-if="modelAvailabilityData.openai">
+                      <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">
+                        (fetched <span x-text="new Date(modelAvailabilityData.openai.fetched_at).toLocaleTimeString()"></span>)
+                      </span>
+                    </template>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.openai && modelAvailabilityData.openai.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Provider</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.openai.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Available' : '✗ Not Found'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.openai">
+                    <p class="text-muted">Failed to fetch OpenAI models. Check API key configuration.</p>
+                  </template>
+                </div>
+
+                <!-- Anthropic Models -->
+                <div>
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #8b5cf6;">
+                    Anthropic Models
+                    <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">(curated list - no API available)</span>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.anthropic && modelAvailabilityData.anthropic.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Known Model</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.anthropic.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Known' : '? Unknown'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.anthropic">
+                    <p class="text-muted">Failed to fetch Anthropic models.</p>
+                  </template>
+                </div>
+
+                <!-- Legend -->
+                <div style="margin-top: 16px; padding: 10px; background: #f9fafb; border-radius: 6px; font-size: 0.8rem;">
+                  <strong>Status Legend:</strong>
+                  <span class="validation-badge validation-badge-info" style="margin-left: 8px;">OK</span> - Model is registered and available
+                  <span class="validation-badge validation-badge-error" style="margin-left: 8px;">NOT FOUND</span> - Model in registry but not available from provider (may be deprecated)
+                  <span class="validation-badge validation-badge-warning" style="margin-left: 8px;">New</span> - Model available from provider but not in registry
+                  <span class="validation-badge" style="margin-left: 8px;">Disabled</span> - Model in registry but disabled
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2" style="gap: 8px;">
+              <button class="btn btn-primary" @click="openModelAvailabilityModal()" :disabled="modelAvailabilityLoading">
+                <template x-if="modelAvailabilityLoading"><span class="spinner"></span></template>
+                Refresh
+              </button>
+              <button class="btn btn-secondary" @click="showModelAvailabilityModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -1956,6 +2103,11 @@ function generateAdminUI(): string {
         // Rate limit handling
         llmRateLimitCooldown: 0,
         llmRateLimitTimer: null,
+        // Model availability checking
+        showModelAvailabilityModal: false,
+        modelAvailabilityLoading: false,
+        modelAvailabilityData: { openai: null, anthropic: null },
+        modelErrorSummary: null,
         // Abort controllers for cancellation
         llmAbortController: null,
 
@@ -2668,6 +2820,66 @@ function generateAdminUI(): string {
           if (!Array.isArray(this.llmAvailableModels)) return false;
           const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
           return model?.supports_extended_thinking ?? false;
+        },
+
+        // Open model availability modal and fetch data
+        async openModelAvailabilityModal() {
+          this.showModelAvailabilityModal = true;
+          this.modelAvailabilityLoading = true;
+          this.modelAvailabilityData = { openai: null, anthropic: null };
+          this.modelErrorSummary = null;
+
+          try {
+            // Fetch OpenAI, Anthropic availability, and error summary in parallel
+            const [openaiRes, anthropicRes, errorsRes] = await Promise.all([
+              fetch('/admin/v1/available-models/openai', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/available-models/anthropic', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/model-errors', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+            ]);
+
+            if (openaiRes.ok) {
+              this.modelAvailabilityData.openai = await openaiRes.json();
+            }
+            if (anthropicRes.ok) {
+              this.modelAvailabilityData.anthropic = await anthropicRes.json();
+            }
+            if (errorsRes.ok) {
+              this.modelErrorSummary = await errorsRes.json();
+            }
+          } catch (e) {
+            console.error('Failed to fetch model availability:', e);
+            this.showToast('Failed to fetch model availability', 'error');
+          } finally {
+            this.modelAvailabilityLoading = false;
+          }
+        },
+
+        // Get status badge class for model availability
+        getModelStatusClass(status) {
+          switch (status) {
+            case 'ok': return 'validation-badge validation-badge-info';
+            case 'missing_from_provider': return 'validation-badge validation-badge-error';
+            case 'not_in_registry': return 'validation-badge validation-badge-warning';
+            case 'disabled': return 'validation-badge';
+            default: return 'validation-badge';
+          }
+        },
+
+        // Get human-readable status text
+        getModelStatusText(status) {
+          switch (status) {
+            case 'ok': return 'OK';
+            case 'missing_from_provider': return 'NOT FOUND';
+            case 'not_in_registry': return 'New (not in registry)';
+            case 'disabled': return 'Disabled';
+            default: return status;
+          }
         },
 
         // Cancel current LLM test
