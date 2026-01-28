@@ -1,0 +1,189 @@
+{
+  "version": "1.0.0",
+  "domain": "core",
+  "description": "Universal business terms and constraint patterns applicable across all domains",
+  "glossary": [
+    {
+      "term": "Annual Recurring Revenue",
+      "aliases": ["ARR", "annual revenue"],
+      "definition": "Predictable revenue normalized to one year from subscriptions or contracts",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Monthly Recurring Revenue",
+      "aliases": ["MRR", "monthly revenue"],
+      "definition": "Predictable revenue normalized to one month from subscriptions or contracts",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Net Revenue Retention",
+      "aliases": ["NRR", "net retention", "dollar retention"],
+      "definition": "Revenue retained from existing customers including expansions, contractions, and churn",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Gross Revenue Retention",
+      "aliases": ["GRR", "gross retention"],
+      "definition": "Revenue retained from existing customers excluding expansions",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Customer Acquisition Cost",
+      "aliases": ["CAC", "acquisition cost"],
+      "definition": "Total cost to acquire a new customer including marketing and sales",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Lifetime Value",
+      "aliases": ["LTV", "CLV", "customer lifetime value", "CLTV"],
+      "definition": "Total revenue expected from a customer over their entire relationship",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Churn Rate",
+      "aliases": ["churn", "attrition rate", "customer churn"],
+      "definition": "Percentage of customers or revenue lost over a period",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Gross Margin",
+      "aliases": ["GM", "gross profit margin"],
+      "definition": "Revenue minus cost of goods sold, expressed as percentage of revenue",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Operating Margin",
+      "aliases": ["EBIT margin", "operating profit margin"],
+      "definition": "Operating income as percentage of revenue",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Return on Investment",
+      "aliases": ["ROI"],
+      "definition": "Gain from investment relative to its cost",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Net Promoter Score",
+      "aliases": ["NPS"],
+      "definition": "Customer loyalty metric ranging from -100 to 100",
+      "typical_unit": "points"
+    },
+    {
+      "term": "Average Revenue Per User",
+      "aliases": ["ARPU", "average revenue per account", "ARPA"],
+      "definition": "Revenue divided by number of users or accounts",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Payback Period",
+      "aliases": ["CAC payback", "payback months"],
+      "definition": "Time required to recover customer acquisition cost",
+      "typical_unit": "months"
+    },
+    {
+      "term": "Burn Rate",
+      "aliases": ["cash burn", "monthly burn"],
+      "definition": "Rate at which company spends cash reserves",
+      "typical_unit": "$/month"
+    },
+    {
+      "term": "Runway",
+      "aliases": ["cash runway"],
+      "definition": "Time until cash reserves are depleted at current burn rate",
+      "typical_unit": "months"
+    },
+    {
+      "term": "Conversion Rate",
+      "aliases": ["CVR", "conversion"],
+      "definition": "Percentage of prospects that complete a desired action",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Total Addressable Market",
+      "aliases": ["TAM"],
+      "definition": "Total market demand for a product or service",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Serviceable Addressable Market",
+      "aliases": ["SAM"],
+      "definition": "Portion of TAM that can be reached with current business model",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Serviceable Obtainable Market",
+      "aliases": ["SOM"],
+      "definition": "Realistic portion of SAM that can be captured",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Full-Time Equivalent",
+      "aliases": ["FTE", "headcount"],
+      "definition": "Unit measuring workload equivalent to one full-time employee",
+      "typical_unit": "people"
+    }
+  ],
+  "constraint_patterns": [
+    {
+      "pattern": "budget",
+      "description": "Financial spending limit",
+      "operator": "max",
+      "examples": ["budget of $500K", "budget not to exceed", "maximum budget"]
+    },
+    {
+      "pattern": "deadline",
+      "description": "Time constraint for completion",
+      "operator": "max",
+      "examples": ["by Q2", "within 6 months", "deadline of March"]
+    },
+    {
+      "pattern": "headcount",
+      "description": "Staff limitation",
+      "operator": "max",
+      "examples": ["team of 5", "no more than 10 FTEs", "headcount cap"]
+    },
+    {
+      "pattern": "minimum revenue",
+      "description": "Revenue floor requirement",
+      "operator": "min",
+      "examples": ["at least $1M ARR", "minimum revenue target", "revenue floor"]
+    },
+    {
+      "pattern": "minimum margin",
+      "description": "Profitability floor",
+      "operator": "min",
+      "examples": ["maintain 70% margin", "gross margin above 60%", "minimum margin"]
+    },
+    {
+      "pattern": "minimum retention",
+      "description": "Customer retention floor",
+      "operator": "min",
+      "examples": ["NRR above 100%", "retention rate at least 90%", "minimum retention"]
+    },
+    {
+      "pattern": "maximum churn",
+      "description": "Churn ceiling",
+      "operator": "max",
+      "examples": ["churn below 5%", "maximum attrition", "churn cap"]
+    },
+    {
+      "pattern": "minimum NPS",
+      "description": "Customer satisfaction floor",
+      "operator": "min",
+      "examples": ["NPS of at least 40", "minimum NPS target", "NPS floor"]
+    },
+    {
+      "pattern": "maximum CAC",
+      "description": "Acquisition cost ceiling",
+      "operator": "max",
+      "examples": ["CAC under $1000", "acquisition cost cap", "maximum CAC"]
+    },
+    {
+      "pattern": "minimum LTV:CAC",
+      "description": "Unit economics floor",
+      "operator": "min",
+      "examples": ["LTV:CAC above 3:1", "minimum LTV to CAC ratio"]
+    }
+  ]
+}

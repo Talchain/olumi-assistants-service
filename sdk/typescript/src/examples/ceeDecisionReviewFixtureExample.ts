@@ -13,7 +13,7 @@
  */
 
 import type {
-  CeeDecisionReviewPayload,
+  CeeDecisionReviewPayloadLegacy as CeeDecisionReviewPayload,
   CeeEngineStatus,
   CeeTraceSummary,
   CeeErrorView,

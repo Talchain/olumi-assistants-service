@@ -138,8 +138,93 @@ export function extractControllableFactors(graph: GraphT): Array<{
 }
 
 // =============================================================================
+// Numeric Formatting
+// =============================================================================
+
+/**
+ * Format elasticity value to 2 decimal places.
+ * Returns null for NaN, undefined, null, or non-finite values.
+ */
+export function formatElasticity(value: number | undefined | null): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return value.toFixed(2);
+}
+
+// =============================================================================
 // Input Building
 // =============================================================================
+
+/**
+ * Drop reason counts for filtered sensitivity data
+ */
+export interface DroppedReasonCounts {
+  id_mismatch: number;
+  rank_exceeded: number;
+  invalid_elasticity: number;
+}
+
+/**
+ * Filter factor_sensitivity to only include valid factors.
+ * Filters out:
+ * - Factors not in controllable factors set
+ * - Factors with invalid elasticity (NaN, Infinity, null, undefined)
+ * - Factors with rank > maxRank
+ *
+ * Returns filtered list, dropped IDs, and breakdown by reason.
+ */
+export function filterMismatchedSensitivity(
+  factorSensitivity: FactorSensitivityInputT[],
+  controllableFactorIds: Set<string>,
+  maxRank: number = MAX_ENRICHMENT_RANK
+): {
+  valid: FactorSensitivityInputT[];
+  dropped: string[];
+  reasonCounts: DroppedReasonCounts;
+} {
+  const valid: FactorSensitivityInputT[] = [];
+  const dropped: string[] = [];
+  const reasonCounts: DroppedReasonCounts = {
+    id_mismatch: 0,
+    rank_exceeded: 0,
+    invalid_elasticity: 0,
+  };
+
+  for (const sensitivity of factorSensitivity) {
+    // Check ID match
+    if (!controllableFactorIds.has(sensitivity.factor_id)) {
+      dropped.push(sensitivity.factor_id);
+      reasonCounts.id_mismatch++;
+      continue;
+    }
+
+    // Check rank within maxRank
+    if (sensitivity.rank > maxRank) {
+      dropped.push(sensitivity.factor_id);
+      reasonCounts.rank_exceeded++;
+      continue;
+    }
+
+    // Format elasticity to 2 decimal places, skip if invalid
+    const formatted = formatElasticity(sensitivity.elasticity);
+    if (formatted === null) {
+      dropped.push(sensitivity.factor_id);
+      reasonCounts.invalid_elasticity++;
+      continue;
+    }
+
+    valid.push({
+      ...sensitivity,
+      elasticity: parseFloat(formatted),
+    });
+  }
+
+  return { valid, dropped, reasonCounts };
+}
 
 /**
  * Build the input for the enrich_factors prompt from graph and ISL sensitivity data.
@@ -265,6 +350,7 @@ export async function enrichFactors(
   const { requestId, maxRank = MAX_ENRICHMENT_RANK, timeoutMs = 30000 } = options;
 
   const startTime = Date.now();
+  const warnings: string[] = [];
 
   log.info(
     {
@@ -276,8 +362,58 @@ export async function enrichFactors(
   );
 
   try {
-    // Build input
-    const input = buildEnrichFactorsInput(graph, factorSensitivity);
+    // Extract controllable factors to validate sensitivity IDs
+    const controllableFactors = extractControllableFactors(graph);
+    const controllableFactorIds = new Set(controllableFactors.map(f => f.factor_id));
+
+    // Filter sensitivity entries: ID mismatch, invalid elasticity, or rank > maxRank
+    const { valid: validSensitivity, dropped: droppedIds, reasonCounts } = filterMismatchedSensitivity(
+      factorSensitivity,
+      controllableFactorIds,
+      maxRank
+    );
+
+    if (droppedIds.length > 0) {
+      log.warn(
+        {
+          event: "cee.enrich_factors.filtered",
+          requestId,
+          droppedFactorIds: droppedIds,
+          dropped_reason_counts: reasonCounts,
+          controllableFactorIds: Array.from(controllableFactorIds),
+          sensitivityCount: factorSensitivity.length,
+          validCount: validSensitivity.length,
+          maxRank,
+          task_version: "v1",
+        },
+        `Dropped ${droppedIds.length} factor(s) (mismatched ID, invalid elasticity, or rank > ${maxRank})`
+      );
+      warnings.push(
+        `Dropped ${droppedIds.length} factor sensitivity entries: ${droppedIds.join(", ")}`
+      );
+    }
+
+    // Early return if no valid sensitivity data remains
+    if (validSensitivity.length === 0) {
+      const durationMs = Date.now() - startTime;
+      log.info(
+        {
+          event: "cee.enrich_factors.empty_sensitivity",
+          requestId,
+          durationMs,
+        },
+        "No valid sensitivity data after filtering, returning empty enrichments"
+      );
+      warnings.push("No valid factor sensitivity data to enrich");
+      return {
+        enrichments: [],
+        success: true,
+        warnings,
+      };
+    }
+
+    // Build input with filtered sensitivity
+    const input = buildEnrichFactorsInput(graph, validSensitivity);
 
     // Validate input
     const inputValidation = EnrichFactorsInput.safeParse(input);
@@ -286,7 +422,7 @@ export async function enrichFactors(
         enrichments: [],
         success: false,
         error: `Invalid input: ${inputValidation.error.message}`,
-        warnings: [],
+        warnings,
       };
     }
 
@@ -307,16 +443,19 @@ export async function enrichFactors(
         enrichments: [],
         success: false,
         error: llmResult.error || "LLM call failed",
-        warnings: [],
+        warnings,
         usage: llmResult.usage,
       };
     }
 
     // Validate and clean response
-    const { enrichments, warnings } = validateAndCleanResponse(
+    const { enrichments, warnings: responseWarnings } = validateAndCleanResponse(
       llmResult.response,
       maxRank
     );
+
+    // Merge all warnings
+    const allWarnings = [...warnings, ...responseWarnings];
 
     const durationMs = Date.now() - startTime;
 
@@ -325,7 +464,7 @@ export async function enrichFactors(
         event: "cee.enrich_factors.complete",
         requestId,
         enrichmentCount: enrichments.length,
-        warningCount: warnings.length,
+        warningCount: allWarnings.length,
         durationMs,
       },
       "Factor enrichment complete"
@@ -334,7 +473,7 @@ export async function enrichFactors(
     return {
       enrichments,
       success: true,
-      warnings,
+      warnings: allWarnings,
       usage: llmResult.usage,
     };
   } catch (error) {
@@ -355,7 +494,7 @@ export async function enrichFactors(
       enrichments: [],
       success: false,
       error: message,
-      warnings: [],
+      warnings,
     };
   }
 }

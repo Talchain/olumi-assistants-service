@@ -1,0 +1,225 @@
+/**
+ * Graph Validator Types
+ *
+ * Type definitions for deterministic graph validation.
+ * Runs after Zod schema validation, before enrichment.
+ *
+ * @module validators/graph-validator.types
+ */
+
+import type { GraphT, NodeT, EdgeT } from "../schemas/graph.js";
+
+// =============================================================================
+// Error Codes
+// =============================================================================
+
+/**
+ * Tier 1: Structural validation errors
+ */
+export type StructuralErrorCode =
+  | "MISSING_GOAL"
+  | "MISSING_DECISION"
+  | "INSUFFICIENT_OPTIONS"
+  | "MISSING_BRIDGE"
+  | "NODE_LIMIT_EXCEEDED"
+  | "EDGE_LIMIT_EXCEEDED"
+  | "INVALID_EDGE_REF";
+
+/**
+ * Tier 2: Topology validation errors (V12.3 aligned)
+ */
+export type TopologyErrorCode =
+  | "INVALID_EDGE_TYPE"
+  | "GOAL_HAS_OUTGOING"
+  | "DECISION_HAS_INCOMING"
+  | "CYCLE_DETECTED";
+
+/**
+ * Tier 3: Reachability validation errors
+ */
+export type ReachabilityErrorCode =
+  | "UNREACHABLE_FROM_DECISION"
+  | "NO_PATH_TO_GOAL";
+
+/**
+ * Tier 4: Factor data consistency errors
+ */
+export type FactorDataErrorCode =
+  | "CONTROLLABLE_MISSING_DATA"
+  | "OBSERVABLE_MISSING_DATA"
+  | "OBSERVABLE_EXTRA_DATA"
+  | "EXTERNAL_HAS_DATA"
+  | "CATEGORY_MISMATCH";
+
+/**
+ * Tier 5: Semantic integrity errors
+ */
+export type SemanticErrorCode =
+  | "NO_EFFECT_PATH"
+  | "OPTIONS_IDENTICAL"
+  | "INVALID_INTERVENTION_REF";
+
+/**
+ * Tier 6: Numeric validation errors
+ */
+export type NumericErrorCode = "NAN_VALUE";
+
+/**
+ * Post-normalisation validation errors
+ */
+export type PostNormErrorCode = "SIGN_MISMATCH";
+
+/**
+ * All error codes
+ */
+export type ValidationErrorCode =
+  | StructuralErrorCode
+  | TopologyErrorCode
+  | ReachabilityErrorCode
+  | FactorDataErrorCode
+  | SemanticErrorCode
+  | NumericErrorCode
+  | PostNormErrorCode;
+
+// =============================================================================
+// Warning Codes
+// =============================================================================
+
+export type ValidationWarningCode =
+  | "STRENGTH_OUT_OF_RANGE"
+  | "PROBABILITY_OUT_OF_RANGE"
+  | "OUTCOME_NEGATIVE_POLARITY"
+  | "RISK_POSITIVE_POLARITY"
+  | "LOW_EDGE_CONFIDENCE"
+  | "EMPTY_UNCERTAINTY_DRIVERS"
+  | "STRUCTURAL_EDGE_NOT_CANONICAL"
+  | "LOW_STD_NON_STRUCTURAL";
+
+// =============================================================================
+// Validation Issue
+// =============================================================================
+
+export type ValidationSeverity = "error" | "warning";
+
+export interface ValidationIssue {
+  /** Error/warning code */
+  code: ValidationErrorCode | ValidationWarningCode;
+  /** Severity level */
+  severity: ValidationSeverity;
+  /** Human-readable message */
+  message: string;
+  /** JSON path to the issue location (e.g., 'edges[17]', 'nodesById.fac_price') */
+  path?: string;
+  /** Additional context for debugging */
+  context?: Record<string, unknown>;
+}
+
+// =============================================================================
+// Factor Category
+// =============================================================================
+
+/**
+ * Inferred factor category based on graph structure.
+ * - controllable: Has incoming edge from option node
+ * - observable: No option edge but has data.value
+ * - external: No option edge, no data.value
+ */
+export type FactorCategory = "controllable" | "observable" | "external";
+
+export interface FactorCategoryInfo {
+  nodeId: string;
+  category: FactorCategory;
+  hasOptionEdge: boolean;
+  hasValue: boolean;
+  /** Explicit category from node.category field (V12.4+) */
+  explicitCategory?: FactorCategory;
+}
+
+// =============================================================================
+// Input/Output Types
+// =============================================================================
+
+export interface GraphValidationInput {
+  /** The graph to validate */
+  graph: GraphT;
+  /** Optional request ID for telemetry */
+  requestId?: string;
+}
+
+export interface GraphValidationResult {
+  /** Whether the graph is valid (no errors) */
+  valid: boolean;
+  /** Blocking errors that prevent processing */
+  errors: ValidationIssue[];
+  /** Non-blocking warnings */
+  warnings: ValidationIssue[];
+}
+
+// =============================================================================
+// Internal Types
+// =============================================================================
+
+export interface NodeMap {
+  byId: Map<string, NodeT>;
+  byKind: Map<string, NodeT[]>;
+}
+
+export interface EdgeInfo {
+  edge: EdgeT;
+  index: number;
+  fromNode?: NodeT;
+  toNode?: NodeT;
+}
+
+export interface AdjacencyLists {
+  /** Forward adjacency: nodeId -> [target nodeIds] */
+  forward: Map<string, string[]>;
+  /** Reverse adjacency: nodeId -> [source nodeIds] */
+  reverse: Map<string, string[]>;
+}
+
+/**
+ * Allowed edge matrix entry.
+ * Used to validate edge types based on node kinds.
+ */
+export interface AllowedEdgeRule {
+  fromKind: string;
+  toKind: string;
+  /** Optional constraint for factor edges */
+  fromFactorCategory?: FactorCategory;
+  toFactorCategory?: FactorCategory;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+export const NODE_LIMIT = 50;
+export const EDGE_LIMIT = 200;
+export const MIN_OPTIONS = 2;
+export const MAX_OPTIONS = 6;
+
+/**
+ * Allowed edge matrix (V12.3 aligned).
+ * Each entry defines a valid edge type.
+ */
+export const ALLOWED_EDGES: AllowedEdgeRule[] = [
+  { fromKind: "decision", toKind: "option" },
+  { fromKind: "option", toKind: "factor", toFactorCategory: "controllable" },
+  { fromKind: "factor", toKind: "factor", toFactorCategory: "observable" },
+  { fromKind: "factor", toKind: "factor", toFactorCategory: "external" },
+  { fromKind: "factor", toKind: "outcome" },
+  { fromKind: "factor", toKind: "risk" },
+  { fromKind: "outcome", toKind: "goal" },
+  { fromKind: "risk", toKind: "goal" },
+];
+
+/**
+ * Canonical edge defaults for structural edges.
+ */
+export const CANONICAL_EDGE = {
+  mean: 1,
+  stdMax: 0.05,
+  prob: 1,
+  direction: "positive" as const,
+};

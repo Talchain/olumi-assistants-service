@@ -16,7 +16,7 @@
 import {
   createCEEClient,
   buildCeeDecisionReviewPayload,
-  type CeeDecisionReviewPayload,
+  type CeeDecisionReviewPayloadLegacy as CeeDecisionReviewPayload,
 } from "../index.js";
 import type {
   CEEDraftGraphRequestV1,

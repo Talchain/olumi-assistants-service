@@ -4001,6 +4001,34 @@ components:
         blocker_reason:
           type: string
           description: Reason analysis is blocked (if can_run_analysis is false)
+        evidence_quality:
+          type: object
+          description: Distribution of evidence quality across edges
+          properties:
+            strong:
+              type: integer
+              minimum: 0
+              description: Count of edges with strong evidence (peer-reviewed data, verified metrics)
+              example: 3
+            moderate:
+              type: integer
+              minimum: 0
+              description: Count of edges with moderate evidence (internal data, credible sources)
+              example: 5
+            weak:
+              type: integer
+              minimum: 0
+              description: Count of edges with weak evidence (assumptions, hypotheses)
+              example: 2
+            none:
+              type: integer
+              minimum: 0
+              description: Count of edges with no provenance
+              example: 1
+            summary:
+              type: string
+              description: Human-readable summary of evidence quality
+              example: "3 edges backed by strong evidence, 5 with moderate evidence, 2 based on assumptions, 1 without provenance"
         trace:
           $ref: '#/components/schemas/CEETraceMeta'
 

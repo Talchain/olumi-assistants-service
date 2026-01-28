@@ -8,6 +8,15 @@ export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk",
  * Shared across all prompts for consistent factor categorization.
  */
 export const FactorType = z.enum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]);
+
+/**
+ * Factor category classification (V12.4+).
+ * - controllable: Has incoming edge from option node, options set this value
+ * - observable: No option edge but has known current state (data.value)
+ * - external: No option edge, unknown/variable state (no data field)
+ */
+export const FactorCategory = z.enum(["controllable", "observable", "external"]);
+
 export const Position = z.object({ x: z.number(), y: z.number() });
 
 /**
@@ -71,6 +80,14 @@ export const Node = z.object({
   kind: NodeKind,
   label: z.string().optional(),
   body: z.string().max(200).optional(),
+  /**
+   * Factor category classification (V12.4+).
+   * Only applies to factor nodes. Optional for backward compatibility.
+   * - controllable: Has incoming edge from option node
+   * - observable: No option edge but has data.value
+   * - external: No option edge, no data.value
+   */
+  category: FactorCategory.optional(),
   /**
    * Node data - type depends on node kind:
    * - factor nodes: FactorData (quantitative values for ISL)
@@ -177,6 +194,7 @@ export type NodeDataT = z.infer<typeof NodeData>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
 export type EffectDirectionT = z.infer<typeof EffectDirection>;
 export type FactorTypeT = z.infer<typeof FactorType>;
+export type FactorCategoryT = z.infer<typeof FactorCategory>;
 
 /**
  * Check if a graph contains any legacy string provenance (for deprecation tracking)

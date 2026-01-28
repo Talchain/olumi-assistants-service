@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
 import { SAFE_REQUEST_ID_PATTERN, isValidRequestId } from "../utils/request-id.js";
+import { FactorEnrichment } from "./enrichment.js";
 
 // Re-export for consumers that import from this module
 export { SAFE_REQUEST_ID_PATTERN, isValidRequestId };
@@ -701,6 +702,9 @@ export const ReviewResponse = z.object({
 
   /** Plain English rationale for the recommendation */
   rationale: Rationale.optional(),
+
+  /** Factor-level enrichments with observations and perspectives */
+  factor_enrichments: z.array(FactorEnrichment).optional(),
 });
 
 export type ReviewResponseT = z.infer<typeof ReviewResponse>;

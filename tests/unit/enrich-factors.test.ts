@@ -466,3 +466,214 @@ describe("Prompt constants", () => {
     expect(CONFIDENCE_QUESTION_MAX_RANK).toBe(3);
   });
 });
+
+// =============================================================================
+// New tests for hardening improvements
+// =============================================================================
+
+import {
+  formatElasticity,
+  filterMismatchedSensitivity,
+} from "../../src/services/review/enrichFactors.js";
+
+describe("formatElasticity", () => {
+  it("rounds to 2 decimal places", () => {
+    expect(formatElasticity(0.6234567)).toBe("0.62");
+    expect(formatElasticity(0.726)).toBe("0.73");
+    expect(formatElasticity(1.999)).toBe("2.00");
+  });
+
+  it("returns null for undefined", () => {
+    expect(formatElasticity(undefined)).toBeNull();
+  });
+
+  it("returns null for null", () => {
+    expect(formatElasticity(null)).toBeNull();
+  });
+
+  it("returns null for NaN", () => {
+    expect(formatElasticity(NaN)).toBeNull();
+  });
+
+  it("returns null for Infinity", () => {
+    expect(formatElasticity(Infinity)).toBeNull();
+    expect(formatElasticity(-Infinity)).toBeNull();
+  });
+
+  it("handles zero", () => {
+    expect(formatElasticity(0)).toBe("0.00");
+  });
+
+  it("handles negative values", () => {
+    expect(formatElasticity(-0.5)).toBe("-0.50");
+    expect(formatElasticity(-1.234)).toBe("-1.23");
+  });
+
+  it("handles small decimals", () => {
+    expect(formatElasticity(0.001)).toBe("0.00");
+    expect(formatElasticity(0.009)).toBe("0.01");
+  });
+
+  it("handles large values", () => {
+    expect(formatElasticity(123.456)).toBe("123.46");
+  });
+});
+
+describe("filterMismatchedSensitivity", () => {
+  const controllableIds = new Set(["fac_price", "fac_time", "fac_cost"]);
+
+  it("keeps matching factor IDs", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+      { factor_id: "fac_time", elasticity: 0.35, rank: 2 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(2);
+    expect(dropped).toHaveLength(0);
+    expect(valid.map(s => s.factor_id)).toEqual(["fac_price", "fac_time"]);
+  });
+
+  it("drops factor IDs not in controllable set", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+      { factor_id: "fac_unknown", elasticity: 0.35, rank: 2 },
+      { factor_id: "fac_missing", elasticity: 0.10, rank: 3 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(1);
+    expect(dropped).toHaveLength(2);
+    expect(dropped).toContain("fac_unknown");
+    expect(dropped).toContain("fac_missing");
+  });
+
+  it("drops factors with NaN elasticity", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: NaN, rank: 1 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+    expect(dropped).toContain("fac_price");
+  });
+
+  it("drops factors with Infinity elasticity", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: Infinity, rank: 1 },
+      { factor_id: "fac_time", elasticity: -Infinity, rank: 2 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(0);
+    expect(dropped).toHaveLength(2);
+  });
+
+  it("rounds elasticity values to 2 decimal places", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72345, rank: 1 },
+      { factor_id: "fac_time", elasticity: 0.35999, rank: 2 },
+    ];
+
+    const { valid } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid[0].elasticity).toBe(0.72);
+    expect(valid[1].elasticity).toBe(0.36);
+  });
+
+  it("handles empty input", () => {
+    const { valid, dropped } = filterMismatchedSensitivity([], controllableIds);
+
+    expect(valid).toHaveLength(0);
+    expect(dropped).toHaveLength(0);
+  });
+
+  it("handles empty controllable set", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, new Set());
+
+    expect(valid).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("drops factors with rank > default maxRank (10)", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+      { factor_id: "fac_time", elasticity: 0.35, rank: 10 },
+      { factor_id: "fac_cost", elasticity: 0.20, rank: 11 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(2);
+    expect(dropped).toHaveLength(1);
+    expect(dropped).toContain("fac_cost");
+    expect(valid.map(s => s.factor_id)).toEqual(["fac_price", "fac_time"]);
+  });
+
+  it("respects custom maxRank parameter", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+      { factor_id: "fac_time", elasticity: 0.35, rank: 5 },
+      { factor_id: "fac_cost", elasticity: 0.20, rank: 6 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds, 5);
+
+    expect(valid).toHaveLength(2);
+    expect(dropped).toHaveLength(1);
+    expect(dropped).toContain("fac_cost");
+  });
+
+  it("drops all factors when maxRank is 0", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+    ];
+
+    const { valid, dropped } = filterMismatchedSensitivity(sensitivity, controllableIds, 0);
+
+    expect(valid).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("returns reason counts breakdown", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 }, // valid
+      { factor_id: "fac_unknown", elasticity: 0.35, rank: 2 }, // id_mismatch
+      { factor_id: "fac_time", elasticity: NaN, rank: 3 }, // invalid_elasticity
+      { factor_id: "fac_cost", elasticity: 0.20, rank: 11 }, // rank_exceeded
+    ];
+
+    const { valid, dropped, reasonCounts } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(valid).toHaveLength(1);
+    expect(dropped).toHaveLength(3);
+    expect(reasonCounts).toEqual({
+      id_mismatch: 1,
+      rank_exceeded: 1,
+      invalid_elasticity: 1,
+    });
+  });
+
+  it("returns zero counts when no factors dropped", () => {
+    const sensitivity = [
+      { factor_id: "fac_price", elasticity: 0.72, rank: 1 },
+    ];
+
+    const { reasonCounts } = filterMismatchedSensitivity(sensitivity, controllableIds);
+
+    expect(reasonCounts).toEqual({
+      id_mismatch: 0,
+      rank_exceeded: 0,
+      invalid_elasticity: 0,
+    });
+  });
+});

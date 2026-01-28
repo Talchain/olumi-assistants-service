@@ -1,23 +1,26 @@
 /**
- * CEE Draft Graph Prompt v12.1
+ * CEE Draft Graph Prompt v12.4
  *
- * V12.1 improvements over V12:
- * - Added 'price' factor type (distinct from cost/revenue)
- * - No-duplicate rule for uncertainty_drivers
- * - Contrastive examples to prevent common failure modes
+ * V12.4 improvements over V12.1:
+ * - Explicit `category` field on all factor nodes (controllable/observable/external)
+ * - Split OUTPUT_SCHEMA: non-factor vs factor shapes clearly separated
+ * - VALUE PRECEDENCE section clarifies data.value vs interventions
+ * - LABEL GUIDELINES: no directional annotations like "(higher = worse)"
+ * - Structural edges: "MUST use exactly" (mandatory, not guidance)
+ * - Validator behaviour: explicit "errors" vs "warns" distinction
+ * - OPTIONS MUST DIFFER: explicit mechanism + contrastive example
+ * - Observable factors: value + extractionType only, no factor_type/uncertainty_drivers
  *
  * Production-ready prompt with factor metadata for downstream enrichment:
+ * - category: Explicit declaration (controllable, observable, external)
  * - factor_type: Canonical type mapping (cost, price, time, probability, revenue, demand, quality, other)
  * - uncertainty_drivers: 1-2 phrases explaining epistemic uncertainty sources
- * - Symmetric invalid edge rules (risk→outcome added)
- * - FACTOR_TYPE_MAPPING canonical reference
- * - Hardcoded node/edge limits (50/200) for prompt admin compatibility
  *
  * Fallback: defaults.ts contains older versions (v8, v6) via PROMPT_VERSION env var
  */
 
 // ============================================================================
-// CEE Draft Graph Prompt v12.1
+// CEE Draft Graph Prompt v12.4
 // ============================================================================
 
 export const DRAFT_GRAPH_PROMPT_V12 = `<ROLE>
@@ -49,26 +52,32 @@ Graphs follow this directed flow:
 
   Decision → Options → Factors → Outcomes/Risks → Goal
 
-NODE TYPES AND EDGE RULES:
+FACTOR CATEGORIES (three types):
 
-| Node | Count | Incoming From | Outgoing To |
-|------|-------|---------------|-------------|
-| decision | exactly 1 | none | options only |
-| option | ≥2 | decision only | controllable factors only |
-| factor (controllable) | ≥1 | options | factors, outcomes, risks |
-| factor (uncontrollable) | any | none or factors | factors, outcomes, risks |
-| outcome | ≥1 (or risk) | factors | goal only (label positively: "Revenue Growth" not "Reduced Losses") |
-| risk | ≥0 | factors | goal only (label negatively: "Customer Churn" not "Customer Retention") |
-| goal | exactly 1 | outcomes, risks | none |
+| Category | Option Edges | Data Field | Use When |
+|----------|--------------|------------|----------|
+| controllable | Yes | Full (value + factor_type + uncertainty_drivers) | Options SET this value differently |
+| observable | No | Partial (value + extractionType only) | Known current state, not changed by options |
+| external | No | None | Unknown/variable, no fixed value |
 
-CRITICAL CONSTRAINTS:
-- Controllable factors: receive option edges, MUST have data.value
-- Uncontrollable factors: NO option edges, NO data field (may be exogenous roots with no incoming edges)
-- Intermediate variables (influenced by factors but not by options): model as uncontrollable factors
-- factor→factor: only when target is uncontrollable
-- Bridge layer mandatory: at least 1 outcome OR 1 risk
-- No shortcuts: option→outcome, option→risk, option→goal, factor→goal, decision→factor, decision→outcome are INVALID
-- Also invalid: outcome→outcome, risk→risk, outcome→risk, risk→outcome, goal→anything
+OBSERVABLE vs EXTERNAL — decision test:
+- Observable = value explicitly stated in brief OR reliably inferred from concrete anchors as current baseline
+- External = not fixed/known at baseline OR expected to vary materially during decision horizon, even if it can be described qualitatively
+- If a factor is not explicitly stated and you cannot infer a credible numeric baseline from concrete anchors in the brief, mark as External (no data) → do not invent baselines
+
+FORBIDDEN EDGES (validator rejects these):
+- option→outcome, option→risk, option→goal
+- factor→goal (must flow via outcome/risk)
+- decision→factor, decision→outcome
+- outcome→risk, outcome→outcome, risk→risk
+- goal→anything
+
+ALLOWED PATTERNS:
+- decision→option (structural)
+- option→factor (only controllable factors)
+- factor→factor (only to observable/external targets, only when clear mediating mechanism exists)
+- factor→outcome, factor→risk (causal influence)
+- outcome→goal, risk→goal (bridge to goal)
 </TOPOLOGY>
 
 <PARAMETER_GUIDANCE>
@@ -100,7 +109,7 @@ EXISTS_PROBABILITY — Structural uncertainty:
 | 0.65–0.85 | Likely | Observed but variable |
 | 0.45–0.65 | Uncertain | Hypothesised relationships |
 
-UNREASONABLE PATTERNS (from Schema B.4):
+UNREASONABLE PATTERNS:
 
 | Pattern | Problem | Fix |
 |---------|---------|-----|
@@ -112,7 +121,7 @@ UNREASONABLE PATTERNS (from Schema B.4):
 </PARAMETER_GUIDANCE>
 
 <FACTOR_TYPE_MAPPING>
-Classify each controllable factor using exactly one of these types:
+Classify each CONTROLLABLE factor using exactly one of these types:
 
 | Type | Description | Examples |
 |------|-------------|----------|
@@ -127,7 +136,7 @@ Classify each controllable factor using exactly one of these types:
 
 Note: price ≠ cost ≠ revenue. Price is what you charge; cost is what you pay; revenue is the outcome of price × demand.
 
-This mapping is shared across all downstream prompts. Use consistently.
+This mapping applies to CONTROLLABLE factors only. Observable and external factors do not use factor_type.
 </FACTOR_TYPE_MAPPING>
 
 <EXTRACTION_RULES>
@@ -141,7 +150,7 @@ BINARY/CATEGORICAL:
 - Three+ choices: USE one-hot binary factors unless node limits prevent it.
   Example: {UK, US, EU} → fac_market_uk(0/1), fac_market_us(0/1), fac_market_eu(0/1)
   Interventions set exactly one to 1.
-  WARNING: Integer encoding (0/1/2) implies ordering — value 2 propagates twice the effect of 1.
+  WARNING: Integer encoding (0/1/2) implies ordering → value 2 propagates twice the effect of 1.
 - If a categorical variable has an inherent degree/order AND that order is explicitly intended, you MAY use an ordinal 0–1 encoding (e.g., 0 / 0.2 / 0.5 / 0.8 / 1.0). Label MUST state it is an ordinal 0–1 scale.
 
 STATUS QUO:
@@ -155,13 +164,14 @@ edge coefficients (strength.mean in [-1,+1]), not raw magnitudes.
 NO PARTIAL NORMALISATION:
 If ANY large-quantity factor is represented on a 0–1 scale, then ALL large-quantity
 factors in the model MUST also be represented on a 0–1 scale. Mixing raw and normalised
-values is INVALID.
+values is INVALID. This applies to controllable AND observable factors.
 
 WHEN TO NORMALISE:
 - Always normalise: cost, revenue, salary, users, time horizons, headcount beyond small teams,
   budgets, and any value with real-world units (currency/time).
 - Small counts (0–10) are acceptable WITHOUT normalisation ONLY when they are unitless counts
   (e.g., hires, number of campaigns), NOT currency/time/percentages.
+- Observable factors with large quantities (customer base, revenue, headcount) MUST also be normalised.
 
 HOW TO REPRESENT:
 | Type | Range | Example |
@@ -180,10 +190,6 @@ CAP SELECTION (for large quantities):
 3. If no plausible cap can be inferred, use qualitative scale:
    - Low = 0.2, Medium = 0.5, High = 0.8
    - Label must state: "(0–1 qualitative scale)"
-
-CONSISTENCY:
-If ANY factor requires normalisation, normalise ALL large-quantity factors in the model.
-Partial normalisation recreates the scale mismatch problem.
 
 FACTOR ID RULE:
 Do NOT change factor IDs. Use exactly the factor IDs derived from the scenario.
@@ -224,7 +230,7 @@ Step 2: CAUSAL MECHANISM & PARSIMONY
   * If A → C → B captures the mechanism, REMOVE the direct A → B edge.
 - CONFOUNDER CHECK:
   * If A and B are correlated but neither directly causes the other,
-    introduce an external or uncontrollable factor C instead of a direct edge.
+    introduce an external or observable factor C instead of a direct edge.
 - Ensure every factor has a directed path to the goal via outcomes or risks.
 
 Step 3: PARAMETER DIFFERENTIATION
@@ -241,18 +247,28 @@ Final Check:
 </CAUSAL_COT_PROTOCOL>
 
 <OUTPUT_SCHEMA>
-NODES — only these fields:
+NON-FACTOR NODES (decision, option, outcome, risk, goal):
 {
-  "id": "prefix_name",      // dec_, opt_, fac_, out_, risk_, goal_
-  "kind": "factor",         // decision|option|factor|outcome|risk|goal
+  "id": "prefix_name",      // dec_, opt_, out_, risk_, goal_
+  "kind": "decision",       // decision|option|outcome|risk|goal
   "label": "Human Label",
-  "data": {...}             // options and controllable factors only
+  "data": {...}             // options only (interventions)
+}
+
+FACTOR NODES (category required):
+{
+  "id": "fac_name",
+  "kind": "factor",
+  "label": "Human Label",
+  "category": "controllable", // REQUIRED: controllable|observable|external
+  "data": {...}               // controllable and observable only
 }
 
 Option data:
   "data": { "interventions": { "fac_id": 0.6 } }
 
-Controllable factor data:
+Controllable factor (category + full metadata):
+  "category": "controllable",
   "data": {
     "value": 0.6,
     "extractionType": "explicit",
@@ -260,17 +276,43 @@ Controllable factor data:
     "uncertainty_drivers": ["Vendor pricing not yet negotiated", "Scope may expand"]
   }
 
+Observable factor (category + value only, NO metadata):
+  "category": "observable",
+  "data": {
+    "value": 0.03,
+    "extractionType": "explicit"
+  }
+
+External factor (category only, NO data field):
+  "category": "external"
+
+FACTOR DATA RULES:
+- Controllable (has option edges): category="controllable", MUST have value, extractionType, factor_type, uncertainty_drivers
+- Observable (no option edges, known state): category="observable", MUST have value, extractionType. NO factor_type, NO uncertainty_drivers
+- External (no option edges, unknown state): category="external", NO data field at all
+
+VALUE PRECEDENCE:
+- For controllable factors, \`data.value\` is the baseline (pre-intervention state)
+- Options override baselines via \`option.data.interventions\`
+- If baseline is unknown, use \`data.value: 1.0\` with \`extractionType: "inferred"\`
+
 FACTOR METADATA (controllable factors only):
 - factor_type: One of: cost | price | time | probability | revenue | demand | quality | other
   (See FACTOR_TYPE_MAPPING for definitions)
 - uncertainty_drivers: 1-2 short phrases explaining why this value is uncertain.
   * Observations only — describe what makes the value uncertain
   * No advisory language ("should", "consider", "might")
-  * These explain the source of epistemic uncertainty (reflected in strength.std),
-    not structural uncertainty about whether relationships exist (exists_probability)
+  * These describe uncertainty in the factor's baseline/intervention value
+  * Edge strength.std describes uncertainty in causal effect size — these are separate concerns
   * No duplicates across factors — each factor must have context-specific drivers
 
-Uncontrollable factors, decision, goal, outcome, risk: NO data field.
+LABEL GUIDELINES:
+- Labels should be clear, human-readable descriptions
+- DO NOT include directional annotations like "(higher = worse)" or "(positive impact)"
+- Edge direction (positive/negative strength.mean) already communicates polarity
+- DO include scale context where relevant: "(0–1, share of £300k cap)"
+
+Decision, goal, outcome, risk: NO data field, NO category field.
 
 EDGES — all edges use this structure:
 {
@@ -284,7 +326,9 @@ EDGES — all edges use this structure:
 effect_direction MUST match sign of strength.mean.
 
 Structural edges (decision→option, option→factor):
-mean=1.0, std=0.01, exists_probability=1.0
+MUST use exactly: mean=1.0, std=0.01, exists_probability=1.0 (no variation allowed)
+
+Non-structural edges should use std ≥ 0.05. Validator warns if non-structural std < 0.05.
 
 If uncertain about a value, infer conservatively rather than omitting required fields.
 </OUTPUT_SCHEMA>
@@ -320,16 +364,76 @@ Common mistakes to avoid:
 
 ✓ GOOD: Flag gaps as observations
   fac_investment: uncertainty_drivers: ["No budget range specified", "Target markets not identified"]
+
+---
+
+✗ BAD: Observable factor with controllable metadata
+  // Current churn rate — known state, not changed by options
+  fac_churn_rate: category: "observable", data: { value: 0.03, factor_type: "probability", uncertainty_drivers: [...] }
+
+✓ GOOD: Observable factor with value only
+  // Current churn rate — known state, not changed by options
+  fac_churn_rate: category: "observable", data: { value: 0.03, extractionType: "explicit" }
+  // No factor_type, no uncertainty_drivers — this is observable, not controllable
+
+---
+
+✗ BAD: Inferred observable from vague mention
+  Brief mentions "competitive pressure" vaguely
+  fac_competition: category: "observable", data: { value: 0.5, extractionType: "inferred" }  // No credible baseline
+
+✓ GOOD: Use External when baseline unknown
+  fac_competition: category: "external"  // NO data field — this is external, not observable
+
+---
+
+✗ BAD: Missing category field
+  fac_investment: data: { value: 0.6, ... }  // Which category?
+
+✓ GOOD: Explicit category declaration
+  fac_investment: category: "controllable", data: { value: 0.6, ... }
+
+---
+
+✗ BAD: Category mismatch (says observable but has option edges)
+  fac_budget: category: "observable", data: { value: 0.5, extractionType: "explicit" }
+  // But opt_expand → fac_budget edge exists → this should be controllable!
+
+✓ GOOD: Category matches structure
+  fac_budget: category: "controllable", data: { value: 0.5, extractionType: "explicit", factor_type: "cost", uncertainty_drivers: [...] }
+
+---
+
+✗ BAD: Directional annotation in label
+  fac_salary: label: "Salary Expense Burden (higher = worse)"
+  // Edge polarity already communicates direction
+
+✓ GOOD: Clean label, polarity in edge
+  fac_salary: label: "Salary Expense (0–1, share of £200k cap)"
+  // Edge to risk has positive strength.mean → structure shows "higher salary → more risk"
+
+---
+
+✗ BAD: Options with identical interventions
+  opt_aggressive: interventions: { fac_investment: 0.8, fac_timeline: 0.5 }
+  opt_moderate: interventions: { fac_investment: 0.8, fac_timeline: 0.5 }
+  // Same values → simulation will produce identical results!
+
+✓ GOOD: Options that actually differ
+  opt_aggressive: interventions: { fac_investment: 0.8, fac_timeline: 0.3 }
+  opt_moderate: interventions: { fac_investment: 0.5, fac_timeline: 0.6 }
+  // Different values create meaningful comparison
 </CONTRASTIVE_EXAMPLES>
 
 <ANNOTATED_EXAMPLE>
 This example is illustrative only. The same structure applies to personal, career, health, and non-business decisions.
 
-Brief: "Should we expand into the European market given our goal of doubling annual revenue while keeping operational risk manageable?"
+Brief: "Should we expand into the European market given our goal of doubling annual revenue while keeping operational risk manageable? We currently have 400 pro customers with a 3% monthly churn rate."
 
 Assumptions for normalisation:
 - Investment cap assumed £500k (round plausible cap; must be stated in labels).
 - Investment is represented as 0–1 share of cap.
+- Customer base normalised to share of 400 cap.
 
 {
   "nodes": [
@@ -343,8 +447,9 @@ Assumptions for normalisation:
     {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic",
      "data": {"interventions": {"fac_europe_entry": 0, "fac_investment": 0.2}}},
 
-    // CONTROLLABLE FACTORS: Options set these values (have data with metadata)
+    // CONTROLLABLE FACTORS: Options set these values (explicit category + full metadata)
     {"id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry (0/1)",
+     "category": "controllable",
      "data": {
        "value": 0,
        "extractionType": "inferred",
@@ -354,6 +459,7 @@ Assumptions for normalisation:
 
     {"id": "fac_investment", "kind": "factor",
      "label": "Expansion Investment (0–1, share of £500k cap)",
+     "category": "controllable",
      "data": {
        "value": 0.2,
        "extractionType": "inferred",
@@ -361,9 +467,26 @@ Assumptions for normalisation:
        "uncertainty_drivers": ["Final vendor quotes pending", "Scope not fully defined"]
      }},
 
-    // UNCONTROLLABLE FACTORS: External variables (NO data field, may have no incoming edges)
-    {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity"},
-    {"id": "fac_regulations", "kind": "factor", "label": "Regulatory Complexity"},
+    // OBSERVABLE FACTORS: Known current state, not changed by options (category + value only)
+    {"id": "fac_customer_base", "kind": "factor", "label": "Pro Customer Base (0–1, share of 400 cap)",
+     "category": "observable",
+     "data": {
+       "value": 1.0,
+       "extractionType": "explicit"
+     }},
+
+    {"id": "fac_churn_rate", "kind": "factor", "label": "Monthly Churn Rate",
+     "category": "observable",
+     "data": {
+       "value": 0.03,
+       "extractionType": "explicit"
+     }},
+
+    // EXTERNAL FACTORS: Unknown/variable (category only, NO data field)
+    {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity",
+     "category": "external"},
+    {"id": "fac_regulations", "kind": "factor", "label": "Regulatory Complexity",
+     "category": "external"},
 
     // BRIDGE LAYER: Outcomes (positive framing) and Risks (negative consequences)
     {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
@@ -385,7 +508,7 @@ Assumptions for normalisation:
     {"from": "opt_hold", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
 
-    // CAUSAL: factors→outcomes/risks (VARIED coefficients — critical)
+    // CAUSAL: controllable factors→outcomes/risks (VARIED coefficients — critical)
     {"from": "fac_europe_entry", "to": "out_revenue", "strength": {"mean": 0.8, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "out_market_share", "strength": {"mean": 0.7, "std": 0.20}, "exists_probability": 0.85, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "risk_operational", "strength": {"mean": 0.6, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
@@ -393,7 +516,11 @@ Assumptions for normalisation:
     {"from": "fac_investment", "to": "out_revenue", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
     {"from": "fac_investment", "to": "risk_financial", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
 
-    // CAUSAL: uncontrollable factors (external influences — may be exogenous)
+    // CAUSAL: observable factors (known state, influences outcomes)
+    {"from": "fac_customer_base", "to": "out_revenue", "strength": {"mean": 0.6, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+    {"from": "fac_churn_rate", "to": "risk_financial", "strength": {"mean": 0.4, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+
+    // CAUSAL: external factors (unknown/variable, influences outcomes)
     {"from": "fac_competition", "to": "out_market_share", "strength": {"mean": -0.4, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
     {"from": "fac_regulations", "to": "risk_operational", "strength": {"mean": 0.5, "std": 0.25}, "exists_probability": 0.70, "effect_direction": "positive"},
 
@@ -406,11 +533,14 @@ Assumptions for normalisation:
 }
 
 KEY PATTERNS DEMONSTRATED:
+- Explicit category on every factor node
 - Coefficient variation: strongest=0.85, weakest=0.4 (not uniform)
 - exists_probability variation: 0.70 to 0.95 (reflects confidence differences)
 - Options differ: europe_entry 1 vs 0, investment 1.0 vs 0.2 (normalised)
-- Controllable factors have data.value + factor_type + uncertainty_drivers
-- Uncontrollable factors have no data field
+- THREE factor categories with correct data:
+  * Controllable: category="controllable", full data (value + factor_type + uncertainty_drivers)
+  * Observable: category="observable", partial data (value + extractionType only)
+  * External: category="external", no data field
 - outcome→goal positive; risk→goal negative (mandatory)
 - uncertainty_drivers are observations, not actions
 </ANNOTATED_EXAMPLE>
@@ -425,8 +555,9 @@ Build in this order:
    Require at least one.
 
 3. FACTORS — What variables influence those outcomes/risks?
-   Controllable (user can change) need data.value, factor_type, uncertainty_drivers.
-   Uncontrollable (external) have no data field.
+   - Controllable (options set this): category="controllable", data.value + factor_type + uncertainty_drivers
+   - Observable (known current state, not changed by options): category="observable", data.value + extractionType only
+   - External (unknown/variable): category="external", no data field
 
 4. OPTIONS — What choices exist? Each must set controllable factors to different values.
    If only one option implied, add Status Quo.
@@ -444,27 +575,44 @@ Build in this order:
 For simple briefs (binary choices, few factors), aim for 6-10 nodes. Don't over-elaborate.
 </CONSTRUCTION_FLOW>
 
-<HARD_CONSTRAINTS>
-LIMITS:
-- Maximum 50 nodes
-- Maximum 200 edges
+<VALIDATION_PIPELINE>
+A code validator runs after generation to check structural rules.
 
-ABSOLUTE RULES:
-- Exactly 1 decision, exactly 1 goal
-- 2-6 options with different interventions (consolidate similar options if more emerge)
-- At least 1 outcome or risk (bridge layer mandatory)
-- No factor→goal edges (must flow through outcomes/risks)
-- Graph must be connected DAG (no cycles, no orphans)
-- Edge from/to must exactly match node IDs
-- effect_direction must match sign of strength.mean
-- outcome→goal edges MUST have positive strength.mean
-- risk→goal edges MUST have negative strength.mean
+SHAPE CHECKLIST (prevent common errors):
+- 1 decision, 1 goal
+- 2-6 options with different interventions
+- OPTIONS MUST DIFFER: Each option must set at least one controllable factor to a different value than every other option
+- At least 1 outcome or risk (bridge layer)
+- Every factor reachable to goal via outcomes/risks
+- Category field on all factor nodes
+
+VALIDATOR DETECTS (errors — must fix):
+- Node/edge count limits (max 50 nodes, 200 edges)
+- Invalid edge types (see FORBIDDEN EDGES above)
+- Unreachable nodes (no path to goal), cycles
+- Missing required data fields per category
+- Category mismatch (declared vs inferred from structure)
+- Identical options (same interventions on same factors)
+- NaN/Infinity values, out-of-range parameters
+
+VALIDATOR WARNS (non-fatal):
+- Non-structural edges with std < 0.05
+- Strength out of typical range
+- Low edge confidence (exists_probability < 0.3)
+
+NORMALISER CLAMPS:
+- strength.mean to [-1, +1]
+- strength.std to [0.01, 0.5]
+- exists_probability to [0.01, 1.0]
+
+If validation fails, you receive specific error codes to fix in next attempt.
+Focus on semantic correctness — the validator catches structural mistakes.
 
 OUTPUT: Valid JSON with "nodes" and "edges" keys only.
-</HARD_CONSTRAINTS>`;
+</VALIDATION_PIPELINE>`;
 
 /**
- * Get V12.1 draft graph prompt (no placeholders - hardcoded limits).
+ * Get V12.4 draft graph prompt (no placeholders - hardcoded limits).
  */
 export function getDraftGraphPromptV12(): string {
   return DRAFT_GRAPH_PROMPT_V12;

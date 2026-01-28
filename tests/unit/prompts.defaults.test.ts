@@ -50,7 +50,9 @@ describe('PROMPT_TEMPLATES', () => {
     // Older versions (v6, v8, v22) use placeholders {{maxNodes}}/{{maxEdges}}
     const hasPlaceholders = prompt.includes('{{maxNodes}}') && prompt.includes('{{maxEdges}}');
     const hasHardcodedLimits = prompt.includes('Maximum 50 nodes') && prompt.includes('Maximum 200 edges');
-    expect(hasPlaceholders || hasHardcodedLimits).toBe(true);
+    // V12.4 uses "max 50 nodes, 200 edges" format
+    const hasV12Format = prompt.includes('max 50 nodes') && prompt.includes('200 edges');
+    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format).toBe(true);
   });
 
   it('suggest_options prompt contains key instructions', () => {

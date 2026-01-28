@@ -15,7 +15,7 @@
  */
 
 import type {
-  CeeDecisionReviewPayload,
+  CeeDecisionReviewPayloadLegacy as CeeDecisionReviewPayload,
   CeeEngineStatus,
   CeeTraceSummary,
 } from "../index.js";

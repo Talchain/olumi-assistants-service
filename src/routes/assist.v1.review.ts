@@ -23,6 +23,7 @@ import {
   aggregateInsights,
   generateImprovementGuidance,
   generateRationale,
+  enrichFactors,
   type BlockBuilderContext,
 } from "../services/review/index.js";
 import { computeQuality } from "../cee/quality/index.js";
@@ -424,6 +425,60 @@ export default async function route(app: FastifyInstance) {
         stability: input.robustness_data?.recommendation_stability as number | undefined,
       });
 
+      // Enrich factors with validation guidance (when ISL sensitivity data available)
+      let factorEnrichments: ReviewResponseT["factor_enrichments"];
+      const factorSensitivity = input.robustness_data?.factor_sensitivity;
+      if (factorSensitivity && Array.isArray(factorSensitivity) && factorSensitivity.length > 0) {
+        // Check if ranks already provided by upstream (ISL)
+        const hasExistingRanks = factorSensitivity.every(
+          (f: { rank?: number }) => typeof f.rank === "number" && f.rank >= 1
+        );
+
+        let sensitivityWithRanks: Array<{ factor_id: string; elasticity: number; rank: number }>;
+
+        if (hasExistingRanks) {
+          // Use existing ranks from ISL
+          sensitivityWithRanks = factorSensitivity.map((f: { factor_id: string; elasticity: number; rank: number }) => ({
+            factor_id: f.factor_id,
+            elasticity: f.elasticity,
+            rank: f.rank,
+          }));
+        } else {
+          // Compute ranks from elasticity with deterministic tie-breaker
+          // Sort by elasticity descending, then factor_id ascending for stability
+          const sortedByElasticity = [...factorSensitivity].sort((a, b) => {
+            const elasticityDiff = b.elasticity - a.elasticity;
+            if (elasticityDiff !== 0) return elasticityDiff;
+            // Tie-breaker: sort by factor_id ascending for deterministic ordering
+            return a.factor_id.localeCompare(b.factor_id);
+          });
+          sensitivityWithRanks = sortedByElasticity.map((f, idx) => ({
+            factor_id: f.factor_id,
+            elasticity: f.elasticity,
+            rank: idx + 1,
+          }));
+        }
+
+        const enrichResult = await enrichFactors(
+          input.graph as GraphT,
+          sensitivityWithRanks,
+          { requestId }
+        );
+
+        if (enrichResult.success && enrichResult.enrichments.length > 0) {
+          factorEnrichments = enrichResult.enrichments;
+        }
+
+        // Log warnings but don't fail the request
+        if (enrichResult.warnings.length > 0) {
+          log.warn({
+            event: "cee.review.enrich_factors_warnings",
+            requestId,
+            warnings: enrichResult.warnings,
+          }, "Factor enrichment completed with warnings");
+        }
+      }
+
       // Build response
       const latencyMs = Date.now() - start;
 
@@ -499,6 +554,8 @@ export default async function route(app: FastifyInstance) {
         guidance_truncated: guidanceResult.truncated || undefined,
         // Plain English rationale for Results Panel
         rationale: rationale || undefined,
+        // Factor-level enrichments with observations and perspectives
+        factor_enrichments: factorEnrichments,
       };
 
       // Compute telemetry aggregates for dashboards (no raw content)
@@ -557,6 +614,8 @@ export default async function route(app: FastifyInstance) {
         insights_count: insights.length,
         improvement_guidance_count: improvementGuidance.length,
         has_rationale: Boolean(rationale),
+        has_factor_enrichments: Boolean(factorEnrichments),
+        factor_enrichments_count: factorEnrichments?.length ?? 0,
         // Enhanced aggregates (Task 5)
         insight_type_counts: insightTypeCounts,
         guidance_category_counts: guidanceCategoryCounts,

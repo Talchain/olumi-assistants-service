@@ -68,7 +68,10 @@ export {
   extractOutcomeLabels,
   extractRiskLabels,
   extractControllableFactors,
+  filterMismatchedSensitivity,
+  formatElasticity,
   FACTOR_TYPE_GUIDANCE,
   type EnrichFactorsOptions,
   type EnrichFactorsResult,
+  type DroppedReasonCounts,
 } from "./enrichFactors.js";

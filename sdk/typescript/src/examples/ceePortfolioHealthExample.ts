@@ -10,7 +10,7 @@
  *   "@olumi/assistants-sdk".
  */
 
-import { type CeeDecisionReviewPayload } from "../index.js";
+import { type CeeDecisionReviewPayloadLegacy as CeeDecisionReviewPayload } from "../index.js";
 
 /**
  * Minimal shape for a decision review entry in a portfolio. The CEE layer

@@ -18,7 +18,7 @@
 import {
   createCEEClient,
   buildCeeDecisionReviewPayload,
-  type CeeDecisionReviewPayload,
+  type CeeDecisionReviewPayloadLegacy as CeeDecisionReviewPayload,
 } from "../index.js";
 import { isRetryableCEEError } from "../ceeHelpers.js";
 import { OlumiAPIError } from "../errors.js";

@@ -48,7 +48,7 @@ describe("Reasoning Model Adapter Integration", () => {
       expect(config).toBeDefined();
       expect(config?.reasoning).toBe(true);
       expect(config?.tier).toBe("premium");
-      expect(config?.maxTokens).toBe(16384);
+      expect(config?.maxTokens).toBe(100000);
     });
   });
 
@@ -140,7 +140,7 @@ describe("Reasoning Model Adapter Integration", () => {
       const config = getModelConfig(reasoningModel);
 
       // Reasoning models typically have higher token limits
-      expect(config?.maxTokens).toBe(16384);
+      expect(config?.maxTokens).toBe(100000);
     });
   });
 });

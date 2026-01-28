@@ -1,0 +1,201 @@
+{
+  "version": "1.0.0",
+  "domain": "saas",
+  "description": "SaaS-specific business terms and constraint patterns",
+  "glossary": [
+    {
+      "term": "Seat License",
+      "aliases": ["seats", "user license", "per-seat", "seat-based"],
+      "definition": "Pricing model charging per user or named user account",
+      "typical_unit": "seats"
+    },
+    {
+      "term": "Usage-Based Pricing",
+      "aliases": ["consumption-based", "pay-as-you-go", "metered billing"],
+      "definition": "Pricing model based on actual product usage rather than fixed fees",
+      "typical_unit": "units"
+    },
+    {
+      "term": "Monthly Active Users",
+      "aliases": ["MAU", "active users"],
+      "definition": "Unique users engaging with product within a month",
+      "typical_unit": "users"
+    },
+    {
+      "term": "Daily Active Users",
+      "aliases": ["DAU"],
+      "definition": "Unique users engaging with product within a day",
+      "typical_unit": "users"
+    },
+    {
+      "term": "Product Qualified Lead",
+      "aliases": ["PQL"],
+      "definition": "Lead who has demonstrated product engagement indicating purchase intent",
+      "typical_unit": "leads"
+    },
+    {
+      "term": "Marketing Qualified Lead",
+      "aliases": ["MQL"],
+      "definition": "Lead who has engaged with marketing indicating potential interest",
+      "typical_unit": "leads"
+    },
+    {
+      "term": "Sales Qualified Lead",
+      "aliases": ["SQL"],
+      "definition": "Lead vetted by sales as ready for direct selling",
+      "typical_unit": "leads"
+    },
+    {
+      "term": "Free-to-Paid Conversion",
+      "aliases": ["trial conversion", "freemium conversion", "F2P"],
+      "definition": "Percentage of free users converting to paid plans",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Annual Contract Value",
+      "aliases": ["ACV"],
+      "definition": "Average annualized revenue per contract",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Total Contract Value",
+      "aliases": ["TCV"],
+      "definition": "Total value of a contract including all years",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Time to Value",
+      "aliases": ["TTV"],
+      "definition": "Time for customer to realize value from product after signup",
+      "typical_unit": "days"
+    },
+    {
+      "term": "Customer Health Score",
+      "aliases": ["health score", "CHS"],
+      "definition": "Composite metric predicting customer retention or expansion likelihood",
+      "typical_unit": "points"
+    },
+    {
+      "term": "Logo Churn",
+      "aliases": ["customer churn", "account churn"],
+      "definition": "Percentage of customer accounts lost over a period",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Revenue Churn",
+      "aliases": ["MRR churn", "dollar churn"],
+      "definition": "Percentage of recurring revenue lost over a period",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Expansion Revenue",
+      "aliases": ["expansion MRR", "upsell revenue", "expansion ARR"],
+      "definition": "Additional revenue from existing customers via upsells or cross-sells",
+      "typical_unit": "$"
+    },
+    {
+      "term": "Quick Ratio",
+      "aliases": ["SaaS quick ratio"],
+      "definition": "Ratio of revenue growth to revenue loss, measuring growth efficiency",
+      "typical_unit": "ratio"
+    },
+    {
+      "term": "Magic Number",
+      "aliases": ["SaaS magic number"],
+      "definition": "Sales efficiency metric: net new ARR divided by sales & marketing spend",
+      "typical_unit": "ratio"
+    },
+    {
+      "term": "Rule of 40",
+      "aliases": ["rule of forty"],
+      "definition": "Growth rate plus profit margin should exceed 40% for healthy SaaS",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Customer Success Manager",
+      "aliases": ["CSM"],
+      "definition": "Role responsible for customer retention, adoption, and expansion",
+      "typical_unit": "people"
+    },
+    {
+      "term": "Annual Plan Discount",
+      "aliases": ["annual discount", "yearly discount"],
+      "definition": "Price reduction offered for annual vs monthly billing commitment",
+      "typical_unit": "%"
+    },
+    {
+      "term": "Feature Flag",
+      "aliases": ["feature toggle", "feature switch"],
+      "definition": "Mechanism to enable or disable features without code deployment",
+      "typical_unit": "flags"
+    },
+    {
+      "term": "Tier Upgrade",
+      "aliases": ["plan upgrade", "tier expansion"],
+      "definition": "Customer moving from lower to higher pricing tier",
+      "typical_unit": "upgrades"
+    }
+  ],
+  "constraint_patterns": [
+    {
+      "pattern": "seat cap",
+      "description": "Maximum number of user licenses",
+      "operator": "max",
+      "examples": ["up to 100 seats", "seat limit of 50", "maximum 25 users"]
+    },
+    {
+      "pattern": "usage limit",
+      "description": "Maximum consumption or API calls",
+      "operator": "max",
+      "examples": ["1M API calls per month", "storage limit of 100GB", "10K requests/day"]
+    },
+    {
+      "pattern": "minimum seats",
+      "description": "Minimum user licenses required",
+      "operator": "min",
+      "examples": ["minimum 5 seats", "at least 10 users", "5-seat minimum"]
+    },
+    {
+      "pattern": "minimum ACV",
+      "description": "Minimum annual contract value",
+      "operator": "min",
+      "examples": ["minimum $10K ACV", "deals above $50K", "ACV floor of $25K"]
+    },
+    {
+      "pattern": "maximum discount",
+      "description": "Discount ceiling for deals",
+      "operator": "max",
+      "examples": ["discount up to 20%", "maximum 30% off", "discount cap"]
+    },
+    {
+      "pattern": "minimum trial conversion",
+      "description": "Trial-to-paid conversion floor",
+      "operator": "min",
+      "examples": ["trial conversion above 10%", "minimum 15% F2P", "conversion floor"]
+    },
+    {
+      "pattern": "maximum TTV",
+      "description": "Time to value ceiling",
+      "operator": "max",
+      "examples": ["TTV under 7 days", "value within first week", "onboarding under 14 days"]
+    },
+    {
+      "pattern": "minimum health score",
+      "description": "Customer health floor for retention",
+      "operator": "min",
+      "examples": ["health score above 70", "minimum CHS of 60", "green accounts only"]
+    },
+    {
+      "pattern": "maximum logo churn",
+      "description": "Customer churn ceiling",
+      "operator": "max",
+      "examples": ["logo churn below 5%", "annual churn under 10%", "churn cap of 3%"]
+    },
+    {
+      "pattern": "minimum expansion rate",
+      "description": "Expansion revenue floor",
+      "operator": "min",
+      "examples": ["expansion rate above 120%", "NRR minimum 110%", "net expansion positive"]
+    }
+  ]
+}
