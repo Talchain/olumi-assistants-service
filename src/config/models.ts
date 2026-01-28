@@ -390,6 +390,46 @@ export function supportsExtendedThinking(modelId: string): boolean {
 }
 
 /**
+ * Check if a model is allowed for client API requests.
+ *
+ * Returns false if:
+ * - Model doesn't exist in registry
+ * - Model is not enabled
+ * - Model is in the blockedModels list (typically from CLIENT_BLOCKED_MODELS env var)
+ *
+ * @param modelId - The model ID to check
+ * @param blockedModels - Optional list of blocked model IDs (from CLIENT_BLOCKED_MODELS)
+ */
+export function isModelClientAllowed(modelId: string, blockedModels?: string[]): boolean {
+  const config = MODEL_REGISTRY[modelId];
+  if (!config) return false;
+  if (!config.enabled) return false;
+  if (blockedModels && blockedModels.includes(modelId)) return false;
+  return true;
+}
+
+/**
+ * Get the reason why a model is not allowed for client use.
+ * Returns undefined if the model is allowed.
+ */
+export function getModelBlockReason(modelId: string, blockedModels?: string[]): string | undefined {
+  const config = MODEL_REGISTRY[modelId];
+  if (!config) return `Unknown model '${modelId}'`;
+  if (!config.enabled) return `Model '${modelId}' is currently disabled`;
+  if (blockedModels && blockedModels.includes(modelId)) return `Model '${modelId}' is blocked for client use`;
+  return undefined;
+}
+
+/**
+ * Get list of models allowed for client API requests.
+ * Returns all enabled models (runtime blocking via CLIENT_BLOCKED_MODELS
+ * is checked in route handlers).
+ */
+export function getClientAllowedModels(): ModelConfig[] {
+  return Object.values(MODEL_REGISTRY).filter(m => m.enabled);
+}
+
+/**
  * Model Validation Results
  */
 export interface ModelValidationResult {

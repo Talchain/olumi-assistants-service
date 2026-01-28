@@ -15,13 +15,14 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../utils/telemetry.js";
-import { config } from "../../config/index.js";
+import { config, getClientBlockedModels } from "../../config/index.js";
 import type { LLMAdapter } from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
 import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
+import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
 
 /**
  * Map task names to CEE model config keys.
@@ -400,24 +401,39 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
  * Get the appropriate LLM adapter for a given task.
  *
  * Selection precedence:
- * 1. Failover configuration (LLM_FAILOVER_PROVIDERS) - wraps multiple providers
- * 2. Task-specific override from config file
- * 3. Environment variables (LLM_PROVIDER, LLM_MODEL)
- * 4. Hard-coded defaults
+ * 1. Request-time model override (from client API body parameter) - highest priority
+ * 2. Failover configuration (LLM_FAILOVER_PROVIDERS) - wraps multiple providers
+ * 3. Task-specific override from config file
+ * 4. CEE_MODEL_* environment variables
+ * 5. TASK_MODEL_DEFAULTS code defaults
+ * 6. LLM_PROVIDER / LLM_MODEL global env vars
+ * 7. Adapter default (gpt-4o-mini)
  *
  * @param task - Optional task name for task-specific routing (e.g., "draft_graph", "suggest_options")
+ * @param modelOverride - Optional model override from client request body
  * @returns LLMAdapter instance (may be FailoverAdapter wrapping multiple adapters)
  *
  * @example
  * ```typescript
+ * // Default model selection based on task
  * const adapter = getAdapter('draft_graph');
- * const result = await adapter.draftGraph(args, opts);
+ *
+ * // With client-specified model override
+ * const adapter = getAdapter('draft_graph', 'gpt-4o');
  * ```
  */
-export function getAdapter(task?: string): LLMAdapter {
+export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
   // Check for failover configuration first
   const failoverAdapter = createFailoverAdapter(task);
   if (failoverAdapter) {
+    // Model override is not supported with failover configuration
+    // (failover involves multiple providers with pre-configured models)
+    if (modelOverride) {
+      log.warn(
+        { task, model_override: modelOverride, reason: 'failover_configured' },
+        "Model override ignored: failover configuration takes precedence"
+      );
+    }
     // Reuse cached failover wrapper to preserve cache state
     const cacheKey = `failover:${task || "default"}`;
     if (!wrappedAdapters.has(cacheKey)) {
@@ -465,24 +481,60 @@ export function getAdapter(task?: string): LLMAdapter {
     );
   }
 
-  // CEE tiered model selection: override model based on task if configured
-  // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
-  const ceeModel = getModelFromConfig(task);
-  if (ceeModel && selectedModel !== ceeModel) {
-    log.info(
-      { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
-      "Using CEE task-specific model from environment"
-    );
-    selectedModel = ceeModel;
-  } else if (!ceeModel && task && isValidCeeTask(task)) {
-    // No env override - use TASK_MODEL_DEFAULTS
-    const taskDefault = getDefaultModelForTask(task);
-    if (taskDefault && selectedModel !== taskDefault) {
-      log.info(
-        { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
-        "Using task default model from TASK_MODEL_DEFAULTS"
+  // Request-time model override takes highest priority (after failover)
+  // This is used when client specifies model in request body
+  if (modelOverride) {
+    // Validate model override against blocklist
+    // Note: Route handlers should also validate before calling getAdapter, but this
+    // provides a defensive fallback if an invalid model slips through
+    const blockedModels = getClientBlockedModels();
+    if (!isModelClientAllowed(modelOverride, blockedModels)) {
+      const reason = getModelBlockReason(modelOverride, blockedModels);
+      log.warn(
+        { task, model_override: modelOverride, reason, source: 'request_body' },
+        "Model override rejected - falling back to default model selection"
       );
-      selectedModel = taskDefault;
+      // Fall through to default model selection instead of using invalid override
+    } else {
+      // Determine the correct provider for the model
+      // This ensures we don't create an OpenAI adapter with an Anthropic model (or vice versa)
+      const modelProvider = getModelProvider(modelOverride);
+      if (modelProvider && modelProvider !== selectedProvider) {
+        log.info(
+          { task, model_override: modelOverride, previous_provider: selectedProvider, new_provider: modelProvider, source: 'request_body' },
+          "Switching provider to match model override"
+        );
+        selectedProvider = modelProvider;
+      }
+      log.info(
+        { task, model_override: modelOverride, previous_model: selectedModel, provider: selectedProvider, source: 'request_body' },
+        "Using request-time model override from client"
+      );
+      selectedModel = modelOverride;
+    }
+  }
+
+  // If no valid model override, use CEE tiered model selection
+  if (!modelOverride || selectedModel !== modelOverride) {
+    // CEE tiered model selection: override model based on task if configured
+    // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
+    const ceeModel = getModelFromConfig(task);
+    if (ceeModel && selectedModel !== ceeModel) {
+      log.info(
+        { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
+        "Using CEE task-specific model from environment"
+      );
+      selectedModel = ceeModel;
+    } else if (!ceeModel && task && isValidCeeTask(task)) {
+      // No env override - use TASK_MODEL_DEFAULTS
+      const taskDefault = getDefaultModelForTask(task);
+      if (taskDefault && selectedModel !== taskDefault) {
+        log.info(
+          { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
+          "Using task default model from TASK_MODEL_DEFAULTS"
+        );
+        selectedModel = taskDefault;
+      }
     }
   }
 

@@ -33,6 +33,8 @@ export interface LLMExtractionOptions {
   minConfidence?: number;
   /** Enable hallucination validation (default: true) */
   validateHallucinations?: boolean;
+  /** Optional model override (e.g., "claude-sonnet-4-20250514") */
+  modelOverride?: string;
 }
 
 export interface LLMExtractionResult {
@@ -103,16 +105,18 @@ Output JSON only:`;
  */
 async function callLLMForFactors(
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  modelOverride?: string
 ): Promise<unknown | null> {
   const result = await callLLMForExtraction(systemPrompt, userPrompt, {
     maxTokens: 2000,
     temperature: 0,
+    modelOverride,
   });
 
   if (!result.success || result.response === null) {
     log.debug(
-      { event: "cee.llm_factor_extraction.call_failed", error: result.error },
+      { event: "cee.llm_factor_extraction.call_failed", error: result.error, model_override: modelOverride },
       "LLM call failed, will fallback to regex"
     );
     return null;
@@ -138,6 +142,7 @@ export async function extractFactorsLLM(
     maxFactors = 20,
     minConfidence = 0.5,
     validateHallucinations = true,
+    modelOverride,
   } = options;
 
   const startTime = Date.now();
@@ -149,7 +154,7 @@ export async function extractFactorsLLM(
     const userPrompt = buildFactorExtractionUserPrompt(brief, context, maxFactors);
 
     // Call LLM
-    const rawResponse = await callLLMForFactors(systemPrompt, userPrompt);
+    const rawResponse = await callLLMForFactors(systemPrompt, userPrompt, modelOverride);
 
     if (rawResponse === null) {
       log.debug({ event: "cee.llm_factor_extraction.no_response" }, "LLM returned no response, falling back to regex");

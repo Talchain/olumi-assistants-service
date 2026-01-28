@@ -90,17 +90,17 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns premium tier for draft_graph task (reasoning model)", () => {
+    it("returns quality tier for draft_graph task (optimized default)", () => {
       const result = selectModel({ task: "draft_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5.2");
-      expect(result.tier).toBe("premium");
+      expect(result.modelId).toBe("gpt-4o"); // Updated default (best performance)
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
-    it("returns premium tier for bias_check task (reasoning model)", () => {
+    it("returns quality tier for bias_check task (Claude Sonnet)", () => {
       const result = selectModel({ task: "bias_check" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5.2");
-      expect(result.tier).toBe("premium");
+      expect(result.modelId).toBe("claude-sonnet-4-20250514"); // Updated default (excellent reasoning)
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
@@ -139,10 +139,10 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns premium tier for repair_graph task (reasoning model)", () => {
+    it("returns quality tier for repair_graph task (Claude Sonnet 4)", () => {
       const result = selectModel({ task: "repair_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5.2");
-      expect(result.tier).toBe("premium");
+      expect(result.modelId).toBe("claude-sonnet-4-20250514");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
@@ -207,38 +207,40 @@ describe("selectModel", () => {
     });
   });
 
-  describe("quality gate", () => {
-    it("prevents downgrade for draft_graph task", () => {
+  describe("quality gate (disabled)", () => {
+    // NOTE: Quality gates have been removed (2026-01-28)
+    // Premium models are now protected via clientAllowed: false in MODEL_REGISTRY
+    // and CLIENT_BLOCKED_MODELS env var instead of task-based gates
+
+    it("allows model override for draft_graph task", () => {
       const result = selectModel(
         { task: "draft_graph", override: "gpt-4o-mini" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
-      expect(result.warnings).toContainEqual(
-        expect.stringContaining("requires quality tier")
-      );
+      // Quality gates removed - override is allowed
+      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.source).toBe("override");
     });
 
-    it("prevents downgrade for bias_check task", () => {
+    it("allows model override for bias_check task", () => {
       const result = selectModel(
         { task: "bias_check", override: "gpt-4o-mini" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
-      expect(result.warnings).toContainEqual(
-        expect.stringContaining("requires quality tier")
-      );
+      // Quality gates removed - override is allowed
+      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.source).toBe("override");
     });
 
-    it("prevents _fast override for quality-required tasks", () => {
+    it("allows _fast override for all tasks (quality gates removed)", () => {
       const result = selectModel(
         { task: "bias_check", override: "_fast" },
         enabledConfig
       );
-      expect(result.tier).toBe("premium"); // bias_check now uses gpt-5.2 (premium)
-      expect(result.warnings).toContainEqual(
-        expect.stringContaining("requires quality tier")
-      );
+      // Quality gates removed - _fast is allowed for all tasks
+      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.tier).toBe("fast");
+      expect(result.source).toBe("override");
     });
 
     it("allows downgrade for non-critical tasks", () => {
@@ -288,13 +290,15 @@ describe("selectModel", () => {
       expect(result.modelId).toBe("gpt-5-mini");
     });
 
-    it("_fast blocked for draft_graph (quality-required)", () => {
+    it("_fast allowed for draft_graph (quality gates removed)", () => {
       const result = selectModel(
         { task: "draft_graph", override: "_fast" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-5.2"); // Default (premium reasoning)
-      expect(result.warnings.length).toBeGreaterThan(0);
+      // Quality gates removed - _fast is allowed for all tasks
+      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.tier).toBe("fast");
+      expect(result.source).toBe("override");
     });
   });
 

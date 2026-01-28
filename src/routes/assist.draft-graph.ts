@@ -32,6 +32,7 @@ import {
 import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config } from "../config/index.js";
+import { getModelConfig, getClientAllowedModels } from "../config/models.js";
 import {
   validateAndRepairGraph,
   GraphValidationError,
@@ -72,6 +73,20 @@ function getRepairTimeoutMs(): number {
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
   return DEFAULT_REPAIR_TIMEOUT_MS;
+}
+
+/**
+ * Preserve category field from original nodes when using engine's normalized graph.
+ * The external PLoT engine's /v1/validate may not include the category field in its
+ * normalized response, so we merge it back from the original nodes.
+ */
+function preserveCategoryFromOriginal(normalized: GraphT, original: GraphT): GraphT {
+  const categoryMap = new Map(original.nodes.map(n => [n.id, n.category]));
+  const nodesWithCategory = normalized.nodes.map(n => ({
+    ...n,
+    category: categoryMap.get(n.id),
+  }));
+  return { ...normalized, nodes: nodesWithCategory };
 }
 
 // Lazy config access to avoid module-level initialization issues
@@ -248,6 +263,10 @@ export function sanitizeDraftGraphInput(
     refinement_instructions,
     preserve_nodes,
     raw_output,
+    model,
+    repair_model,
+    bias_model,
+    enrichment_model,
   } = input;
 
   const base = {
@@ -263,6 +282,10 @@ export function sanitizeDraftGraphInput(
     refinement_instructions,
     preserve_nodes,
     raw_output,
+    model,
+    repair_model,
+    bias_model,
+    enrichment_model,
   };
 
   const passthrough: Record<string, unknown> = {};
@@ -468,6 +491,89 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Create correction collector for tracking graph modifications
   const collector = createCorrectionCollector();
 
+  // Helper to validate a model parameter
+  const validateModelParam = (modelId: string, paramName: string): PipelineResult | null => {
+    const modelConfig = getModelConfig(modelId);
+
+    // Check if model exists
+    if (!modelConfig) {
+      const allowedModels = getClientAllowedModels().map(m => m.id).slice(0, 10);
+      return {
+        kind: "error",
+        statusCode: 400,
+        envelope: buildError("BAD_INPUT", `Unknown model '${modelId}' for ${paramName}.`, {
+          hint: "Use a valid model ID from the registry.",
+          examples: allowedModels,
+          cee_error_code: "CEE_INVALID_MODEL",
+        }),
+      };
+    }
+
+    // Check if model is enabled
+    if (!modelConfig.enabled) {
+      return {
+        kind: "error",
+        statusCode: 400,
+        envelope: buildError("BAD_INPUT", `Model '${modelId}' is currently disabled.`, {
+          hint: "This model has been disabled. Please use a different model.",
+          cee_error_code: "CEE_MODEL_DISABLED",
+        }),
+      };
+    }
+
+    // Check runtime blocklist (CLIENT_BLOCKED_MODELS env var)
+    // Safely access config - may fail in test environments
+    let blockedModels: string[] = [];
+    try {
+      blockedModels = config.llm.clientBlockedModels ?? [];
+    } catch {
+      // Config not available in test environment - no runtime blocklist
+    }
+    if (blockedModels.includes(modelId)) {
+      return {
+        kind: "error",
+        statusCode: 400,
+        envelope: buildError("BAD_INPUT", `Model '${modelId}' is temporarily unavailable.`, {
+          hint: "This model has been disabled by the administrator. Please use a different model.",
+          cee_error_code: "CEE_MODEL_BLOCKED",
+        }),
+      };
+    }
+
+    return null; // Validation passed
+  };
+
+  // Validate all model parameters if provided
+  const modelFields = [
+    { value: input.model, name: "model" },
+    { value: input.repair_model, name: "repair_model" },
+    { value: input.bias_model, name: "bias_model" },
+    { value: input.enrichment_model, name: "enrichment_model" },
+  ];
+
+  for (const { value, name } of modelFields) {
+    if (value) {
+      const error = validateModelParam(value, name);
+      if (error) return error;
+    }
+  }
+
+  // Log model overrides if any are specified
+  const modelOverrides = modelFields.filter(f => f.value).map(f => ({ [f.name]: f.value }));
+  if (modelOverrides.length > 0) {
+    log.info({
+      event: "cee.model.client_overrides",
+      overrides: Object.assign({}, ...modelOverrides),
+      correlation_id: correlationId,
+    }, `Client requested model overrides: ${modelOverrides.map(o => Object.entries(o).map(([k, v]) => `${k}=${v}`).join(", ")).join(", ")}`);
+  }
+
+  // Extract model overrides for use in pipeline
+  const modelOverride = input.model;
+  const repairModelOverride = input.repair_model;
+  const biasModelOverride = input.bias_model;
+  const enrichmentModelOverride = input.enrichment_model;
+
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
   let docs: DocPreview[];
   let groundingStats: GroundingStats | undefined;
@@ -513,7 +619,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const clarifier = determineClarifier(confidence);
 
   // Get adapter via router (env-driven or config-based provider selection)
-  const draftAdapter = getAdapter('draft_graph');
+  // Pass modelOverride if client specified a model in the request body
+  const draftAdapter = getAdapter('draft_graph', modelOverride);
 
   // Cost guard: check estimated cost before making LLM call
   const promptChars = effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
@@ -698,7 +805,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     let repairOnlyAdapter: RepairOnlyAdapter | undefined;
 
     if (!skipRepairDueToBudget) {
-      const repairAdapter = getAdapter('repair_graph');
+      const repairAdapter = getAdapter('repair_graph', repairModelOverride ?? modelOverride);
       repairOnlyAdapter = {
         async repairGraph(brief, failedGraph, errors, reqId) {
           // Convert ValidationIssue[] to string[] for the legacy adapter
@@ -799,7 +906,10 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
   // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
-  const enrichmentResult = await enrichGraphWithFactorsAsync(validatedGraph, effectiveBrief, { collector });
+  const enrichmentResult = await enrichGraphWithFactorsAsync(validatedGraph, effectiveBrief, {
+    collector,
+    modelOverride: enrichmentModelOverride,
+  });
   const enrichedGraph = enrichmentResult.graph;
 
   // DEBUG: Track node counts after factor enrichment
@@ -858,7 +968,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
+        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
       } else {
         candidate = repaired;
@@ -875,7 +986,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
         emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
 
         // Get repair adapter (may be different provider than draft)
-        const repairAdapter = getAdapter('repair_graph');
+        const repairAdapter = getAdapter('repair_graph', repairModelOverride ?? modelOverride);
         const repairResult = await repairAdapter.repairGraph(
           {
             graph: candidate,
@@ -905,7 +1016,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Re-validate repaired graph
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
+        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
         emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
       } else {
@@ -926,7 +1038,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        candidate = stabiliseGraph(ensureDagAndPrune(second.normalized, { collector }), { collector });
+        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
       } else {
         candidate = repaired;
@@ -940,7 +1053,9 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
     } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
-    candidate = stabiliseGraph(ensureDagAndPrune(first.normalized, { collector }), { collector });
+    // Preserve category field from original candidate (engine may not include it)
+    const normalizedWithCategory = preserveCategoryFromOriginal(first.normalized, candidate);
+    candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
   }
 
   // Enforce stable edge IDs and deterministic sorting (v04 determinism hardening)

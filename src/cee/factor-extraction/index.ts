@@ -540,6 +540,8 @@ export interface OrchestratedExtractionOptions {
   forceRegex?: boolean;
   /** Force LLM extraction even if disabled (for testing) */
   forceLLM?: boolean;
+  /** Optional model override (e.g., "claude-sonnet-4-20250514") */
+  modelOverride?: string;
 }
 
 /**
@@ -578,7 +580,7 @@ export async function extractFactorsOrchestrated(
   brief: string,
   options: OrchestratedExtractionOptions = {}
 ): Promise<OrchestratedExtractionResult> {
-  const { domain, context: providedContext, forceRegex = false, forceLLM = false } = options;
+  const { domain, context: providedContext, forceRegex = false, forceLLM = false, modelOverride } = options;
   const warnings: string[] = [];
 
   // Check feature flag
@@ -608,6 +610,7 @@ export async function extractFactorsOrchestrated(
     maxFactors: 20,
     minConfidence: 0.5,
     validateHallucinations: true,
+    modelOverride,
   });
 
   if (llmResult.warnings.length > 0) {

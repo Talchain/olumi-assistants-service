@@ -598,6 +598,8 @@ export async function draftGraphWithAnthropic(
       kind: n.kind as NodeT["kind"],
       label: n.label,
       body: n.body,
+      category: n.category,
+      data: n.data,
     }));
 
     // Calculate roots and leaves
@@ -1137,6 +1139,8 @@ export async function repairGraphWithAnthropic(
         kind: n.kind,
         label: n.label,
         body: n.body,
+        category: n.category,
+        data: n.data,
       })),
       edges: edgesWithIds,
       meta: args.graph.meta || {

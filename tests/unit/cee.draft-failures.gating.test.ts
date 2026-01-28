@@ -49,8 +49,8 @@ describe('CEE draft failures unsafe gating', () => {
       },
     });
 
-    // 422 Unprocessable Entity: validation failed (correct syntax, invalid semantics)
-    expect(res.statusCode).toBe(422);
+    // 400 Bad Request: graph validation failed (CEE_GRAPH_INVALID - missing option kind)
+    expect(res.statusCode).toBe(400);
     expect(persistMock).toHaveBeenCalledTimes(1);
 
     const call = persistMock.mock.calls[0]?.[0] as any;
@@ -81,8 +81,8 @@ describe('CEE draft failures unsafe gating', () => {
       },
     });
 
-    // 422 Unprocessable Entity: validation failed (correct syntax, invalid semantics)
-    expect(res.statusCode).toBe(422);
+    // 400 Bad Request: graph validation failed (CEE_GRAPH_INVALID - missing option kind)
+    expect(res.statusCode).toBe(400);
     expect(persistMock).toHaveBeenCalledTimes(1);
 
     const call = persistMock.mock.calls[0]?.[0] as any;

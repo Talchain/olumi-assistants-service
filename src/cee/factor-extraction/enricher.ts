@@ -289,9 +289,9 @@ export interface EnrichmentResultAsync extends EnrichmentResult {
 export async function enrichGraphWithFactorsAsync(
   graph: GraphT,
   brief: string,
-  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector } = {}
+  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector; modelOverride?: string } = {}
 ): Promise<EnrichmentResultAsync> {
-  const { minConfidence = 0.6, maxFactors = 10, collector } = options;
+  const { minConfidence = 0.6, maxFactors = 10, collector, modelOverride } = options;
 
   // Check feature flag for LLM-first extraction
   let useLLMFirst = false;
@@ -308,7 +308,7 @@ export async function enrichGraphWithFactorsAsync(
 
   if (useLLMFirst) {
     // Use orchestrated extraction (LLM-first with regex fallback)
-    const result = await extractFactorsOrchestrated(brief);
+    const result = await extractFactorsOrchestrated(brief, { modelOverride });
     extracted = result.factors;
     extractionMode = result.mode;
     llmSuccess = result.llmSuccess;

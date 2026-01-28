@@ -9,8 +9,9 @@
 
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import { config } from "../../config/index.js";
+import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
+import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
 
 // ============================================================================
 // Types
@@ -25,6 +26,8 @@ export interface ExtractionCallOptions {
   maxTokens?: number;
   /** Temperature (default: 0 for deterministic extraction) */
   temperature?: number;
+  /** Optional model override (e.g., "claude-sonnet-4-20250514") */
+  modelOverride?: string;
 }
 
 export interface ExtractionResult {
@@ -49,9 +52,13 @@ export interface ExtractionResult {
 
 /**
  * Get the model to use for extraction tasks.
- * Priority: CEE_MODEL_EXTRACTION > CEE_MODEL_DRAFT > provider default
+ * Priority: modelOverride > CEE_MODEL_EXTRACTION > CEE_MODEL_DRAFT > provider default
  */
-function getExtractionModel(provider: "openai" | "anthropic"): string {
+function getExtractionModel(provider: "openai" | "anthropic", modelOverride?: string): string {
+  // Request-time model override takes highest priority
+  if (modelOverride) {
+    return modelOverride;
+  }
   // Prefer dedicated extraction model
   if (config.cee.models.extraction) {
     return config.cee.models.extraction;
@@ -213,11 +220,11 @@ async function callOpenAI(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0 } = options;
+  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0, modelOverride } = options;
 
   try {
     const client = getOpenAIClient();
-    const model = getExtractionModel("openai");
+    const model = getExtractionModel("openai", modelOverride);
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -290,11 +297,11 @@ async function callAnthropic(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature: _temperature = 0 } = options;
+  const { timeoutMs = 30000, maxTokens = 2000, temperature: _temperature = 0, modelOverride } = options;
 
   try {
     const client = getAnthropicClient();
-    const model = getExtractionModel("anthropic");
+    const model = getExtractionModel("anthropic", modelOverride);
 
     const responsePromise = client.messages.create({
       model,
@@ -384,16 +391,54 @@ export async function callLLMForExtraction(
   userPrompt: string,
   options: ExtractionCallOptions = {}
 ): Promise<ExtractionResult> {
-  const provider = getActiveProvider();
+  let provider = getActiveProvider();
   const startTime = Date.now();
   const abortController = new AbortController();
+
+  // Validate and apply model override if specified
+  let effectiveModelOverride = options.modelOverride;
+  if (effectiveModelOverride && provider !== "fixtures") {
+    // Validate model override against blocklist
+    const blockedModels = getClientBlockedModels();
+    if (!isModelClientAllowed(effectiveModelOverride, blockedModels)) {
+      const reason = getModelBlockReason(effectiveModelOverride, blockedModels);
+      log.warn(
+        {
+          event: "cee.extraction.model_override_rejected",
+          model_override: effectiveModelOverride,
+          reason,
+        },
+        "Model override rejected for extraction - using default"
+      );
+      effectiveModelOverride = undefined;
+    } else {
+      // Switch provider to match the model
+      const modelProvider = getModelProvider(effectiveModelOverride);
+      if (modelProvider && modelProvider !== provider) {
+        log.info(
+          {
+            event: "cee.extraction.provider_switch",
+            model_override: effectiveModelOverride,
+            previous_provider: provider,
+            new_provider: modelProvider,
+          },
+          "Switching provider to match model override for extraction"
+        );
+        provider = modelProvider;
+      }
+    }
+  }
+
+  // Update options with validated model override
+  const validatedOptions = { ...options, modelOverride: effectiveModelOverride };
 
   log.debug(
     {
       event: "cee.extraction.call_start",
       provider,
-      requestId: options.requestId,
-      timeoutMs: options.timeoutMs ?? 30000,
+      model_override: effectiveModelOverride,
+      requestId: validatedOptions.requestId,
+      timeoutMs: validatedOptions.timeoutMs ?? 30000,
     },
     "Starting LLM extraction call"
   );
@@ -403,13 +448,13 @@ export async function callLLMForExtraction(
   try {
     switch (provider) {
       case "openai":
-        result = await callOpenAI(systemPrompt, userPrompt, options, abortController.signal);
+        result = await callOpenAI(systemPrompt, userPrompt, validatedOptions, abortController.signal);
         break;
       case "anthropic":
-        result = await callAnthropic(systemPrompt, userPrompt, options, abortController.signal);
+        result = await callAnthropic(systemPrompt, userPrompt, validatedOptions, abortController.signal);
         break;
       case "fixtures":
-        result = await callFixtures(systemPrompt, userPrompt, options);
+        result = await callFixtures(systemPrompt, userPrompt, validatedOptions);
         break;
       default:
         result = {

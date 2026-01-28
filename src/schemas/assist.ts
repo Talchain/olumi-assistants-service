@@ -46,6 +46,16 @@ export const DraftGraphInput = z.object({
   // Raw output mode - skip all post-processing repairs (factor enrichment, goal repair, etc.)
   // Returns LLM output directly after basic schema validation
   raw_output: z.boolean().optional(),
+  // Model selection for different pipeline operations
+  // All models must be enabled in MODEL_REGISTRY. Use CLIENT_BLOCKED_MODELS env var to block specific models.
+  // Main graph generation model (default: gpt-4o)
+  model: z.string().optional(),
+  // Graph repair model - used when initial draft needs fixing (default: claude-sonnet-4-20250514)
+  repair_model: z.string().optional(),
+  // Bias detection model (default: claude-sonnet-4-20250514)
+  bias_model: z.string().optional(),
+  // Factor enrichment model (default: claude-sonnet-4-20250514)
+  enrichment_model: z.string().optional(),
 });
 
 // Graph correction tracking schema

@@ -23,9 +23,11 @@ export type CeeTask =
 /**
  * Default model assignments per task
  *
- * All tasks now use GPT-5 family models:
+ * Model selection by task type:
  * - Fast tier (gpt-5-mini): Simple, speed-sensitive tasks
- * - Premium tier (gpt-5.2): Advanced reasoning with extended thinking
+ * - Quality tier (gpt-4o): Primary drafting - best performance in testing
+ * - Quality tier (claude-sonnet-4): Bias detection - excellent reasoning
+ * - Premium tier (gpt-5.2): Advanced reasoning for critique/repair
  */
 export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // Fast tier - simple generation, low latency
@@ -34,11 +36,12 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   explainer: "gpt-5-mini",
   evidence_helper: "gpt-5-mini",
   sensitivity_coach: "gpt-5-mini",
-  // Premium tier - advanced reasoning
+  // Quality tier - optimized for specific tasks
+  draft_graph: "gpt-4o",  // Best performance in testing
+  bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
+  repair_graph: "claude-sonnet-4-20250514",  // Excellent reasoning for repair
+  // Premium tier - advanced reasoning for complex tasks
   options: "gpt-5.2",
-  draft_graph: "gpt-5.2",
-  repair_graph: "gpt-5.2",
-  bias_check: "gpt-5.2",
   critique_graph: "gpt-5.2",
 };
 
@@ -48,10 +51,14 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
  * These tasks cannot be downgraded to fast tier even if
  * explicitly requested via override. This protects core
  * value delivery from accidental degradation.
+ *
+ * NOTE: Quality gates removed (2026-01-28) to allow client-specified
+ * model selection. Premium models are now protected via:
+ * - clientAllowed: false in MODEL_REGISTRY
+ * - CLIENT_BLOCKED_MODELS env var
  */
 export const QUALITY_REQUIRED_TASKS: CeeTask[] = [
-  "draft_graph",
-  "bias_check",
+  // Quality gates disabled - all tasks can use any client-allowed model
 ];
 
 /**

@@ -133,6 +133,13 @@ const ConfigSchema = z.object({
       .transform((val) => val.split(",").map((p) => p.trim()))
       .optional(),
     providersConfigPath: z.string().optional(),
+    // Runtime blocklist for client API model selection (comma-separated model IDs)
+    // Use to block additional models at runtime without code changes.
+    // Supplements clientAllowed: false in MODEL_REGISTRY.
+    clientBlockedModels: z
+      .string()
+      .transform((val) => val.split(",").map((m) => m.trim()).filter(Boolean))
+      .optional(),
   }),
 
   // Feature Flags
@@ -385,6 +392,7 @@ function parseConfig(): Config {
       openaiApiKey: env.OPENAI_API_KEY,
       failoverProviders: env.LLM_FAILOVER_PROVIDERS,
       providersConfigPath: env.PROVIDERS_CONFIG_PATH,
+      clientBlockedModels: env.CLIENT_BLOCKED_MODELS,
     },
     features: {
       // CEE_GROUNDING_ENABLED preferred; falls back to GROUNDING_ENABLED
@@ -699,4 +707,19 @@ export function shouldUseStagingPrompts(): boolean {
 
   // 3. Legacy fallback: use NODE_ENV (for backwards compatibility)
   return !isProduction();
+}
+
+/**
+ * Get list of models blocked for client use.
+ *
+ * Returns the models specified in CLIENT_BLOCKED_MODELS env var.
+ * Returns empty array if not set or in test environment.
+ */
+export function getClientBlockedModels(): string[] {
+  try {
+    return config.llm.clientBlockedModels ?? [];
+  } catch {
+    // Config not available (e.g., test environment)
+    return [];
+  }
 }

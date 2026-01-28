@@ -271,7 +271,7 @@ describe("LLM Router", () => {
   });
 
   describe("TASK_MODEL_DEFAULTS integration", () => {
-    it("uses gpt-5.2 for draft_graph when no CEE_MODEL_DRAFT override", () => {
+    it("uses gpt-4o for draft_graph when no CEE_MODEL_DRAFT override", () => {
       delete process.env.CEE_MODEL_DRAFT;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "openai";
@@ -279,7 +279,7 @@ describe("LLM Router", () => {
       const adapter = getAdapter("draft_graph");
 
       expect(adapter.name).toBe("openai");
-      expect(adapter.model).toBe("gpt-5.2");
+      expect(adapter.model).toBe("gpt-4o"); // Updated default (best performance in testing)
     });
 
     it("uses gpt-5-mini for clarification when no CEE_MODEL_CLARIFICATION override", () => {
@@ -293,23 +293,23 @@ describe("LLM Router", () => {
       expect(adapter.model).toBe("gpt-5-mini");
     });
 
-    it("uses gpt-5.2 for bias_check when no CEE_MODEL_* override", () => {
+    it("uses claude-sonnet-4 for bias_check when no CEE_MODEL_* override", () => {
       delete process.env.LLM_MODEL;
-      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_PROVIDER = "anthropic"; // Claude model requires anthropic provider
 
       const adapter = getAdapter("bias_check");
 
-      expect(adapter.name).toBe("openai");
-      expect(adapter.model).toBe("gpt-5.2");
+      expect(adapter.name).toBe("anthropic");
+      expect(adapter.model).toBe("claude-sonnet-4-20250514"); // Updated default (excellent reasoning)
     });
 
     it("CEE_MODEL_DRAFT env var overrides TASK_MODEL_DEFAULTS", () => {
-      process.env.CEE_MODEL_DRAFT = "gpt-4o";
+      process.env.CEE_MODEL_DRAFT = "gpt-5.2";
       process.env.LLM_PROVIDER = "openai";
 
       const adapter = getAdapter("draft_graph");
 
-      expect(adapter.model).toBe("gpt-4o");
+      expect(adapter.model).toBe("gpt-5.2");
     });
 
     it("non-CEE tasks fall back to LLM_MODEL or adapter default", () => {
@@ -330,6 +330,62 @@ describe("LLM Router", () => {
       const adapter = getAdapter("unknown_task");
 
       expect(adapter.model).toBe("gpt-4o");
+    });
+  });
+
+  describe("Model override with provider switching", () => {
+    it("switches to anthropic provider when requesting Claude model with openai default", () => {
+      process.env.LLM_PROVIDER = "openai";
+      delete process.env.LLM_MODEL;
+
+      // Request a Claude model - should switch to anthropic provider
+      const adapter = getAdapter("draft_graph", "claude-sonnet-4-20250514");
+
+      expect(adapter.name).toBe("anthropic");
+      expect(adapter.model).toBe("claude-sonnet-4-20250514");
+    });
+
+    it("switches to openai provider when requesting OpenAI model with anthropic default", () => {
+      process.env.LLM_PROVIDER = "anthropic";
+      delete process.env.LLM_MODEL;
+
+      // Request an OpenAI model - should switch to openai provider
+      const adapter = getAdapter("draft_graph", "gpt-4o");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-4o");
+    });
+
+    it("model override takes precedence over task defaults", () => {
+      process.env.LLM_PROVIDER = "openai";
+      delete process.env.LLM_MODEL;
+
+      // draft_graph has default gpt-4o, but override with gpt-5-mini
+      const adapter = getAdapter("draft_graph", "gpt-5-mini");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-5-mini");
+    });
+
+    it("model override takes precedence over CEE_MODEL_* env vars", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.CEE_MODEL_DRAFT = "gpt-5.2";
+
+      // CEE_MODEL_DRAFT says gpt-5.2, but override with gpt-4o-mini
+      const adapter = getAdapter("draft_graph", "gpt-4o-mini");
+
+      expect(adapter.model).toBe("gpt-4o-mini");
+    });
+
+    it("keeps same provider when model matches current provider", () => {
+      process.env.LLM_PROVIDER = "openai";
+      delete process.env.LLM_MODEL;
+
+      // Request an OpenAI model when already on openai - should stay on openai
+      const adapter = getAdapter("draft_graph", "gpt-4-turbo");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-4-turbo");
     });
   });
 });
