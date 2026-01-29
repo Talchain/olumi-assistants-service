@@ -1,0 +1,40 @@
+{
+  "name": "goal-number-extraction",
+  "description": "Brief with goal target value that previously produced factor_value_0 nodes",
+  "brief": "Should we hire a senior developer? Our goal is reaching £20k MRR within 12 months.",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should we hire a senior developer?" },
+        { "id": "opt_yes", "kind": "option", "label": "Yes, hire senior dev" },
+        { "id": "opt_no", "kind": "option", "label": "No, continue without" },
+        { "id": "fac_dev_cost", "kind": "factor", "label": "Development Cost", "category": "controllable" },
+        { "id": "fac_productivity", "kind": "factor", "label": "Team Productivity", "category": "controllable" },
+        { "id": "outcome_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "goal_1", "kind": "goal", "label": "Reach £20k MRR within 12 months" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_yes", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_no", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_yes", "to": "fac_dev_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_yes", "to": "fac_productivity", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_dev_cost", "to": "outcome_revenue", "strength_mean": -0.3, "belief_exists": 0.8 },
+        { "from": "fac_productivity", "to": "outcome_revenue", "strength_mean": 0.6, "belief_exists": 0.85 },
+        { "from": "outcome_revenue", "to": "goal_1", "strength_mean": 0.9, "belief_exists": 1 }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": { "passed": true, "errors": [], "warnings": [] }
+  },
+  "assertions": {
+    "no_factor_value_nodes": true,
+    "goal_node_contains": ["MRR"],
+    "structural_edges_canonical": true,
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "validation_passes": true
+  }
+}

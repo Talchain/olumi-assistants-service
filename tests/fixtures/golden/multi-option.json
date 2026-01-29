@@ -1,0 +1,44 @@
+{
+  "name": "multi-option",
+  "description": "Decision with 4+ options for cloud provider selection",
+  "brief": "We need to choose a cloud provider: AWS, GCP, Azure, or on-premise. Our goal is minimising total cost of ownership over 3 years.",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Which cloud provider should we choose?" },
+        { "id": "opt_aws", "kind": "option", "label": "AWS" },
+        { "id": "opt_gcp", "kind": "option", "label": "GCP" },
+        { "id": "opt_azure", "kind": "option", "label": "Azure" },
+        { "id": "opt_onprem", "kind": "option", "label": "On-premise" },
+        { "id": "fac_compute_cost", "kind": "factor", "label": "Compute Cost", "category": "controllable" },
+        { "id": "fac_migration", "kind": "factor", "label": "Migration Effort", "category": "observable" },
+        { "id": "fac_vendor_lock", "kind": "factor", "label": "Vendor Lock-in Risk", "category": "external" },
+        { "id": "outcome_tco", "kind": "outcome", "label": "Total Cost of Ownership" },
+        { "id": "goal_1", "kind": "goal", "label": "Minimise TCO over 3 years" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_aws", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_gcp", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_azure", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_onprem", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_aws", "to": "fac_compute_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_gcp", "to": "fac_compute_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_compute_cost", "to": "outcome_tco", "strength_mean": 0.7, "belief_exists": 0.9 },
+        { "from": "fac_migration", "to": "outcome_tco", "strength_mean": 0.4, "belief_exists": 0.8 },
+        { "from": "fac_vendor_lock", "to": "outcome_tco", "strength_mean": 0.3, "belief_exists": 0.7 },
+        { "from": "outcome_tco", "to": "goal_1", "strength_mean": -0.9, "belief_exists": 1 }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": { "passed": true, "errors": [], "warnings": [] }
+  },
+  "assertions": {
+    "option_count_gte": 4,
+    "has_goal_node": true,
+    "has_decision_node": true,
+    "validation_passes": true
+  }
+}
