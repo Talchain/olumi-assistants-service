@@ -9,7 +9,7 @@
 
 import type { GraphQualityMetrics } from "./types.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import type { GraphValidationResult, ValidationIssue } from "../../validators/graph-validator.types.js";
+import type { GraphValidationResult } from "../../validators/graph-validator.types.js";
 import type { RepairRecord } from "../structure/index.js";
 
 // ============================================================================

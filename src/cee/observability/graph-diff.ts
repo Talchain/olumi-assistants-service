@@ -7,7 +7,7 @@
  * @module cee/observability/graph-diff
  */
 
-import type { GraphDiff, GraphDiffType } from "./types.js";
+import type { GraphDiff } from "./types.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import type { RepairRecord } from "../structure/index.js";
 

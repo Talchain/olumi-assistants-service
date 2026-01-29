@@ -21,7 +21,6 @@ import {
 import type { ValidationIssue, GraphValidationResult } from "../validators/graph-validator.types.js";
 import { zodToValidationErrors, isZodError } from "../validators/zod-error-mapper.js";
 import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
-import type { ZodError } from "zod";
 
 // =============================================================================
 // Types

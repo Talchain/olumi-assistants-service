@@ -94,7 +94,7 @@ describe("Golden Fixtures", () => {
     return;
   }
 
-  fixtures.forEach(({ path, data: fixture }) => {
+  fixtures.forEach(({ path: _path, data: fixture }) => {
     describe(fixture.name, () => {
       let response: GoldenFixture["recorded_response"];
 

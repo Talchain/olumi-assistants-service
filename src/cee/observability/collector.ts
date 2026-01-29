@@ -12,10 +12,10 @@
  */
 
 import { randomUUID, createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type {
   CEEObservability,
   LLMCallRecord,
-  LLMCallStep,
   ValidationAttemptRecord,
   ValidationTracking,
   OrchestratorTracking,
@@ -25,6 +25,7 @@ import type {
   GraphQualityMetrics,
   GraphDiff,
 } from "./types.js";
+import { config } from "../../config/index.js";
 
 // ============================================================================
 // Collector Interface
@@ -136,7 +137,7 @@ export function createObservabilityCollector(
   let graphMetrics: GraphQualityMetrics | undefined;
 
   // Production check: NEVER include raw I/O in production
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = config.server.nodeEnv === "production";
   const effectiveCaptureRawIO = captureRawIO && !isProduction;
 
   /**

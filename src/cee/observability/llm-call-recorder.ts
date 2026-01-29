@@ -5,6 +5,7 @@
  * Used by LLM adapters (anthropic.ts, openai.ts, extraction.ts).
  */
 
+import { performance } from "node:perf_hooks";
 import type { LLMCallStep, ModelSelectionReason, PromptModelConfig } from "./types.js";
 import type { ObservabilityCollector } from "./collector.js";
 

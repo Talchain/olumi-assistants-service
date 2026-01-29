@@ -45,7 +45,6 @@ import {
   createNoOpObservabilityCollector,
   isObservabilityEnabled,
   isRawIOCaptureEnabled,
-  type CEEObservability,
 } from "../observability/index.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
@@ -2742,7 +2741,7 @@ export async function finaliseCeeDraftResponse(
   // This provides debug panel visibility into LLM calls, validation, and orchestrator activity
   if (observabilityEnabled) {
     // Record validation attempt summary
-    const validationAttemptCount = schemaRetryAttempted ? 2 : 1;
+    const _validationAttemptCount = schemaRetryAttempted ? 2 : 1;
     observabilityCollector.recordValidationAttempt({
       passed: true,
       rules_checked: pipelineStages.length,
