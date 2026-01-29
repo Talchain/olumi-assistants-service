@@ -115,6 +115,13 @@ UNREASONABLE PATTERNS (from Schema B.4):
 | All causal edges exists_probability=1.0 | Ignores structural uncertainty | Some edges should be <0.9 |
 | std > |mean| | Sign may flip across samples | Reduce std or increase |mean| |
 | exists_probability<0.3 | Why include doubtful edge? | Strengthen evidence or remove |
+| Goal target as factor | "£20k MRR" is a goal, not a factor | Model factors that INFLUENCE the goal, not the goal itself |
+
+GOAL VS FACTOR DISTINCTION:
+- DO NOT create factors from goal numeric values like "£20k MRR", "$50k revenue target", or "100 users"
+- These are GOALS (outcomes to achieve), not causal factors
+- Factors are things that INFLUENCE outcomes: "Marketing spend", "Conversion rate", "Price point"
+- If the brief states "goal of reaching £20k MRR", model factors like "Marketing Investment", "Customer Acquisition Rate" that drive toward that goal
 </PARAMETER_GUIDANCE>
 
 <EXTRACTION_RULES>

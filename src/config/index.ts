@@ -284,6 +284,11 @@ const ConfigSchema = z.object({
         critiqueGraph: z.string().optional(),
       }).default({}),
     }).default({}),
+    // Observability settings (debug panel visibility)
+    observabilityEnabled: booleanString.default(false), // If true, include _observability in CEE responses
+    observabilityRawIO: booleanString.default(false), // If true, include raw prompts/responses (security: disable in prod)
+    // Debug logging settings
+    debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -521,6 +526,11 @@ function parseConfig(): Config {
           critiqueGraph: env.CEE_MODEL_TASK_CRITIQUE_GRAPH,
         },
       },
+      // Observability settings
+      observabilityEnabled: env.CEE_OBSERVABILITY_ENABLED,
+      observabilityRawIO: env.CEE_OBSERVABILITY_RAW_IO,
+      // Debug logging settings
+      debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

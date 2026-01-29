@@ -958,6 +958,206 @@ describe('validateGraph', () => {
         expect(issue?.context?.actualKind).toBe('goal');
       });
     });
+
+    describe('GOAL_NUMBER_AS_FACTOR', () => {
+      it('errors when factor label is "£20k MRR"', () => {
+        const graph = createValidGraph();
+        // Add a factor that looks like a goal target value (no option edge = observable)
+        graph.nodes.push({
+          id: 'fac_goal_num',
+          kind: 'factor',
+          label: '£20k MRR',
+          data: { value: 20000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_goal_num', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
+        const issue = findIssue(result.errors, 'GOAL_NUMBER_AS_FACTOR');
+        expect(issue?.context?.label).toBe('£20k MRR');
+      });
+
+      it('errors when factor label is "$50k revenue target"', () => {
+        const graph = createValidGraph();
+        graph.nodes.push({
+          id: 'fac_revenue_target',
+          kind: 'factor',
+          label: '$50k revenue target',
+          data: { value: 50000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_revenue_target', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
+      });
+
+      it('errors when factor label matches "target of £100k"', () => {
+        const graph = createValidGraph();
+        graph.nodes.push({
+          id: 'fac_target',
+          kind: 'factor',
+          label: 'target of £100k',
+          data: { value: 100000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_target', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
+      });
+
+      it('errors when factor label matches "goal of reaching $1M"', () => {
+        const graph = createValidGraph();
+        graph.nodes.push({
+          id: 'fac_goal',
+          kind: 'factor',
+          label: 'goal of reaching $1M',
+          data: { value: 1000000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_goal', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
+      });
+
+      it('passes when factor label is "Monthly Revenue" (no number)', () => {
+        const graph = createValidGraph();
+        graph.nodes.push({
+          id: 'fac_revenue',
+          kind: 'factor',
+          label: 'Monthly Revenue',
+          data: { value: 15000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_revenue', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+
+      it('passes when factor with goal-like name has option edge (controllable)', () => {
+        const graph = createValidGraph();
+        // Add a factor with goal-like name BUT it has option edge = controllable
+        graph.nodes.push({
+          id: 'fac_controllable_goal',
+          kind: 'factor',
+          label: '50k revenue',
+          data: {
+            value: 50000,
+            extractionType: 'explicit',
+            factor_type: 'revenue',
+            uncertainty_drivers: ['market'],
+          },
+        } as never);
+        // Adding option edge makes it controllable - should pass validation
+        graph.edges.push({ from: 'opt_a', to: 'fac_controllable_goal', strength_mean: 1, belief_exists: 1 });
+        graph.edges.push({ from: 'fac_controllable_goal', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+
+      it('passes when factor label is "Price" (normal factor)', () => {
+        const graph = createValidGraph();
+        // Default fac_price should pass
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+
+      it('passes when factor label is "target customer segments" (no currency/financial term)', () => {
+        const graph = createValidGraph();
+        // This should NOT match - it's a legitimate factor, not a goal target
+        graph.nodes.push({
+          id: 'fac_segments',
+          kind: 'factor',
+          label: 'target customer segments',
+          data: { value: 5, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_segments', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+
+      it('passes when factor label is "objective function weight" (no currency/financial term)', () => {
+        const graph = createValidGraph();
+        // This should NOT match - it's a legitimate technical factor
+        graph.nodes.push({
+          id: 'fac_weight',
+          kind: 'factor',
+          label: 'objective function weight',
+          data: { value: 0.5, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_weight', to: 'outcome_1', strength_mean: 0.3 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+    });
+
+    describe('STRUCTURAL_EDGE_NOT_CANONICAL_ERROR', () => {
+      it('errors when option->factor edge has non-canonical std', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          optionEdge.strength_std = 0.15; // Should be <= 0.05 for structural
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
+        const issue = findIssue(result.errors, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR');
+        expect(issue?.context?.from).toBe('opt_a');
+        expect(issue?.context?.to).toBe('fac_price');
+      });
+
+      it('errors when option->factor edge has non-canonical mean', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          optionEdge.strength_mean = 0.8; // Should be 1 for structural
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
+      });
+
+      it('errors when option->factor edge has non-canonical belief_exists', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          optionEdge.belief_exists = 0.9; // Should be 1 for structural
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
+      });
+
+      it('passes when option->factor edge has canonical values', () => {
+        const graph = createValidGraph();
+        // Default graph has canonical structural edges
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(false);
+      });
+
+      it('decision->option non-canonical is WARNING not ERROR', () => {
+        const graph = createValidGraph();
+        const decisionEdge = graph.edges.find(
+          (e) => e.from === 'decision_1' && e.to === 'opt_a'
+        );
+        if (decisionEdge) {
+          decisionEdge.strength_mean = 0.5; // Non-canonical
+        }
+
+        const result = validateGraph({ graph });
+        // decision->option non-canonical is warning, not error
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(false);
+        expect(hasWarning(result, 'STRUCTURAL_EDGE_NOT_CANONICAL')).toBe(true);
+      });
+    });
   });
 
   // =============================================================================

@@ -416,6 +416,68 @@ describe("Configuration Module", () => {
     });
   });
 
+  describe("CEE Debug Category Trace", () => {
+    it("defaults to false when CEE_DEBUG_CATEGORY_TRACE is not set", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+      };
+      delete process.env.CEE_DEBUG_CATEGORY_TRACE;
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.debugCategoryTrace).toBe(false);
+    });
+
+    it("is true when CEE_DEBUG_CATEGORY_TRACE=true", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        CEE_DEBUG_CATEGORY_TRACE: "true",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.debugCategoryTrace).toBe(true);
+    });
+
+    it("is true when CEE_DEBUG_CATEGORY_TRACE=1", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        CEE_DEBUG_CATEGORY_TRACE: "1",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.debugCategoryTrace).toBe(true);
+    });
+
+    it("is false when CEE_DEBUG_CATEGORY_TRACE=false", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        CEE_DEBUG_CATEGORY_TRACE: "false",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.debugCategoryTrace).toBe(false);
+    });
+
+    it("is false when CEE_DEBUG_CATEGORY_TRACE=0", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        CEE_DEBUG_CATEGORY_TRACE: "0",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.debugCategoryTrace).toBe(false);
+    });
+  });
+
   describe("Port Resolution", () => {
     it("resolves port from environment first", async () => {
       vi.resetModules();

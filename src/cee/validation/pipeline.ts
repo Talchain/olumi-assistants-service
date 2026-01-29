@@ -40,6 +40,13 @@ import { randomUUID, createHash } from "node:crypto";
 import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
 import { createCorrectionCollector } from "../corrections.js";
 import { SERVICE_VERSION } from "../../version.js";
+import {
+  createObservabilityCollector,
+  createNoOpObservabilityCollector,
+  isObservabilityEnabled,
+  isRawIOCaptureEnabled,
+  type CEEObservability,
+} from "../observability/index.js";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -934,6 +941,19 @@ export async function finaliseCeeDraftResponse(
   // Corrections collector for tracking all graph modifications
   const collector = createCorrectionCollector();
 
+  // Observability collector for debug panel visibility
+  // Enabled via CEE_OBSERVABILITY_ENABLED=true or include_debug=true in request
+  const includeDebug = (input as any).include_debug === true;
+  const observabilityEnabled = isObservabilityEnabled(includeDebug);
+  const rawIOEnabled = isRawIOCaptureEnabled(includeDebug);
+  const observabilityCollector = observabilityEnabled
+    ? createObservabilityCollector({
+        requestId,
+        ceeVersion: SERVICE_VERSION,
+        captureRawIO: rawIOEnabled,
+      })
+    : createNoOpObservabilityCollector(requestId);
+
   // Check for cache bypass via URL param (?supa=1) or header (X-CEE-Refresh-Prompt: true)
   // URL param is easier for frontend testing: https://staging--olumi.netlify.app/#/canvas?diag=1&supa=1
   const query = (request.query as Record<string, unknown>) ?? {};
@@ -1189,6 +1209,30 @@ export async function finaliseCeeDraftResponse(
   // Compute raw node counts from adapter-reported kinds
   nodeCountsRaw = nodeKindsArrayToCounts(nodeKindsRawJsonFromAdapter);
 
+  // Record LLM draft call for observability
+  if (observabilityEnabled && llmMeta) {
+    const tokenUsage = llmMeta.token_usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    observabilityCollector.recordLLMCall({
+      step: "draft_graph",
+      model: llmMeta.model ?? model ?? "unknown",
+      provider: (provider === "anthropic" || provider === "openai") ? provider : "openai",
+      tokens: {
+        input: tokenUsage.prompt_tokens ?? 0,
+        output: tokenUsage.completion_tokens ?? 0,
+        total: tokenUsage.total_tokens ?? 0,
+      },
+      latency_ms: llmMeta.provider_latency_ms ?? (llmDraftEnd - llmDraftStart),
+      attempt: schemaRetryAttempted ? 2 : 1,
+      success: true,
+      started_at: new Date(llmDraftStart).toISOString(),
+      completed_at: new Date(llmDraftEnd).toISOString(),
+      prompt_version: llmMeta.prompt_version,
+      cache_hit: Boolean(llmMeta.cache_status === "fresh" || llmMeta.cache_read_input_tokens > 0),
+      raw_prompt: rawIOEnabled ? llmMeta.raw_prompt : undefined,
+      raw_response: rawIOEnabled ? llmMeta.raw_llm_text : undefined,
+    });
+  }
+
   // Store LLM output for admin retrieval (always store, but full output only accessible via admin endpoint)
   if (llmMeta?.raw_llm_text) {
     storeLLMOutput(requestId, llmMeta.raw_llm_text, payload.graph, {
@@ -1266,6 +1310,18 @@ export async function finaliseCeeDraftResponse(
       quality: { overall: 0, completeness: 0, coherence: 0, clarity: 0 },
       seed: input.seed,
     };
+
+    // Add observability for raw-output mode
+    if (observabilityEnabled) {
+      observabilityCollector.setOrchestratorEnabled(true);
+      observabilityCollector.recordOrchestratorStep({
+        step: "llm_draft",
+        executed: true,
+        latency_ms: Date.now() - start,
+        metadata: { raw_output_mode: true },
+      });
+      (rawResponse as any)._observability = observabilityCollector.build();
+    }
 
     return {
       statusCode: 200,
@@ -2679,6 +2735,41 @@ export async function finaliseCeeDraftResponse(
     edge_count: responseEdges.length,
     sample_edges: sampleEdges,
   }, '[BOUNDARY-CEE-OUT] Edge coefficient values in response');
+
+  // Add observability metadata when enabled (CEE_OBSERVABILITY_ENABLED=true or include_debug=true)
+  // This provides debug panel visibility into LLM calls, validation, and orchestrator activity
+  if (observabilityEnabled) {
+    // Record validation attempt summary
+    const validationAttemptCount = schemaRetryAttempted ? 2 : 1;
+    observabilityCollector.recordValidationAttempt({
+      passed: true,
+      rules_checked: pipelineStages.length,
+      rules_failed: [],
+      repairs_triggered: pipelineStages.some(s => s.status === "success_with_repairs"),
+      repair_types: pipelineStages
+        .filter(s => s.status === "success_with_repairs")
+        .map(s => s.name),
+      retry_triggered: schemaRetryAttempted,
+      latency_ms: latencyMs,
+      validator: "cee_pipeline",
+      warnings: validationIssues.map(i => i.code),
+    });
+
+    // Record orchestrator steps from pipeline stages
+    observabilityCollector.setOrchestratorEnabled(true);
+    for (const stage of pipelineStages) {
+      observabilityCollector.recordOrchestratorStep({
+        step: stage.name,
+        executed: true,
+        latency_ms: stage.duration_ms,
+        metadata: stage.details,
+      });
+    }
+
+    // Build and attach observability to response
+    const observability = observabilityCollector.build();
+    (verifiedResponse as any)._observability = observability;
+  }
 
   return {
     statusCode: 200,

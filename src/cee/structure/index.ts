@@ -828,6 +828,127 @@ export function detectUniformStrengths(
   };
 }
 
+/**
+ * Canonical edge values for structural edges (decision→option, option→factor).
+ * These edges represent structural relationships, not causal influence,
+ * so they should have fixed values.
+ */
+const CANONICAL_STRUCTURAL_EDGE = {
+  mean: 1.0,
+  std: 0.01,
+  prob: 1.0,
+  direction: "positive" as const,
+};
+
+/**
+ * Result of structural edge fix operation
+ */
+export interface StructuralEdgeFixResult {
+  graph: GraphV1;
+  fixedEdgeCount: number;
+  fixedEdgeIds: string[];
+}
+
+/**
+ * Fix non-canonical structural edges (option→factor) to have canonical values.
+ *
+ * Structural edges represent structural relationships (option targets a factor),
+ * not causal influence. They should have:
+ * - strength_mean: 1.0
+ * - strength_std: 0.01
+ * - belief_exists: 1.0
+ * - effect_direction: "positive"
+ *
+ * This is a deterministic repair that does not require LLM intervention.
+ *
+ * @param graph - Graph to fix
+ * @returns Fixed graph with count of repaired edges
+ */
+export function fixNonCanonicalStructuralEdges(
+  graph: GraphV1 | undefined,
+): StructuralEdgeFixResult | undefined {
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return undefined;
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  // Build kind lookup
+  const kinds = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof (node as any)?.id === "string" ? ((node as any).id as string) : undefined;
+    const kind = typeof (node as any)?.kind === "string" ? ((node as any).kind as string) : undefined;
+    if (id && kind) {
+      kinds.set(id, kind);
+    }
+  }
+
+  const fixedEdgeIds: string[] = [];
+  let mutated = false;
+
+  const updatedEdges = edges.map((edge) => {
+    const from = (edge as any)?.from;
+    const to = (edge as any)?.to;
+    const edgeId = (edge as any)?.id;
+
+    // Only fix option→factor edges (structural edges)
+    if (
+      typeof from === "string" &&
+      typeof to === "string" &&
+      kinds.get(from) === "option" &&
+      kinds.get(to) === "factor"
+    ) {
+      // Check if edge is already canonical
+      const mean = (edge as any)?.strength_mean ?? (edge as any)?.weight;
+      const std = (edge as any)?.strength_std;
+      const prob = (edge as any)?.belief_exists ?? (edge as any)?.belief;
+
+      const isCanonical =
+        mean === CANONICAL_STRUCTURAL_EDGE.mean &&
+        (std === undefined || std <= 0.05) &&
+        prob === CANONICAL_STRUCTURAL_EDGE.prob;
+
+      if (!isCanonical) {
+        mutated = true;
+        if (typeof edgeId === "string") {
+          fixedEdgeIds.push(edgeId);
+        }
+        return {
+          ...(edge as any),
+          // V4 fields
+          strength_mean: CANONICAL_STRUCTURAL_EDGE.mean,
+          strength_std: CANONICAL_STRUCTURAL_EDGE.std,
+          belief_exists: CANONICAL_STRUCTURAL_EDGE.prob,
+          effect_direction: CANONICAL_STRUCTURAL_EDGE.direction,
+          // Legacy fields for backwards compatibility
+          weight: CANONICAL_STRUCTURAL_EDGE.mean,
+          belief: CANONICAL_STRUCTURAL_EDGE.prob,
+        };
+      }
+    }
+
+    return edge;
+  });
+
+  if (!mutated) {
+    return {
+      graph,
+      fixedEdgeCount: 0,
+      fixedEdgeIds: [],
+    };
+  }
+
+  return {
+    graph: {
+      ...(graph as any),
+      edges: updatedEdges as any,
+    } as GraphV1,
+    fixedEdgeCount: fixedEdgeIds.length,
+    fixedEdgeIds,
+  };
+}
+
 // Re-export goal inference utilities
 export {
   inferGoalFromBrief,

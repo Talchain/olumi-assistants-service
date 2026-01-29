@@ -8,6 +8,7 @@
 import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
+import type { ObservabilityCollector } from "../../cee/observability/index.js";
 
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
@@ -238,6 +239,7 @@ export interface CallOpts {
   bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (?supa=1 or X-CEE-Refresh-Prompt header)
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
   collector?: CorrectionCollector; // Graph corrections tracking
+  observabilityCollector?: ObservabilityCollector; // LLM call observability tracking
 }
 
 /**

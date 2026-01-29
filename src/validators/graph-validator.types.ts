@@ -57,7 +57,9 @@ export type FactorDataErrorCode =
 export type SemanticErrorCode =
   | "NO_EFFECT_PATH"
   | "OPTIONS_IDENTICAL"
-  | "INVALID_INTERVENTION_REF";
+  | "INVALID_INTERVENTION_REF"
+  | "GOAL_NUMBER_AS_FACTOR"
+  | "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR";
 
 /**
  * Tier 6: Numeric validation errors

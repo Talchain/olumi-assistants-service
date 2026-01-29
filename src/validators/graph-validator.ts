@@ -244,6 +244,39 @@ function isInvalidNumber(value: unknown): boolean {
   return !Number.isFinite(value);
 }
 
+/**
+ * Goal-number detection patterns.
+ * Matches factor labels that appear to be goal target values, not causal factors.
+ * E.g., "£20k MRR", "$50k revenue target", "target of £100k"
+ *
+ * Patterns are intentionally specific to reduce false positives:
+ * - Require currency symbols (£$€) OR specific financial terms (MRR/ARR/revenue/sales)
+ * - Avoid matching generic factors like "target customer segments" or "objective function"
+ */
+const GOAL_NUMBER_PATTERNS = [
+  // "goal of reaching £20k" or "goal of $1M"
+  /goal of (?:reaching |achieving )?[£$€]?[\d,]+[kKmM]?/i,
+  // "target of £100k" - requires currency symbol to avoid "target 5 segments"
+  /target (?:of )?[£$€][\d,]+[kKmM]?/i,
+  // "target of 100k revenue" or "revenue target of 50k" - requires financial keyword
+  /(?:revenue|sales|MRR|ARR)\s*target\s*(?:of\s*)?[\d,]+[kKmM]?/i,
+  /target\s*(?:of\s*)?[\d,]+[kKmM]?\s*(?:revenue|sales|MRR|ARR)/i,
+  // Standalone currency amounts like "£20k MRR" or "$50k"
+  /^[£$€][\d,]+[kKmM]?\s*(?:MRR|ARR|revenue|sales)?$/i,
+  // "50k MRR" or "100k revenue target"
+  /^\d+[kKmM]\s*(?:MRR|ARR|revenue|sales|target|goal)/i,
+  // "$50k revenue target"
+  /[£$€]\d+[kKmM]?\s*(?:revenue|sales)?\s*target/i,
+];
+
+/**
+ * Check if a factor label appears to be a goal target value.
+ */
+function isGoalNumberLabel(label: string): boolean {
+  if (!label) return false;
+  return GOAL_NUMBER_PATTERNS.some((pattern) => pattern.test(label));
+}
+
 // =============================================================================
 // Tier 1: Structural Validation
 // =============================================================================
@@ -723,6 +756,63 @@ function validateSemantic(
           message: `Option "${option.id}" intervention references non-factor node: ${factorId} (kind: ${targetNode.kind})`,
           path: `nodesById.${option.id}.data.interventions`,
           context: { factorId, actualKind: targetNode.kind },
+        });
+      }
+    }
+  }
+
+  // GOAL_NUMBER_AS_FACTOR: Factor labels should not be goal target values
+  // E.g., "£20k MRR" is a goal target, not a causal factor
+  const factors = nodeMap.byKind.get("factor") ?? [];
+  for (const factor of factors) {
+    const label = factor.label ?? factor.id;
+    if (isGoalNumberLabel(label)) {
+      // Only error if factor has no incoming edge from options (not controllable)
+      const factorInfo = factorCategories.get(factor.id);
+      if (!factorInfo?.hasOptionEdge) {
+        issues.push({
+          code: "GOAL_NUMBER_AS_FACTOR",
+          severity: "error",
+          message: `Factor "${label}" appears to be a goal target value, not a causal factor`,
+          path: `nodesById.${factor.id}`,
+          context: { label, factorId: factor.id },
+        });
+      }
+    }
+  }
+
+  // STRUCTURAL_EDGE_NOT_CANONICAL_ERROR: option→factor edges must have canonical values
+  // This is an ERROR for option→factor (triggering repair), WARNING for decision→option
+  for (let i = 0; i < graph.edges.length; i++) {
+    const edge = graph.edges[i];
+    const fromNode = nodeMap.byId.get(edge.from);
+    const toNode = nodeMap.byId.get(edge.to);
+
+    if (!fromNode || !toNode) continue;
+
+    // Only check option→factor edges (structural edges that require canonical values)
+    if (fromNode.kind === "option" && toNode.kind === "factor") {
+      const mean = edge.strength_mean ?? edge.weight;
+      const std = edge.strength_std;
+      const prob = edge.belief_exists ?? edge.belief;
+
+      const isCanonical =
+        mean === CANONICAL_EDGE.mean &&
+        (std === undefined || std <= CANONICAL_EDGE.stdMax) &&
+        prob === CANONICAL_EDGE.prob;
+
+      if (!isCanonical) {
+        issues.push({
+          code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          severity: "error",
+          message: `Option→factor structural edge must have canonical values (mean=1.0, std≤0.05, prob=1.0)`,
+          path: `edges[${i}]`,
+          context: {
+            from: edge.from,
+            to: edge.to,
+            expected: { mean: CANONICAL_EDGE.mean, stdMax: CANONICAL_EDGE.stdMax, prob: CANONICAL_EDGE.prob },
+            actual: { mean, std, prob },
+          },
         });
       }
     }
