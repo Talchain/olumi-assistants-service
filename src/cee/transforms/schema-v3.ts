@@ -443,6 +443,18 @@ export function transformResponseToV3(
 ): V3DraftGraphResponse {
   const { graph } = v1Response;
 
+  // [V3-CAT-INPUT] Log category on V1 input (before any transform)
+  const v1InputFactors = graph.nodes.filter((n) => n.kind === "factor");
+  const v1InputWithCategory = v1InputFactors.filter((n) => n.category);
+  log.info({
+    requestId: context.requestId,
+    v1_input_factor_count: v1InputFactors.length,
+    v1_input_with_category: v1InputWithCategory.length,
+    v1_input_sample: v1InputWithCategory.slice(0, 5).map((n) => ({ id: n.id, category: n.category })),
+    all_input_node_ids: graph.nodes.map((n) => n.id),
+    event: "cee.v3_transform.input_category_check",
+  }, "[V3-CAT-INPUT] V1 input category status at transform entry");
+
   // Find goal node
   const goalNode = findGoalNode(graph.nodes);
   if (!goalNode) {
@@ -458,6 +470,20 @@ export function transformResponseToV3(
 
   // Transform graph (without option nodes)
   const v3Graph = transformGraphToV3(graph);
+
+  // [V3-CAT-TRACE] Log category field status through V3 transform
+  const v1FactorsWithCategory = graph.nodes.filter((n) => n.kind === "factor" && n.category);
+  const v3FactorsWithCategory = v3Graph.nodes.filter((n) => n.kind === "factor" && n.category);
+  log.info({
+    requestId: context.requestId,
+    v1_factor_count: graph.nodes.filter((n) => n.kind === "factor").length,
+    v1_factors_with_category: v1FactorsWithCategory.length,
+    v1_category_sample: v1FactorsWithCategory.slice(0, 3).map((n) => ({ id: n.id, cat: n.category })),
+    v3_factor_count: v3Graph.nodes.filter((n) => n.kind === "factor").length,
+    v3_factors_with_category: v3FactorsWithCategory.length,
+    v3_category_sample: v3FactorsWithCategory.slice(0, 3).map((n) => ({ id: n.id, cat: n.category })),
+    event: "cee.v3_transform.category_trace",
+  }, "[V3-CAT-TRACE] Category field status in V3 transform");
 
   const v3NodeIdByV1Id = new Map(
     graph.nodes.map((node, index) => [node.id, v3Graph.nodes[index]?.id ?? node.id])
