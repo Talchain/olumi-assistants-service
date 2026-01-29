@@ -831,7 +831,7 @@ function generateAdminUI(): string {
                         <div class="flex" style="gap: 15px; flex-wrap: wrap; align-items: center;">
                           <div style="display: flex; align-items: center; gap: 6px;">
                             <label style="font-size: 0.85rem; font-weight: 500;">Model:</label>
-                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()">
+                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()" @change="saveModelPreference()">
                               <option value="">Default</option>
                               <template x-for="m in llmAvailableModels" :key="m.id">
                                 <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
@@ -2145,12 +2145,26 @@ function generateAdminUI(): string {
           });
         },
 
-        // Initialize - check for saved session
+        // Initialize - check for saved session and restore preferences
         init() {
           const savedKey = sessionStorage.getItem('adminApiKey');
           if (savedKey) {
             this.apiKey = savedKey;
             this.authenticate();
+          }
+          // Restore saved model preference
+          const savedModel = localStorage.getItem('admin_llm_model_preference');
+          if (savedModel) {
+            this.llmModelOverride = savedModel;
+          }
+        },
+
+        // Save model preference to localStorage when changed
+        saveModelPreference() {
+          if (this.llmModelOverride) {
+            localStorage.setItem('admin_llm_model_preference', this.llmModelOverride);
+          } else {
+            localStorage.removeItem('admin_llm_model_preference');
           }
         },
 
@@ -2165,6 +2179,7 @@ function generateAdminUI(): string {
               sessionStorage.setItem('adminApiKey', this.apiKey);
               this.showToast('Logged in successfully', 'success');
               this.loadPrompts();
+              this.loadAvailableModels(); // Pre-load models so saved preference displays correctly
             } else {
               sessionStorage.removeItem('adminApiKey');
               const data = await res.json();

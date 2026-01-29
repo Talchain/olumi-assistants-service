@@ -1068,14 +1068,21 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
+      // Priority: explicit override > task default > configured provider default
       let model = modelOverride;
       if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
         // Use task-specific default from TASK_MODEL_DEFAULTS
         model = getDefaultModelForTask(prompt.taskId);
       }
       if (!model) {
-        // Last resort fallback for non-CEE tasks
-        model = 'gpt-4o-mini';
+        // Fall back to configured provider's default model
+        // This respects LLM_PROVIDER env var so Claude-only deployments use Claude
+        const configuredProvider = config.llm?.provider;
+        if (configuredProvider === 'anthropic') {
+          model = 'claude-sonnet-4-20250514';
+        } else {
+          model = 'gpt-4o-mini';
+        }
       }
 
       // Validate model if specified
