@@ -1068,16 +1068,24 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
-      // Priority: explicit override > task default > configured provider default
+      // Priority: explicit override > task default (if provider matches) > configured provider default
       let model = modelOverride;
+      const configuredProvider = config.llm?.provider;
+
       if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
-        // Use task-specific default from TASK_MODEL_DEFAULTS
-        model = getDefaultModelForTask(prompt.taskId);
+        const taskDefault = getDefaultModelForTask(prompt.taskId);
+        const taskDefaultProvider = getModelProvider(taskDefault);
+        // Only use task default if its provider matches configured provider
+        // This ensures LLM_PROVIDER=anthropic doesn't try to use OpenAI models
+        if (!configuredProvider || taskDefaultProvider === configuredProvider) {
+          model = taskDefault;
+        }
+        // Otherwise fall through to provider default below
       }
+
       if (!model) {
         // Fall back to configured provider's default model
         // This respects LLM_PROVIDER env var so Claude-only deployments use Claude
-        const configuredProvider = config.llm?.provider;
         if (configuredProvider === 'anthropic') {
           model = 'claude-sonnet-4-20250514';
         } else {

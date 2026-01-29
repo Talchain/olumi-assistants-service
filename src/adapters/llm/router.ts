@@ -528,12 +528,21 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
     } else if (!ceeModel && task && isValidCeeTask(task)) {
       // No env override - use TASK_MODEL_DEFAULTS
       const taskDefault = getDefaultModelForTask(task);
-      if (taskDefault && selectedModel !== taskDefault) {
+      const taskDefaultProvider = getModelProvider(taskDefault);
+      // Only use task default if its provider matches configured provider
+      // This ensures LLM_PROVIDER=anthropic doesn't try to use OpenAI models
+      if (taskDefault && selectedModel !== taskDefault &&
+          (selectedProvider === 'fixtures' || !taskDefaultProvider || taskDefaultProvider === selectedProvider)) {
         log.info(
           { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
           "Using task default model from TASK_MODEL_DEFAULTS"
         );
         selectedModel = taskDefault;
+      } else if (taskDefault && taskDefaultProvider !== selectedProvider) {
+        log.info(
+          { task, task_default: taskDefault, task_default_provider: taskDefaultProvider, configured_provider: selectedProvider, source: 'provider_mismatch' },
+          "Skipping task default - provider mismatch with LLM_PROVIDER"
+        );
       }
     }
 
