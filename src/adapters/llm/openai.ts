@@ -488,6 +488,15 @@ export class OpenAIAdapter implements LLMAdapter {
 
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
       const rawJson = JSON.parse(content);
+
+      // [CAT-1] Trace category field: after LLM JSON parse, before any transformation
+      const cat1Factors = Array.isArray((rawJson as any)?.nodes)
+        ? ((rawJson as any).nodes as any[])
+          .filter((n: any) => n?.kind === 'factor')
+          .map((n: any) => ({ id: n?.id, category: n?.category }))
+        : [];
+      log.info({ event: 'CAT-1', stage: 'after_llm_parse', factors: cat1Factors }, '[CAT-1] After LLM parse (raw)');
+
       const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
         ? ((rawJson as any).nodes as any[])
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
@@ -533,6 +542,12 @@ export class OpenAIAdapter implements LLMAdapter {
       }
 
       const parsed = parseResult.data;
+
+      // [CAT-2] Trace category field: after Zod validation
+      const cat2Factors = parsed.nodes
+        .filter((n) => n.kind === 'factor')
+        .map((n) => ({ id: n.id, category: n.category }));
+      log.info({ event: 'CAT-2', stage: 'after_zod_parse', factors: cat2Factors }, '[CAT-2] After Zod parse');
 
       // Validate and cap node/edge counts
       if (parsed.nodes.length > GRAPH_MAX_NODES) {
