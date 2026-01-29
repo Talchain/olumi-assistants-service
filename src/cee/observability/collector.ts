@@ -22,6 +22,8 @@ import type {
   OrchestratorStepRecord,
   ObservabilityTotals,
   ObservabilityCollectorOptions,
+  GraphQualityMetrics,
+  GraphDiff,
 } from "./types.js";
 
 // ============================================================================
@@ -48,9 +50,24 @@ export interface ObservabilityCollector {
   recordOrchestratorStep(step: Omit<OrchestratorStepRecord, "timestamp">): void;
 
   /**
+   * Record a graph diff from repair operations.
+   */
+  recordGraphDiff(diff: GraphDiff): void;
+
+  /**
+   * Record multiple graph diffs at once.
+   */
+  recordGraphDiffs(diffs: GraphDiff[]): void;
+
+  /**
    * Set orchestrator enabled state.
    */
   setOrchestratorEnabled(enabled: boolean): void;
+
+  /**
+   * Set graph quality metrics (computed after validation/repair).
+   */
+  setGraphMetrics(metrics: GraphQualityMetrics): void;
 
   /**
    * Start timing for an operation.
@@ -113,8 +130,14 @@ export function createObservabilityCollector(
   const llmCalls: LLMCallRecord[] = [];
   const validationAttempts: ValidationAttemptRecord[] = [];
   const orchestratorSteps: OrchestratorStepRecord[] = [];
+  const graphDiffs: GraphDiff[] = [];
   let orchestratorEnabled = false;
   let totalLatencyMs = 0;
+  let graphMetrics: GraphQualityMetrics | undefined;
+
+  // Production check: NEVER include raw I/O in production
+  const isProduction = process.env.NODE_ENV === "production";
+  const effectiveCaptureRawIO = captureRawIO && !isProduction;
 
   /**
    * Compute SHA-256 hash of a string.
@@ -139,9 +162,9 @@ export function createObservabilityCollector(
         id: randomUUID(),
         prompt_hash: call.raw_prompt ? sha256(call.raw_prompt) : undefined,
         response_hash: call.raw_response ? sha256(call.raw_response) : undefined,
-        // Only include raw I/O if capture is enabled
-        raw_prompt: captureRawIO ? truncate(call.raw_prompt, maxPromptLength) : undefined,
-        raw_response: captureRawIO ? truncate(call.raw_response, maxResponseLength) : undefined,
+        // Only include raw I/O if capture is enabled AND not in production
+        raw_prompt: effectiveCaptureRawIO ? truncate(call.raw_prompt, maxPromptLength) : undefined,
+        raw_response: effectiveCaptureRawIO ? truncate(call.raw_response, maxResponseLength) : undefined,
       };
       llmCalls.push(record);
       totalLatencyMs += call.latency_ms;
@@ -168,8 +191,20 @@ export function createObservabilityCollector(
       totalLatencyMs += step.latency_ms;
     },
 
+    recordGraphDiff(diff: GraphDiff): void {
+      graphDiffs.push(diff);
+    },
+
+    recordGraphDiffs(diffs: GraphDiff[]): void {
+      graphDiffs.push(...diffs);
+    },
+
     setOrchestratorEnabled(enabled: boolean): void {
       orchestratorEnabled = enabled;
+    },
+
+    setGraphMetrics(metrics: GraphQualityMetrics): void {
+      graphMetrics = metrics;
     },
 
     startTimer(): () => number {
@@ -191,16 +226,24 @@ export function createObservabilityCollector(
       );
 
       // Build totals
-      const totals: ObservabilityTotals = buildTotals(llmCalls, ceeVersion, totalLatencyMs);
+      const totals: ObservabilityTotals = buildTotals(llmCalls, validationAttempts, graphDiffs, ceeVersion, totalLatencyMs);
 
-      return {
+      const result: CEEObservability = {
         llm_calls: llmCalls,
         validation,
         orchestrator,
         totals,
+        graph_metrics: graphMetrics,
         request_id: requestId,
-        raw_io_included: captureRawIO,
+        raw_io_included: effectiveCaptureRawIO,
       };
+
+      // Only include graph_diffs if there are any
+      if (graphDiffs.length > 0) {
+        result.graph_diffs = graphDiffs;
+      }
+
+      return result;
     },
 
     hasLLMCalls(): boolean {
@@ -317,10 +360,12 @@ function buildOrchestratorTracking(
 }
 
 /**
- * Build aggregated totals from LLM calls.
+ * Build aggregated totals from LLM calls and validation tracking.
  */
 function buildTotals(
   llmCalls: LLMCallRecord[],
+  validationAttempts: ValidationAttemptRecord[],
+  graphDiffs: GraphDiff[],
   ceeVersion: string,
   totalLatencyMs: number
 ): ObservabilityTotals {
@@ -332,6 +377,21 @@ function buildTotals(
     outputTokens += call.tokens.output;
   }
 
+  // Count repairs triggered from validation attempts
+  let repairsTriggered = 0;
+  let retries = 0;
+  for (const attempt of validationAttempts) {
+    if (attempt.repairs_triggered) {
+      repairsTriggered++;
+    }
+    if (attempt.retry_triggered) {
+      retries++;
+    }
+  }
+
+  // Also count graph diffs as repairs (each diff represents a repair action)
+  repairsTriggered += graphDiffs.length;
+
   return {
     total_llm_calls: llmCalls.length,
     total_tokens: {
@@ -340,6 +400,8 @@ function buildTotals(
       total: inputTokens + outputTokens,
     },
     total_latency_ms: totalLatencyMs,
+    repairs_triggered: repairsTriggered,
+    retries,
     cee_version: ceeVersion,
   };
 }
@@ -377,6 +439,8 @@ export function createNoOpObservabilityCollector(requestId: string): Observabili
     total_llm_calls: 0,
     total_tokens: { input: 0, output: 0, total: 0 },
     total_latency_ms: 0,
+    repairs_triggered: 0,
+    retries: 0,
     cee_version: "",
   };
 
@@ -393,7 +457,10 @@ export function createNoOpObservabilityCollector(requestId: string): Observabili
     recordLLMCall(): void {},
     recordValidationAttempt(): void {},
     recordOrchestratorStep(): void {},
+    recordGraphDiff(): void {},
+    recordGraphDiffs(): void {},
     setOrchestratorEnabled(): void {},
+    setGraphMetrics(): void {},
     startTimer(): () => number {
       return () => 0;
     },

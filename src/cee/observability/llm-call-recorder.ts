@@ -5,7 +5,7 @@
  * Used by LLM adapters (anthropic.ts, openai.ts, extraction.ts).
  */
 
-import type { LLMCallStep } from "./types.js";
+import type { LLMCallStep, ModelSelectionReason, PromptModelConfig } from "./types.js";
 import type { ObservabilityCollector } from "./collector.js";
 
 /**
@@ -14,8 +14,14 @@ import type { ObservabilityCollector } from "./collector.js";
 export interface RecordLLMCallParams {
   collector: ObservabilityCollector | undefined;
   step: LLMCallStep;
+  /** Prompt ID (e.g., "default:draft_graph") */
+  prompt_id?: string;
   model: string;
   provider: "anthropic" | "openai";
+  /** Per-prompt model configuration */
+  model_config?: PromptModelConfig;
+  /** Why this model was selected */
+  model_selection_reason?: ModelSelectionReason;
   attempt: number;
   success: boolean;
   error?: string;
@@ -44,8 +50,11 @@ export function recordLLMCall(params: RecordLLMCallParams): void {
 
   collector.recordLLMCall({
     step: callData.step,
+    prompt_id: callData.prompt_id,
     model: callData.model,
     provider: callData.provider,
+    model_config: callData.model_config,
+    model_selection_reason: callData.model_selection_reason,
     tokens: {
       input: callData.tokens.input,
       output: callData.tokens.output,
@@ -65,6 +74,18 @@ export function recordLLMCall(params: RecordLLMCallParams): void {
 }
 
 /**
+ * Options for creating an LLM call context.
+ */
+export interface CreateLLMCallContextOptions {
+  collector: ObservabilityCollector | undefined;
+  step: LLMCallStep;
+  model: string;
+  provider: "anthropic" | "openai";
+  /** Optional prompt ID */
+  prompt_id?: string;
+}
+
+/**
  * Create a context object for tracking LLM call timing.
  * Returns a function to call when the LLM call completes.
  */
@@ -72,7 +93,8 @@ export function createLLMCallContext(
   collector: ObservabilityCollector | undefined,
   step: LLMCallStep,
   model: string,
-  provider: "anthropic" | "openai"
+  provider: "anthropic" | "openai",
+  prompt_id?: string
 ): LLMCallContext {
   const startedAt = new Date();
   const startTime = performance.now();
@@ -90,8 +112,11 @@ export function createLLMCallContext(
       recordLLMCall({
         collector,
         step,
+        prompt_id,
         model,
         provider,
+        model_config: params.model_config,
+        model_selection_reason: params.model_selection_reason,
         attempt: params.attempt ?? 1,
         success: params.success,
         error: params.error,
@@ -137,6 +162,10 @@ export interface LLMCallCompleteParams {
   raw_response?: string;
   prompt_version?: string;
   cache_hit?: boolean;
+  /** Per-prompt model configuration */
+  model_config?: PromptModelConfig;
+  /** Why this model was selected */
+  model_selection_reason?: ModelSelectionReason;
 }
 
 /**

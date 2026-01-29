@@ -5,14 +5,12 @@
  * - LLM call tracking (model, tokens, latency, raw I/O)
  * - Validation tracking (attempts, rules, repairs)
  * - Orchestrator tracking (steps, timing)
+ * - Graph quality metrics (structure, topology, data quality)
  *
  * Current Coverage:
  * - draft_graph: Full tracking via pipeline.ts
- * - repair_graph, suggest_options, clarify_brief, etc.: Not yet instrumented at adapter level
- *
- * TODO: Instrument individual adapter methods (anthropic.ts, openai.ts) for complete
- * LLM call coverage across all operations. Currently only the primary draft_graph
- * call is tracked in the pipeline.
+ * - critique_graph: Tracked via assist.critique-graph.ts
+ * - suggest_options: Tracked via assist.suggest-options.ts
  *
  * Usage:
  *   import { createObservabilityCollector, isObservabilityEnabled } from "../observability/index.js";
@@ -20,6 +18,7 @@
  *   if (isObservabilityEnabled()) {
  *     const collector = createObservabilityCollector({ requestId, ceeVersion });
  *     // ... record calls, validation, etc.
+ *     collector.setGraphMetrics(computeGraphMetrics({ graph, validationResult, repairs }));
  *     response._observability = collector.build();
  *   }
  */
@@ -36,10 +35,16 @@ export type {
   LLMCallStep,
   ValidationAttemptRecord,
   ValidationTracking,
+  ValidationAction,
   OrchestratorTracking,
   OrchestratorStepRecord,
   ObservabilityTotals,
   ObservabilityCollectorOptions,
+  GraphQualityMetrics,
+  GraphDiff,
+  GraphDiffType,
+  ModelSelectionReason,
+  PromptModelConfig,
 } from "./types.js";
 
 export {
@@ -50,6 +55,16 @@ export {
   type LLMCallContext,
   type LLMCallCompleteParams,
 } from "./llm-call-recorder.js";
+
+export {
+  computeGraphMetrics,
+  type ComputeGraphMetricsInput,
+} from "./graph-metrics.js";
+
+export {
+  repairRecordsToGraphDiffs,
+  computeGraphDiffs,
+} from "./graph-diff.js";
 
 import { config } from "../../config/index.js";
 

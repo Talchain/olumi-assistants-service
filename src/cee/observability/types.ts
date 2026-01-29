@@ -18,6 +18,25 @@
 // ============================================================================
 
 /**
+ * Model selection reason - explains why a particular model was used.
+ */
+export type ModelSelectionReason =
+  | "explicit_override"
+  | "prompt_config_staging"
+  | "prompt_config_production"
+  | "task_default"
+  | "provider_default"
+  | "provider_incompatible";
+
+/**
+ * Per-prompt model configuration.
+ */
+export interface PromptModelConfig {
+  staging?: string;
+  production?: string;
+}
+
+/**
  * Single LLM call record.
  * Captures timing, model info, token usage, and optionally raw I/O.
  */
@@ -26,10 +45,16 @@ export interface LLMCallRecord {
   id: string;
   /** Pipeline step that made this call */
   step: LLMCallStep;
+  /** Prompt ID used (e.g., "default:draft_graph") */
+  prompt_id?: string;
   /** Model ID used */
   model: string;
   /** Provider (anthropic, openai) */
   provider: "anthropic" | "openai";
+  /** Per-prompt model configuration (staging/production) */
+  model_config?: PromptModelConfig;
+  /** Why this model was selected */
+  model_selection_reason?: ModelSelectionReason;
   /** Token usage */
   tokens: {
     input: number;
@@ -50,12 +75,12 @@ export interface LLMCallRecord {
   completed_at: string;
   /**
    * Raw prompt sent to LLM (only included if CEE_OBSERVABILITY_RAW_IO=true).
-   * Redacted in production unless explicitly enabled.
+   * NEVER included in production regardless of flags.
    */
   raw_prompt?: string;
   /**
    * Raw response from LLM (only included if CEE_OBSERVABILITY_RAW_IO=true).
-   * Redacted in production unless explicitly enabled.
+   * NEVER included in production regardless of flags.
    */
   raw_response?: string;
   /** SHA-256 hash of raw prompt (only included when raw_prompt is available) */
@@ -88,6 +113,11 @@ export type LLMCallStep =
 // ============================================================================
 
 /**
+ * Action taken after validation.
+ */
+export type ValidationAction = "proceed" | "trigger_repair" | "trigger_retry" | "fail";
+
+/**
  * Validation attempt record.
  */
 export interface ValidationAttemptRecord {
@@ -105,6 +135,8 @@ export interface ValidationAttemptRecord {
   repair_types?: string[];
   /** Whether retry was triggered */
   retry_triggered: boolean;
+  /** Action taken after this validation attempt */
+  action_taken?: ValidationAction;
   /** Validation latency in milliseconds */
   latency_ms: number;
   /** Timestamp */
@@ -199,8 +231,98 @@ export interface ObservabilityTotals {
    * May exceed actual elapsed time if operations overlap or run in parallel.
    */
   total_latency_ms: number;
+  /** Number of repair operations triggered */
+  repairs_triggered: number;
+  /** Number of retry operations triggered */
+  retries: number;
   /** CEE version */
   cee_version: string;
+}
+
+// ============================================================================
+// Graph Quality Metrics
+// ============================================================================
+
+/**
+ * Graph quality metrics for monitoring and debugging.
+ * Computed from the final validated/repaired graph.
+ */
+export interface GraphQualityMetrics {
+  // Structure
+  /** Total node count */
+  node_count: number;
+  /** Total edge count */
+  edge_count: number;
+  /** Factor node count */
+  factor_count: number;
+  /** Option node count */
+  option_count: number;
+  /** Outcome node count */
+  outcome_count: number;
+  /** Risk node count */
+  risk_count: number;
+
+  // Validation
+  /** Whether final validation passed */
+  validation_passed: boolean;
+  /** Validation error codes */
+  validation_errors: string[];
+  /** Validation warning codes */
+  validation_warnings: string[];
+  /** Count of repairs applied */
+  repairs_applied: number;
+  /** Repair action codes */
+  repair_codes: string[];
+
+  // Topology
+  /** Nodes with no edges */
+  orphan_nodes: number;
+  /** Number of disconnected subgraphs (should be 1 for valid graph) */
+  disconnected_subgraphs: number;
+  /** Longest path from decision to goal */
+  max_path_depth: number;
+
+  // Data Quality
+  /** Factors with category field set */
+  factors_with_category: number;
+  /** Factors missing category field */
+  factors_missing_category: number;
+  /** Structural edges (decision→option, option→factor) */
+  structural_edges: number;
+  /** Causal edges (factor→factor, factor→outcome, etc.) */
+  causal_edges: number;
+  /** Edges that were repaired */
+  edges_repaired: number;
+}
+
+// ============================================================================
+// Graph Diff Tracking
+// ============================================================================
+
+/**
+ * Type of graph modification during repair.
+ */
+export type GraphDiffType =
+  | "node_added"
+  | "node_removed"
+  | "edge_added"
+  | "edge_removed"
+  | "edge_modified";
+
+/**
+ * Record of a single graph modification during repair.
+ */
+export interface GraphDiff {
+  /** Type of modification */
+  type: GraphDiffType;
+  /** ID of the affected node or edge */
+  target_id: string;
+  /** State before modification (for removals and modifications) */
+  before?: unknown;
+  /** State after modification (for additions and modifications) */
+  after?: unknown;
+  /** Repair rule or reason that caused this change */
+  repair_reason?: string;
 }
 
 // ============================================================================
@@ -220,6 +342,10 @@ export interface CEEObservability {
   orchestrator: OrchestratorTracking;
   /** Aggregated totals */
   totals: ObservabilityTotals;
+  /** Graph quality metrics (computed after validation/repair) */
+  graph_metrics?: GraphQualityMetrics;
+  /** Graph diffs from repair operations */
+  graph_diffs?: GraphDiff[];
   /** Request ID for correlation */
   request_id: string;
   /** Whether raw I/O is included */
