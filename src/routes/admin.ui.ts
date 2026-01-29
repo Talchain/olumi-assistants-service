@@ -1310,6 +1310,36 @@ function generateAdminUI(): string {
               </div>
             </div>
 
+            <!-- Model Configuration -->
+            <div class="mt-2 mb-2" style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+              <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: #475569;">Model Configuration</h4>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Staging Model</label>
+                  <select x-model="selectedPrompt.modelConfig.staging" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Production Model</label>
+                  <select x-model="selectedPrompt.modelConfig.production" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+              <p style="margin: 8px 0 0 0; font-size: 0.75rem; color: #94a3b8;">
+                Set environment-specific models. Leave empty to use task defaults.
+              </p>
+            </div>
+
             <h3 class="mt-2 mb-2">Versions</h3>
             <div class="version-list">
               <template x-for="version in selectedPrompt.versions.slice().reverse()" :key="version.version">
@@ -2251,17 +2281,31 @@ function generateAdminUI(): string {
 
         viewPrompt(prompt) {
           // Clone the prompt and store previous status for potential revert
-          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
           // Default to staging version if set, otherwise production version
           // This encourages testing staging versions first in the admin UI
           this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
         },
 
         editPrompt(prompt) {
           // Open view modal AND pre-fill new version with current content for editing
-          this.selectedPrompt = { ...prompt, _previousStatus: prompt.status };
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
           // Default to staging version if set, otherwise production version
           this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
           // Pre-fill the new version form with current content (from selected version)
           const currentContent = this.getVersionContent(this.selectedVersionNum);
           this.newVersion = {
@@ -2392,6 +2436,41 @@ function generateAdminUI(): string {
             }
           } catch (e) {
             this.showToast('Failed to update design version', 'error');
+          }
+        },
+
+        async updateModelConfig() {
+          this.error = null;
+          try {
+            // Clean up modelConfig - convert empty strings to undefined
+            const modelConfig = {
+              staging: this.selectedPrompt.modelConfig?.staging || undefined,
+              production: this.selectedPrompt.modelConfig?.production || undefined
+            };
+            // If both are undefined, send null to clear the config
+            const payload = (modelConfig.staging || modelConfig.production)
+              ? { modelConfig }
+              : { modelConfig: null };
+
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const stagingModel = modelConfig.staging || 'task default';
+              const prodModel = modelConfig.production || 'task default';
+              this.showToast('Model config updated: staging=' + stagingModel + ', production=' + prodModel, 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update model config', 'error');
+            }
+          } catch (e) {
+            this.showToast('Failed to update model config', 'error');
           }
         },
 

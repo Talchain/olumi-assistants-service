@@ -109,6 +109,18 @@ export const PromptVersionSchema = z.object({
 export type PromptVersion = z.infer<typeof PromptVersionSchema>;
 
 /**
+ * Environment-specific model configuration for a prompt.
+ * Allows setting different models for staging vs production.
+ */
+export const ModelConfigSchema = z.object({
+  /** Model ID to use in staging environment (e.g., "gpt-4o-mini") */
+  staging: z.string().max(64).optional(),
+  /** Model ID to use in production environment (e.g., "gpt-4o") */
+  production: z.string().max(64).optional(),
+}).optional();
+export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+
+/**
  * Full prompt definition with all versions
  */
 export const PromptDefinitionSchema = z.object({
@@ -130,6 +142,8 @@ export const PromptDefinitionSchema = z.object({
   stagingVersion: z.number().int().positive().optional(),
   /** Prompt design version (e.g., "v22", "v8.2") - tracks prompt generation/iteration */
   designVersion: z.string().max(32).optional(),
+  /** Environment-specific model configuration */
+  modelConfig: ModelConfigSchema,
   /** Tags for organization/filtering */
   tags: z.array(z.string().max(64)).max(20).default([]),
   /** When the prompt was first created */
@@ -150,6 +164,7 @@ export const CreatePromptRequestSchema = z.object({
   content: z.string().min(10).max(100000),
   variables: z.array(PromptVariableSchema).default([]),
   designVersion: z.string().max(32).optional(),
+  modelConfig: ModelConfigSchema,
   tags: z.array(z.string().max(64)).max(20).default([]),
   createdBy: z.string().min(1).max(128),
   changeNote: z.string().max(1024).optional(),
@@ -179,6 +194,7 @@ export const UpdatePromptRequestSchema = z.object({
   activeVersion: z.number().int().positive().optional(),
   stagingVersion: z.number().int().positive().nullable().optional(),
   designVersion: z.string().max(32).optional(),
+  modelConfig: ModelConfigSchema,
   tags: z.array(z.string().max(64)).max(20).optional(),
 });
 export type UpdatePromptRequest = z.infer<typeof UpdatePromptRequestSchema>;

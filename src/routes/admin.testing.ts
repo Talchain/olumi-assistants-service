@@ -1068,10 +1068,21 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
-      // Priority: explicit override > task default (if provider matches) > configured provider default
+      // Priority: explicit override > prompt modelConfig > task default (if provider matches) > configured provider default
       let model = modelOverride;
       const configuredProvider = config.llm?.provider;
 
+      // Check prompt's per-prompt model configuration
+      if (!model && prompt.modelConfig) {
+        // Use environment-specific model based on prompt status
+        const env = prompt.status === 'production' ? 'production' : 'staging';
+        const promptModel = prompt.modelConfig[env];
+        if (promptModel) {
+          model = promptModel;
+        }
+      }
+
+      // Fall back to task defaults if no prompt-specific model
       if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
         const taskDefault = getDefaultModelForTask(prompt.taskId);
         const taskDefaultProvider = getModelProvider(taskDefault);
