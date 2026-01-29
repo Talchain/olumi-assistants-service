@@ -767,9 +767,16 @@ function validateSemantic(
   for (const factor of factors) {
     const label = factor.label ?? factor.id;
     if (isGoalNumberLabel(label)) {
-      // Only error if factor has no incoming edge from options (not controllable)
+      // Determine controllability using EITHER:
+      // 1. category === 'controllable' (declared in factor data), OR
+      // 2. Presence of option→factor edges
+      // Only flag if BOTH indicate "not controllable"
       const factorInfo = factorCategories.get(factor.id);
-      if (!factorInfo?.hasOptionEdge) {
+      const hasOptionEdge = factorInfo?.hasOptionEdge ?? false;
+      const declaredControllable = (factor as any).category === "controllable";
+      const isControllable = hasOptionEdge || declaredControllable;
+
+      if (!isControllable) {
         issues.push({
           code: "GOAL_NUMBER_AS_FACTOR",
           severity: "error",
@@ -796,21 +803,23 @@ function validateSemantic(
       const std = edge.strength_std;
       const prob = edge.belief_exists ?? edge.belief;
 
+      // T2: Strict canonical - exactly mean=1.0, std=0.01, prob=1.0
+      // undefined std triggers error (will be repaired to 0.01)
       const isCanonical =
         mean === CANONICAL_EDGE.mean &&
-        (std === undefined || std <= CANONICAL_EDGE.stdMax) &&
+        std === CANONICAL_EDGE.std &&
         prob === CANONICAL_EDGE.prob;
 
       if (!isCanonical) {
         issues.push({
           code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
           severity: "error",
-          message: `Option→factor structural edge must have canonical values (mean=1.0, std≤0.05, prob=1.0)`,
+          message: `Option→factor structural edge must have canonical values (mean=1.0, std=0.01, prob=1.0)`,
           path: `edges[${i}]`,
           context: {
             from: edge.from,
             to: edge.to,
-            expected: { mean: CANONICAL_EDGE.mean, stdMax: CANONICAL_EDGE.stdMax, prob: CANONICAL_EDGE.prob },
+            expected: { mean: CANONICAL_EDGE.mean, std: CANONICAL_EDGE.std, prob: CANONICAL_EDGE.prob },
             actual: { mean, std, prob },
           },
         });

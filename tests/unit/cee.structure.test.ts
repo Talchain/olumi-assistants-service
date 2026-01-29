@@ -788,7 +788,8 @@ describe("fixNonCanonicalStructuralEdges", () => {
         { id: "fac1", kind: "factor" } as any,
       ],
       edges: [
-        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0 } as any,
+        // All canonical values including effect_direction
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" } as any,
       ],
     });
 
@@ -869,5 +870,151 @@ describe("fixNonCanonicalStructuralEdges", () => {
 
     const edge = (result!.graph.edges as any[])[0];
     expect(edge.effect_direction).toBe("positive");
+  });
+
+  // T3: Repair record tests
+  it("returns empty repairs array when no changes needed", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        // All canonical values including effect_direction
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs).toEqual([]);
+  });
+
+  it("returns repair records for each field changed", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.8 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // Should have records for mean, std, and prob
+    const meanRepair = result!.repairs.find((r) => r.field === "strength.mean");
+    const stdRepair = result!.repairs.find((r) => r.field === "strength.std");
+    const probRepair = result!.repairs.find((r) => r.field === "exists_probability");
+
+    expect(meanRepair).toBeDefined();
+    expect(meanRepair!.from_value).toBe(0.5);
+    expect(meanRepair!.to_value).toBe(1.0);
+    expect(meanRepair!.action).toBe("normalised");
+
+    expect(stdRepair).toBeDefined();
+    expect(stdRepair!.from_value).toBe(0.15);
+    expect(stdRepair!.to_value).toBe(0.01);
+
+    expect(probRepair).toBeDefined();
+    expect(probRepair!.from_value).toBe(0.8);
+    expect(probRepair!.to_value).toBe(1.0);
+  });
+
+  it("uses real edge.id in repair records (not from->to concatenation)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "my-real-edge-id", from: "opt1", to: "fac1", strength_mean: 0.5 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // All repair records should use the real edge.id
+    for (const repair of result!.repairs) {
+      expect(repair.edge_id).toBe("my-real-edge-id");
+      expect(repair.edge_from).toBe("opt1");
+      expect(repair.edge_to).toBe("fac1");
+    }
+  });
+
+  it("uses 'defaulted' action for undefined values", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        // No strength_std defined (undefined)
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, belief_exists: 1.0 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+
+    const stdRepair = result!.repairs.find((r) => r.field === "strength.std");
+    expect(stdRepair).toBeDefined();
+    expect(stdRepair!.from_value).toBeNull(); // undefined represented as null
+    expect(stdRepair!.action).toBe("defaulted");
+    expect(stdRepair!.to_value).toBe(0.01);
+  });
+
+  it("tracks effect_direction repair when not positive", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "negative" } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+
+    const dirRepair = result!.repairs.find((r) => r.field === "effect_direction");
+    expect(dirRepair).toBeDefined();
+    expect(dirRepair!.from_value).toBe("negative");
+    expect(dirRepair!.to_value).toBe("positive");
+    expect(dirRepair!.action).toBe("normalised");
+  });
+
+  it("repair records match PLoT repairs_applied[] schema shape", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt1", kind: "option" } as any,
+        { id: "fac1", kind: "factor" } as any,
+      ],
+      edges: [
+        { id: "e1", from: "opt1", to: "fac1", strength_mean: 0.5 } as any,
+      ],
+    });
+
+    const result = fixNonCanonicalStructuralEdges(graph);
+    expect(result).toBeDefined();
+    expect(result!.repairs.length).toBeGreaterThan(0);
+
+    // Verify each repair record has all required PLoT fields
+    for (const repair of result!.repairs) {
+      expect(typeof repair.field).toBe("string");
+      expect(["clamped", "defaulted", "normalised"]).toContain(repair.action);
+      expect(repair.from_value === null || typeof repair.from_value === "number" || typeof repair.from_value === "string").toBe(true);
+      expect(typeof repair.to_value === "number" || typeof repair.to_value === "string").toBe(true);
+      expect(typeof repair.reason).toBe("string");
+      expect(typeof repair.edge_id).toBe("string");
+      expect(typeof repair.edge_from).toBe("string");
+      expect(typeof repair.edge_to).toBe("string");
+    }
   });
 });

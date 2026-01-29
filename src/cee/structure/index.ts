@@ -832,13 +832,37 @@ export function detectUniformStrengths(
  * Canonical edge values for structural edges (decision→option, option→factor).
  * These edges represent structural relationships, not causal influence,
  * so they should have fixed values.
+ * T2: Strict canonical - exactly std=0.01, undefined triggers repair.
  */
 const CANONICAL_STRUCTURAL_EDGE = {
   mean: 1.0,
-  std: 0.01,
+  std: 0.01,    // Strict canonical (not a max)
   prob: 1.0,
   direction: "positive" as const,
 };
+
+/**
+ * PLoT-compatible repair record for tracking changes.
+ * T3: Matches PLoT's repairs_applied[] structure.
+ */
+export interface RepairRecord {
+  /** Field that was repaired: "strength.std", "strength.mean", "exists_probability" */
+  field: string;
+  /** Action taken: "clamped" | "defaulted" | "normalised" */
+  action: "clamped" | "defaulted" | "normalised";
+  /** Original value (null if undefined) */
+  from_value: number | string | null;
+  /** New canonical value */
+  to_value: number | string;
+  /** Human-readable explanation */
+  reason: string;
+  /** Edge ID (use actual edge.id, NOT from->to concatenation) */
+  edge_id: string;
+  /** Source node ID */
+  edge_from: string;
+  /** Target node ID */
+  edge_to: string;
+}
 
 /**
  * Result of structural edge fix operation
@@ -847,6 +871,8 @@ export interface StructuralEdgeFixResult {
   graph: GraphV1;
   fixedEdgeCount: number;
   fixedEdgeIds: string[];
+  /** T3: PLoT-compatible repair records */
+  repairs: RepairRecord[];
 }
 
 /**
@@ -860,9 +886,10 @@ export interface StructuralEdgeFixResult {
  * - effect_direction: "positive"
  *
  * This is a deterministic repair that does not require LLM intervention.
+ * T3: Returns PLoT-compatible RepairRecord array for each field repaired.
  *
  * @param graph - Graph to fix
- * @returns Fixed graph with count of repaired edges
+ * @returns Fixed graph with count of repaired edges and repair records
  */
 export function fixNonCanonicalStructuralEdges(
   graph: GraphV1 | undefined,
@@ -885,12 +912,16 @@ export function fixNonCanonicalStructuralEdges(
   }
 
   const fixedEdgeIds: string[] = [];
+  const repairs: RepairRecord[] = [];
   let mutated = false;
 
-  const updatedEdges = edges.map((edge) => {
+  const updatedEdges = edges.map((edge, index) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
-    const edgeId = (edge as any)?.id;
+    // T3: Use real edge.id to avoid multi-edge collisions
+    const edgeId = typeof (edge as any)?.id === "string"
+      ? ((edge as any).id as string)
+      : `${from}:${to}:structural:${index}`;
 
     // Only fix option→factor edges (structural edges)
     if (
@@ -900,20 +931,75 @@ export function fixNonCanonicalStructuralEdges(
       kinds.get(to) === "factor"
     ) {
       // Check if edge is already canonical
+      // T2: Strict canonical - exactly mean=1.0, std=0.01, prob=1.0, direction="positive"
       const mean = (edge as any)?.strength_mean ?? (edge as any)?.weight;
       const std = (edge as any)?.strength_std;
       const prob = (edge as any)?.belief_exists ?? (edge as any)?.belief;
+      const direction = (edge as any)?.effect_direction;
 
       const isCanonical =
         mean === CANONICAL_STRUCTURAL_EDGE.mean &&
-        (std === undefined || std <= 0.05) &&
-        prob === CANONICAL_STRUCTURAL_EDGE.prob;
+        std === CANONICAL_STRUCTURAL_EDGE.std &&
+        prob === CANONICAL_STRUCTURAL_EDGE.prob &&
+        direction === CANONICAL_STRUCTURAL_EDGE.direction;
 
       if (!isCanonical) {
         mutated = true;
-        if (typeof edgeId === "string") {
-          fixedEdgeIds.push(edgeId);
+        if (typeof (edge as any)?.id === "string") {
+          fixedEdgeIds.push((edge as any).id);
         }
+
+        // T3: Track individual field repairs
+        if (mean !== CANONICAL_STRUCTURAL_EDGE.mean) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "strength.mean",
+            action: mean === undefined ? "defaulted" : "normalised",
+            from_value: mean ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.mean,
+            reason: "Structural edge mean normalised to canonical value",
+          });
+        }
+        if (std !== CANONICAL_STRUCTURAL_EDGE.std) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "strength.std",
+            action: std === undefined ? "defaulted" : "normalised",
+            from_value: std ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.std,
+            reason: "Structural edge std normalised to canonical value",
+          });
+        }
+        if (prob !== CANONICAL_STRUCTURAL_EDGE.prob) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "exists_probability",
+            action: prob === undefined ? "defaulted" : "normalised",
+            from_value: prob ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.prob,
+            reason: "Structural edge exists_probability normalised to canonical value",
+          });
+        }
+        // Track effect_direction repair if not already positive
+        if (direction !== CANONICAL_STRUCTURAL_EDGE.direction) {
+          repairs.push({
+            edge_id: edgeId,
+            edge_from: from,
+            edge_to: to,
+            field: "effect_direction",
+            action: direction === undefined ? "defaulted" : "normalised",
+            from_value: direction ?? null,
+            to_value: CANONICAL_STRUCTURAL_EDGE.direction,
+            reason: "Structural edge effect_direction normalised to canonical value",
+          });
+        }
+
         return {
           ...(edge as any),
           // V4 fields
@@ -936,6 +1022,7 @@ export function fixNonCanonicalStructuralEdges(
       graph,
       fixedEdgeCount: 0,
       fixedEdgeIds: [],
+      repairs: [],  // T3: Empty array, not undefined
     };
   }
 
@@ -946,6 +1033,7 @@ export function fixNonCanonicalStructuralEdges(
     } as GraphV1,
     fixedEdgeCount: fixedEdgeIds.length,
     fixedEdgeIds,
+    repairs,  // T3: PLoT-compatible repair records
   };
 }
 

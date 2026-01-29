@@ -218,10 +218,12 @@ export const ALLOWED_EDGES: AllowedEdgeRule[] = [
 
 /**
  * Canonical edge defaults for structural edges.
+ * T2: Strict canonical std - exactly 0.01, undefined triggers repair.
  */
 export const CANONICAL_EDGE = {
   mean: 1,
-  stdMax: 0.05,
+  std: 0.01,        // Strict canonical value (not a max)
+  stdMax: 0.05,     // Legacy tolerance (kept for backwards compat in warnings)
   prob: 1,
   direction: "positive" as const,
 };

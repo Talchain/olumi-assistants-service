@@ -43,8 +43,9 @@ function createValidGraph(): GraphT {
     edges: [
       { from: "dec_1", to: "opt_a", strength_mean: 1, belief_exists: 1 },
       { from: "dec_1", to: "opt_b", strength_mean: 1, belief_exists: 1 },
-      { from: "opt_a", to: "fac_price", strength_mean: 1, belief_exists: 1 },
-      { from: "opt_b", to: "fac_price", strength_mean: 1, belief_exists: 1 },
+      // T2: Strict canonical requires strength_std: 0.01 and effect_direction for option→factor
+      { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_b", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
       { from: "fac_price", to: "outcome_1", strength_mean: 0.7, belief_exists: 0.9 },
       { from: "outcome_1", to: "goal_1", strength_mean: 0.8, belief_exists: 0.95 },
     ],

@@ -51,8 +51,9 @@ function createValidGraph(): GraphT {
     edges: [
       { from: 'decision_1', to: 'opt_a', strength_mean: 1, belief_exists: 1 },
       { from: 'decision_1', to: 'opt_b', strength_mean: 1, belief_exists: 1 },
-      { from: 'opt_a', to: 'fac_price', strength_mean: 1, belief_exists: 1 },
-      { from: 'opt_b', to: 'fac_price', strength_mean: 1, belief_exists: 1 },
+      // T2: Strict canonical requires strength_std: 0.01 for option→factor edges
+      { from: 'opt_a', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      { from: 'opt_b', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
       { from: 'fac_price', to: 'outcome_1', strength_mean: 0.8, belief_exists: 0.9 },
       { from: 'outcome_1', to: 'goal_1', strength_mean: 0.9, belief_exists: 1 },
     ],
@@ -1091,16 +1092,65 @@ describe('validateGraph', () => {
         const result = validateGraph({ graph });
         expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
       });
+
+      // T1: Controllability detection edge cases
+      it('passes when factor has category=controllable but no option edge yet', () => {
+        const graph = createValidGraph();
+        // Factor with goal-like name AND category: controllable (trust declaration)
+        graph.nodes.push({
+          id: 'fac_controllable_declared',
+          kind: 'factor',
+          label: '50k revenue',
+          category: 'controllable',  // Declared controllable
+          data: { value: 50000, extractionType: 'explicit' },
+        } as never);
+        // No option edge - but category says controllable, should NOT flag
+        graph.edges.push({ from: 'fac_controllable_declared', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
+
+      it('errors when factor has no category, no option edge, and matches goal-number pattern', () => {
+        const graph = createValidGraph();
+        // Factor with goal-like name, no category, no option edge = should flag
+        graph.nodes.push({
+          id: 'fac_uncategorized_goal',
+          kind: 'factor',
+          label: '$100k revenue target',
+          data: { value: 100000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_uncategorized_goal', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
+      });
+
+      it('passes when factor has category=controllable even with goal-number pattern', () => {
+        const graph = createValidGraph();
+        // Factor with goal-number pattern but explicitly marked controllable
+        graph.nodes.push({
+          id: 'fac_goal_but_controllable',
+          kind: 'factor',
+          label: '£50k MRR target',
+          category: 'controllable',  // Trust declaration even for goal-like names
+          data: { value: 50000, extractionType: 'explicit' },
+        } as never);
+        graph.edges.push({ from: 'fac_goal_but_controllable', to: 'outcome_1', strength_mean: 0.5 });
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+      });
     });
 
     describe('STRUCTURAL_EDGE_NOT_CANONICAL_ERROR', () => {
-      it('errors when option->factor edge has non-canonical std', () => {
+      it('errors when option->factor edge has non-canonical std (0.15)', () => {
         const graph = createValidGraph();
         const optionEdge = graph.edges.find(
           (e) => e.from === 'opt_a' && e.to === 'fac_price'
         );
         if (optionEdge) {
-          optionEdge.strength_std = 0.15; // Should be <= 0.05 for structural
+          optionEdge.strength_std = 0.15; // T2: Should be exactly 0.01 for structural
         }
 
         const result = validateGraph({ graph });
@@ -1108,6 +1158,34 @@ describe('validateGraph', () => {
         const issue = findIssue(result.errors, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR');
         expect(issue?.context?.from).toBe('opt_a');
         expect(issue?.context?.to).toBe('fac_price');
+      });
+
+      // T2: Strict canonical - std: 0.05 is NOT canonical (only 0.01 is)
+      it('errors when option->factor edge has std=0.05 (not strictly canonical)', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          optionEdge.strength_std = 0.05; // T2: 0.05 is NOT canonical, only 0.01 is
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
+      });
+
+      // T2: undefined std triggers error (will be repaired to 0.01)
+      it('errors when option->factor edge has undefined std', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          delete optionEdge.strength_std; // T2: undefined triggers error, then repair
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
       });
 
       it('errors when option->factor edge has non-canonical mean', () => {
@@ -1136,9 +1214,9 @@ describe('validateGraph', () => {
         expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
       });
 
-      it('passes when option->factor edge has canonical values', () => {
+      it('passes when option->factor edge has canonical values (mean=1, std=0.01, prob=1)', () => {
         const graph = createValidGraph();
-        // Default graph has canonical structural edges
+        // Default graph has canonical structural edges (createValidGraph now includes std=0.01)
         const result = validateGraph({ graph });
         expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(false);
       });
