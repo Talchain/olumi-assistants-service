@@ -782,7 +782,12 @@ function validateSemantic(
           severity: "error",
           message: `Factor "${label}" appears to be a goal target value, not a causal factor`,
           path: `nodesById.${factor.id}`,
-          context: { label, factorId: factor.id },
+          context: {
+            label,
+            factorId: factor.id,
+            hasOptionEdge,
+            category: (factor as any).category ?? null,
+          },
         });
       }
     }
@@ -802,25 +807,27 @@ function validateSemantic(
       const mean = edge.strength_mean ?? edge.weight;
       const std = edge.strength_std;
       const prob = edge.belief_exists ?? edge.belief;
+      const direction = edge.effect_direction;
 
-      // T2: Strict canonical - exactly mean=1.0, std=0.01, prob=1.0
-      // undefined std triggers error (will be repaired to 0.01)
+      // T2: Strict canonical - exactly mean=1.0, std=0.01, prob=1.0, direction="positive"
+      // undefined values trigger error (will be repaired by fixNonCanonicalStructuralEdges)
       const isCanonical =
         mean === CANONICAL_EDGE.mean &&
         std === CANONICAL_EDGE.std &&
-        prob === CANONICAL_EDGE.prob;
+        prob === CANONICAL_EDGE.prob &&
+        direction === CANONICAL_EDGE.direction;
 
       if (!isCanonical) {
         issues.push({
           code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
           severity: "error",
-          message: `Option→factor structural edge must have canonical values (mean=1.0, std=0.01, prob=1.0)`,
+          message: `Option→factor structural edge must have canonical values (mean=1.0, std=0.01, prob=1.0, direction="positive")`,
           path: `edges[${i}]`,
           context: {
             from: edge.from,
             to: edge.to,
-            expected: { mean: CANONICAL_EDGE.mean, std: CANONICAL_EDGE.std, prob: CANONICAL_EDGE.prob },
-            actual: { mean, std, prob },
+            expected: { mean: CANONICAL_EDGE.mean, std: CANONICAL_EDGE.std, prob: CANONICAL_EDGE.prob, direction: CANONICAL_EDGE.direction },
+            actual: { mean, std, prob, direction },
           },
         });
       }

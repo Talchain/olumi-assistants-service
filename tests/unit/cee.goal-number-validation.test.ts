@@ -42,10 +42,10 @@ function createGoalNumberBriefGraph(): GraphT {
       { id: "goal_1", kind: "goal", label: "Reach £20k MRR within 12 months" },
     ],
     edges: [
-      { from: "decision_1", to: "opt_yes", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-      { from: "decision_1", to: "opt_no", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      { from: "decision_1", to: "opt_yes", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "decision_1", to: "opt_no", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
       // Structural edge with canonical values
-      { from: "opt_yes", to: "fac_dev_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      { from: "opt_yes", to: "fac_dev_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
       // Causal edge
       { from: "fac_dev_cost", to: "outcome_1", strength_mean: 0.7, belief_exists: 0.8 },
       // Goal-number factor edge (no option edge = observable/external)
@@ -105,7 +105,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
           { id: "goal_1", kind: "goal", label: "Goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
           // NON-CANONICAL structural edge (mean=0.8, std=undefined, prob=0.9)
           { id: "structural_edge", from: "opt_a", to: "fac_1", strength_mean: 0.8, belief_exists: 0.9 },
           { from: "fac_1", to: "outcome_1", strength_mean: 0.5, belief_exists: 0.7 },
@@ -171,7 +171,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
           { id: "goal_1", kind: "goal", label: "Goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
           // NON-CANONICAL structural edge
           { id: "e1", from: "opt_a", to: "fac_1", strength_mean: 0.5, belief_exists: 0.9 },
           { from: "fac_1", to: "outcome_1", strength_mean: 0.5, belief_exists: 0.7 },
@@ -212,7 +212,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
           { id: "goal_1", kind: "goal", label: "Goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
           // No option edge to factor_value_0 (it's observable/external)
           { from: "factor_value_0", to: "outcome_1", strength_mean: 0.5 },
           { from: "outcome_1", to: "goal_1", strength_mean: 0.9 },

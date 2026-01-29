@@ -51,9 +51,9 @@ function createValidGraph(): GraphT {
     edges: [
       { from: 'decision_1', to: 'opt_a', strength_mean: 1, belief_exists: 1 },
       { from: 'decision_1', to: 'opt_b', strength_mean: 1, belief_exists: 1 },
-      // T2: Strict canonical requires strength_std: 0.01 for option→factor edges
-      { from: 'opt_a', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-      { from: 'opt_b', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+      // T2: Strict canonical requires strength_std: 0.01 and effect_direction: "positive" for option→factor edges
+      { from: 'opt_a', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: 'positive' },
+      { from: 'opt_b', to: 'fac_price', strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: 'positive' },
       { from: 'fac_price', to: 'outcome_1', strength_mean: 0.8, belief_exists: 0.9 },
       { from: 'outcome_1', to: 'goal_1', strength_mean: 0.9, belief_exists: 1 },
     ],
@@ -1214,11 +1214,38 @@ describe('validateGraph', () => {
         expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
       });
 
-      it('passes when option->factor edge has canonical values (mean=1, std=0.01, prob=1)', () => {
+      it('passes when option->factor edge has canonical values (mean=1, std=0.01, prob=1, direction=positive)', () => {
         const graph = createValidGraph();
-        // Default graph has canonical structural edges (createValidGraph now includes std=0.01)
+        // Default graph has canonical structural edges (createValidGraph now includes std=0.01 and direction)
         const result = validateGraph({ graph });
         expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(false);
+      });
+
+      // T2: effect_direction must also be canonical ("positive")
+      it('errors when option->factor edge has non-canonical effect_direction', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          optionEdge.effect_direction = 'negative'; // Should be "positive" for structural
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
+      });
+
+      it('errors when option->factor edge has undefined effect_direction', () => {
+        const graph = createValidGraph();
+        const optionEdge = graph.edges.find(
+          (e) => e.from === 'opt_a' && e.to === 'fac_price'
+        );
+        if (optionEdge) {
+          delete optionEdge.effect_direction; // undefined triggers error, then repair
+        }
+
+        const result = validateGraph({ graph });
+        expect(hasError(result, 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR')).toBe(true);
       });
 
       it('decision->option non-canonical is WARNING not ERROR', () => {
