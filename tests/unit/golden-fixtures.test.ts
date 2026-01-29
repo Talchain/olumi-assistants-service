@@ -88,8 +88,8 @@ describe("Golden Fixtures", () => {
   const fixtures = loadFixtures();
 
   if (fixtures.length === 0) {
-    it.skip("no fixtures found", () => {
-      // Skip if no fixtures exist yet
+    it("should have at least one golden fixture", () => {
+      throw new Error("No golden fixtures found in tests/fixtures/golden/");
     });
     return;
   }
