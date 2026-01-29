@@ -536,6 +536,20 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
         selectedModel = taskDefault;
       }
     }
+
+    // After any model selection (CEE env or task default), ensure provider matches model
+    // This prevents "model does not exist" errors from using wrong provider for model
+    // Skip for fixtures provider (testing) - fixtures handles any model name
+    if (selectedModel && selectedProvider !== 'fixtures') {
+      const modelProvider = getModelProvider(selectedModel);
+      if (modelProvider && modelProvider !== selectedProvider) {
+        log.info(
+          { task, model: selectedModel, previous_provider: selectedProvider, new_provider: modelProvider, source: 'provider_switch' },
+          "Switching provider to match selected model"
+        );
+        selectedProvider = modelProvider;
+      }
+    }
   }
 
   // Reuse cached wrapper to preserve cache state across requests

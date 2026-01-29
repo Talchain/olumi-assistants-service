@@ -16,6 +16,7 @@ export type CeeTask =
   | "evidence_helper"
   | "sensitivity_coach"
   | "options"
+  | "suggest_options"
   | "explainer"
   | "repair_graph"
   | "critique_graph";
@@ -42,6 +43,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   repair_graph: "claude-sonnet-4-20250514",  // Excellent reasoning for repair
   // Premium tier - advanced reasoning for complex tasks
   options: "gpt-5.2",
+  suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
 };
 

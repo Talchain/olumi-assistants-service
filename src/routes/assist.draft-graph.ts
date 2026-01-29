@@ -951,12 +951,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     correlation_id: correlationId,
   }, "Pipeline stage: First stabiliseGraph complete (20 node cap applied)");
 
-  // [CAT-3] Trace category field: before external validation call
-  const cat3Factors = candidate.nodes
-    .filter((n) => n.kind === 'factor')
-    .map((n) => ({ id: n.id, category: n.category }));
-  log.info({ event: 'CAT-3', stage: 'before_ext_validation', factors: cat3Factors }, '[CAT-3] Before external validation');
-
   const first = await validateGraph(candidate);
   if (!first.ok) {
     issues = first.violations;
@@ -1059,21 +1053,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
     } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
-    // [CAT-4] Trace category field: after external validation returns (raw normalized)
-    const cat4Factors = first.normalized.nodes
-      .filter((n) => n.kind === 'factor')
-      .map((n) => ({ id: n.id, category: (n as any).category }));
-    log.info({ event: 'CAT-4', stage: 'after_ext_validation_raw', factors: cat4Factors }, '[CAT-4] After external validation (raw normalized)');
-
     // Preserve category field from original candidate (engine may not include it)
     const normalizedWithCategory = preserveCategoryFromOriginal(first.normalized, candidate);
-
-    // [CAT-5] Trace category field: after preserveCategoryFromOriginal
-    const cat5Factors = normalizedWithCategory.nodes
-      .filter((n) => n.kind === 'factor')
-      .map((n) => ({ id: n.id, category: n.category }));
-    log.info({ event: 'CAT-5', stage: 'after_preserve_category', factors: cat5Factors }, '[CAT-5] After preserveCategoryFromOriginal');
-
     candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
   }
 
@@ -1191,12 +1172,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       }
     : undefined;
 
-  // [CAT-6] Trace category field: before response serialization (DraftGraphOutput.parse)
-  const cat6Factors = candidate.nodes
-    .filter((n) => n.kind === 'factor')
-    .map((n) => ({ id: n.id, category: n.category }));
-  log.info({ event: 'CAT-6', stage: 'before_response_serialize', factors: cat6Factors }, '[CAT-6] Before response serialization');
-
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -1207,12 +1182,6 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     debug: debugPayload,
     trace: tracePayload,
   });
-
-  // [CAT-7] Trace category field: after DraftGraphOutput.parse (final output)
-  const cat7Factors = payload.graph.nodes
-    .filter((n) => n.kind === 'factor')
-    .map((n) => ({ id: n.id, category: n.category }));
-  log.info({ event: 'CAT-7', stage: 'after_response_parse', factors: cat7Factors }, '[CAT-7] After DraftGraphOutput.parse (final)');
 
   // Check for legacy string provenance (for deprecation tracking)
   const legacy = hasLegacyProvenance(candidate);

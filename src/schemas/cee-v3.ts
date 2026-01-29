@@ -50,6 +50,15 @@ export const ObservedStateV3 = z.object({
 export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 
 /**
+ * Factor category classification (V12.4+).
+ * - controllable: Has incoming edge from option node, options set this value
+ * - observable: No option edge but has known current state (data.value)
+ * - external: No option edge, unknown/variable state (no data field)
+ */
+export const FactorCategoryV3 = z.enum(["controllable", "observable", "external"]);
+export type FactorCategoryV3T = z.infer<typeof FactorCategoryV3>;
+
+/**
  * V3 node schema.
  */
 export const NodeV3 = z.object({
@@ -63,6 +72,8 @@ export const NodeV3 = z.object({
   description: z.string().optional(),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
+  /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
+  category: FactorCategoryV3.optional(),
 });
 export type NodeV3T = z.infer<typeof NodeV3>;
 

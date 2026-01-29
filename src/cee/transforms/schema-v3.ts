@@ -124,6 +124,8 @@ export function transformNodeToV3(
     kind: mapKindToV3(node.kind),
     label: node.label ?? node.id,
     description: node.body,
+    // Preserve category field (V12.4+) for factor nodes
+    category: node.category,
   };
 
   // Transform data to observed_state (only if it's FactorData with value defined)

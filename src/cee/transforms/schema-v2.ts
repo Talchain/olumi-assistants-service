@@ -78,6 +78,8 @@ export interface V1Node {
   label?: string;
   body?: string;
   data?: V1NodeData;
+  /** Factor category (V12.4+): controllable, observable, external */
+  category?: "controllable" | "observable" | "external";
 }
 
 export interface V1Edge {
