@@ -698,10 +698,18 @@ export function extractInterventionsForOption(
     // Try to match to a factor node
     const matchResult = matchInterventionToFactor(cat.target_text, nodes, edges, goalNodeId);
 
-    // Determine factor ID - use matched node or generate from target
-    const factorId = matchResult.matched && matchResult.node_id
-      ? matchResult.node_id
-      : normalizeToId(`factor_${cat.target_text}`, new Set(Object.keys(interventions)));
+    // P0 FIX: Only create intervention if we matched an EXISTING factor
+    // Never invent factor IDs that don't exist in the graph
+    if (!matchResult.matched || !matchResult.node_id) {
+      // No match found - add to unresolved targets, don't create fake factor ID
+      unresolvedTargets.push(cat.target_text);
+      userQuestions.push(
+        `Which factor should "${cat.raw_categorical_value}" (${cat.target_text}) apply to?`
+      );
+      continue;
+    }
+
+    const factorId = matchResult.node_id;
 
     // Try to get a default encoding
     const defaultEncoding = getDefaultEncoding(
@@ -714,20 +722,15 @@ export function extractInterventionsForOption(
     rawInterventions[factorId] = cat.raw_categorical_value;
     hasNonNumericRaw = hasNonNumericRaw || typeof cat.raw_categorical_value !== "number";
 
+    // Build target match for the matched factor
+    const targetMatch: TargetMatchT = {
+      node_id: matchResult.node_id,
+      match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+      confidence: matchResult.confidence,
+    };
+
     if (defaultEncoding !== undefined) {
       // We have a default encoding - create intervention with raw_value
-      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
-        ? {
-            node_id: matchResult.node_id,
-            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-            confidence: matchResult.confidence,
-          }
-        : {
-            node_id: factorId,
-            match_type: "semantic" as const,
-            confidence: "low" as const,
-          };
-
       interventions[factorId] = {
         value: defaultEncoding,
         source: cat.source,
@@ -747,18 +750,6 @@ export function extractInterventionsForOption(
     } else {
       // No default encoding - mark as needing encoding
       // Still create a placeholder intervention with value=0
-      const targetMatch: TargetMatchT = matchResult.matched && matchResult.node_id
-        ? {
-            node_id: matchResult.node_id,
-            match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-            confidence: matchResult.confidence,
-          }
-        : {
-            node_id: factorId,
-            match_type: "semantic" as const,
-            confidence: "low" as const,
-          };
-
       interventions[factorId] = {
         value: 0, // Placeholder - needs encoding
         source: cat.source,
