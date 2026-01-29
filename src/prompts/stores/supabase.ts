@@ -66,6 +66,8 @@ interface PromptRow {
   status: string;
   active_version: number;
   staging_version: number | null;
+  design_version: string | null;
+  model_config: { staging?: string; production?: string } | null;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -216,6 +218,8 @@ export class SupabasePromptStore implements IPromptStore {
       task_id: request.taskId,
       status: 'draft',
       active_version: 1,
+      design_version: request.designVersion ?? null,
+      model_config: request.modelConfig ?? null,
       tags: request.tags ?? [],
       created_at: now,
       updated_at: now,
@@ -376,6 +380,8 @@ export class SupabasePromptStore implements IPromptStore {
     if (request.tags !== undefined) updateData.tags = request.tags;
     if (request.activeVersion !== undefined) updateData.active_version = request.activeVersion;
     if (request.stagingVersion !== undefined) updateData.staging_version = request.stagingVersion;
+    if (request.designVersion !== undefined) updateData.design_version = request.designVersion;
+    if (request.modelConfig !== undefined) updateData.model_config = request.modelConfig;
 
     const { error } = await client.from('cee_prompts').update(updateData).eq('id', id);
 
@@ -687,6 +693,8 @@ export class SupabasePromptStore implements IPromptStore {
       status: prompt.status as PromptDefinition['status'],
       activeVersion: prompt.active_version,
       stagingVersion: prompt.staging_version ?? undefined,
+      designVersion: prompt.design_version ?? undefined,
+      modelConfig: prompt.model_config ?? undefined,
       tags: prompt.tags ?? [],
       createdAt: prompt.created_at,
       updatedAt: prompt.updated_at,

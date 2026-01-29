@@ -1078,7 +1078,20 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         const env = prompt.status === 'production' ? 'production' : 'staging';
         const promptModel = prompt.modelConfig[env];
         if (promptModel) {
-          model = promptModel;
+          // Validate that the model's provider matches configured LLM_PROVIDER
+          // This prevents using OpenAI models when LLM_PROVIDER=anthropic
+          const promptModelProvider = getModelProvider(promptModel);
+          if (!configuredProvider || promptModelProvider === configuredProvider) {
+            model = promptModel;
+          } else {
+            // Provider mismatch - log warning and fall through to provider default
+            log.warn({
+              prompt_id: prompt.id,
+              prompt_model: promptModel,
+              prompt_model_provider: promptModelProvider,
+              configured_provider: configuredProvider,
+            }, 'Prompt modelConfig provider mismatch - falling back to provider default');
+          }
         }
       }
 

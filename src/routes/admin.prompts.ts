@@ -60,6 +60,7 @@ import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
+import { MODEL_REGISTRY } from '../config/models.js';
 
 /**
  * Telemetry events
@@ -348,6 +349,39 @@ const VersionParamsSchema = z.object({
 
 
 // =========================================================================
+// Validation Helpers
+// =========================================================================
+
+/**
+ * Validate modelConfig against MODEL_REGISTRY
+ * Returns validation errors if any model IDs are invalid
+ */
+function validateModelConfig(
+  modelConfig: { staging?: string; production?: string } | null | undefined
+): string[] {
+  const errors: string[] = [];
+  if (!modelConfig) return errors;
+
+  if (modelConfig.staging) {
+    if (!MODEL_REGISTRY[modelConfig.staging]) {
+      errors.push(`Invalid staging model: '${modelConfig.staging}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
+    } else if (!MODEL_REGISTRY[modelConfig.staging].enabled) {
+      errors.push(`Staging model '${modelConfig.staging}' is disabled`);
+    }
+  }
+
+  if (modelConfig.production) {
+    if (!MODEL_REGISTRY[modelConfig.production]) {
+      errors.push(`Invalid production model: '${modelConfig.production}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
+    } else if (!MODEL_REGISTRY[modelConfig.production].enabled) {
+      errors.push(`Production model '${modelConfig.production}' is disabled`);
+    }
+  }
+
+  return errors;
+}
+
+// =========================================================================
 // Routes
 // =========================================================================
 
@@ -441,6 +475,16 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({
         error: 'validation_error',
         details: body.error.flatten(),
+      });
+    }
+
+    // Validate modelConfig against MODEL_REGISTRY
+    const modelConfigErrors = validateModelConfig(body.data.modelConfig);
+    if (modelConfigErrors.length > 0) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: modelConfigErrors.join('; '),
+        field: 'modelConfig',
       });
     }
 
@@ -548,6 +592,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         error: 'validation_error',
         details: body.error.flatten(),
       });
+    }
+
+    // Validate modelConfig against MODEL_REGISTRY (if provided)
+    if (body.data.modelConfig !== undefined) {
+      const modelConfigErrors = validateModelConfig(body.data.modelConfig);
+      if (modelConfigErrors.length > 0) {
+        return reply.status(400).send({
+          error: 'validation_error',
+          message: modelConfigErrors.join('; '),
+          field: 'modelConfig',
+        });
+      }
     }
 
     try {
