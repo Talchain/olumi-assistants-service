@@ -1214,8 +1214,10 @@ export async function finaliseCeeDraftResponse(
     const tokenUsage = llmMeta.token_usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     observabilityCollector.recordLLMCall({
       step: "draft_graph",
+      prompt_id: llmMeta.prompt_id,
       model: llmMeta.model ?? model ?? "unknown",
       provider: (provider === "anthropic" || provider === "openai") ? provider : "openai",
+      model_selection_reason: "task_default", // Pipeline uses TASK_MODEL_DEFAULTS
       tokens: {
         input: tokenUsage.prompt_tokens ?? 0,
         output: tokenUsage.completion_tokens ?? 0,
@@ -2750,6 +2752,7 @@ export async function finaliseCeeDraftResponse(
         .filter(s => s.status === "success_with_repairs")
         .map(s => s.name),
       retry_triggered: schemaRetryAttempted,
+      action_taken: "proceed",
       latency_ms: latencyMs,
       validator: "cee_pipeline",
       warnings: validationIssues.map(i => i.code),

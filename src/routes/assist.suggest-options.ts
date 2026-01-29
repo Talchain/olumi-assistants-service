@@ -2,6 +2,16 @@ import type { FastifyInstance } from "fastify";
 import { SuggestOptionsInput, SuggestOptionsOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { getRequestId } from "../utils/request-id.js";
+import {
+  createObservabilityCollector,
+  createNoOpObservabilityCollector,
+  isObservabilityEnabled,
+  isRawIOCaptureEnabled,
+  type ObservabilityCollector,
+} from "../cee/observability/index.js";
+
+const CEE_VERSION = "v12.4";
 
 /**
  * POST /assist/suggest-options
@@ -13,6 +23,7 @@ export default async function route(app: FastifyInstance) {
   app.post("/assist/suggest-options", async (req, reply) => {
     const startTime = Date.now();
     const parsed = SuggestOptionsInput.safeParse(req.body);
+    const requestId = getRequestId(req as any);
 
     if (!parsed.success) {
       reply.code(400);
@@ -23,6 +34,18 @@ export default async function route(app: FastifyInstance) {
         details: parsed.error.flatten()
       }));
     }
+
+    // Observability: create collector if enabled via flag or include_debug
+    const includeDebug = (parsed.data as any).include_debug === true;
+    const observabilityEnabled = isObservabilityEnabled(includeDebug);
+    const rawIOEnabled = isRawIOCaptureEnabled(includeDebug);
+    const observabilityCollector: ObservabilityCollector = observabilityEnabled
+      ? createObservabilityCollector({
+          requestId,
+          ceeVersion: CEE_VERSION,
+          captureRawIO: rawIOEnabled,
+        })
+      : createNoOpObservabilityCollector(requestId);
 
     try {
       const existingOptions = parsed.data.graph_summary?.existing_options;
@@ -45,8 +68,9 @@ export default async function route(app: FastifyInstance) {
           existingOptions,
         },
         {
-          requestId: `suggest_${Date.now()}`,
+          requestId,
           timeoutMs: 10000, // 10s timeout for suggestions
+          observabilityCollector,
         }
       );
 
@@ -54,6 +78,27 @@ export default async function route(app: FastifyInstance) {
       const sortedOptions = [...result.options].sort((a, b) => a.id.localeCompare(b.id));
 
       const durationMs = Date.now() - startTime;
+
+      // Record LLM call for observability
+      if (observabilityEnabled) {
+        observabilityCollector.recordLLMCall({
+          step: "suggest_options",
+          model: adapter.model,
+          provider: (adapter.name === "anthropic" || adapter.name === "openai") ? adapter.name : "anthropic",
+          model_selection_reason: "task_default", // Uses TASK_MODEL_DEFAULTS
+          tokens: {
+            input: result.usage.input_tokens,
+            output: result.usage.output_tokens,
+            total: result.usage.input_tokens + result.usage.output_tokens,
+          },
+          latency_ms: durationMs,
+          attempt: 1,
+          success: true,
+          started_at: new Date(startTime).toISOString(),
+          completed_at: new Date().toISOString(),
+          cache_hit: (result.usage.cache_read_input_tokens ?? 0) > 0,
+        });
+      }
 
       // Calculate cost from usage metrics
       const costUsd = calculateCost(
@@ -72,6 +117,12 @@ export default async function route(app: FastifyInstance) {
       });
 
       const output = SuggestOptionsOutput.parse({ options: sortedOptions });
+
+      // Attach observability data if enabled
+      if (observabilityEnabled) {
+        (output as any)._observability = observabilityCollector.build();
+      }
+
       return reply.send(output);
 
     } catch (error: unknown) {

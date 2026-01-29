@@ -10,6 +10,15 @@ import { processAttachments, type AttachmentInput, type GroundingStats } from ".
 import { type DocPreview } from "../services/docProcessing.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { verificationPipeline } from "../cee/verification/index.js";
+import {
+  createObservabilityCollector,
+  createNoOpObservabilityCollector,
+  isObservabilityEnabled,
+  isRawIOCaptureEnabled,
+  type ObservabilityCollector,
+} from "../cee/observability/index.js";
+
+const CEE_VERSION = "v12.4";
 
 type AttachmentPayload = string | { data: string; encoding?: string };
 
@@ -37,6 +46,18 @@ export default async function route(app: FastifyInstance) {
     const requestId = getRequestId(req as any);
     const callerCtx = getRequestCallerContext(req as any);
     const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
+
+    // Observability: create collector if enabled via flag or include_debug
+    const includeDebug = (input as any).include_debug === true;
+    const observabilityEnabled = isObservabilityEnabled(includeDebug);
+    const rawIOEnabled = isRawIOCaptureEnabled(includeDebug);
+    const observabilityCollector: ObservabilityCollector = observabilityEnabled
+      ? createObservabilityCollector({
+          requestId,
+          ceeVersion: CEE_VERSION,
+          captureRawIO: rawIOEnabled,
+        })
+      : createNoOpObservabilityCollector(requestId);
 
     try {
       // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)
@@ -125,12 +146,34 @@ export default async function route(app: FastifyInstance) {
           focus_areas: input.focus_areas,
         },
         {
-          requestId: `critique_${Date.now()}`,
+          requestId,
           timeoutMs: 10000, // 10s timeout for critique
+          observabilityCollector,
         }
       );
 
       const critiqueDuration = Date.now() - critiqueStartTime;
+
+      // Record LLM call for observability
+      if (observabilityEnabled) {
+        observabilityCollector.recordLLMCall({
+          step: "critique_graph",
+          model: adapter.model,
+          provider: (adapter.name === "anthropic" || adapter.name === "openai") ? adapter.name : "anthropic",
+          model_selection_reason: "task_default", // Uses TASK_MODEL_DEFAULTS
+          tokens: {
+            input: result.usage.input_tokens,
+            output: result.usage.output_tokens,
+            total: result.usage.input_tokens + result.usage.output_tokens,
+          },
+          latency_ms: critiqueDuration,
+          attempt: 1,
+          success: true,
+          started_at: new Date(critiqueStartTime).toISOString(),
+          completed_at: new Date().toISOString(),
+          cache_hit: (result.usage.cache_read_input_tokens ?? 0) > 0,
+        });
+      }
 
       // Calculate cost (provider-specific pricing)
       const cost_usd = calculateCost(adapter.model, result.usage.input_tokens, result.usage.output_tokens);
@@ -186,6 +229,11 @@ export default async function route(app: FastifyInstance) {
           requestId,
         },
       );
+
+      // Attach observability data if enabled
+      if (observabilityEnabled) {
+        (response as any)._observability = observabilityCollector.build();
+      }
 
       return reply.send(response);
     } catch (error: unknown) {

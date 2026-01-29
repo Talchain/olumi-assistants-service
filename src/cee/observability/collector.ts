@@ -179,7 +179,9 @@ export function createObservabilityCollector(
         timestamp: new Date().toISOString(),
       };
       validationAttempts.push(record);
-      totalLatencyMs += attempt.latency_ms;
+      // Note: Don't add validation latency to totals - validation latency often includes
+      // the full pipeline time which already contains LLM latency. Validation timing is
+      // tracked separately in validation.total_latency_ms.
     },
 
     recordOrchestratorStep(step: Omit<OrchestratorStepRecord, "timestamp">): void {
@@ -226,7 +228,7 @@ export function createObservabilityCollector(
       );
 
       // Build totals
-      const totals: ObservabilityTotals = buildTotals(llmCalls, validationAttempts, graphDiffs, ceeVersion, totalLatencyMs);
+      const totals: ObservabilityTotals = buildTotals(llmCalls, validationAttempts, ceeVersion, totalLatencyMs);
 
       const result: CEEObservability = {
         llm_calls: llmCalls,
@@ -255,7 +257,7 @@ export function createObservabilityCollector(
     },
 
     isRawIOEnabled(): boolean {
-      return captureRawIO;
+      return effectiveCaptureRawIO;
     },
 
     getRequestId(): string {
@@ -365,7 +367,6 @@ function buildOrchestratorTracking(
 function buildTotals(
   llmCalls: LLMCallRecord[],
   validationAttempts: ValidationAttemptRecord[],
-  graphDiffs: GraphDiff[],
   ceeVersion: string,
   totalLatencyMs: number
 ): ObservabilityTotals {
@@ -378,6 +379,7 @@ function buildTotals(
   }
 
   // Count repairs triggered from validation attempts
+  // Note: graph_diffs are the DETAILS of repairs, not separate repairs - don't double-count
   let repairsTriggered = 0;
   let retries = 0;
   for (const attempt of validationAttempts) {
@@ -388,9 +390,6 @@ function buildTotals(
       retries++;
     }
   }
-
-  // Also count graph diffs as repairs (each diff represents a repair action)
-  repairsTriggered += graphDiffs.length;
 
   return {
     total_llm_calls: llmCalls.length,
