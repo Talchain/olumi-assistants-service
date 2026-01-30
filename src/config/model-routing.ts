@@ -26,7 +26,7 @@ export type CeeTask =
  *
  * Model selection by task type:
  * - Fast tier (gpt-5-mini): Simple, speed-sensitive tasks
- * - Quality tier (gpt-41): Primary drafting - best performance in testing
+ * - Quality tier (gpt-4.1): Primary drafting - best performance in testing
  * - Quality tier (claude-sonnet-4): Bias detection - excellent reasoning
  * - Premium tier (gpt-5.2): Advanced reasoning for critique/repair
  */
@@ -38,7 +38,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   evidence_helper: "gpt-5-mini",
   sensitivity_coach: "gpt-5-mini",
   // Quality tier - optimized for specific tasks
-  draft_graph: "gpt-41",  // Best performance in testing
+  draft_graph: "gpt-4.1-2025-04-14",  // Best performance in testing
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
   repair_graph: "claude-sonnet-4-20250514",  // Excellent reasoning for repair
   // Premium tier - advanced reasoning for complex tasks
