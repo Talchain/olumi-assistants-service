@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 import type { FastifyInstance } from "fastify";
 import { CritiqueGraphInput, CritiqueGraphOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
+import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
+import { shouldUseStagingPrompts } from "../config/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestCallerContext } from "../plugins/auth.js";
@@ -126,7 +128,18 @@ export default async function route(app: FastifyInstance) {
       const critiqueStartTime = Date.now();
 
       // Get adapter via router (env-driven or config)
-      const adapter = getAdapter('critique_graph');
+      // Model selection priority: prompt config > task default
+      let modelOverride: string | undefined;
+      const promptMeta = getSystemPromptMeta('critique_graph');
+      if (promptMeta.modelConfig) {
+        const env = shouldUseStagingPrompts() ? 'staging' : 'production';
+        const promptModel = promptMeta.modelConfig[env];
+        if (promptModel) {
+          modelOverride = promptModel;
+          log.info({ task: 'critique_graph', env, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+        }
+      }
+      const adapter = getAdapter('critique_graph', modelOverride);
 
       emit(TelemetryEvents.CritiqueStart, {
         ...telemetryCtx,

@@ -67,6 +67,8 @@ export interface LoadedPrompt {
   version?: number;
   /** Whether this is a staging version (true if useStaging was requested and staging version was used) */
   isStaging?: boolean;
+  /** Environment-specific model configuration (if from store and configured) */
+  modelConfig?: { staging?: string; production?: string };
 }
 
 /**
@@ -163,6 +165,7 @@ export async function loadPrompt(
         promptId: compiled.promptId,
         version: compiled.version,
         isStaging,
+        modelConfig: compiled.modelConfig,
       };
     }
 

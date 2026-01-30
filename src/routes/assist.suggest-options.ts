@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { SuggestOptionsInput, SuggestOptionsOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
+import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
+import { shouldUseStagingPrompts } from "../config/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
 import {
@@ -51,7 +53,18 @@ export default async function route(app: FastifyInstance) {
       const existingOptions = parsed.data.graph_summary?.existing_options;
 
       // Get adapter via router (env-driven or config)
-      const adapter = getAdapter('suggest_options');
+      // Model selection priority: prompt config > task default
+      let modelOverride: string | undefined;
+      const promptMeta = getSystemPromptMeta('suggest_options');
+      if (promptMeta.modelConfig) {
+        const env = shouldUseStagingPrompts() ? 'staging' : 'production';
+        const promptModel = promptMeta.modelConfig[env];
+        if (promptModel) {
+          modelOverride = promptModel;
+          log.info({ task: 'suggest_options', env, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+        }
+      }
+      const adapter = getAdapter('suggest_options', modelOverride);
 
       // Emit telemetry start event
       emit(TelemetryEvents.SuggestOptionsStart, {

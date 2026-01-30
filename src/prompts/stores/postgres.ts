@@ -597,7 +597,7 @@ export class PostgresPromptStore implements IPromptStore {
       // Find prompt for this task (exclude archived, allow draft/staging/production)
       // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
       const prompts = await sql`
-        SELECT id, active_version, staging_version
+        SELECT id, active_version, staging_version, model_config
         FROM prompts
         WHERE task_id = ${taskId} AND status != 'archived'
       `;
@@ -649,6 +649,7 @@ export class PostgresPromptStore implements IPromptStore {
         content,
         compiledAt: new Date().toISOString(),
         variables,
+        modelConfig: prompt.model_config ?? undefined,
       };
     } catch (error) {
       emit(TelemetryEvents.PromptStoreError, {

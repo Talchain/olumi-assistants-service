@@ -234,6 +234,8 @@ export const CompiledPromptSchema = z.object({
   content: z.string(),
   compiledAt: z.string().datetime(),
   variables: z.record(z.union([z.string(), z.number()])).optional(),
+  /** Environment-specific model configuration (if set in prompt definition) */
+  modelConfig: ModelConfigSchema,
 });
 export type CompiledPrompt = z.infer<typeof CompiledPromptSchema>;
 

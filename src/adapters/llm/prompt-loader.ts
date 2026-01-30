@@ -101,6 +101,8 @@ interface CacheEntry {
   promptHash?: string;
   /** Whether this is a staging version (for non-production environments) */
   isStaging?: boolean;
+  /** Environment-specific model configuration (if from store and configured) */
+  modelConfig?: { staging?: string; production?: string };
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
@@ -236,6 +238,7 @@ export async function getSystemPrompt(
             version: loaded.version,
             promptHash,
             isStaging: loaded.isStaging,
+            modelConfig: loaded.modelConfig,
           });
         }
 
@@ -333,6 +336,7 @@ function triggerBackgroundRefresh(
           version: loaded.version,
           promptHash: refreshedHash,
           isStaging: loaded.isStaging,
+          modelConfig: loaded.modelConfig,
         });
         // Log successful refresh with full identifiers for debugging
         log.info(
@@ -373,6 +377,8 @@ export function getSystemPromptMeta(operation: string): {
   cache_status?: 'fresh' | 'stale' | 'expired' | 'miss';
   /** Whether staging mode is enabled (from DD_ENV or config) */
   use_staging_mode?: boolean;
+  /** Environment-specific model configuration (if from store and configured) */
+  modelConfig?: { staging?: string; production?: string };
 } {
   ensureDefaultsRegistered();
 
@@ -428,6 +434,7 @@ export function getSystemPromptMeta(operation: string): {
     cache_age_ms: cacheAgeMs,
     cache_status: cacheStatus,
     use_staging_mode: useStagingMode,
+    modelConfig: cached?.modelConfig,
   };
 }
 
@@ -480,6 +487,7 @@ export async function warmPromptCacheFromStore(): Promise<{
         version: loaded.version,
         promptHash,
         isStaging: loaded.isStaging,
+        modelConfig: loaded.modelConfig,
       });
 
       if (loaded.source === 'store') {

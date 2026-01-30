@@ -625,6 +625,7 @@ export class FilePromptStore implements IPromptStore {
       content,
       compiledAt: new Date().toISOString(),
       variables,
+      modelConfig: prompt.modelConfig,
     };
 
     emit(TelemetryEvents.PromptCompiled, {

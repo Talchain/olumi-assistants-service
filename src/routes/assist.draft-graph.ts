@@ -31,8 +31,9 @@ import {
 } from "../utils/degraded-mode.js";
 import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
-import { config } from "../config/index.js";
+import { config, shouldUseStagingPrompts } from "../config/index.js";
 import { getModelConfig, getClientAllowedModels } from "../config/models.js";
+import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import {
   validateAndRepairGraph,
   GraphValidationError,
@@ -619,8 +620,21 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const clarifier = determineClarifier(confidence);
 
   // Get adapter via router (env-driven or config-based provider selection)
-  // Pass modelOverride if client specified a model in the request body
-  const draftAdapter = getAdapter('draft_graph', modelOverride);
+  // Model selection priority: explicit override > prompt config > task default
+  let effectiveModelOverride = modelOverride;
+  if (!effectiveModelOverride) {
+    // Check if the prompt has a model config for this environment
+    const promptMeta = getSystemPromptMeta('draft_graph');
+    if (promptMeta.modelConfig) {
+      const env = shouldUseStagingPrompts() ? 'staging' : 'production';
+      const promptModel = promptMeta.modelConfig[env];
+      if (promptModel) {
+        effectiveModelOverride = promptModel;
+        log.info({ task: 'draft_graph', env, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+      }
+    }
+  }
+  const draftAdapter = getAdapter('draft_graph', effectiveModelOverride);
 
   // Cost guard: check estimated cost before making LLM call
   const promptChars = effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);

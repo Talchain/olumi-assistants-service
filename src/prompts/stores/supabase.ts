@@ -645,6 +645,7 @@ export class SupabasePromptStore implements IPromptStore {
       version: version.version,
       content,
       compiledAt: new Date().toISOString(),
+      modelConfig: prompt.model_config ?? undefined,
     };
   }
 
