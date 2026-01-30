@@ -55,6 +55,9 @@ const WARNING_CODES = [
   "IDENTICAL_OPTION_INTERVENTIONS",
   "EMPTY_INTERVENTIONS_READY",
   "INTERVENTION_TARGET_NO_PATH",
+  "INTERVENTION_NO_EDGE",
+  "EDGE_NO_INTERVENTION",
+  "INTERVENTION_KEY_MISMATCH",
 ] as const;
 
 // INFO - Suggestions for improvement
@@ -173,6 +176,9 @@ const SUGGESTION_MAP: Record<string, string> = {
   IDENTICAL_OPTION_INTERVENTIONS: "Options must differ in at least one intervention value",
   EMPTY_INTERVENTIONS_READY: "Add interventions or change status to 'needs_user_mapping'",
   INTERVENTION_TARGET_NO_PATH: "Ensure intervention target has a path to the goal node",
+  INTERVENTION_NO_EDGE: "Remove intervention or add option→factor edge — interventions must have structural support",
+  EDGE_NO_INTERVENTION: "Add intervention for this edge target or remove the option→factor edge",
+  INTERVENTION_KEY_MISMATCH: "Ensure intervention key matches target_match.node_id — they must be identical",
   INTERVENTION_TARGET_NOT_FOUND: "Ensure intervention target node exists in the graph",
   INTERVENTION_TARGET_NOT_FACTOR: "Interventions should target factor nodes",
   INTERVENTION_TARGET_DISCONNECTED: "Connect intervention target to the goal via causal path",

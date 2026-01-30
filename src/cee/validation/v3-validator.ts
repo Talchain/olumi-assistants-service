@@ -80,6 +80,7 @@ export function validateV3Response(
   warnings.push(...validateGraphStructure(v3Response)); // Cycle, self-loop, bidirectional detection
   warnings.push(...validateOptions(v3Response, options));
   warnings.push(...validateInterventions(v3Response, options));
+  warnings.push(...validateInterventionEdgeConsistency(v3Response));
 
   return categorizeWarnings(warnings);
 }
@@ -773,6 +774,97 @@ function validateInterventions(
           affected_option_id: option.id,
           affected_node_id: factorId,
           suggestion: "Review the target mapping for accuracy",
+          stage,
+        });
+      }
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Validate that option interventions have corresponding option→factor edges.
+ *
+ * Per V4 Rule 11: keys(data.interventions) must EXACTLY match outgoing option→factor edges.
+ * This validates both directions:
+ * 1. Every intervention must have a corresponding edge (INTERVENTION_NO_EDGE)
+ * 2. Every edge must have a corresponding intervention (EDGE_NO_INTERVENTION)
+ * 3. Intervention key must match target_match.node_id (INTERVENTION_KEY_MISMATCH)
+ */
+function validateInterventionEdgeConsistency(
+  response: CEEGraphResponseV3T
+): ValidationWarningV3T[] {
+  const warnings: ValidationWarningV3T[] = [];
+  const stage = "intervention_edge_validation";
+
+  // Build map: optionId -> Set of factor IDs connected by edges
+  const optionToFactorEdges = new Map<string, Set<string>>();
+  const factorNodes = new Set(
+    response.nodes.filter((n) => n.kind === "factor").map((n) => n.id)
+  );
+  const optionNodes = new Set(
+    response.nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  for (const edge of response.edges) {
+    if (optionNodes.has(edge.from) && factorNodes.has(edge.to)) {
+      if (!optionToFactorEdges.has(edge.from)) {
+        optionToFactorEdges.set(edge.from, new Set());
+      }
+      optionToFactorEdges.get(edge.from)!.add(edge.to);
+    }
+  }
+
+  // For each option, validate intervention-edge consistency
+  for (const option of response.options) {
+    const edgeTargets = optionToFactorEdges.get(option.id) ?? new Set<string>();
+    const interventionTargets = new Set<string>();
+
+    for (const [factorKey, intervention] of Object.entries(option.interventions)) {
+      const interventionTarget = intervention.target_match.node_id;
+      interventionTargets.add(interventionTarget);
+
+      // Check 1: Intervention key must match target_match.node_id
+      if (factorKey !== interventionTarget) {
+        warnings.push({
+          code: "INTERVENTION_KEY_MISMATCH",
+          severity: "warning",
+          message: `Option "${option.id}": intervention key "${factorKey}" does not match target_match.node_id "${interventionTarget}"`,
+          affected_option_id: option.id,
+          affected_node_id: interventionTarget,
+          suggestion:
+            "Ensure intervention key matches target_match.node_id — they must be identical",
+          stage,
+        });
+      }
+
+      // Check 2: Intervention target must have a corresponding edge
+      if (!edgeTargets.has(interventionTarget)) {
+        warnings.push({
+          code: "INTERVENTION_NO_EDGE",
+          severity: "warning",
+          message: `Option "${option.id}" has intervention for "${interventionTarget}" but no option→factor edge`,
+          affected_option_id: option.id,
+          affected_node_id: interventionTarget,
+          suggestion:
+            "Remove intervention or add option→factor edge — interventions must have structural support",
+          stage,
+        });
+      }
+    }
+
+    // Check 3: Every edge target must have a corresponding intervention
+    for (const edgeTarget of edgeTargets) {
+      if (!interventionTargets.has(edgeTarget)) {
+        warnings.push({
+          code: "EDGE_NO_INTERVENTION",
+          severity: "warning",
+          message: `Option "${option.id}" has edge to "${edgeTarget}" but no corresponding intervention`,
+          affected_option_id: option.id,
+          affected_node_id: edgeTarget,
+          suggestion:
+            "Add intervention for this edge target or remove the option→factor edge",
           stage,
         });
       }
