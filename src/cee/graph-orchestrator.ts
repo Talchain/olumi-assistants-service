@@ -18,9 +18,11 @@ import {
   validateGraph,
   validateGraphPostNormalisation,
 } from "../validators/graph-validator.js";
-import type { ValidationIssue, GraphValidationResult } from "../validators/graph-validator.types.js";
+import type { ValidationIssue } from "../validators/graph-validator.types.js";
 import { zodToValidationErrors, isZodError } from "../validators/zod-error-mapper.js";
-import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
+import { log } from "../utils/telemetry.js";
+import type { ObservabilityCollector } from "./observability/collector.js";
+import { config } from "../config/index.js";
 
 // =============================================================================
 // Types
@@ -31,8 +33,10 @@ export interface GenerateGraphInput {
   brief: string;
   /** Request ID for tracing */
   requestId?: string;
-  /** Maximum repair retries (default: 1) */
+  /** Maximum repair retries (default: from config CEE_MAX_REPAIR_RETRIES) */
   maxRetries?: number;
+  /** Optional observability collector for recording validation attempts */
+  collector?: ObservabilityCollector;
 }
 
 export interface GenerateGraphResult {
@@ -95,14 +99,30 @@ export class GraphValidationError extends Error {
 // =============================================================================
 
 /**
+ * Result of graph normalisation, including observability metadata.
+ */
+export interface NormaliseGraphResult {
+  graph: GraphT;
+  /** Edge IDs that had their origin defaulted to 'ai' */
+  edgesWithDefaultedOrigin: string[];
+}
+
+/**
  * Normalise graph values (clamp strength_mean to [-1, 1], etc.)
  * This is a minimal normaliser for the orchestrator.
  * Full normalisation happens downstream in the pipeline.
  */
-function normaliseGraph(graph: GraphT): GraphT {
-  return {
-    ...graph,
-    edges: graph.edges.map((edge) => ({
+function normaliseGraph(graph: GraphT): NormaliseGraphResult {
+  const edgesWithDefaultedOrigin: string[] = [];
+
+  const normalisedEdges = graph.edges.map((edge) => {
+    // Track edges with defaulted origin for observability
+    if (!edge.origin) {
+      const edgeId = (edge as any).id ?? `${edge.from}->${edge.to}`;
+      edgesWithDefaultedOrigin.push(edgeId);
+    }
+
+    return {
       ...edge,
       // Clamp strength_mean to [-1, 1]
       strength_mean:
@@ -119,7 +139,14 @@ function normaliseGraph(graph: GraphT): GraphT {
         edge.strength_std !== undefined
           ? Math.max(0.01, edge.strength_std)
           : edge.strength_std,
-    })),
+      // Default edge origin to 'ai' for LLM-generated edges
+      origin: edge.origin ?? "ai",
+    };
+  });
+
+  return {
+    graph: { ...graph, edges: normalisedEdges },
+    edgesWithDefaultedOrigin,
   };
 }
 
@@ -167,13 +194,16 @@ export async function generateGraph(
   input: GenerateGraphInput,
   adapter: GraphLLMAdapter
 ): Promise<GenerateGraphResult> {
-  const { brief, requestId, maxRetries = 1 } = input;
+  // Use config default for maxRetries if not specified
+  const defaultMaxRetries = config.cee.maxRepairRetries;
+  const { brief, requestId, maxRetries = defaultMaxRetries, collector } = input;
   const totalAttempts = maxRetries + 1; // Initial attempt + retries
 
   let lastGraph: GraphT | undefined;
   let lastErrors: ValidationIssue[] = [];
   let lastPhase: "zod" | "validate" | "post_norm" = "zod";
   const repairHistory: RepairAttempt[] = [];
+  let validationStartTime = Date.now();
 
   log.info(
     {
@@ -252,6 +282,24 @@ export async function generateGraph(
           "Zod validation failed"
         );
 
+        // Record validation attempt (failed - Zod)
+        if (collector) {
+          const latencyMs = Date.now() - validationStartTime;
+          collector.recordValidationAttempt({
+            passed: false,
+            rules_checked: 1,
+            rules_failed: lastErrors.map(e => e.code),
+            repairs_triggered: attempt < totalAttempts - 1,
+            repair_types: attempt < totalAttempts - 1 ? ["llm_repair"] : [],
+            retry_triggered: attempt < totalAttempts - 1,
+            action_taken: attempt < totalAttempts - 1 ? "trigger_retry" : "fail",
+            latency_ms: latencyMs,
+            validator: "zod",
+            warnings: [],
+          });
+          validationStartTime = Date.now();
+        }
+
         repairHistory.push({
           attempt: attempt + 1,
           errors: [...lastErrors],
@@ -281,6 +329,24 @@ export async function generateGraph(
           "Graph validation failed"
         );
 
+        // Record validation attempt (failed - pre-normalisation)
+        if (collector) {
+          const latencyMs = Date.now() - validationStartTime;
+          collector.recordValidationAttempt({
+            passed: false,
+            rules_checked: validationResult.errors.length + validationResult.warnings.length,
+            rules_failed: validationResult.errors.map(e => e.code),
+            repairs_triggered: attempt < totalAttempts - 1,
+            repair_types: attempt < totalAttempts - 1 ? ["llm_repair"] : [],
+            retry_triggered: attempt < totalAttempts - 1,
+            action_taken: attempt < totalAttempts - 1 ? "trigger_retry" : "fail",
+            latency_ms: latencyMs,
+            validator: "graph_validator",
+            warnings: validationResult.warnings.map(w => w.code),
+          });
+          validationStartTime = Date.now();
+        }
+
         repairHistory.push({
           attempt: attempt + 1,
           errors: [...lastErrors],
@@ -291,13 +357,38 @@ export async function generateGraph(
       }
 
       // Step 4: Normalise
-      const normalisedGraph = normaliseGraph(graph);
+      const { graph: normalisedGraph, edgesWithDefaultedOrigin } = normaliseGraph(graph);
 
       // Step 5: Post-normalisation validation
       const postNormResult = validateGraphPostNormalisation({
         graph: normalisedGraph,
         requestId: attemptRequestId,
       });
+
+      // Track edge origin defaulting for observability
+      const edgeOriginWarnings: ValidationIssue[] = [];
+      if (edgesWithDefaultedOrigin.length > 0) {
+        log.info(
+          {
+            event: "graph_orchestrator.edge_origin_defaulted",
+            requestId: attemptRequestId,
+            edgeCount: edgesWithDefaultedOrigin.length,
+            edgeIds: edgesWithDefaultedOrigin.slice(0, 10), // Sample for logging
+          },
+          `Defaulted origin to 'ai' for ${edgesWithDefaultedOrigin.length} edges`
+        );
+        // Create info warning for observability (one aggregated warning, not per-edge)
+        edgeOriginWarnings.push({
+          code: "EDGE_ORIGIN_DEFAULTED",
+          message: `${edgesWithDefaultedOrigin.length} edge(s) missing origin, defaulted to 'ai'`,
+          severity: "info",
+          path: "edges",
+          context: {
+            edge_count: edgesWithDefaultedOrigin.length,
+            edge_ids: edgesWithDefaultedOrigin.slice(0, 5), // First 5 edge IDs per spec
+          },
+        });
+      }
 
       if (!postNormResult.valid) {
         lastErrors = postNormResult.errors;
@@ -313,6 +404,24 @@ export async function generateGraph(
           },
           "Post-normalisation validation failed"
         );
+
+        // Record validation attempt (failed - post-normalisation)
+        if (collector) {
+          const latencyMs = Date.now() - validationStartTime;
+          collector.recordValidationAttempt({
+            passed: false,
+            rules_checked: postNormResult.errors.length + postNormResult.warnings.length,
+            rules_failed: postNormResult.errors.map(e => e.code),
+            repairs_triggered: attempt < totalAttempts - 1,
+            repair_types: attempt < totalAttempts - 1 ? ["llm_repair"] : [],
+            retry_triggered: attempt < totalAttempts - 1,
+            action_taken: attempt < totalAttempts - 1 ? "trigger_retry" : "fail",
+            latency_ms: latencyMs,
+            validator: "post_normalisation_validator",
+            warnings: postNormResult.warnings.map(w => w.code),
+          });
+          validationStartTime = Date.now();
+        }
 
         repairHistory.push({
           attempt: attempt + 1,
@@ -335,14 +444,35 @@ export async function generateGraph(
         "Graph generation succeeded"
       );
 
+      // Combine all warnings
+      const combinedWarnings = [...validationResult.warnings, ...postNormResult.warnings, ...edgeOriginWarnings];
+
+      // Record validation attempt (success)
+      if (collector) {
+        const latencyMs = Date.now() - validationStartTime;
+        collector.recordValidationAttempt({
+          passed: true,
+          rules_checked: validationResult.errors.length + validationResult.warnings.length +
+                         postNormResult.errors.length + postNormResult.warnings.length + 1, // +1 for Zod
+          rules_failed: [],
+          repairs_triggered: false,
+          repair_types: [],
+          retry_triggered: false,
+          action_taken: "proceed",
+          latency_ms: latencyMs,
+          validator: "graph_orchestrator",
+          warnings: combinedWarnings.map(w => w.code),
+        });
+      }
+
       // Log warnings but don't fail
-      if (validationResult.warnings.length > 0) {
+      if (combinedWarnings.length > 0) {
         log.info(
           {
             event: "graph_orchestrator.warnings",
             requestId,
-            warningCount: validationResult.warnings.length,
-            warnings: validationResult.warnings.map((w) => w.code),
+            warningCount: combinedWarnings.length,
+            warnings: combinedWarnings.map((w) => w.code),
           },
           "Graph has non-blocking warnings"
         );
@@ -352,7 +482,7 @@ export async function generateGraph(
         graph: normalisedGraph,
         attempts: attempt + 1,
         repairUsed: isRetry,
-        warnings: validationResult.warnings,
+        warnings: combinedWarnings,
         repairHistory: repairHistory.length > 0 ? repairHistory : undefined,
       };
     } catch (error) {
@@ -421,8 +551,10 @@ export interface ValidateAndRepairInput {
   brief: string;
   /** Request ID for tracing */
   requestId?: string;
-  /** Maximum repair retries (default: 1) */
+  /** Maximum repair retries (default: from config CEE_MAX_REPAIR_RETRIES) */
   maxRetries?: number;
+  /** Optional observability collector for recording validation attempts */
+  collector?: ObservabilityCollector;
 }
 
 /**
@@ -477,12 +609,15 @@ export async function validateAndRepairGraph(
   input: ValidateAndRepairInput,
   repairAdapter?: RepairOnlyAdapter
 ): Promise<ValidateAndRepairResult> {
-  const { graph: rawGraph, brief, requestId, maxRetries = 1 } = input;
+  // Use config default for maxRetries if not specified
+  const defaultMaxRetries = config.cee.maxRepairRetries;
+  const { graph: rawGraph, brief, requestId, maxRetries = defaultMaxRetries, collector: _collector } = input;
 
   let currentGraph: GraphT | undefined;
   let lastErrors: ValidationIssue[] = [];
   let lastPhase: "zod" | "validate" | "post_norm" = "zod";
   let repairAttempts = 0;
+  const _validationStartTime = Date.now();
 
   const totalAttempts = maxRetries + 1;
 
@@ -591,12 +726,37 @@ export async function validateAndRepairGraph(
     }
 
     // Phase 3: Normalise
-    const normalised = normaliseGraph(currentGraph);
+    const { graph: normalised, edgesWithDefaultedOrigin } = normaliseGraph(currentGraph);
+
+    // Track edge origin defaulting for observability
+    const edgeOriginWarnings: ValidationIssue[] = [];
+    if (edgesWithDefaultedOrigin.length > 0) {
+      log.info(
+        {
+          event: "graph_orchestrator.edge_origin_defaulted",
+          requestId: attemptRequestId,
+          edgeCount: edgesWithDefaultedOrigin.length,
+          edgeIds: edgesWithDefaultedOrigin.slice(0, 10), // Sample for logging
+        },
+        `Defaulted origin to 'ai' for ${edgesWithDefaultedOrigin.length} edges`
+      );
+      // Create info warning for observability (one aggregated warning, not per-edge)
+      edgeOriginWarnings.push({
+        code: "EDGE_ORIGIN_DEFAULTED",
+        message: `${edgesWithDefaultedOrigin.length} edge(s) missing origin, defaulted to 'ai'`,
+        severity: "info",
+        path: "edges",
+        context: {
+          edge_count: edgesWithDefaultedOrigin.length,
+          edge_ids: edgesWithDefaultedOrigin.slice(0, 5), // First 5 edge IDs per spec
+        },
+      });
+    }
 
     // Phase 4: Post-normalisation validation
     const postNormResult = validateGraphPostNormalisation({ graph: normalised });
     const postNormErrors = postNormResult.errors;
-    const allWarnings = [...warnings, ...postNormResult.warnings];
+    const allWarnings = [...warnings, ...postNormResult.warnings, ...edgeOriginWarnings];
 
     if (postNormErrors.length > 0) {
       lastErrors = postNormErrors;

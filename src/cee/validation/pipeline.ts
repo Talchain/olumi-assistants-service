@@ -23,7 +23,22 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
-import { detectStructuralWarnings, detectUniformStrengths, normaliseDecisionBranchBeliefs, validateAndFixGraph, ensureGoalNode, hasGoalNode, wireOutcomesToGoal, type StructuralMeta } from "../structure/index.js";
+import {
+  detectStructuralWarnings,
+  detectUniformStrengths,
+  normaliseDecisionBranchBeliefs,
+  validateAndFixGraph,
+  ensureGoalNode,
+  hasGoalNode,
+  wireOutcomesToGoal,
+  detectStrengthClustering,
+  detectSameLeverOptions,
+  detectMissingBaseline,
+  detectGoalNoBaselineValue,
+  checkGoalConnectivity,
+  computeModelQualityFactors,
+  type StructuralMeta
+} from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
 import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
 import {
@@ -1688,6 +1703,8 @@ export async function finaliseCeeDraftResponse(
           severity: "medium",
           node_ids: goalResult.goalNodeId ? [goalResult.goalNodeId] : [],
           edge_ids: [],
+          affected_node_ids: goalResult.goalNodeId ? [goalResult.goalNodeId] : [],
+          affected_edge_ids: [],
           explanation: goalResult.inferredFrom === "brief"
             ? "Goal was inferred from your description. Review to ensure it captures your intended objective."
             : "A placeholder goal was added because one could not be inferred. Please update it to reflect your actual objective.",
@@ -2469,6 +2486,89 @@ export async function finaliseCeeDraftResponse(
     draftWarnings.push(goalInferenceWarning);
   }
 
+  // ==========================================================================
+  // Phase 5: Pre-Analysis Quality Detection
+  // ==========================================================================
+
+  // Detect strength clustering (CV < 0.3)
+  const strengthClusteringResult = detectStrengthClustering(graph);
+  if (strengthClusteringResult.detected && strengthClusteringResult.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(strengthClusteringResult.warning);
+  }
+
+  // Detect same lever options (>60% intervention target overlap)
+  const sameLeverResult = detectSameLeverOptions(graph);
+  if (sameLeverResult.detected && sameLeverResult.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(sameLeverResult.warning);
+  }
+
+  // Detect missing baseline option
+  const missingBaselineResult = detectMissingBaseline(graph);
+  if (missingBaselineResult.detected && missingBaselineResult.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(missingBaselineResult.warning);
+  }
+
+  // Detect goal without baseline value
+  const goalNoValueResult = detectGoalNoBaselineValue(graph);
+  if (goalNoValueResult.detected && goalNoValueResult.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(goalNoValueResult.warning);
+  }
+
+  // Check goal connectivity and emit blocker warning if status = 'none'
+  const goalConnectivityResult = checkGoalConnectivity(graph);
+  if (goalConnectivityResult.status === "none" && goalConnectivityResult.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(goalConnectivityResult.warning);
+  }
+
+  // Compute model quality factors
+  const modelQualityFactors = computeModelQualityFactors(graph);
+
+  // Build goal_connectivity response object
+  const goalConnectivity = {
+    status: goalConnectivityResult.status,
+    disconnected_options: goalConnectivityResult.disconnectedOptions,
+    weak_paths: goalConnectivityResult.weakPaths,
+  };
+
+  // Extract intervention hints from options
+  const interventionHints: Array<{
+    option_id: string;
+    target_node_id: string;
+    unit?: string;
+    factor_type?: "currency" | "percentage" | "count" | "duration" | "ratio" | "unknown";
+    extracted_range?: { min?: number; max?: number; source?: "brief" | "context" | "default" };
+    source?: "user" | "ai" | "default";
+  }> = [];
+  if (graph && Array.isArray((graph as any).nodes)) {
+    const nodes = (graph as any).nodes as any[];
+    for (const node of nodes) {
+      if (node?.kind !== "option") continue;
+      const optionId = node?.id;
+      const interventions = (node?.data as any)?.interventions ?? [];
+      for (const interv of interventions) {
+        const targetId = interv?.target_match?.node_id ?? interv?.target;
+        if (!targetId) continue;
+        interventionHints.push({
+          option_id: optionId,
+          target_node_id: targetId,
+          unit: interv?.unit,
+          factor_type: interv?.factor_type ?? "unknown",
+          extracted_range: interv?.range ? {
+            min: interv.range.min,
+            max: interv.range.max,
+            source: interv?.range_source ?? "default",
+          } : undefined,
+          source: interv?.source ?? "ai",
+        });
+      }
+    }
+  }
+
   const guidance = buildCeeGuidance({
     quality,
     validationIssues,
@@ -2498,6 +2598,10 @@ export async function finaliseCeeDraftResponse(
     clarifier: clarifierResult.clarifier,
     // Backward compatibility: set clarifier_status when clarification is complete
     clarifier_status: clarifierStatus,
+    // Phase 5: Pre-analysis validation fields
+    goal_connectivity: goalConnectivity,
+    model_quality_factors: modelQualityFactors,
+    intervention_hints: interventionHints.length > 0 ? interventionHints : undefined,
   };
 
   const draftWarningCount = Array.isArray(draftWarnings) ? draftWarnings.length : 0;

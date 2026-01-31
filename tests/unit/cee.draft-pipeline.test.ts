@@ -84,6 +84,41 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     }
     return { ...graph, edges: newEdges };
   },
+  // Phase 5 quality detection functions (Pre-Analysis Validation Layer)
+  detectStrengthClustering: () => ({
+    detected: false,
+    edgeCount: 0,
+    coefficientOfVariation: undefined,
+    warning: undefined,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: undefined,
+    warning: undefined,
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: true,
+    warning: undefined,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: true,
+    goalNodeId: undefined,
+    warning: undefined,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full" as const,
+    disconnectedOptions: [],
+    weakPaths: [],
+    warning: undefined,
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
 }));
 
 import { finaliseCeeDraftResponse } from "../../src/cee/validation/pipeline.js";

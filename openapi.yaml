@@ -3503,6 +3503,109 @@ components:
             comparison_suggested:
               type: boolean
               description: Whether the graph structure suggests comparison analysis would add value
+            goal_connectivity:
+              $ref: '#/components/schemas/CEEGoalConnectivityV1'
+            model_quality_factors:
+              $ref: '#/components/schemas/CEEModelQualityFactorsV1'
+            intervention_hints:
+              type: array
+              description: Metadata hints for interventions to assist normalisation
+              items:
+                $ref: '#/components/schemas/CEEInterventionHintV1'
+
+    CEEGoalConnectivityV1:
+      type: object
+      description: Goal connectivity status for the draft graph
+      required:
+        - status
+        - disconnected_options
+        - weak_paths
+      properties:
+        status:
+          type: string
+          enum: [full, partial, none]
+          description: Overall goal connectivity status. 'none' is a blocker.
+        disconnected_options:
+          type: array
+          description: Option IDs that have no path to the goal
+          items:
+            type: string
+        weak_paths:
+          type: array
+          description: Paths with low aggregate strength to the goal
+          items:
+            type: object
+            properties:
+              option_id:
+                type: string
+              path_strength:
+                type: number
+                description: Aggregate strength along the path (product of edge strengths)
+              hop_count:
+                type: integer
+                description: Number of edges in the path
+
+    CEEModelQualityFactorsV1:
+      type: object
+      description: Quality factors for model estimation confidence
+      required:
+        - estimate_confidence
+        - strength_variation
+        - range_confidence_coverage
+        - has_baseline_option
+      properties:
+        estimate_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Overall confidence in the model estimates
+        strength_variation:
+          type: number
+          description: Coefficient of variation for edge strengths (0 = all uniform)
+        range_confidence_coverage:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Percentage of interventions with Priority 1-2 ranges (explicit or extracted, not inferred/default)
+        has_baseline_option:
+          type: boolean
+          description: Whether a status quo / baseline option was detected
+
+    CEEInterventionHintV1:
+      type: object
+      description: Metadata hints for an intervention to assist normalisation
+      required:
+        - option_id
+        - target_node_id
+      properties:
+        option_id:
+          type: string
+          description: ID of the option containing this intervention
+        target_node_id:
+          type: string
+          description: ID of the target factor node
+        unit:
+          type: string
+          description: Detected or inferred unit for the intervention value
+        factor_type:
+          type: string
+          enum: [currency, percentage, count, duration, ratio, unknown]
+          description: Classified type of the intervention factor
+        extracted_range:
+          type: object
+          description: Range extracted from context or brief
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+            source:
+              type: string
+              enum: [brief, context, default]
+        source:
+          type: string
+          enum: [user, ai, default]
+          description: Origin of this intervention value
 
     CEEWeightSuggestionV1:
       type: object
@@ -3725,27 +3828,44 @@ components:
       required:
         - id
         - severity
+        - affected_node_ids
+        - affected_edge_ids
       properties:
         id:
           type: string
           description: Stable identifier for this warning type
-          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred]
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred, strength_clustering, same_lever_options, missing_baseline, goal_no_baseline_value, normalisation_input_insufficient, range_degenerate, goal_disconnected, goal_connectivity_none, edge_origin_defaulted]
         severity:
           type: string
-          enum: [low, medium, high]
+          enum: [low, medium, high, blocker]
         node_ids:
           type: array
-          description: Related graph node IDs (no labels or free text)
+          description: Related graph node IDs (no labels or free text). Deprecated - use affected_node_ids.
           items:
             type: string
         edge_ids:
           type: array
-          description: Related graph edge IDs (no labels or free text)
+          description: Related graph edge IDs (no labels or free text). Deprecated - use affected_edge_ids.
           items:
             type: string
+        affected_node_ids:
+          type: array
+          description: Node IDs affected by this warning (always an array, empty if none)
+          items:
+            type: string
+          default: []
+        affected_edge_ids:
+          type: array
+          description: Edge IDs affected by this warning (always an array, empty if none)
+          items:
+            type: string
+          default: []
         explanation:
           type: string
           description: Short human-readable explanation (not used in telemetry)
+        fix_hint:
+          type: string
+          description: Actionable suggestion for how to resolve this warning
 
     CEEConfidenceFlagsV1:
       type: object

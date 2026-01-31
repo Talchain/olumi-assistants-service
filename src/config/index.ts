@@ -287,8 +287,11 @@ const ConfigSchema = z.object({
     // Observability settings (debug panel visibility)
     observabilityEnabled: booleanString.default(false), // If true, include _observability in CEE responses
     observabilityRawIO: booleanString.default(false), // If true, include raw prompts/responses (security: disable in prod)
+    // Repair loop settings
+    maxRepairRetries: z.coerce.number().int().min(0).max(5).default(1), // Max repair retries in graph orchestrator
     // Debug logging settings
     debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
+    debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -529,8 +532,11 @@ function parseConfig(): Config {
       // Observability settings
       observabilityEnabled: env.CEE_OBSERVABILITY_ENABLED,
       observabilityRawIO: env.CEE_OBSERVABILITY_RAW_IO,
+      // Repair loop settings
+      maxRepairRetries: env.CEE_MAX_REPAIR_RETRIES,
       // Debug logging settings
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
+      debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

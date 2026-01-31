@@ -17,6 +17,7 @@ import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./nor
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
+import { extractJsonFromResponse } from '../../utils/json-extractor.js';
 
 export type DraftArgs = {
   brief: string;
@@ -470,16 +471,16 @@ export async function draftGraphWithAnthropic(
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response (handle markdown code blocks if present)
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
-
-    // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Extract JSON from response using robust extractor
+    // Handles: raw JSON, markdown code blocks, conversational preamble/suffix
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "draft_graph",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
+    // Preserve raw text for debug output
+    const jsonText = extractionResult.extractedContent || content.text.trim();
     const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
       ? ((rawJson as any).nodes as any[])
         .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
@@ -790,15 +791,15 @@ export async function suggestOptionsWithAnthropic(args: {
       throw new Error("unexpected_response_type");
     }
 
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
+    // Extract JSON from response using robust extractor
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "suggest_options",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Parse and validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Validate with Zod
     const parseResult = AnthropicOptionsResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
@@ -1014,16 +1015,15 @@ export async function repairGraphWithAnthropic(
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
+    // Extract JSON from response using robust extractor
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "repair_graph",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Normalise non-standard node kinds, ensure factor baselines, then validate with Zod
     const normalised = normaliseDraftResponse(rawJson);
     const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
     if (repairDefaultedFactors.length > 0) {
@@ -1341,16 +1341,15 @@ export async function clarifyBriefWithAnthropic(
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
+    // Extract JSON from response using robust extractor
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "clarify_brief",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Parse and validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Validate with Zod
     const parseResult = AnthropicClarifyResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
@@ -1555,16 +1554,15 @@ export async function critiqueGraphWithAnthropic(
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
+    // Extract JSON from response using robust extractor
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "critique_graph",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Parse and validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Validate with Zod
     const parseResult = AnthropicCritiqueResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
@@ -1721,16 +1719,15 @@ Return ONLY valid JSON in this format:
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response
-    let jsonText = content.text.trim();
-    if (jsonText.startsWith("```json")) {
-      jsonText = jsonText.replace(/^```json\n/, "").replace(/\n```$/, "");
-    } else if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```\n/, "").replace(/\n```$/, "");
-    }
+    // Extract JSON from response using robust extractor
+    const extractionResult = extractJsonFromResponse(content.text, {
+      task: "explain_diff",
+      model,
+      correlationId: idempotencyKey,
+    });
+    const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Parse and validate with Zod
-    const rawJson = JSON.parse(jsonText);
+    // Validate with Zod
     const parseResult = AnthropicExplainDiffResponse.safeParse(rawJson);
 
     if (!parseResult.success) {

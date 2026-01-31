@@ -98,14 +98,21 @@ export type ValidationWarningCode =
   | "LOW_STD_NON_STRUCTURAL";
 
 // =============================================================================
+// Info Codes (non-blocking observability hints)
+// =============================================================================
+
+export type ValidationInfoCode =
+  | "EDGE_ORIGIN_DEFAULTED";
+
+// =============================================================================
 // Validation Issue
 // =============================================================================
 
-export type ValidationSeverity = "error" | "warning";
+export type ValidationSeverity = "error" | "warning" | "info";
 
 export interface ValidationIssue {
-  /** Error/warning code */
-  code: ValidationErrorCode | ValidationWarningCode;
+  /** Error/warning/info code */
+  code: ValidationErrorCode | ValidationWarningCode | ValidationInfoCode;
   /** Severity level */
   severity: ValidationSeverity;
   /** Human-readable message */

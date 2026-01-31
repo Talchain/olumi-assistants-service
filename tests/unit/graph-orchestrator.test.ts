@@ -5,12 +5,9 @@ import {
   formatErrorsForRepair,
   buildRepairPromptContext,
   type GraphLLMAdapter,
-  type GenerateGraphInput,
-  type LLMDraftResult,
-  type LLMRepairResult,
 } from "../../src/cee/graph-orchestrator.js";
 import { zodToValidationErrors, isZodError } from "../../src/validators/zod-error-mapper.js";
-import { Graph, type GraphT } from "../../src/schemas/graph.js";
+import { type GraphT } from "../../src/schemas/graph.js";
 import { z } from "zod";
 
 // =============================================================================
@@ -41,13 +38,13 @@ function createValidGraph(): GraphT {
       { id: "outcome_1", kind: "outcome", label: "Revenue" },
     ],
     edges: [
-      { from: "dec_1", to: "opt_a", strength_mean: 1, belief_exists: 1 },
-      { from: "dec_1", to: "opt_b", strength_mean: 1, belief_exists: 1 },
+      { from: "dec_1", to: "opt_a", strength_mean: 1, belief_exists: 1, origin: "ai" },
+      { from: "dec_1", to: "opt_b", strength_mean: 1, belief_exists: 1, origin: "ai" },
       // T2: Strict canonical requires strength_std: 0.01 and effect_direction for option→factor
-      { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
-      { from: "opt_b", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
-      { from: "fac_price", to: "outcome_1", strength_mean: 0.7, belief_exists: 0.9 },
-      { from: "outcome_1", to: "goal_1", strength_mean: 0.8, belief_exists: 0.95 },
+      { from: "opt_a", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive", origin: "ai" },
+      { from: "opt_b", to: "fac_price", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive", origin: "ai" },
+      { from: "fac_price", to: "outcome_1", strength_mean: 0.7, belief_exists: 0.9, origin: "ai" },
+      { from: "outcome_1", to: "goal_1", strength_mean: 0.8, belief_exists: 0.95, origin: "ai" },
     ],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
   };
@@ -63,8 +60,8 @@ function createInvalidGraphMissingGoal(): unknown {
       { id: "opt_b", kind: "option", label: "Option B" },
     ],
     edges: [
-      { from: "dec_1", to: "opt_a", strength_mean: 1 },
-      { from: "dec_1", to: "opt_b", strength_mean: 1 },
+      { from: "dec_1", to: "opt_a", strength_mean: 1, origin: "ai" },
+      { from: "dec_1", to: "opt_b", strength_mean: 1, origin: "ai" },
     ],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
   };
@@ -92,7 +89,7 @@ function createGraphWithSignMismatch(): GraphT {
   return graph;
 }
 
-function createGraphWithWarnings(): GraphT {
+function _createGraphWithWarnings(): GraphT {
   const graph = createValidGraph();
   // Add warning-level issue: strength out of typical range
   graph.edges[4] = {
@@ -279,7 +276,7 @@ describe("generateGraph orchestrator", () => {
 
       try {
         await generateGraph({ brief: "Test", maxRetries: 1 }, adapter);
-      } catch (error) {
+      } catch {
         // 1 draft + 1 repair = 2 total attempts
         expect(adapter.draftGraph).toHaveBeenCalledTimes(1);
         expect(adapter.repairGraph).toHaveBeenCalledTimes(1);
@@ -521,7 +518,6 @@ describe("buildRepairPromptContext", () => {
 
 import {
   validateAndRepairGraph,
-  type ValidateAndRepairInput,
   type RepairOnlyAdapter,
 } from "../../src/cee/graph-orchestrator.js";
 

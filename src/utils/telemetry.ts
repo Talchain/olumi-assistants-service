@@ -189,6 +189,9 @@ export const TelemetryEvents = {
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
   FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
 
+  // JSON extraction events (model output normalization)
+  JsonExtractionRequired: "llm.json_extraction.required",
+
   // Goal generation tracking (prompt tuning)
   GoalGeneration: "cee.goal_generation",
 

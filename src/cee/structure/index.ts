@@ -62,6 +62,8 @@ export function detectStructuralWarnings(
       severity: "medium",
       node_ids: relatedIds,
       edge_ids: [],
+      affected_node_ids: relatedIds,
+      affected_edge_ids: [],
       explanation:
         "Graph contains no outcome nodes; decision consequences may not be fully represented.",
     } as CEEStructuralWarningV1);
@@ -86,6 +88,8 @@ export function detectStructuralWarnings(
         severity: "low",
         node_ids: capped,
         edge_ids: [],
+        affected_node_ids: capped,
+        affected_edge_ids: [],
         explanation:
           "Some nodes are not connected to any edges; they may not influence the decision.",
       } as CEEStructuralWarningV1);
@@ -101,6 +105,8 @@ export function detectStructuralWarnings(
       severity: "high",
       node_ids: cycleNodeIds,
       edge_ids: [],
+      affected_node_ids: cycleNodeIds,
+      affected_edge_ids: [],
       explanation:
         "Cycles were detected and automatically broken to enforce DAG structure; review these nodes for correctness.",
     } as CEEStructuralWarningV1);
@@ -137,6 +143,8 @@ export function detectStructuralWarnings(
       severity: "medium",
       node_ids: nodesList,
       edge_ids: backwardsEdgeIds,
+      affected_node_ids: nodesList,
+      affected_edge_ids: backwardsEdgeIds,
       explanation:
         "Some edges flow from outcome nodes back into decision or option nodes; this may invert cause and effect.",
     } as CEEStructuralWarningV1);
@@ -814,6 +822,8 @@ export function detectUniformStrengths(
     severity: "medium",
     node_ids: [],
     edge_ids: affectedEdgeIds,
+    affected_node_ids: [],
+    affected_edge_ids: affectedEdgeIds,
     explanation: `${Math.round(defaultStrengthPercentage * 100)}% of causal edges have default strength (0.5). ` +
       `The LLM may not have output varied edge coefficients, which reduces sensitivity analysis accuracy. ` +
       `Consider reviewing edge strengths or refining the brief with more causal detail.`,
@@ -1034,6 +1044,544 @@ export function fixNonCanonicalStructuralEdges(
     fixedEdgeCount: fixedEdgeIds.length,
     fixedEdgeIds,
     repairs,  // T3: PLoT-compatible repair records
+  };
+}
+
+// =============================================================================
+// Quality Detection Functions (Phase 5: Pre-Analysis Validation)
+// =============================================================================
+
+/**
+ * Result of strength clustering detection.
+ */
+export interface StrengthClusteringResult {
+  detected: boolean;
+  coefficientOfVariation: number;
+  edgeCount: number;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect strength clustering: low coefficient of variation (CV < 0.3) in edge strengths.
+ * CV = std(strengths) / mean(abs(strengths))
+ * If mean(abs(strengths)) === 0, treat as clustered.
+ * Excludes structural edges (decision→option, option→factor).
+ */
+export function detectStrengthClustering(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.3
+): StrengthClusteringResult {
+  if (!graph || !Array.isArray((graph as any).edges) || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, coefficientOfVariation: 0, edgeCount: 0 };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  // Build node kind map
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) {
+    const id = typeof node?.id === "string" ? node.id : undefined;
+    const kind = typeof node?.kind === "string" ? node.kind : undefined;
+    if (id && kind) nodeKindMap.set(id, kind);
+  }
+
+  // Collect causal edge strengths
+  const strengths: number[] = [];
+  const affectedEdgeIds: string[] = [];
+
+  for (const edge of edges) {
+    const from = edge?.from;
+    const to = edge?.to;
+    const fromKind = typeof from === "string" ? nodeKindMap.get(from) : undefined;
+    const toKind = typeof to === "string" ? nodeKindMap.get(to) : undefined;
+
+    // Skip structural edges
+    if (fromKind && toKind) {
+      const edgeType = `${fromKind}-${toKind}`;
+      if (STRUCTURAL_EDGE_TYPES.has(edgeType)) continue;
+    }
+
+    const strength = edge?.strength_mean ?? edge?.weight ?? 0.5;
+    if (typeof strength === "number" && Number.isFinite(strength)) {
+      strengths.push(strength);
+      const edgeId = edge?.id;
+      if (typeof edgeId === "string") affectedEdgeIds.push(edgeId);
+    }
+  }
+
+  if (strengths.length < 2) {
+    return { detected: false, coefficientOfVariation: 0, edgeCount: strengths.length };
+  }
+
+  // Calculate mean of absolute values
+  const absStrengths = strengths.map(Math.abs);
+  const meanAbs = absStrengths.reduce((a, b) => a + b, 0) / absStrengths.length;
+
+  // If mean is zero, treat as clustered
+  if (meanAbs === 0) {
+    return {
+      detected: true,
+      coefficientOfVariation: 0,
+      edgeCount: strengths.length,
+      warning: {
+        id: "strength_clustering" as any,
+        severity: "medium",
+        node_ids: [],
+        edge_ids: affectedEdgeIds.slice(0, 10),
+        affected_node_ids: [],
+        affected_edge_ids: affectedEdgeIds.slice(0, 10),
+        explanation: "All edge strengths are zero — estimates may need review.",
+        fix_hint: "Review edge strengths — low variance suggests estimates may be rough approximations",
+      } as CEEStructuralWarningV1,
+    };
+  }
+
+  // Calculate standard deviation
+  const variance = strengths.reduce((sum, s) => sum + Math.pow(s - meanAbs, 2), 0) / strengths.length;
+  const std = Math.sqrt(variance);
+  const cv = std / meanAbs;
+
+  const detected = cv < threshold;
+
+  if (!detected) {
+    return { detected: false, coefficientOfVariation: cv, edgeCount: strengths.length };
+  }
+
+  return {
+    detected: true,
+    coefficientOfVariation: cv,
+    edgeCount: strengths.length,
+    warning: {
+      id: "strength_clustering" as any,
+      severity: "medium",
+      node_ids: [],
+      edge_ids: affectedEdgeIds.slice(0, 10),
+      affected_node_ids: [],
+      affected_edge_ids: affectedEdgeIds.slice(0, 10),
+      explanation: `Edge strength CV is ${cv.toFixed(2)} (threshold: ${threshold}) — strengths are clustered.`,
+      fix_hint: "Review edge strengths — low variance suggests estimates may be rough approximations",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of same lever options detection.
+ */
+export interface SameLeverOptionsResult {
+  detected: boolean;
+  maxOverlapPercentage: number;
+  overlappingOptionPairs: Array<{ option1: string; option2: string; overlapPct: number }>;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when options share >60% of intervention targets.
+ */
+export function detectSameLeverOptions(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.6
+): SameLeverOptionsResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+
+  // Get option nodes with interventions
+  const optionInterventions = new Map<string, Set<string>>();
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    const optionId = node?.id;
+    if (typeof optionId !== "string") continue;
+
+    const interventions = (node?.data as any)?.interventions ?? [];
+    const targets = new Set<string>();
+    for (const interv of interventions) {
+      const targetId = interv?.target_match?.node_id ?? interv?.target;
+      if (typeof targetId === "string") targets.add(targetId);
+    }
+    if (targets.size > 0) optionInterventions.set(optionId, targets);
+  }
+
+  const optionIds = Array.from(optionInterventions.keys());
+  if (optionIds.length < 2) {
+    return { detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] };
+  }
+
+  const overlappingPairs: Array<{ option1: string; option2: string; overlapPct: number }> = [];
+  let maxOverlap = 0;
+
+  for (let i = 0; i < optionIds.length; i++) {
+    for (let j = i + 1; j < optionIds.length; j++) {
+      const targets1 = optionInterventions.get(optionIds[i])!;
+      const targets2 = optionInterventions.get(optionIds[j])!;
+      const intersection = new Set([...targets1].filter(t => targets2.has(t)));
+      const union = new Set([...targets1, ...targets2]);
+      const overlapPct = union.size > 0 ? intersection.size / union.size : 0;
+
+      if (overlapPct > maxOverlap) maxOverlap = overlapPct;
+      if (overlapPct > threshold) {
+        overlappingPairs.push({ option1: optionIds[i], option2: optionIds[j], overlapPct });
+      }
+    }
+  }
+
+  const detected = overlappingPairs.length > 0;
+
+  if (!detected) {
+    return { detected: false, maxOverlapPercentage: maxOverlap, overlappingOptionPairs: [] };
+  }
+
+  const affectedOptionIds = [...new Set(overlappingPairs.flatMap(p => [p.option1, p.option2]))];
+
+  return {
+    detected: true,
+    maxOverlapPercentage: maxOverlap,
+    overlappingOptionPairs: overlappingPairs,
+    warning: {
+      id: "same_lever_options" as any,
+      severity: "medium",
+      node_ids: affectedOptionIds,
+      edge_ids: [],
+      affected_node_ids: affectedOptionIds,
+      affected_edge_ids: [],
+      explanation: `${overlappingPairs.length} option pair(s) share >${Math.round(threshold * 100)}% intervention targets.`,
+      fix_hint: "Options share most intervention targets — consider differentiating approaches",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of missing baseline detection.
+ */
+export interface MissingBaselineResult {
+  detected: boolean;
+  hasBaseline: boolean;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when no status quo / baseline option exists.
+ * Looks for options with labels containing "status quo", "do nothing", "no action", "baseline", "current".
+ */
+export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaselineResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, hasBaseline: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const baselinePatterns = [
+    /status\s*quo/i,
+    /do\s*nothing/i,
+    /no\s*action/i,
+    /baseline/i,
+    /current\s*state/i,
+    /as\s*is/i,
+  ];
+
+  let hasBaseline = false;
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    const label = node?.label ?? "";
+    if (typeof label === "string" && baselinePatterns.some(p => p.test(label))) {
+      hasBaseline = true;
+      break;
+    }
+    // Also check option data for status_quo flag
+    if ((node?.data as any)?.is_status_quo === true) {
+      hasBaseline = true;
+      break;
+    }
+  }
+
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+
+  if (hasBaseline || optionIds.length === 0) {
+    return { detected: false, hasBaseline };
+  }
+
+  return {
+    detected: true,
+    hasBaseline: false,
+    warning: {
+      id: "missing_baseline" as any,
+      severity: "low",
+      node_ids: optionIds,
+      edge_ids: [],
+      affected_node_ids: optionIds,
+      affected_edge_ids: [],
+      explanation: "No status quo / baseline option detected.",
+      fix_hint: "Add a status quo option to enable comparison with no action",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of goal baseline value detection.
+ */
+export interface GoalNoBaselineValueResult {
+  detected: boolean;
+  goalHasValue: boolean;
+  goalNodeId?: string;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when goal node has no observed_state.value.
+ */
+export function detectGoalNoBaselineValue(graph: GraphV1 | undefined): GoalNoBaselineValueResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, goalHasValue: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const goalNodeId = (graph as any)?.goal_node_id;
+
+  let goalNode: any = null;
+  for (const node of nodes) {
+    if (node?.kind === "goal" || node?.id === goalNodeId) {
+      goalNode = node;
+      break;
+    }
+  }
+
+  if (!goalNode) {
+    return { detected: false, goalHasValue: false };
+  }
+
+  const observedValue = goalNode?.observed_state?.value ?? goalNode?.data?.observed_value;
+  const hasValue = observedValue !== undefined && observedValue !== null;
+
+  if (hasValue) {
+    return { detected: false, goalHasValue: true, goalNodeId: goalNode.id };
+  }
+
+  return {
+    detected: true,
+    goalHasValue: false,
+    goalNodeId: goalNode.id,
+    warning: {
+      id: "goal_no_baseline_value" as any,
+      severity: "low",
+      node_ids: [goalNode.id],
+      edge_ids: [],
+      affected_node_ids: [goalNode.id],
+      affected_edge_ids: [],
+      explanation: "Goal node has no observed_state.value set.",
+      fix_hint: "Set goal node's observed_state.value to establish baseline for comparison",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
+ * Result of goal connectivity check.
+ */
+export interface GoalConnectivityResult {
+  status: "full" | "partial" | "none";
+  disconnectedOptions: string[];
+  weakPaths: Array<{ option_id: string; path_strength: number; hop_count: number }>;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Check goal connectivity for all options.
+ * Returns status: full (all connected), partial (some connected), none (no connections).
+ */
+export function checkGoalConnectivity(graph: GraphV1 | undefined): GoalConnectivityResult {
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return { status: "none", disconnectedOptions: [], weakPaths: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+  const goalNodeId = (graph as any)?.goal_node_id;
+
+  // Find goal node
+  let goalId: string | undefined;
+  for (const node of nodes) {
+    if (node?.kind === "goal" || node?.id === goalNodeId) {
+      goalId = node?.id;
+      break;
+    }
+  }
+
+  if (!goalId) {
+    const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+    // Sort for deterministic ordering
+    const sortedOptionIds = [...optionIds].sort() as string[];
+    return {
+      status: "none",
+      disconnectedOptions: sortedOptionIds,
+      weakPaths: [],
+      warning: {
+        id: "goal_connectivity_none",
+        severity: "blocker",
+        node_ids: sortedOptionIds,
+        edge_ids: [],
+        affected_node_ids: sortedOptionIds,
+        affected_edge_ids: [],
+        explanation: "No goal node found in graph.",
+        fix_hint: "Connect each option to the goal via at least one factor or edge",
+      },
+    };
+  }
+
+  // Build adjacency list
+  const adjacency = new Map<string, Array<{ to: string; strength: number }>>();
+  for (const edge of edges) {
+    const from = edge?.from;
+    const to = edge?.to;
+    if (typeof from !== "string" || typeof to !== "string") continue;
+    const strength = Math.abs(edge?.strength_mean ?? edge?.weight ?? 0.5);
+    if (!adjacency.has(from)) adjacency.set(from, []);
+    adjacency.get(from)!.push({ to, strength });
+  }
+
+  // Get option IDs
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean) as string[];
+
+  // BFS to find path from each option to goal
+  const disconnectedOptions: string[] = [];
+  const weakPaths: Array<{ option_id: string; path_strength: number; hop_count: number }> = [];
+
+  for (const optionId of optionIds) {
+    const visited = new Set<string>();
+    const queue: Array<{ node: string; strength: number; hops: number }> = [{ node: optionId, strength: 1, hops: 0 }];
+    let foundPath = false;
+    let bestPath: { strength: number; hops: number } | null = null;
+
+    while (queue.length > 0) {
+      const { node, strength, hops } = queue.shift()!;
+      if (node === goalId) {
+        foundPath = true;
+        if (!bestPath || strength > bestPath.strength) {
+          bestPath = { strength, hops };
+        }
+        continue;
+      }
+      if (visited.has(node)) continue;
+      visited.add(node);
+
+      const neighbors = adjacency.get(node) ?? [];
+      for (const { to, strength: edgeStrength } of neighbors) {
+        queue.push({ node: to, strength: strength * edgeStrength, hops: hops + 1 });
+      }
+    }
+
+    if (!foundPath) {
+      disconnectedOptions.push(optionId);
+    } else if (bestPath && bestPath.strength < 0.1) {
+      weakPaths.push({ option_id: optionId, path_strength: bestPath.strength, hop_count: bestPath.hops });
+    }
+  }
+
+  const status: "full" | "partial" | "none" =
+    disconnectedOptions.length === 0 ? "full" :
+    disconnectedOptions.length === optionIds.length ? "none" : "partial";
+
+  // Sort disconnected options for deterministic ordering
+  const sortedDisconnectedOptions = [...disconnectedOptions].sort();
+
+  const warning: CEEStructuralWarningV1 | undefined = status === "none" ? {
+    id: "goal_connectivity_none",
+    severity: "blocker",
+    node_ids: sortedDisconnectedOptions,
+    edge_ids: [],
+    // Deterministic order: goal first, then sorted option IDs
+    affected_node_ids: [goalId, ...sortedDisconnectedOptions],
+    affected_edge_ids: [],
+    explanation: `No options have a path to the goal node.`,
+    fix_hint: "Connect each option to the goal via at least one factor or edge",
+  } : undefined;
+
+  return { status, disconnectedOptions: sortedDisconnectedOptions, weakPaths, warning };
+}
+
+/**
+ * Compute model quality factors for a graph.
+ */
+export interface ModelQualityFactorsResult {
+  estimate_confidence: number;
+  strength_variation: number;
+  range_confidence_coverage: number;
+  has_baseline_option: boolean;
+}
+
+/**
+ * Compute model quality factors for the draft graph.
+ */
+export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQualityFactorsResult {
+  const defaultResult: ModelQualityFactorsResult = {
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  };
+
+  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
+    return defaultResult;
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[];
+
+  // Compute strength variation (CV)
+  const strengths = edges
+    .map(e => e?.strength_mean ?? e?.weight ?? 0.5)
+    .filter(s => typeof s === "number" && Number.isFinite(s));
+
+  let strengthVariation = 0;
+  if (strengths.length > 1) {
+    const mean = strengths.reduce((a, b) => a + b, 0) / strengths.length;
+    const variance = strengths.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / strengths.length;
+    const std = Math.sqrt(variance);
+    strengthVariation = mean !== 0 ? std / Math.abs(mean) : 0;
+  }
+
+  // Check for baseline option
+  const baselinePatterns = [/status\s*quo/i, /do\s*nothing/i, /no\s*action/i, /baseline/i, /current/i, /as\s*is/i];
+  const hasBaselineOption = nodes.some(n => {
+    if (n?.kind !== "option") return false;
+    const label = n?.label ?? "";
+    if (baselinePatterns.some(p => p.test(label))) return true;
+    if ((n?.data as any)?.is_status_quo === true) return true;
+    return false;
+  });
+
+  // Compute range confidence coverage (% of interventions with Priority 1-2 ranges)
+  let totalInterventions = 0;
+  let interventionsWithRanges = 0;
+
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    const interventions = (node?.data as any)?.interventions ?? [];
+    for (const interv of interventions) {
+      totalInterventions++;
+      // Check if intervention has explicit range
+      const hasRange = interv?.range?.min !== undefined && interv?.range?.max !== undefined;
+      const hasExtractedRange = interv?.extracted_range?.min !== undefined && interv?.extracted_range?.max !== undefined;
+      if (hasRange || hasExtractedRange) {
+        interventionsWithRanges++;
+      }
+    }
+  }
+
+  const rangeConfidenceCoverage = totalInterventions > 0 ? interventionsWithRanges / totalInterventions : 0;
+
+  // Estimate overall confidence based on factors
+  const confidenceFactors = [
+    strengthVariation > 0.3 ? 0.8 : 0.5, // Higher variation = more confidence
+    hasBaselineOption ? 0.9 : 0.6,
+    rangeConfidenceCoverage > 0.5 ? 0.8 : 0.5,
+  ];
+  const estimateConfidence = confidenceFactors.reduce((a, b) => a + b, 0) / confidenceFactors.length;
+
+  return {
+    estimate_confidence: Math.round(estimateConfidence * 100) / 100,
+    strength_variation: Math.round(strengthVariation * 1000) / 1000,
+    range_confidence_coverage: Math.round(rangeConfidenceCoverage * 100) / 100,
+    has_baseline_option: hasBaselineOption,
   };
 }
 

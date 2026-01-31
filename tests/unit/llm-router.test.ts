@@ -165,19 +165,19 @@ describe("LLM Router", () => {
   });
 
   describe("Task-specific routing", () => {
-    it("uses provider matching the task default model", () => {
+    it("uses LLM_PROVIDER unless task model matches that provider", () => {
       process.env.LLM_PROVIDER = "anthropic";
 
       const draftAdapter = getAdapter("draft_graph");
       const suggestAdapter = getAdapter("suggest_options");
       const repairAdapter = getAdapter("repair_graph");
 
-      // Provider is determined by TASK_MODEL_DEFAULTS model, not LLM_PROVIDER
-      // draft_graph uses gpt-4o → OpenAI
-      // suggest_options uses gpt-5.2 → OpenAI (options maps to gpt-5.2 in TASK_MODEL_DEFAULTS)
-      // repair_graph uses claude-sonnet-4-20250514 → Anthropic
-      expect(draftAdapter.name).toBe("openai");
-      expect(suggestAdapter.name).toBe("openai");
+      // LLM_PROVIDER takes precedence; task defaults only used if compatible
+      // draft_graph default is gpt-4o (OpenAI), but LLM_PROVIDER=anthropic → Anthropic
+      // suggest_options default is gpt-5.2 (OpenAI), but LLM_PROVIDER=anthropic → Anthropic
+      // repair_graph default is claude-sonnet-4 (Anthropic), matches LLM_PROVIDER → Anthropic
+      expect(draftAdapter.name).toBe("anthropic");
+      expect(suggestAdapter.name).toBe("anthropic");
       expect(repairAdapter.name).toBe("anthropic");
     });
   });
