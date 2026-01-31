@@ -834,4 +834,68 @@ describe("V3 Validator - Graph Structure Validation", () => {
       expect(warning?.message).toContain("factor_2");
     });
   });
+
+  describe("Null/Undefined Interventions Regression", () => {
+    it("handles options with undefined interventions without throwing", () => {
+      const response = makeV3Response({
+        options: [
+          {
+            id: "option_1",
+            label: "Option A",
+            status: "needs_user_mapping",
+            interventions: undefined as any, // Simulate missing interventions
+          },
+        ],
+      });
+
+      // Should not throw "interventions is not iterable"
+      expect(() => validateV3Response(response)).not.toThrow();
+
+      const result = validateV3Response(response);
+      // Validation should complete (may have warnings but no crash)
+      expect(result).toBeDefined();
+      expect(Array.isArray(result.errors)).toBe(true);
+      expect(Array.isArray(result.warningsOnly)).toBe(true);
+    });
+
+    it("handles options with null interventions without throwing", () => {
+      const response = makeV3Response({
+        options: [
+          {
+            id: "option_1",
+            label: "Option A",
+            status: "needs_user_mapping",
+            interventions: null as any, // Simulate null interventions
+          },
+        ],
+      });
+
+      // Should not throw "interventions is not iterable"
+      expect(() => validateV3Response(response)).not.toThrow();
+
+      const result = validateV3Response(response);
+      expect(result).toBeDefined();
+    });
+
+    it("treats missing interventions as empty (no crash on ready status)", () => {
+      const response = makeV3Response({
+        options: [
+          {
+            id: "option_1",
+            label: "Option A",
+            status: "ready", // ready status with no interventions
+            interventions: undefined as any,
+          },
+        ],
+      });
+
+      // Key assertion: validation completes without crash (regression test)
+      // Before fix: "interventions is not iterable" TypeError
+      const result = validateV3Response(response);
+      expect(result).toBeDefined();
+      expect(result.valid).toBeDefined();
+      expect(Array.isArray(result.errors)).toBe(true);
+      expect(Array.isArray(result.warningsOnly)).toBe(true);
+    });
+  });
 });

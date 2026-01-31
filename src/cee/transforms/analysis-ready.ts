@@ -375,7 +375,7 @@ export function validateAnalysisReadyPayload(
 
   // Rule 5: Status consistency
   const hasEmptyInterventions = payload.options.some(
-    (o) => Object.keys(o.interventions).length === 0
+    (o) => Object.keys(o.interventions ?? {}).length === 0
   );
 
   if (hasEmptyInterventions && payload.status === "ready") {
