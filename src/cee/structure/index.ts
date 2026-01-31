@@ -1195,9 +1195,9 @@ export function detectSameLeverOptions(
     const optionId = node?.id;
     if (typeof optionId !== "string") continue;
 
-    const interventions = (node?.data as any)?.interventions ?? [];
+    const interventions = (node?.data as any)?.interventions ?? {};
     const targets = new Set<string>();
-    for (const interv of interventions) {
+    for (const interv of Object.values(interventions) as any[]) {
       const targetId = interv?.target_match?.node_id ?? interv?.target;
       if (typeof targetId === "string") targets.add(targetId);
     }
@@ -1555,8 +1555,8 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
 
   for (const node of nodes) {
     if (node?.kind !== "option") continue;
-    const interventions = (node?.data as any)?.interventions ?? [];
-    for (const interv of interventions) {
+    const interventions = (node?.data as any)?.interventions ?? {};
+    for (const interv of Object.values(interventions) as any[]) {
       totalInterventions++;
       // Check if intervention has explicit range
       const hasRange = interv?.range?.min !== undefined && interv?.range?.max !== undefined;

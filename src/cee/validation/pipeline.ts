@@ -2549,8 +2549,8 @@ export async function finaliseCeeDraftResponse(
     for (const node of nodes) {
       if (node?.kind !== "option") continue;
       const optionId = node?.id;
-      const interventions = (node?.data as any)?.interventions ?? [];
-      for (const interv of interventions) {
+      const interventions = (node?.data as any)?.interventions ?? {};
+      for (const interv of Object.values(interventions) as any[]) {
         const targetId = interv?.target_match?.node_id ?? interv?.target;
         if (!targetId) continue;
         interventionHints.push({
