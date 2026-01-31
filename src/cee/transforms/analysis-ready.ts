@@ -63,7 +63,7 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   let hasRawValues = false;
   let hasNonNumericRaw = false;
 
-  for (const [factorId, intervention] of Object.entries(option.interventions)) {
+  for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
     // Extract the encoded numeric value (always required)
     interventions[factorId] = intervention.value;
 
@@ -93,7 +93,7 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
 
   // Build extraction metadata from first intervention's source/confidence
   let extractionMetadata: ExtractionMetadataT | undefined;
-  const firstIntervention = Object.values(option.interventions)[0];
+  const firstIntervention = Object.values(option.interventions ?? {})[0];
   if (firstIntervention) {
     extractionMetadata = {
       source: firstIntervention.source,
@@ -332,7 +332,7 @@ export function validateAnalysisReadyPayload(
 
   // Rule 3: All intervention factor IDs must exist with kind="factor"
   for (const option of payload.options) {
-    for (const factorId of Object.keys(option.interventions)) {
+    for (const factorId of Object.keys(option.interventions ?? {})) {
       if (!factorNodeIds.has(factorId)) {
         // Check if it exists at all but with wrong kind
         if (allNodeIds.has(factorId)) {
@@ -355,7 +355,7 @@ export function validateAnalysisReadyPayload(
 
   // Rule 4: Intervention values must be numbers
   for (const option of payload.options) {
-    for (const [factorId, value] of Object.entries(option.interventions)) {
+    for (const [factorId, value] of Object.entries(option.interventions ?? {})) {
       if (typeof value !== "number") {
         errors.push({
           code: "INTERVENTION_NOT_NUMBER",

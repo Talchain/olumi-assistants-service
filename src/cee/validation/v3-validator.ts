@@ -215,7 +215,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
   // In V3, options are in a separate array (as well as in nodes[] for graph connectivity)
   const controllableFactors = new Set<string>();
   for (const option of response.options) {
-    for (const intervention of Object.values(option.interventions)) {
+    for (const intervention of Object.values(option.interventions ?? {})) {
       controllableFactors.add(intervention.target_match.node_id);
     }
   }
@@ -597,7 +597,7 @@ function validateOptions(
 
     // Check for identical interventions (v6.0.2 rule: options must differ)
     // Normalize by sorting keys to make comparison order-insensitive
-    const interventionEntries = Object.entries(option.interventions)
+    const interventionEntries = Object.entries(option.interventions ?? {})
       .map(([_k, v]) => `${v.target_match.node_id}:${v.value}`)
       .sort()
       .join("|");
@@ -629,7 +629,7 @@ function validateOptions(
     }
 
     // Check status consistency
-    const hasInterventions = Object.keys(option.interventions).length > 0;
+    const hasInterventions = Object.keys(option.interventions ?? {}).length > 0;
     if (option.status === "ready" && !hasInterventions) {
       warnings.push({
         code: "EMPTY_INTERVENTIONS_READY",
@@ -686,7 +686,7 @@ function validateInterventions(
   const stage = "intervention_validation";
 
   for (const option of response.options) {
-    for (const [factorId, intervention] of Object.entries(option.interventions)) {
+    for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
       // Check target node exists
       if (!nodeIds.has(intervention.target_match.node_id)) {
         warnings.push({
@@ -821,7 +821,7 @@ function validateInterventionEdgeConsistency(
     const edgeTargets = optionToFactorEdges.get(option.id) ?? new Set<string>();
     const interventionTargets = new Set<string>();
 
-    for (const [factorKey, intervention] of Object.entries(option.interventions)) {
+    for (const [factorKey, intervention] of Object.entries(option.interventions ?? {})) {
       const interventionTarget = intervention.target_match.node_id;
       interventionTargets.add(interventionTarget);
 

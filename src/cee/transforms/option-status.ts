@@ -88,7 +88,7 @@ export function countInterventionsByResolution(
   let resolved = 0;
   let unresolved = 0;
 
-  for (const intervention of Object.values(interventions)) {
+  for (const intervention of Object.values(interventions ?? {})) {
     if (isInterventionResolved(intervention)) {
       resolved++;
     } else {

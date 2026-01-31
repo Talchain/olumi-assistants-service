@@ -680,7 +680,7 @@ function generateValidationWarnings(
 
   for (const option of options) {
     // Check for empty interventions on ready options
-    if (option.status === "ready" && Object.keys(option.interventions).length === 0) {
+    if (option.status === "ready" && Object.keys(option.interventions ?? {}).length === 0) {
       warnings.push({
         code: "EMPTY_INTERVENTIONS_READY",
         severity: "warning",
@@ -691,7 +691,7 @@ function generateValidationWarnings(
     }
 
     // Check intervention targets exist
-    for (const [factorId, intervention] of Object.entries(option.interventions)) {
+    for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
       if (!nodeIds.has(intervention.target_match.node_id)) {
         warnings.push({
           code: "INTERVENTION_TARGET_NOT_FOUND",

@@ -1004,7 +1004,7 @@ export function getExtractionStatistics(options: ExtractedOption[]): ExtractionS
       stats.raw_interventions_total += Object.keys(option.raw_interventions).length;
     }
 
-    for (const intervention of Object.values(option.interventions)) {
+    for (const intervention of Object.values(option.interventions ?? {})) {
       stats.interventions_total++;
 
       // Track match types
