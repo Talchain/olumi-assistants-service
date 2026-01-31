@@ -912,20 +912,36 @@ export function extractOptionsFromNodes(
  * Normalise option interventions to ensure non-null object.
  * Centralises the ?? {} guard pattern at a single ingest point.
  *
- * Emits telemetry when interventions are missing but option status
- * suggests they should exist (status != 'needs_user_mapping').
+ * ## Normalisation Architecture
+ *
+ * There are two entry points for options into the system:
+ * 1. **Extraction path**: Options created via toOptionV3() → normalised here
+ * 2. **Validation path**: Raw LLM responses via validateV3Response() → normalised there
+ *
+ * Both paths call this function, ensuring all options have interventions: {} before
+ * downstream processing. The ?? {} guards in validators remain as belt-and-suspenders.
+ *
+ * ## Telemetry
+ *
+ * Emits `InterventionsMissingDefaulted` when interventions are missing and:
+ * - status is not 'needs_user_mapping' (expected to have interventions)
+ * - status is missing/unknown (data quality issue)
  */
 export function normaliseOptionInterventions<T extends { interventions?: Record<string, unknown> | null; id?: string; status?: string }>(
   option: T
 ): T & { interventions: Record<string, unknown> } {
   const wasMissing = option.interventions == null;
 
-  // Emit telemetry if interventions missing but status suggests they should exist
-  if (wasMissing && option.status && option.status !== "needs_user_mapping") {
-    emit(TelemetryEvents.InterventionsMissingDefaulted, {
-      option_id: option.id ?? "unknown",
-      option_status: option.status,
-    });
+  // Emit telemetry if interventions missing and status suggests they should exist
+  // Also emit with "unknown" status when status field itself is missing (data quality signal)
+  if (wasMissing) {
+    const status = option.status ?? "unknown";
+    if (status !== "needs_user_mapping") {
+      emit(TelemetryEvents.InterventionsMissingDefaulted, {
+        option_id: option.id ?? "unknown",
+        option_status: status,
+      });
+    }
   }
 
   return {

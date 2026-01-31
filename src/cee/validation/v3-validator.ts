@@ -12,6 +12,30 @@ import type {
 import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
+import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
+
+/**
+ * Normalise raw response options before schema validation.
+ * This is the ingest boundary for raw LLM responses entering validation.
+ */
+function normaliseRawResponseOptions(response: unknown): unknown {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  const resp = response as Record<string, unknown>;
+  if (!resp.options || !Array.isArray(resp.options)) {
+    return response;
+  }
+
+  return {
+    ...resp,
+    options: resp.options.map((opt: unknown) => {
+      if (!opt || typeof opt !== "object") return opt;
+      return normaliseOptionInterventions(opt as Record<string, unknown>);
+    }),
+  };
+}
 
 /**
  * Validation result with detailed findings.
@@ -56,8 +80,12 @@ export function validateV3Response(
 ): V3ValidationResult {
   const warnings: ValidationWarningV3T[] = [];
 
+  // Normalise options.interventions before schema validation
+  // This ensures null/undefined interventions become {} before zod parsing
+  const normalisedResponse = normaliseRawResponseOptions(response);
+
   // Schema validation first
-  const schemaResult = CEEGraphResponseV3.safeParse(response);
+  const schemaResult = CEEGraphResponseV3.safeParse(normalisedResponse);
   if (!schemaResult.success) {
     for (const issue of schemaResult.error.issues) {
       warnings.push({

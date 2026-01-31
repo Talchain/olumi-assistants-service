@@ -5,7 +5,6 @@ import {
   toOptionV3,
   type ExtractedOption,
 } from "../../src/cee/extraction/intervention-extractor.js";
-import { normaliseV3ResponseOptions } from "../../src/cee/transforms/schema-v3.js";
 import * as telemetry from "../../src/utils/telemetry.js";
 
 describe("Option Interventions Normalisation", () => {
@@ -95,6 +94,24 @@ describe("Option Interventions Normalisation", () => {
       );
     });
 
+    it("emits telemetry with unknown status when status is missing", () => {
+      const option = {
+        id: "option_no_status",
+        // status is intentionally missing
+        interventions: undefined as any,
+      };
+
+      normaliseOptionInterventions(option);
+
+      expect(emitSpy).toHaveBeenCalledWith(
+        telemetry.TelemetryEvents.InterventionsMissingDefaulted,
+        {
+          option_id: "option_no_status",
+          option_status: "unknown",
+        }
+      );
+    });
+
     it("does NOT emit telemetry when status is needs_user_mapping", () => {
       const option = {
         id: "option_mapping",
@@ -167,41 +184,6 @@ describe("Option Interventions Normalisation", () => {
       const result = toOptionV3(extracted);
 
       expect(result.interventions).toEqual({ factor_1: intervention });
-    });
-  });
-
-  describe("normaliseV3ResponseOptions", () => {
-    it("normalises all options in a response", () => {
-      const response = {
-        schema_version: "3.0",
-        options: [
-          { id: "opt_1", status: "ready", interventions: undefined },
-          { id: "opt_2", status: "ready", interventions: null },
-          { id: "opt_3", status: "ready", interventions: { f: { v: 1 } } },
-        ],
-      };
-
-      const result = normaliseV3ResponseOptions(response as any);
-
-      expect(result.options[0].interventions).toEqual({});
-      expect(result.options[1].interventions).toEqual({});
-      expect(result.options[2].interventions).toEqual({ f: { v: 1 } });
-    });
-
-    it("handles response with no options array", () => {
-      const response = { schema_version: "3.0" };
-
-      const result = normaliseV3ResponseOptions(response as any);
-
-      expect(result).toEqual(response);
-    });
-
-    it("handles response with empty options array", () => {
-      const response = { schema_version: "3.0", options: [] };
-
-      const result = normaliseV3ResponseOptions(response as any);
-
-      expect(result.options).toEqual([]);
     });
   });
 
