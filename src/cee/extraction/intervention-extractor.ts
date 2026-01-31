@@ -25,7 +25,7 @@ import {
   categorizeUserQuestions,
   type StatusComputationInput,
 } from "../transforms/option-status.js";
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 /**
  * Raw extracted intervention before graph matching.
@@ -909,19 +909,49 @@ export function extractOptionsFromNodes(
 }
 
 /**
+ * Normalise option interventions to ensure non-null object.
+ * Centralises the ?? {} guard pattern at a single ingest point.
+ *
+ * Emits telemetry when interventions are missing but option status
+ * suggests they should exist (status != 'needs_user_mapping').
+ */
+export function normaliseOptionInterventions<T extends { interventions?: Record<string, unknown> | null; id?: string; status?: string }>(
+  option: T
+): T & { interventions: Record<string, unknown> } {
+  const wasMissing = option.interventions == null;
+
+  // Emit telemetry if interventions missing but status suggests they should exist
+  if (wasMissing && option.status && option.status !== "needs_user_mapping") {
+    emit(TelemetryEvents.InterventionsMissingDefaulted, {
+      option_id: option.id ?? "unknown",
+      option_status: option.status,
+    });
+  }
+
+  return {
+    ...option,
+    interventions: option.interventions ?? {},
+  };
+}
+
+/**
  * Convert extracted option to V3 schema format.
  * Includes raw_interventions for Raw+Encoded pattern support.
+ * Normalises interventions to ensure non-null object (single normalisation point).
  */
 export function toOptionV3(extracted: ExtractedOption): OptionV3T {
+  // Normalise interventions at the creation point
+  const normalised = normaliseOptionInterventions(extracted);
+
   const result: OptionV3T = {
-    id: extracted.id,
-    label: extracted.label,
-    description: extracted.description,
-    status: extracted.status,
-    interventions: extracted.interventions,
-    unresolved_targets: extracted.unresolved_targets,
-    user_questions: extracted.user_questions,
-    provenance: extracted.provenance,
+    id: normalised.id,
+    label: normalised.label,
+    description: normalised.description,
+    status: normalised.status,
+    interventions: normalised.interventions,
+    unresolved_targets: normalised.unresolved_targets,
+    user_questions: normalised.user_questions,
+    provenance: normalised.provenance,
   };
 
   // Add raw_interventions if present (Raw+Encoded pattern)

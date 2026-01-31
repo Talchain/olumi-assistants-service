@@ -28,6 +28,7 @@ import {
   toOptionsV3,
   getExtractionStatistics,
   hasPriceRelatedUnresolvedTargets,
+  normaliseOptionInterventions,
   type EdgeHint,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
@@ -36,6 +37,29 @@ import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
+
+// ============================================================================
+// Option Interventions Normalisation
+// ============================================================================
+
+/**
+ * Normalise all options in a V3 response to ensure interventions is never null/undefined.
+ * This is the single normalisation point for raw LLM responses entering the system.
+ *
+ * Call this on raw LLM responses before validation or downstream processing.
+ */
+export function normaliseV3ResponseOptions<T extends { options?: Array<{ interventions?: Record<string, unknown> | null; id?: string; status?: string }> }>(
+  response: T
+): T {
+  if (!response.options || !Array.isArray(response.options)) {
+    return response;
+  }
+
+  return {
+    ...response,
+    options: response.options.map(normaliseOptionInterventions),
+  };
+}
 
 // ============================================================================
 // V3 Types

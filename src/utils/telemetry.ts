@@ -188,6 +188,7 @@ export const TelemetryEvents = {
 
   NodeKindNormalized: "llm.normalization.node_kind_mapped",
   FactorBaselineDefaulted: "cee.factor.baseline_defaulted",
+  InterventionsMissingDefaulted: "cee.option.interventions_missing_defaulted",
 
   // JSON extraction events (model output normalization)
   JsonExtractionRequired: "llm.json_extraction.required",
