@@ -58,6 +58,7 @@ import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } fro
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
+import { publicPromptRoutes } from "./routes/v1.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
 import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
@@ -741,6 +742,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }
+
+  // Public prompt routes (cache warming and status)
+  // Registered unconditionally - routes handle health checks internally
+  await publicPromptRoutes(app);
 
   // Always initialize prompt store if database credentials are configured
   // This ensures prompts can be loaded from Supabase/Postgres even if PROMPTS_ENABLED is not set
