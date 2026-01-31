@@ -2549,8 +2549,14 @@ export async function finaliseCeeDraftResponse(
     for (const node of nodes) {
       if (node?.kind !== "option") continue;
       const optionId = node?.id;
-      const interventions = (node?.data as any)?.interventions ?? {};
-      for (const interv of Object.values(interventions) as any[]) {
+      const rawInterventions = (node?.data as any)?.interventions;
+      // Handle both array (V1/V2) and object (V3) formats
+      const interventionValues = Array.isArray(rawInterventions)
+        ? rawInterventions
+        : rawInterventions && typeof rawInterventions === "object"
+          ? Object.values(rawInterventions) as any[]
+          : [];
+      for (const interv of interventionValues) {
         const targetId = interv?.target_match?.node_id ?? interv?.target;
         if (!targetId) continue;
         interventionHints.push({

@@ -1195,9 +1195,15 @@ export function detectSameLeverOptions(
     const optionId = node?.id;
     if (typeof optionId !== "string") continue;
 
-    const interventions = (node?.data as any)?.interventions ?? {};
+    const rawInterventions = (node?.data as any)?.interventions;
+    // Handle both array (V1/V2) and object (V3) formats
+    const interventionValues = Array.isArray(rawInterventions)
+      ? rawInterventions
+      : rawInterventions && typeof rawInterventions === "object"
+        ? Object.values(rawInterventions) as any[]
+        : [];
     const targets = new Set<string>();
-    for (const interv of Object.values(interventions) as any[]) {
+    for (const interv of interventionValues) {
       const targetId = interv?.target_match?.node_id ?? interv?.target;
       if (typeof targetId === "string") targets.add(targetId);
     }
@@ -1555,8 +1561,14 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
 
   for (const node of nodes) {
     if (node?.kind !== "option") continue;
-    const interventions = (node?.data as any)?.interventions ?? {};
-    for (const interv of Object.values(interventions) as any[]) {
+    const rawInterventions = (node?.data as any)?.interventions;
+    // Handle both array (V1/V2) and object (V3) formats
+    const interventionValues = Array.isArray(rawInterventions)
+      ? rawInterventions
+      : rawInterventions && typeof rawInterventions === "object"
+        ? Object.values(rawInterventions) as any[]
+        : [];
+    for (const interv of interventionValues) {
       totalInterventions++;
       // Check if intervention has explicit range
       const hasRange = interv?.range?.min !== undefined && interv?.range?.max !== undefined;
