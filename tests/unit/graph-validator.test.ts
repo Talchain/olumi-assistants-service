@@ -16,6 +16,7 @@ import {
   EDGE_LIMIT,
   MIN_OPTIONS,
   MAX_OPTIONS,
+  type ValidationIssue,
 } from '../../src/validators/graph-validator.types.js';
 
 // =============================================================================
@@ -64,7 +65,7 @@ function createValidGraph(): GraphT {
 /**
  * Helper to find issue by code
  */
-function findIssue(issues: { code: string }[], code: string) {
+function findIssue(issues: ValidationIssue[], code: string) {
   return issues.find((i) => i.code === code);
 }
 

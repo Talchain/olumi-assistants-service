@@ -190,7 +190,7 @@ export const Graph = z.object({
       roots: z.array(z.string()).default([]),
       leaves: z.array(z.string()).default([]),
       suggested_positions: z.record(z.string(), Position).default({}),
-      source: z.enum(["assistant", "fixtures"]).default("assistant")
+      source: z.enum(["assistant", "fixtures", "test"]).default("assistant")
     })
     .default({ roots: [], leaves: [], suggested_positions: {}, source: "assistant" })
 });

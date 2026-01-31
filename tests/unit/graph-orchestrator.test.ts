@@ -479,8 +479,8 @@ describe("generateGraph orchestrator", () => {
 describe("formatErrorsForRepair", () => {
   it("formats errors into numbered list", () => {
     const errors = [
-      { code: "MISSING_GOAL", severity: "error" as const, message: "Graph must have exactly 1 goal node" },
-      { code: "INVALID_EDGE_TYPE", severity: "error" as const, message: "Invalid edge from option to goal", path: "edges[2]" },
+      { code: "MISSING_GOAL" as const, severity: "error" as const, message: "Graph must have exactly 1 goal node" },
+      { code: "INVALID_EDGE_TYPE" as const, severity: "error" as const, message: "Invalid edge from option to goal", path: "edges[2]" },
     ];
 
     const formatted = formatErrorsForRepair(errors);
@@ -499,7 +499,7 @@ describe("buildRepairPromptContext", () => {
     const brief = "Should we expand?";
     const graph = createValidGraph();
     const errors = [
-      { code: "MISSING_GOAL", severity: "error" as const, message: "Missing goal" },
+      { code: "MISSING_GOAL" as const, severity: "error" as const, message: "Missing goal" },
     ];
 
     const context = buildRepairPromptContext(brief, graph, errors);
