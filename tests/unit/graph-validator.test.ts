@@ -10,7 +10,7 @@ import {
   validateGraph,
   validateGraphPostNormalisation,
 } from '../../src/validators/graph-validator.js';
-import type { GraphT, NodeT, EdgeT } from '../../src/schemas/graph.js';
+import type { GraphT, NodeT } from '../../src/schemas/graph.js';
 import {
   NODE_LIMIT,
   EDGE_LIMIT,

@@ -226,7 +226,7 @@ function extractJsonWithBracketMatching(
   if (openBracket !== "{" && openBracket !== "[") {
     return null;
   }
-  const closeBracket = openBracket === "{" ? "}" : "]";
+  const _closeBracket = openBracket === "{" ? "}" : "]"; // Used for type safety, depth tracking handles matching
 
   let depth = 0;
   let inString = false;

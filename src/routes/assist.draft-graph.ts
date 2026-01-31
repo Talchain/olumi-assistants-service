@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { getRequestId } from "../utils/request-id.js";
 import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { calcConfidence, shouldClarify } from "../utils/confidence.js";
@@ -37,7 +37,6 @@ import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import {
   validateAndRepairGraph,
   GraphValidationError,
-  type ValidateAndRepairResult,
   type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
 
@@ -572,7 +571,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Extract model overrides for use in pipeline
   const modelOverride = input.model;
   const repairModelOverride = input.repair_model;
-  const biasModelOverride = input.bias_model;
+  const _biasModelOverride = input.bias_model; // Reserved for future use
   const enrichmentModelOverride = input.enrichment_model;
 
   // Process attachments with grounding module (v04: 5k limit, privacy, safe CSV)

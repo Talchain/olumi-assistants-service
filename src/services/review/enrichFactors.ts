@@ -18,12 +18,10 @@ import {
 import {
   EnrichFactorsInput,
   EnrichFactorsOutput,
-  FactorEnrichment,
   validateConfidenceQuestionRank,
   filterByRank,
   type EnrichFactorsInputT,
   type FactorEnrichmentT,
-  type EnrichFactorsOutputT,
 } from "../../schemas/enrichment.js";
 import { FactorType, type GraphT, type NodeT, type FactorTypeT } from "../../schemas/graph.js";
 import type { FactorSensitivityInputT } from "../../schemas/enrichment.js";

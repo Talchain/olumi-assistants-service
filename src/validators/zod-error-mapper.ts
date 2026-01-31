@@ -101,9 +101,10 @@ function generateLLMFriendlyMessage(issue: ZodIssue, path: string): string {
     case "invalid_type":
       return `Expected ${issue.expected}, received ${issue.received}${location}`;
 
-    case "invalid_enum_value":
+    case "invalid_enum_value": {
       const options = issue.options?.slice(0, 5).join(", ") ?? "unknown";
       return `Invalid value${location}. Must be one of: ${options}`;
+    }
 
     case "too_small":
       if (issue.type === "string") {
@@ -125,9 +126,10 @@ function generateLLMFriendlyMessage(issue: ZodIssue, path: string): string {
       }
       return `Value${location} is too large (maximum: ${issue.maximum})`;
 
-    case "unrecognized_keys":
+    case "unrecognized_keys": {
       const keys = issue.keys?.slice(0, 3).join(", ") ?? "unknown";
       return `Unrecognized keys${location}: ${keys}`;
+    }
 
     case "invalid_union":
       return `Value${location} does not match any valid schema`;

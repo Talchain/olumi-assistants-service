@@ -5,7 +5,7 @@
  * with conversational preamble, suffix text, and markdown code blocks.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { extractJsonFromResponse, extractJson } from "../../src/utils/json-extractor.js";
 
 // Mock telemetry to prevent actual emissions during tests
