@@ -89,6 +89,68 @@ describe("Goal-Number Brief Validation (T4)", () => {
       expect(goalNode).toBeDefined();
       expect(goalNode?.label).toContain("£20k MRR");
     });
+
+    it("does NOT flag factors that REFERENCE a target value (share of £20k target)", () => {
+      // This tests the exclusion pattern for reference-style labels
+      const graph: GraphT = {
+        version: "1",
+        default_seed: 42,
+        nodes: [
+          { id: "decision_1", kind: "decision", label: "Should we increase price?" },
+          { id: "opt_yes", kind: "option", label: "Increase price" },
+          { id: "opt_no", kind: "option", label: "Keep current price" },
+          // Reference-style factor - should NOT be flagged
+          {
+            id: "fac_mrr",
+            kind: "factor",
+            label: "Current MRR (0–1, share of £20k target)",
+            data: { value: 0.6, extractionType: "inferred" },
+          },
+          { id: "goal_1", kind: "goal", label: "Reach £20k MRR" },
+        ],
+        edges: [
+          { from: "decision_1", to: "opt_yes", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_no", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "fac_mrr", to: "goal_1", strength_mean: 0.8, belief_exists: 0.9 },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      };
+
+      const result = validateGraph({ graph });
+
+      // fac_mrr should NOT be flagged - it's a reference, not the target itself
+      const goalNumErrors = result.errors.filter((e) => e.code === "GOAL_NUMBER_AS_FACTOR");
+      const mrrError = goalNumErrors.find((e) => e.context?.factorId === "fac_mrr");
+      expect(mrrError).toBeUndefined();
+    });
+
+    it("does NOT flag 'progress toward £X' style factors", () => {
+      const graph: GraphT = {
+        version: "1",
+        default_seed: 42,
+        nodes: [
+          { id: "decision_1", kind: "decision", label: "Decision" },
+          { id: "opt_1", kind: "option", label: "Option" },
+          {
+            id: "fac_progress",
+            kind: "factor",
+            label: "Progress toward £20k goal",
+            data: { value: 0.5 },
+          },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "decision_1", to: "opt_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "fac_progress", to: "goal_1", strength_mean: 0.8, belief_exists: 0.9 },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      };
+
+      const result = validateGraph({ graph });
+
+      const goalNumErrors = result.errors.filter((e) => e.code === "GOAL_NUMBER_AS_FACTOR");
+      expect(goalNumErrors.find((e) => e.context?.factorId === "fac_progress")).toBeUndefined();
+    });
   });
 
   describe("Structural edge canonical repair", () => {

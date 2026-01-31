@@ -270,10 +270,34 @@ const GOAL_NUMBER_PATTERNS = [
 ];
 
 /**
+ * Patterns that indicate a REFERENCE to a target, not THE target itself.
+ * These are used to exclude false positives like "share of £20k target".
+ */
+const GOAL_REFERENCE_EXCLUSIONS = [
+  // "share of £20k target" or "fraction of $100k goal"
+  /(?:share|fraction|portion|percentage|%)\s+of\s+[£$€]?[\d,]+[kKmM]?\s*(?:target|goal)?/i,
+  // "progress toward £20k" or "progress to $100k"
+  /progress\s+(?:toward|towards|to)\s+[£$€]?[\d,]+[kKmM]?/i,
+  // "(0-1, share of £20k target)" - normalized metric description
+  /\([\d.]+[-–][\d.]+,?\s*(?:share|fraction|portion)\s+of\s+[£$€]?[\d,]+[kKmM]?\s*(?:target|goal)?\)/i,
+  // "relative to £20k target" or "compared to $50k goal"
+  /(?:relative|compared)\s+to\s+[£$€]?[\d,]+[kKmM]?\s*(?:target|goal)?/i,
+  // "as % of £20k" or "as fraction of $100k"
+  /as\s+(?:%|percent|percentage|fraction|share)\s+of\s+[£$€]?[\d,]+[kKmM]?/i,
+];
+
+/**
  * Check if a factor label appears to be a goal target value.
+ * Excludes cases where the target is just a reference point (e.g., "share of £20k target").
  */
 function isGoalNumberLabel(label: string): boolean {
   if (!label) return false;
+
+  // First check if this is a reference to a target (not the target itself)
+  const isReference = GOAL_REFERENCE_EXCLUSIONS.some((pattern) => pattern.test(label));
+  if (isReference) return false;
+
+  // Then check if it matches goal number patterns
   return GOAL_NUMBER_PATTERNS.some((pattern) => pattern.test(label));
 }
 
