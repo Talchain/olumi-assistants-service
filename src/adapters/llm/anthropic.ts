@@ -477,10 +477,11 @@ export async function draftGraphWithAnthropic(
       task: "draft_graph",
       model,
       correlationId: idempotencyKey,
+      includeRawContent: args.includeDebug, // Preserve full raw text for debugging
     });
     const rawJson = extractionResult.json as Record<string, unknown>;
-    // Preserve raw text for debug output
-    const jsonText = extractionResult.extractedContent || content.text.trim();
+    // Use full raw text for debug output (preserves preamble/suffix for forensics)
+    const jsonText = content.text.trim();
     const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
       ? ((rawJson as any).nodes as any[])
         .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
