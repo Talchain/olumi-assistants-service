@@ -17,7 +17,7 @@ describe.skip("Anthropic prompt caching (PERF 2.1) - QUARANTINED", () => {
     const { __test_only } = await import("../../src/adapters/llm/anthropic.js");
 
     const args: DraftArgs = { brief: "Test brief", docs: [], seed: 17 };
-    const { system, userContent } = __test_only.buildDraftPrompt(args);
+    const { system, userContent } = await __test_only.buildDraftPrompt(args);
 
     expect(system).toHaveLength(1);
     expect(system[0].type).toBe("text");
@@ -30,7 +30,7 @@ describe.skip("Anthropic prompt caching (PERF 2.1) - QUARANTINED", () => {
     const { __test_only } = await import("../../src/adapters/llm/anthropic.js");
 
     const args: DraftArgs = { brief: "No cache", docs: [], seed: 17 };
-    const { system } = __test_only.buildDraftPrompt(args);
+    const { system } = await __test_only.buildDraftPrompt(args);
 
     expect(system).toHaveLength(1);
     expect(system[0].cache_control).toBeUndefined();
@@ -39,7 +39,7 @@ describe.skip("Anthropic prompt caching (PERF 2.1) - QUARANTINED", () => {
   it("keeps user-specific content out of cached system blocks for suggestions", async () => {
     const { __test_only } = await import("../../src/adapters/llm/anthropic.js");
 
-    const prompt = __test_only.buildSuggestPrompt({
+    const prompt = await __test_only.buildSuggestPrompt({
       goal: "Increase upgrades",
       constraints: { budget: "low" },
       existingOptions: ["Extend trial"],

@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { validateGraph } from "../../src/validators/graph-validator.js";
 import { fixNonCanonicalStructuralEdges } from "../../src/cee/structure/index.js";
-import type { GraphT } from "../../src/validators/graph-validator.types.js";
+import type { GraphT, NodeT } from "../../src/schemas/graph.js";
 
 /**
  * Creates a graph simulating output from a brief like:
@@ -85,7 +85,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
       const graph = createGoalNumberBriefGraph();
 
       // Goal node should exist and contain the goal description
-      const goalNode = graph.nodes.find((n) => n.kind === "goal");
+      const goalNode = graph.nodes.find((n: NodeT) => n.kind === "goal");
       expect(goalNode).toBeDefined();
       expect(goalNode?.label).toContain("£20k MRR");
     });
@@ -177,7 +177,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
       };
 
       // Run repair
-      const repairResult = fixNonCanonicalStructuralEdges(graph);
+      const repairResult = fixNonCanonicalStructuralEdges(graph as any);
 
       expect(repairResult).toBeDefined();
       expect(repairResult!.fixedEdgeCount).toBe(1);
@@ -205,7 +205,7 @@ describe("Goal-Number Brief Validation (T4)", () => {
         meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
       };
 
-      const repairResult = fixNonCanonicalStructuralEdges(graph);
+      const repairResult = fixNonCanonicalStructuralEdges(graph as any);
 
       expect(repairResult).toBeDefined();
       expect(repairResult!.repairs.length).toBe(4); // mean, std, prob, direction
@@ -248,12 +248,12 @@ describe("Goal-Number Brief Validation (T4)", () => {
       expect(structuralError).toBeDefined();
 
       // Step 2: Run repair
-      const repairResult = fixNonCanonicalStructuralEdges(graph);
+      const repairResult = fixNonCanonicalStructuralEdges(graph as any);
       expect(repairResult).toBeDefined();
       expect(repairResult!.fixedEdgeCount).toBe(1);
 
       // Step 3: Re-validate repaired graph - should pass structural edge check
-      const finalResult = validateGraph({ graph: repairResult!.graph });
+      const finalResult = validateGraph({ graph: repairResult!.graph as GraphT });
       const finalStructuralError = finalResult.errors.find((e) => e.code === "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR");
       expect(finalStructuralError).toBeUndefined();
     });
