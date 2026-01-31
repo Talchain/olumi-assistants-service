@@ -35,7 +35,7 @@ jobs:
           # Minimal env for validation (uses defaults)
           LLM_PROVIDER: fixtures
       - name: Run unit tests with coverage
-        run: pnpm test --coverage
+        run: pnpm test -- --coverage
 
       - name: Check for quarantined tests
         if: always()
