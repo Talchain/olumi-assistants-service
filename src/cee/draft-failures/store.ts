@@ -242,8 +242,12 @@ export function startDraftFailureRetentionJob(): void {
   const client = getClient();
   if (!client) return;
 
-  void cleanupOldDraftFailureBundles();
+  cleanupOldDraftFailureBundles().catch(err =>
+    log.debug({ error: String(err) }, 'Draft failure retention cleanup failed (fire-and-forget)')
+  );
   _cleanupTimer = setInterval(() => {
-    void cleanupOldDraftFailureBundles();
+    cleanupOldDraftFailureBundles().catch(err =>
+      log.debug({ error: String(err) }, 'Draft failure retention cleanup failed (fire-and-forget)')
+    );
   }, 24 * 60 * 60 * 1000);
 }

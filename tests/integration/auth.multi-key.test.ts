@@ -87,7 +87,7 @@ describe("Multi-Key Auth", () => {
       expect(response.statusCode).toBe(401);
       const body = JSON.parse(response.body);
       expect(body.schema).toBe("error.v1");
-      expect(body.code).toBe("FORBIDDEN");
+      expect(body.code).toBe("UNAUTHENTICATED");
       expect(body.message).toContain("Missing API key");
     });
 

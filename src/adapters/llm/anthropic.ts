@@ -1,12 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent } from "./types.js";
@@ -18,6 +16,15 @@ import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
+import {
+  LLMNode as AnthropicNode,
+  LLMEdge as AnthropicEdge,
+  LLMDraftResponse as AnthropicDraftResponse,
+  LLMOptionsResponse as AnthropicOptionsResponse,
+  LLMClarifyResponse as AnthropicClarifyResponse,
+  LLMCritiqueResponse as AnthropicCritiqueResponse,
+  LLMExplainDiffResponse as AnthropicExplainDiffResponse,
+} from './shared-schemas.js';
 
 export type DraftArgs = {
   brief: string;
@@ -61,94 +68,7 @@ function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean 
   };
 }
 
-// Zod schemas for Anthropic response validation
-const AnthropicNode = z.object({
-  id: z.string().min(1),
-  kind: NodeKind,
-  label: z.string().optional(),
-  body: z.string().max(200).optional(),
-  // Factor category (V12.4+): controllable, observable, external
-  category: FactorCategory.optional(),
-  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
-  data: NodeData.optional(),
-});
-
-// V4 edge strength schema (nested object from LLM)
-const EdgeStrength = z.object({
-  mean: z.number(),
-  std: z.number().positive(),
-}).optional();
-
-const AnthropicEdge = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  // V4 format (preferred) - from v4 prompt (nested)
-  strength: EdgeStrength,
-  exists_probability: z.number().min(0).max(1).optional(),
-  // V4 format (flat) - added by normaliseDraftResponse()
-  strength_mean: z.number().optional(),
-  strength_std: z.number().optional(),
-  belief_exists: z.number().optional(),
-  effect_direction: z.enum(["positive", "negative"]).optional(),
-  // Legacy format (deprecated, for backwards compatibility during transition)
-  weight: z.number().optional(),
-  belief: z.number().min(0).max(1).optional(),
-  provenance: StructuredProvenance.optional(),
-  provenance_source: ProvenanceSource.optional(),
-});
-
-const AnthropicDraftResponse = z.object({
-  nodes: z.array(AnthropicNode),
-  edges: z.array(AnthropicEdge),
-  rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
-});
-
-const AnthropicOptionsResponse = z.object({
-  options: z.array(
-    z.object({
-      id: z.string().min(1),
-      title: z.string().min(3),
-      pros: z.array(z.string()).min(2).max(3),
-      cons: z.array(z.string()).min(2).max(3),
-      evidence_to_gather: z.array(z.string()).min(2).max(3),
-    })
-  ),
-});
-
-const AnthropicClarifyResponse = z.object({
-  questions: z.array(
-    z.object({
-      question: z.string().min(10),
-      choices: z.array(z.string()).optional(),
-      why_we_ask: z.string().min(20),
-      impacts_draft: z.string().min(20),
-    })
-  ).min(1).max(5),
-  confidence: z.number().min(0).max(1),
-  should_continue: z.boolean(),
-});
-
-const AnthropicCritiqueResponse = z.object({
-  issues: z.array(
-    z.object({
-      level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
-      note: z.string().min(10).max(280),
-      target: z.string().optional(),
-    })
-  ),
-  suggested_fixes: z.array(z.string()).max(5),
-  overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional(),
-});
-
-const AnthropicExplainDiffResponse = z.object({
-  rationales: z.array(
-    z.object({
-      target: z.string().min(1),
-      why: z.string().min(10).max(280),
-      provenance_source: z.string().optional(),
-    })
-  ).min(1),
-});
+// Schemas imported from shared-schemas.ts (AnthropicNode, AnthropicEdge, etc.)
 
 // Use centralized config for API key (lazy access via getter)
 function getApiKey(): string | undefined {
@@ -940,11 +860,94 @@ Fix the graph to resolve ALL violations. Common fixes:
 
 Respond ONLY with valid JSON matching this structure.`;
 
+// Maximum size for graph JSON in repair prompts (50KB)
+const REPAIR_PROMPT_MAX_JSON_SIZE = 50 * 1024;
+
+/**
+ * Truncate graph to fit within repair prompt size limit.
+ * Prioritizes keeping nodes over edges when truncating.
+ */
+function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated: boolean; originalNodes: number; originalEdges: number } {
+  const originalNodes = graph.nodes?.length ?? 0;
+  const originalEdges = graph.edges?.length ?? 0;
+
+  const jsonStr = JSON.stringify(graph, null, 2);
+  if (jsonStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
+    return { graph, truncated: false, originalNodes, originalEdges };
+  }
+
+  log.warn(
+    { json_size: jsonStr.length, max_size: REPAIR_PROMPT_MAX_JSON_SIZE, node_count: originalNodes, edge_count: originalEdges },
+    "Repair prompt graph too large - truncating"
+  );
+
+  // Calculate target sizes (keep 80% of limits to leave room for structure overhead)
+  const targetNodes = Math.min(originalNodes, GRAPH_MAX_NODES);
+  const targetEdges = Math.min(originalEdges, GRAPH_MAX_EDGES);
+
+  // Iteratively reduce until under limit
+  let truncatedGraph = { ...graph };
+  let iterations = 0;
+  const maxIterations = 10;
+
+  while (iterations < maxIterations) {
+    const testStr = JSON.stringify(truncatedGraph, null, 2);
+    if (testStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
+      break;
+    }
+
+    // Reduce by 20% each iteration, prioritizing edge reduction
+    const currentNodes = truncatedGraph.nodes?.length ?? 0;
+    const currentEdges = truncatedGraph.edges?.length ?? 0;
+
+    if (currentEdges > Math.ceil(targetEdges * 0.5)) {
+      // Reduce edges first
+      const newEdgeCount = Math.ceil(currentEdges * 0.8);
+      truncatedGraph = {
+        ...truncatedGraph,
+        edges: truncatedGraph.edges?.slice(0, newEdgeCount),
+      };
+    } else if (currentNodes > Math.ceil(targetNodes * 0.5)) {
+      // Then reduce nodes
+      const newNodeCount = Math.ceil(currentNodes * 0.8);
+      const keptNodeIds = new Set(truncatedGraph.nodes?.slice(0, newNodeCount).map(n => n.id) ?? []);
+      truncatedGraph = {
+        ...truncatedGraph,
+        nodes: truncatedGraph.nodes?.slice(0, newNodeCount),
+        edges: truncatedGraph.edges?.filter(e => keptNodeIds.has(e.from) && keptNodeIds.has(e.to)),
+      };
+    } else {
+      // Already at minimum, break
+      break;
+    }
+    iterations++;
+  }
+
+  emit(TelemetryEvents.RepairPromptTruncated ?? "llm.repair_prompt.truncated", {
+    original_json_size: jsonStr.length,
+    truncated_json_size: JSON.stringify(truncatedGraph, null, 2).length,
+    original_nodes: originalNodes,
+    truncated_nodes: truncatedGraph.nodes?.length ?? 0,
+    original_edges: originalEdges,
+    truncated_edges: truncatedGraph.edges?.length ?? 0,
+  });
+
+  return {
+    graph: truncatedGraph as GraphT,
+    truncated: true,
+    originalNodes,
+    originalEdges,
+  };
+}
+
 async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+  const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(args.graph);
+  const truncatedNote = truncated ? "\n\n**Note: Graph was truncated for repair due to size.**" : "";
+
   const graphJson = JSON.stringify(
     {
-      nodes: args.graph.nodes,
-      edges: args.graph.edges,
+      nodes: truncatedGraph.nodes,
+      edges: truncatedGraph.edges,
     },
     null,
     2
@@ -952,7 +955,7 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
 
   const violationsText = args.violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
 
-  const userContent = `## Current Graph (INVALID)
+  const userContent = `## Current Graph (INVALID)${truncatedNote}
 ${graphJson}
 
 ## Violations Found

@@ -26,9 +26,11 @@ function shouldSampleInfoLog(statusCode: number): boolean {
 }
 
 async function observabilityPlugin(fastify: FastifyInstance) {
-  // Track request start time
+  // Track request start time (only if not already set by another plugin)
   fastify.addHook("onRequest", async (request: FastifyRequest) => {
-    (request as any).startTime = Date.now();
+    if (!(request as any).startTime) {
+      (request as any).startTime = Date.now();
+    }
   });
 
   // Log request completion with sampling

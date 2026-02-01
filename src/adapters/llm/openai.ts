@@ -1,10 +1,8 @@
 import OpenAI from "openai";
-import { z } from "zod";
 import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
@@ -17,74 +15,15 @@ import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./nor
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
+import {
+  LLMNode as OpenAINode,
+  LLMEdge as OpenAIEdge,
+  LLMDraftResponse as OpenAIDraftResponse,
+  LLMOptionsResponse as OpenAIOptionsResponse,
+  LLMClarifyResponse as OpenAIClarifyResponse,
+} from './shared-schemas.js';
 
-// ============================================================================
-// Zod schemas for OpenAI response validation (same as Anthropic)
-const OpenAINode = z.object({
-  id: z.string().min(1),
-  kind: NodeKind,
-  label: z.string().optional(),
-  body: z.string().max(200).optional(),
-  // Factor category (V12.4+): controllable, observable, external
-  category: FactorCategory.optional(),
-  // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
-  data: NodeData.optional(),
-});
-
-// V4 edge strength schema (nested object from LLM)
-const EdgeStrength = z.object({
-  mean: z.number(),
-  std: z.number().positive(),
-}).optional();
-
-const OpenAIEdge = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  // V4 format (preferred) - from v4 prompt (nested)
-  strength: EdgeStrength,
-  exists_probability: z.number().min(0).max(1).optional(),
-  // V4 format (flat) - added by normaliseDraftResponse()
-  strength_mean: z.number().optional(),
-  strength_std: z.number().optional(),
-  belief_exists: z.number().optional(),
-  effect_direction: z.enum(["positive", "negative"]).optional(),
-  // Legacy format (deprecated, for backwards compatibility during transition)
-  weight: z.number().optional(),
-  belief: z.number().min(0).max(1).optional(),
-  provenance: StructuredProvenance.optional(),
-  provenance_source: ProvenanceSource.optional(),
-});
-
-const OpenAIDraftResponse = z.object({
-  nodes: z.array(OpenAINode),
-  edges: z.array(OpenAIEdge),
-  rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
-});
-
-const OpenAIOptionsResponse = z.object({
-  options: z.array(
-    z.object({
-      id: z.string().min(1),
-      title: z.string().min(3),
-      pros: z.array(z.string()).min(2).max(3),
-      cons: z.array(z.string()).min(2).max(3),
-      evidence_to_gather: z.array(z.string()).min(2).max(3),
-    })
-  ),
-});
-
-const OpenAIClarifyResponse = z.object({
-  questions: z.array(
-    z.object({
-      question: z.string().min(10),
-      choices: z.array(z.string()).optional(),
-      why_we_ask: z.string().min(20),
-      impacts_draft: z.string().min(20),
-    })
-  ).min(1).max(5),
-  confidence: z.number().min(0).max(1),
-  should_continue: z.boolean(),
-});
+// Schemas imported from shared-schemas.ts (OpenAINode, OpenAIEdge, etc.)
 
 // Use centralized config for API key (lazy access via getter)
 function getApiKey(): string | undefined {
@@ -178,11 +117,95 @@ export function buildModelParams(
   }
 }
 
+// Maximum size for graph JSON in repair prompts (50KB)
+const REPAIR_PROMPT_MAX_JSON_SIZE = 50 * 1024;
+
+/**
+ * Truncate graph to fit within repair prompt size limit.
+ * Prioritizes keeping nodes over edges when truncating.
+ */
+function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated: boolean; originalNodes: number; originalEdges: number } {
+  const originalNodes = graph.nodes?.length ?? 0;
+  const originalEdges = graph.edges?.length ?? 0;
+
+  const jsonStr = JSON.stringify(graph, null, 2);
+  if (jsonStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
+    return { graph, truncated: false, originalNodes, originalEdges };
+  }
+
+  log.warn(
+    { json_size: jsonStr.length, max_size: REPAIR_PROMPT_MAX_JSON_SIZE, node_count: originalNodes, edge_count: originalEdges },
+    "Repair prompt graph too large - truncating"
+  );
+
+  // Calculate target sizes (keep 80% of limits to leave room for structure overhead)
+  const targetNodes = Math.min(originalNodes, GRAPH_MAX_NODES);
+  const targetEdges = Math.min(originalEdges, GRAPH_MAX_EDGES);
+
+  // Iteratively reduce until under limit
+  let truncatedGraph = { ...graph };
+  let iterations = 0;
+  const maxIterations = 10;
+
+  while (iterations < maxIterations) {
+    const testStr = JSON.stringify(truncatedGraph, null, 2);
+    if (testStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
+      break;
+    }
+
+    // Reduce by 20% each iteration, prioritizing edge reduction
+    const currentNodes = truncatedGraph.nodes?.length ?? 0;
+    const currentEdges = truncatedGraph.edges?.length ?? 0;
+
+    if (currentEdges > Math.ceil(targetEdges * 0.5)) {
+      // Reduce edges first
+      const newEdgeCount = Math.ceil(currentEdges * 0.8);
+      truncatedGraph = {
+        ...truncatedGraph,
+        edges: truncatedGraph.edges?.slice(0, newEdgeCount),
+      };
+    } else if (currentNodes > Math.ceil(targetNodes * 0.5)) {
+      // Then reduce nodes
+      const newNodeCount = Math.ceil(currentNodes * 0.8);
+      const keptNodeIds = new Set(truncatedGraph.nodes?.slice(0, newNodeCount).map(n => n.id) ?? []);
+      truncatedGraph = {
+        ...truncatedGraph,
+        nodes: truncatedGraph.nodes?.slice(0, newNodeCount),
+        edges: truncatedGraph.edges?.filter(e => keptNodeIds.has(e.from) && keptNodeIds.has(e.to)),
+      };
+    } else {
+      // Already at minimum, break
+      break;
+    }
+    iterations++;
+  }
+
+  emit(TelemetryEvents.RepairPromptTruncated ?? "llm.repair_prompt.truncated", {
+    original_json_size: jsonStr.length,
+    truncated_json_size: JSON.stringify(truncatedGraph, null, 2).length,
+    original_nodes: originalNodes,
+    truncated_nodes: truncatedGraph.nodes?.length ?? 0,
+    original_edges: originalEdges,
+    truncated_edges: truncatedGraph.edges?.length ?? 0,
+  });
+
+  return {
+    graph: truncatedGraph as GraphT,
+    truncated: true,
+    originalNodes,
+    originalEdges,
+  };
+}
+
 function buildRepairPrompt(graph: GraphT, violations: string[]): string {
+  const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(graph);
+  const graphJson = JSON.stringify(truncatedGraph, null, 2);
+  const truncatedNote = truncated ? "\n\n**Note: Graph was truncated for repair due to size.**" : "";
+
   return `You are fixing validation errors in a decision graph.
 
-## Current Graph (INVALID)
-${JSON.stringify(graph, null, 2)}
+## Current Graph (INVALID)${truncatedNote}
+${graphJson}
 
 ## Validation Errors
 ${violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}

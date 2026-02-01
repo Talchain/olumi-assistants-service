@@ -61,164 +61,20 @@ import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { MODEL_REGISTRY } from '../config/models.js';
+import {
+  verifyAdminKey,
+  getActorFromRequest,
+  AdminAuthTelemetryEvents,
+} from '../middleware/admin-auth.js';
 
 /**
- * Telemetry events
+ * Telemetry events (route-specific, extends shared AdminAuthTelemetryEvents)
  */
 const AdminTelemetryEvents = {
-  AdminAuthFailed: 'admin.auth.failed',
-  AdminIPBlocked: 'admin.ip.blocked',
+  ...AdminAuthTelemetryEvents,
   AdminPromptAccess: 'admin.prompt.access',
   AdminExperimentAccess: 'admin.experiment.access',
 } as const;
-
-/**
- * Permission level for admin operations
- */
-type AdminPermission = 'read' | 'write';
-
-/**
- * Parse and cache allowed IPs from config
- */
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null; // No restriction
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-/**
- * Check if request IP is allowed
- * Returns true if allowed, sends error response if blocked
- */
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-
-  // No IP restriction configured
-  if (!allowedIPs) {
-    return true;
-  }
-
-  const requestIP = request.ip;
-
-  // Check if IP is in allowlist
-  // Also check for common localhost representations
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    // Use hashed IP in telemetry/logs to avoid PII leakage
-    const ipHash = hashIP(requestIP);
-    emit(AdminTelemetryEvents.AdminIPBlocked, {
-      ip_hash: ipHash,
-      path: request.url,
-      allowedCount: allowedIPs.size,
-    });
-    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin access blocked by IP allowlist');
-    reply.status(403).send({
-      error: 'ip_not_allowed',
-      message: 'Your IP address is not authorized for admin access',
-    });
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Verify admin API key with permission level
- *
- * Supports two key types:
- * - ADMIN_API_KEY: Full read/write access
- * - ADMIN_API_KEY_READ: Read-only access (list, get, diff only)
- *
- * @param request - Fastify request
- * @param reply - Fastify reply
- * @param requiredPermission - 'read' for read-only ops, 'write' for mutations
- * @returns true if authorized, false if error response sent
- */
-function verifyAdminKey(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  requiredPermission: AdminPermission = 'write'
-): boolean {
-  // First check IP allowlist
-  if (!verifyIPAllowed(request, reply)) {
-    return false;
-  }
-
-  const adminKey = config.prompts?.adminApiKey;
-  const adminKeyRead = config.prompts?.adminApiKeyRead;
-
-  // At least one key must be configured
-  if (!adminKey && !adminKeyRead) {
-    log.warn('No admin API keys configured, admin routes disabled');
-    reply.status(503).send({
-      error: 'admin_not_configured',
-      message: 'Admin API is not configured',
-    });
-    return false;
-  }
-
-  const providedKey = request.headers['x-admin-key'] as string;
-
-  if (!providedKey) {
-    emit(AdminTelemetryEvents.AdminAuthFailed, {
-      ip: request.ip,
-      path: request.url,
-      reason: 'missing_key',
-    });
-    reply.status(401).send({
-      error: 'unauthorized',
-      message: 'Missing admin API key',
-    });
-    return false;
-  }
-
-  // Check full access key
-  if (adminKey && providedKey === adminKey) {
-    return true;
-  }
-
-  // Check read-only key
-  if (adminKeyRead && providedKey === adminKeyRead) {
-    // Read-only key provided - check if operation is read-only
-    if (requiredPermission === 'write') {
-      emit(AdminTelemetryEvents.AdminAuthFailed, {
-        ip: request.ip,
-        path: request.url,
-        reason: 'insufficient_permission',
-      });
-      reply.status(403).send({
-        error: 'forbidden',
-        message: 'Read-only key cannot perform write operations',
-      });
-      return false;
-    }
-    return true;
-  }
-
-  // Invalid key
-  emit(AdminTelemetryEvents.AdminAuthFailed, {
-    ip: request.ip,
-    path: request.url,
-    reason: 'invalid_key',
-  });
-  reply.status(401).send({
-    error: 'unauthorized',
-    message: 'Invalid admin API key',
-  });
-  return false;
-}
 
 /**
  * Check if prompt management is enabled
@@ -241,14 +97,6 @@ function ensureStoreHealthy(reply: FastifyReply): boolean {
     return false;
   }
   return true;
-}
-
-/**
- * Get actor identifier from request (admin key ID or IP)
- */
-function getActorFromRequest(request: FastifyRequest): string {
-  // Could be enhanced to extract key ID from admin key header
-  return `admin@${request.ip}`;
 }
 
 // =========================================================================
@@ -498,7 +346,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       await logPromptCreated(auditLogger, prompt.id, actor, {
         taskId: prompt.taskId,
         name: prompt.name,
-        ip: request.ip,
+        ip_hash: hashIP(request.ip),
       });
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {

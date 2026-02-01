@@ -125,7 +125,7 @@ describe("Configuration Module", () => {
         const { config } = await import("../../src/config/index.js");
         // Access property to trigger validation
         const _port = config.server.port;
-      }).rejects.toThrow("Invalid configuration");
+      }).rejects.toThrow("Configuration validation failed");
     });
 
     it("should validate LLM provider enum", async () => {
@@ -138,7 +138,7 @@ describe("Configuration Module", () => {
         const { config } = await import("../../src/config/index.js");
         // Access property to trigger validation
         const _provider = config.llm.provider;
-      }).rejects.toThrow("Invalid configuration");
+      }).rejects.toThrow("Configuration validation failed");
     });
 
     it("should treat invalid URLs as undefined in test mode (lenient validation)", async () => {

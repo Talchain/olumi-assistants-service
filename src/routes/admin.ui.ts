@@ -15,9 +15,8 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { config } from '../config/index.js';
-import { log, emit, hashIP } from '../utils/telemetry.js';
 import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
+import { verifyIPAllowed } from '../middleware/admin-auth.js';
 
 /**
  * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
@@ -34,64 +33,6 @@ function generateTaskFilterOptions(): string {
   const allTasksOption = '<option value="">All Tasks</option>';
   const taskOptions = PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
   return `${allTasksOption}\n                    ${taskOptions}`;
-}
-
-/**
- * Telemetry event for blocked IP access
- */
-const AdminUIIPBlocked = 'admin.ui.ip.blocked' as const;
-
-/**
- * Parse and cache allowed IPs from config
- */
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null; // No restriction
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-/**
- * Check if request IP is allowed to access admin UI
- * Returns true if allowed, sends error response if blocked
- */
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-
-  // No IP restriction configured
-  if (!allowedIPs) {
-    return true;
-  }
-
-  const requestIP = request.ip;
-
-  // Check if IP is in allowlist (including localhost variants)
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    // Use hashed IP in telemetry/logs to avoid PII leakage
-    const ipHash = hashIP(requestIP);
-    emit(AdminUIIPBlocked, {
-      ip_hash: ipHash,
-      path: request.url,
-      allowedCount: allowedIPs.size,
-    });
-    log.warn({ ip_hash: ipHash, path: request.url }, 'Admin UI access blocked by IP allowlist');
-    reply.status(403).send('Forbidden: IP not allowed');
-    return false;
-  }
-
-  return true;
 }
 
 /**

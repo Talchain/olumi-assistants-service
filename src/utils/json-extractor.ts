@@ -79,7 +79,34 @@ export function extractJsonFromResponse(
         rawContent: includeRawContent ? content : undefined,
       };
     } catch {
-      // May have trailing text after valid JSON, continue to extraction
+      // May have trailing text after valid JSON - try bracket matching from start first
+      // This is an early-exit optimization that avoids code block scanning when
+      // the JSON is at the start but has trailing content (common with some models)
+      const earlyExitResult = extractJsonWithBracketMatching(trimmed, 0);
+      if (earlyExitResult) {
+        const suffixLength = trimmed.length - earlyExitResult.content.length;
+        if (suffixLength > 0) {
+          if (logWarnings) {
+            log.warn(
+              { task, model, correlationId, extraction_method: "boundary", suffix_length: suffixLength },
+              "JSON extracted via early-exit bracket matching (trailing content stripped)"
+            );
+          }
+          emit(TelemetryEvents.JsonExtractionRequired ?? "llm.json_extraction.required", {
+            task, model, preamble_length: 0, suffix_length: suffixLength, extraction_method: "boundary",
+          });
+        }
+        return {
+          json: earlyExitResult.json,
+          wasExtracted: suffixLength > 0,
+          extractedContent: earlyExitResult.content,
+          preambleLength: 0,
+          suffixLength,
+          extractionMethod: "boundary",
+          rawContent: includeRawContent ? content : undefined,
+        };
+      }
+      // Early exit failed, continue to full extraction
     }
   }
 
@@ -160,39 +187,37 @@ export function extractJsonFromResponse(
       // Determine if this is "boundary" (first candidate worked) or "bracket_matching"
       const extractionMethod = candidate.index === candidates[0].index ? "boundary" : "bracket_matching";
 
-      // Log and emit telemetry for extraction (telemetry always emits, logging respects logWarnings)
-      if (preambleLength > 0 || suffixLength > 0) {
+      // Log warning if there was preamble/suffix text (respects logWarnings)
+      if ((preambleLength > 0 || suffixLength > 0) && logWarnings) {
         const preamblePreview = preambleLength > 0
           ? trimmed.substring(0, Math.min(50, preambleLength))
           : undefined;
 
-        if (logWarnings) {
-          log.warn(
-            {
-              task,
-              model,
-              correlationId,
-              extraction_method: extractionMethod,
-              preamble_length: preambleLength,
-              suffix_length: suffixLength,
-              preamble_preview: preamblePreview,
-              candidates_tried: candidates.indexOf(candidate) + 1,
-              total_candidates: candidates.length,
-            },
-            "JSON extraction required - model returned conversational preamble/suffix"
-          );
-        }
-
-        // Always emit telemetry regardless of logWarnings setting
-        emit(TelemetryEvents.JsonExtractionRequired ?? "llm.json_extraction.required", {
-          task,
-          model,
-          preamble_length: preambleLength,
-          suffix_length: suffixLength,
-          extraction_method: extractionMethod,
-          candidates_tried: candidates.indexOf(candidate) + 1,
-        });
+        log.warn(
+          {
+            task,
+            model,
+            correlationId,
+            extraction_method: extractionMethod,
+            preamble_length: preambleLength,
+            suffix_length: suffixLength,
+            preamble_preview: preamblePreview,
+            candidates_tried: candidates.indexOf(candidate) + 1,
+            total_candidates: candidates.length,
+          },
+          "JSON extraction required - model returned conversational preamble/suffix"
+        );
       }
+
+      // Always emit telemetry when extraction is performed (decoupled from logging)
+      emit(TelemetryEvents.JsonExtractionRequired ?? "llm.json_extraction.required", {
+        task,
+        model,
+        preamble_length: preambleLength,
+        suffix_length: suffixLength,
+        extraction_method: extractionMethod,
+        candidates_tried: candidates.indexOf(candidate) + 1,
+      });
 
       return {
         json: bracketResult.json,

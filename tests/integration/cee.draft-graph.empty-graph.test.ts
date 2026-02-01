@@ -28,6 +28,35 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     defaultStrengthCount: 0,
     defaultStrengthPercentage: 0,
   }),
+  detectStrengthClustering: () => ({
+    detected: false,
+    coefficientOfVariation: 0,
+    edgeCount: 0,
+  }),
+  detectSameLeverOptions: () => ({
+    detected: false,
+    maxOverlapPercentage: 0,
+    overlappingOptionPairs: [],
+  }),
+  detectMissingBaseline: () => ({
+    detected: false,
+    hasBaseline: false,
+  }),
+  detectGoalNoBaselineValue: () => ({
+    detected: false,
+    goalHasValue: false,
+  }),
+  checkGoalConnectivity: () => ({
+    status: "full",
+    disconnectedOptions: [],
+    weakPaths: [],
+  }),
+  computeModelQualityFactors: () => ({
+    estimate_confidence: 0.5,
+    strength_variation: 0,
+    range_confidence_coverage: 0,
+    has_baseline_option: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -38,6 +67,12 @@ vi.mock("../../src/cee/structure/index.js", () => ({
       decisionBranchesNormalized: false,
     },
     warnings: [],
+  }),
+  fixNonCanonicalStructuralEdges: (graph: unknown) => ({
+    graph,
+    fixedEdgeCount: 0,
+    fixedEdgeIds: [],
+    repairs: [],
   }),
   // Goal inference utilities
   hasGoalNode: (graph: any) => {

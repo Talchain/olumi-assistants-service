@@ -39,6 +39,34 @@ export function compareSeverity(a: StructuralWarningSeverity, b: StructuralWarni
   return severityRank(a) - severityRank(b);
 }
 
+/**
+ * Canonical severity levels for all warnings.
+ * UI and downstream consumers should only see these values.
+ * Alias for StructuralWarningSeverity for semantic clarity.
+ */
+export type CanonicalSeverity = StructuralWarningSeverity;
+
+/**
+ * Translate v3-validator severity to canonical.
+ * Centralises mapping so UI doesn't need to handle multiple systems.
+ *
+ * Mapping:
+ * - error → blocker (blocks execution)
+ * - warning → medium (degrades quality, consistent with draft_warnings patterns)
+ * - info → low (informational)
+ * - unknown → medium (safe default)
+ */
+export function toCanonicalSeverity(
+  validatorSeverity: CeeSeverity | string
+): CanonicalSeverity {
+  switch (validatorSeverity) {
+    case "error": return "blocker";
+    case "warning": return "medium";
+    case "info": return "low";
+    default: return "medium";
+  }
+}
+
 // ERROR - Blocks engine execution
 const ERROR_CODES = [
   "LIMIT_EXCEEDED",

@@ -597,9 +597,12 @@ function parseConfig(): Config {
     return ConfigSchema.parse(rawConfig);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("❌ Configuration validation failed:");
-      console.error(JSON.stringify(error.issues, null, 2));
-      throw new Error("Invalid configuration. Please check environment variables.");
+      // Include validation issues in error message for debugging
+      // Note: Logger not available yet during config parsing, so we embed details in the error
+      const issuesSummary = error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      throw new Error(`Configuration validation failed: ${issuesSummary}`);
     }
     throw error;
   }
@@ -677,6 +680,23 @@ export function _resetConfigCache(): void {
 }
 
 /**
+ * Validate configuration at startup
+ *
+ * Forces immediate validation of all environment variables.
+ * Call this early in server startup to fail fast on misconfiguration.
+ * Throws if configuration is invalid.
+ *
+ * @returns The validated configuration
+ */
+export function validateConfig(): Config {
+  // Force initialization by accessing a property
+  // The Proxy will parse and validate the config
+  const validated = config.server;
+  void validated; // Use the value to satisfy linter
+  return config;
+}
+
+/**
  * Check if running in production environment
  */
 export function isProduction(): boolean {
@@ -738,4 +758,39 @@ export function getClientBlockedModels(): string[] {
     // Config not available (e.g., test environment)
     return [];
   }
+}
+
+/**
+ * Deprecated environment variable mapping
+ * Maps deprecated env var names to their preferred replacements
+ */
+const DEPRECATED_ENV_VARS: Record<string, string> = {
+  HMAC_SECRET: 'CEE_HMAC_SECRET',
+  SHARE_SECRET: 'CEE_SHARE_SECRET',
+  GROUNDING_ENABLED: 'CEE_GROUNDING_ENABLED',
+};
+
+/**
+ * Check for deprecated environment variables in use
+ *
+ * Returns a list of warnings for deprecated env vars that are being used
+ * as fallbacks. Call this at startup after config validation to log warnings.
+ *
+ * @returns Array of warning messages for deprecated env vars in use
+ */
+export function checkDeprecatedEnvVars(): string[] {
+  const warnings: string[] = [];
+  const env = process.env;
+
+  for (const [deprecated, preferred] of Object.entries(DEPRECATED_ENV_VARS)) {
+    // Only warn if deprecated is set AND preferred is NOT set
+    // (i.e., the deprecated value is actually being used as fallback)
+    if (env[deprecated] && !env[preferred]) {
+      warnings.push(
+        `Deprecated env var '${deprecated}' is in use. Please migrate to '${preferred}' before the next major release.`
+      );
+    }
+  }
+
+  return warnings;
 }

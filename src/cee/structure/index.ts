@@ -1556,8 +1556,11 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
   });
 
   // Compute range confidence coverage (% of interventions with Priority 1-2 ranges)
+  // Per spec: only count 'explicit' or 'extracted' sources, NOT 'inferred*' or 'default'
+  const HIGH_CONFIDENCE_SOURCES = new Set(["explicit", "extracted", "brief", "context"]);
+
   let totalInterventions = 0;
-  let interventionsWithRanges = 0;
+  let interventionsWithHighConfidenceRanges = 0;
 
   for (const node of nodes) {
     if (node?.kind !== "option") continue;
@@ -1570,16 +1573,27 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
         : [];
     for (const interv of interventionValues) {
       totalInterventions++;
-      // Check if intervention has explicit range
+      // Check if intervention has a range with high-confidence source
       const hasRange = interv?.range?.min !== undefined && interv?.range?.max !== undefined;
       const hasExtractedRange = interv?.extracted_range?.min !== undefined && interv?.extracted_range?.max !== undefined;
+
       if (hasRange || hasExtractedRange) {
-        interventionsWithRanges++;
+        // Check source - exclude inferred/default sources
+        const rangeSource = interv?.range_source ?? interv?.extracted_range?.source ?? "default";
+        const isHighConfidence = HIGH_CONFIDENCE_SOURCES.has(rangeSource) ||
+          // Also accept sources that don't start with 'inferred' or 'default'
+          (typeof rangeSource === "string" &&
+           !rangeSource.startsWith("inferred") &&
+           rangeSource !== "default");
+
+        if (isHighConfidence) {
+          interventionsWithHighConfidenceRanges++;
+        }
       }
     }
   }
 
-  const rangeConfidenceCoverage = totalInterventions > 0 ? interventionsWithRanges / totalInterventions : 0;
+  const rangeConfidenceCoverage = totalInterventions > 0 ? interventionsWithHighConfidenceRanges / totalInterventions : 0;
 
   // Estimate overall confidence based on factors
   const confidenceFactors = [

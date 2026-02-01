@@ -113,24 +113,27 @@ describe("error utilities", () => {
       expect(error.details).toHaveProperty("max_size_bytes");
     });
 
-    it("should use INTERNAL for unknown errors", () => {
+    it("should use INTERNAL for unknown errors with generic message", () => {
       const unknownError = new Error("Something went wrong");
 
       const error = toErrorV1(unknownError);
 
       expect(error.code).toBe("INTERNAL");
-      expect(error.message).toBe("Something went wrong");
+      // Error message should be masked for INTERNAL errors
+      expect(error.message).toBe("Internal server error");
     });
 
-    it("should sanitize error messages (no stack traces)", () => {
+    it("should mask INTERNAL error messages (no details exposed)", () => {
       const errorWithStack = new Error("Database connection failed");
       errorWithStack.stack = "Error: Database connection failed\n  at db.connect (/app/src/db.ts:123:45)";
 
       const error = toErrorV1(errorWithStack);
 
+      // INTERNAL errors return generic message, no specific details
+      expect(error.message).toBe("Internal server error");
+      expect(error.message).not.toContain("Database connection failed");
       expect(error.message).not.toContain("/app/src/db.ts");
       expect(error.message).not.toContain("at db.connect");
-      // error.details is undefined when there are no details to add
       expect(error.details).toBeUndefined();
     });
 
@@ -146,20 +149,23 @@ describe("error utilities", () => {
       expect(error.request_id).toBeDefined();
     });
 
-    it("should handle non-Error objects", () => {
+    it("should handle non-Error objects with generic message", () => {
       const stringError = "String error message";
       const error = toErrorV1(stringError);
 
       expect(error.code).toBe("INTERNAL");
-      expect(error.message).toBe("String error message");
+      // String errors also get masked for INTERNAL errors
+      expect(error.message).toBe("Internal server error");
     });
 
-    it("should handle null/undefined errors", () => {
+    it("should handle null/undefined errors with generic message", () => {
       const error1 = toErrorV1(null);
       const error2 = toErrorV1(undefined);
 
       expect(error1.code).toBe("INTERNAL");
+      expect(error1.message).toBe("Internal server error");
       expect(error2.code).toBe("INTERNAL");
+      expect(error2.message).toBe("Internal server error");
     });
   });
 
@@ -189,15 +195,17 @@ describe("error utilities", () => {
     });
   });
 
-  describe("error privacy", () => {
-    it("should never expose stack traces in error response", () => {
-      const error = new Error("Test error");
+  describe("error privacy (INTERNAL errors hardened)", () => {
+    it("should never expose stack traces or original message", () => {
+      const error = new Error("Test error with sensitive info");
       error.stack = "Stack trace with sensitive paths";
 
       const errorV1 = toErrorV1(error);
 
+      // INTERNAL errors return generic message only
+      expect(errorV1.message).toBe("Internal server error");
       expect(JSON.stringify(errorV1)).not.toContain("Stack trace");
-      // error.details is undefined when there are no details
+      expect(JSON.stringify(errorV1)).not.toContain("sensitive");
       expect(errorV1.details).toBeUndefined();
     });
 
@@ -206,8 +214,10 @@ describe("error utilities", () => {
 
       const errorV1 = toErrorV1(error);
 
-      // Message should be sanitized or generic
+      // INTERNAL errors return generic message
+      expect(errorV1.message).toBe("Internal server error");
       expect(errorV1.message).not.toContain("secret123");
+      expect(errorV1.message).not.toContain("API_KEY");
     });
 
     it("should never expose file paths", () => {
@@ -215,8 +225,26 @@ describe("error utilities", () => {
 
       const errorV1 = toErrorV1(error);
 
-      // Internal path should not be exposed
+      // INTERNAL errors return generic message
+      expect(errorV1.message).toBe("Internal server error");
       expect(errorV1.message).not.toContain("/Users/admin");
+      expect(errorV1.message).not.toContain("db.ts");
+    });
+
+    it("should preserve specific messages for client-facing error codes", () => {
+      // Rate limit errors keep their specific message
+      const rateLimitError = new Error("Rate limit exceeded");
+      (rateLimitError as any).statusCode = 429;
+      const rateErrorV1 = toErrorV1(rateLimitError);
+      expect(rateErrorV1.code).toBe("RATE_LIMITED");
+      expect(rateErrorV1.message).toBe("Too many requests");
+
+      // Body limit errors keep their specific message
+      const bodyLimitError = new Error("Body limit exceeded");
+      (bodyLimitError as any).code = "FST_ERR_CTP_BODY_TOO_LARGE";
+      const bodyErrorV1 = toErrorV1(bodyLimitError);
+      expect(bodyErrorV1.code).toBe("BAD_INPUT");
+      expect(bodyErrorV1.message).toBe("Request body too large");
     });
   });
 });

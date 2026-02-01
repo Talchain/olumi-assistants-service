@@ -129,11 +129,11 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     const bodyMeta = getBodyMeta(request);
 
     // Store for later use in boundary.response (preserves client metadata)
+    // Use shared startTime from performance-monitoring plugin if available
     (request as any).boundaryMeta = {
       payloadHash,
       clientBuild,
       incomingRequestId,
-      startTime: Date.now(),
     };
 
     // Emit boundary.request event with body metadata hints
@@ -178,7 +178,8 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
   fastify.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = getRequestId(request);
     const boundaryMeta = (request as any).boundaryMeta || {};
-    const startTime = boundaryMeta.startTime || Date.now();
+    // Use shared startTime from request (set by performance-monitoring or observability plugin)
+    const startTime = (request as any).startTime || Date.now();
     const elapsedMs = Date.now() - startTime;
 
     // Get response hash (set by response-hash plugin)

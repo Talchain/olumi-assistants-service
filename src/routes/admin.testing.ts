@@ -21,6 +21,7 @@ import { getRequestId } from '../utils/request-id.js';
 import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
+import { verifyAdminKey } from '../middleware/admin-auth.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -151,89 +152,6 @@ interface TestPromptLLMResponse {
 // ============================================================================
 // Authentication helpers
 // ============================================================================
-
-type AdminPermission = 'read' | 'write';
-
-function getAllowedIPs(): Set<string> | null {
-  const allowedIPsConfig = config.prompts?.adminAllowedIPs;
-  if (!allowedIPsConfig || allowedIPsConfig.trim() === '') {
-    return null;
-  }
-
-  return new Set(
-    allowedIPsConfig
-      .split(',')
-      .map((ip) => ip.trim())
-      .filter((ip) => ip.length > 0)
-  );
-}
-
-function verifyIPAllowed(request: FastifyRequest, reply: FastifyReply): boolean {
-  const allowedIPs = getAllowedIPs();
-  if (!allowedIPs) return true;
-
-  const requestIP = request.ip;
-  const isAllowed =
-    allowedIPs.has(requestIP) ||
-    (requestIP === '::1' && allowedIPs.has('127.0.0.1')) ||
-    (requestIP === '127.0.0.1' && allowedIPs.has('::1'));
-
-  if (!isAllowed) {
-    reply.status(403).send({
-      error: 'ip_not_allowed',
-      message: 'Your IP address is not authorized for admin access',
-    });
-    return false;
-  }
-  return true;
-}
-
-function verifyAdminKey(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  requiredPermission: AdminPermission = 'write'
-): boolean {
-  if (!verifyIPAllowed(request, reply)) return false;
-
-  const adminKey = config.prompts?.adminApiKey;
-  const adminKeyRead = config.prompts?.adminApiKeyRead;
-
-  if (!adminKey && !adminKeyRead) {
-    reply.status(503).send({
-      error: 'admin_not_configured',
-      message: 'Admin API is not configured',
-    });
-    return false;
-  }
-
-  const providedKey = request.headers['x-admin-key'] as string;
-  if (!providedKey) {
-    reply.status(401).send({
-      error: 'unauthorized',
-      message: 'Missing admin API key',
-    });
-    return false;
-  }
-
-  if (adminKey && providedKey === adminKey) return true;
-
-  if (adminKeyRead && providedKey === adminKeyRead) {
-    if (requiredPermission === 'write') {
-      reply.status(403).send({
-        error: 'forbidden',
-        message: 'Read-only key cannot perform write operations',
-      });
-      return false;
-    }
-    return true;
-  }
-
-  reply.status(401).send({
-    error: 'unauthorized',
-    message: 'Invalid admin API key',
-  });
-  return false;
-}
 
 function ensureStoreHealthy(reply: FastifyReply): boolean {
   if (!isPromptStoreHealthy()) {

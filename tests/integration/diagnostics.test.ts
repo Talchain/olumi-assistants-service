@@ -130,6 +130,6 @@ describe("GET /diagnostics - Security: Mandatory Authentication", () => {
     const body = JSON.parse(res.body);
 
     expect(body.schema).toBe("error.v1");
-    expect(body.code).toBe("FORBIDDEN"); // Auth plugin uses FORBIDDEN for missing auth
+    expect(body.code).toBe("UNAUTHENTICATED"); // Auth plugin uses UNAUTHENTICATED for missing auth (401)
   });
 });

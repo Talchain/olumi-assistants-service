@@ -87,6 +87,18 @@ function isSseRequest(request: FastifyRequest): boolean {
 }
 
 /**
+ * Extend FastifyRequest to include raw body for HMAC verification
+ */
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Raw request body bytes captured before JSON parsing for HMAC verification */
+    rawBody?: string;
+    /** Flag indicating HMAC auth is pending (deferred to preHandler) */
+    _hmacAuthPending?: boolean;
+  }
+}
+
+/**
  * Auth plugin (internal implementation)
  */
 async function authPluginImpl(fastify: FastifyInstance) {
@@ -99,6 +111,34 @@ async function authPluginImpl(fastify: FastifyInstance) {
     // Only log the count - avoid logging any partial key information
     log.info({ count: initialKeys.size }, "API keys configured");
   }
+
+  // Capture raw request body BEFORE JSON parsing for HMAC signature verification
+  // This ensures the signature is verified against the exact bytes sent by the client,
+  // not a re-stringified version that might have different key ordering
+  fastify.addHook("preParsing", async (request: FastifyRequest, _reply, payload) => {
+    // Only capture for routes that might use HMAC auth (non-public routes with body)
+    if (isPublicRoute(request.url, request.method)) {
+      return payload;
+    }
+
+    // Only capture for content types we care about (JSON)
+    const contentType = request.headers["content-type"];
+    if (!contentType || !contentType.includes("application/json")) {
+      return payload;
+    }
+
+    // Capture the raw body bytes
+    const chunks: Buffer[] = [];
+    for await (const chunk of payload) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const rawBody = Buffer.concat(chunks).toString("utf-8");
+    request.rawBody = rawBody;
+
+    // Return a new readable stream with the same content for the body parser
+    const { Readable } = await import("node:stream");
+    return Readable.from([rawBody]);
+  });
 
   fastify.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     // Skip auth for public routes
@@ -134,45 +174,12 @@ async function authPluginImpl(fastify: FastifyInstance) {
     let keyId: string | null = null;
 
     if (hasSignature && config.auth.hmacSecret) {
-      // HMAC signature authentication (preferred)
-      const body = typeof request.body === "string" ? request.body :
-                   request.body ? JSON.stringify(request.body) : undefined;
-
-      const hmacResult = await verifyHmacSignature(
-        request.method,
-        request.url,
-        body,
-        request.headers as Record<string, string | string[] | undefined>
-      );
-
-      if (!hmacResult.valid) {
-        emit(TelemetryEvents.AuthFailed, {
-          reason: hmacResult.error,
-          path: request.url,
-          hmac: true,
-          fallback: validKeys.size > 0 ? "api_key" : "none",
-        });
-
-        // If no API keys are configured, behave as before and fail hard on HMAC
-        if (validKeys.size === 0) {
-          return reply.code(403).send({
-            schema: "error.v1",
-            code: hmacResult.error || "FORBIDDEN",
-            message: `HMAC signature validation failed: ${hmacResult.error}`,
-          });
-        }
-
-        // Otherwise, fall through to API key auth
-      } else {
-        // HMAC auth successful - use HMAC secret as the "API key" for quota tracking
-        apiKey = config.auth.hmacSecret!;
-        // keyId will be set by tryConsumeToken below
-
-        log.info(
-          { legacy: hmacResult.legacy, path: request.url },
-          "HMAC signature authentication successful"
-        );
-      }
+      // HMAC signature authentication requires the raw body bytes which are captured
+      // in preParsing hook. Since onRequest runs before preParsing, we need to defer
+      // HMAC verification to preHandler hook where rawBody is available.
+      // Mark request as pending HMAC auth and continue.
+      request._hmacAuthPending = true;
+      return; // HMAC auth will be completed in preHandler hook
     }
 
     // Fallback or primary path: API key authentication
@@ -187,7 +194,7 @@ async function authPluginImpl(fastify: FastifyInstance) {
 
         return reply.code(401).send({
           schema: "error.v1",
-          code: "FORBIDDEN",
+          code: "UNAUTHENTICATED",
           message: "Missing API key. Provide X-Olumi-Assist-Key header.",
         });
       }
@@ -251,6 +258,153 @@ async function authPluginImpl(fastify: FastifyInstance) {
 
     // Also attach keyId directly for backwards compatibility
     (request as any).keyId = keyId;
+  });
+
+  // Complete HMAC auth in preHandler (after preParsing has captured rawBody)
+  fastify.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
+    // Only process if HMAC auth was deferred from onRequest
+    if (!request._hmacAuthPending) {
+      return;
+    }
+
+    // Clear the pending flag
+    request._hmacAuthPending = false;
+
+    const validKeys = getValidApiKeys();
+
+    // HMAC signature authentication (preferred)
+    // Use raw body bytes captured in preParsing hook to ensure signature verification
+    // matches the exact bytes sent by the client, not re-stringified JSON
+    const body = request.rawBody ??
+                 (typeof request.body === "string" ? request.body :
+                 request.body ? JSON.stringify(request.body) : undefined);
+
+    const hmacResult = await verifyHmacSignature(
+      request.method,
+      request.url,
+      body,
+      request.headers as Record<string, string | string[] | undefined>
+    );
+
+    if (!hmacResult.valid) {
+      emit(TelemetryEvents.AuthFailed, {
+        reason: hmacResult.error,
+        path: request.url,
+        hmac: true,
+        fallback: validKeys.size > 0 ? "api_key" : "none",
+      });
+
+      // If no API keys are configured, behave as before and fail hard on HMAC
+      if (validKeys.size === 0) {
+        return reply.code(403).send({
+          schema: "error.v1",
+          code: "FORBIDDEN",
+          message: `HMAC signature validation failed: ${hmacResult.error}`,
+          details: {
+            hmac_error: hmacResult.error,
+          },
+        });
+      }
+
+      // Fall through to API key auth if available
+      const extractedKey = extractApiKey(request);
+      if (!extractedKey || !validKeys.has(extractedKey)) {
+        emit(TelemetryEvents.AuthFailed, {
+          reason: extractedKey ? "invalid_key" : "missing_header",
+          path: request.url,
+        });
+
+        return reply.code(extractedKey ? 403 : 401).send({
+          schema: "error.v1",
+          code: extractedKey ? "FORBIDDEN" : "UNAUTHENTICATED",
+          message: extractedKey ? "Invalid API key." : "Missing API key. Provide X-Olumi-Assist-Key header.",
+        });
+      }
+
+      // API key fallback successful
+      const isSSE = isSseRequest(request);
+      const quotaResult = await tryConsumeToken(extractedKey, isSSE);
+
+      if (!quotaResult.allowed) {
+        emit(TelemetryEvents.RateLimited, {
+          key_id: quotaResult.keyId,
+          path: request.url,
+          is_sse: isSSE,
+        });
+
+        return reply.code(429).send({
+          schema: "error.v1",
+          code: "RATE_LIMITED",
+          message: "Rate limit exceeded.",
+          details: {
+            retry_after_seconds: quotaResult.retryAfterSeconds || 1,
+          },
+        });
+      }
+
+      // API key fallback auth successful
+      const ctx = attachCallerContext(request, {
+        keyId: quotaResult.keyId!,
+        hmacAuth: false,
+        sourceIp: request.ip,
+        userAgent: request.headers["user-agent"] as string | undefined,
+        correlationId: request.headers["x-correlation-id"] as string | undefined,
+      });
+
+      emit(TelemetryEvents.AuthSuccess, {
+        key_id: quotaResult.keyId!,
+        path: request.url,
+        hmac_auth: false,
+        correlation_id: ctx.correlationId,
+      });
+
+      (request as any).keyId = quotaResult.keyId;
+      return;
+    }
+
+    // HMAC auth successful - use HMAC secret as the "API key" for quota tracking
+    log.info(
+      { legacy: hmacResult.legacy, path: request.url },
+      "HMAC signature authentication successful"
+    );
+
+    const isSSE = isSseRequest(request);
+    const quotaResult = await tryConsumeToken(config.auth.hmacSecret!, isSSE);
+
+    if (!quotaResult.allowed) {
+      emit(TelemetryEvents.RateLimited, {
+        key_id: quotaResult.keyId,
+        path: request.url,
+        is_sse: isSSE,
+      });
+
+      return reply.code(429).send({
+        schema: "error.v1",
+        code: "RATE_LIMITED",
+        message: "Rate limit exceeded.",
+        details: {
+          retry_after_seconds: quotaResult.retryAfterSeconds || 1,
+        },
+      });
+    }
+
+    // HMAC auth successful - attach context
+    const ctx = attachCallerContext(request, {
+      keyId: quotaResult.keyId!,
+      hmacAuth: true,
+      sourceIp: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+      correlationId: request.headers["x-correlation-id"] as string | undefined,
+    });
+
+    emit(TelemetryEvents.AuthSuccess, {
+      key_id: quotaResult.keyId!,
+      path: request.url,
+      hmac_auth: true,
+      correlation_id: ctx.correlationId,
+    });
+
+    (request as any).keyId = quotaResult.keyId;
   });
 }
 

@@ -186,6 +186,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // LLM Normalization events (Phase 1 NodeKind normalization)
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
+        // LLM Repair events (large graph handling)
+        RepairPromptTruncated: "llm.repair_prompt.truncated",
+
         // Goal generation tracking (prompt tuning)
         GoalGeneration: "cee.goal_generation",
 
@@ -359,6 +362,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Performance timing events (Observability v2)
         LlmCall: "llm.call",
         DownstreamCall: "downstream.call",
+
+        // JSON extraction events (LLM response parsing)
+        JsonExtractionRequired: "llm.json_extraction.required",
+
+        // Options interventions defaulting (CEE)
+        InterventionsMissingDefaulted: "cee.option.interventions_missing_defaulted",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -384,7 +393,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|call$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -793,6 +802,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.AnalysisReadyValidationFailed,
         // Factor baseline defaulting (diagnostic only)
         TelemetryEvents.FactorBaselineDefaulted,
+        // JSON extraction events (diagnostic only)
+        TelemetryEvents.JsonExtractionRequired,
+        // Options interventions defaulting (diagnostic only)
+        TelemetryEvents.InterventionsMissingDefaulted,
+        // Repair prompt truncation (diagnostic only - large graph handling)
+        TelemetryEvents.RepairPromptTruncated,
       ];
 
       for (const event of allEvents) {
@@ -935,6 +950,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // LLM Normalization events (Phase 1 NodeKind normalization)
         "llm.normalization.node_kind_mapped",
+
+        // LLM Repair events (large graph handling)
+        "llm.repair_prompt.truncated",
 
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",
@@ -1124,6 +1142,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Performance timing events (Observability v2)
         "llm.call",
         "downstream.call",
+
+        // JSON extraction events (LLM response parsing)
+        "llm.json_extraction.required",
+
+        // Options interventions defaulting (CEE)
+        "cee.option.interventions_missing_defaulted",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

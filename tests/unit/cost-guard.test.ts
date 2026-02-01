@@ -153,7 +153,7 @@ describe("Cost Guard", () => {
       await expect(async () => {
         const { allowedCostUSD: fn } = await import("../../src/utils/costGuard.js");
         fn(1000, 1000, "claude-3-5-sonnet-20241022");
-      }).rejects.toThrow("Invalid configuration");
+      }).rejects.toThrow("Configuration validation failed");
     });
   });
 });

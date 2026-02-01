@@ -340,7 +340,7 @@ describe("Public Routes Access", () => {
 
     expect(response.statusCode).toBe(401);
     const body = JSON.parse(response.body);
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
     expect(body.message).toContain("Missing API key");
   });
 });
@@ -552,12 +552,12 @@ describe("HMAC Timestamp Edge Cases", () => {
         body,
       });
 
-      // Should reject with 403 (either SIGNATURE_SKEW or INVALID_SIGNATURE
-      // depending on whether body was re-serialized by Fastify)
+      // Should reject with 403 - standard error code, specific HMAC error in details
       expect(response.statusCode).toBe(403);
       const responseBody = JSON.parse(response.body);
       expect(responseBody.schema).toBe("error.v1");
-      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.code);
+      expect(responseBody.code).toBe("FORBIDDEN");
+      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.details?.hmac_error);
     } finally {
       await server.close();
     }
@@ -606,12 +606,173 @@ describe("HMAC Timestamp Edge Cases", () => {
         body,
       });
 
-      // Should reject with 403 (either SIGNATURE_SKEW or INVALID_SIGNATURE
-      // depending on whether body was re-serialized by Fastify)
+      // Should reject with 403 - standard error code, specific HMAC error in details
       expect(response.statusCode).toBe(403);
       const responseBody = JSON.parse(response.body);
       expect(responseBody.schema).toBe("error.v1");
-      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.code);
+      expect(responseBody.code).toBe("FORBIDDEN");
+      expect(["SIGNATURE_SKEW", "INVALID_SIGNATURE"]).toContain(responseBody.details?.hmac_error);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("HMAC Raw Body Signing", () => {
+  const originalEnv = { ...process.env };
+  const TEST_SECRET = "test-hmac-raw-body-secret";
+
+  afterEach(async () => {
+    process.env = originalEnv;
+    vi.resetModules();
+  });
+
+  it("passes HMAC verification with non-alphabetical key order in JSON", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      // JSON with keys in non-alphabetical order (z before a)
+      // This should pass because we now sign against raw body bytes, not re-stringified JSON
+      const body = '{"z_field":"last","brief":"Test brief that meets the minimum length requirement for validation purposes","a_field":"first"}';
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/draft-graph",
+        body,
+        timestamp,
+        nonce
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body, // Send raw body, not parsed object
+      });
+
+      // Should succeed - HMAC verified against raw body bytes
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes HMAC verification with extra whitespace in JSON", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      // JSON with extra whitespace that would be lost if re-stringified
+      const body = '{  "brief"  :  "Test brief that meets the minimum length requirement for validation purposes"  }';
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/draft-graph",
+        body,
+        timestamp,
+        nonce
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body,
+      });
+
+      // Should succeed - HMAC verified against raw body bytes preserving whitespace
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fails HMAC verification with tampered body", async () => {
+    vi.resetModules();
+
+    process.env.HMAC_SECRET = TEST_SECRET;
+    process.env.LLM_PROVIDER = "fixtures";
+    delete process.env.ASSIST_API_KEY;
+    delete process.env.ASSIST_API_KEYS;
+
+    cleanBaseUrl();
+    const { build } = await import("../../src/server.js");
+    const server = await build();
+    await server.ready();
+
+    try {
+      const originalBody = JSON.stringify({
+        brief: "Test brief that meets the minimum length requirement for validation purposes",
+      });
+      const tamperedBody = JSON.stringify({
+        brief: "TAMPERED brief that should fail signature verification completely",
+      });
+      const nonce = randomUUID();
+      const timestamp = Date.now().toString();
+
+      // Sign the original body
+      const { signature } = signRequest(
+        TEST_SECRET,
+        "POST",
+        "/assist/draft-graph",
+        originalBody,
+        timestamp,
+        nonce
+      );
+
+      // Send the tampered body with the original signature
+      const response = await server.inject({
+        method: "POST",
+        url: "/assist/draft-graph",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Signature": signature,
+          "X-Olumi-Timestamp": timestamp,
+          "X-Olumi-Nonce": nonce,
+        },
+        body: tamperedBody,
+      });
+
+      // Should fail - tampered body doesn't match signature
+      expect(response.statusCode).toBe(403);
+      const responseBody = JSON.parse(response.body);
+      expect(responseBody.code).toBe("FORBIDDEN"); // Standard error code per error.v1 schema
+      expect(responseBody.details?.hmac_error).toBe("INVALID_SIGNATURE"); // Specific error in details
     } finally {
       await server.close();
     }

@@ -193,6 +193,9 @@ export const TelemetryEvents = {
   // JSON extraction events (model output normalization)
   JsonExtractionRequired: "llm.json_extraction.required",
 
+  // Repair prompt truncation event (large graph handling)
+  RepairPromptTruncated: "llm.repair_prompt.truncated",
+
   // Goal generation tracking (prompt tuning)
   GoalGeneration: "cee.goal_generation",
 

@@ -13,10 +13,27 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { readFile, access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../utils/telemetry.js";
 import { config, getClientBlockedModels } from "../../config/index.js";
-import type { LLMAdapter } from "./types.js";
+import type {
+  LLMAdapter,
+  DraftGraphArgs,
+  DraftGraphResult,
+  SuggestOptionsArgs,
+  SuggestOptionsResult,
+  RepairGraphArgs,
+  RepairGraphResult,
+  ClarifyBriefArgs,
+  ClarifyBriefResult,
+  CritiqueGraphArgs,
+  CritiqueGraphResult,
+  ExplainDiffArgs,
+  ExplainDiffResult,
+  CallOpts,
+} from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
@@ -102,15 +119,15 @@ interface ProviderConfig {
 }
 
 /**
- * Load provider configuration from file if it exists
+ * Load provider configuration from file if it exists (sync - fallback only)
  */
-function loadConfig(): ProviderConfig | null {
+function loadConfigSync(): ProviderConfig | null {
   const configPath = getConfigPath();
   try {
     if (existsSync(configPath)) {
       const content = readFileSync(configPath, 'utf-8');
       const providersCfg = JSON.parse(content) as ProviderConfig;
-      log.info({ config_path: configPath }, "Loaded provider configuration");
+      log.info({ config_path: configPath }, "Loaded provider configuration (sync)");
       return providersCfg;
     }
   } catch (error) {
@@ -119,17 +136,107 @@ function loadConfig(): ProviderConfig | null {
   return null;
 }
 
+/**
+ * Load provider configuration from file asynchronously (preferred at startup)
+ */
+async function loadConfigAsync(): Promise<ProviderConfig | null> {
+  const configPath = getConfigPath();
+  try {
+    await access(configPath, fsConstants.R_OK);
+    const content = await readFile(configPath, 'utf-8');
+    const providersCfg = JSON.parse(content) as ProviderConfig;
+    log.info({ config_path: configPath }, "Loaded provider configuration (async)");
+    return providersCfg;
+  } catch (error) {
+    // File doesn't exist or not readable - this is normal
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log.warn({ error, config_path: configPath }, "Failed to load provider config, using env/defaults");
+    }
+  }
+  return null;
+}
+
 // Lazy-load config on first use
 let configCache: ProviderConfig | null | undefined;
 
+/**
+ * Simple LRU Map with bounded size and eviction.
+ * Uses Map's insertion-order property for LRU tracking.
+ */
+class LRUMap<K, V> {
+  private map = new Map<K, V>();
+  private readonly maxSize: number;
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
+  get(key: K): V | undefined {
+    const value = this.map.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.map.delete(key);
+      this.map.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    // If key exists, delete it first to update position
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    }
+    // Evict oldest entry if at capacity
+    if (this.map.size >= this.maxSize) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.delete(oldestKey);
+        log.debug({ evicted_key: oldestKey, cache_size: this.maxSize }, "LRU eviction: adapter cache at capacity");
+      }
+    }
+    this.map.set(key, value);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+// Maximum number of cached adapters (prevents unbounded memory growth)
+const ADAPTER_CACHE_MAX_SIZE = 100;
+
 // Cached wrapper instances (caching, failover) to preserve state across requests
-const wrappedAdapters = new Map<string, LLMAdapter>();
+const wrappedAdapters = new LRUMap<string, LLMAdapter>(ADAPTER_CACHE_MAX_SIZE);
 
 function getConfig(): ProviderConfig | null {
   if (configCache === undefined) {
-    configCache = loadConfig();
+    // Fall back to sync load if cache not warmed at startup
+    configCache = loadConfigSync();
   }
   return configCache;
+}
+
+/**
+ * Warm the provider config cache asynchronously at startup.
+ * Call this during server initialization to avoid sync file I/O on first request.
+ */
+export async function warmProviderConfigCache(): Promise<{ loaded: boolean; path: string }> {
+  const configPath = getConfigPath();
+  if (configCache === undefined) {
+    configCache = await loadConfigAsync();
+  }
+  return {
+    loaded: configCache !== null,
+    path: configPath,
+  };
 }
 
 /**
@@ -140,14 +247,14 @@ class FixturesAdapter implements LLMAdapter {
   readonly name = 'fixtures' as const;
   readonly model = 'fixture-v1';
 
-  async draftGraph(_args: any, _opts: any): Promise<any> {
+  async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     // Import fixture dynamically to avoid circular deps
     const { fixtureGraph } = await import("../../utils/fixtures.js");
 
-    const unsafeCaptureEnabled = Boolean(_args?.includeDebug === true && _args?.flags?.unsafe_capture === true);
-    const rawNodeKinds = Array.isArray((fixtureGraph as any)?.nodes)
-      ? ((fixtureGraph as any).nodes as any[])
-        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+    const unsafeCaptureEnabled = Boolean(args.includeDebug === true && args.flags?.unsafe_capture === true);
+    const rawNodeKinds = Array.isArray(fixtureGraph?.nodes)
+      ? fixtureGraph.nodes
+        .map((n) => n?.kind ?? 'unknown')
         .filter(Boolean)
       : [];
 
@@ -183,7 +290,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(_args: any, _opts: any): Promise<any> {
+  async suggestOptions(_args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
     return {
       options: [
         {
@@ -215,7 +322,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: any, _opts: any): Promise<any> {
+  async repairGraph(args: RepairGraphArgs, _opts: CallOpts): Promise<RepairGraphResult> {
     // For fixtures, just return the input graph unchanged
     return {
       graph: args.graph,
@@ -227,7 +334,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async clarifyBrief(args: any, _opts: any): Promise<any> {
+  async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
     return {
       questions: [
         {
@@ -247,7 +354,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async critiqueGraph(_args: any, _opts: any): Promise<any> {
+  async critiqueGraph(_args: CritiqueGraphArgs, _opts: CallOpts): Promise<CritiqueGraphResult> {
     return {
       issues: [
         {
@@ -264,7 +371,7 @@ class FixturesAdapter implements LLMAdapter {
     };
   }
 
-  async explainDiff(args: any, _opts: any): Promise<any> {
+  async explainDiff(args: ExplainDiffArgs, _opts: CallOpts): Promise<ExplainDiffResult> {
     const rationales: Array<{ target: string; why: string; provenance_source?: string }> = [];
 
     // Generate rationales for added nodes
@@ -304,8 +411,8 @@ class FixturesAdapter implements LLMAdapter {
   }
 }
 
-// Adapter instances cache
-const adapters: Map<string, LLMAdapter> = new Map();
+// Adapter instances cache (LRU with bounded size)
+const adapters = new LRUMap<string, LLMAdapter>(ADAPTER_CACHE_MAX_SIZE);
 
 /**
  * Get or create an adapter instance for the given provider and model.
@@ -423,7 +530,20 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
  * ```
  */
 export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
-  // Check for failover configuration first
+  // Check for cached failover adapter first (before creating new objects)
+  const failoverCacheKey = `failover:${task || "default"}`;
+  if (wrappedAdapters.has(failoverCacheKey)) {
+    // Model override is not supported with failover configuration
+    if (modelOverride) {
+      log.warn(
+        { task, model_override: modelOverride, reason: 'failover_configured' },
+        "Model override ignored: failover configuration takes precedence"
+      );
+    }
+    return wrappedAdapters.get(failoverCacheKey)!;
+  }
+
+  // Check for failover configuration (only if not cached)
   const failoverAdapter = createFailoverAdapter(task);
   if (failoverAdapter) {
     // Model override is not supported with failover configuration
@@ -434,12 +554,9 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
         "Model override ignored: failover configuration takes precedence"
       );
     }
-    // Reuse cached failover wrapper to preserve cache state
-    const cacheKey = `failover:${task || "default"}`;
-    if (!wrappedAdapters.has(cacheKey)) {
-      wrappedAdapters.set(cacheKey, withCaching(failoverAdapter));
-    }
-    return wrappedAdapters.get(cacheKey)!;
+    // Cache the wrapped failover adapter
+    wrappedAdapters.set(failoverCacheKey, withCaching(failoverAdapter));
+    return wrappedAdapters.get(failoverCacheKey)!;
   }
   const providersConfig = getConfig();
 

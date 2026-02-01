@@ -426,7 +426,7 @@ describe("CEE Quality Detection Functions", () => {
       expect(result.has_baseline_option).toBe(true);
     });
 
-    it("should compute range confidence coverage", () => {
+    it("should compute range confidence coverage for high-confidence sources", () => {
       const graph = {
         nodes: [
           {
@@ -434,8 +434,8 @@ describe("CEE Quality Detection Functions", () => {
             kind: "option",
             data: {
               interventions: [
-                { range: { min: 0, max: 100 } },
-                { range: { min: 10, max: 20 } },
+                { range: { min: 0, max: 100 }, range_source: "explicit" },
+                { range: { min: 10, max: 20 }, range_source: "extracted" },
                 { /* no range */ },
               ],
             },
@@ -444,7 +444,52 @@ describe("CEE Quality Detection Functions", () => {
         edges: [],
       };
       const result = computeModelQualityFactors(graph as any);
-      // 2 out of 3 interventions have ranges
+      // 2 out of 3 interventions have high-confidence ranges
+      expect(result.range_confidence_coverage).toBeCloseTo(0.67, 1);
+    });
+
+    it("should exclude inferred and default sources from range confidence coverage", () => {
+      const graph = {
+        nodes: [
+          {
+            id: "opt1",
+            kind: "option",
+            data: {
+              interventions: [
+                { range: { min: 0, max: 100 }, range_source: "explicit" }, // counts
+                { range: { min: 10, max: 20 }, range_source: "inferred_spread" }, // excluded
+                { range: { min: 5, max: 15 }, range_source: "default" }, // excluded
+                { range: { min: 1, max: 10 }, range_source: "inferred_baseline" }, // excluded
+              ],
+            },
+          },
+        ],
+        edges: [],
+      };
+      const result = computeModelQualityFactors(graph as any);
+      // Only 1 out of 4 interventions has a high-confidence range
+      expect(result.range_confidence_coverage).toBeCloseTo(0.25, 2);
+    });
+
+    it("should count brief and context as high-confidence sources", () => {
+      const graph = {
+        nodes: [
+          {
+            id: "opt1",
+            kind: "option",
+            data: {
+              interventions: [
+                { range: { min: 0, max: 100 }, range_source: "brief" }, // counts
+                { range: { min: 10, max: 20 }, range_source: "context" }, // counts
+                { /* no range */ },
+              ],
+            },
+          },
+        ],
+        edges: [],
+      };
+      const result = computeModelQualityFactors(graph as any);
+      // 2 out of 3 interventions have high-confidence ranges
       expect(result.range_confidence_coverage).toBeCloseTo(0.67, 1);
     });
   });

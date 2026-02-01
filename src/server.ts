@@ -1,4 +1,5 @@
-// Load environment variables from .env file (local development only)
+// Load environment variables from .env file
+// In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
 
 import { env } from "node:process";
@@ -43,7 +44,7 @@ import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./rout
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
-import { getAdapter } from "./adapters/llm/router.js";
+import { getAdapter, warmProviderConfigCache } from "./adapters/llm/router.js";
 import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/models.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -66,8 +67,9 @@ import { adminTestRoutes } from "./routes/admin.testing.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
-import { config, shouldUseStagingPrompts } from "./config/index.js";
+import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
+import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 
 export const DEFAULT_ORIGINS = [
@@ -109,9 +111,8 @@ function resolveAllowedOrigins(): string[] {
     throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
   }
 
-  // Diagnostic: log parsed origins at startup
-  console.log("[CORS] Raw ALLOWED_ORIGINS env:", raw ? `"${raw}"` : "(not set, using defaults)");
-  console.log("[CORS] Parsed origins:", JSON.stringify(origins));
+  // Diagnostic: log parsed origins at startup (debug level)
+  log.debug({ rawEnv: raw ?? '(not set)', origins }, 'CORS origins parsed');
 
   return origins;
 }
@@ -121,12 +122,22 @@ function resolveAllowedOrigins(): string[] {
  * (Can be imported for testing or run directly)
  */
 export async function build() {
+  // Fail-fast: Validate all configuration at startup
+  // This ensures misconfiguration is caught immediately rather than lazily
+  validateConfig();
+
+  // Check for deprecated environment variables and log warnings
+  const deprecationWarnings = checkDeprecatedEnvVars();
+  for (const warning of deprecationWarnings) {
+    log.warn({ event: 'config.deprecated_env_var' }, warning);
+  }
+
   // Fail-fast: Verify LLM provider and API key configuration
-  const llmProvider = env.LLM_PROVIDER || 'openai';
-  if (llmProvider === 'openai' && !env.OPENAI_API_KEY) {
+  const llmProvider = config.llm.provider;
+  if (llmProvider === 'openai' && !config.llm.openaiApiKey) {
     throw new Error('FATAL: LLM_PROVIDER=openai but OPENAI_API_KEY is not set');
   }
-  if (llmProvider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+  if (llmProvider === 'anthropic' && !config.llm.anthropicApiKey) {
     throw new Error('FATAL: LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set');
   }
 
@@ -134,30 +145,25 @@ export async function build() {
   // This logs enabled models and warns about deprecated/misconfigured models
   const modelValidation = validateModelsAtStartup();
   if (modelValidation.warnings.length > 0) {
-    console.warn('[MODEL VALIDATION] Warnings detected:');
     for (const warning of modelValidation.warnings) {
-      console.warn(`  - ${warning}`);
+      log.warn({ event: 'model.validation.warning' }, warning);
     }
   }
   const modelsSummary = getEnabledModelsSummary();
-  console.log('[MODEL VALIDATION] Enabled models:', JSON.stringify({
+  log.info({
+    event: 'model.validation.complete',
     openai: modelsSummary.openai,
     anthropic: modelsSummary.anthropic,
     total: modelValidation.enabledModels,
-  }));
+  }, 'Model registry validated');
 
   // Fail-fast: In production, require at least one API key or HMAC secret so
   // that authentication cannot be accidentally disabled.
-  const nodeEnv = env.NODE_ENV || 'development';
+  const nodeEnv = config.server.nodeEnv;
   const hasApiKeys =
-    Boolean(env.ASSIST_API_KEY && env.ASSIST_API_KEY.trim().length > 0) ||
-    Boolean(
-      env.ASSIST_API_KEYS &&
-        env.ASSIST_API_KEYS
-          .split(',')
-          .some((k) => k.trim().length > 0),
-    );
-  const hasHmacSecret = Boolean(env.HMAC_SECRET && env.HMAC_SECRET.trim().length > 0);
+    Boolean(config.auth.assistApiKey?.trim().length) ||
+    Boolean(config.auth.assistApiKeys?.some((k) => k.trim().length > 0));
+  const hasHmacSecret = Boolean(config.auth.hmacSecret?.trim().length);
 
   if (nodeEnv === 'production' && !hasApiKeys && !hasHmacSecret) {
     throw new Error(
@@ -747,6 +753,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // Registered unconditionally - routes handle health checks internally
   await publicPromptRoutes(app);
 
+  // Warm provider config cache asynchronously (avoids sync file I/O on first request)
+  const providerConfigResult = await warmProviderConfigCache();
+  if (providerConfigResult.loaded) {
+    app.log.info({ config_path: providerConfigResult.path }, 'Provider config cache warmed');
+  }
+
   // Always initialize prompt store if database credentials are configured
   // This ensures prompts can be loaded from Supabase/Postgres even if PROMPTS_ENABLED is not set
   const storeBackendConfigured = isStoreBackendConfigured();
@@ -830,12 +842,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         route_timeout_ms: ROUTE_TIMEOUT_MS,
         http_client_timeout_ms: HTTP_CLIENT_TIMEOUT_MS,
         upstream_retry_delay_ms: UPSTREAM_RETRY_DELAY_MS,
-      }, '🚀 Olumi Assistants Service starting');
+      }, 'Olumi Assistants Service starting');
 
       await app.listen({ port, host: "0.0.0.0" });
     })
     .catch((err: unknown) => {
-      console.error('❌ Failed to start server:', err);
+      log.fatal({ err, event: 'server.startup.failed' }, 'Failed to start server');
       process.exit(1);
     });
 }

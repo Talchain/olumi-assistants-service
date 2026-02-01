@@ -2,6 +2,7 @@ import { ZodError } from 'zod';
 import type { FastifyRequest } from 'fastify';
 import { getRequestId } from './request-id.js';
 import { redactLogMessage } from './redaction.js';
+import { log } from './telemetry.js';
 
 /**
  * Error codes for structured error responses
@@ -160,43 +161,54 @@ export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | To
       return result;
     }
 
-    // Sanitize error message - remove potential PII and paths
-    let message = error.message || 'An unexpected error occurred';
+    // Log the actual error server-side for debugging (with sanitization for logs)
+    let sanitizedMessage = error.message || 'An unexpected error occurred';
+    sanitizedMessage = sanitizedMessage.replace(/\/[\w/.@-]+/g, '[path]');
+    sanitizedMessage = sanitizedMessage.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
+    sanitizedMessage = sanitizedMessage.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
+    sanitizedMessage = sanitizedMessage.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+    sanitizedMessage = redactLogMessage(sanitizedMessage);
 
-    // Remove file paths
-    message = message.replace(/\/[\w/.@-]+/g, '[path]');
-    // Remove potential secrets
-    message = message.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
-    message = message.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
-    // Remove email addresses
-    message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+    // Log the sanitized error server-side for debugging
+    log.error(
+      { error_message: sanitizedMessage, request_id: requestId, stage },
+      'Internal server error occurred'
+    );
 
-    message = redactLogMessage(message);
-
-    // Generic error - safe message only, no stack
-    const result = buildErrorV1('INTERNAL', message, undefined, requestId);
+    // Return generic message to client - never expose internal error details
+    const result = buildErrorV1('INTERNAL', 'Internal server error', undefined, requestId);
     if (stage) result.stage = stage;
     return result;
   }
 
   // Handle string errors
   if (typeof error === 'string') {
-    let message = error;
-    // Apply same sanitization
-    message = message.replace(/\/[\w/.@-]+/g, '[path]');
-    message = message.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
-    message = message.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
-    message = message.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+    let sanitizedMessage = error;
+    // Apply same sanitization for logging
+    sanitizedMessage = sanitizedMessage.replace(/\/[\w/.@-]+/g, '[path]');
+    sanitizedMessage = sanitizedMessage.replace(/[A-Z_]+_?KEY=\S+/gi, '[KEY_REDACTED]');
+    sanitizedMessage = sanitizedMessage.replace(/[A-Z_]+_?SECRET=\S+/gi, '[SECRET_REDACTED]');
+    sanitizedMessage = sanitizedMessage.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+    sanitizedMessage = redactLogMessage(sanitizedMessage);
 
-    message = redactLogMessage(message);
+    // Log the sanitized error server-side for debugging
+    log.error(
+      { error_message: sanitizedMessage, request_id: requestId, stage },
+      'Internal server error occurred'
+    );
 
-    const result = buildErrorV1('INTERNAL', message, undefined, requestId);
+    // Return generic message to client
+    const result = buildErrorV1('INTERNAL', 'Internal server error', undefined, requestId);
     if (stage) result.stage = stage;
     return result;
   }
 
-  // Unknown error type - minimal info
-  const result = buildErrorV1('INTERNAL', 'An unexpected error occurred', undefined, requestId);
+  // Unknown error type - log and return minimal info
+  log.error(
+    { error_type: typeof error, request_id: requestId, stage },
+    'Internal server error occurred (unknown error type)'
+  );
+  const result = buildErrorV1('INTERNAL', 'Internal server error', undefined, requestId);
   if (stage) result.stage = stage;
   return result;
 }

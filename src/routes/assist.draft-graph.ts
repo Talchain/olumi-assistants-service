@@ -1401,22 +1401,24 @@ async function handleSseResponse(
 
   // SSE with fixture fallback: show fixture if draft takes > 2.5s
   try {
-    const fixtureTimeout = setTimeout(async () => {
-      if (!fixtureSent) {
-        // Show minimal fixture graph while waiting for real draft
-        // Apply stable edge IDs to fixture graph for consistency
-        const stableFixture = enforceStableEdgeIds({ ...fixtureGraph });
-        const fixturePayload = DraftGraphOutput.parse({
-          graph: stableFixture,
-          patch: defaultPatch,
-          rationales: [],
-          confidence: 0.5,
-          clarifier_status: "complete",
-        });
-        await writeStageAndBuffer({ stage: "DRAFTING", payload: fixturePayload });
-        fixtureSent = true;
-        emit(TelemetryEvents.FixtureShown, { timeout_ms: FIXTURE_TIMEOUT_MS });
-      }
+    const fixtureTimeout = setTimeout(() => {
+      (async () => {
+        if (!fixtureSent) {
+          // Show minimal fixture graph while waiting for real draft
+          // Apply stable edge IDs to fixture graph for consistency
+          const stableFixture = enforceStableEdgeIds({ ...fixtureGraph });
+          const fixturePayload = DraftGraphOutput.parse({
+            graph: stableFixture,
+            patch: defaultPatch,
+            rationales: [],
+            confidence: 0.5,
+            clarifier_status: "complete",
+          });
+          await writeStageAndBuffer({ stage: "DRAFTING", payload: fixturePayload });
+          fixtureSent = true;
+          emit(TelemetryEvents.FixtureShown, { timeout_ms: FIXTURE_TIMEOUT_MS });
+        }
+      })().catch(err => log.warn({ error: String(err), request_id: correlationId }, 'Fixture timeout callback failed'));
     }, FIXTURE_TIMEOUT_MS);
 
     // Run pipeline

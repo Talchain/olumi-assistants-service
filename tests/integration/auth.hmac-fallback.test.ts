@@ -76,7 +76,7 @@ describe("HMAC + API Key Fallback", () => {
     expect(response.statusCode).toBe(401);
     const body = JSON.parse(response.body);
     expect(body.schema).toBe("error.v1");
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
     expect(body.message).toContain("Missing API key");
   });
 });
@@ -123,9 +123,9 @@ describe("HMAC-only auth without API keys", () => {
     expect(response.statusCode).toBe(403);
     const body = JSON.parse(response.body);
     expect(body.schema).toBe("error.v1");
-    // For HMAC-only mode, the implementation uses the specific
-    // HMAC error (e.g. INVALID_SIGNATURE) as the error code.
-    expect(body.code).toBe("INVALID_SIGNATURE");
+    // Standard error code per error.v1 schema; specific HMAC error in details
+    expect(body.code).toBe("FORBIDDEN");
+    expect(body.details?.hmac_error).toBe("INVALID_SIGNATURE");
     expect(body.message).toContain("HMAC signature validation failed");
   });
 });

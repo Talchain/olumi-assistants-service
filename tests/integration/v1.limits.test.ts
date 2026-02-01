@@ -39,7 +39,7 @@ describe("GET /v1/limits", () => {
     expect(response.statusCode).toBe(401);
     const body = response.json();
     expect(body.schema).toBe("error.v1");
-    expect(body.code).toBe("FORBIDDEN");
+    expect(body.code).toBe("UNAUTHENTICATED");
   });
 
   it("returns limits for authenticated key including graph caps", async () => {

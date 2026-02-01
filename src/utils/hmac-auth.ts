@@ -145,6 +145,16 @@ export async function verifyHmacSignature(
   if (timestampStr && nonceStr) {
     // Validate timestamp (clock skew tolerance)
     const requestTime = Number(timestampStr);
+
+    // Reject invalid (non-numeric) timestamps
+    if (!Number.isFinite(requestTime) || requestTime <= 0) {
+      log.warn(
+        { timestamp: timestampStr },
+        "HMAC signature timestamp is not a valid number"
+      );
+      return { valid: false, error: "SIGNATURE_SKEW" };
+    }
+
     const now = Date.now();
     const skew = Math.abs(now - requestTime);
 
