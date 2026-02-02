@@ -143,6 +143,15 @@ export const TelemetryEvents = {
   CeeReviewSucceeded: "cee.review.succeeded",
   CeeReviewFailed: "cee.review.failed",
 
+  // CEE Decision Review endpoint events (M2) - unique events only
+  // Note: Requested/Succeeded/Failed use existing DecisionReviewRequested etc.
+  CeeDecisionReviewPromptLoaded: "cee.decision_review.prompt_loaded",
+  CeeDecisionReviewLlmCallStarted: "cee.decision_review.llm_call_started",
+  CeeDecisionReviewLlmCallCompleted: "cee.decision_review.llm_call_completed",
+  CeeDecisionReviewJsonExtracted: "cee.decision_review.json_extracted",
+  CeeDecisionReviewShapeCheckFailed: "cee.decision_review.shape_check_failed",
+  CeeDecisionReviewShapeCheckWarnings: "cee.decision_review.shape_check_warnings",
+
   // V04: Upstream telemetry events
   DraftUpstreamSuccess: "assist.draft.upstream_success",
   DraftUpstreamError: "assist.draft.upstream_error",

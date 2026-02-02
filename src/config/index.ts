@@ -199,6 +199,7 @@ const ConfigSchema = z.object({
     draftArchetypesEnabled: booleanString.default(true), // Default true to match pipeline.ts behavior
     draftStructuralWarningsEnabled: booleanString.default(false),
     refinementEnabled: booleanString.default(false), // Enable draft refinement feature
+    decisionReviewEnabled: booleanString.default(false), // Enable M2 Decision Review endpoint
     decisionReviewRateLimitRpm: z.coerce.number().int().positive().default(30), // Decision review rate limit
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
@@ -448,6 +449,7 @@ function parseConfig(): Config {
       draftArchetypesEnabled: env.CEE_DRAFT_ARCHETYPES_ENABLED,
       draftStructuralWarningsEnabled: env.CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED,
       refinementEnabled: env.CEE_REFINEMENT_ENABLED,
+      decisionReviewEnabled: env.CEE_DECISION_REVIEW_ENABLED,
       decisionReviewRateLimitRpm: env.CEE_DECISION_REVIEW_RATE_LIMIT_RPM,
       optionsFeatureVersion: env.CEE_OPTIONS_FEATURE_VERSION,
       explainFeatureVersion: env.CEE_EXPLAIN_FEATURE_VERSION,
