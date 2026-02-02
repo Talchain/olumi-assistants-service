@@ -419,8 +419,8 @@ class FixturesAdapter implements LLMAdapter {
       narrative_summary:
         "Option A leads with a 65% win probability, driven by strong market timing alignment. This is a close call with Option B trailing by 12 points. Evidence gaps in customer adoption rates warrant caution before final commitment.",
       story_headlines: {
-        option_a: "First-mover advantage drives projected success",
-        option_b: "Strong fundamentals but timing uncertainty remains",
+        opt_a: "First-mover advantage drives projected success",
+        opt_b: "Strong fundamentals but timing uncertainty remains",
       },
       robustness_explanation: {
         summary: "The recommendation shows moderate stability with one key sensitivity",
@@ -432,7 +432,7 @@ class FixturesAdapter implements LLMAdapter {
         "This is a close call requiring careful attention to timing assumptions before proceeding.",
       // M2 spec: evidence_enhancements.<factor_id> = { specific_action, rationale, evidence_type, decision_hygiene, effort? }
       evidence_enhancements: {
-        factor_timing: {
+        node_timing: {
           specific_action: "Commission market timing analysis from independent research firm",
           rationale: "Current timing estimates have high uncertainty that affects the recommendation",
           evidence_type: "market_research",
@@ -441,7 +441,7 @@ class FixturesAdapter implements LLMAdapter {
       },
       // M2 spec: scenario_contexts.<edge_id> = { trigger_description, consequence }
       scenario_contexts: {
-        e3: {
+        edge_timing_revenue: {
           trigger_description: "If market timing shifts unfavorably",
           consequence: "Option B becomes viable due to its defensive positioning",
         },
@@ -452,9 +452,9 @@ class FixturesAdapter implements LLMAdapter {
           type: "DOMINANT_FACTOR",
           source: "structural",
           description: "Heavy weight on supporting evidence for Option A",
-          affected_elements: ["factor_timing"],
+          affected_elements: ["node_timing"],
           suggested_action: "Seek disconfirming evidence actively",
-          linked_critique_code: "OVER_RELIANCE",
+          linked_critique_code: "DOMINANT_FACTOR",
         },
       ],
       // M2 spec: key_assumptions is array of STRINGS (max 5, mix model + psychological)
@@ -477,7 +477,7 @@ class FixturesAdapter implements LLMAdapter {
         warning_signs: ["Declining early adoption metrics", "Competitor announcements"],
         mitigation: "Establish monthly review cadence with kill criteria",
         review_trigger: "Two consecutive months of below-target adoption",
-        grounded_in: ["e3", "factor_timing"],
+        grounded_in: ["edge_timing_revenue", "node_timing"],
       },
     });
 
