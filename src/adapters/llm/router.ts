@@ -32,6 +32,8 @@ import type {
   CritiqueGraphResult,
   ExplainDiffArgs,
   ExplainDiffResult,
+  ChatArgs,
+  ChatResult,
   CallOpts,
 } from "./types.js";
 import { AnthropicAdapter } from "./anthropic.js";
@@ -403,6 +405,86 @@ class FixturesAdapter implements LLMAdapter {
 
     return {
       rationales,
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    };
+  }
+
+  async chat(_args: ChatArgs, _opts: CallOpts): Promise<ChatResult> {
+    // M2 Decision Review mock response - matches OUTPUT_SCHEMA from decision_review prompt
+    // See src/prompts/defaults.ts lines 1097-1141 for the authoritative schema
+    const mockContent = JSON.stringify({
+      narrative_summary:
+        "Option A leads with a 65% win probability, driven by strong market timing alignment. This is a close call with Option B trailing by 12 points. Evidence gaps in customer adoption rates warrant caution before final commitment.",
+      story_headlines: {
+        option_a: "First-mover advantage drives projected success",
+        option_b: "Strong fundamentals but timing uncertainty remains",
+      },
+      robustness_explanation: {
+        summary: "The recommendation shows moderate stability with one key sensitivity",
+        primary_risk: "Market timing factor has high elasticity (0.45)",
+        stability_factors: ["Strong team alignment", "Clear market demand signals"],
+        fragility_factors: ["Timing assumptions", "Competitor response uncertainty"],
+      },
+      readiness_rationale:
+        "This is a close call requiring careful attention to timing assumptions before proceeding.",
+      // M2 spec: evidence_enhancements.<factor_id> = { specific_action, rationale, evidence_type, decision_hygiene, effort? }
+      evidence_enhancements: {
+        factor_timing: {
+          specific_action: "Commission market timing analysis from independent research firm",
+          rationale: "Current timing estimates have high uncertainty that affects the recommendation",
+          evidence_type: "market_research",
+          decision_hygiene: "Gather disconfirming evidence before committing",
+        },
+      },
+      // M2 spec: scenario_contexts.<edge_id> = { trigger_description, consequence }
+      scenario_contexts: {
+        e3: {
+          trigger_description: "If market timing shifts unfavorably",
+          consequence: "Option B becomes viable due to its defensive positioning",
+        },
+      },
+      // M2 spec: bias_findings[] = { type, source, description, affected_elements, suggested_action, linked_critique_code?, brief_evidence? }
+      bias_findings: [
+        {
+          type: "DOMINANT_FACTOR",
+          source: "structural",
+          description: "Heavy weight on supporting evidence for Option A",
+          affected_elements: ["factor_timing"],
+          suggested_action: "Seek disconfirming evidence actively",
+          linked_critique_code: "OVER_RELIANCE",
+        },
+      ],
+      // M2 spec: key_assumptions is array of STRINGS (max 5, mix model + psychological)
+      key_assumptions: [
+        "Market conditions remain stable through implementation period",
+        "Team capacity assumptions are accurate",
+        "Competitor response will be within expected range",
+      ],
+      // M2 spec: decision_quality_prompts[] = { question, principle, applies_because }
+      decision_quality_prompts: [
+        {
+          question: "Have you considered what would make Option B the better choice?",
+          principle: "Pre-mortem analysis",
+          applies_because: "Close-call decisions benefit from imagining failure scenarios",
+        },
+      ],
+      // M2 spec: pre_mortem = { failure_scenario, warning_signs, mitigation, grounded_in, review_trigger? }
+      pre_mortem: {
+        failure_scenario: "Six months from now, if this decision fails, it will be because market timing assumptions were overly optimistic",
+        warning_signs: ["Declining early adoption metrics", "Competitor announcements"],
+        mitigation: "Establish monthly review cadence with kill criteria",
+        review_trigger: "Two consecutive months of below-target adoption",
+        grounded_in: ["e3", "factor_timing"],
+      },
+    });
+
+    return {
+      content: mockContent,
+      model: this.model,
+      latencyMs: 0,
       usage: {
         input_tokens: 0,
         output_tokens: 0,

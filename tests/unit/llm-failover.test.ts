@@ -88,6 +88,18 @@ class MockAdapter implements LLMAdapter {
       usage: { input_tokens: 10, output_tokens: 20 },
     };
   }
+
+  async chat(_args: any, _opts: CallOpts): Promise<any> {
+    if (this.shouldFail) {
+      throw new Error(`${this.name} failed`);
+    }
+    return {
+      content: "Mock chat response",
+      usage: { input_tokens: 10, output_tokens: 20 },
+      model: this.model,
+      latencyMs: 100,
+    };
+  }
 }
 
 describe("FailoverAdapter", () => {

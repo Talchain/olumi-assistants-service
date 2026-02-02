@@ -7,7 +7,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -1278,5 +1278,128 @@ export class OpenAIAdapter implements LLMAdapter {
     // OpenAI provider does not yet support explainDiff
     // Switch to LLM_PROVIDER=anthropic to use this feature
     throw new Error("openai_explain_diff_not_supported: ExplainDiff endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  }
+
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    const maxTokens = args.maxTokens ?? 4096;
+    const temperature = args.temperature ?? 0;
+    const timeoutMs = opts.timeoutMs || getTimeoutForModel(this.model);
+
+    // V04: Generate idempotency key for request traceability
+    const idempotencyKey = opts.requestId || makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info(
+      {
+        model: this.model,
+        max_tokens: maxTokens,
+        temperature,
+        system_chars: args.system.length,
+        user_chars: args.userMessage.length,
+        idempotency_key: idempotencyKey,
+      },
+      "calling OpenAI for chat completion"
+    );
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    try {
+      const apiClient = getClient();
+      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: [
+                { role: "system", content: args.system },
+                { role: "user", content: args.userMessage },
+              ],
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { "Idempotency-Key": idempotencyKey },
+            }
+          ),
+        {
+          adapter: "openai",
+          model: this.model,
+          operation: "chat",
+        }
+      );
+
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        log.error({ response }, "OpenAI returned empty content");
+        throw new Error("openai_empty_response");
+      }
+
+      log.info(
+        {
+          model: this.model,
+          latency_ms: latencyMs,
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          content_chars: content.length,
+        },
+        "OpenAI chat completion successful"
+      );
+
+      return {
+        content,
+        model: this.model,
+        latencyMs,
+        usage: {
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+        },
+      };
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
+
+      if (error instanceof Error) {
+        // V04: Throw typed UpstreamTimeoutError for timeout classification
+        if (error.name === "AbortError" || abortController.signal.aborted) {
+          log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, "OpenAI chat call timed out");
+          throw new UpstreamTimeoutError(
+            "OpenAI chat timed out",
+            "openai",
+            "chat",
+            "body",
+            elapsedMs,
+            error
+          );
+        }
+
+        // V04: Check for OpenAI API errors (non-2xx responses)
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.get?.('x-request-id') || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            "OpenAI API returned non-2xx status"
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI chat failed: ${apiError.message || 'unknown error'}`,
+            "openai",
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
+      }
+
+      log.error({ error }, "OpenAI chat call failed");
+      throw error;
+    }
   }
 }

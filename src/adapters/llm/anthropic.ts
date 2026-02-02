@@ -7,7 +7,7 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -1801,6 +1801,150 @@ Return ONLY valid JSON in this format:
   }
 }
 
+// ============================================================================
+// Generic Chat Completion
+// ============================================================================
+
+interface ChatWithAnthropicArgs {
+  system: string;
+  userMessage: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  requestId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Generic chat completion with Anthropic.
+ * Used for non-graph-specific LLM calls (e.g., Decision Review).
+ * Uses the same infrastructure as other adapter methods: retry, timeout, telemetry.
+ */
+export async function chatWithAnthropic(
+  args: ChatWithAnthropicArgs
+): Promise<ChatResult> {
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = args.maxTokens ?? 4096;
+  const temperature = args.temperature ?? 0;
+  const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
+
+  // V04: Generate idempotency key for request traceability
+  const idempotencyKey = args.requestId || makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info(
+    {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system_chars: args.system.length,
+      user_chars: args.userMessage.length,
+      idempotency_key: idempotencyKey,
+    },
+    "calling Anthropic for chat completion"
+  );
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+  try {
+    const apiClient = getClient();
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(
+          {
+            model,
+            max_tokens: maxTokens,
+            temperature,
+            system: args.system,
+            messages: [{ role: "user", content: args.userMessage }],
+          },
+          {
+            signal: abortController.signal,
+            headers: { "Idempotency-Key": idempotencyKey },
+          }
+        ),
+      {
+        adapter: "anthropic",
+        model,
+        operation: "chat",
+      }
+    );
+
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    const content = response.content[0];
+    if (content.type !== "text") {
+      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+      throw new Error("unexpected_response_type");
+    }
+
+    log.info(
+      {
+        model,
+        latency_ms: latencyMs,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        content_chars: content.text.length,
+      },
+      "Anthropic chat completion successful"
+    );
+
+    return {
+      content: content.text,
+      model,
+      latencyMs,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
+
+    if (error instanceof Error) {
+      // V04: Throw typed UpstreamTimeoutError for timeout classification
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, "Anthropic chat call timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic chat timed out",
+          "anthropic",
+          "chat",
+          "body",
+          elapsedMs,
+          error
+        );
+      }
+
+      // V04: Check for Anthropic API errors (non-2xx responses)
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic chat failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
+      }
+    }
+
+    log.error({ error }, "Anthropic chat call failed");
+    throw error;
+  }
+}
+
 /**
  * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
  * This wraps the existing functions to provide a consistent interface for the router.
@@ -1916,6 +2060,18 @@ export class AnthropicAdapter implements LLMAdapter {
       rationales: result.rationales,
       usage: result.usage,
     };
+  }
+
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    return chatWithAnthropic({
+      system: args.system,
+      userMessage: args.userMessage,
+      model: this.model,
+      temperature: args.temperature,
+      maxTokens: args.maxTokens,
+      requestId: opts.requestId,
+      timeoutMs: opts.timeoutMs,
+    });
   }
 }
 

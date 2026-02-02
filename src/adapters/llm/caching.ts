@@ -37,6 +37,8 @@ import type {
   ClarifyBriefResult,
   CritiqueGraphArgs,
   CritiqueGraphResult,
+  ChatArgs,
+  ChatResult,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
@@ -356,6 +358,14 @@ export class CachingAdapter implements LLMAdapter {
     }
 
     log.info({ provider: this.adapter.name }, "Prompt cache cleared");
+  }
+
+  /**
+   * Chat completion - bypasses cache as responses are context-dependent
+   */
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    // Chat responses are typically unique and context-dependent, so we bypass cache
+    return this.adapter.chat(args, opts);
   }
 }
 

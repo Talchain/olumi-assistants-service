@@ -230,6 +230,35 @@ export interface CritiqueGraphResult {
 }
 
 /**
+ * Arguments for generic chat completion (non-graph-specific LLM calls).
+ * Used by endpoints like Decision Review that need plain text LLM responses.
+ */
+export interface ChatArgs {
+  /** System prompt for the conversation */
+  system: string;
+  /** User message content */
+  userMessage: string;
+  /** Temperature for response generation (0-1, default: 0 for determinism) */
+  temperature?: number;
+  /** Maximum tokens to generate (default: 4096) */
+  maxTokens?: number;
+}
+
+/**
+ * Result from a generic chat completion.
+ */
+export interface ChatResult {
+  /** The generated text content */
+  content: string;
+  /** Token usage metrics for cost tracking */
+  usage: UsageMetrics;
+  /** Model that was used */
+  model: string;
+  /** Provider-side latency in milliseconds */
+  latencyMs: number;
+}
+
+/**
  * Call options passed to all adapter methods for request tracking and timeouts.
  */
 export interface CallOpts {
@@ -334,6 +363,22 @@ export interface LLMAdapter {
    * @throws Error on timeout or API failure
    */
   explainDiff(args: ExplainDiffArgs, opts: CallOpts): Promise<ExplainDiffResult>;
+
+  /**
+   * Generic chat completion for non-graph-specific LLM calls.
+   *
+   * This method provides a standard way to make LLM calls that don't fit
+   * the graph-specific methods (draftGraph, critiqueGraph, etc.). It uses
+   * the same infrastructure: retry logic, timeout handling, telemetry, and
+   * error classification.
+   *
+   * @param args - System prompt, user message, optional temperature/maxTokens
+   * @param opts - Request ID, timeout, abort signal
+   * @returns Generated text content with usage metrics
+   * @throws UpstreamTimeoutError on timeout
+   * @throws UpstreamHTTPError on API errors
+   */
+  chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult>;
 }
 
 /**

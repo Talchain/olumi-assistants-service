@@ -75,6 +75,16 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
+  async chat(_args: any, _opts: CallOpts): Promise<any> {
+    this.callCount++;
+    return {
+      content: "Mock chat response",
+      usage: { input_tokens: 10, output_tokens: 20 },
+      model: this.model,
+      latencyMs: 100,
+    };
+  }
+
   getCallCount(): number {
     return this.callCount;
   }

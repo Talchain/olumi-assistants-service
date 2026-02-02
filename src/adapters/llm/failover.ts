@@ -31,6 +31,8 @@ import type {
   ClarifyBriefResult,
   CritiqueGraphArgs,
   CritiqueGraphResult,
+  ChatArgs,
+  ChatResult,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
@@ -204,6 +206,13 @@ export class FailoverAdapter implements LLMAdapter {
 
   async explainDiff(args: ExplainDiffArgs, opts: CallOpts): Promise<ExplainDiffResult> {
     return this.withFailover("explain_diff", (adapter) => adapter.explainDiff(args, opts), opts);
+  }
+
+  /**
+   * Chat completion with automatic failover
+   */
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    return this.withFailover("chat", (adapter) => adapter.chat(args, opts), opts);
   }
 
   /**
