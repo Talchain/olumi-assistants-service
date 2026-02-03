@@ -85,6 +85,7 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   critique_graph: 'critique_graph',
   explainer: 'explainer',
   bias_check: 'bias_check',
+  decision_review: 'decision_review',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 
@@ -206,10 +207,16 @@ export async function getSystemPrompt(
     cacheAge: cached ? cacheAge : undefined,
   });
 
+  // Track whether fallback to defaults is due to a transient failure (timeout/error)
+  // vs a permanent condition (no managed prompt exists, prompt management disabled).
+  // We should NOT cache defaults on transient failures - let the next request retry.
+  let isTransientFailure = false;
+
   // Cache expired - try synchronous store fetch BEFORE falling back to defaults
   // This ensures store prompts are used when available, even after cache expiry
-  // Use a timeout to prevent blocking too long if Supabase is slow (2.5s max)
-  const STORE_FETCH_TIMEOUT_MS = 2500;
+  // Use a timeout to prevent blocking too long if Supabase is slow (5s max)
+  // Note: Increased from 2.5s to 5s to accommodate Supabase free tier cold starts
+  const STORE_FETCH_TIMEOUT_MS = 5000;
   if (isPromptManagementEnabled()) {
     const useStaging = shouldUseStagingPrompts();
     try {
@@ -222,9 +229,10 @@ export async function getSystemPrompt(
       if (loaded === null) {
         log.warn(
           { taskId, timeoutMs: STORE_FETCH_TIMEOUT_MS, useStaging },
-          'Cache expired - store fetch timed out, falling back to defaults'
+          'Cache expired - store fetch timed out, falling back to defaults (will NOT cache defaults)'
         );
-        // Fall through to defaults
+        // Transient failure - don't cache defaults, let next request retry
+        isTransientFailure = true;
       } else if (loaded.source === 'store') {
         const promptHash = createHash('sha256').update(loaded.content).digest('hex');
 
@@ -250,22 +258,26 @@ export async function getSystemPrompt(
 
         return loaded.content;
       } else if (loaded !== null) {
-        // Store returned defaults - fall through to default handling below
+        // Store returned defaults - this is a permanent condition (no managed prompt exists)
+        // It's OK to cache defaults in this case
         log.debug({ taskId, useStaging }, 'Cache expired - store returned defaults, using hardcoded default');
       }
     } catch (err) {
-      // Store fetch failed - fall through to defaults
+      // Store fetch failed - transient failure, don't cache defaults
       log.warn(
         { taskId, error: String(err), useStaging },
-        'Cache expired - store fetch failed, falling back to defaults'
+        'Cache expired - store fetch failed, falling back to defaults (will NOT cache defaults)'
       );
+      isTransientFailure = true;
     }
   }
 
   // Log at warn level for visibility in production - this should be rare after cache warming
   log.warn(
-    { taskId, reason: missReason, cacheAge: cached ? cacheAge : null, cacheTtlMs: CACHE_TTL_MS, staleGraceMs: STALE_GRACE_PERIOD_MS },
-    'Prompt cache miss - returning defaults. This indicates cache expiry or cold start.'
+    { taskId, reason: missReason, cacheAge: cached ? cacheAge : null, cacheTtlMs: CACHE_TTL_MS, staleGraceMs: STALE_GRACE_PERIOD_MS, isTransientFailure },
+    isTransientFailure
+      ? 'Prompt cache miss - returning defaults WITHOUT caching (transient failure, next request will retry)'
+      : 'Prompt cache miss - returning defaults. This indicates cache expiry or cold start.'
   );
 
   // Load from prompt system (sync path for immediate return)
@@ -275,7 +287,11 @@ export async function getSystemPrompt(
     const promptHash = createHash('sha256').update(content).digest('hex');
 
     // Only cache static prompts (no variables) to avoid cache poisoning
-    if (!hasVariables) {
+    // IMPORTANT: Do NOT cache defaults on transient failures (timeout/network error)
+    // This prevents "poisoning" the cache with defaults when Supabase is temporarily slow.
+    // The next request will retry and likely succeed since we just "woke up" Supabase.
+    const willCache = !hasVariables && !isTransientFailure;
+    if (willCache) {
       promptCache.set(taskId, {
         content,
         loadedAt: now,
@@ -283,6 +299,13 @@ export async function getSystemPrompt(
         promptHash,
       });
     }
+
+    // Emit telemetry with reason and cache status for monitoring
+    emit(TelemetryEvents.PromptLoadedFromDefault, {
+      taskId,
+      reason: isTransientFailure ? 'transient_failure' : missReason,
+      cached: willCache,
+    });
 
     // Trigger background refresh from store to update cache for next request
     triggerBackgroundRefresh(taskId, variables);

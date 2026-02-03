@@ -1496,6 +1496,8 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.loader.source", 1, {
             source: "default",
             task_id: String((eventData.taskId as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+            cached: String((eventData.cached as boolean | undefined) ?? "unknown"),
           });
           break;
         }
