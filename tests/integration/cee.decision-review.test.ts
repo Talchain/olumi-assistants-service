@@ -107,8 +107,8 @@ describe("POST /assist/v1/decision-review (M2 Schema)", () => {
         { code: "DOMINANT_FACTOR", factor_id: "factor_timing", elasticity: 0.45 },
       ],
     },
-    winner: "option_uk",
-    runner_up: "option_de",
+    winner: { id: "option_uk", label: "UK Expansion", win_probability: 0.65, outcome_mean: 0.72 },
+    runner_up: { id: "option_de", label: "Germany Expansion", win_probability: 0.35, outcome_mean: 0.58 },
     flip_threshold_data: [
       {
         factor_id: "factor_timing",
@@ -430,8 +430,8 @@ describe("POST /assist/v1/decision-review (feature disabled)", () => {
           evidence_gaps: [],
           model_critiques: [],
         },
-        winner: "opt1",
-        runner_up: "opt2",
+        winner: { id: "opt1", label: "Option 1", win_probability: 0.6 },
+        runner_up: { id: "opt2", label: "Option 2", win_probability: 0.4 },
       },
     });
 
@@ -475,8 +475,8 @@ describe("POST /assist/v1/decision-review (include_raw gating)", () => {
       evidence_gaps: [],
       model_critiques: [],
     },
-    winner: "opt1",
-    runner_up: "opt2",
+    winner: { id: "opt1", label: "Option 1", win_probability: 0.6 },
+    runner_up: { id: "opt2", label: "Option 2", win_probability: 0.4 },
   };
 
   it("does not include raw_llm_output when CEE_OBSERVABILITY_RAW_IO is false", async () => {
@@ -530,8 +530,8 @@ describe("POST /assist/v1/decision-review (include_raw enabled)", () => {
       evidence_gaps: [],
       model_critiques: [],
     },
-    winner: "opt1",
-    runner_up: "opt2",
+    winner: { id: "opt1", label: "Option 1", win_probability: 0.6 },
+    runner_up: { id: "opt2", label: "Option 2", win_probability: 0.4 },
   };
 
   it("includes raw_llm_output when CEE_OBSERVABILITY_RAW_IO is true", async () => {

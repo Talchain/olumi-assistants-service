@@ -79,11 +79,26 @@ const DecisionReviewInputSchema = z
       })
       .passthrough(),
 
-    /** Winning option ID */
-    winner: z.string(),
+    /** Winning option (accepts id/label or option_id/option_label) */
+    winner: z
+      .object({
+        id: z.string(),
+        label: z.string(),
+        win_probability: z.number(),
+        outcome_mean: z.number().optional(),
+      })
+      .passthrough(),
 
-    /** Runner-up option ID (null for single-option decisions) */
-    runner_up: z.string().nullable(),
+    /** Runner-up option (null for single-option decisions) */
+    runner_up: z
+      .object({
+        id: z.string(),
+        label: z.string(),
+        win_probability: z.number(),
+        outcome_mean: z.number().optional(),
+      })
+      .passthrough()
+      .nullable(),
 
     /** PLoT-computed flip threshold data (max 2) */
     flip_threshold_data: z
@@ -221,9 +236,9 @@ function buildUserMessage(input: DecisionReviewInput): string {
 
   // Decision Context
   sections.push("<DECISION_CONTEXT>");
-  sections.push(`winner: ${input.winner}`);
+  sections.push(`winner: ${JSON.stringify(input.winner)}`);
   if (input.runner_up !== null) {
-    sections.push(`runner_up: ${input.runner_up}`);
+    sections.push(`runner_up: ${JSON.stringify(input.runner_up)}`);
   } else {
     sections.push("runner_up: null (single-option decision)");
   }
@@ -494,8 +509,8 @@ export default async function route(app: FastifyInstance) {
       {
         request_id: requestId,
         brief_hash: input.brief_hash,
-        winner: input.winner,
-        runner_up: input.runner_up,
+        winner_id: input.winner.id,
+        runner_up_id: input.runner_up?.id ?? null,
         readiness: input.deterministic_coaching.readiness,
       },
       "Processing decision review request"
