@@ -40,6 +40,7 @@ import ceeIslSynthesisRouteV1 from "./routes/assist.v1.isl-synthesis.js";
 import ceeHealthRouteV1 from "./routes/assist.v1.health.js";
 import ceeAskRouteV1 from "./routes/assist.v1.ask.js";
 import ceeReviewRouteV1 from "./routes/assist.v1.review.js";
+import ceeDecisionReviewRouteV1 from "./routes/assist.v1.decision-review.js";
 import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./routes/v1.status.js";
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
@@ -745,6 +746,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeHealthRouteV1(app);
   await ceeAskRouteV1(app);
   await ceeReviewRouteV1(app);
+  await ceeDecisionReviewRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }
