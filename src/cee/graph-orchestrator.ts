@@ -23,6 +23,7 @@ import { zodToValidationErrors, isZodError } from "../validators/zod-error-mappe
 import { log } from "../utils/telemetry.js";
 import type { ObservabilityCollector } from "./observability/collector.js";
 import { config } from "../config/index.js";
+import { normaliseStructuralEdges } from "./structural-edge-normaliser.js";
 
 // =============================================================================
 // Types
@@ -309,8 +310,24 @@ export async function generateGraph(
         continue;
       }
 
-      const graph = parseResult.data;
+      const parsedGraph = parseResult.data;
+
+      // Step 2.5: Normalise structural edges (option→factor) to canonical values
+      // This prevents STRUCTURAL_EDGE_NOT_CANONICAL_ERROR from non-canonical LLM outputs
+      const { graph, normalisedCount } = normaliseStructuralEdges(parsedGraph);
       lastGraph = graph;
+
+      if (normalisedCount > 0) {
+        log.info(
+          {
+            event: "graph_orchestrator.structural_edges_normalised",
+            requestId: attemptRequestId,
+            attempt: attempt + 1,
+            count: normalisedCount,
+          },
+          `Normalised ${normalisedCount} structural edge(s) before validation`
+        );
+      }
 
       // Step 3: Graph validator (pre-normalisation)
       const validationResult = validateGraph({ graph, requestId: attemptRequestId });
@@ -680,7 +697,23 @@ export async function validateAndRepairGraph(
       continue;
     }
 
-    currentGraph = zodResult.data;
+    const parsedGraph = zodResult.data;
+
+    // Phase 1.5: Normalise structural edges (option→factor) to canonical values
+    const { graph: structurallyNormalised, normalisedCount } = normaliseStructuralEdges(parsedGraph);
+    currentGraph = structurallyNormalised;
+
+    if (normalisedCount > 0) {
+      log.info(
+        {
+          event: "graph_orchestrator.validate_repair.structural_edges_normalised",
+          requestId: attemptRequestId,
+          attempt: attempt + 1,
+          count: normalisedCount,
+        },
+        `Normalised ${normalisedCount} structural edge(s) before validation`
+      );
+    }
 
     // Phase 2: Deterministic validation
     const validationResult = validateGraph({ graph: currentGraph });

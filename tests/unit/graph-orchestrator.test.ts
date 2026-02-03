@@ -622,4 +622,132 @@ describe("validateAndRepairGraph", () => {
       ).rejects.toThrow(GraphValidationError);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Test: Structural edge normalisation
+  // -------------------------------------------------------------------------
+  describe("structural edge normalisation", () => {
+    it("normalises non-canonical option→factor edges before validation", async () => {
+      // Graph with non-canonical option→factor edge values
+      // All edges have required fields to pass validation
+      const graphWithDriftedEdge: GraphT = {
+        version: "1",
+        default_seed: 17,
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Maximize Value" },
+          { id: "dec_1", kind: "decision", label: "Main Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "opt_b", kind: "option", label: "Option B" },
+          {
+            id: "fac_price",
+            kind: "factor",
+            label: "Price",
+            category: "controllable",
+            data: {
+              value: 100,
+              extractionType: "explicit",
+              factor_type: "price",
+              uncertainty_drivers: ["market volatility"],
+            },
+          },
+          { id: "outcome_1", kind: "outcome", label: "Revenue" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive", origin: "ai" },
+          { from: "dec_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive", origin: "ai" },
+          // Non-canonical option→factor edge - should be normalised
+          {
+            from: "opt_a",
+            to: "fac_price",
+            strength_mean: 0.95, // Drifted from 1.0
+            strength_std: 0.08, // Drifted from 0.01
+            belief_exists: 0.92, // Drifted from 1.0
+            effect_direction: "positive",
+            origin: "ai",
+          },
+          // Another non-canonical option→factor edge
+          {
+            from: "opt_b",
+            to: "fac_price",
+            strength_mean: 0.88,
+            strength_std: 0.12,
+            belief_exists: 0.9,
+            effect_direction: "positive",
+            origin: "ai",
+          },
+          // Causal edge - should NOT be normalised
+          { from: "fac_price", to: "outcome_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive", origin: "ai" },
+          { from: "outcome_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive", origin: "ai" },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      };
+
+      const adapter = createMockAdapter({
+        draftGraph: vi.fn().mockResolvedValue({
+          graph: graphWithDriftedEdge,
+          usage: { input_tokens: 100, output_tokens: 200 },
+        }),
+      });
+
+      const result = await generateGraph(
+        { brief: "Test structural normalisation", requestId: "test-norm" },
+        adapter
+      );
+
+      // Should succeed without repair because structural edges are normalised
+      expect(result.attempts).toBe(1);
+      expect(result.repairUsed).toBe(false);
+
+      // Find the option→factor edges in the result
+      const optAToFactor = result.graph.edges.find(
+        (e) => e.from === "opt_a" && e.to === "fac_price"
+      );
+      const optBToFactor = result.graph.edges.find(
+        (e) => e.from === "opt_b" && e.to === "fac_price"
+      );
+
+      // Structural edges should have canonical values
+      expect(optAToFactor?.strength_mean).toBe(1);
+      expect(optAToFactor?.strength_std).toBe(0.01);
+      expect(optAToFactor?.belief_exists).toBe(1);
+      expect(optAToFactor?.effect_direction).toBe("positive");
+
+      expect(optBToFactor?.strength_mean).toBe(1);
+      expect(optBToFactor?.strength_std).toBe(0.01);
+      expect(optBToFactor?.belief_exists).toBe(1);
+
+      // Causal edge should be unchanged
+      const causalEdge = result.graph.edges.find(
+        (e) => e.from === "fac_price" && e.to === "outcome_1"
+      );
+      expect(causalEdge?.strength_mean).toBe(0.7);
+      expect(causalEdge?.belief_exists).toBe(0.9);
+    });
+
+    it("does not normalise factor→factor causal edges", async () => {
+      // Use the standard valid graph and check that causal edges remain unchanged
+      const validGraph = createValidGraph();
+
+      const adapter = createMockAdapter({
+        draftGraph: vi.fn().mockResolvedValue({
+          graph: validGraph,
+          usage: { input_tokens: 100, output_tokens: 200 },
+        }),
+      });
+
+      const result = await generateGraph(
+        { brief: "Test causal edge preservation", requestId: "test-causal" },
+        adapter
+      );
+
+      // Find the factor→outcome edge (causal, not structural)
+      const causalEdge = result.graph.edges.find(
+        (e) => e.from === "fac_price" && e.to === "outcome_1"
+      );
+
+      // Values should be unchanged - not normalised (it's 0.7, not 1.0)
+      expect(causalEdge?.strength_mean).toBe(0.7);
+      expect(causalEdge?.belief_exists).toBe(0.9);
+    });
+  });
 });
