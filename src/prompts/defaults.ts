@@ -1147,6 +1147,155 @@ OPTIONAL FIELDS — omit rather than fabricate:
 - effort, review_trigger: Only if confidently estimated
 </OUTPUT_SCHEMA>
 
+<ANNOTATED_EXAMPLE>
+// CONTEXT: European expansion decision, 3 options, readiness = "close_call"
+// Winner: "expand_uk" (win_prob: 0.42), Runner-up: "expand_de" (win_prob: 0.35)
+// Key fragile edge: market_timing → revenue_growth (switch_prob: 0.23)
+// Evidence gap: regulatory_complexity (VoI: 0.31, confidence: 0.35)
+// Model critique: DOMINANT_FACTOR (market_timing elasticity: 0.58)
+
+{
+  "narrative_summary": "UK expansion leads with a 42% win probability, primarily driven by the strong market timing to revenue growth pathway. However, this is a close call — Germany trails by just 7 points and could overtake if market timing assumptions shift. The regulatory complexity factor currently has low confidence (35%), which limits how much weight to place on this recommendation.",
+  // WHY: winner + margin + driver → fragility → readiness caveat. All numbers from inputs.
+
+  "story_headlines": {
+    "expand_uk": "First-mover timing advantage offsets regulatory unknowns",
+    "expand_de": "Stronger fundamentals if timing advantage narrows",
+    "expand_fr": "Viable if both UK and Germany regulatory costs exceed estimates"
+  },
+  // WHY: Strategic narratives — winner=why it wins, runner-up=what flips it, other=niche
+
+  "robustness_explanation": {
+    "summary": "The recommendation is moderately stable but hinges on a single factor.",
+    "primary_risk": "Market Timing drives 58% of outcome variation — if this assumption weakens, the ranking could flip.",
+    "stability_factors": [
+      "UK revenue growth estimates are based on comparable market entries",
+      "Cost structure differences between markets are well-documented"
+    ],
+    "fragility_factors": [
+      "Market timing → revenue growth has a 23% chance of flipping the winner",
+      "Regulatory complexity confidence is only 35%",
+      "No baseline 'delay expansion' option was modelled"
+    ]
+  },
+
+  "readiness_rationale": "This is a close call: the 7-point gap between UK and Germany is within the model's uncertainty range, and the dominant factor (market timing) is sensitive to disruption. Gathering evidence on regulatory complexity would materially sharpen the comparison.",
+
+  "evidence_enhancements": {
+    "regulatory_complexity": {
+      "specific_action": "Commission a regulatory mapping from a local law firm covering licensing, data protection, and employment law timelines for each market.",
+      "rationale": "Regulatory complexity has the highest value of information (VoI: 0.31) but lowest confidence (35%) — resolving this could change the recommendation.",
+      "evidence_type": "expert_input",
+      "decision_hygiene": "Before reviewing the legal analysis, write down your current estimate of regulatory cost for each market. Compare afterwards to check for anchoring."
+    }
+  },
+  // WHY: Concrete action + behavioural science pairing, not "gather more data"
+
+  "scenario_contexts": {
+    "edge_market_timing_revenue": {
+      "trigger_description": "If a competitor announces European entry before your planned launch window, the market timing advantage for UK expansion erodes.",
+      "consequence": "Germany becomes the stronger option — expand_de overtakes expand_uk."
+    }
+  },
+  // WHY: Specific trigger + consequence references valid option label
+
+  "bias_findings": [
+    {
+      "type": "DOMINANT_FACTOR", "source": "structural",
+      "description": "Market Timing accounts for 58% of outcome variation — is this concentration intentional, or should other factors carry more weight?",
+      "affected_elements": ["node_market_timing"],
+      "suggested_action": "Review whether market timing deserves this dominance, or if edge strengths to other factors should be increased.",
+      "linked_critique_code": "DOMINANT_FACTOR"
+    },
+    {
+      "type": "SUNK_COST", "source": "semantic",
+      "description": "The brief mentions 18 months of UK market research — could this prior investment be anchoring the team toward UK regardless of the analysis?",
+      "affected_elements": ["node_expand_uk"],
+      "suggested_action": "Run the analysis imagining equal research on all three markets. Does UK still win on fundamentals alone?",
+      "brief_evidence": "18 months of UK market research and partner development"
+    }
+  ],
+  // WHY: structural → linked_critique_code. semantic → brief_evidence (exact substring ≥12 chars).
+
+  "key_assumptions": [
+    "Edge strengths assume current competitive landscape persists through execution",
+    "Market timing advantage assumes no major competitor enters during the execution window",
+    "Regulatory cost estimates are based on initial scoping, not detailed legal review",
+    "The team's prior UK research may create familiarity bias toward that market",
+    "Revenue projections assume consistent exchange rates across markets"
+  ],
+
+  "decision_quality_prompts": [
+    {
+      "question": "What evidence would convince you to choose Germany over the UK?",
+      "principle": "Disconfirmation",
+      "applies_because": "UK leads narrowly — seeking counter-evidence prevents confirmation bias."
+    },
+    {
+      "question": "If this expansion fails within a year, what was the most likely cause?",
+      "principle": "Pre-mortem (Klein)",
+      "applies_because": "Close-call readiness means failure modes are plausible — naming them creates early warning systems."
+    }
+  ],
+
+  "pre_mortem": {
+    "failure_scenario": "UK expansion stalled because a competitor launched a localised product shortly before us, eliminating our timing advantage. Germany's regulatory environment simplified under new EU harmonisation rules, making it the obvious choice in hindsight.",
+    "warning_signs": [
+      "Competitor announces European hiring or office openings",
+      "EU regulatory harmonisation proposals advance to consultation",
+      "UK partner negotiations stall without term sheet"
+    ],
+    "mitigation": "Monthly competitive intelligence review with pre-committed trigger to reassess if any warning sign materialises.",
+    "grounded_in": ["edge_market_timing_revenue", "regulatory_complexity"],
+    "review_trigger": "Reconvene if competitor announces European expansion or regulatory costs significantly exceed estimates"
+  },
+
+  "flip_thresholds": [
+    {
+      "factor_id": "market_timing", "factor_label": "Market Timing",
+      "current_value": 0.72, "flip_value": 0.45, "direction": "decrease",
+      "plain_english": "If Market Timing drops from 0.72 to 0.45, Germany overtakes the UK."
+    }
+  ],
+  // WHY: Numeric values EXACTLY from flip_threshold_data. Only plain_english is generated.
+
+  "framing_check": { "addresses_goal": true }
+}
+</ANNOTATED_EXAMPLE>
+
+<CONTRASTIVE_EXAMPLES>
+// ── INVENTED NUMBERS ──────────────────────────────────────────────
+// ❌ "Industry benchmarks suggest 60% of expansions succeed"
+//    → 60% not in inputs. Server rejects: UNGROUNDED_NUMBER
+// ✅ "UK expansion's 42% win probability reflects the model's uncertainty"
+
+// ── READINESS CONTRADICTION ───────────────────────────────────────
+// ❌ (needs_evidence) "The analysis clearly shows UK is the right choice."
+//    → Server rejects: READINESS_CONTRADICTION
+// ✅ (needs_evidence) "UK currently leads, but the evidence base needs
+//    strengthening — particularly regulatory complexity at just 35% confidence."
+
+// ── VAGUE vs SPECIFIC EVIDENCE ────────────────────────────────────
+// ❌ "Gather more data on regulatory complexity"
+// ✅ "Commission a regulatory mapping from a local law firm"
+//    + decision_hygiene: "Write your cost estimate before reviewing the report"
+
+// ── ACCUSATORY vs REFLECTIVE BIAS ─────────────────────────────────
+// ❌ "You have sunk cost bias because you mentioned prior investment."
+// ✅ "The brief mentions 18 months of UK research — could this prior
+//    investment be anchoring the team regardless of the analysis?"
+
+// ── CONSEQUENCE WITHOUT OPTION ────────────────────────────────────
+// ❌ consequence: "Things would change significantly"
+//    → Server rejects: CONSEQUENCE_INVALID_OPTION
+// ✅ consequence: "Germany becomes the stronger option — expand_de overtakes"
+
+// ── FLIP VALUE MODIFICATION ───────────────────────────────────────
+// ❌ flip_thresholds: { current_value: 0.70 } when input had 0.72
+//    → Server rejects: MODIFIED_VALUES
+// ✅ Copy current_value and flip_value exactly from flip_threshold_data
+</CONTRASTIVE_EXAMPLES>
+
 <CONSTRAINTS>
 Return ONLY the JSON object. No markdown fences, no preamble, no explanation
 outside the JSON structure.
