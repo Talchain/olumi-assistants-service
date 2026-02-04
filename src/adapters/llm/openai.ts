@@ -197,52 +197,33 @@ function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated
   };
 }
 
-function buildRepairPrompt(graph: GraphT, violations: string[]): string {
+async function buildRepairPrompt(graph: GraphT, violations: string[]): Promise<{ system: string; userContent: string }> {
   const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(graph);
-  const graphJson = JSON.stringify(truncatedGraph, null, 2);
+  const graphJson = JSON.stringify(
+    {
+      nodes: truncatedGraph.nodes,
+      edges: truncatedGraph.edges,
+    },
+    null,
+    2
+  );
   const truncatedNote = truncated ? "\n\n**Note: Graph was truncated for repair due to size.**" : "";
 
-  return `You are fixing validation errors in a decision graph.
+  const violationsText = violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
 
-## Current Graph (INVALID)${truncatedNote}
+  const userContent = `## Current Graph (INVALID)${truncatedNote}
 ${graphJson}
 
-## Validation Errors
-${violations.map((v, i) => `${i + 1}. ${v}`).join("\n")}
+## Violations Found
+${violationsText}`;
 
-## Your Task
-Fix ALL violations while preserving as much structure as possible:
-- Remove cycles (make it a DAG)
-- Remove edges referencing non-existent nodes
-- Cap at ${GRAPH_MAX_NODES} nodes and ${GRAPH_MAX_EDGES} edges
-- Maintain structured provenance on all edges
-- Keep stable node IDs (don't change IDs unless necessary)
+  // Load system prompt from prompt management system (with fallback to registered defaults)
+  const systemPrompt = await getSystemPrompt('repair_graph');
 
-## CRITICAL: Edge Direction Rules
-Edges represent CAUSAL influence: "from" node CAUSES or INFLUENCES "to" node.
-
-**The goal node MUST be a TERMINAL SINK with ZERO outgoing edges.**
-
-Correct directions:
-- decision → option (frames options)
-- option → outcome (leads to outcome)
-- outcome → goal (contributes to goal)
-- factor → option (affects viability)
-- risk → goal (detracts from goal)
-
-**WRONG directions to FIX:**
-- goal → anything (reverse these edges or remove)
-- outcome → option (reverse or remove)
-
-## Output Format (JSON)
-Return ONLY the repaired graph as valid JSON:
-{
-  "nodes": [...],
-  "edges": [...],
-  "rationales": [{"target": "node_id", "why": "why this fix was needed"}]
-}
-
-IMPORTANT: Return ONLY the JSON object, no markdown formatting`;
+  return {
+    system: systemPrompt,
+    userContent,
+  };
 }
 
 function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, unknown>, existingOptions?: string[]): string {
@@ -846,7 +827,7 @@ export class OpenAIAdapter implements LLMAdapter {
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
     const { graph, violations } = args;
     const collector = opts.collector;
-    const prompt = buildRepairPrompt(graph, violations);
+    const prompt = await buildRepairPrompt(graph, violations);
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -881,7 +862,10 @@ export class OpenAIAdapter implements LLMAdapter {
           apiClient.chat.completions.create(
             {
               model: this.model,
-              messages: [{ role: "user", content: prompt }],
+              messages: [
+                { role: "system", content: prompt.system },
+                { role: "user", content: prompt.userContent },
+              ],
               response_format: { type: "json_object" },
               ...modelParams,
             },
