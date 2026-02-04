@@ -198,8 +198,8 @@ describe("Task-to-Model Routing", () => {
       expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4o");
       // bias_check uses Claude Sonnet 4 (excellent reasoning)
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
-      // repair_graph uses Claude Sonnet 4 (excellent at fixing graphs)
-      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("claude-sonnet-4-20250514");
+      // repair_graph uses gpt-4o (quality tier for graph repair)
+      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-4o");
       // Other complex tasks use premium tier (gpt-5.2)
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-5.2");
       expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("gpt-5.2");

@@ -97,6 +97,84 @@ function wireOrphansToGoal(
 }
 
 /**
+ * Wire orphaned outcome/risk nodes FROM the causal chain.
+ * Finds nodes with no INBOUND edges from factors and connects them
+ * to a factor in the graph (prefers controllable).
+ *
+ * This complements wireOrphansToGoal which handles OUTBOUND edges.
+ * Both are needed for full reachability from decision via forward BFS.
+ *
+ * LIMITATION: All orphaned nodes wire from the same source factor for
+ * simplicity. This is a fallback repair mechanism; production graphs
+ * should have proper factor→outcome/risk edges from the LLM.
+ */
+function wireOrphansFromCausalChain(
+  nodes: GraphT["nodes"],
+  edges: GraphT["edges"],
+  requestId?: string
+): { edges: GraphT["edges"]; wiredIds: string[] } {
+  // Find outcome/risk nodes
+  const outcomeRiskIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind === "outcome" || node.kind === "risk") {
+      outcomeRiskIds.add(node.id);
+    }
+  }
+
+  // Find which already have INBOUND edges from factors
+  const hasInbound = new Set<string>();
+  for (const edge of edges) {
+    const fromNode = nodes.find((n) => n.id === edge.from);
+    if (fromNode?.kind === "factor" && outcomeRiskIds.has(edge.to)) {
+      hasInbound.add(edge.to);
+    }
+  }
+
+  // Find a factor to wire from (prefer controllable, fallback to any)
+  const factors = nodes.filter((n) => n.kind === "factor");
+  const controllableFactor = factors.find((n) => n.category === "controllable");
+  const sourceFactor = controllableFactor || factors[0];
+
+  if (!sourceFactor) {
+    return { edges, wiredIds: [] };
+  }
+
+  // Add inbound edges for orphaned outcome/risk nodes
+  const newEdges = [...edges];
+  const wiredIds: string[] = [];
+  for (const nodeId of outcomeRiskIds) {
+    if (!hasInbound.has(nodeId)) {
+      const node = nodes.find((n) => n.id === nodeId);
+      const isRisk = node?.kind === "risk";
+      newEdges.push({
+        from: sourceFactor.id,
+        to: nodeId,
+        strength_mean: isRisk ? 0.3 : 0.5, // Positive causal influence
+        strength_std: 0.2,
+        belief_exists: 0.75,
+        effect_direction: "positive",
+      });
+      wiredIds.push(nodeId);
+    }
+  }
+
+  if (wiredIds.length > 0) {
+    log.info(
+      {
+        event: "SIMPLE_REPAIR_WIRED_FROM_FACTOR",
+        request_id: requestId,
+        source_factor: sourceFactor.id,
+        wired_node_ids: wiredIds,
+        edge_count_added: wiredIds.length,
+      },
+      `simpleRepair wired ${wiredIds.length} orphaned outcome/risk nodes from factor`
+    );
+  }
+
+  return { edges: newEdges, wiredIds };
+}
+
+/**
  * Get nodes reachable from decision nodes via BFS
  */
 function getReachableFromDecision(
@@ -261,6 +339,12 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
     const wireResult = wireOrphansToGoal(nodes, validEdges, goalId, requestId);
     validEdges = wireResult.edges;
   }
+
+  // Step A.5: Wire orphaned outcomes/risks FROM the causal chain
+  // This ensures outcome/risk nodes have INBOUND edges from factors,
+  // making them reachable from decision via forward BFS.
+  const wireFromResult = wireOrphansFromCausalChain(nodes, validEdges, requestId);
+  validEdges = wireFromResult.edges;
 
   // Step B: Prune nodes unreachable from decision
   const pruneResult = pruneUnreachable(nodes, validEdges, requestId);

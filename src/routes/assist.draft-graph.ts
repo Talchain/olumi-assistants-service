@@ -953,6 +953,11 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
 
+  // Pipeline trace tracking variables
+  let simpleRepairExecuted = false;
+  let repairLoopAttempts = 0;
+  const draftGraphProduced = graph.nodes?.length > 0;
+
   // DEBUG: Track node counts after first stabiliseGraph (DAG + prune + 20 node cap)
   log.info({
     stage: "3_first_stabilise",
@@ -963,6 +968,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     node_kinds: candidate.nodes.map((n: any) => n.kind),
     correlation_id: correlationId,
   }, "Pipeline stage: First stabiliseGraph complete (20 node cap applied)");
+
+  // Pre-validation connectivity repair: wire orphaned outcome/risk nodes
+  // Per repair_graph v6 principles #5-#6: deterministic repair runs BEFORE validation
+  const preValidationRepaired = simpleRepair(candidate, correlationId);
+  candidate = stabiliseGraph(ensureDagAndPrune(preValidationRepaired, { collector }), { collector });
+  simpleRepairExecuted = true;
+
+  log.info({
+    stage: "3a_pre_validation_repair",
+    node_count: candidate.nodes.length,
+    edge_count: candidate.edges.length,
+    correlation_id: correlationId,
+  }, "Pipeline stage: Pre-validation simpleRepair complete");
 
   const first = await validateGraph(candidate);
   if (!first.ok) {
@@ -995,6 +1013,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       });
     } else {
       // LLM-guided repair: use violations as hints
+      repairLoopAttempts++;
       try {
         emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
 
@@ -1178,12 +1197,19 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     : undefined;
 
   // Build trace with corrections if any were recorded
-  const tracePayload = collector.hasCorrections()
-    ? {
-        corrections: collector.getCorrections(),
-        corrections_summary: collector.getSummary(),
-      }
-    : undefined;
+  // Build trace payload with repair tracking fields + corrections if any
+  const tracePayload = {
+    // Pipeline repair tracking fields (always included)
+    draft_graph_produced: draftGraphProduced,
+    simple_repair_executed: simpleRepairExecuted,
+    repair_loop_attempts: repairLoopAttempts,
+    repair_attempted: simpleRepairExecuted || repairLoopAttempts > 0,
+    // Corrections if any were recorded
+    ...(collector.hasCorrections() ? {
+      corrections: collector.getCorrections(),
+      corrections_summary: collector.getSummary(),
+    } : {}),
+  };
 
   const payload = DraftGraphOutput.parse({
     graph: candidate,

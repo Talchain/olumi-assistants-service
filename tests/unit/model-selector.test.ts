@@ -139,9 +139,9 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for repair_graph task (Claude Sonnet 4)", () => {
+    it("returns quality tier for repair_graph task (GPT-4o)", () => {
       const result = selectModel({ task: "repair_graph" }, enabledConfig);
-      expect(result.modelId).toBe("claude-sonnet-4-20250514");
+      expect(result.modelId).toBe("gpt-4o");
       expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });

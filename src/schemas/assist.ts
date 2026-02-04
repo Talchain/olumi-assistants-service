@@ -112,8 +112,14 @@ export const DraftGraphOutput = z.object({
     .optional(),
   debug: z.object({ needle_movers: z.any().optional() }).optional(),
   confidence: z.number().min(0).max(1).optional(),
-  // Graph corrections tracking
+  // Graph corrections tracking + pipeline repair observability
   trace: z.object({
+    // Pipeline repair tracking fields
+    draft_graph_produced: z.boolean().optional(),
+    simple_repair_executed: z.boolean().optional(),
+    repair_loop_attempts: z.number().optional(),
+    repair_attempted: z.boolean().optional(),
+    // Graph corrections
     corrections: z.array(GraphCorrectionSchema).optional(),
     corrections_summary: CorrectionsSummarySchema.optional(),
   }).optional(),

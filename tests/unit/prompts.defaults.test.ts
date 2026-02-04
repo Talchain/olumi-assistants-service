@@ -66,10 +66,10 @@ describe('PROMPT_TEMPLATES', () => {
 
   it('repair_graph prompt contains key instructions', () => {
     const prompt = PROMPT_TEMPLATES.repair_graph;
-    expect(prompt).toContain('fixing');
+    expect(prompt).toContain('repair');
     expect(prompt).toContain('violations');
-    expect(prompt).toContain('DAGs');
-    expect(prompt).toContain('belief values');
+    expect(prompt).toContain('causal decision graphs');
+    expect(prompt).toContain('MINIMAL DIFF');
   });
 
   it('clarify_brief prompt contains key instructions', () => {

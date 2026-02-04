@@ -716,6 +716,361 @@ describe("simpleRepair connectivity", () => {
     });
   });
 
+  describe("wireOrphansFromCausalChain", () => {
+    it("wires orphaned risk with no inbound edges from controllable factor", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1", category: "controllable" },
+          { id: "risk_1", kind: "risk", label: "Risk 1" }, // No inbound edge from factor
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_1",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // Note: No edge from fac_1 to risk_1 (orphaned risk)
+          {
+            from: "risk_1",
+            to: "goal_1",
+            strength_mean: -0.5,
+            strength_std: 0.15,
+            belief_exists: 0.9,
+            effect_direction: "negative",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // Should have added edge from fac_1 to risk_1
+      const factorToRiskEdge = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "risk_1"
+      );
+      expect(factorToRiskEdge).toBeDefined();
+      expect(factorToRiskEdge?.strength_mean).toBe(0.3); // Risk canonical inbound value
+      expect(factorToRiskEdge?.strength_std).toBe(0.2);
+      expect(factorToRiskEdge?.belief_exists).toBe(0.75);
+      expect(factorToRiskEdge?.effect_direction).toBe("positive");
+    });
+
+    it("wires orphaned outcome with no inbound edges from factor", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" }, // No inbound edge from factor
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_1",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // Note: No edge from fac_1 to out_1 (orphaned outcome)
+          {
+            from: "out_1",
+            to: "goal_1",
+            strength_mean: 0.7,
+            strength_std: 0.15,
+            belief_exists: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // Should have added edge from fac_1 to out_1
+      const factorToOutcomeEdge = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "out_1"
+      );
+      expect(factorToOutcomeEdge).toBeDefined();
+      expect(factorToOutcomeEdge?.strength_mean).toBe(0.5); // Outcome canonical inbound value
+      expect(factorToOutcomeEdge?.strength_std).toBe(0.2);
+      expect(factorToOutcomeEdge?.belief_exists).toBe(0.75);
+      expect(factorToOutcomeEdge?.effect_direction).toBe("positive");
+    });
+
+    it("wires multiple orphaned nodes from same source factor", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1", category: "controllable" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "out_2", kind: "outcome", label: "Outcome 2" },
+          { id: "risk_1", kind: "risk", label: "Risk 1" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_1",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // All outcome/risk nodes have no inbound edges from factor
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // All three should be wired from fac_1
+      const facToOut1 = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "out_1"
+      );
+      const facToOut2 = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "out_2"
+      );
+      const facToRisk1 = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "risk_1"
+      );
+
+      expect(facToOut1).toBeDefined();
+      expect(facToOut2).toBeDefined();
+      expect(facToRisk1).toBeDefined();
+
+      // Outcomes get 0.5, risks get 0.3
+      expect(facToOut1?.strength_mean).toBe(0.5);
+      expect(facToOut2?.strength_mean).toBe(0.5);
+      expect(facToRisk1?.strength_mean).toBe(0.3);
+    });
+
+    it("skips wiring when no factors in graph", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "out_1",
+            strength_mean: 0.8,
+            strength_std: 0.1,
+            belief_exists: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // No factor->outcome edges added (no factors exist)
+      const factorEdges = result.edges.filter((e) => {
+        const fromNode = result.nodes.find((n) => n.id === e.from);
+        return fromNode?.kind === "factor";
+      });
+      expect(factorEdges.length).toBe(0);
+    });
+
+    it("prefers controllable factor over external factor", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_ext", kind: "factor", label: "External Factor", category: "external" },
+          { id: "fac_ctrl", kind: "factor", label: "Controllable Factor", category: "controllable" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_ext",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_ctrl",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // Should wire from controllable factor, not external
+      const factorToOutcomeEdge = result.edges.find((e) => e.to === "out_1");
+      expect(factorToOutcomeEdge).toBeDefined();
+      expect(factorToOutcomeEdge?.from).toBe("fac_ctrl"); // Prefers controllable
+    });
+
+    it("does not re-wire nodes that already have inbound from factor", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1" },
+          { id: "fac_2", kind: "factor", label: "Factor 2" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_1",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_2",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // Already has inbound from fac_1
+          {
+            from: "fac_1",
+            to: "out_1",
+            strength_mean: 0.9,
+            strength_std: 0.05,
+            belief_exists: 0.95,
+            effect_direction: "positive",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // Should not add duplicate edge from fac_2 to out_1
+      const factorToOutcomeEdges = result.edges.filter((e) => e.to === "out_1");
+      expect(factorToOutcomeEdges.length).toBe(1);
+
+      // Original values preserved
+      expect(factorToOutcomeEdges[0].from).toBe("fac_1");
+      expect(factorToOutcomeEdges[0].strength_mean).toBe(0.9);
+    });
+
+    it("wires orphaned risk making it reachable from decision", () => {
+      // This is the key scenario: risk node with outbound edge to goal
+      // but no inbound edge from factor, making it unreachable
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1", category: "controllable" },
+          { id: "risk_currency", kind: "risk", label: "Currency Fluctuations" },
+          { id: "goal_1", kind: "goal", label: "Maximize Profit" },
+        ],
+        edges: [
+          {
+            from: "dec_1",
+            to: "opt_a",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          {
+            from: "opt_a",
+            to: "fac_1",
+            strength_mean: 1.0,
+            strength_std: 0.01,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // Risk has outbound to goal (via wireOrphansToGoal) but no inbound
+          {
+            from: "risk_currency",
+            to: "goal_1",
+            strength_mean: -0.5,
+            strength_std: 0.15,
+            belief_exists: 0.9,
+            effect_direction: "negative",
+          },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // Risk should now have inbound edge from factor
+      const factorToRiskEdge = result.edges.find(
+        (e) => e.from === "fac_1" && e.to === "risk_currency"
+      );
+      expect(factorToRiskEdge).toBeDefined();
+
+      // Risk is now reachable: dec_1 → opt_a → fac_1 → risk_currency → goal_1
+      // All nodes should be preserved
+      expect(result.nodes.length).toBe(5);
+      expect(result.nodes.find((n) => n.id === "risk_currency")).toBeDefined();
+    });
+  });
+
   describe("edge cases", () => {
     it("handles empty graph", () => {
       const graph = createTestGraph({
