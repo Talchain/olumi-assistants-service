@@ -870,7 +870,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
     const validationResult = await validateAndRepairGraph(
       {
-        graph,
+        graph: preOrchestratorRepaired, // Use repaired graph, not original
         brief: effectiveBrief,
         requestId: correlationId,
         maxRetries: skipRepairDueToBudget ? 0 : 1, // 0 retries if budget exceeded
