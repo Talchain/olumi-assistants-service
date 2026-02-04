@@ -805,10 +805,29 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // === PRE-ORCHESTRATOR DETERMINISTIC REPAIR ===
+  // Run simpleRepair UNCONDITIONALLY before any validation (orchestrator or legacy).
+  // This wires orphaned outcome/risk nodes to the causal chain, ensuring reachability.
+  // NOT budget-gated: simpleRepair is deterministic and takes <50ms.
+  // Per repair_graph v6 principles #5-#6: deterministic repair runs BEFORE validation.
+  let simpleRepairExecuted = false;
+  const draftGraphProduced = graph.nodes?.length > 0;
+  const preOrchestratorRepaired = simpleRepair(graph, correlationId);
+  simpleRepairExecuted = true;
+
+  log.info({
+    stage: "0_pre_orchestrator_repair",
+    original_node_count: graph.nodes.length,
+    original_edge_count: graph.edges.length,
+    repaired_node_count: preOrchestratorRepaired.nodes.length,
+    repaired_edge_count: preOrchestratorRepaired.edges.length,
+    correlation_id: correlationId,
+  }, "Pipeline stage: Pre-orchestrator simpleRepair complete (unconditional)");
+
   // === ORCHESTRATOR VALIDATION: Zod + deterministic validation with repair loop ===
   // Validates the LLM output before proceeding with factor enrichment
   // Only runs when CEE_ORCHESTRATOR_VALIDATION_ENABLED=true (off by default)
-  let validatedGraph: GraphT = graph;
+  let validatedGraph: GraphT = preOrchestratorRepaired;
   let orchestratorRepairUsed = false;
   let orchestratorWarnings: Array<{ code: string; message: string }> = [];
 
@@ -953,10 +972,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let issues: string[] | undefined;
   let repairFallbackReason: string | null = null;
 
-  // Pipeline trace tracking variables
-  let simpleRepairExecuted = false;
+  // Pipeline trace tracking variables (simpleRepairExecuted and draftGraphProduced declared earlier)
   let repairLoopAttempts = 0;
-  const draftGraphProduced = graph.nodes?.length > 0;
 
   // DEBUG: Track node counts after first stabiliseGraph (DAG + prune + 20 node cap)
   log.info({
@@ -969,18 +986,17 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     correlation_id: correlationId,
   }, "Pipeline stage: First stabiliseGraph complete (20 node cap applied)");
 
-  // Pre-validation connectivity repair: wire orphaned outcome/risk nodes
-  // Per repair_graph v6 principles #5-#6: deterministic repair runs BEFORE validation
+  // Post-factor-enrichment connectivity repair: ensure any new nodes from enrichment are connected
+  // (simpleRepairExecuted already true from pre-orchestrator repair)
   const preValidationRepaired = simpleRepair(candidate, correlationId);
   candidate = stabiliseGraph(ensureDagAndPrune(preValidationRepaired, { collector }), { collector });
-  simpleRepairExecuted = true;
 
   log.info({
-    stage: "3a_pre_validation_repair",
+    stage: "3a_post_enrichment_repair",
     node_count: candidate.nodes.length,
     edge_count: candidate.edges.length,
     correlation_id: correlationId,
-  }, "Pipeline stage: Pre-validation simpleRepair complete");
+  }, "Pipeline stage: Post-enrichment simpleRepair complete");
 
   const first = await validateGraph(candidate);
   if (!first.ok) {

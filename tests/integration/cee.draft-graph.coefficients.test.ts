@@ -105,6 +105,9 @@ vi.mock("../../src/utils/fixtures.js", () => ({
       { from: "dec_pricing", to: "opt_maintain" },
       { from: "opt_increase", to: "fac_price" },
       { from: "opt_maintain", to: "fac_price" },
+      // Connect fac_demand to option so it's reachable from decision
+      // (prevents pruning as unreachable node)
+      { from: "opt_increase", to: "fac_demand" },
       {
         from: "fac_price",
         to: "out_revenue",

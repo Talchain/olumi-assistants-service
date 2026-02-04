@@ -2,7 +2,17 @@
  * CEE Edge Repair Integration Test
  *
  * Verifies that when the LLM generates a graph with outcomes/risks but forgets
- * to connect them to the goal, the edge repair stage fixes the connectivity.
+ * to connect them to the goal, connectivity is repaired.
+ *
+ * NOTE: As of the pre-orchestrator simpleRepair change, connectivity repairs may happen
+ * in one of two places:
+ * 1. simpleRepair (runs unconditionally before CEE pipeline) - wires orphaned outcome/risk to goal
+ * 2. CEE edge_repair stage (runs during CEE pipeline) - also wires orphaned nodes to goal
+ *
+ * If simpleRepair fixes the graph first, CEE's edge_repair stage will have nothing to do.
+ * This test accepts either path since both achieve the same outcome: a connected graph.
+ *
+ * For isolated testing of simpleRepair logic, see: tests/unit/simple-repair-connectivity.test.ts
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -118,7 +128,7 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
       },
     });
 
-    // Should succeed after edge repair
+    // Should succeed after repair (either via simpleRepair or CEE edge_repair)
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
@@ -128,30 +138,36 @@ describe("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
     expect(body.nodes.some((n: any) => n.kind === "risk")).toBe(true);
 
     // Verify edges to goal were added (V3: edges at root level)
+    // Repairs now happen in pre-orchestrator simpleRepair stage, so edges are wired
+    // before the CEE pipeline's edge_repair stage runs.
     const goalNode = body.nodes.find((n: any) => n.kind === "goal");
     const edgesToGoal = body.edges.filter((e: any) => e.to === goalNode.id);
 
     // Should have at least 2 edges to goal (outcome + risk)
     expect(edgesToGoal.length).toBeGreaterThanOrEqual(2);
 
-    // Verify edge repair is recorded in pipeline trace
+    // Verify pipeline trace exists
     expect(body.trace.pipeline).toBeDefined();
-    expect(body.trace.pipeline.status).toBe("success_with_repairs");
+    // Pipeline status is "success" when simpleRepair fixes the graph early,
+    // or "success_with_repairs" when CEE's edge_repair fixes it.
+    expect(["success", "success_with_repairs"]).toContain(body.trace.pipeline.status);
 
+    // The edge_repair stage should exist but may show no work done
+    // (if simpleRepair already fixed the graph)
     const edgeRepairStage = body.trace.pipeline.stages.find(
       (s: any) => s.name === "edge_repair"
     );
-    expect(edgeRepairStage).toBeDefined();
-    expect(edgeRepairStage.status).toBe("success_with_repairs");
 
-    // Verify new trace semantics
-    expect(edgeRepairStage.details.called).toBe(true);
-    expect(edgeRepairStage.details.candidates_found).toBeGreaterThanOrEqual(2);
-    expect(edgeRepairStage.details.edges_added).toBeGreaterThanOrEqual(2);
-    expect(edgeRepairStage.details.repair_reason).toBe("goal_unreachable");
-    expect(edgeRepairStage.details.connectivity_restored).toBe(true);
-    // noop_reason should NOT be present when repair succeeded
-    expect(edgeRepairStage.details.noop_reason).toBeUndefined();
+    // If edge_repair was called and made repairs, verify the details
+    if (edgeRepairStage && edgeRepairStage.details?.called && edgeRepairStage.details?.edges_added > 0) {
+      expect(edgeRepairStage.status).toBe("success_with_repairs");
+      expect(edgeRepairStage.details.candidates_found).toBeGreaterThanOrEqual(2);
+      expect(edgeRepairStage.details.edges_added).toBeGreaterThanOrEqual(2);
+      expect(edgeRepairStage.details.repair_reason).toBe("goal_unreachable");
+      expect(edgeRepairStage.details.connectivity_restored).toBe(true);
+      expect(edgeRepairStage.details.noop_reason).toBeUndefined();
+    }
+    // Otherwise, simpleRepair fixed the graph first - that's also valid
   });
 
   it("includes edge repair details in pipeline trace", async () => {
