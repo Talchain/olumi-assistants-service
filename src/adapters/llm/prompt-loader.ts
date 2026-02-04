@@ -21,8 +21,10 @@
  *   Operations: draft_graph, suggest_options, repair_graph, clarify_brief, critique_graph
  *
  * **OpenAI adapter** (`src/adapters/llm/openai.ts`):
- *   Uses this centralized prompt management system for `draft_graph` via `getSystemPrompt()`.
- *   Other operations (suggest_options, repair_graph, clarify_brief) use inline prompts.
+ *   Uses this centralized prompt management system via `getSystemPrompt()` for:
+ *   - draft_graph: Full prompt management integration
+ *   - repair_graph: Full prompt management integration (v6 minimal-diff prompt)
+ *   Other operations (suggest_options, clarify_brief) use inline prompts.
  *   This partial integration is intentional:
  *   - OpenAI's API structure differs from Anthropic (user-only vs system+user)
  *   - OpenAI integration is secondary/fallback; Anthropic is primary

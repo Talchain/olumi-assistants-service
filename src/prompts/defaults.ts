@@ -693,62 +693,328 @@ Respond ONLY with valid JSON.`;
 // Repair Graph Prompt
 // ============================================================================
 
-const REPAIR_GRAPH_PROMPT = `You are an expert at fixing decision graph violations.
+// ============================================================================
+// Repair Graph Prompt v6
+//
+// CHANGELOG (v6):
+// - Minimal-diff philosophy: fix only what's broken, preserve everything else
+// - Violation-targeted: specific fixes for each violation code
+// - Aligned with deterministic repair pipeline (simpleRepair handles connectivity)
+// - Structured rationales for debuggability
+// - Canonical edge values for new edges
+// - Contrastive examples showing over-editing anti-patterns
+// ============================================================================
 
-## Your Task
-Fix the graph to resolve ALL violations. Common fixes:
-- Remove cycles (decision graphs must be DAGs)
-- Remove isolated nodes (all nodes must be connected)
-- Ensure edge endpoints reference valid node IDs
-- Ensure belief values are between 0 and 1
-- Ensure node kinds are valid (goal, decision, option, outcome, risk, factor)
-- Maintain graph topology where possible
+const REPAIR_GRAPH_PROMPT = `<ROLE>
+You repair causal decision graphs that failed validation. Your job is to make
+the MINIMUM changes needed to resolve every violation while preserving the
+graph's causal meaning.
 
-## CRITICAL: Closed-World Edge Rules (v4)
+Stakes: Over-editing destroys the user's model. Renaming IDs breaks downstream
+references. Changing edge semantics silently alters simulation results. Every
+unnecessary change is a bug.
+
+CORE RULE: FIX what's broken — PRESERVE everything else.
+Minimal edits. No restructuring unless required. No cosmetic changes.
+</ROLE>
+
+<REPAIR_PRINCIPLES>
+1. MINIMAL DIFF: Change only what each violation requires. If a violation needs
+   one new edge, add one edge. Do not reorganise the graph.
+
+2. PRESERVE IDS: Never rename node IDs. Never change node kinds unless the
+   violation explicitly requires it (e.g., INVALID_EDGE_TYPE caused by wrong kind).
+
+3. PRESERVE PARAMETERS: Do not modify strength.mean, strength.std, or
+   exists_probability on edges that are not cited in a violation.
+
+4. ONE FIX PER VIOLATION: Address each violation independently. If fixes
+   conflict, prefer the fix that changes fewer elements.
+
+5. REACHABILITY IS MOSTLY DETERMINISTIC: The system wires orphaned
+   outcomes/risks to goals and prunes unreachable factors automatically.
+   For reachability violations: do not add mediator nodes, do not rewire
+   outcomes/risks (the system handles this). For unreachable factors,
+   prefer removing the factor unless it is clearly central to the brief.
+
+6. STRUCTURAL EDGES ARE NORMALISED AUTOMATICALLY: Do not modify
+   decision→option or option→factor edges unless the violation
+   specifically requires it.
+</REPAIR_PRINCIPLES>
+
+<TOPOLOGY_RULES>
 Only these edge patterns are ALLOWED:
 
-| From     | To       | Meaning                              |
-|----------|----------|--------------------------------------|
-| decision | option   | Decision frames this option          |
-| option   | factor   | Option sets factor value             |
-| factor   | outcome  | Factor influences outcome            |
-| factor   | risk     | Factor influences risk               |
-| factor   | factor   | Factor affects another factor        |
-| outcome  | goal     | Outcome contributes to goal          |
-| risk     | goal     | Risk contributes to goal             |
+| From     | To       | Required Values                                    |
+|----------|----------|----------------------------------------------------|
+| decision | option   | mean=1.0, std=0.01, exists_probability=1.0         |
+| option   | factor   | mean=1.0, std=0.01, exists_probability=1.0         |
+| factor   | outcome  | Causal (varied parameters)                         |
+| factor   | risk     | Causal (varied parameters)                         |
+| factor   | factor   | Causal (varied parameters)                         |
+| outcome  | goal     | Positive direction (mean > 0)                      |
+| risk     | goal     | Negative direction (mean < 0)                      |
 
-**ALL other edge patterns are PROHIBITED and must be removed or fixed.**
+ALL other edge patterns are PROHIBITED and must be removed or rerouted.
 
-Correct topology: Decision → Options → Factors → Outcomes/Risks → Goal
+COMMON PROHIBITED PATTERNS AND FIXES:
+| Prohibited Edge    | Fix                                                  |
+|--------------------|------------------------------------------------------|
+| option → outcome   | Insert factor between: option → fac_new → outcome    |
+| option → goal      | Insert factor + outcome: opt → fac → out → goal      |
+| factor → goal      | Insert outcome: factor → out_new → goal              |
+| goal → anything    | Remove edge (goal is terminal sink)                  |
+| outcome → option   | Remove edge (reverse causation)                      |
 
-**PROHIBITED edges to REMOVE:**
-- option → outcome (WRONG: use option → factor → outcome)
-- option → goal (WRONG: use option → factor → outcome → goal)
-- factor → goal (WRONG: use factor → outcome → goal)
-- factor → decision (factors don't cause decisions)
-- factor → option (factors influence outcomes via factors, not options)
-- goal → anything (goal is terminal sink)
-- outcome → option (outcomes don't cause options)
+When inserting a new factor node:
+- ID: fac_[descriptive_name] (lowercase, underscores)
+- kind: "factor"
+- category: "external" (safest default — no data assumptions)
+- label: Brief descriptive label
+- No data field (external factors have none)
 
-## Output Format (JSON)
+When inserting a new outcome node:
+- ID: out_[descriptive_name]
+- kind: "outcome"
+- label: Brief descriptive label
+- No data field
+
+CANONICAL VALUES FOR NEW EDGES:
+| Edge Type           | mean | std  | exists_probability | effect_direction |
+|---------------------|------|------|--------------------|------------------|
+| Structural          | 1.0  | 0.01 | 1.0               | positive         |
+| New causal (positive)| 0.5 | 0.20 | 0.75               | positive         |
+| New causal (negative)| -0.5| 0.20 | 0.75               | negative         |
+| Outcome → goal      | 0.7  | 0.15 | 0.90              | positive         |
+| Risk → goal         | -0.5 | 0.15 | 0.90              | negative         |
+</TOPOLOGY_RULES>
+
+<VIOLATION_REFERENCE>
+You will receive specific violation codes. Here is how to fix each:
+
+TIER 1 — STRUCTURAL:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| MISSING_GOAL            | Add goal node + wire all outcomes/risks to it          |
+| MISSING_DECISION        | Add decision node + wire to all options                |
+| INSUFFICIENT_OPTIONS    | Add status quo option with baseline interventions      |
+| MISSING_BRIDGE          | Add outcome node + wire relevant factors to it + to goal|
+| NODE_LIMIT_EXCEEDED     | Remove least-connected unprotected nodes               |
+| EDGE_LIMIT_EXCEEDED     | Remove weakest edges (lowest exists_probability)       |
+| INVALID_EDGE_REF        | Remove edge (references non-existent node)             |
+
+TIER 2 — TOPOLOGY:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| GOAL_HAS_OUTGOING       | Remove outgoing edges from goal                        |
+| DECISION_HAS_INCOMING   | Remove incoming edges to decision                      |
+| INVALID_EDGE_TYPE       | Reroute per PROHIBITED PATTERNS table above            |
+| CYCLE_DETECTED          | Remove the weakest edge in the cycle                   |
+
+TIER 3 — REACHABILITY:
+| Code                    | Fix                                                    |
+|-------------------------|--------------------------------------------------------|
+| UNREACHABLE_FROM_DECISION| Add smallest direct missing edge to connect node to causal chain. Do not wire outcomes/risks to goal (handled deterministically). |
+| NO_PATH_TO_GOAL         | Add missing causal edge factor→outcome if needed. Do not add outcome/risk→goal edges (handled deterministically). |
+
+TIER 4 — FACTOR DATA:
+| Code                         | Fix                                               |
+|------------------------------|---------------------------------------------------|
+| CONTROLLABLE_MISSING_DATA    | Add data: {value: 1.0, extractionType: "inferred", factor_type: "other", uncertainty_drivers: ["Not specified"]} |
+| OBSERVABLE_MISSING_DATA      | Add data: {value: 1.0, extractionType: "inferred"}|
+
+TIER 5 — SEMANTIC:
+| Code                              | Fix                                          |
+|-----------------------------------|----------------------------------------------|
+| NO_EFFECT_PATH                    | Add missing causal edge along path            |
+| OPTIONS_IDENTICAL                 | Differentiate at least one intervention value |
+| STRUCTURAL_EDGE_NOT_CANONICAL     | Set mean=1.0, std=0.01, exists_probability=1.0|
+
+TIER 6 — NUMERIC:
+| Code         | Fix                                                          |
+|--------------|--------------------------------------------------------------|
+| NAN_VALUE    | Replace NaN with canonical default for that edge type        |
+</VIOLATION_REFERENCE>
+
+<OUTPUT_SCHEMA>
+Return a single JSON object. No markdown fences, no preamble.
+
 {
   "nodes": [
+    // Complete list of ALL nodes (preserved + any new ones)
     { "id": "goal_1", "kind": "goal", "label": "..." },
     { "id": "dec_1", "kind": "decision", "label": "..." },
-    { "id": "opt_1", "kind": "option", "label": "..." },
-    { "id": "fac_1", "kind": "factor", "label": "..." },
+    { "id": "opt_1", "kind": "option", "label": "...", "data": {"interventions": {...}} },
+    { "id": "fac_1", "kind": "factor", "label": "...", "category": "controllable", "data": {...} },
     { "id": "out_1", "kind": "outcome", "label": "..." }
   ],
   "edges": [
-    { "from": "dec_1", "to": "opt_1", "belief": 1.0 },
-    { "from": "opt_1", "to": "fac_1", "belief": 1.0 },
-    { "from": "fac_1", "to": "out_1", "belief": 0.7 },
-    { "from": "out_1", "to": "goal_1", "belief": 0.8 }
+    // Complete list of ALL edges (preserved + any new/modified ones)
+    { "from": "dec_1", "to": "opt_1", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive" }
   ],
-  "rationales": []
+  "rationales": [
+    // One entry per violation addressed
+    {
+      "violation_code": "UNREACHABLE_FROM_DECISION",
+      "node_or_edge": "out_profit_margin",
+      "action": "Added edge fac_revenue → out_profit_margin (mean=0.5, std=0.20, exists_probability=0.75)",
+      "elements_changed": 1
+    }
+  ]
 }
 
-Respond ONLY with valid JSON matching this structure.`;
+RATIONALES RULES:
+- One rationale per violation (not per edit — group related edits under one violation)
+- action: Plain description of what changed
+- elements_changed: Count of nodes + edges added, removed, or modified
+- If a violation required no fix (already resolved by fixing another), include:
+  action: "Resolved by fix for [other_violation_code]", elements_changed: 0
+
+OUTPUT: Complete graph (all nodes + all edges) — not a diff. The validator
+re-runs on your complete output. Omitting unchanged nodes/edges causes new
+INVALID_EDGE_REF violations.
+</OUTPUT_SCHEMA>
+
+<CONTRASTIVE_EXAMPLES>
+// —— OVER-EDITING ————————————————————————————————————————————————
+// Violation: UNREACHABLE_FROM_DECISION on fac_competition
+
+// ✗ BAD: Restructures the entire graph
+//    Renames fac_competition → fac_competitive_pressure
+//    Moves edges from other factors
+//    Changes strength values on unrelated edges
+
+// ✓ GOOD: Adds one edge
+//    Adds: fac_market_entry → fac_competition (mean=-0.4, std=0.22, exists_probability=0.75)
+//    Everything else untouched
+
+// —— PROHIBITED EDGE ————————————————————————————————————————————
+// Violation: INVALID_EDGE_TYPE on option → outcome
+
+// ✗ BAD: Deletes both the option and outcome nodes
+// ✗ BAD: Reverses the edge to outcome → option
+
+// ✓ GOOD: Inserts mediating factor
+//    Adds node: fac_intervention_effect (kind=factor, category=external)
+//    Replaces edge: opt_a → out_revenue
+//    With edges: opt_a → fac_intervention_effect, fac_intervention_effect → out_revenue
+
+// —— NO_PATH_TO_GOAL ———————————————————————————————————————————
+// Violation: NO_PATH_TO_GOAL on out_market_share
+
+// ✗ BAD: Removes out_market_share entirely
+// ✗ BAD: Adds out_market_share → dec_1 (wrong direction)
+
+// ✓ GOOD: Adds bridge edge
+//    Adds: out_market_share → goal_growth (mean=0.7, std=0.15, exists_probability=0.90)
+
+// —— CYCLE ———————————————————————————————————————————————————————
+// Violation: CYCLE_DETECTED involving fac_a → fac_b → fac_a
+
+// ✗ BAD: Removes both edges (breaks connectivity)
+
+// ✓ GOOD: Removes the weaker edge
+//    fac_a → fac_b: exists_probability=0.85 (keep)
+//    fac_b → fac_a: exists_probability=0.60 (remove — weaker link)
+
+// —— ID PRESERVATION ————————————————————————————————————————————
+// ✗ BAD: Renames fac_market_timing → fac_timing (breaks downstream refs)
+// ✓ GOOD: Keeps fac_market_timing exactly as received
+</CONTRASTIVE_EXAMPLES>
+
+<ANNOTATED_EXAMPLE>
+// INPUT: Graph with 2 violations:
+// 1. INVALID_EDGE_TYPE: opt_expand → out_revenue (prohibited: option→outcome)
+// 2. NO_PATH_TO_GOAL: risk_operational has no edge to goal_growth
+
+// REPAIR OUTPUT:
+{
+  "nodes": [
+    {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
+    {"id": "opt_expand", "kind": "option", "label": "Enter European Market",
+     "data": {"interventions": {"fac_market_entry": 1, "fac_investment": 0.8}}},
+    {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic",
+     "data": {"interventions": {"fac_market_entry": 0, "fac_investment": 0.2}}},
+    {"id": "fac_market_entry", "kind": "factor", "label": "Market Entry (0/1)",
+     "category": "controllable",
+     "data": {"value": 0, "extractionType": "inferred", "factor_type": "other",
+              "uncertainty_drivers": ["Market readiness unvalidated"]}},
+    {"id": "fac_investment", "kind": "factor", "label": "Expansion Investment (0–1, share of £500k cap)",
+     "category": "controllable",
+     "data": {"value": 0.2, "extractionType": "inferred", "factor_type": "cost",
+              "uncertainty_drivers": ["Vendor quotes pending"]}},
+    {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity",
+     "category": "external"},
+    {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
+    {"id": "risk_operational", "kind": "risk", "label": "Operational Complexity"},
+    {"id": "goal_growth", "kind": "goal", "label": "Double Revenue with Manageable Risk"}
+  ],
+  "edges": [
+    // PRESERVED — structural edges (unchanged)
+    {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_expand", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hold", "to": "fac_market_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    // PRESERVED — causal edges (unchanged)
+    {"from": "fac_competition", "to": "out_revenue", "strength": {"mean": -0.4, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
+    {"from": "fac_market_entry", "to": "risk_operational", "strength": {"mean": 0.6, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
+
+    // PRESERVED — bridge edge (unchanged)
+    {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.85, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+
+    // FIX 1: Replaced opt_expand → out_revenue (prohibited) with factor path
+    // REMOVED: {"from": "opt_expand", "to": "out_revenue", ...}
+    // ADDED: fac_market_entry already has edge to out_revenue via fac_competition path,
+    //        so add direct causal link:
+    {"from": "fac_market_entry", "to": "out_revenue", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+
+    // FIX 2: risk_operational had no path to goal. Added missing causal edge
+    //        from existing factor (deterministic wiring handles risk→goal).
+    {"from": "fac_investment", "to": "risk_operational", "strength": {"mean": 0.5, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "positive"}
+  ],
+  "rationales": [
+    {
+      "violation_code": "INVALID_EDGE_TYPE",
+      "node_or_edge": "opt_expand → out_revenue",
+      "action": "Removed prohibited option→outcome edge. Added fac_market_entry → out_revenue (mean=0.7, std=0.15, exists_probability=0.85) to preserve causal path via existing controllable factor.",
+      "elements_changed": 2
+    },
+    {
+      "violation_code": "NO_PATH_TO_GOAL",
+      "node_or_edge": "risk_operational",
+      "action": "Added fac_investment → risk_operational (mean=0.5, std=0.20, exists_probability=0.75) so risk node is reachable. Deterministic wiring adds risk→goal.",
+      "elements_changed": 1
+    }
+  ]
+}
+// Total changes: 3 (1 edge removed, 2 edges added). All IDs preserved.
+// No node kinds changed. No parameters modified on existing edges.
+</ANNOTATED_EXAMPLE>
+
+<CONSTRAINTS>
+Return ONLY the JSON object. No markdown fences, no preamble, no explanation
+outside the JSON structure.
+
+The output must contain the COMPLETE graph — all nodes and all edges, including
+unchanged ones. The validator runs on your complete output; it does not merge
+with the original.
+
+HARD LIMITS:
+- Do not rename any existing node ID
+- Do not change node kind unless violation explicitly requires it
+- Do not modify parameters on edges not cited in violations
+- Do not add coaching or summary fields — this is repair only
+- Do not include any top-level keys other than: nodes, edges, rationales
+- rationales array must reference every violation code received. If resolved by
+  another fix, set elements_changed: 0 and action: "Resolved by fix for [other_code]"
+
+If a violation cannot be fixed without significant restructuring (e.g., the
+graph's core topology is wrong), fix what you can and note in rationales:
+  action: "Partial fix — [description]. Full restructuring may be needed."
+</CONSTRAINTS>`;
 
 // ============================================================================
 // Clarify Brief Prompt
