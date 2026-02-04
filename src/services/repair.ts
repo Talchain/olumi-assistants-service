@@ -25,6 +25,183 @@ function isEdgeAllowed(fromKind: string, toKind: string): boolean {
   );
 }
 
+// =============================================================================
+// Connectivity Repair Helpers
+// =============================================================================
+
+/**
+ * Find goal node ID from nodes array
+ */
+function findGoalId(nodes: GraphT["nodes"]): string | undefined {
+  return nodes.find((n) => n.kind === "goal")?.id;
+}
+
+/**
+ * Wire orphaned outcomes/risks to goal node.
+ * Logic replicated from goal-inference.ts:wireOutcomesToGoal
+ */
+function wireOrphansToGoal(
+  nodes: GraphT["nodes"],
+  edges: GraphT["edges"],
+  goalId: string,
+  requestId?: string
+): { edges: GraphT["edges"]; wiredIds: string[] } {
+  // Find outcome/risk nodes
+  const outcomeRiskIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind === "outcome" || node.kind === "risk") {
+      outcomeRiskIds.add(node.id);
+    }
+  }
+
+  // Find which already have edges to goal
+  const alreadyWired = new Set<string>();
+  for (const edge of edges) {
+    if (edge.to === goalId && outcomeRiskIds.has(edge.from)) {
+      alreadyWired.add(edge.from);
+    }
+  }
+
+  // Add missing edges
+  const newEdges = [...edges];
+  const wiredIds: string[] = [];
+  for (const nodeId of outcomeRiskIds) {
+    if (!alreadyWired.has(nodeId)) {
+      const node = nodes.find((n) => n.id === nodeId);
+      const isRisk = node?.kind === "risk";
+      newEdges.push({
+        from: nodeId,
+        to: goalId,
+        strength_mean: isRisk ? -0.5 : 0.7,
+        strength_std: 0.15,
+        belief_exists: 0.9,
+        effect_direction: isRisk ? "negative" : "positive",
+      });
+      wiredIds.push(nodeId);
+    }
+  }
+
+  if (wiredIds.length > 0) {
+    log.info(
+      {
+        event: "SIMPLE_REPAIR_WIRED_TO_GOAL",
+        request_id: requestId,
+        wired_node_ids: wiredIds,
+        edge_count_added: wiredIds.length,
+      },
+      `simpleRepair wired ${wiredIds.length} orphaned outcome/risk nodes to goal`
+    );
+  }
+
+  return { edges: newEdges, wiredIds };
+}
+
+/**
+ * Get nodes reachable from decision nodes via BFS
+ */
+function getReachableFromDecision(
+  nodes: GraphT["nodes"],
+  edges: GraphT["edges"]
+): Set<string> {
+  // Build adjacency list (forward edges)
+  const adj = new Map<string, string[]>();
+  for (const node of nodes) {
+    adj.set(node.id, []);
+  }
+  for (const edge of edges) {
+    const list = adj.get(edge.from);
+    if (list) list.push(edge.to);
+  }
+
+  // BFS from all decision nodes
+  const reachable = new Set<string>();
+  const queue: string[] = [];
+  for (const node of nodes) {
+    if (node.kind === "decision") {
+      queue.push(node.id);
+      reachable.add(node.id);
+    }
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const neighbor of adj.get(current) || []) {
+      if (!reachable.has(neighbor)) {
+        reachable.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+/**
+ * Node kinds that must be preserved during repair, even if unreachable.
+ * Defined here so pruneUnreachable can reference it.
+ */
+const PROTECTED_KINDS_FOR_PRUNING = new Set([
+  "goal",
+  "decision",
+  "option",
+  "outcome",
+  "risk",
+]);
+
+/**
+ * Prune nodes unreachable from decision.
+ * IMPORTANT: Protected kinds (goal, decision, option, outcome, risk) are NEVER pruned
+ * to maintain structural integrity of the graph.
+ *
+ * If no decision nodes exist, pruning is skipped entirely to avoid
+ * over-deletion in malformed graphs.
+ */
+function pruneUnreachable(
+  nodes: GraphT["nodes"],
+  edges: GraphT["edges"],
+  requestId?: string
+): { nodes: GraphT["nodes"]; edges: GraphT["edges"]; prunedIds: string[] } {
+  // Skip pruning if no decision nodes - can't determine reachability
+  const hasDecision = nodes.some((n) => n.kind === "decision");
+  if (!hasDecision) {
+    return { nodes, edges, prunedIds: [] };
+  }
+
+  const reachable = getReachableFromDecision(nodes, edges);
+
+  const prunedIds: string[] = [];
+  const keptNodes = nodes.filter((n) => {
+    // Always keep protected kinds (structural nodes)
+    if (PROTECTED_KINDS_FOR_PRUNING.has(n.kind)) return true;
+    // Keep reachable nodes
+    if (reachable.has(n.id)) return true;
+    // Prune unreachable non-protected nodes
+    prunedIds.push(n.id);
+    return false;
+  });
+
+  if (prunedIds.length > 0) {
+    const keptNodeIds = new Set(keptNodes.map((n) => n.id));
+    const keptEdges = edges.filter(
+      (e) => keptNodeIds.has(e.from) && keptNodeIds.has(e.to)
+    );
+
+    log.info(
+      {
+        event: "SIMPLE_REPAIR_PRUNED_UNREACHABLE",
+        request_id: requestId,
+        pruned_node_ids: prunedIds,
+        reason: "unreachable_from_decision",
+      },
+      `simpleRepair pruned ${prunedIds.length} unreachable nodes`
+    );
+
+    return { nodes: keptNodes, edges: keptEdges, prunedIds };
+  }
+
+  return { nodes, edges, prunedIds: [] };
+}
+
 /**
  * Node kinds that must be preserved during repair, even if it means exceeding the soft cap.
  * These are structurally required for a valid decision graph:
@@ -74,13 +251,32 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   const nodeKindMap = new Map(nodes.map((node) => [node.id, node.kind]));
 
   // Filter only dangling edges (references to nodes outside the trimmed set)
-  const validEdges = g.edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
+  let validEdges = g.edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
+
+  // === Connectivity Repair ===
+
+  // Step A: Wire orphaned outcomes/risks to goal
+  const goalId = findGoalId(nodes);
+  if (goalId) {
+    const wireResult = wireOrphansToGoal(nodes, validEdges, goalId, requestId);
+    validEdges = wireResult.edges;
+  }
+
+  // Step B: Prune nodes unreachable from decision
+  const pruneResult = pruneUnreachable(nodes, validEdges, requestId);
+  const finalNodes = pruneResult.nodes;
+  validEdges = pruneResult.edges;
+
+  // Update nodeKindMap for pruned nodes
+  const finalNodeKindMap = new Map(finalNodes.map((node) => [node.id, node.kind]));
+
+  // === End Connectivity Repair ===
 
   // Detect invalid edge patterns for telemetry (but don't drop them)
   const invalidEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
   for (const edge of validEdges) {
-    const fromKind = nodeKindMap.get(edge.from);
-    const toKind = nodeKindMap.get(edge.to);
+    const fromKind = finalNodeKindMap.get(edge.from);
+    const toKind = finalNodeKindMap.get(edge.to);
     if (fromKind && toKind && !isEdgeAllowed(fromKind, toKind)) {
       invalidEdges.push({ from: edge.from, to: edge.to, fromKind, toKind });
     }
@@ -103,5 +299,5 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
     .map((edge, idx) => ({ ...edge, id: edge.id || `${edge.from}::${edge.to}::${idx}` }))
     .sort((a, b) => a.id!.localeCompare(b.id!));
 
-  return { ...g, nodes, edges };
+  return { ...g, nodes: finalNodes, edges };
 }

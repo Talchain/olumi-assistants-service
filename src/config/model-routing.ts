@@ -19,7 +19,8 @@ export type CeeTask =
   | "suggest_options"
   | "explainer"
   | "repair_graph"
-  | "critique_graph";
+  | "critique_graph"
+  | "decision_review";
 
 /**
  * Default model assignments per task
@@ -45,6 +46,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   options: "gpt-5.2",
   suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
+  decision_review: "gpt-4o",  // Premium tier - narrative synthesis from ISL results
 };
 
 /**
