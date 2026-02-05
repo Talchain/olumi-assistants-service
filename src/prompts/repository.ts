@@ -519,16 +519,23 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       if (!content) continue;
 
       // Check if prompt already exists for this task
+      // Skip seeding if any prompt for this task is in production, staging, OR archived status
+      // - production/staging: prevents unwanted versions when prompts are being actively edited
+      // - archived: respects explicit cleanup/removal decisions (see: prompt v150 incident)
       const existing = await this.store!.list({ taskId });
-      const hasProduction = existing.some(p => p.status === 'production');
+      const blockingPrompt = existing.find(p =>
+        p.status === 'production' || p.status === 'staging' || p.status === 'archived'
+      );
 
-      if (hasProduction && !force) {
-        // Non-destructive: skip if production prompt exists
+      if (blockingPrompt && !force) {
+        // Non-destructive: skip if any managed prompt exists
         log.debug({
           event: 'prompt.seed.skipped',
           task_id: taskId,
-          reason: 'production_exists',
-        }, 'Skipping seed - production prompt exists');
+          reason: 'managed_prompt_exists',
+          blocking_prompt_id: blockingPrompt.id,
+          blocking_status: blockingPrompt.status,
+        }, `Skipping seed - ${blockingPrompt.status} prompt exists: ${blockingPrompt.id}`);
         skipped++;
         continue;
       }

@@ -80,8 +80,68 @@ export interface BuildModelParamsOptions {
 }
 
 /**
+ * Explicit allowlist of legacy models that use max_tokens.
+ * All other models (including unknown future models) will use max_completion_tokens.
+ *
+ * Using an explicit allowlist is safer than pattern matching because:
+ * - New gpt-4.x variants (4.2, 4.3, etc.) will correctly default to max_completion_tokens
+ * - We only keep legacy behavior for known, specific models
+ */
+const LEGACY_MAX_TOKENS_MODELS = new Set([
+  // GPT-3.5 family
+  'gpt-3.5-turbo',
+  'gpt-3.5-turbo-0125',
+  'gpt-3.5-turbo-1106',
+  'gpt-3.5-turbo-16k',
+  'gpt-3.5-turbo-instruct',
+  // GPT-4 base
+  'gpt-4',
+  'gpt-4-32k',
+  // GPT-4 Turbo
+  'gpt-4-turbo',
+  'gpt-4-turbo-preview',
+  'gpt-4-turbo-2024-04-09',
+  'gpt-4-1106-preview',
+  'gpt-4-0125-preview',
+  // GPT-4o family (last generation before max_completion_tokens requirement)
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4o-2024-05-13',
+  'gpt-4o-2024-08-06',
+  'gpt-4o-2024-11-20',
+  'gpt-4o-mini-2024-07-18',
+]);
+
+/**
+ * Check if a model requires max_completion_tokens instead of max_tokens.
+ *
+ * OpenAI's newer models (gpt-4.1*, gpt-5*, o1*, o3*, o4*) reject the max_tokens
+ * parameter with 400: "Use 'max_completion_tokens' instead."
+ *
+ * For safety, we default to max_completion_tokens for any unknown model,
+ * as future OpenAI models will likely require it.
+ *
+ * @param model - The model ID to check
+ * @returns true if the model requires max_completion_tokens
+ */
+export function requiresMaxCompletionTokens(model: string): boolean {
+  // Explicit allowlist of legacy models that use max_tokens
+  if (LEGACY_MAX_TOKENS_MODELS.has(model)) {
+    return false;
+  }
+
+  // All other models (gpt-4.1*, gpt-4.2*, gpt-5*, o1*, o3*, o4*, and unknown future models)
+  // use max_completion_tokens
+  return true;
+}
+
+/**
  * Build model-specific parameters for OpenAI API calls.
- * Reasoning models require different parameters than standard models.
+ *
+ * Model parameter compatibility:
+ * - Reasoning models (o1*, o3*, gpt-5.2): use reasoning_effort + max_completion_tokens, no temperature
+ * - Newer non-reasoning models (gpt-4.1*, gpt-5-mini): use temperature + max_completion_tokens
+ * - Legacy models (gpt-3.5*, gpt-4o, gpt-4-turbo): use temperature + max_tokens
  *
  * @param model - The model ID being used
  * @param temperature - The temperature value for non-reasoning models
@@ -101,6 +161,15 @@ export function buildModelParams(
 } {
   const maxTokens = options?.maxTokens;
   const reasoningEffort = options?.reasoningEffort ?? "medium";
+  const usesMaxCompletionTokens = requiresMaxCompletionTokens(model);
+
+  // Log which token parameter will be used for observability
+  const tokenParam = usesMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens';
+  log.debug({
+    event: 'openai.token_param',
+    model,
+    param: tokenParam,
+  }, `Using ${tokenParam} for model ${model}`);
 
   if (isReasoningModel(model)) {
     // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
@@ -108,8 +177,15 @@ export function buildModelParams(
       reasoning_effort: reasoningEffort,
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
     };
+  } else if (usesMaxCompletionTokens) {
+    // Newer non-reasoning models (gpt-4.1*, gpt-5-mini, etc.):
+    // Use temperature but max_completion_tokens instead of max_tokens
+    return {
+      temperature,
+      ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
+    };
   } else {
-    // Standard models: use temperature and max_tokens
+    // Legacy models (gpt-3.5*, gpt-4o, gpt-4-turbo): use temperature and max_tokens
     return {
       temperature,
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
