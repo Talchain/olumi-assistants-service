@@ -30,6 +30,10 @@ export const FactorData = z.object({
   baseline: z.number().optional(),
   /** Unit of measurement (£, $, %, etc.) */
   unit: z.string().optional(),
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value: z.number().optional(),
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap: z.number().optional(),
   /** Valid range for sensitivity analysis */
   range: z.object({
     min: z.number(),

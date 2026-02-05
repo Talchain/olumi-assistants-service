@@ -34,12 +34,20 @@ export interface V1FactorData {
   value?: number;
   baseline?: number;
   unit?: string;
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value?: number;
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap?: number;
   range?: { min: number; max: number };
   /** Extraction metadata for uncertainty derivation */
   extractionType?: ExtractionType;
   confidence?: number;
   rangeMin?: number;
   rangeMax?: number;
+  /** Factor type classification for downstream enrichment */
+  factor_type?: "cost" | "price" | "time" | "probability" | "revenue" | "demand" | "quality" | "other";
+  /** 1-2 short phrases explaining sources of epistemic uncertainty */
+  uncertainty_drivers?: string[];
 }
 
 /**

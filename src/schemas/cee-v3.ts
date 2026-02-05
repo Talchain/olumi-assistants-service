@@ -35,6 +35,12 @@ export const NodeKindV3 = z.enum([
 export type NodeKindV3T = z.infer<typeof NodeKindV3>;
 
 /**
+ * Factor type classification for downstream enrichment.
+ */
+export const FactorTypeV3 = z.enum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]);
+export type FactorTypeV3T = z.infer<typeof FactorTypeV3>;
+
+/**
  * Observed state for factor nodes with quantitative values.
  */
 export const ObservedStateV3 = z.object({
@@ -46,6 +52,19 @@ export const ObservedStateV3 = z.object({
   unit: z.string().optional(),
   /** How the value was determined */
   source: z.enum(["brief_extraction", "cee_inference"]).optional(),
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value: z.number().optional(),
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap: z.number().optional(),
+  /** How the value was extracted (explicit, inferred, range) */
+  extractionType: z.enum(["explicit", "inferred", "range"]).optional(),
+  /** Factor type classification for downstream enrichment */
+  factor_type: FactorTypeV3.optional(),
+  /** 1-2 short phrases explaining sources of epistemic uncertainty */
+  uncertainty_drivers: z.array(z.string()).max(2).refine(
+    (arr) => new Set(arr).size === arr.length,
+    { message: "uncertainty_drivers must not contain duplicates" }
+  ).optional(),
 });
 export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 

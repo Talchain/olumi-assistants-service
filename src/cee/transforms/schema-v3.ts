@@ -141,6 +141,12 @@ export function transformNodeToV3(
       baseline: node.data.baseline,
       unit: node.data.unit,
       source,
+      // Pass through factor metadata fields
+      ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
+      ...(node.data.cap !== undefined && { cap: node.data.cap }),
+      ...(node.data.extractionType !== undefined && { extractionType: node.data.extractionType }),
+      ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
+      ...(node.data.uncertainty_drivers !== undefined && { uncertainty_drivers: node.data.uncertainty_drivers }),
     };
   }
 
