@@ -91,8 +91,21 @@ function labelsMatch(label1: string, label2: string): boolean {
 }
 
 /**
+ * Check if units are compatible for duplicate detection.
+ * Units match if: both undefined, both equal, or one undefined and semantic label matches.
+ */
+function unitsCompatible(existingUnit: string | undefined, extractedUnit: string | undefined): boolean {
+  // Both undefined = compatible (unitless values)
+  if (existingUnit === undefined && extractedUnit === undefined) return true;
+  // Both defined and equal
+  if (existingUnit !== undefined && extractedUnit !== undefined && existingUnit === extractedUnit) return true;
+  // Mismatch: one has unit, other doesn't, or different units
+  return false;
+}
+
+/**
  * Check if an extracted quantity is already covered by an existing LLM-generated factor.
- * Uses value matching (with tolerance) and semantic label matching.
+ * Uses value matching (with tolerance) AND unit compatibility to avoid false matches.
  */
 function isQuantityCoveredByExistingFactor(
   extracted: ExtractedFactor,
@@ -103,24 +116,27 @@ function isQuantityCoveredByExistingFactor(
     if (!isFactorData(node.data)) continue;
     const data = node.data;
 
-    // Match on value within 10% tolerance
-    if (data.value !== undefined && extracted.value !== undefined) {
+    // For numeric comparisons, require unit compatibility to avoid 5% vs $5 false matches
+    const unitsMatch = unitsCompatible(data.unit, extracted.unit);
+
+    // Match on value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.value !== undefined && extracted.value !== undefined) {
       const tolerance = Math.abs(data.value * 0.1);
       if (Math.abs(data.value - extracted.value) <= tolerance) {
         return { covered: true, matchedNode: node, matchReason: "value_match" };
       }
     }
 
-    // Match on raw_value within 10% tolerance
-    if (data.raw_value !== undefined && extracted.value !== undefined) {
+    // Match on raw_value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.raw_value !== undefined && extracted.value !== undefined) {
       const tolerance = Math.abs(data.raw_value * 0.1);
       if (Math.abs(data.raw_value - extracted.value) <= tolerance) {
         return { covered: true, matchedNode: node, matchReason: "raw_value_match" };
       }
     }
 
-    // Match on cap value within 10% tolerance
-    if (data.cap !== undefined && extracted.value !== undefined) {
+    // Match on cap value within 10% tolerance (requires compatible units)
+    if (unitsMatch && data.cap !== undefined && extracted.value !== undefined) {
       const tolerance = Math.abs(data.cap * 0.1);
       if (Math.abs(data.cap - extracted.value) <= tolerance) {
         return { covered: true, matchedNode: node, matchReason: "cap_match" };
