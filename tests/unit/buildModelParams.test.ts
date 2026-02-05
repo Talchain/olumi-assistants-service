@@ -126,25 +126,31 @@ describe("buildModelParams", () => {
   });
 
   describe("Newer non-reasoning models (gpt-5-mini, gpt-4.1)", () => {
-    it("gpt-5-mini uses temperature + max_completion_tokens", () => {
+    it("gpt-5-mini omits temperature (rejects temperature=0)", () => {
       const params = buildModelParams("gpt-5-mini", 0.7, { maxTokens: 8192 });
-      expect(params.temperature).toBe(0.7);
+      expect(params.temperature).toBeUndefined();
       expect(params.max_completion_tokens).toBe(8192);
       expect(params.max_tokens).toBeUndefined();
       expect(params.reasoning_effort).toBeUndefined();
     });
 
-    it("gpt-4.1-2025-04-14 uses temperature + max_completion_tokens", () => {
+    it("gpt-5-mini with temperature=0 still omits temperature", () => {
+      const params = buildModelParams("gpt-5-mini", 0, { maxTokens: 4096 });
+      expect(params.temperature).toBeUndefined();
+      expect(params.max_completion_tokens).toBe(4096);
+    });
+
+    it("gpt-4.1-2025-04-14 omits temperature", () => {
       const params = buildModelParams("gpt-4.1-2025-04-14", 0.5, { maxTokens: 4096 });
-      expect(params.temperature).toBe(0.5);
+      expect(params.temperature).toBeUndefined();
       expect(params.max_completion_tokens).toBe(4096);
       expect(params.max_tokens).toBeUndefined();
       expect(params.reasoning_effort).toBeUndefined();
     });
 
-    it("gpt-4.1-mini-2025-04-14 uses temperature + max_completion_tokens", () => {
+    it("gpt-4.1-mini-2025-04-14 omits temperature", () => {
       const params = buildModelParams("gpt-4.1-mini-2025-04-14", 0.3, { maxTokens: 2048 });
-      expect(params.temperature).toBe(0.3);
+      expect(params.temperature).toBeUndefined();
       expect(params.max_completion_tokens).toBe(2048);
       expect(params.max_tokens).toBeUndefined();
     });
@@ -181,18 +187,18 @@ describe("buildModelParams", () => {
     });
   });
 
-  describe("Unknown future models (default to max_completion_tokens)", () => {
-    it("gpt-6 defaults to max_completion_tokens for safety", () => {
+  describe("Unknown future models (default to max_completion_tokens, no temperature)", () => {
+    it("gpt-6 defaults to max_completion_tokens and omits temperature", () => {
       const params = buildModelParams("gpt-6", 0.5, { maxTokens: 8192 });
-      expect(params.temperature).toBe(0.5);
+      expect(params.temperature).toBeUndefined();
       expect(params.max_completion_tokens).toBe(8192);
       expect(params.max_tokens).toBeUndefined();
       expect(params.reasoning_effort).toBeUndefined();
     });
 
-    it("unknown-model defaults to max_completion_tokens", () => {
+    it("unknown-model defaults to max_completion_tokens and omits temperature", () => {
       const params = buildModelParams("unknown-model", 0.3, { maxTokens: 2048 });
-      expect(params.temperature).toBe(0.3);
+      expect(params.temperature).toBeUndefined();
       expect(params.max_completion_tokens).toBe(2048);
       expect(params.max_tokens).toBeUndefined();
     });
@@ -217,11 +223,11 @@ describe("buildModelParams", () => {
       expect(keys).not.toContain("max_completion_tokens");
     });
 
-    it("newer non-reasoning model output has only expected keys", () => {
+    it("newer non-reasoning model output has only max_completion_tokens (no temperature)", () => {
       const params = buildModelParams("gpt-5-mini", 0.5, { maxTokens: 4096 });
       const keys = Object.keys(params);
-      expect(keys).toContain("temperature");
       expect(keys).toContain("max_completion_tokens");
+      expect(keys).not.toContain("temperature");
       expect(keys).not.toContain("reasoning_effort");
       expect(keys).not.toContain("max_tokens");
     });
@@ -235,9 +241,9 @@ describe("buildModelParams", () => {
       const legacyParams = buildModelParams("gpt-4o", 0);
       expect(Object.keys(legacyParams)).toEqual(["temperature"]);
 
-      // Newer non-reasoning model: just temperature
+      // Newer non-reasoning model: empty object (temperature omitted for these models)
       const newerParams = buildModelParams("gpt-5-mini", 0);
-      expect(Object.keys(newerParams)).toEqual(["temperature"]);
+      expect(Object.keys(newerParams)).toEqual([]);
     });
   });
 });

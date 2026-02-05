@@ -25,6 +25,7 @@ import { getSystemPrompt, getSystemPromptMeta } from "../adapters/llm/prompt-loa
 import { extractJsonFromResponse } from "../utils/json-extractor.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type { LLMAdapter, CallOpts, ChatResult } from "../adapters/llm/types.js";
+import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 
 // ============================================================================
@@ -724,6 +725,16 @@ export default async function route(app: FastifyInstance) {
       const err = error instanceof Error ? error : new Error("internal error");
       const isTimeout =
         err.name === "AbortError" || err.message.includes("timeout");
+      const isUpstreamError = error instanceof UpstreamHTTPError;
+
+      // Extract upstream error details for debug bundles
+      const upstreamDetails = isUpstreamError
+        ? {
+            upstream_status: (error as UpstreamHTTPError).status,
+            upstream_code: (error as UpstreamHTTPError).code,
+            upstream_provider: (error as UpstreamHTTPError).provider,
+          }
+        : undefined;
 
       emit(TelemetryEvents.DecisionReviewFailed, {
         ...telemetryCtx,
@@ -731,6 +742,7 @@ export default async function route(app: FastifyInstance) {
         error_code: isTimeout ? "CEE_TIMEOUT" : "CEE_INTERNAL_ERROR",
         http_status: isTimeout ? 504 : 500,
         error_message: err.message,
+        ...upstreamDetails,
       });
 
       logCeeCall({
@@ -747,6 +759,7 @@ export default async function route(app: FastifyInstance) {
           request_id: requestId,
           error: err.message,
           stack: err.stack,
+          ...upstreamDetails,
         },
         "Decision review failed"
       );
@@ -757,6 +770,11 @@ export default async function route(app: FastifyInstance) {
         {
           retryable: isTimeout,
           requestId,
+          // Include upstream error details so debug bundles capture the actual failure reason
+          details: {
+            error_detail: err.message,
+            ...(upstreamDetails || {}),
+          },
         }
       );
 

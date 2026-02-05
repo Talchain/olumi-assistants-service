@@ -139,12 +139,13 @@ export function requiresMaxCompletionTokens(model: string): boolean {
  * Build model-specific parameters for OpenAI API calls.
  *
  * Model parameter compatibility:
- * - Reasoning models (o1*, o3*, gpt-5.2): use reasoning_effort + max_completion_tokens, no temperature
- * - Newer non-reasoning models (gpt-4.1*, gpt-5-mini): use temperature + max_completion_tokens
+ * - Reasoning models (o1*, o3*, gpt-5.2): use reasoning_effort + max_completion_tokens, no temperature/top_p/seed
+ * - Newer non-reasoning models (gpt-4.1*, gpt-5-mini): use max_completion_tokens only, no temperature/top_p/seed
+ *   (these models reject temperature=0 with 400 errors)
  * - Legacy models (gpt-3.5*, gpt-4o, gpt-4-turbo): use temperature + max_tokens
  *
  * @param model - The model ID being used
- * @param temperature - The temperature value for non-reasoning models
+ * @param temperature - The temperature value (only used for legacy models)
  * @param options - Optional parameters including maxTokens and reasoningEffort
  * @returns Object with appropriate parameters for the model type
  */
@@ -169,19 +170,20 @@ export function buildModelParams(
     event: 'openai.token_param',
     model,
     param: tokenParam,
+    includes_temperature: !usesMaxCompletionTokens,
   }, `Using ${tokenParam} for model ${model}`);
 
   if (isReasoningModel(model)) {
-    // Reasoning models: use reasoning_effort, omit temperature, use max_completion_tokens
+    // Reasoning models: use reasoning_effort, omit temperature/top_p/seed, use max_completion_tokens
     return {
       reasoning_effort: reasoningEffort,
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
     };
   } else if (usesMaxCompletionTokens) {
     // Newer non-reasoning models (gpt-4.1*, gpt-5-mini, etc.):
-    // Use temperature but max_completion_tokens instead of max_tokens
+    // Omit temperature/top_p/seed - these models reject temperature=0 and other sampling params
+    // Only send max_completion_tokens
     return {
-      temperature,
       ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
     };
   } else {
