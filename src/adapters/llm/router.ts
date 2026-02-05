@@ -45,7 +45,7 @@ import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../
 
 /**
  * Map task names to CEE model config keys.
- * Used to look up per-operation model from config.cee.models.*
+ * Used to look up per-operation model from config.cee.models.* and config.cee.maxTokens.*
  */
 const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'draft_graph': 'draft',
@@ -54,6 +54,7 @@ const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'clarify_brief': 'clarification',
   'critique_graph': 'critique',
   'validate': 'validation',
+  'decision_review': 'decision_review',
 };
 
 /**

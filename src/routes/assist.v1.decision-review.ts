@@ -23,7 +23,7 @@ import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import { extractJsonFromResponse } from "../utils/json-extractor.js";
-import { getAdapter } from "../adapters/llm/router.js";
+import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type { LLMAdapter, CallOpts, ChatResult } from "../adapters/llm/types.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 
@@ -542,12 +542,22 @@ export default async function route(app: FastifyInstance) {
         model: adapter.model,
       });
 
+      // Get max tokens from config, with fallback
+      const configuredMaxTokens = getMaxTokensFromConfig('decision_review');
+      const maxTokens = configuredMaxTokens ?? 4096;
+      if (configuredMaxTokens === undefined) {
+        log.debug(
+          { request_id: requestId, task: 'decision_review', default_max_tokens: 4096 },
+          'CEE_MAX_TOKENS_DECISION_REVIEW not set, using default'
+        );
+      }
+
       const llmResult = await adapter.chat(
         {
           system: systemPrompt,
           userMessage,
           temperature: 0,
-          maxTokens: 4096,
+          maxTokens,
         },
         {
           requestId,

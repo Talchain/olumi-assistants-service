@@ -374,11 +374,28 @@ export function getModelProvider(modelId: string): ModelProvider | undefined {
 }
 
 /**
+ * Known reasoning model prefixes for pattern-based fallback.
+ * Used when model ID is not in registry (e.g., dated variants like "o1-2025-01").
+ */
+const REASONING_MODEL_PATTERNS = [
+  /^o1(-|$)/,       // o1, o1-mini, o1-preview, o1-2025-01, etc.
+  /^o3(-|$)/,       // o3, o3-mini, etc.
+  /^gpt-5\.2(-|$)/, // gpt-5.2, gpt-5.2-preview, etc.
+];
+
+/**
  * Check if a model is a reasoning model (requires reasoning_effort parameter)
- * Uses registry lookup - does NOT use string matching
+ * First tries registry lookup, then falls back to pattern matching for unregistered variants.
  */
 export function isReasoningModel(modelId: string): boolean {
-  return MODEL_REGISTRY[modelId]?.reasoning === true;
+  // First: exact registry lookup
+  const registryEntry = MODEL_REGISTRY[modelId];
+  if (registryEntry !== undefined) {
+    return registryEntry.reasoning === true;
+  }
+
+  // Fallback: pattern matching for unregistered model variants
+  return REASONING_MODEL_PATTERNS.some(pattern => pattern.test(modelId));
 }
 
 /**

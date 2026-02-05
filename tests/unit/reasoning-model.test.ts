@@ -54,13 +54,21 @@ describe("Reasoning Model Support", () => {
       expect(isReasoningModel("claude-3-5-sonnet-20241022")).toBe(false);
     });
 
-    it("returns false for unknown models (uses registry lookup, not string matching)", () => {
-      // Critical: ensure we use registry lookup, not string matching like startsWith("gpt-5")
+    it("returns false for unknown models not matching reasoning patterns", () => {
+      // These don't match known reasoning model patterns
       expect(isReasoningModel("gpt-5-unknown")).toBe(false);
-      expect(isReasoningModel("gpt-5.3")).toBe(false);
+      expect(isReasoningModel("gpt-5.3")).toBe(false); // Only gpt-5.2 is reasoning
       expect(isReasoningModel("thinking-model")).toBe(false);
-      expect(isReasoningModel("o1-turbo")).toBe(false); // Not a real model
       expect(isReasoningModel("reasoning-hypothetical")).toBe(false);
+    });
+
+    it("returns true for model variants matching reasoning patterns (safety fallback)", () => {
+      // Pattern-based fallback for unregistered model variants
+      // Better to use max_completion_tokens for potential reasoning models than to fail
+      expect(isReasoningModel("o1-turbo")).toBe(true); // Matches o1 pattern
+      expect(isReasoningModel("o1-2025-01")).toBe(true); // Dated variant
+      expect(isReasoningModel("o3-preview")).toBe(true); // Matches o3 pattern
+      expect(isReasoningModel("gpt-5.2-preview")).toBe(true); // Matches gpt-5.2 pattern
     });
   });
 

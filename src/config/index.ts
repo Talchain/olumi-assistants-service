@@ -253,6 +253,7 @@ const ConfigSchema = z.object({
       critique: z.string().optional(),
       validation: z.string().optional(),
       extraction: z.string().optional(), // Model for LLM-first factor/constraint extraction
+      decision_review: z.string().optional(), // Model for decision review
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -263,6 +264,7 @@ const ConfigSchema = z.object({
       critique: z.coerce.number().int().positive().optional(),
       validation: z.coerce.number().int().positive().optional(),
       extraction: z.coerce.number().int().positive().optional(), // Max tokens for LLM-first extraction
+      decision_review: z.coerce.number().int().positive().optional(), // Max tokens for decision review
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -501,6 +503,7 @@ function parseConfig(): Config {
         critique: env.CEE_MODEL_CRITIQUE,
         validation: env.CEE_MODEL_VALIDATION,
         extraction: env.CEE_MODEL_EXTRACTION,
+        decision_review: env.CEE_MODEL_DECISION_REVIEW,
       },
       // Per-operation max tokens limits
       maxTokens: {
@@ -510,6 +513,7 @@ function parseConfig(): Config {
         clarification: env.CEE_MAX_TOKENS_CLARIFICATION,
         critique: env.CEE_MAX_TOKENS_CRITIQUE,
         validation: env.CEE_MAX_TOKENS_VALIDATION,
+        decision_review: env.CEE_MAX_TOKENS_DECISION_REVIEW,
       },
       // Tiered model selection
       modelSelection: {
