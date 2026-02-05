@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine"]);
-export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor"]);
+export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor", "constraint"]);
 
 /**
  * Factor type classification for downstream enrichment.
@@ -69,11 +69,57 @@ export const OptionData = z.object({
 });
 
 /**
- * Union type for node data - can be either:
+ * Constraint operator for threshold comparisons.
+ * PLoT requires ASCII operators only - no unicode.
+ */
+export const ConstraintOperator = z.enum([">=", "<="]);
+
+/**
+ * Metadata for constraint observed_state.
+ * PLoT looks for operator in this location.
+ */
+export const ConstraintMetadata = z.object({
+  /** Comparison operator - REQUIRED by PLoT */
+  operator: ConstraintOperator,
+  /** Original value before any normalization (for round-trip) */
+  original_value: z.number().optional(),
+  /** Unit of measurement if known */
+  unit: z.string().optional(),
+  /** Deadline date for temporal constraints (ISO format) */
+  deadline_date: z.string().optional(),
+  /** Reference date used for temporal computation */
+  reference_date: z.string().optional(),
+  /** Whether reference date was assumed vs explicit */
+  assumed_reference_date: z.boolean().optional(),
+});
+
+/**
+ * Observed state for constraint nodes.
+ * Contains the threshold value and operator metadata.
+ */
+export const ConstraintObservedState = z.object({
+  /** Threshold value in user units - PLoT normalises */
+  value: z.number(),
+  /** Metadata including the explicit operator */
+  metadata: ConstraintMetadata,
+});
+
+/**
+ * Data field for constraint nodes (redundant operator for PLoT compatibility).
+ * PLoT checks both observed_state.metadata.operator and data.operator.
+ */
+export const ConstraintNodeData = z.object({
+  /** Redundant operator - ensures PLoT finds it */
+  operator: ConstraintOperator,
+});
+
+/**
+ * Union type for node data - can be:
  * - FactorData: quantitative data for factor nodes (ISL integration)
  * - OptionData: intervention mappings for option nodes (V4 format)
+ * - ConstraintNodeData: operator for constraint nodes (PLoT integration)
  */
-export const NodeData = z.union([FactorData, OptionData]);
+export const NodeData = z.union([FactorData, OptionData, ConstraintNodeData]);
 
 export const Node = z.object({
   id: z.string().min(1),
@@ -92,8 +138,15 @@ export const Node = z.object({
    * Node data - type depends on node kind:
    * - factor nodes: FactorData (quantitative values for ISL)
    * - option nodes: OptionData (intervention mappings from V4 prompt)
+   * - constraint nodes: ConstraintNodeData (redundant operator for PLoT)
    */
-  data: NodeData.optional()
+  data: NodeData.optional(),
+  /**
+   * Observed state for constraint nodes (PLoT Phase 1 T6).
+   * Contains threshold value and explicit operator.
+   * PLoT requires operator in observed_state.metadata.operator.
+   */
+  observed_state: ConstraintObservedState.optional(),
 });
 
 // Structured provenance for production trust and traceability

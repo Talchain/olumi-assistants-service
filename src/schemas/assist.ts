@@ -89,6 +89,40 @@ export const CorrectionsSummarySchema = z.object({
   by_type: z.record(z.string(), z.number().int().min(0)),
 });
 
+/**
+ * Goal constraint schema for compound goal extraction (Phase 3).
+ * Defines a threshold constraint on a target node.
+ * PLoT merges explicit goal_constraints[] with compiled constraint nodes.
+ */
+export const GoalConstraintSchema = z.object({
+  /** Unique constraint identifier */
+  constraint_id: z.string().min(1),
+  /** ID of the target node (factor/outcome) this constraint applies to */
+  node_id: z.string().min(1),
+  /** Comparison operator - ASCII only (>= or <=) */
+  operator: z.enum([">=", "<="]),
+  /** Threshold value in user units - PLoT normalises */
+  value: z.number(),
+  /** Human-readable constraint label */
+  label: z.string().optional(),
+  /** Unit of measurement if known */
+  unit: z.string().optional(),
+  /** Source quote from brief */
+  source_quote: z.string().max(200).optional(),
+  /** Extraction confidence (0-1) */
+  confidence: z.number().min(0).max(1).optional(),
+  /** Provenance marker for UI display */
+  provenance: z.enum(["explicit", "inferred", "proxy"]).optional(),
+  /** Deadline metadata for temporal constraints */
+  deadline_metadata: z.object({
+    deadline_date: z.string().optional(),
+    reference_date: z.string().optional(),
+    assumed_reference_date: z.boolean().optional(),
+  }).optional(),
+});
+
+export type GoalConstraintT = z.infer<typeof GoalConstraintSchema>;
+
 export const DraftGraphOutput = z.object({
   graph: Graph,
   patch: z
@@ -112,6 +146,12 @@ export const DraftGraphOutput = z.object({
     .optional(),
   debug: z.object({ needle_movers: z.any().optional() }).optional(),
   confidence: z.number().min(0).max(1).optional(),
+  /**
+   * Goal constraints extracted from compound goals (Phase 3).
+   * Populated when brief contains multiple quantitative targets.
+   * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
+   */
+  goal_constraints: z.array(GoalConstraintSchema).optional(),
   // Graph corrections tracking + pipeline repair observability
   trace: z.object({
     // Pipeline repair tracking fields

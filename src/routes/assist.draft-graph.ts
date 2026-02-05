@@ -39,6 +39,14 @@ import {
   GraphValidationError,
   type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
+import {
+  extractCompoundGoals,
+  toGoalConstraints,
+  generateConstraintNodes,
+  generateConstraintEdges,
+  constraintNodesToGraphNodes,
+  constraintEdgesToGraphEdges,
+} from "../cee/compound-goal/index.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
@@ -1227,6 +1235,58 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     } : {}),
   };
 
+  // Phase 3: Compound Goal Extraction
+  // Extract multi-constraint goals from the brief and emit goal_constraints[]
+  const compoundGoalResult = extractCompoundGoals(effectiveBrief, { includeProxies: false });
+  let goalConstraints: ReturnType<typeof toGoalConstraints> | undefined;
+
+  if (compoundGoalResult.constraints.length > 0) {
+    // Convert to goal_constraints format for PLoT
+    goalConstraints = toGoalConstraints(compoundGoalResult.constraints);
+
+    // Generate constraint nodes and edges for the graph
+    const constraintNodes = generateConstraintNodes(compoundGoalResult.constraints);
+    const constraintEdges = generateConstraintEdges(compoundGoalResult.constraints);
+
+    // Add constraint nodes and edges to the candidate graph
+    // Only add constraints whose target node exists (avoid orphan nodes)
+    const existingNodeIds = new Set(candidate.nodes.map(n => n.id));
+
+    // Filter constraint edges to only include those whose target exists
+    const edgesToAdd = constraintEdgesToGraphEdges(constraintEdges).filter(
+      e => existingNodeIds.has(e.to)
+    );
+
+    // Get the set of constraint IDs that have valid edges (their targets exist)
+    const constraintIdsWithValidTargets = new Set(edgesToAdd.map(e => e.from));
+
+    // Only add constraint nodes that have valid targets (avoid orphan nodes)
+    // Also check for ID collisions with existing nodes
+    const nodesToAdd = constraintNodesToGraphNodes(constraintNodes).filter(
+      n => constraintIdsWithValidTargets.has(n.id) && !existingNodeIds.has(n.id)
+    );
+
+    // Track how many constraints were skipped due to missing targets
+    const skippedCount = constraintNodes.length - nodesToAdd.length;
+
+    // Update candidate with new nodes and edges
+    candidate = {
+      ...candidate,
+      nodes: [...candidate.nodes, ...nodesToAdd],
+      edges: [...candidate.edges, ...edgesToAdd],
+    };
+
+    log.info({
+      event: "cee.compound_goal.integrated",
+      request_id: correlationId,
+      constraint_count: goalConstraints.length,
+      constraint_nodes_added: nodesToAdd.length,
+      constraint_edges_added: edgesToAdd.length,
+      constraints_skipped_no_target: skippedCount,
+      is_compound: compoundGoalResult.isCompound,
+    }, "Compound goal constraints integrated into graph");
+  }
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -1236,6 +1296,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     clarifier_status: clarifier,
     debug: debugPayload,
     trace: tracePayload,
+    goal_constraints: goalConstraints,
   });
 
   // Check for legacy string provenance (for deprecation tracking)
