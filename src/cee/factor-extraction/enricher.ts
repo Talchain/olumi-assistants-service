@@ -45,6 +45,23 @@ export interface EnrichmentResult {
 }
 
 /**
+ * Synonym groups for semantic label matching.
+ * Each group contains terms that refer to the same concept.
+ */
+const SYNONYM_GROUPS = [
+  ["price", "cost", "fee", "expense"],
+  ["budget", "investment", "funding", "spend", "capital"],
+  ["churn", "attrition", "turnover", "retention"],
+  ["conversion", "upgrade", "signup", "acquisition"],
+  ["revenue", "income", "sales", "earnings"],
+  ["growth", "increase", "expansion", "scale"],
+  ["user", "customer", "subscriber", "client"],
+  ["target", "goal", "objective", "threshold"],
+  ["rate", "percentage", "ratio", "proportion"],
+  ["time", "duration", "period", "timeline"],
+];
+
+/**
  * Check if two labels refer to the same concept
  */
 function labelsMatch(label1: string, label2: string): boolean {
@@ -63,23 +80,90 @@ function labelsMatch(label1: string, label2: string): boolean {
   // Substring match (e.g., "price" matches "pro plan price")
   if (n1.includes(n2) || n2.includes(n1)) return true;
 
-  // Common synonyms
-  const synonymGroups = [
-    ["price", "cost", "fee"],
-    ["churn", "attrition", "turnover"],
-    ["conversion", "upgrade", "signup"],
-    ["revenue", "income", "sales"],
-    ["growth", "increase", "expansion"],
-    ["user", "customer", "subscriber"],
-  ];
-
-  for (const group of synonymGroups) {
+  // Check synonym groups
+  for (const group of SYNONYM_GROUPS) {
     const has1 = group.some((s) => n1.includes(s));
     const has2 = group.some((s) => n2.includes(s));
     if (has1 && has2) return true;
   }
 
   return false;
+}
+
+/**
+ * Check if an extracted quantity is already covered by an existing LLM-generated factor.
+ * Uses value matching (with tolerance) and semantic label matching.
+ */
+function isQuantityCoveredByExistingFactor(
+  extracted: ExtractedFactor,
+  existingFactors: NodeT[]
+): { covered: boolean; matchedNode?: NodeT; matchReason?: string } {
+  for (const node of existingFactors) {
+    if (node.kind !== "factor" || !node.data) continue;
+    if (!isFactorData(node.data)) continue;
+    const data = node.data;
+
+    // Match on value within 10% tolerance
+    if (data.value !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.value * 0.1);
+      if (Math.abs(data.value - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "value_match" };
+      }
+    }
+
+    // Match on raw_value within 10% tolerance
+    if (data.raw_value !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.raw_value * 0.1);
+      if (Math.abs(data.raw_value - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "raw_value_match" };
+      }
+    }
+
+    // Match on cap value within 10% tolerance
+    if (data.cap !== undefined && extracted.value !== undefined) {
+      const tolerance = Math.abs(data.cap * 0.1);
+      if (Math.abs(data.cap - extracted.value) <= tolerance) {
+        return { covered: true, matchedNode: node, matchReason: "cap_match" };
+      }
+    }
+
+    // Match on unit + semantic label overlap (using synonym groups)
+    if (data.unit && extracted.unit && data.unit === extracted.unit && node.label) {
+      if (labelsMatch(node.label, extracted.label)) {
+        return { covered: true, matchedNode: node, matchReason: "unit_label_match" };
+      }
+    }
+  }
+  return { covered: false };
+}
+
+/**
+ * Infer factor category from graph edge structure.
+ * - controllable: Has incoming edge from option node
+ * - observable: Has data.value but no option edge, or has outbound edges
+ * - external: No edges and no clear state
+ */
+function inferCategoryFromEdges(
+  nodeId: string,
+  edges: EdgeT[],
+  nodes: NodeT[]
+): "controllable" | "observable" | "external" {
+  const optionNodeIds = new Set(
+    nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  // Check for incoming edges from option nodes
+  const hasInboundOptionEdge = edges.some(
+    (e) => e.to === nodeId && optionNodeIds.has(e.from)
+  );
+  if (hasInboundOptionEdge) return "controllable";
+
+  // Check for any outbound edges (indicates observable influence)
+  const hasOutboundEdge = edges.some((e) => e.from === nodeId);
+  if (hasOutboundEdge) return "observable";
+
+  // Default to external for isolated factors
+  return "external";
 }
 
 /**
@@ -409,6 +493,24 @@ export async function enrichGraphWithFactorsAsync(
       continue;
     }
 
+    // Check if quantity is already covered by an LLM-generated factor
+    const coverageCheck = isQuantityCoveredByExistingFactor(factor, existingFactors);
+    if (coverageCheck.covered) {
+      factorsSkipped++;
+      log.info(
+        {
+          skippedLabel: factor.label,
+          skippedValue: factor.value,
+          matchedNodeId: coverageCheck.matchedNode?.id,
+          matchedNodeLabel: coverageCheck.matchedNode?.label,
+          matchReason: coverageCheck.matchReason,
+          event: "cee.factor_enrichment.skipped_duplicate",
+        },
+        `Skipping factor injection: "${factor.label}" covered by LLM factor "${coverageCheck.matchedNode?.id}"`
+      );
+      continue;
+    }
+
     // Create new factor node
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const factorData: FactorDataT = {
@@ -424,11 +526,31 @@ export async function enrichGraphWithFactorsAsync(
         : undefined,
     };
 
+    // Connect to relevant node first (needed for category inference)
+    const targetId = findConnectionTarget(graph, factor);
+    const newEdge: EdgeT | null = targetId
+      ? {
+          from: nodeId,
+          to: targetId,
+          belief: factor.confidence,
+          provenance: {
+            source: "hypothesis",
+            quote: `Extracted from brief: "${factor.matchedText}"`,
+          },
+          provenance_source: "hypothesis",
+        }
+      : null;
+
+    // Infer category from edge structure
+    const allEdges = newEdge ? [...enrichedGraph.edges, newEdge] : enrichedGraph.edges;
+    const category = inferCategoryFromEdges(nodeId, allEdges, enrichedGraph.nodes);
+
     const newNode: NodeT = {
       id: nodeId,
       kind: "factor",
       label: factor.label,
       data: factorData,
+      category,
     };
 
     enrichedGraph.nodes.push(newNode);
@@ -440,25 +562,14 @@ export async function enrichGraphWithFactorsAsync(
         11, // Stage 11: Factor Enrichment
         "node_added",
         { node_id: nodeId, kind: "factor" },
-        `Added factor node extracted from brief`,
+        `Added factor node extracted from brief (category: ${category})`,
         undefined,
-        { id: nodeId, kind: "factor", label: factor.label }
+        { id: nodeId, kind: "factor", label: factor.label, category }
       );
     }
 
-    // Connect to relevant node
-    const targetId = findConnectionTarget(graph, factor);
-    if (targetId) {
-      const newEdge: EdgeT = {
-        from: nodeId,
-        to: targetId,
-        belief: factor.confidence,
-        provenance: {
-          source: "hypothesis",
-          quote: `Extracted from brief: "${factor.matchedText}"`,
-        },
-        provenance_source: "hypothesis",
-      };
+    // Add the edge to the graph
+    if (newEdge) {
       enrichedGraph.edges.push(newEdge);
 
       // Record correction for added factor edge (Stage 11: Factor Enrichment)
@@ -466,7 +577,7 @@ export async function enrichGraphWithFactorsAsync(
         collector.addByStage(
           11, // Stage 11: Factor Enrichment
           "edge_added",
-          { edge_id: formatEdgeId(nodeId, targetId) },
+          { edge_id: formatEdgeId(nodeId, targetId!) },
           `Added edge connecting factor to ${targetId}`,
           undefined,
           { from: nodeId, to: targetId, belief: factor.confidence }
