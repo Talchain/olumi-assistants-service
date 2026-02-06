@@ -26,18 +26,19 @@ export type CeeTask =
  * Default model assignments per task
  *
  * Model selection by task type:
- * - Fast tier (gpt-5-mini): Simple, speed-sensitive tasks
+ * - Fast tier (gpt-4.1): Simple, speed-sensitive tasks (gpt-5-mini deprecated - empty response issues)
  * - Quality tier (gpt-4o): Primary drafting - reliable JSON output
  * - Quality tier (claude-sonnet-4): Bias detection - excellent reasoning
  * - Premium tier (gpt-5.2): Advanced reasoning for critique/repair
  */
 export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // Fast tier - simple generation, low latency
-  clarification: "gpt-5-mini",
-  preflight: "gpt-5-mini",
-  explainer: "gpt-5-mini",
-  evidence_helper: "gpt-5-mini",
-  sensitivity_coach: "gpt-5-mini",
+  // Note: gpt-5-mini deprecated (2026-02-06) - returns empty responses on large prompts
+  clarification: "gpt-4.1-2025-04-14",
+  preflight: "gpt-4.1-2025-04-14",
+  explainer: "gpt-4.1-2025-04-14",
+  evidence_helper: "gpt-4.1-2025-04-14",
+  sensitivity_coach: "gpt-4.1-2025-04-14",
   // Quality tier - optimized for specific tasks
   draft_graph: "gpt-4o",  // Reverted - gpt-4.1 has JSON mode compatibility issues
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
@@ -46,7 +47,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   options: "gpt-5.2",
   suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
-  decision_review: "gpt-5-mini",  // Fast tier - narrative synthesis from ISL results
+  decision_review: "gpt-4.1-2025-04-14",  // Fast tier - narrative synthesis from ISL results
 };
 
 /**
@@ -91,7 +92,7 @@ export function isValidCeeTask(task: string): task is CeeTask {
  */
 export const TIER_SHORTCUTS = {
   _default: "Use task default model",
-  _fast: "Force fast tier (gpt-5-mini) for eligible tasks",
+  _fast: "Force fast tier (gpt-4.1) for eligible tasks",
   _quality: "Force quality tier (gpt-5.2) for all tasks",
 } as const;
 
