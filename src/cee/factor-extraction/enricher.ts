@@ -429,7 +429,45 @@ export async function enrichGraphWithFactorsAsync(
   }
 
   // Filter by confidence
-  const qualified = extracted.filter((f) => f.confidence >= minConfidence);
+  const confidenceFiltered = extracted.filter((f) => f.confidence >= minConfidence);
+
+  // Dedupe extracted factors against each other before injection
+  // Same value + same unit = duplicate, or matching labels (e.g., "Churn" vs "Churn Rate")
+  const qualified: ExtractedFactor[] = [];
+  for (const factor of confidenceFiltered) {
+    const isDuplicate = qualified.some((existing) => {
+      // Check unit compatibility first
+      if (!unitsCompatible(existing.unit, factor.unit)) return false;
+
+      // Check value within 10% tolerance
+      if (existing.value !== undefined && factor.value !== undefined) {
+        const tolerance = Math.abs(existing.value * 0.1);
+        if (Math.abs(existing.value - factor.value) <= tolerance) {
+          return true;
+        }
+      }
+
+      // Check label similarity (e.g., "Churn" vs "Churn Rate")
+      if (labelsMatch(existing.label, factor.label)) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (!isDuplicate) {
+      qualified.push(factor);
+    } else {
+      log.debug(
+        {
+          skippedLabel: factor.label,
+          skippedValue: factor.value,
+          event: "cee.factor_extraction.dedupe_within_extraction",
+        },
+        `Skipping duplicate extracted factor: "${factor.label}"`
+      );
+    }
+  }
 
   // Get existing factor labels (case-insensitive)
   const existingFactors = graph.nodes.filter((n) => n.kind === "factor");
