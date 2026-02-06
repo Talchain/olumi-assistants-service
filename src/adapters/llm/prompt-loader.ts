@@ -32,7 +32,7 @@
  */
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
-import { registerAllDefaultPrompts } from '../../prompts/defaults.js';
+import { registerAllDefaultPrompts, DECISION_REVIEW_PROMPT_VERSION } from '../../prompts/defaults.js';
 import { isPromptManagementEnabled } from '../../prompts/loader.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -438,11 +438,15 @@ export function getSystemPromptMeta(operation: string): {
   // Examples:
   //   "draft_graph_default@v6 (staging) [inst:a1b2c3d4]" - staging version from store
   //   "draft_graph_default@v8 (production) [inst:a1b2c3d4]" - production version from store
-  //   "default:draft_graph [inst:a1b2c3d4]" - hardcoded default
+  //   "default:draft_graph" - hardcoded default (generic)
+  //   "default:decision_review@v6" - hardcoded default with explicit version
   let promptVersion: string;
   if (source === 'store' && promptId && typeof version === 'number') {
     const envLabel = isStaging ? 'staging' : 'production';
     promptVersion = `${promptId}@v${version} (${envLabel})`;
+  } else if (taskId === 'decision_review') {
+    // Decision review has explicit version tracking for fallback observability
+    promptVersion = `default:${taskId}@${DECISION_REVIEW_PROMPT_VERSION}`;
   } else {
     promptVersion = `default:${taskId}`;
   }

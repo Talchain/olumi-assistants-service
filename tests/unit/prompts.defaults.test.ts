@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   registerAllDefaultPrompts,
   PROMPT_TEMPLATES,
+  DECISION_REVIEW_PROMPT_VERSION,
 } from '../../src/prompts/defaults.js';
 import {
   getDefaultPrompts,
@@ -229,5 +230,125 @@ describe('Integration with Loader', () => {
 
     // Try to load a task that doesn't have a default
     expect(() => loadPromptSync('evidence_helper' as any)).toThrow('No default prompt');
+  });
+});
+
+describe('Decision Review Fallback Prompt (v6)', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v6', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v6');
+  });
+
+  it('decision_review prompt is registered', () => {
+    const defaults = getDefaultPrompts();
+    expect(defaults).toHaveProperty('decision_review');
+    expect(defaults.decision_review).toBeDefined();
+    expect(typeof defaults.decision_review).toBe('string');
+    expect(defaults.decision_review!.length).toBeGreaterThan(1000);
+  });
+
+  it('decision_review prompt can be loaded with loadPromptSync', () => {
+    const prompt = loadPromptSync('decision_review');
+    expect(typeof prompt).toBe('string');
+    expect(prompt.length).toBeGreaterThan(0);
+  });
+
+  it('decision_review prompt contains required structural sections', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Required XML-style sections from v6
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('</ROLE>');
+    expect(prompt).toContain('<INPUT_FIELDS>');
+    expect(prompt).toContain('</INPUT_FIELDS>');
+    expect(prompt).toContain('<CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('</CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('<GROUNDING_RULES>');
+    expect(prompt).toContain('</GROUNDING_RULES>');
+    expect(prompt).toContain('<FIELD_SPECIFICATIONS>');
+    expect(prompt).toContain('</FIELD_SPECIFICATIONS>');
+    expect(prompt).toContain('<OUTPUT_SCHEMA>');
+    expect(prompt).toContain('</OUTPUT_SCHEMA>');
+    expect(prompt).toContain('<VALIDATION>');
+    expect(prompt).toContain('</VALIDATION>');
+  });
+
+  it('decision_review prompt contains required output field definitions', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Required output fields per M2 schema
+    const requiredFields = [
+      'narrative_summary',
+      'story_headlines',
+      'robustness_explanation',
+      'readiness_rationale',
+      'evidence_enhancements',
+      'scenario_contexts',
+      'flip_thresholds',
+      'bias_findings',
+      'key_assumptions',
+      'decision_quality_prompts',
+    ];
+
+    for (const field of requiredFields) {
+      expect(prompt).toContain(field);
+    }
+  });
+
+  it('decision_review prompt contains grounding rules for numbers', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Key grounding constraints from v6
+    expect(prompt).toContain('Descriptive fields');
+    expect(prompt).toContain('Prescriptive fields');
+    expect(prompt).toContain('±10%');
+    expect(prompt).toContain('Do NOT invent statistics');
+    expect(prompt).toContain('Do NOT compute derived numbers');
+  });
+
+  it('decision_review prompt contains tone alignment table', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Readiness levels and their tones
+    expect(prompt).toContain('readiness');
+    expect(prompt).toContain('headline_type');
+    expect(prompt).toContain('ready');
+    expect(prompt).toContain('close_call');
+    expect(prompt).toContain('needs_evidence');
+    expect(prompt).toContain('needs_framing');
+    expect(prompt).toContain('Forbidden phrases');
+  });
+
+  it('decision_review prompt contains bias detection guidance', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Bias types
+    expect(prompt).toContain('STRUCTURAL');
+    expect(prompt).toContain('SEMANTIC');
+    expect(prompt).toContain('ANCHORING');
+    expect(prompt).toContain('DOMINANT_FACTOR');
+    expect(prompt).toContain('SUNK_COST');
+    expect(prompt).toContain('linked_critique_code');
+    expect(prompt).toContain('brief_evidence');
+  });
+
+  it('decision_review prompt contains validation error documentation', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    // Validation section documents server-side checks
+    expect(prompt).toContain('ERRORS (cause rejection)');
+    expect(prompt).toContain('story_headlines missing');
+    expect(prompt).toContain('Ungrounded number');
+    expect(prompt).toContain('Readiness contradiction');
+  });
+
+  it('decision_review prompt requests JSON-only output', () => {
+    const prompt = loadPromptSync('decision_review');
+
+    expect(prompt).toContain('Return ONLY a JSON object');
+    expect(prompt).toContain('No markdown fences');
   });
 });
