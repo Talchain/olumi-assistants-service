@@ -688,9 +688,8 @@ export class OpenAIAdapter implements LLMAdapter {
       const rawOutput = truncateRawOutput(rawJson);
 
       const unsafeCaptureEnabled = args.includeDebug === true && args.flags?.unsafe_capture === true;
-      const rawTextTruncated = content.length > RAW_LLM_TEXT_MAX_CHARS
-        ? content.slice(0, RAW_LLM_TEXT_MAX_CHARS)
-        : content;
+      // Full text preserved for debug bundle (no truncation — needed for prompt validation)
+      const rawTextFull = content;
       const rawPreview = content.length > RAW_LLM_PREVIEW_MAX_CHARS
         ? content.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
         : content;
@@ -727,7 +726,7 @@ export class OpenAIAdapter implements LLMAdapter {
           node_kinds_raw_json: rawNodeKinds,
           // Always include raw output for LLM observability trace (preview + full text for storage)
           raw_output_preview: rawPreview,
-          raw_llm_text: rawTextTruncated,
+          raw_llm_text: rawTextFull,
           // Only include parsed JSON when unsafe capture is enabled (admin-gated)
           ...(unsafeCaptureEnabled ? {
             raw_llm_json: rawOutput.output,

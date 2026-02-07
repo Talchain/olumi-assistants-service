@@ -554,9 +554,8 @@ export async function draftGraphWithAnthropic(
     const rawOutput = truncateRawOutput(rawJson);
 
     const unsafeCaptureEnabled = args.includeDebug === true && (args as any).flags?.unsafe_capture === true;
-    const rawTextTruncated = jsonText.length > RAW_LLM_TEXT_MAX_CHARS
-      ? jsonText.slice(0, RAW_LLM_TEXT_MAX_CHARS)
-      : jsonText;
+    // Full text preserved for debug bundle (no truncation — needed for prompt validation)
+    const rawTextFull = jsonText;
     const rawPreview = jsonText.length > RAW_LLM_PREVIEW_MAX_CHARS
       ? jsonText.slice(0, RAW_LLM_PREVIEW_MAX_CHARS)
       : jsonText;
@@ -592,7 +591,7 @@ export async function draftGraphWithAnthropic(
         node_kinds_raw_json: rawNodeKinds,
         // Always include raw output for LLM observability trace (preview + full text for storage)
         raw_output_preview: rawPreview,
-        raw_llm_text: rawTextTruncated,
+        raw_llm_text: rawTextFull,
         // Only include parsed JSON when unsafe capture is enabled (admin-gated)
         ...(unsafeCaptureEnabled ? {
           raw_llm_json: rawOutput.output,

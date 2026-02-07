@@ -215,7 +215,9 @@ export function buildLLMRawTrace(
     storeOutput?: boolean;
   }
 ): {
+  text: string;
   output_preview: string;
+  char_count: number;
   output_hash: string;
   output_node_count: number;
   output_edge_count: number;
@@ -272,7 +274,9 @@ export function buildLLMRawTrace(
   }
 
   return {
+    text: rawText,
     output_preview: outputPreview,
+    char_count: rawText.length,
     output_hash: outputHash,
     output_node_count: nodeCount,
     output_edge_count: edgeCount,
