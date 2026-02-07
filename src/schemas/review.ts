@@ -80,8 +80,8 @@ export const FragileEdge = z.object({
   edge_id: z.string(),
   from_label: z.string(),
   to_label: z.string(),
-  alternative_winner_id: z.string().optional(),
-  alternative_winner_label: z.string().optional(),
+  alternative_winner_id: z.string().nullable().optional(),
+  alternative_winner_label: z.string().nullable().optional(),
   switch_probability: z.number().min(0).max(1).optional(),
 });
 

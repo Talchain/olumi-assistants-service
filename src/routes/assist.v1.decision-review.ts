@@ -109,7 +109,7 @@ const DecisionReviewInputSchema = z
             factor_id: z.string(),
             factor_label: z.string(),
             current_value: z.number(),
-            flip_value: z.number(),
+            flip_value: z.number().nullable(),
             direction: z.string(),
           })
           .passthrough()
@@ -525,7 +525,7 @@ export default async function route(app: FastifyInstance) {
       // Observability: Prompt loaded
       emit(TelemetryEvents.CeeDecisionReviewPromptLoaded, {
         ...telemetryCtx,
-        prompt_version: promptMeta.version,
+        prompt_version: promptMeta.prompt_version,
         prompt_source: promptMeta.source,
       });
 
@@ -663,7 +663,7 @@ export default async function route(app: FastifyInstance) {
           request_id: requestId,
           correlation_id: correlationId,
           brief_hash: input.brief_hash,
-          prompt_version: promptMeta.version,
+          prompt_version: promptMeta.prompt_version,
           prompt_source: promptMeta.source,
         },
         _meta: {

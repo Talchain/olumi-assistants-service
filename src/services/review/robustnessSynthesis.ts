@@ -134,7 +134,7 @@ function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
 function generateContextualisedAssumptionExplanation(
   fromLabel: string,
   toLabel: string,
-  alternativeWinner: string | undefined,
+  alternativeWinner: string | null | undefined,
   switchProbability: number | undefined,
 ): string {
   // Detect factor types for contextualised phrasing

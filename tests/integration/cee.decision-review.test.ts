@@ -204,6 +204,33 @@ describe("POST /assist/v1/decision-review (M2 Schema)", () => {
       expect(body.review).toBeDefined();
     });
 
+    it("accepts flip_threshold_data with null flip_value", async () => {
+      const payloadWithNullFlip = {
+        ...validM2Payload,
+        flip_threshold_data: [
+          {
+            factor_id: "factor_timing",
+            factor_label: "Market Timing",
+            current_value: 0.72,
+            flip_value: null,
+            direction: "decrease",
+            flip_reason: "no_crossover",
+          },
+        ],
+      };
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/decision-review",
+        headers: headersSuccess,
+        payload: payloadWithNullFlip,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.review).toBeDefined();
+    });
+
     it("includes optional pre_mortem when readiness allows", async () => {
       const res = await app.inject({
         method: "POST",
