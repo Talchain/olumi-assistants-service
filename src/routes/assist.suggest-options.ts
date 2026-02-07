@@ -5,6 +5,7 @@ import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import { shouldUseStagingPrompts } from "../config/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
+import { SUGGEST_OPTIONS_TIMEOUT_MS } from "../config/timeouts.js";
 import {
   createObservabilityCollector,
   createNoOpObservabilityCollector,
@@ -82,7 +83,7 @@ export default async function route(app: FastifyInstance) {
         },
         {
           requestId,
-          timeoutMs: 10000, // 10s timeout for suggestions
+          timeoutMs: SUGGEST_OPTIONS_TIMEOUT_MS,
           observabilityCollector,
         }
       );

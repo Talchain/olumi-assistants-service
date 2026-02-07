@@ -56,7 +56,7 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
-import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS } from "./config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
@@ -170,6 +170,16 @@ export async function build() {
     throw new Error(
       'FATAL: In production, at least one ASSIST_API_KEY/ASSIST_API_KEYS or HMAC_SECRET must be configured',
     );
+  }
+
+  // Log all resolved timeout values at startup for diagnostics
+  const resolvedTimeouts = getResolvedTimeouts();
+  log.info({ event: 'config.timeouts', ...resolvedTimeouts }, 'Resolved timeout configuration');
+
+  // Validate timeout relationships (warn about misconfigurations)
+  const timeoutWarnings = validateTimeoutRelationships();
+  for (const warning of timeoutWarnings) {
+    log.warn({ event: 'config.timeout_relationship' }, warning);
   }
 
   // Register default prompts (fallbacks for prompt management system)

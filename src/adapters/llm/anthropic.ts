@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, setGlobalDispatcher } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -81,7 +81,7 @@ function getApiKey(): string | undefined {
 // Note: Anthropic SDK uses fetch API, so we set global undici dispatcher
 const undiciAgent = new Agent({
   connect: {
-    timeout: 3000, // 3s
+    timeout: UNDICI_CONNECT_TIMEOUT_MS,
   },
   headersTimeout: HTTP_CLIENT_TIMEOUT_MS,
   bodyTimeout: HTTP_CLIENT_TIMEOUT_MS,
@@ -104,7 +104,7 @@ function getClient(): Anthropic {
   return client;
 }
 
-const TIMEOUT_MS = 110_000; // 110 seconds - aligned with HTTP_CLIENT_TIMEOUT_MS for draft_graph
+const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 
 const RAW_LLM_TEXT_MAX_CHARS = 10_000;
 const RAW_LLM_PREVIEW_MAX_CHARS = 500;

@@ -8,6 +8,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { assessBriefReadiness } from "../cee/validation/readiness.js";
@@ -117,7 +118,7 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
     } else {
       const timeout = setTimeout(() => {
         reject(new Error("SSE write timeout"));
-      }, 5000);
+      }, SSE_WRITE_TIMEOUT_MS);
 
       reply.raw.once("drain", () => {
         clearTimeout(timeout);
@@ -364,7 +365,7 @@ export default async function route(app: FastifyInstance) {
         clearInterval(heartbeatInterval);
         log.debug({ error, correlation_id: requestId }, "Heartbeat failed - stopping");
       }
-    }, 10000);
+    }, SSE_HEARTBEAT_INTERVAL_MS);
 
     let sseEndState: "complete" | "timeout" | "aborted" | "error";
 

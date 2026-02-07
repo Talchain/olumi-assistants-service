@@ -12,6 +12,7 @@ import {
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { randomUUID, createHash } from "node:crypto";
+import { CLARIFIER_QUESTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
 /**
  * Derive a deterministic seed from request ID and ambiguity context.
@@ -165,7 +166,7 @@ export async function generateQuestionCandidates(
 
     const callOpts: CallOpts = {
       requestId: reqId,
-      timeoutMs: 15000, // 15 second timeout for question generation
+      timeoutMs: CLARIFIER_QUESTION_TIMEOUT_MS,
     };
 
     log.debug(

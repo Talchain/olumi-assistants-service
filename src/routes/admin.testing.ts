@@ -22,6 +22,7 @@ import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, sup
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
+import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_TIMEOUT_MS } from '../config/timeouts.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -200,23 +201,18 @@ function sanitizeErrorMessage(error: unknown): string {
 // LLM Call helpers
 // ============================================================================
 
-const LLM_TIMEOUT_MS = 120_000; // 2 minutes for standard models
-const REASONING_TIMEOUT_MS = 180_000; // 3 minutes for reasoning models (medium effort)
-const REASONING_HIGH_TIMEOUT_MS = 300_000; // 5 minutes for reasoning models with HIGH effort
-const _REQUEST_TIMEOUT_MS = 350_000; // 5.5 minutes total (to exceed max LLM timeout)
-
 /**
  * Get appropriate timeout based on model type and reasoning effort.
  */
 function getLLMTimeout(model: string, reasoningEffort?: 'low' | 'medium' | 'high'): number {
   if (!isReasoningModel(model)) {
-    return LLM_TIMEOUT_MS;
+    return ADMIN_LLM_TIMEOUT_MS;
   }
   // Reasoning models need more time, especially with HIGH effort
   if (reasoningEffort === 'high') {
-    return REASONING_HIGH_TIMEOUT_MS;
+    return ADMIN_REASONING_HIGH_TIMEOUT_MS;
   }
-  return REASONING_TIMEOUT_MS;
+  return ADMIN_REASONING_TIMEOUT_MS;
 }
 
 interface LLMCallOptions {
@@ -312,7 +308,7 @@ async function callAnthropicWithPrompt(
   // Extended thinking models need longer timeout AND streaming
   // Anthropic requires streaming for operations that may take >10 minutes
   const hasExtendedThinking = supportsExtendedThinking(model) && budgetTokens !== undefined;
-  const effectiveTimeout = hasExtendedThinking ? REASONING_HIGH_TIMEOUT_MS : LLM_TIMEOUT_MS;
+  const effectiveTimeout = hasExtendedThinking ? ADMIN_REASONING_HIGH_TIMEOUT_MS : ADMIN_LLM_TIMEOUT_MS;
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
   // Effective temperature: default to 0 if null (deterministic for testing)

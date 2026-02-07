@@ -25,6 +25,7 @@ import {
 } from "../../schemas/enrichment.js";
 import { FactorType, type GraphT, type NodeT, type FactorTypeT } from "../../schemas/graph.js";
 import type { FactorSensitivityInputT } from "../../schemas/enrichment.js";
+import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
 // =============================================================================
 // Types
@@ -345,7 +346,7 @@ export async function enrichFactors(
   factorSensitivity: FactorSensitivityInputT[],
   options: EnrichFactorsOptions = {}
 ): Promise<EnrichFactorsResult> {
-  const { requestId, maxRank = MAX_ENRICHMENT_RANK, timeoutMs = 30000 } = options;
+  const { requestId, maxRank = MAX_ENRICHMENT_RANK, timeoutMs = EXTRACTION_TIMEOUT_MS } = options;
 
   const startTime = Date.now();
   const warnings: string[] = [];

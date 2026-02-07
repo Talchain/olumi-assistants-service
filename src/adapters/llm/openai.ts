@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { Agent, setGlobalDispatcher } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -36,7 +36,7 @@ function getApiKey(): string | undefined {
 // Note: OpenAI SDK v6 uses fetch API, so we set global undici dispatcher
 const undiciAgent = new Agent({
   connect: {
-    timeout: 3000, // 3s
+    timeout: UNDICI_CONNECT_TIMEOUT_MS,
   },
   headersTimeout: HTTP_CLIENT_TIMEOUT_MS,
   bodyTimeout: HTTP_CLIENT_TIMEOUT_MS,

@@ -3,6 +3,7 @@ import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assis
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
+import { CLARIFY_BRIEF_TIMEOUT_MS } from "../config/timeouts.js";
 import { getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
@@ -82,7 +83,7 @@ export default async function route(app: FastifyInstance) {
         },
         {
           requestId: `clarify_${Date.now()}`,
-          timeoutMs: 10000, // 10s timeout for clarification
+          timeoutMs: CLARIFY_BRIEF_TIMEOUT_MS,
         }
       );
 

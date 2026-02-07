@@ -12,6 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
 import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
 // ============================================================================
 // Types
@@ -20,7 +21,7 @@ import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../
 export interface ExtractionCallOptions {
   /** Request ID for telemetry */
   requestId?: string;
-  /** Timeout in milliseconds (default: 30000) */
+  /** Timeout in milliseconds (default: EXTRACTION_TIMEOUT_MS env var or 30000) */
   timeoutMs?: number;
   /** Maximum tokens to generate (default: 2000) */
   maxTokens?: number;
@@ -220,7 +221,7 @@ async function callOpenAI(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature = 0, modelOverride } = options;
+  const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature = 0, modelOverride } = options;
 
   try {
     const client = getOpenAIClient();
@@ -297,7 +298,7 @@ async function callAnthropic(
   options: ExtractionCallOptions,
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
-  const { timeoutMs = 30000, maxTokens = 2000, temperature: _temperature = 0, modelOverride } = options;
+  const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature: _temperature = 0, modelOverride } = options;
 
   try {
     const client = getAnthropicClient();
@@ -438,7 +439,7 @@ export async function callLLMForExtraction(
       provider,
       model_override: effectiveModelOverride,
       requestId: validatedOptions.requestId,
-      timeoutMs: validatedOptions.timeoutMs ?? 30000,
+      timeoutMs: validatedOptions.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
     },
     "Starting LLM extraction call"
   );

@@ -24,6 +24,7 @@ import { log } from "../utils/telemetry.js";
 import type { ObservabilityCollector } from "./observability/collector.js";
 import { config } from "../config/index.js";
 import { normaliseStructuralEdges } from "./structural-edge-normaliser.js";
+import { ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
 
 // =============================================================================
 // Types
@@ -948,7 +949,7 @@ export function createAdapterBridge(
     seed = 17,
     flags,
     includeDebug = false,
-    timeoutMs = 30000,
+    timeoutMs = ORCHESTRATOR_TIMEOUT_MS,
     collector,
     bypassCache,
     forceDefault,

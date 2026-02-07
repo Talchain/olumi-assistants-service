@@ -5,6 +5,7 @@ import { retrieveQuestion } from "./question-cache.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { randomUUID, createHash } from "node:crypto";
+import { CLARIFIER_ANSWER_TIMEOUT_MS } from "../../config/timeouts.js";
 
 /**
  * Derive a deterministic seed from request and question IDs.
@@ -162,7 +163,7 @@ export async function incorporateAnswer(
 
     const callOpts: CallOpts = {
       requestId,
-      timeoutMs: 30000, // 30 second timeout for refinement
+      timeoutMs: CLARIFIER_ANSWER_TIMEOUT_MS,
     };
 
     log.debug(

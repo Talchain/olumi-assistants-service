@@ -29,7 +29,7 @@ import {
   SSE_DEGRADED_REDIS_REASON,
   SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
 } from "../utils/degraded-mode.js";
-import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs } from "../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs, FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_HEARTBEAT_INTERVAL_MS, SSE_RESUME_LIVE_TIMEOUT_MS, SSE_RESUME_POLL_INTERVAL_MS, SSE_RESUME_SNAPSHOT_RENEWAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config, shouldUseStagingPrompts } from "../config/index.js";
 import { getModelConfig, getClientAllowedModels } from "../config/models.js";
@@ -56,31 +56,15 @@ const SSE_HEADERS = {
   "cache-control": "no-cache"
 } as const;
 
-const FIXTURE_TIMEOUT_MS = 2500; // Show fixture if draft takes longer than 2.5s
-
-// Time budget configuration - skip LLM repair if draft takes too long
-// This prevents client timeouts by ensuring faster responses
-const DEFAULT_DRAFT_BUDGET_MS = 25000; // 25 seconds total budget
-const DEFAULT_REPAIR_TIMEOUT_MS = 10000; // 10 seconds for repair call
+// All timeout constants are imported from config/timeouts.ts (env-var controlled):
+// FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_HEARTBEAT_INTERVAL_MS
 
 function getDraftBudgetMs(): number {
-  // eslint-disable-next-line no-restricted-syntax -- Runtime tuning, not in config schema
-  const envVal = process.env.CEE_DRAFT_BUDGET_MS;
-  if (envVal) {
-    const parsed = parseInt(envVal, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-  }
-  return DEFAULT_DRAFT_BUDGET_MS;
+  return DRAFT_BUDGET_MS;
 }
 
 function getRepairTimeoutMs(): number {
-  // eslint-disable-next-line no-restricted-syntax -- Runtime tuning, not in config schema
-  const envVal = process.env.CEE_REPAIR_TIMEOUT_MS;
-  if (envVal) {
-    const parsed = parseInt(envVal, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-  }
-  return DEFAULT_REPAIR_TIMEOUT_MS;
+  return REPAIR_TIMEOUT_MS;
 }
 
 /**
@@ -90,10 +74,30 @@ function getRepairTimeoutMs(): number {
  */
 function preserveCategoryFromOriginal(normalized: GraphT, original: GraphT): GraphT {
   const categoryMap = new Map(original.nodes.map(n => [n.id, n.category]));
-  const nodesWithCategory = normalized.nodes.map(n => ({
-    ...n,
-    category: categoryMap.get(n.id),
-  }));
+  // Label-based fallback for nodes whose IDs changed during normalization.
+  // Only use labels that are unique in the original graph to avoid misassignment.
+  const labelCounts = new Map<string, number>();
+  for (const n of original.nodes) {
+    if (n.label) {
+      const key = n.label.toLowerCase();
+      labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const labelCategoryMap = new Map(
+    original.nodes
+      .filter(n => n.category && n.label && labelCounts.get(n.label.toLowerCase()) === 1)
+      .map(n => [n.label!.toLowerCase(), n.category!])
+  );
+
+  const nodesWithCategory = normalized.nodes.map(n => {
+    const fromId = categoryMap.get(n.id);
+    if (fromId !== undefined) return { ...n, category: fromId };
+    // Fallback: match by label if ID changed
+    const fromLabel = n.label ? labelCategoryMap.get(n.label.toLowerCase()) : undefined;
+    if (fromLabel !== undefined) return { ...n, category: fromLabel };
+    // Keep whatever category the node already has
+    return n;
+  });
   return { ...normalized, nodes: nodesWithCategory };
 }
 
@@ -423,7 +427,7 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
     const timeout = setTimeout(() => {
       reply.raw.removeListener("drain", onDrain);
       reject(new Error("SSE write timeout"));
-    }, 30000);
+    }, SSE_WRITE_TIMEOUT_MS);
 
     const onDrain = () => {
       log.debug({ event: (event as any).stage }, "SSE write resumed after drain");
@@ -1457,7 +1461,7 @@ async function handleSseResponse(
       clearInterval(heartbeatInterval);
       log.debug({ error, correlation_id: correlationId }, "Failed to write SSE heartbeat - stopping heartbeats");
     }
-  }, 10000); // 10s
+  }, SSE_HEARTBEAT_INTERVAL_MS);
 
   // v1.8: Helper to write stage and buffer event (gracefully handle buffering errors)
   const writeStageAndBuffer = async (event: StageEvent) => {
@@ -2021,10 +2025,10 @@ export default async function route(app: FastifyInstance) {
       let lastHeartbeat = Date.now();
       let lastSnapshotRenewal = Date.now();
       const startTime = Date.now();
-      const liveTimeout = 120000; // 2 minutes
-      const pollInterval = 1500; // 1.5 seconds
-      const heartbeatInterval = 10000; // 10 seconds
-      const snapshotRenewalInterval = 30000; // 30 seconds
+      const liveTimeout = SSE_RESUME_LIVE_TIMEOUT_MS;
+      const pollInterval = SSE_RESUME_POLL_INTERVAL_MS;
+      const heartbeatInterval = SSE_HEARTBEAT_INTERVAL_MS;
+      const snapshotRenewalInterval = SSE_RESUME_SNAPSHOT_RENEWAL_MS;
 
       try {
         const pollForEvents = async (): Promise<boolean> => {

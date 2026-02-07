@@ -6,6 +6,7 @@ import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import { shouldUseStagingPrompts } from "../config/index.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
+import { CRITIQUE_TIMEOUT_MS } from "../config/timeouts.js";
 import { getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
@@ -160,7 +161,7 @@ export default async function route(app: FastifyInstance) {
         },
         {
           requestId,
-          timeoutMs: 10000, // 10s timeout for critique
+          timeoutMs: CRITIQUE_TIMEOUT_MS,
           observabilityCollector,
         }
       );

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ExplainDiffInput, ExplainDiffOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
+import { EXPLAIN_DIFF_TIMEOUT_MS } from "../config/timeouts.js";
 
 /**
  * POST /assist/explain-diff
@@ -65,7 +66,7 @@ export default async function route(app: FastifyInstance) {
         },
         {
           requestId: `explain_${Date.now()}`,
-          timeoutMs: 15000, // 15s timeout
+          timeoutMs: EXPLAIN_DIFF_TIMEOUT_MS,
         }
       );
 

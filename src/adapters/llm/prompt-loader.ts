@@ -37,6 +37,7 @@ import { isPromptManagementEnabled } from '../../prompts/loader.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { shouldUseStagingPrompts } from '../../config/index.js';
+import { PROMPT_STORE_FETCH_TIMEOUT_MS } from '../../config/timeouts.js';
 
 // Unique identifier for this server instance (helps diagnose multi-instance issues)
 const INSTANCE_ID = randomBytes(4).toString('hex');
@@ -218,7 +219,7 @@ export async function getSystemPrompt(
   // This ensures store prompts are used when available, even after cache expiry
   // Use a timeout to prevent blocking too long if Supabase is slow (5s max)
   // Note: Increased from 2.5s to 5s to accommodate Supabase free tier cold starts
-  const STORE_FETCH_TIMEOUT_MS = 5000;
+  const STORE_FETCH_TIMEOUT_MS = PROMPT_STORE_FETCH_TIMEOUT_MS;
   if (isPromptManagementEnabled()) {
     const useStaging = shouldUseStagingPrompts();
     try {
