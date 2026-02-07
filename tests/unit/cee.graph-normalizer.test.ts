@@ -52,6 +52,48 @@ describe('normalizeGraphForISL', () => {
       expect(factorNode?.data?.extractionType).toBe('explicit');
     });
 
+    it('preserves V3 metadata fields (raw_value, cap, factor_type, uncertainty_drivers) when converting observed_state to data', () => {
+      const graph: GraphV1 = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'fac_investment',
+            kind: 'factor',
+            label: 'Investment Factor',
+            // V3 format with all metadata fields
+            observed_state: {
+              value: 0.65,
+              baseline: 0.5,
+              unit: '£',
+              source: 'brief_extraction',
+              raw_value: 65000,
+              cap: 100000,
+              extractionType: 'explicit',
+              factor_type: 'cost',
+              uncertainty_drivers: ['Market volatility', 'Exchange rates'],
+            },
+          } as unknown as GraphV1['nodes'][0],
+        ],
+        edges: [],
+      };
+
+      const normalized = normalizeGraphForISL(graph);
+
+      // Factor node should preserve all V3 metadata fields
+      const factorNode = normalized.nodes.find((n) => n.id === 'fac_investment') as any;
+      expect(factorNode).toBeDefined();
+      expect(factorNode?.data).toBeDefined();
+      expect(factorNode?.data?.value).toBe(0.65);
+      expect(factorNode?.data?.baseline).toBe(0.5);
+      expect(factorNode?.data?.unit).toBe('£');
+      // V3 metadata should be preserved
+      expect(factorNode?.data?.raw_value).toBe(65000);
+      expect(factorNode?.data?.cap).toBe(100000);
+      expect(factorNode?.data?.factor_type).toBe('cost');
+      expect(factorNode?.data?.uncertainty_drivers).toEqual(['Market volatility', 'Exchange rates']);
+    });
+
     it('preserves existing data field when present', () => {
       const graph: GraphV1 = {
         version: '1',

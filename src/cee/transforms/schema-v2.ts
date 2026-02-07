@@ -88,6 +88,18 @@ export interface V1Node {
   data?: V1NodeData;
   /** Factor category (V12.4+): controllable, observable, external */
   category?: "controllable" | "observable" | "external";
+  /**
+   * Goal threshold fields (V14+).
+   * Only applies to goal nodes. Extracted from explicit numeric targets in brief.
+   */
+  /** Normalised threshold in model units (0-1) */
+  goal_threshold?: number;
+  /** Raw threshold value from brief for UI display */
+  goal_threshold_raw?: number;
+  /** Unit of measurement for display */
+  goal_threshold_unit?: string;
+  /** Normalisation denominator */
+  goal_threshold_cap?: number;
 }
 
 export interface V1Edge {

@@ -127,6 +127,11 @@ export function transformNodeToV3(
     description: node.body,
     // Preserve category field (V12.4+) for factor nodes
     category: node.category,
+    // Preserve goal threshold fields (V14+) for goal nodes
+    ...(node.goal_threshold !== undefined && { goal_threshold: node.goal_threshold }),
+    ...(node.goal_threshold_raw !== undefined && { goal_threshold_raw: node.goal_threshold_raw }),
+    ...(node.goal_threshold_unit !== undefined && { goal_threshold_unit: node.goal_threshold_unit }),
+    ...(node.goal_threshold_cap !== undefined && { goal_threshold_cap: node.goal_threshold_cap }),
   };
 
   // Transform data to observed_state (only if it's FactorData with value defined)

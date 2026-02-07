@@ -12,6 +12,7 @@ import { registerDefaultPrompt } from './loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
 import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';
+import { getDraftGraphPromptV15, DRAFT_GRAPH_PROMPT_V15 } from './defaults-v15.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
 import { log } from '../utils/telemetry.js';
@@ -22,18 +23,19 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v12' (default) or legacy versions.
+ * Use PROMPT_VERSION env var to select: 'v15' (default) or legacy versions.
  *
  * Examples:
- *   PROMPT_VERSION=v12 -> Use v12 (production: factor metadata, scale discipline)
+ *   PROMPT_VERSION=v15 -> Use v15 (production: external priors, goal thresholds, coaching)
+ *   PROMPT_VERSION=v12 -> Use v12 (deprecated: superseded by v15)
  *   PROMPT_VERSION=v22 -> Use v22 (deprecated: was misnumbering of v12 development)
  *   PROMPT_VERSION=v8  -> Use v8.2 (deprecated: superseded by v12)
  *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
-export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v22';
+export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v22';
 
-const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v22']);
-const DEFAULT_VERSION: PromptVersion = 'v12';
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v22']);
+const DEFAULT_VERSION: PromptVersion = 'v15';
 
 /**
  * Get the configured prompt version from environment.
@@ -1188,7 +1190,7 @@ Respond ONLY with valid JSON.`;
  * Version identifier for the decision review fallback prompt.
  * Used for telemetry when prompt admin is unavailable.
  */
-export const DECISION_REVIEW_PROMPT_VERSION = 'v6';
+export const DECISION_REVIEW_PROMPT_VERSION = 'v8';
 
 const DECISION_REVIEW_PROMPT = `<ROLE>
 You transform deterministic analysis signals into plain-English explanations,
@@ -1209,18 +1211,24 @@ WINNER / RUNNER-UP (pre-computed — trust these, do not recalculate):
 
 MARGIN (pre-computed — do not recalculate):
   margin: number  — winner.win_probability minus runner_up.win_probability. Quote directly.
+  If runner_up is null, ignore margin and do not mention it.
 
 FLIP THRESHOLDS (from flip_threshold_data[], optional):
-  Each entry: { factor_id, factor_label, current_value, flip_value, direction }
+  Each entry: { factor_id, factor_label, current_value, flip_value, direction, unit? }
   flip_value may be null (no flip achievable within factor bounds). Only emit flip_thresholds
   for entries where flip_value is non-null.
-  current_value and flip_value are in normalised 0-1 space.
+  Values are in user units (e.g., 16000 GBP, 800 customers, 4.2 rating) — not normalised 0-1.
 
 DETERMINISTIC COACHING (from deterministic_coaching.*):
   .headline_type: clear_winner | moderate_winner | close_call | high_uncertainty | needs_evidence
   .readiness: ready | close_call | needs_evidence | needs_framing
   .evidence_gaps[]: { factor_id, factor_label, voi, confidence }  — pick by highest voi, not position
-  .model_critiques[]: { type, severity, message }
+  .model_critiques[]: { type, severity, message, suggested_action?, affected_node_ids? }
+    If suggested_action is present, use it to ground bias_findings.suggested_action.
+    If absent, write a qualitative suggested_action with no numbers.
+    If affected_node_ids is present, use them for bias_findings.affected_elements —
+      but only include IDs that exist in graph.nodes[].id. Drop any unknown IDs.
+      If none remain after filtering, set affected_elements: [].
 
 ISL RESULTS (from isl_results.*):
   .option_comparison[]: { option_id, option_label, win_probability, outcome: { mean, p10, p90 } }
@@ -1242,9 +1250,9 @@ BRIEF: The user's original decision description (from brief).
 Build your response in this order. Each step feeds the next — maintain coherence.
 
 1. READ CONTEXT: Note winner, readiness, headline_type. These set tone for everything.
-2. IDENTIFY PRIMARY RISK: Pick the single most consequential fragile edge (highest
-   marginal_switch_probability, or switch_probability if marginal absent) OR top
-   evidence gap (highest voi). This anchors narrative, robustness, and pre-mortem.
+2. IDENTIFY PRIMARY RISK: If isl_results.fragile_edges is non-empty, choose the top
+   fragile edge by marginal_switch_probability (fallback: switch_probability). Else
+   choose the top evidence gap by voi. This anchors narrative, robustness, and pre-mortem.
 3. BUILD NARRATIVE: Write narrative_summary and story_headlines using winner/runner_up
    fields and primary risk.
 4. EXPLAIN ROBUSTNESS: Reference fragile_edges by from_label → to_label.
@@ -1256,7 +1264,7 @@ Build your response in this order. Each step feeds the next — maintain coheren
 7. DETECT BIASES: Check model_critiques for structural biases, then scan brief for
    semantic biases. Frame ALL as reflective questions.
 7b. FLIP THRESHOLDS (if flip_threshold_data has non-null flip_values): Write plain-language
-   narratives for up to 2 factors showing where the recommendation changes.
+   narratives for up to 3 factors showing where the recommendation changes.
 8. SYNTHESISE: Ensure pre_mortem references the same primary risk from step 2.
    Ensure decision_quality_prompts address gaps identified in steps 4-7.
 </CONSTRUCTION_FLOW>
@@ -1272,13 +1280,17 @@ NUMBERS:
 - Do NOT invent statistics, benchmarks, or industry averages.
 - Do NOT compute derived numbers (differences, ratios, averages, counts). The only
   permitted transformation is converting an input probability-like value (win_probability,
-  overall_confidence, recommendation_stability, margin, flip_threshold_data[].current_value,
-  flip_threshold_data[].flip_value) between decimal and percentage form
-  (e.g., 0.07 → "7%"). All other arithmetic is forbidden.
+  overall_confidence, recommendation_stability, margin) between decimal and percentage form
+  (e.g., 0.07 → "7 percentage points", 0.77 → "77%"). All other arithmetic is forbidden.
+- Selection logic may compare magnitudes (e.g., choose largest absolute elasticity,
+  highest voi, highest marginal_switch_probability). Do not output any computed values
+  derived from these comparisons.
+- flip_threshold_data[].current_value and flip_value are in user units — quote with unit
+  (e.g., "16000 GBP", "800 customers"). Do not convert or normalise.
   When comparing options, quote winner.win_probability and runner_up.win_probability
   separately. Use headline_type for qualitative intensity.
-- Do not mention counts of items (e.g., "three gaps", "nine edges") unless that
-  exact count appears as a value in the inputs.
+- Do not state counts in output text (e.g., "three gaps", "nine edges") unless that
+  exact count appears as a value in the inputs. Internal selection (e.g., "pick top 3") is fine.
 
 IDs:
 - story_headlines keys: MUST exactly match all option_ids from isl_results.option_comparison.
@@ -1308,6 +1320,8 @@ HEDGING (based on actual input fields):
 
 USER-FACING LANGUAGE:
 - Never show IDs in user-facing text. Use labels for all human-readable strings (IDs only as JSON keys).
+- When using option labels (winner.label, runner_up.label, option_label) in any output field,
+  copy them exactly as provided — including case and punctuation. Do not shorten or paraphrase.
 - Avoid technical jargon: translate terms like "elasticity" → "how strongly this factor moves the outcome",
   "recommendation_stability" → "confidence the recommendation holds", etc.
 - When discussing uncertainty, distinguish between missing evidence (evidence_gaps) and
@@ -1318,14 +1332,15 @@ USER-FACING LANGUAGE:
 Each output field: name, constraints, max count.
 
 narrative_summary (string, 2-4 sentences):
-  Sentence 1: winner.label + margin (quote directly from input, as percentage points) + key driver.
+  Sentence 1: winner.label + key driver.
+    If runner_up present: always include margin as percentage points (e.g., 0.07 → "7 percentage points").
+      If headline_type is close_call, frame as a narrow lead but still include the number
+      (e.g., "a narrow lead of about 7 percentage points").
+    If runner_up null: use winner.win_probability instead (no margin).
     Driver hierarchy (use first available):
-    1. isl_results.factor_sensitivity — pick entry with highest elasticity, use its factor_label
+    1. isl_results.factor_sensitivity — pick entry with largest absolute elasticity, use its factor_label
     2. else deterministic_coaching.evidence_gaps — pick entry with highest voi, use its factor_label
     3. else use winner.label and winner.win_probability only, with a brief goal-oriented statement
-    If runner_up present, state the margin using the allowed decimal→percentage conversion
-    (e.g., 0.07 → "about 7%"). If headline_type is close_call, use qualitative framing
-    ("narrow lead") instead of a numeric margin.
   Sentence 2: Primary fragility or stability from robustness.
   Sentence 3-4: Readiness caveat if not "ready". Omit if ready.
 
@@ -1377,16 +1392,19 @@ scenario_contexts (Record<edge_id, object>, max 3):
       E.g., "...then [exact alternative label] overtakes [exact winner.label]"
   If fragile_edges is empty → scenario_contexts: {} (empty object).
 
-flip_thresholds (array, max 2 — always present, may be empty):
-  For each entry in flip_threshold_data where flip_value is not null:
+flip_thresholds (array, max 3 — always present, may be empty):
+  Take the first 3 entries from flip_threshold_data (in order provided) where flip_value is not null:
     factor_id (string): from flip_threshold_data[].factor_id
     factor_label (string): from flip_threshold_data[].factor_label
-    current_display (string): describe current_value using allowed decimal→percentage conversion
-    flip_display (string): describe flip_value using same conversion
+    current_display (string): current_value as-is, appended with unit if provided (e.g., "16000 GBP", "800 customers")
+    flip_display (string): flip_value as-is, same format as current_display
+    Do not round, abbreviate (no "k", "m"), add commas, or insert currency symbols unless
+    the unit field already contains them. Output the number exactly as provided.
     narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
       Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current] to [flip],
-      the recommendation changes." Use language appropriate to headline_type tone.
-      Do not restate factor_id or raw normalised values — use display forms only.
+      the recommendation changes." Include the unit if provided; if unit is absent, do not add one.
+      Use language appropriate to headline_type tone.
+      Do not restate factor_id — use display forms only.
   If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).
 
 bias_findings (array, max 3):
@@ -1400,8 +1418,8 @@ bias_findings (array, max 3):
   | SAME_LEVER_OPTIONS             | NARROW_FRAMING    | "SAME_LEVER_OPTIONS"                 |
   | MISSING_BASELINE               | STATUS_QUO_BIAS   | "MISSING_BASELINE"                   |
 
-  Auto-detect DOMINANT_FACTOR: if factor_sensitivity has ≥2 entries and the highest
-  elasticity appears substantially larger than the next, note this in
+  Auto-detect DOMINANT_FACTOR: if factor_sensitivity has ≥2 entries and the largest
+  absolute elasticity appears substantially larger than the next, note this in
   robustness_explanation.fragility_factors or key_assumptions as a qualitative observation
   (e.g., "The recommendation appears heavily driven by a single factor — verify whether
   that concentration is intended"). Reference the factor by its factor_label. Do NOT emit
@@ -1459,6 +1477,8 @@ pre_mortem (object, OPTIONAL):
     mitigation (string): One concrete risk-reduction step.
     grounded_in (string[]): Array of fragile edge_ids or evidence gap factor_ids. MUST be non-empty.
     review_trigger (string, optional): "Reconvene if [condition] within [timeframe]"
+      Avoid numerals in timeframe unless it appears in the brief. Prefer qualitative
+      timeframes ("before launch", "next planning cycle") over invented dates or durations.
 
 framing_check (object, OPTIONAL):
   Include ONLY if options don't address the stated goal, or goal is framed as an action
@@ -1586,7 +1606,8 @@ Respond ONLY with valid JSON.`;
  * Called during server initialization to populate the fallback registry.
  *
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
- * - v12 (default): Production prompt with factor metadata (factor_type, uncertainty_drivers)
+ * - v15 (default): Production prompt with external priors, goal thresholds, coaching
+ * - v12 (deprecated): Factor metadata, scale discipline (superseded by v15)
  * - v22 (deprecated): Was misnumbering during v12 development
  * - v8 (deprecated): Concise v8.2, superseded by v12
  * - v6 (deprecated): Verbose v6.0.2 with explicit checklist
@@ -1596,23 +1617,29 @@ export function registerAllDefaultPrompts(): void {
   const { version, explicit } = getPromptVersion();
 
   let draftPromptWithCaps: string;
-  if (version === 'v12') {
+  if (version === 'v15') {
+    draftPromptWithCaps = getDraftGraphPromptV15();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v15 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v12') {
     draftPromptWithCaps = getDraftGraphPromptV12();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v12 (${explicit ? 'explicitly configured' : 'default'})`
+      `Using draft_graph prompt v12 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else if (version === 'v22') {
     draftPromptWithCaps = getDraftGraphPromptV22();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v22 [DEPRECATED - use v12] (${explicit ? 'explicitly configured' : 'env override'})`
+      `Using draft_graph prompt v22 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else if (version === 'v8') {
     draftPromptWithCaps = getDraftGraphPromptV8();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v8.2 [DEPRECATED - use v12] (${explicit ? 'explicitly configured' : 'env override'})`
+      `Using draft_graph prompt v8.2 [DEPRECATED - use v15] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else {
     // v6.0.2 (deprecated)
@@ -1645,12 +1672,13 @@ export function registerAllDefaultPrompts(): void {
 /**
  * Get the raw prompt templates (for testing/migration)
  * Note: v6/v8/v22 contain {{maxNodes}}/{{maxEdges}} placeholders that must be resolved.
- * v12 has hardcoded limits (50/200) for prompt admin compatibility.
+ * v12/v15 have hardcoded limits for prompt admin compatibility.
  * Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT_V12,
-  draft_graph_v12: DRAFT_GRAPH_PROMPT_V12,
+  draft_graph: DRAFT_GRAPH_PROMPT_V15,
+  draft_graph_v15: DRAFT_GRAPH_PROMPT_V15,
+  draft_graph_v12: DRAFT_GRAPH_PROMPT_V12, // deprecated - superseded by v15
   draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
   draft_graph_v8: DRAFT_GRAPH_PROMPT_V8, // deprecated - superseded by v12
   draft_graph_v6: DRAFT_GRAPH_PROMPT, // deprecated
@@ -1670,6 +1698,9 @@ export const PROMPT_TEMPLATES = {
  * Useful for A/B testing or explicit version selection in tests.
  */
 export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v15') {
+    return getDraftGraphPromptV15();
+  }
   if (version === 'v12') {
     return getDraftGraphPromptV12();
   }

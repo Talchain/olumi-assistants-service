@@ -47,13 +47,13 @@ describe('PROMPT_TEMPLATES', () => {
     expect(prompt).toContain('outcome');
     expect(prompt).toContain('goal');
     expect(prompt).toContain('JSON');
-    // V12 uses hardcoded limits (50/200) for prompt admin compatibility
+    // V15 uses "max 50 nodes, 100 edges"; V12 used "max 50 nodes, 200 edges"
     // Older versions (v6, v8, v22) use placeholders {{maxNodes}}/{{maxEdges}}
     const hasPlaceholders = prompt.includes('{{maxNodes}}') && prompt.includes('{{maxEdges}}');
     const hasHardcodedLimits = prompt.includes('Maximum 50 nodes') && prompt.includes('Maximum 200 edges');
-    // V12.4 uses "max 50 nodes, 200 edges" format
     const hasV12Format = prompt.includes('max 50 nodes') && prompt.includes('200 edges');
-    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format).toBe(true);
+    const hasV15Format = prompt.includes('max 50 nodes') && prompt.includes('100 edges');
+    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format || hasV15Format).toBe(true);
   });
 
   it('suggest_options prompt contains key instructions', () => {
@@ -233,13 +233,13 @@ describe('Integration with Loader', () => {
   });
 });
 
-describe('Decision Review Fallback Prompt (v6)', () => {
+describe('Decision Review Fallback Prompt (v8)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
 
-  it('exports DECISION_REVIEW_PROMPT_VERSION as v6', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v6');
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v8', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v8');
   });
 
   it('decision_review prompt is registered', () => {

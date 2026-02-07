@@ -950,6 +950,12 @@ export async function finaliseCeeDraftResponse(
   let nodeCountsRaw: Record<string, number> = {};
   let nodeCountsNormalised: Record<string, number> = {};
   let nodeCountsValidated: Record<string, number> = {};
+  // Node ID tracking for visibility into pipeline transformations
+  let nodeIdsRaw: string[] = [];
+  let nodeIdsNormalised: string[] = [];
+  let nodeIdsValidated: string[] = [];
+  let nodeIdsDropped: string[] = [];
+  let nodeIdsInjected: string[] = [];
   let validationSummary: ValidationSummaryEntry | undefined;
 
   // Corrections collector for tracking all graph modifications
@@ -1259,10 +1265,35 @@ export async function finaliseCeeDraftResponse(
 
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
 
+  // Capture raw node IDs from LLM output (before normalisation)
+  nodeIdsRaw = Array.isArray(payload.graph?.nodes)
+    ? (payload.graph.nodes as any[]).map((n: any) => n?.id).filter(Boolean)
+    : [];
+
   // Node extraction (post-LLM parse) - safe
   nodeKindsPostNormalisation = extractNodeKinds(graph);
   // Compute normalized node counts (after version normalization)
   nodeCountsNormalised = countNodeKinds(graph?.nodes as any);
+
+  // Capture node IDs after normalisation
+  nodeIdsNormalised = Array.isArray(graph?.nodes)
+    ? graph!.nodes.map((n: any) => n?.id).filter(Boolean)
+    : [];
+
+  // Compute dropped node IDs (present in raw but not in normalised)
+  nodeIdsDropped = nodeIdsRaw.filter((id) => !nodeIdsNormalised.includes(id));
+
+  // Log node ID visibility
+  log.info({
+    request_id: requestId,
+    event: "cee.pipeline.node_visibility.post_normalisation",
+    raw_count: nodeIdsRaw.length,
+    normalised_count: nodeIdsNormalised.length,
+    dropped_count: nodeIdsDropped.length,
+    raw_ids: nodeIdsRaw,
+    normalised_ids: nodeIdsNormalised,
+    dropped_ids: nodeIdsDropped,
+  }, `[pipeline] Post-normalisation: ${nodeIdsRaw.length} raw → ${nodeIdsNormalised.length} normalised, ${nodeIdsDropped.length} dropped`);
 
   // === RAW OUTPUT MODE ===
   // When raw_output: true, skip all post-processing (factor enrichment, goal repair, etc.)
@@ -1477,6 +1508,27 @@ export async function finaliseCeeDraftResponse(
   nodeKindsPreValidation = extractNodeKinds(graph);
   // Track validated node counts (after node validation fixes)
   nodeCountsValidated = countNodeKinds(graph?.nodes as any);
+
+  // Capture node IDs after validation and enrichment
+  nodeIdsValidated = Array.isArray(graph?.nodes)
+    ? graph!.nodes.map((n: any) => n?.id).filter(Boolean)
+    : [];
+
+  // Compute injected node IDs (present in validated but not in normalised)
+  nodeIdsInjected = nodeIdsValidated.filter((id) => !nodeIdsNormalised.includes(id));
+
+  // Log node ID visibility after validation
+  log.info({
+    request_id: requestId,
+    event: "cee.pipeline.node_visibility.post_validation",
+    normalised_count: nodeIdsNormalised.length,
+    validated_count: nodeIdsValidated.length,
+    injected_count: nodeIdsInjected.length,
+    normalised_ids: nodeIdsNormalised,
+    validated_ids: nodeIdsValidated,
+    injected_ids: nodeIdsInjected,
+  }, `[pipeline] Post-validation: ${nodeIdsNormalised.length} normalised → ${nodeIdsValidated.length} validated, ${nodeIdsInjected.length} injected`);
+
   const nodeCount = Array.isArray(graph?.nodes) ? graph!.nodes.length : 0;
   const edgeCount = Array.isArray(graph?.edges) ? graph!.edges.length : 0;
 
@@ -2195,8 +2247,13 @@ export async function finaliseCeeDraftResponse(
       // Node extraction counts at each pipeline stage
       node_extraction: {
         raw: nodeCountsRaw,
+        raw_ids: nodeIdsRaw,
         normalised: nodeCountsNormalised,
+        normalised_ids: nodeIdsNormalised,
+        dropped_ids: nodeIdsDropped,
         validated: nodeCountsValidated,
+        validated_ids: nodeIdsValidated,
+        injected_ids: nodeIdsInjected,
       },
       // Validation summary with explicit missing_kinds
       validation_summary: validationSummary,
@@ -2728,8 +2785,13 @@ export async function finaliseCeeDraftResponse(
       // Node extraction counts at each pipeline stage (for LLM observability)
       node_extraction: {
         raw: nodeCountsRaw,
+        raw_ids: nodeIdsRaw,
         normalised: nodeCountsNormalised,
+        normalised_ids: nodeIdsNormalised,
+        dropped_ids: nodeIdsDropped,
         validated: nodeCountsValidated,
+        validated_ids: nodeIdsValidated,
+        injected_ids: nodeIdsInjected,
       },
       // Validation summary with explicit missing_kinds
       validation_summary: validationSummary,

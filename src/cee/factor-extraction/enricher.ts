@@ -61,6 +61,102 @@ const SYNONYM_GROUPS = [
   ["time", "duration", "period", "timeline"],
 ];
 
+/** Target/goal synonym group for identifying quantities that should be goal thresholds */
+const TARGET_GOAL_SYNONYMS = ["target", "goal", "objective", "threshold"];
+
+/**
+ * Patterns that indicate the label is a metric/KPI rather than a goal threshold.
+ * These should NOT be redirected to goal_threshold even if they contain target/goal words.
+ */
+const METRIC_CONTEXT_PATTERNS = [
+  /\brate\b/i,         // "target completion rate", "goal attainment rate"
+  /\bmarket\b/i,       // "target market", "target segment"
+  /\bsegment\b/i,      // "target segment churn"
+  /\baudience\b/i,     // "target audience"
+  /\bcustomer\s+type/i,// "target customer type"
+  /\bcompletion\b/i,   // "goal completion rate"
+  /\battainment\b/i,   // "goal attainment"
+  /\bscore\b/i,        // "goal score"
+  /\blevel\b/i,        // "threshold level"
+];
+
+/**
+ * Check if a label refers to a target/goal quantity (should be goal_threshold, not a factor).
+ *
+ * Criteria for redirection:
+ * 1. Label contains target/goal/objective/threshold
+ * 2. Label does NOT contain metric/KPI context patterns
+ * 3. Label is short (likely "Target 800" not "Target Market Segment Analysis")
+ */
+function isTargetGoalLabel(label: string): boolean {
+  const normalized = label.toLowerCase().trim();
+
+  // Must contain a goal/target synonym
+  const hasGoalSynonym = TARGET_GOAL_SYNONYMS.some((term) => normalized.includes(term));
+  if (!hasGoalSynonym) return false;
+
+  // Reject if it looks like a metric/KPI rather than a goal quantity
+  const looksLikeMetric = METRIC_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (looksLikeMetric) return false;
+
+  // Reject if label is too long (likely a descriptive factor, not a simple target quantity)
+  // "Target 800 customers" is 3 words; "Target market segment churn rate" is 5+ words
+  const wordCount = normalized.split(/\s+/).length;
+  if (wordCount > 4) return false;
+
+  return true;
+}
+
+/**
+ * Compute a normalisation cap for a large value.
+ * Uses order-of-magnitude rounding: 800 → 1000, 50000 → 100000
+ */
+function computeNormalisationCap(rawValue: number): number {
+  if (rawValue <= 0) return 1;
+  // Round up to next order of magnitude
+  const orderOfMagnitude = Math.pow(10, Math.ceil(Math.log10(rawValue)));
+  return orderOfMagnitude;
+}
+
+/**
+ * Infer factor_type from unit and value characteristics.
+ */
+function inferFactorType(
+  unit: string | undefined,
+  label: string
+): "cost" | "price" | "time" | "probability" | "revenue" | "demand" | "quality" | "other" {
+  const labelLower = label.toLowerCase();
+
+  // Check unit first
+  if (unit === "%") return "probability";
+  if (unit && ["£", "$", "€", "GBP", "USD", "EUR"].includes(unit)) {
+    // Currency - check label for specifics
+    if (labelLower.includes("cost") || labelLower.includes("expense") || labelLower.includes("budget")) {
+      return "cost";
+    }
+    if (labelLower.includes("price") || labelLower.includes("fee")) {
+      return "price";
+    }
+    if (labelLower.includes("revenue") || labelLower.includes("income") || labelLower.includes("sales")) {
+      return "revenue";
+    }
+    return "cost"; // Default for currency
+  }
+
+  // Check label patterns
+  if (labelLower.includes("customer") || labelLower.includes("user") || labelLower.includes("subscriber")) {
+    return "demand";
+  }
+  if (labelLower.includes("time") || labelLower.includes("duration") || labelLower.includes("period")) {
+    return "time";
+  }
+  if (labelLower.includes("rate") || labelLower.includes("churn") || labelLower.includes("conversion")) {
+    return "probability";
+  }
+
+  return "other";
+}
+
 /**
  * Check if two labels refer to the same concept
  */
@@ -475,9 +571,14 @@ export async function enrichGraphWithFactorsAsync(
     existingFactors.map((n) => n.label?.toLowerCase() || "")
   );
 
+  // Find the goal node for potential goal_threshold redirection
+  const goalNode = graph.nodes.find((n) => n.kind === "goal");
+  const goalNodeIndex = goalNode ? graph.nodes.findIndex((n) => n.id === goalNode.id) : -1;
+
   let factorsAdded = 0;
   let factorsEnhanced = 0;
   let factorsSkipped = 0;
+  let goalThresholdsSet = 0;
 
   // Deep clone the graph to avoid mutation
   const enrichedGraph: GraphT = {
@@ -488,6 +589,72 @@ export async function enrichGraphWithFactorsAsync(
 
   for (const factor of qualified) {
     if (factorsAdded >= maxFactors) break;
+
+    // Step 1: Check if this is a target/goal quantity that should be goal_threshold
+    // Redirect to goal node instead of injecting as a factor
+    if (isTargetGoalLabel(factor.label) && goalNode && goalNodeIndex >= 0) {
+      // Only set goal_threshold if not already set
+      const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
+      if (currentGoalNode.goal_threshold === undefined) {
+        // Apply same normalization guard as factor injection:
+        // Only normalize if non-percentage and value > 1
+        let normalizedValue = factor.value;
+        let rawValue: number | undefined;
+        let cap: number | undefined;
+
+        if (factor.unit !== "%" && factor.value > 1) {
+          // Large absolute value - normalize using cap
+          cap = computeNormalisationCap(factor.value);
+          rawValue = factor.value;
+          normalizedValue = factor.value / cap;
+        } else {
+          // Already normalized (percentage or <= 1) - no cap needed
+          rawValue = factor.value;
+        }
+
+        // Update goal node with threshold fields
+        enrichedGraph.nodes[goalNodeIndex] = {
+          ...currentGoalNode,
+          goal_threshold: normalizedValue,
+          goal_threshold_raw: rawValue,
+          goal_threshold_unit: factor.unit ?? "count",
+          goal_threshold_cap: cap,
+        };
+
+        goalThresholdsSet++;
+        log.info(
+          {
+            goalNodeId: goalNode.id,
+            goal_threshold: normalizedValue,
+            goal_threshold_raw: rawValue,
+            goal_threshold_cap: cap,
+            originalLabel: factor.label,
+            wasNormalized: cap !== undefined,
+            event: "cee.factor_enrichment.goal_threshold_set",
+          },
+          `Redirected target quantity to goal_threshold on "${goalNode.id}"`
+        );
+
+        // Record correction for goal threshold set (Stage 11: Factor Enrichment)
+        if (collector) {
+          collector.addByStage(
+            11, // Stage 11: Factor Enrichment
+            "node_modified",
+            { node_id: goalNode.id, kind: "goal" },
+            `Set goal_threshold from extracted target quantity`,
+            { id: goalNode.id },
+            {
+              id: goalNode.id,
+              goal_threshold: normalizedValue,
+              goal_threshold_raw: rawValue,
+              goal_threshold_cap: cap,
+            }
+          );
+        }
+
+        continue; // Don't inject as factor
+      }
+    }
 
     // Check if a similar factor already exists
     const existingNode = existingFactors.find(
@@ -504,10 +671,24 @@ export async function enrichGraphWithFactorsAsync(
       if (!hasFactorData) {
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
+          // Apply normalisation for large non-percentage values
+          let normalizedValue = factor.value;
+          let rawValue: number | undefined;
+          let cap: number | undefined;
+
+          if (factor.unit !== "%" && factor.value > 1) {
+            // Large absolute value - normalise using cap
+            cap = computeNormalisationCap(factor.value);
+            rawValue = factor.value;
+            normalizedValue = factor.value / cap;
+          }
+
           const factorData: FactorDataT = {
-            value: factor.value,
+            value: normalizedValue,
             baseline: factor.baseline,
             unit: factor.unit,
+            raw_value: rawValue,
+            cap: cap,
             extractionType: factor.extractionType,
             confidence: factor.confidence,
             rangeMin: factor.rangeMin,
@@ -515,6 +696,8 @@ export async function enrichGraphWithFactorsAsync(
             range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
               ? { min: factor.rangeMin, max: factor.rangeMax }
               : undefined,
+            factor_type: inferFactorType(factor.unit, factor.label),
+            uncertainty_drivers: ["Extracted from brief — confirm value"],
           };
           const beforeData = enrichedGraph.nodes[nodeIndex].data;
           enrichedGraph.nodes[nodeIndex] = {
@@ -565,12 +748,37 @@ export async function enrichGraphWithFactorsAsync(
       continue;
     }
 
-    // Create new factor node
+    // Step 2: Apply normalisation for large non-percentage values
+    let normalizedValue = factor.value;
+    let rawValue: number | undefined;
+    let cap: number | undefined;
+
+    if (factor.unit !== "%" && factor.value > 1) {
+      // Large absolute value - normalise using cap
+      cap = computeNormalisationCap(factor.value);
+      rawValue = factor.value;
+      normalizedValue = factor.value / cap;
+
+      log.debug(
+        {
+          label: factor.label,
+          rawValue: factor.value,
+          cap,
+          normalizedValue,
+          event: "cee.factor_enrichment.normalised",
+        },
+        `Normalised factor value: ${factor.value} / ${cap} = ${normalizedValue}`
+      );
+    }
+
+    // Create new factor node with V3 fields
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const factorData: FactorDataT = {
-      value: factor.value,
+      value: normalizedValue,
       baseline: factor.baseline,
       unit: factor.unit,
+      raw_value: rawValue,
+      cap: cap,
       extractionType: factor.extractionType,
       confidence: factor.confidence,
       rangeMin: factor.rangeMin,
@@ -578,6 +786,9 @@ export async function enrichGraphWithFactorsAsync(
       range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
         ? { min: factor.rangeMin, max: factor.rangeMax }
         : undefined,
+      // V3 fields for injected factors
+      factor_type: inferFactorType(factor.unit, factor.label),
+      uncertainty_drivers: ["Extracted from brief — confirm value"],
     };
 
     // Connect to relevant node first (needed for category inference)
@@ -643,11 +854,12 @@ export async function enrichGraphWithFactorsAsync(
   }
 
   // Emit telemetry
-  if (factorsAdded > 0 || factorsEnhanced > 0) {
+  if (factorsAdded > 0 || factorsEnhanced > 0 || goalThresholdsSet > 0) {
     emit(TelemetryEvents.FactorExtractionComplete, {
       factors_added: factorsAdded,
       factors_enhanced: factorsEnhanced,
       factors_skipped: factorsSkipped,
+      goal_thresholds_set: goalThresholdsSet,
       total_extracted: extracted.length,
       extraction_mode: extractionMode,
       llm_success: llmSuccess,
@@ -659,6 +871,7 @@ export async function enrichGraphWithFactorsAsync(
       factorsAdded,
       factorsEnhanced,
       factorsSkipped,
+      goalThresholdsSet,
       totalExtracted: extracted.length,
       extractionMode,
       llmSuccess,

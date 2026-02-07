@@ -31,12 +31,23 @@ const STD_FLOOR = 0.01;
 
 /**
  * V3 observed_state format (may be present on nodes from CEE output)
+ * Includes all V3 fields to ensure they are preserved during normalisation.
  */
 interface ObservedStateV3 {
   value: number;
   baseline?: number;
   unit?: string;
   source?: 'brief_extraction' | 'cee_inference';
+  /** Raw value before normalization (preserves original extraction) */
+  raw_value?: number;
+  /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
+  cap?: number;
+  /** How the value was extracted (explicit, inferred, range) */
+  extractionType?: 'explicit' | 'inferred' | 'range';
+  /** Factor type classification for downstream enrichment */
+  factor_type?: 'cost' | 'price' | 'time' | 'probability' | 'revenue' | 'demand' | 'quality' | 'other';
+  /** 1-2 short phrases explaining sources of epistemic uncertainty */
+  uncertainty_drivers?: string[];
 }
 
 /**
@@ -151,14 +162,15 @@ export function normalizeGraphForISL(graph: GraphV1): NormalizedGraphForISL {
       };
     }
 
-    // If node has observed_state.value, copy to data format with std
+    // If node has observed_state.value, copy ALL observed_state fields to data format
+    // Use spread to preserve V3 fields (raw_value, cap, factor_type, uncertainty_drivers)
     normalizedCount++;
     return {
       ...node,
       data: {
-        value: nodeWithState.observed_state!.value,
-        baseline: nodeWithState.observed_state!.baseline,
-        unit: nodeWithState.observed_state!.unit,
+        // Spread all observed_state fields first
+        ...nodeWithState.observed_state,
+        // Then override/add computed fields
         extractionType: extractionType,
         value_std: valueStd,
       },

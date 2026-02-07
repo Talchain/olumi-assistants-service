@@ -93,6 +93,18 @@ export const NodeV3 = z.object({
   observed_state: ObservedStateV3.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
   category: FactorCategoryV3.optional(),
+  /**
+   * Goal threshold fields (V14+).
+   * Only applies to goal nodes. Extracted from explicit numeric targets in brief.
+   */
+  /** Normalised threshold in model units (0-1), computed as goal_threshold_raw / goal_threshold_cap */
+  goal_threshold: z.number().optional(),
+  /** Raw threshold value from brief for UI display (e.g., 800 for "target 800 customers") */
+  goal_threshold_raw: z.number().optional(),
+  /** Unit of measurement for display (e.g., "customers", "%", "£") */
+  goal_threshold_unit: z.string().optional(),
+  /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
+  goal_threshold_cap: z.number().optional(),
 });
 export type NodeV3T = z.infer<typeof NodeV3>;
 

@@ -230,6 +230,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DecisionReviewSucceeded: "cee.decision_review.succeeded",
         DecisionReviewFailed: "cee.decision_review.failed",
 
+        // Decision Review M2 events (unique events only)
+        CeeDecisionReviewPromptLoaded: "cee.decision_review.prompt_loaded",
+        CeeDecisionReviewLlmCallStarted: "cee.decision_review.llm_call_started",
+        CeeDecisionReviewLlmCallCompleted: "cee.decision_review.llm_call_completed",
+        CeeDecisionReviewJsonExtracted: "cee.decision_review.json_extracted",
+        CeeDecisionReviewShapeCheckFailed: "cee.decision_review.shape_check_failed",
+        CeeDecisionReviewShapeCheckWarnings: "cee.decision_review.shape_check_warnings",
+
         // Bias Mitigation events (v2.0)
         BiasPatchesGenerated: "cee.bias_check.patches_generated",
         BiasPatchesApplied: "cee.bias_check.patches_applied",
@@ -628,6 +636,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.succeeded": [TelemetryEvents.DecisionReviewGenerated, TelemetryEvents.DecisionReviewSucceeded],
         "cee.decision_review.failed": [TelemetryEvents.DecisionReviewFailed],
         "cee.decision_review.isl_fallback": [TelemetryEvents.DecisionReviewIslFallback],
+        "cee.decision_review.prompt_loaded": [TelemetryEvents.CeeDecisionReviewPromptLoaded],
+        "cee.decision_review.llm_call_started": [TelemetryEvents.CeeDecisionReviewLlmCallStarted],
+        "cee.decision_review.llm_call_completed": [TelemetryEvents.CeeDecisionReviewLlmCallCompleted],
+        "cee.decision_review.json_extracted": [TelemetryEvents.CeeDecisionReviewJsonExtracted],
+        "cee.decision_review.shape_check_failed": [TelemetryEvents.CeeDecisionReviewShapeCheckFailed],
+        "cee.decision_review.shape_check_warnings": [TelemetryEvents.CeeDecisionReviewShapeCheckWarnings],
 
         // Graph Readiness events (v2.3)
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
@@ -1006,6 +1020,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.requested",
         "cee.decision_review.succeeded",
         "cee.decision_review.failed",
+
+        // Decision Review M2 events
+        "cee.decision_review.prompt_loaded",
+        "cee.decision_review.llm_call_started",
+        "cee.decision_review.llm_call_completed",
+        "cee.decision_review.json_extracted",
+        "cee.decision_review.shape_check_failed",
+        "cee.decision_review.shape_check_warnings",
 
         // Bias Mitigation events (v2.0)
         "cee.bias_check.patches_generated",
