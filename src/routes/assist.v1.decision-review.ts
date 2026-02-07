@@ -27,6 +27,7 @@ import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type { LLMAdapter, CallOpts, ChatResult } from "../adapters/llm/types.js";
 import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
+import { buildLLMRawTrace } from "../cee/llm-output-store.js";
 
 // ============================================================================
 // Feature Flag
@@ -589,6 +590,13 @@ export default async function route(app: FastifyInstance) {
         extraction_method: extractionResult.extractionMethod,
       });
 
+      // Build llm_raw trace (same pattern as draft-graph)
+      const llmRawTrace = buildLLMRawTrace(requestId, llmResult.content, extractionResult.json, {
+        model: llmResult.model,
+        promptVersion: promptMeta.prompt_version,
+        storeOutput: true,
+      });
+
       // Lightweight shape check
       const shapeCheck = performShapeCheck(extractionResult.json);
 
@@ -607,7 +615,7 @@ export default async function route(app: FastifyInstance) {
           errors: shapeCheck.errors,
         });
 
-        // Return error with shape check details
+        // Return error with shape check details and llm_raw for diagnosis
         const errorBody = buildCeeErrorResponse(
           "CEE_LLM_VALIDATION_FAILED",
           "LLM response did not match expected M2 schema",
@@ -617,6 +625,7 @@ export default async function route(app: FastifyInstance) {
             details: {
               shape_errors: shapeCheck.errors,
               partial_response: extractionResult.json,
+              llm_raw: llmRawTrace,
             },
           }
         );
@@ -665,6 +674,9 @@ export default async function route(app: FastifyInstance) {
           brief_hash: input.brief_hash,
           prompt_version: promptMeta.prompt_version,
           prompt_source: promptMeta.source,
+          pipeline: {
+            llm_raw: llmRawTrace,
+          },
         },
         _meta: {
           model: llmResult.model,

@@ -61,7 +61,7 @@ export const FactorData = z.object({
     (arr) => new Set(arr).size === arr.length,
     { message: "uncertainty_drivers must not contain duplicates" }
   ).optional(),
-});
+}).passthrough();
 
 /**
  * Intervention data for option nodes.
@@ -70,7 +70,7 @@ export const FactorData = z.object({
  */
 export const OptionData = z.object({
   interventions: z.record(z.string(), z.number()),
-});
+}).passthrough();
 
 /**
  * Constraint operator for threshold comparisons.
@@ -115,15 +115,18 @@ export const ConstraintObservedState = z.object({
 export const ConstraintNodeData = z.object({
   /** Redundant operator - ensures PLoT finds it */
   operator: ConstraintOperator,
-});
+}).passthrough();
 
 /**
- * Union type for node data - can be:
- * - FactorData: quantitative data for factor nodes (ISL integration)
- * - OptionData: intervention mappings for option nodes (V4 format)
- * - ConstraintNodeData: operator for constraint nodes (PLoT integration)
+ * Union type for node data — order matters for Zod union matching:
+ * 1. OptionData first: requires 'interventions' (won't false-match factor/constraint)
+ * 2. ConstraintNodeData: requires 'operator' (won't false-match factor/option)
+ * 3. FactorData last: permissive fallback (only requires 'value')
+ *
+ * FactorData was previously first, causing it to match option nodes that had
+ * both 'value' and 'interventions', silently stripping 'interventions'.
  */
-export const NodeData = z.union([FactorData, OptionData, ConstraintNodeData]);
+export const NodeData = z.union([OptionData, ConstraintNodeData, FactorData]);
 
 export const Node = z.object({
   id: z.string().min(1),

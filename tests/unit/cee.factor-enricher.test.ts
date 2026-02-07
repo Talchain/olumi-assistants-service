@@ -268,6 +268,157 @@ describe('enrichGraphWithFactorsAsync', () => {
     });
   });
 
+  describe('V4 complete intervention early exit', () => {
+    it('skips enrichment when all options have complete V4 interventions', async () => {
+      const graph: GraphT = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Reduce operating costs',
+          },
+          {
+            id: 'fac_pa_cost',
+            kind: 'factor',
+            label: 'PA Cost',
+            category: 'controllable',
+            data: { value: 0.5, unit: '£' },
+          },
+          {
+            id: 'fac_productivity',
+            kind: 'factor',
+            label: 'Productivity Gain',
+            category: 'observable',
+            data: { value: 0.3 },
+          },
+          {
+            id: 'opt_hire',
+            kind: 'option',
+            label: 'Hire Personal Assistant',
+            data: { interventions: { fac_pa_cost: 1.0, fac_productivity: 0.8 } },
+          },
+        ],
+        edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+      };
+
+      const brief = 'Should I hire a personal assistant for £30,000/year to improve productivity?';
+
+      const result = await enrichGraphWithFactorsAsync(graph, brief);
+
+      // Should skip enrichment entirely
+      expect(result.extractionMode).toBe('v4_complete_skip');
+      expect(result.factorsAdded).toBe(0);
+      expect(result.factorsEnhanced).toBe(0);
+
+      // No synthetic factors injected
+      const factorNodes = result.graph.nodes.filter(n => n.kind === 'factor');
+      expect(factorNodes.length).toBe(2); // Only the original two
+      expect(factorNodes.every(n => ['fac_pa_cost', 'fac_productivity'].includes(n.id))).toBe(true);
+    });
+
+    it('runs enrichment when option interventions reference missing factors', async () => {
+      const graph: GraphT = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Test goal',
+          },
+          {
+            id: 'opt_a',
+            kind: 'option',
+            label: 'Option A',
+            data: { interventions: { fac_nonexistent: 1.0 } },
+          },
+        ],
+        edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+      };
+
+      const brief = 'Budget of £50000.';
+
+      const result = await enrichGraphWithFactorsAsync(graph, brief);
+
+      // Should NOT skip — intervention references a factor not in graph
+      expect(result.extractionMode).not.toBe('v4_complete_skip');
+    });
+
+    it('runs enrichment when target factor lacks data.value', async () => {
+      const graph: GraphT = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Test goal',
+          },
+          {
+            id: 'fac_incomplete',
+            kind: 'factor',
+            label: 'Incomplete Factor',
+            // No data — missing value
+          },
+          {
+            id: 'opt_a',
+            kind: 'option',
+            label: 'Option A',
+            data: { interventions: { fac_incomplete: 1.0 } },
+          },
+        ],
+        edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+      };
+
+      const brief = 'Budget of £50000.';
+
+      const result = await enrichGraphWithFactorsAsync(graph, brief);
+
+      // Should NOT skip — target factor has no data.value
+      expect(result.extractionMode).not.toBe('v4_complete_skip');
+    });
+
+    it('runs enrichment when option has no interventions', async () => {
+      const graph: GraphT = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          {
+            id: 'goal_1',
+            kind: 'goal',
+            label: 'Test goal',
+          },
+          {
+            id: 'fac_cost',
+            kind: 'factor',
+            label: 'Cost',
+            data: { value: 0.5 },
+          },
+          {
+            id: 'opt_a',
+            kind: 'option',
+            label: 'Option A',
+            // No data.interventions
+          },
+        ],
+        edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+      };
+
+      const brief = 'Budget of £50000.';
+
+      const result = await enrichGraphWithFactorsAsync(graph, brief);
+
+      // Should NOT skip — option has no interventions
+      expect(result.extractionMode).not.toBe('v4_complete_skip');
+    });
+  });
+
   describe('deduplication', () => {
     it('does not inject factor when LLM already covered the quantity', async () => {
       const graph: GraphT = {

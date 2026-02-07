@@ -466,8 +466,8 @@ export function enrichGraphWithFactors(
  * Extended enrichment result with LLM metadata
  */
 export interface EnrichmentResultAsync extends EnrichmentResult {
-  /** Extraction mode used (llm-first or regex-only) */
-  extractionMode: "llm-first" | "regex-only";
+  /** Extraction mode used */
+  extractionMode: "llm-first" | "regex-only" | "v4_complete_skip";
   /** Whether LLM extraction succeeded (if LLM mode used) */
   llmSuccess?: boolean;
   /** Any warnings from extraction */
@@ -488,6 +488,39 @@ export async function enrichGraphWithFactorsAsync(
   options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector; modelOverride?: string } = {}
 ): Promise<EnrichmentResultAsync> {
   const { minConfidence = 0.6, maxFactors = 10, collector, modelOverride } = options;
+
+  // Early exit: skip extraction when LLM provides complete V4 intervention data
+  const optionNodes = graph.nodes.filter(n => n.kind === "option");
+  if (optionNodes.length > 0) {
+    const factorNodes = graph.nodes.filter(n => n.kind === "factor");
+    const factorMap = new Map(factorNodes.map(n => [n.id, n]));
+    const allOptionsHaveInterventions = optionNodes.every(n => {
+      if (!n.data || !('interventions' in n.data)) return false;
+      const interventions = (n.data as { interventions: Record<string, number> }).interventions;
+      const entries = Object.entries(interventions);
+      // Must have at least one intervention, all targets must reference existing factors
+      // with quantitative data (value defined) — otherwise enrichment may need to fill gaps
+      return entries.length > 0 && entries.every(([factorId]) => {
+        const factor = factorMap.get(factorId);
+        return factor?.data && 'value' in factor.data;
+      });
+    });
+
+    if (allOptionsHaveInterventions) {
+      log.info(
+        { optionCount: optionNodes.length, event: "cee.factor_enrichment.v4_complete_skip" },
+        "Skipping factor enrichment: all options have complete V4 interventions"
+      );
+      return {
+        graph,
+        factorsAdded: 0,
+        factorsEnhanced: 0,
+        factorsSkipped: 0,
+        extractionMode: "v4_complete_skip",
+        warnings: [],
+      };
+    }
+  }
 
   // Check feature flag for LLM-first extraction
   let useLLMFirst = false;
