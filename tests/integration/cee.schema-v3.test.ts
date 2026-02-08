@@ -435,4 +435,77 @@ describe("CEE Schema V3 Integration", () => {
       expect(v3Response.quality).toBeUndefined();
     });
   });
+
+  // ── CIL Phase 0: goal_constraints carry-through ──────────────────────
+  describe("goal_constraints in V3 output", () => {
+    it("carries goal_constraints from V1 response into V3 output", () => {
+      const v1WithConstraints: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        goal_constraints: [
+          {
+            constraint_id: "c1",
+            node_id: "goal_revenue",
+            operator: ">=",
+            value: 0.7,
+            label: "Revenue target",
+          },
+        ],
+      };
+
+      const v3Response = transformResponseToV3(v1WithConstraints);
+
+      expect(v3Response.goal_constraints).toBeDefined();
+      expect(v3Response.goal_constraints).toHaveLength(1);
+      expect(v3Response.goal_constraints![0]).toMatchObject({
+        constraint_id: "c1",
+        node_id: "goal_revenue",
+        operator: ">=",
+        value: 0.7,
+        label: "Revenue target",
+      });
+    });
+
+    it("omits goal_constraints when not present in V1 response", () => {
+      const v3Response = transformResponseToV3(sampleV1Response);
+
+      expect(v3Response.goal_constraints).toBeUndefined();
+    });
+
+    it("omits goal_constraints when V1 has empty array", () => {
+      const v1WithEmpty: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        goal_constraints: [],
+      };
+
+      const v3Response = transformResponseToV3(v1WithEmpty);
+
+      expect(v3Response.goal_constraints).toBeUndefined();
+    });
+
+    it("goal_constraints survives CEEGraphResponseV3.safeParse()", () => {
+      const v1WithConstraints: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        goal_constraints: [
+          {
+            constraint_id: "c2",
+            node_id: "goal_revenue",
+            operator: "<=",
+            value: 500,
+            label: "Budget cap",
+            unit: "GBP",
+          },
+        ],
+      };
+
+      const v3Response = transformResponseToV3(v1WithConstraints);
+      const parseResult = CEEGraphResponseV3.safeParse(v3Response);
+
+      expect(parseResult.success).toBe(true);
+      if (parseResult.success) {
+        expect(parseResult.data.goal_constraints).toBeDefined();
+        expect(parseResult.data.goal_constraints).toHaveLength(1);
+        expect(parseResult.data.goal_constraints![0].constraint_id).toBe("c2");
+      }
+    });
+  });
 });

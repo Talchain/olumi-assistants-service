@@ -75,7 +75,7 @@ export const OptionForAnalysis = z.object({
   raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Extraction metadata for transparency */
   extraction_metadata: ExtractionMetadata.optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
 
 // ============================================================================
@@ -114,7 +114,7 @@ export const AnalysisReadyPayload = z.object({
   status: AnalysisReadyStatus,
   /** Questions for user when status is needs_user_mapping */
   user_questions: z.array(z.string()).optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 
 // ============================================================================

@@ -36,6 +36,7 @@ import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
+import { runIntegrityChecks } from "../validation/integrity-sentinel.js";
 
 // ============================================================================
 // V3 Types
@@ -607,6 +608,14 @@ export function transformResponseToV3(
     draft_warnings: v1Response.draft_warnings,
   };
 
+  // CIL Phase 0: Carry goal_constraints from V1 pipeline into V3 response.
+  // These are generated during compound goal extraction (Phase 3) and were
+  // previously dropped during V1→V3 reconstruction.
+  const v1GoalConstraints = (v1Response as any).goal_constraints;
+  if (Array.isArray(v1GoalConstraints) && v1GoalConstraints.length > 0) {
+    v3Response.goal_constraints = v1GoalConstraints;
+  }
+
   // Add validation warnings if any
   if (validationWarnings.length > 0) {
     v3Response.validation_warnings = validationWarnings;
@@ -634,6 +643,40 @@ export function transformResponseToV3(
       leaves: graph.meta.leaves,
       source: graph.meta.source as "assistant" | "user" | "imported" | undefined,
     };
+  }
+
+  // CIL Phase 0: Sentinel integrity checks — compare LLM raw nodes against
+  // final V3 output to detect silent data loss. Gated on debug flag for zero
+  // production cost.
+  if (config.cee.debugLoggingEnabled) {
+    try {
+      const integrityWarnings = runIntegrityChecks(
+        graph.nodes as any[],
+        v3Response.nodes as any[],
+        v3Response.options as any[],
+      );
+      if (integrityWarnings.length > 0) {
+        // Attach to trace.pipeline.integrity_warnings for debug panel
+        if (!v3Response.trace) {
+          v3Response.trace = {};
+        }
+        // Guard: ensure pipeline is a plain object before mutation.
+        // If upstream set it to a non-object (string/array), start fresh.
+        const existing = v3Response.trace.pipeline;
+        const pipeline: Record<string, unknown> =
+          existing !== null && typeof existing === "object" && !Array.isArray(existing)
+            ? (existing as Record<string, unknown>)
+            : {};
+        pipeline.integrity_warnings = integrityWarnings;
+        v3Response.trace.pipeline = pipeline;
+      }
+    } catch (err) {
+      // Sentinel must never block the response
+      log.warn(
+        { error: err, requestId: context.requestId },
+        "Integrity sentinel check failed (non-blocking)",
+      );
+    }
   }
 
   return v3Response;

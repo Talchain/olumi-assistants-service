@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { GoalConstraintSchema } from "./assist.js";
 
 // ============================================================================
 // Node Types
@@ -65,7 +66,7 @@ export const ObservedStateV3 = z.object({
     (arr) => new Set(arr).size === arr.length,
     { message: "uncertainty_drivers must not contain duplicates" }
   ).optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 
 /**
@@ -105,7 +106,7 @@ export const NodeV3 = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type NodeV3T = z.infer<typeof NodeV3>;
 
 // ============================================================================
@@ -120,7 +121,7 @@ export const EdgeProvenanceV3 = z.object({
   source: z.enum(["brief_extraction", "cee_hypothesis", "domain_knowledge", "user_specified"]),
   /** Optional reasoning */
   reasoning: z.string().optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
 /**
@@ -141,7 +142,7 @@ export const EdgeV3 = z.object({
   effect_direction: z.enum(["positive", "negative"]),
   /** Provenance */
   provenance: EdgeProvenanceV3.optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type EdgeV3T = z.infer<typeof EdgeV3>;
 
 // ============================================================================
@@ -158,7 +159,7 @@ export const TargetMatch = z.object({
   match_type: z.enum(["exact_id", "exact_label", "semantic"]),
   /** Confidence in the match */
   confidence: z.enum(["high", "medium", "low"]),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type TargetMatchT = z.infer<typeof TargetMatch>;
 
 /**
@@ -213,7 +214,7 @@ export const InterventionV3 = z.object({
   value_type: InterventionValueType.optional(),
   /** Encoding map for categorical values: raw_value -> encoded integer */
   encoding_map: z.record(z.string(), z.number()).optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 
 /**
@@ -224,7 +225,7 @@ export const OptionProvenanceV3 = z.object({
   source: z.enum(["brief_extraction", "cee_hypothesis", "user_specified"]),
   /** The text this was extracted from (dev only) */
   brief_quote: z.string().optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type OptionProvenanceV3T = z.infer<typeof OptionProvenanceV3>;
 
 /**
@@ -264,7 +265,7 @@ export const OptionV3 = z.object({
   user_questions: z.array(z.string()).optional(),
   /** Provenance */
   provenance: OptionProvenanceV3.optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type OptionV3T = z.infer<typeof OptionV3>;
 
 // ============================================================================
@@ -308,7 +309,7 @@ export const ValidationWarningV3 = z.object({
   suggestion: z.string().optional(),
   /** Pipeline stage that detected this issue */
   stage: z.string().optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
 
 // ============================================================================
@@ -337,7 +338,7 @@ export const GraphMetaV3 = z.object({
   leaves: z.array(z.string()).optional(),
   /** Graph source */
   source: z.enum(["assistant", "user", "imported"]).optional(),
-});
+}).passthrough(); // CIL Phase 0: preserve additive fields
 export type GraphMetaV3T = z.infer<typeof GraphMetaV3>;
 
 // ============================================================================
@@ -361,6 +362,12 @@ export const CEEGraphResponseV3 = z.object({
   goal_node_id: z.string(),
   /** Validation warnings */
   validation_warnings: z.array(ValidationWarningV3).optional(),
+  /**
+   * Goal constraints extracted from compound goals (Phase 3).
+   * Populated when brief contains multiple quantitative targets.
+   * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
+   */
+  goal_constraints: z.array(GoalConstraintSchema).optional(),
   /** Graph metadata */
   meta: GraphMetaV3.optional(),
   /** Quality metrics (carried from V2) */
@@ -385,8 +392,8 @@ export const CEEGraphResponseV3 = z.object({
     }).optional(),
     /** Pipeline diagnostics (P0) */
     pipeline: z.record(z.unknown()).optional(),
-  }).optional(),
-});
+  }).passthrough().optional(), // CIL Phase 0: preserve additive trace fields
+}).passthrough(); // CIL Phase 0: preserve additive fields (e.g. goal_constraints, analysis_ready)
 export type CEEGraphResponseV3T = z.infer<typeof CEEGraphResponseV3>;
 
 // ============================================================================

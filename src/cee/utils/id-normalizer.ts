@@ -141,6 +141,35 @@ export function normalizeLabelsToIds(
 }
 
 /**
+ * Core ID normalisation (steps 1-7) without dedup suffix.
+ *
+ * Exported for use by the integrity sentinel so that raw↔V3 ID matching
+ * uses the exact same algorithm as the production normalizer.
+ *
+ * If the input already matches the valid ID pattern, it is returned as-is.
+ */
+export function normaliseIdBase(label: string): string {
+  if (label === null || label === undefined || typeof label !== "string") {
+    return "unknown";
+  }
+  if (PRESERVED_ID_REGEX.test(label)) {
+    return label;
+  }
+  let id = label.toLowerCase();
+  id = id.replace(/[\s\-–—:]/g, "_");
+  id = id.replace(/[()[\]{}]/g, "_");
+  id = id.replace(/[^a-z0-9_-]/g, "");
+  id = id.replace(/_{2,}/g, "_");
+  id = id.replace(/-{2,}/g, "-");
+  id = id.replace(/:{2,}/g, ":");
+  id = id.replace(/^[_-]+|[_-]+$/g, "");
+  if (!id) {
+    id = "node";
+  }
+  return id;
+}
+
+/**
  * Validate that an ID matches the required pattern.
  *
  * @param id - ID to validate
