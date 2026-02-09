@@ -8,6 +8,7 @@ import {
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/index.js";
 import { validateV3Response } from "../../src/cee/validation/v3-validator.js";
 import { CEEGraphResponseV3 } from "../../src/schemas/cee-v3.js";
+import { normaliseIdForMatch } from "../../src/cee/validation/integrity-sentinel.js";
 
 describe("CEE Schema V3 Integration", () => {
   // V4 topology: decision → options → factors → outcomes/risks → goal
@@ -505,6 +506,117 @@ describe("CEE Schema V3 Integration", () => {
         expect(parseResult.data.goal_constraints).toBeDefined();
         expect(parseResult.data.goal_constraints).toHaveLength(1);
         expect(parseResult.data.goal_constraints![0].constraint_id).toBe("c2");
+      }
+    });
+  });
+
+  // ============================================================================
+  // Task C: Bundle-trace alignment integration test (CIL Phase 0.1)
+  // ============================================================================
+  describe("CIL Phase 0.1: Bundle-trace alignment", () => {
+    it("includeDebug=true → trace.pipeline.integrity_warnings exists with correct shape", () => {
+      const v3Response = transformResponseToV3(sampleV1Response, {
+        requestId: "test-bundle-alignment",
+        includeDebug: true,
+      });
+
+      // integrity_warnings must exist in the response (even if empty)
+      expect(v3Response.trace).toBeDefined();
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown> | undefined;
+      expect(pipeline).toBeDefined();
+      expect(pipeline!.integrity_warnings).toBeDefined();
+
+      const iw = pipeline!.integrity_warnings as {
+        warnings: Array<{ code: string; node_id?: string; details: string }>;
+        raw_counts: { node_count: number; edge_count: number; node_ids: string[] };
+        output_counts: { node_count: number; edge_count: number; node_ids: string[] };
+      };
+
+      // Shape checks
+      expect(Array.isArray(iw.warnings)).toBe(true);
+      expect(iw.raw_counts).toBeDefined();
+      expect(iw.output_counts).toBeDefined();
+      expect(typeof iw.raw_counts.node_count).toBe("number");
+      expect(typeof iw.raw_counts.edge_count).toBe("number");
+      expect(Array.isArray(iw.raw_counts.node_ids)).toBe(true);
+      expect(typeof iw.output_counts.node_count).toBe("number");
+      expect(typeof iw.output_counts.edge_count).toBe("number");
+      expect(Array.isArray(iw.output_counts.node_ids)).toBe(true);
+    });
+
+    it("includeDebug=true → raw_counts and output_counts reflect actual graph", () => {
+      const v3Response = transformResponseToV3(sampleV1Response, {
+        requestId: "test-bundle-counts",
+        includeDebug: true,
+      });
+
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
+      const iw = pipeline.integrity_warnings as {
+        warnings: Array<{ code: string; node_id?: string }>;
+        raw_counts: { node_count: number; edge_count: number; node_ids: string[] };
+        output_counts: { node_count: number; edge_count: number; node_ids: string[] };
+      };
+
+      // raw_counts should reflect the V1 input graph
+      expect(iw.raw_counts.node_count).toBe(sampleV1Response.graph.nodes.length);
+      expect(iw.raw_counts.edge_count).toBe(sampleV1Response.graph.edges.length);
+
+      // output_counts should reflect the V3 output
+      expect(iw.output_counts.node_count).toBe(v3Response.nodes.length);
+      expect(iw.output_counts.edge_count).toBe(v3Response.edges.length);
+    });
+
+    it("includeDebug=true → output node_ids are subset of raw node_ids after normalisation", () => {
+      const v3Response = transformResponseToV3(sampleV1Response, {
+        requestId: "test-bundle-subset",
+        includeDebug: true,
+      });
+
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
+      const iw = pipeline.integrity_warnings as {
+        warnings: Array<{ code: string; node_id?: string }>;
+        raw_counts: { node_count: number; node_ids: string[] };
+        output_counts: { node_count: number; node_ids: string[] };
+      };
+
+      const rawNormIds = new Set(iw.raw_counts.node_ids.map((id: string) => normaliseIdForMatch(id)));
+      const outputNormIds = iw.output_counts.node_ids.map((id: string) => normaliseIdForMatch(id));
+
+      // Every output node should have a corresponding raw node (after normalisation)
+      // OR a NODE_DROPPED / SYNTHETIC_NODE_INJECTED warning should exist
+      for (const outId of outputNormIds) {
+        if (!rawNormIds.has(outId)) {
+          // Must have a SYNTHETIC_NODE_INJECTED warning
+          const syntheticWarning = iw.warnings.find(
+            (w) => w.code === "SYNTHETIC_NODE_INJECTED" && normaliseIdForMatch(w.node_id ?? "") === outId
+          );
+          expect(syntheticWarning).toBeDefined();
+        }
+      }
+
+      // Any raw node not in output should have a NODE_DROPPED warning
+      const outputNormIdSet = new Set(outputNormIds);
+      for (const rawId of iw.raw_counts.node_ids) {
+        const normRawId = normaliseIdForMatch(rawId);
+        if (!outputNormIdSet.has(normRawId)) {
+          const droppedWarning = iw.warnings.find(
+            (w) => w.code === "NODE_DROPPED" && normaliseIdForMatch(w.node_id ?? "") === normRawId
+          );
+          expect(droppedWarning).toBeDefined();
+        }
+      }
+    });
+
+    it("includeDebug=false and no debugLoggingEnabled → integrity_warnings absent", () => {
+      const v3Response = transformResponseToV3(sampleV1Response, {
+        requestId: "test-bundle-off",
+        // includeDebug not set (defaults to undefined/false)
+      });
+
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown> | undefined;
+      // integrity_warnings should be absent (sentinel did not run)
+      if (pipeline) {
+        expect(pipeline.integrity_warnings).toBeUndefined();
       }
     });
   });

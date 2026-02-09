@@ -81,6 +81,12 @@ export interface V3TransformContext {
   correlationId?: string;
   /** Enable strict validation mode */
   strictMode?: boolean;
+  /**
+   * CIL Phase 0.1: Enable sentinel integrity checks in the response.
+   * Should be true when debug bundle capture is active (include_debug=true
+   * or observabilityEnabled). This ensures sentinel output lands in bundles.
+   */
+  includeDebug?: boolean;
 }
 
 // ============================================================================
@@ -645,31 +651,34 @@ export function transformResponseToV3(
     };
   }
 
-  // CIL Phase 0: Sentinel integrity checks — compare LLM raw nodes against
-  // final V3 output to detect silent data loss. Gated on debug flag for zero
-  // production cost.
-  if (config.cee.debugLoggingEnabled) {
+  // CIL Phase 0.1: Sentinel integrity checks — compare LLM raw nodes against
+  // final V3 output to detect silent data loss. Gated on debug bundle mode
+  // (includeDebug) OR debugLoggingEnabled so sentinel output lands in bundles.
+  // Zero cost in production when both flags are off.
+  const sentinelEnabled = context.includeDebug || config.cee.debugLoggingEnabled;
+  if (sentinelEnabled) {
     try {
-      const integrityWarnings = runIntegrityChecks(
+      const sentinelOutput = runIntegrityChecks(
         graph.nodes as any[],
         v3Response.nodes as any[],
         v3Response.options as any[],
+        graph.edges as any[],
+        v3Response.edges as any[],
       );
-      if (integrityWarnings.length > 0) {
-        // Attach to trace.pipeline.integrity_warnings for debug panel
-        if (!v3Response.trace) {
-          v3Response.trace = {};
-        }
-        // Guard: ensure pipeline is a plain object before mutation.
-        // If upstream set it to a non-object (string/array), start fresh.
-        const existing = v3Response.trace.pipeline;
-        const pipeline: Record<string, unknown> =
-          existing !== null && typeof existing === "object" && !Array.isArray(existing)
-            ? (existing as Record<string, unknown>)
-            : {};
-        pipeline.integrity_warnings = integrityWarnings;
-        v3Response.trace.pipeline = pipeline;
+      // Always attach when debug is active (even if warnings is []).
+      // This ensures bundles contain the evidence structure for verification.
+      if (!v3Response.trace) {
+        v3Response.trace = {};
       }
+      // Guard: ensure pipeline is a plain object before mutation.
+      // If upstream set it to a non-object (string/array), start fresh.
+      const existing = v3Response.trace.pipeline;
+      const pipeline: Record<string, unknown> =
+        existing !== null && typeof existing === "object" && !Array.isArray(existing)
+          ? (existing as Record<string, unknown>)
+          : {};
+      pipeline.integrity_warnings = sentinelOutput;
+      v3Response.trace.pipeline = pipeline;
     } catch (err) {
       // Sentinel must never block the response
       log.warn(

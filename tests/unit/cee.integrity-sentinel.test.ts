@@ -3,26 +3,26 @@ import {
   runIntegrityChecks,
   normaliseIdForMatch,
   type IntegrityWarning,
+  type IntegrityWarningsOutput,
 } from "../../src/cee/validation/integrity-sentinel.js";
 
 /**
- * CIL Phase 0 — Sentinel integrity check tests.
+ * CIL Phase 0.1 — Sentinel integrity check tests.
  *
  * Verifies that runIntegrityChecks correctly detects data loss between
- * LLM raw output and V3 response.
+ * LLM raw output and V3 response, and returns enriched output with
+ * raw_counts / output_counts evidence for debug bundles.
  */
-describe("CIL Phase 0: Sentinel integrity checks", () => {
+describe("CIL Phase 0.1: Sentinel integrity checks", () => {
   // ── normaliseIdForMatch ────────────────────────────────────────────────
   describe("normaliseIdForMatch", () => {
     it("preserves IDs that already match the valid pattern", () => {
-      // Valid IDs are returned as-is (case-preserved)
       expect(normaliseIdForMatch("Factor_Price")).toBe("Factor_Price");
       expect(normaliseIdForMatch("Goal-Revenue")).toBe("Goal-Revenue");
       expect(normaliseIdForMatch("factor_price")).toBe("factor_price");
     });
 
     it("normalises human-readable labels the same way as production", () => {
-      // Labels with spaces/parens go through full normalisation
       expect(normaliseIdForMatch("Price (GBP)")).toBe("price_gbp");
       expect(normaliseIdForMatch("Marketing Spend")).toBe("marketing_spend");
       expect(normaliseIdForMatch("opt (A)")).toBe("opt_a");
@@ -36,11 +36,11 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         { id: "factor_price", kind: "factor", category: "controllable" },
       ];
       const v3Nodes = [
-        { id: "factor_price", kind: "factor" }, // category missing
+        { id: "factor_price", kind: "factor" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const catWarnings = warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const catWarnings = result.warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
 
       expect(catWarnings).toHaveLength(1);
       expect(catWarnings[0].node_id).toBe("factor_price");
@@ -56,13 +56,13 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         { id: "factor_price", kind: "factor", category: "controllable" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const catWarnings = warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const catWarnings = result.warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
       expect(catWarnings).toHaveLength(0);
     });
   });
 
-  // ── NODE_DROPPED ───────────────────────────────────────────────────────
+  // ── NODE_DROPPED ───────────────────────────────────────────────────
   describe("NODE_DROPPED", () => {
     it("emits warning when raw node is missing from V3", () => {
       const rawNodes = [
@@ -71,18 +71,17 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
       ];
       const v3Nodes = [
         { id: "factor_price", kind: "factor" },
-        // factor_demand missing
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const dropped = warnings.filter((w) => w.code === "NODE_DROPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
 
       expect(dropped).toHaveLength(1);
       expect(dropped[0].node_id).toBe("factor_demand");
     });
   });
 
-  // ── SYNTHETIC_NODE_INJECTED ────────────────────────────────────────────
+  // ── SYNTHETIC_NODE_INJECTED ──────────────────────────────────────────
   describe("SYNTHETIC_NODE_INJECTED", () => {
     it("emits warning when V3 has node not in raw", () => {
       const rawNodes = [
@@ -93,15 +92,15 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         { id: "synthetic_node", kind: "factor" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const synthetic = warnings.filter((w) => w.code === "SYNTHETIC_NODE_INJECTED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const synthetic = result.warnings.filter((w) => w.code === "SYNTHETIC_NODE_INJECTED");
 
       expect(synthetic).toHaveLength(1);
       expect(synthetic[0].node_id).toBe("synthetic_node");
     });
   });
 
-  // ── GOAL_THRESHOLD_STRIPPED ────────────────────────────────────────────
+  // ── GOAL_THRESHOLD_STRIPPED ──────────────────────────────────────────
   describe("GOAL_THRESHOLD_STRIPPED", () => {
     it("emits warning when goal_threshold fields are in raw but not V3", () => {
       const rawNodes = [
@@ -115,11 +114,11 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         },
       ];
       const v3Nodes = [
-        { id: "goal_revenue", kind: "goal" }, // all threshold fields missing
+        { id: "goal_revenue", kind: "goal" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const threshold = warnings.filter((w) => w.code === "GOAL_THRESHOLD_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const threshold = result.warnings.filter((w) => w.code === "GOAL_THRESHOLD_STRIPPED");
 
       expect(threshold).toHaveLength(1);
       expect(threshold[0].node_id).toBe("goal_revenue");
@@ -144,8 +143,8 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const threshold = warnings.filter((w) => w.code === "GOAL_THRESHOLD_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const threshold = result.warnings.filter((w) => w.code === "GOAL_THRESHOLD_STRIPPED");
       expect(threshold).toHaveLength(0);
     });
   });
@@ -170,12 +169,12 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         {
           id: "factor_price",
           kind: "factor",
-          observed_state: { value: 49 }, // enrichment fields missing
+          observed_state: { value: 49 },
         },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const enrichment = warnings.filter((w) => w.code === "ENRICHMENT_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const enrichment = result.warnings.filter((w) => w.code === "ENRICHMENT_STRIPPED");
 
       expect(enrichment).toHaveLength(1);
       expect(enrichment[0].node_id).toBe("factor_price");
@@ -190,27 +189,19 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         {
           id: "factor_price",
           kind: "factor",
-          data: {
-            value: 49,
-            raw_value: 49,
-            cap: 100,
-          },
+          data: { value: 49, raw_value: 49, cap: 100 },
         },
       ];
       const v3Nodes = [
         {
           id: "factor_price",
           kind: "factor",
-          observed_state: {
-            value: 49,
-            raw_value: 49,
-            cap: 100,
-          },
+          observed_state: { value: 49, raw_value: 49, cap: 100 },
         },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      const enrichment = warnings.filter((w) => w.code === "ENRICHMENT_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const enrichment = result.warnings.filter((w) => w.code === "ENRICHMENT_STRIPPED");
       expect(enrichment).toHaveLength(0);
     });
   });
@@ -222,20 +213,14 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         {
           id: "option_premium",
           kind: "option",
-          data: {
-            interventions: { factor_price: { value: 59 } },
-          },
+          data: { interventions: { factor_price: { value: 59 } } },
         },
       ];
-      const v3Nodes = [
-        { id: "option_premium", kind: "option" },
-      ];
-      const v3Options = [
-        { id: "option_premium", interventions: {} }, // empty
-      ];
+      const v3Nodes = [{ id: "option_premium", kind: "option" }];
+      const v3Options = [{ id: "option_premium", interventions: {} }];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
-      const intWarnings = warnings.filter((w) => w.code === "INTERVENTIONS_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
+      const intWarnings = result.warnings.filter((w) => w.code === "INTERVENTIONS_STRIPPED");
 
       expect(intWarnings).toHaveLength(1);
       expect(intWarnings[0].node_id).toBe("option_premium");
@@ -246,14 +231,10 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         {
           id: "option_premium",
           kind: "option",
-          data: {
-            interventions: { factor_price: { value: 59 } },
-          },
+          data: { interventions: { factor_price: { value: 59 } } },
         },
       ];
-      const v3Nodes = [
-        { id: "option_premium", kind: "option" },
-      ];
+      const v3Nodes = [{ id: "option_premium", kind: "option" }];
       const v3Options = [
         {
           id: "option_premium",
@@ -261,104 +242,72 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
         },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
-      const intWarnings = warnings.filter((w) => w.code === "INTERVENTIONS_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
+      const intWarnings = result.warnings.filter((w) => w.code === "INTERVENTIONS_STRIPPED");
       expect(intWarnings).toHaveLength(0);
     });
   });
 
-  // ── Everything matches → zero warnings ─────────────────────────────────
+  // ── Clean fixture → zero warnings ───────────────────────────────────────
   describe("clean fixture", () => {
     it("emits zero warnings when everything matches", () => {
       const rawNodes = [
-        {
-          id: "goal_revenue",
-          kind: "goal",
-          goal_threshold: 0.8,
-        },
+        { id: "goal_revenue", kind: "goal", goal_threshold: 0.8 },
         {
           id: "factor_price",
           kind: "factor",
           category: "controllable",
-          data: {
-            value: 49,
-            unit: "GBP",
-            raw_value: 49,
-          },
+          data: { value: 49, unit: "GBP", raw_value: 49 },
         },
         {
           id: "option_premium",
           kind: "option",
-          data: {
-            interventions: { factor_price: { value: 59 } },
-          },
+          data: { interventions: { factor_price: { value: 59 } } },
         },
       ];
       const v3Nodes = [
-        {
-          id: "goal_revenue",
-          kind: "goal",
-          goal_threshold: 0.8,
-        },
+        { id: "goal_revenue", kind: "goal", goal_threshold: 0.8 },
         {
           id: "factor_price",
           kind: "factor",
           category: "controllable",
-          observed_state: {
-            value: 49,
-            unit: "GBP",
-            raw_value: 49,
-          },
+          observed_state: { value: 49, unit: "GBP", raw_value: 49 },
         },
-        {
-          id: "option_premium",
-          kind: "option",
-        },
+        { id: "option_premium", kind: "option" },
       ];
       const v3Options = [
-        {
-          id: "option_premium",
-          interventions: { factor_price: { value: 59 } },
-        },
+        { id: "option_premium", interventions: { factor_price: { value: 59 } } },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
-      expect(warnings).toHaveLength(0);
+      const result = runIntegrityChecks(rawNodes, v3Nodes, v3Options);
+      expect(result.warnings).toHaveLength(0);
     });
   });
 
   // ── ID normalisation matching ──────────────────────────────────────────
   describe("ID normalisation matching", () => {
     it("matches raw human-readable label to V3 normalised ID", () => {
-      // Raw LLM output may use "Price (GBP)" which normalises to "price_gbp"
       const rawNodes = [
         { id: "Price (GBP)", kind: "factor", category: "controllable" },
       ];
       const v3Nodes = [
-        { id: "price_gbp", kind: "factor" }, // category missing
+        { id: "price_gbp", kind: "factor" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      // Should match by normalised ID and detect CATEGORY_STRIPPED, not NODE_DROPPED
-      const dropped = warnings.filter((w) => w.code === "NODE_DROPPED");
-      const catStripped = warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
+      const catStripped = result.warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
       expect(dropped).toHaveLength(0);
       expect(catStripped).toHaveLength(1);
     });
 
     it("valid IDs with different casing are treated as different nodes", () => {
-      // Both match ^[A-Za-z][A-Za-z0-9_-]*$ so are preserved as-is
-      const rawNodes = [
-        { id: "Factor_Price", kind: "factor" },
-      ];
-      const v3Nodes = [
-        { id: "factor_price", kind: "factor" },
-      ];
+      const rawNodes = [{ id: "Factor_Price", kind: "factor" }];
+      const v3Nodes = [{ id: "factor_price", kind: "factor" }];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      // These are different normalised IDs, so both NODE_DROPPED and SYNTHETIC
-      const dropped = warnings.filter((w) => w.code === "NODE_DROPPED");
-      const synthetic = warnings.filter((w) => w.code === "SYNTHETIC_NODE_INJECTED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
+      const synthetic = result.warnings.filter((w) => w.code === "SYNTHETIC_NODE_INJECTED");
       expect(dropped).toHaveLength(1);
       expect(synthetic).toHaveLength(1);
     });
@@ -367,23 +316,141 @@ describe("CIL Phase 0: Sentinel integrity checks", () => {
   // ── Collision handling ─────────────────────────────────────────────────
   describe("collision handling", () => {
     it("checks all raw nodes that normalise to the same key", () => {
-      // Two raw labels that both normalise to "marketing_spend" under production rules
       const rawNodes = [
         { id: "Marketing Spend", kind: "factor", category: "controllable" },
         { id: "Marketing  Spend", kind: "factor", category: "external" },
       ];
-      // V3 has one node at the normalised key
       const v3Nodes = [
-        { id: "marketing_spend", kind: "factor" }, // category missing
+        { id: "marketing_spend", kind: "factor" },
       ];
 
-      const warnings = runIntegrityChecks(rawNodes, v3Nodes, []);
-      // Both raw nodes should be checked — both have category stripped
-      const catStripped = warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+      const catStripped = result.warnings.filter((w) => w.code === "CATEGORY_STRIPPED");
       expect(catStripped).toHaveLength(2);
-      // No NODE_DROPPED since the normalised key exists in V3
-      const dropped = warnings.filter((w) => w.code === "NODE_DROPPED");
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
       expect(dropped).toHaveLength(0);
+    });
+  });
+
+  // ============================================================================
+  // Task A: Debug bundle visibility tests
+  // ============================================================================
+  describe("Task A: debug bundle visibility", () => {
+    it("returns IntegrityWarningsOutput with non-empty warnings for mismatch fixture", () => {
+      const rawNodes = [
+        { id: "factor_price", kind: "factor" },
+        { id: "factor_demand", kind: "factor" },
+      ];
+      const v3Nodes = [
+        { id: "factor_price", kind: "factor" },
+        // factor_demand dropped
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+
+      // Result is IntegrityWarningsOutput, not a flat array
+      expect(result).toHaveProperty("warnings");
+      expect(result).toHaveProperty("raw_counts");
+      expect(result).toHaveProperty("output_counts");
+      expect(result.warnings.length).toBeGreaterThan(0);
+
+      // At least one NODE_DROPPED
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
+      expect(dropped.length).toBeGreaterThanOrEqual(1);
+      expect(dropped[0].node_id).toBe("factor_demand");
+    });
+
+    it("returns IntegrityWarningsOutput with empty warnings [] for clean fixture", () => {
+      const rawNodes = [{ id: "factor_price", kind: "factor" }];
+      const v3Nodes = [{ id: "factor_price", kind: "factor" }];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+
+      expect(result).toHaveProperty("warnings");
+      expect(result.warnings).toHaveLength(0);
+      // Counts still present even with no warnings
+      expect(result.raw_counts).toBeDefined();
+      expect(result.output_counts).toBeDefined();
+    });
+  });
+
+  // ============================================================================
+  // Task B: Evidence counts tests
+  // ============================================================================
+  describe("Task B: raw_counts / output_counts evidence", () => {
+    it("raw_counts and output_counts match actual fixture data", () => {
+      const rawNodes = [
+        { id: "goal_revenue", kind: "goal" },
+        { id: "factor_price", kind: "factor" },
+        { id: "factor_demand", kind: "factor" },
+      ];
+      const rawEdges = [
+        { from: "factor_price", to: "goal_revenue" },
+        { from: "factor_demand", to: "goal_revenue" },
+      ];
+      const v3Nodes = [
+        { id: "goal_revenue", kind: "goal" },
+        { id: "factor_price", kind: "factor" },
+      ];
+      const v3Edges = [
+        { source: "factor_price", target: "goal_revenue" },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], rawEdges, v3Edges);
+
+      expect(result.raw_counts.node_count).toBe(3);
+      expect(result.raw_counts.edge_count).toBe(2);
+      expect(result.raw_counts.node_ids).toEqual(["goal_revenue", "factor_price", "factor_demand"]);
+
+      expect(result.output_counts.node_count).toBe(2);
+      expect(result.output_counts.edge_count).toBe(1);
+      expect(result.output_counts.node_ids).toEqual(["goal_revenue", "factor_price"]);
+    });
+
+    it("dropped node appears in raw_counts.node_ids but not output_counts.node_ids, with NODE_DROPPED warning", () => {
+      const rawNodes = [
+        { id: "factor_price", kind: "factor" },
+        { id: "factor_demand", kind: "factor" },
+      ];
+      const v3Nodes = [
+        { id: "factor_price", kind: "factor" },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+
+      // factor_demand is in raw but not output
+      expect(result.raw_counts.node_ids).toContain("factor_demand");
+      expect(result.output_counts.node_ids).not.toContain("factor_demand");
+
+      // Corresponding NODE_DROPPED warning exists
+      const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
+      expect(dropped).toHaveLength(1);
+      expect(dropped[0].node_id).toBe("factor_demand");
+    });
+
+    it("counts populate even when no warnings (clean fixture)", () => {
+      const rawNodes = [{ id: "factor_price", kind: "factor" }];
+      const rawEdges = [{ from: "factor_price", to: "goal" }];
+      const v3Nodes = [{ id: "factor_price", kind: "factor" }];
+      const v3Edges = [{ source: "factor_price", target: "goal" }];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], rawEdges, v3Edges);
+
+      expect(result.warnings).toHaveLength(0);
+      expect(result.raw_counts.node_count).toBe(1);
+      expect(result.raw_counts.edge_count).toBe(1);
+      expect(result.output_counts.node_count).toBe(1);
+      expect(result.output_counts.edge_count).toBe(1);
+    });
+
+    it("edge counts default to 0 when edges not provided", () => {
+      const rawNodes = [{ id: "factor_price", kind: "factor" }];
+      const v3Nodes = [{ id: "factor_price", kind: "factor" }];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, []);
+
+      expect(result.raw_counts.edge_count).toBe(0);
+      expect(result.output_counts.edge_count).toBe(0);
     });
   });
 });

@@ -1,10 +1,11 @@
 /**
- * CIL Phase 0 — Sentinel Integrity Checks
+ * CIL Phase 0.1 — Sentinel Integrity Checks
  *
  * Compares LLM raw graph output against the final V3 response to detect
  * silent data loss between pipeline stages. Debug-only, non-blocking.
  *
- * Gated on `config.cee.debugLoggingEnabled` — zero cost in production.
+ * Gated by the debug bundle mechanism (observabilityEnabled / include_debug)
+ * so sentinel output lands in debug bundles. Zero cost in production.
  *
  * Warning codes:
  * - CATEGORY_STRIPPED: factor node has category in raw but not in V3
@@ -27,6 +28,28 @@ export interface IntegrityWarning {
   node_id?: string;
   edge_id?: string;
   details: string;
+}
+
+/**
+ * Enriched sentinel output for debug bundles.
+ *
+ * Contains both individual warnings AND compact graph evidence so that
+ * claims like "11 nodes became 8" are provable from a single bundle.
+ */
+export interface IntegrityWarningsOutput {
+  warnings: IntegrityWarning[];
+  /** Compact LLM raw graph summary (earliest parsed representation) */
+  raw_counts: {
+    node_count: number;
+    edge_count: number;
+    node_ids: string[];
+  };
+  /** Final CEE V3 output counts */
+  output_counts: {
+    node_count: number;
+    edge_count: number;
+    node_ids: string[];
+  };
 }
 
 /** Minimal shape of a raw LLM node (pre-transform). */
@@ -76,6 +99,20 @@ interface V3Option {
   [key: string]: unknown;
 }
 
+/** Minimal shape of a raw LLM edge (pre-transform). */
+interface RawEdge {
+  from: string;
+  to: string;
+  [key: string]: unknown;
+}
+
+/** Minimal shape of a V3 output edge. */
+interface V3Edge {
+  source: string;
+  target: string;
+  [key: string]: unknown;
+}
+
 // ============================================================================
 // ID Normalisation (for matching raw ↔ V3 nodes)
 // ============================================================================
@@ -99,16 +136,24 @@ export function normaliseIdForMatch(id: string): string {
 /**
  * Run sentinel integrity checks comparing LLM raw graph against V3 output.
  *
+ * Returns an enriched output containing both individual warnings and compact
+ * graph evidence (raw_counts / output_counts) so that node/edge delta claims
+ * are provable from a single debug bundle.
+ *
  * @param rawNodes - Nodes from the earliest raw LLM representation
  * @param v3Nodes - Nodes from the final V3 response
  * @param v3Options - Options from the final V3 response
- * @returns Array of integrity warnings (empty if everything matches)
+ * @param rawEdges - Edges from the earliest raw LLM representation (optional)
+ * @param v3Edges - Edges from the final V3 response (optional)
+ * @returns IntegrityWarningsOutput with warnings + evidence counts
  */
 export function runIntegrityChecks(
   rawNodes: RawNode[],
   v3Nodes: V3Node[],
   v3Options: V3Option[],
-): IntegrityWarning[] {
+  rawEdges: RawEdge[] = [],
+  v3Edges: V3Edge[] = [],
+): IntegrityWarningsOutput {
   const warnings: IntegrityWarning[] = [];
 
   // Build lookup maps by normalised ID.
@@ -258,5 +303,17 @@ export function runIntegrityChecks(
     );
   }
 
-  return warnings;
+  return {
+    warnings,
+    raw_counts: {
+      node_count: rawNodes.length,
+      edge_count: rawEdges.length,
+      node_ids: rawNodes.map((n) => n.id),
+    },
+    output_counts: {
+      node_count: v3Nodes.length,
+      edge_count: v3Edges.length,
+      node_ids: v3Nodes.map((n) => n.id),
+    },
+  };
 }
