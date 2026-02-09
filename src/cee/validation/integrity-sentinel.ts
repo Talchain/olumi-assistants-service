@@ -23,7 +23,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import { normaliseIdBase } from "../utils/id-normalizer.js";
-import { DEFAULT_STRENGTH_MEAN } from "../transforms/schema-v3.js";
+import { DEFAULT_STRENGTH_MEAN } from "../constants.js";
 
 // ============================================================================
 // Types
@@ -447,14 +447,15 @@ export function detectStrengthDefaults(
     };
   }
 
-  // Count edges with default strength value
-  // Use strict equality since DEFAULT_STRENGTH_MEAN is set programmatically (not via float arithmetic)
+  // Count edges with default strength value (both positive and negative)
+  // Use Math.abs() because transform applies sign adjustment based on effect_direction,
+  // so defaulted edges may be +0.5 or -0.5 depending on polarity.
   let defaultedCount = 0;
   for (const edge of causalEdges) {
     const edgeData = edge as { strength_mean?: number; [key: string]: unknown };
     const strengthMean = edgeData.strength_mean;
 
-    if (strengthMean === DEFAULT_STRENGTH_MEAN) {
+    if (strengthMean !== undefined && Math.abs(strengthMean) === DEFAULT_STRENGTH_MEAN) {
       defaultedCount++;
     }
   }

@@ -37,17 +37,7 @@ import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
 import { runIntegrityChecks, detectStrengthDefaults } from "../validation/integrity-sentinel.js";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Default strength mean value applied when LLM omits strength data.
- * Used in edge transformation fallback (schema-v3) and detection (integrity-sentinel).
- * Shared constant prevents drift between fallback and detection logic.
- */
-export const DEFAULT_STRENGTH_MEAN = 0.5;
+import { DEFAULT_STRENGTH_MEAN } from "../constants.js";
 
 // ============================================================================
 // V3 Types

@@ -724,5 +724,36 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_defaults.defaulted_count).toBe(0);
       expect(result.strength_defaults.detected).toBe(false);
     });
+
+    it("detects negative defaults (-0.5) from effect_direction sign adjustment", () => {
+      // When LLM omits strength data and edge has effect_direction: "negative",
+      // transform applies sign flip: default 0.5 → -0.5 after adjustment.
+      // Detection should count both +0.5 and -0.5 as defaults via Math.abs().
+      const rawNodes = [
+        { id: "risk_a", kind: "risk" },
+        { id: "risk_b", kind: "risk" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "risk_a", kind: "risk" },
+        { id: "risk_b", kind: "risk" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // Negative defaults (sign-adjusted from 0.5 → -0.5)
+        { from: "risk_a", to: "goal", strength_mean: -0.5, effect_direction: "negative" },
+        { from: "risk_b", to: "goal", strength_mean: -0.5, effect_direction: "negative" },
+        // Positive default
+        { from: "risk_a", to: "risk_b", strength_mean: 0.5 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // All 3 edges have default magnitude (|±0.5|) → 100% defaulted
+      expect(result.strength_defaults.detected).toBe(true);
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_defaults.defaulted_count).toBe(3);
+      expect(result.strength_defaults.default_value).toBe(0.5);
+    });
   });
 });
