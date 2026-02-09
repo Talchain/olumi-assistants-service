@@ -55,6 +55,22 @@ export interface IntegrityWarningsOutput {
     edge_count: number;
     node_ids: string[];
   };
+  /** CIL Phase 1: Strength default detection */
+  strength_defaults: {
+    detected: boolean;
+    total_edges: number;
+    defaulted_count: number;
+    default_value: number | null;  // null if no defaulting detected
+  };
+  /**
+   * @deprecated Use input_counts instead. Removal target: Phase 2 or v2.0.0.
+   * Backward compatibility shim added in Phase 0.2 — raw_counts is an alias for input_counts.
+   */
+  raw_counts?: {
+    node_count: number;
+    edge_count: number;
+    node_ids: string[];
+  };
 }
 
 /** Minimal shape of a pipeline V1 node (input to V3 transform). */
@@ -302,6 +318,17 @@ export function runIntegrityChecks(
     }
   }
 
+  // ── CIL Phase 1: Strength Default Detection ────────────────────────────
+  const strengthDefaults = detectStrengthDefaults(v3Nodes, v3Edges);
+
+  // Add STRENGTH_DEFAULT_APPLIED warning if threshold exceeded
+  if (strengthDefaults.detected) {
+    warnings.push({
+      code: "STRENGTH_DEFAULT_APPLIED",
+      details: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${Math.round((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100)}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
+    });
+  }
+
   if (warnings.length > 0) {
     log.info(
       {
@@ -325,5 +352,114 @@ export function runIntegrityChecks(
       edge_count: v3Edges.length,
       node_ids: v3Nodes.map((n) => n.id),
     },
+    strength_defaults: {
+      detected: strengthDefaults.detected,
+      total_edges: strengthDefaults.total_edges,
+      defaulted_count: strengthDefaults.defaulted_count,
+      default_value: strengthDefaults.default_value,
+    },
+    // Backward compatibility shim (deprecated, remove in Phase 2)
+    raw_counts: {
+      node_count: inputNodes.length,
+      edge_count: inputEdges.length,
+      node_ids: inputNodes.map((n) => n.id),
+    },
+  };
+}
+
+// ============================================================================
+// Strength Default Detection (CIL Phase 1)
+// ============================================================================
+
+/** Result of strength default detection. */
+interface StrengthDefaultsResult {
+  /** Whether uniform defaulting was detected (≥80% threshold met) */
+  detected: boolean;
+  /** Total number of causal edges analyzed (excludes structural edges) */
+  total_edges: number;
+  /** Count of edges with default strength value (0.5) */
+  defaulted_count: number;
+  /** The default value detected, or null if no defaulting */
+  default_value: number | null;
+}
+
+/**
+ * Detect uniform strength defaults in V3 edges.
+ *
+ * Checks if ≥80% of causal edges have strength_mean === 0.5, indicating the
+ * LLM did not output varied strength coefficients (strength data was missing
+ * and fell back to the default in schema-v3.ts).
+ *
+ * Excludes structural edges (decision→option, option→factor) from analysis,
+ * as these are synthetic edges added by the pipeline, not LLM output.
+ *
+ * Minimum threshold: 3 edges required to avoid false positives on tiny graphs.
+ *
+ * @param v3Nodes - V3 nodes (used to identify option nodes)
+ * @param v3Edges - V3 edges to analyze
+ * @returns Detection result with counts and detected flag
+ */
+function detectStrengthDefaults(
+  v3Nodes: V3Node[],
+  v3Edges: V3Edge[],
+): StrengthDefaultsResult {
+  const DEFAULT_STRENGTH = 0.5;
+  const EPSILON = 0.001; // Tolerance for float comparison
+  const THRESHOLD = 0.8; // 80%
+  const MIN_EDGES = 3; // Minimum edges required for detection
+
+  // Build option node set for structural edge exclusion
+  const optionIds = new Set(
+    v3Nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  // Filter to causal edges only (exclude structural edges)
+  const causalEdges = v3Edges.filter((edge) => {
+    const edgeData = edge as { from: string; to: string; [key: string]: unknown };
+
+    // Exclude decision→option edges (synthetic pipeline edges)
+    const fromNode = v3Nodes.find((n) => n.id === edgeData.from);
+    const isDecisionToOption = fromNode?.kind === "decision" && optionIds.has(edgeData.to);
+
+    // Exclude option→factor edges (synthetic pipeline edges)
+    const isOptionToFactor = optionIds.has(edgeData.from);
+
+    return !isDecisionToOption && !isOptionToFactor;
+  });
+
+  const totalEdges = causalEdges.length;
+
+  // If too few edges, don't flag as issue (avoid false positives)
+  if (totalEdges < MIN_EDGES) {
+    return {
+      detected: false,
+      total_edges: totalEdges,
+      defaulted_count: 0,
+      default_value: null,
+    };
+  }
+
+  // Count edges with default strength value
+  let defaultedCount = 0;
+  for (const edge of causalEdges) {
+    const edgeData = edge as { strength_mean?: number; [key: string]: unknown };
+    const strengthMean = edgeData.strength_mean;
+
+    if (
+      strengthMean !== undefined &&
+      Math.abs(strengthMean - DEFAULT_STRENGTH) < EPSILON
+    ) {
+      defaultedCount++;
+    }
+  }
+
+  const defaultPercentage = defaultedCount / totalEdges;
+  const detected = defaultPercentage >= THRESHOLD;
+
+  return {
+    detected,
+    total_edges: totalEdges,
+    defaulted_count: defaultedCount,
+    default_value: detected ? DEFAULT_STRENGTH : null,
   };
 }

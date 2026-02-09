@@ -453,4 +453,224 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.output_counts.edge_count).toBe(0);
     });
   });
+
+  // ── CIL Phase 1: STRENGTH_DEFAULT_APPLIED ──────────────────────────────
+  describe("STRENGTH_DEFAULT_APPLIED (Phase 1)", () => {
+    it("detects uniform 0.5 strength values across all edges", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.detected).toBe(true);
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_defaults.defaulted_count).toBe(3);
+      expect(result.strength_defaults.default_value).toBe(0.5);
+
+      const strengthWarnings = result.warnings.filter(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarnings).toHaveLength(1);
+      expect(strengthWarnings[0].details).toContain("100%");
+      expect(strengthWarnings[0].details).toContain("3 of 3 edges");
+    });
+
+    it("does NOT detect when edges have varied strength values", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.3 },
+        { from: "factor_b", to: "goal", strength_mean: 0.7 },
+        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.detected).toBe(false);
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+      expect(result.strength_defaults.default_value).toBe(null);
+
+      const strengthWarnings = result.warnings.filter(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarnings).toHaveLength(0);
+    });
+
+    it("detects when exactly 80% threshold is met (4 of 5 edges)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+        { from: "factor_b", to: "goal", strength_mean: 0.8 }, // One varied edge
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.detected).toBe(true);
+      expect(result.strength_defaults.total_edges).toBe(5);
+      expect(result.strength_defaults.defaulted_count).toBe(4);
+      expect(result.strength_defaults.default_value).toBe(0.5);
+
+      const strengthWarnings = result.warnings.filter(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarnings).toHaveLength(1);
+      expect(strengthWarnings[0].details).toContain("80%");
+    });
+
+    it("does NOT detect when below 80% threshold (3 of 5 = 60%)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "goal", strength_mean: 0.7 },
+        { from: "factor_b", to: "goal", strength_mean: 0.8 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.detected).toBe(false);
+      expect(result.strength_defaults.total_edges).toBe(5);
+      expect(result.strength_defaults.defaulted_count).toBe(3);
+
+      const strengthWarnings = result.warnings.filter(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarnings).toHaveLength(0);
+    });
+
+    it("does NOT detect when edge count is below minimum (< 3 edges)", () => {
+      const rawNodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
+      const v3Nodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
+      const v3Edges = [
+        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.detected).toBe(false);
+      expect(result.strength_defaults.total_edges).toBe(2);
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+
+      const strengthWarnings = result.warnings.filter(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarnings).toHaveLength(0);
+    });
+
+    it("excludes structural edges (decision→option, option→factor) from analysis", () => {
+      const rawNodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "factor_price", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "factor_price", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // Structural edges (excluded)
+        { from: "decision", to: "option_a", strength_mean: 0.5 },
+        { from: "option_a", to: "factor_price", strength_mean: 0.5 },
+        // Causal edges (included)
+        { from: "factor_price", to: "goal", strength_mean: 0.5 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Only 3 causal edges should be analyzed (structural excluded)
+      expect(result.strength_defaults.detected).toBe(true);
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_defaults.defaulted_count).toBe(3);
+    });
+
+    it("strength_defaults counter is always present (even when no defaulting)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "goal", strength_mean: 0.3 },
+        { from: "factor_a", to: "goal", strength_mean: 0.7 },
+        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Counter should exist even when no defaulting detected
+      expect(result.strength_defaults).toBeDefined();
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+      expect(result.strength_defaults.default_value).toBe(null);
+    });
+
+    it("strength_defaults counter exists even with zero edges", () => {
+      const rawNodes = [{ id: "factor_a", kind: "factor" }];
+      const v3Nodes = [{ id: "factor_a", kind: "factor" }];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], []);
+
+      expect(result.strength_defaults).toBeDefined();
+      expect(result.strength_defaults.total_edges).toBe(0);
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+      expect(result.strength_defaults.default_value).toBe(null);
+    });
+  });
 });

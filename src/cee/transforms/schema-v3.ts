@@ -684,6 +684,22 @@ export function transformResponseToV3(
         raw_counts: sentinelOutput.input_counts, // Deprecated: use input_counts
       };
       v3Response.trace.pipeline = pipeline;
+
+      // CIL Phase 1: Propagate STRENGTH_DEFAULT_APPLIED warning to validation_warnings
+      const strengthWarning = sentinelOutput.warnings.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      if (strengthWarning) {
+        const validationWarning = {
+          code: "STRENGTH_DEFAULT_APPLIED",
+          message: strengthWarning.details,
+          severity: "warning" as const,
+        };
+        if (!v3Response.validation_warnings) {
+          v3Response.validation_warnings = [];
+        }
+        v3Response.validation_warnings.push(validationWarning);
+      }
     } catch (err) {
       // Sentinel must never block the response
       log.warn(
