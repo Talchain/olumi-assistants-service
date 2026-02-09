@@ -36,7 +36,7 @@ import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
-import { runIntegrityChecks } from "../validation/integrity-sentinel.js";
+import { runIntegrityChecks, detectStrengthDefaults } from "../validation/integrity-sentinel.js";
 
 // ============================================================================
 // V3 Types
@@ -622,6 +622,22 @@ export function transformResponseToV3(
     v3Response.goal_constraints = v1GoalConstraints;
   }
 
+  // CIL Phase 1: Strength default detection (production-enabled, not debug-gated)
+  // Run unconditionally so user-facing warning appears in all responses
+  const strengthDefaults = detectStrengthDefaults(
+    v3Graph.nodes as any[],
+    v3Graph.edges as any[]
+  );
+
+  // Add STRENGTH_DEFAULT_APPLIED to validation_warnings if threshold exceeded
+  if (strengthDefaults.detected) {
+    validationWarnings.push({
+      code: "STRENGTH_DEFAULT_APPLIED",
+      message: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${Math.round((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100)}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
+      severity: "warning" as const,
+    });
+  }
+
   // Add validation warnings if any
   if (validationWarnings.length > 0) {
     v3Response.validation_warnings = validationWarnings;
@@ -684,22 +700,6 @@ export function transformResponseToV3(
         raw_counts: sentinelOutput.input_counts, // Deprecated: use input_counts
       };
       v3Response.trace.pipeline = pipeline;
-
-      // CIL Phase 1: Propagate STRENGTH_DEFAULT_APPLIED warning to validation_warnings
-      const strengthWarning = sentinelOutput.warnings.find(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      if (strengthWarning) {
-        const validationWarning = {
-          code: "STRENGTH_DEFAULT_APPLIED",
-          message: strengthWarning.details,
-          severity: "warning" as const,
-        };
-        if (!v3Response.validation_warnings) {
-          v3Response.validation_warnings = [];
-        }
-        v3Response.validation_warnings.push(validationWarning);
-      }
     } catch (err) {
       // Sentinel must never block the response
       log.warn(

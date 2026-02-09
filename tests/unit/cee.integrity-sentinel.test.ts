@@ -475,17 +475,15 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
+      // Verify counter values (warning is added at schema-v3 level, not here)
       expect(result.strength_defaults.detected).toBe(true);
       expect(result.strength_defaults.total_edges).toBe(3);
       expect(result.strength_defaults.defaulted_count).toBe(3);
       expect(result.strength_defaults.default_value).toBe(0.5);
 
-      const strengthWarnings = result.warnings.filter(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(strengthWarnings).toHaveLength(1);
-      expect(strengthWarnings[0].details).toContain("100%");
-      expect(strengthWarnings[0].details).toContain("3 of 3 edges");
+      // Note: STRENGTH_DEFAULT_APPLIED warning is no longer added to result.warnings here.
+      // It's added to validation_warnings in schema-v3.ts for production visibility.
+      // See integration tests for end-to-end warning propagation.
     });
 
     it("does NOT detect when edges have varied strength values", () => {
@@ -507,15 +505,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
+      // No uniform defaulting - detected should be false
       expect(result.strength_defaults.detected).toBe(false);
       expect(result.strength_defaults.total_edges).toBe(3);
       expect(result.strength_defaults.defaulted_count).toBe(0);
       expect(result.strength_defaults.default_value).toBe(null);
-
-      const strengthWarnings = result.warnings.filter(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(strengthWarnings).toHaveLength(0);
     });
 
     it("detects when exactly 80% threshold is met (4 of 5 edges)", () => {
@@ -541,16 +535,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
+      // 80% threshold met - detected flag should be true
       expect(result.strength_defaults.detected).toBe(true);
       expect(result.strength_defaults.total_edges).toBe(5);
       expect(result.strength_defaults.defaulted_count).toBe(4);
       expect(result.strength_defaults.default_value).toBe(0.5);
-
-      const strengthWarnings = result.warnings.filter(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(strengthWarnings).toHaveLength(1);
-      expect(strengthWarnings[0].details).toContain("80%");
     });
 
     it("does NOT detect when below 80% threshold (3 of 5 = 60%)", () => {
@@ -576,14 +565,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
+      // Below 80% threshold (60%) - should not be detected
       expect(result.strength_defaults.detected).toBe(false);
       expect(result.strength_defaults.total_edges).toBe(5);
       expect(result.strength_defaults.defaulted_count).toBe(3);
-
-      const strengthWarnings = result.warnings.filter(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(strengthWarnings).toHaveLength(0);
     });
 
     it("does NOT detect when edge count is below minimum (< 3 edges)", () => {
@@ -596,14 +581,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
+      // Below minimum edge count (MIN_EDGES = 3) - should not be detected
       expect(result.strength_defaults.detected).toBe(false);
       expect(result.strength_defaults.total_edges).toBe(2);
       expect(result.strength_defaults.defaulted_count).toBe(0);
-
-      const strengthWarnings = result.warnings.filter(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(strengthWarnings).toHaveLength(0);
     });
 
     it("excludes structural edges (decision→option, option→factor) from analysis", () => {
@@ -671,6 +652,31 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_defaults.total_edges).toBe(0);
       expect(result.strength_defaults.defaulted_count).toBe(0);
       expect(result.strength_defaults.default_value).toBe(null);
+    });
+
+    it("excludes edges with missing nodes (malformed graphs)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+        // Note: factor_b is missing but referenced in edges
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5 }, // Missing from node
+        { from: "factor_a", to: "factor_missing", strength_mean: 0.5 }, // Missing to node
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Only 1 valid edge should be counted (edges with missing nodes excluded)
+      expect(result.strength_defaults.total_edges).toBe(1);
+      // With < MIN_EDGES (3), detection returns early with defaulted_count = 0
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+      expect(result.strength_defaults.detected).toBe(false);
     });
   });
 });

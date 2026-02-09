@@ -319,15 +319,10 @@ export function runIntegrityChecks(
   }
 
   // ── CIL Phase 1: Strength Default Detection ────────────────────────────
+  // Note: STRENGTH_DEFAULT_APPLIED warning is added to validation_warnings in
+  // schema-v3.ts (production-enabled, not debug-gated). Here we only populate
+  // the counter for debug bundle evidence.
   const strengthDefaults = detectStrengthDefaults(v3Nodes, v3Edges);
-
-  // Add STRENGTH_DEFAULT_APPLIED warning if threshold exceeded
-  if (strengthDefaults.detected) {
-    warnings.push({
-      code: "STRENGTH_DEFAULT_APPLIED",
-      details: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${Math.round((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100)}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
-    });
-  }
 
   if (warnings.length > 0) {
     log.info(
@@ -372,7 +367,7 @@ export function runIntegrityChecks(
 // ============================================================================
 
 /** Result of strength default detection. */
-interface StrengthDefaultsResult {
+export interface StrengthDefaultsResult {
   /** Whether uniform defaulting was detected (≥80% threshold met) */
   detected: boolean;
   /** Total number of causal edges analyzed (excludes structural edges) */
@@ -390,7 +385,7 @@ interface StrengthDefaultsResult {
  * LLM did not output varied strength coefficients (strength data was missing
  * and fell back to the default in schema-v3.ts).
  *
- * Excludes structural edges (decision→option, option→factor) from analysis,
+ * Excludes structural edges (decision→option, option→*) from analysis,
  * as these are synthetic edges added by the pipeline, not LLM output.
  *
  * Minimum threshold: 3 edges required to avoid false positives on tiny graphs.
@@ -399,7 +394,7 @@ interface StrengthDefaultsResult {
  * @param v3Edges - V3 edges to analyze
  * @returns Detection result with counts and detected flag
  */
-function detectStrengthDefaults(
+export function detectStrengthDefaults(
   v3Nodes: V3Node[],
   v3Edges: V3Edge[],
 ): StrengthDefaultsResult {
@@ -408,7 +403,14 @@ function detectStrengthDefaults(
   const THRESHOLD = 0.8; // 80%
   const MIN_EDGES = 3; // Minimum edges required for detection
 
-  // Build option node set for structural edge exclusion
+  // Build lookup maps for O(1) node kind checks (performance optimization)
+  const nodeKindMap = new Map<string, string>();
+  for (const node of v3Nodes) {
+    if (node.kind) {
+      nodeKindMap.set(node.id, node.kind);
+    }
+  }
+
   const optionIds = new Set(
     v3Nodes.filter((n) => n.kind === "option").map((n) => n.id)
   );
@@ -417,14 +419,19 @@ function detectStrengthDefaults(
   const causalEdges = v3Edges.filter((edge) => {
     const edgeData = edge as { from: string; to: string; [key: string]: unknown };
 
+    // Defensively exclude edges with missing nodes (malformed graphs)
+    const fromKind = nodeKindMap.get(edgeData.from);
+    const toKind = nodeKindMap.get(edgeData.to);
+    if (!fromKind || !toKind) return false; // Missing from or to node - exclude
+
+    // Exclude ALL option-outgoing edges (structural/synthetic)
+    if (optionIds.has(edgeData.from)) return false;
+
     // Exclude decision→option edges (synthetic pipeline edges)
-    const fromNode = v3Nodes.find((n) => n.id === edgeData.from);
-    const isDecisionToOption = fromNode?.kind === "decision" && optionIds.has(edgeData.to);
+    const isDecisionToOption = fromKind === "decision" && optionIds.has(edgeData.to);
+    if (isDecisionToOption) return false;
 
-    // Exclude option→factor edges (synthetic pipeline edges)
-    const isOptionToFactor = optionIds.has(edgeData.from);
-
-    return !isDecisionToOption && !isOptionToFactor;
+    return true;
   });
 
   const totalEdges = causalEdges.length;

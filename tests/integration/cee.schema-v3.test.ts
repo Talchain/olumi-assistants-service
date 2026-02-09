@@ -646,7 +646,7 @@ describe("CEE Schema V3 Integration", () => {
 
   // ── CIL Phase 1: Strength Default Detection ───────────────────────────
   describe("CIL Phase 1: Strength default warnings", () => {
-    it("detects uniform 0.5 strength → STRENGTH_DEFAULT_APPLIED in integrity_warnings AND validation_warnings", () => {
+    it("detects uniform 0.5 strength → warning in validation_warnings AND counter in integrity_warnings", () => {
       // Create V1 response with edges that all have strength_mean = 0.5 (uniform default)
       const v1Response = {
         graph: {
@@ -668,32 +668,10 @@ describe("CEE Schema V3 Integration", () => {
 
       const v3Response = transformResponseToV3(v1Response, {
         requestId: "test-strength-default",
-        includeDebug: true, // Enable sentinel
+        includeDebug: true, // Enable sentinel for counter
       });
 
-      // Verify integrity_warnings contains STRENGTH_DEFAULT_APPLIED
-      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
-      const iw = pipeline.integrity_warnings as {
-        warnings: Array<{ code: string; details: string }>;
-        strength_defaults: {
-          total_edges: number;
-          defaulted_count: number;
-          default_value: number | null;
-        };
-      };
-
-      expect(iw.warnings).toBeDefined();
-      const strengthWarning = iw.warnings.find((w) => w.code === "STRENGTH_DEFAULT_APPLIED");
-      expect(strengthWarning).toBeDefined();
-      expect(strengthWarning?.details).toContain("3 of 3 edges");
-      expect(strengthWarning?.details).toContain("100%");
-
-      // Verify strength_defaults counter
-      expect(iw.strength_defaults.total_edges).toBe(3);
-      expect(iw.strength_defaults.defaulted_count).toBe(3);
-      expect(iw.strength_defaults.default_value).toBe(0.5);
-
-      // Verify validation_warnings also contains STRENGTH_DEFAULT_APPLIED
+      // Verify validation_warnings contains STRENGTH_DEFAULT_APPLIED (user-facing)
       expect(v3Response.validation_warnings).toBeDefined();
       const validationStrengthWarning = v3Response.validation_warnings?.find(
         (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
@@ -701,9 +679,34 @@ describe("CEE Schema V3 Integration", () => {
       expect(validationStrengthWarning).toBeDefined();
       expect(validationStrengthWarning?.severity).toBe("warning");
       expect(validationStrengthWarning?.message).toContain("3 of 3 edges");
+      expect(validationStrengthWarning?.message).toContain("100%");
+
+      // Verify strength_defaults counter in integrity_warnings (debug evidence)
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
+      const iw = pipeline.integrity_warnings as {
+        warnings: Array<{ code: string }>;
+        strength_defaults: {
+          detected: boolean;
+          total_edges: number;
+          defaulted_count: number;
+          default_value: number | null;
+        };
+      };
+
+      expect(iw.strength_defaults).toBeDefined();
+      expect(iw.strength_defaults.detected).toBe(true);
+      expect(iw.strength_defaults.total_edges).toBe(3);
+      expect(iw.strength_defaults.defaulted_count).toBe(3);
+      expect(iw.strength_defaults.default_value).toBe(0.5);
+
+      // Warning is NOT in integrity_warnings.warnings (moved to validation_warnings)
+      const strengthWarningInIntegrity = iw.warnings.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarningInIntegrity).toBeUndefined();
     });
 
-    it("varied strength values → NO warning in integrity_warnings or validation_warnings", () => {
+    it("varied strength values → NO warning in validation_warnings", () => {
       const v1Response = {
         graph: {
           nodes: [
@@ -727,44 +730,59 @@ describe("CEE Schema V3 Integration", () => {
         includeDebug: true,
       });
 
-      // Verify NO STRENGTH_DEFAULT_APPLIED in integrity_warnings
+      // Verify NO STRENGTH_DEFAULT_APPLIED in validation_warnings
+      const validationStrengthWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(validationStrengthWarning).toBeUndefined();
+
+      // Counter should show 0 defaulted (debug evidence)
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
       const iw = pipeline.integrity_warnings as {
         warnings: Array<{ code: string }>;
         strength_defaults: { detected: boolean; total_edges: number; defaulted_count: number };
       };
 
-      const strengthWarning = iw.warnings.find((w) => w.code === "STRENGTH_DEFAULT_APPLIED");
-      expect(strengthWarning).toBeUndefined();
-
-      // Counter should show 0 defaulted
+      expect(iw.strength_defaults.detected).toBe(false);
       expect(iw.strength_defaults.total_edges).toBe(3);
       expect(iw.strength_defaults.defaulted_count).toBe(0);
-
-      // Verify NO STRENGTH_DEFAULT_APPLIED in validation_warnings
-      const validationStrengthWarning = v3Response.validation_warnings?.find(
-        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
-      );
-      expect(validationStrengthWarning).toBeUndefined();
     });
 
-    it("strength_defaults counter present even when includeDebug=false (sentinel disabled)", () => {
+    it("STRENGTH_DEFAULT_APPLIED appears in validation_warnings even when includeDebug=false (production mode)", () => {
+      // Critical: strength warnings must be user-visible in production, not debug-gated
       const v1Response = {
         graph: {
-          nodes: [{ id: "factor_a", kind: "factor", label: "Factor A", data: {} }],
-          edges: [],
+          nodes: [
+            { id: "factor_a", kind: "factor", label: "Factor A", data: {} },
+            { id: "factor_b", kind: "factor", label: "Factor B", data: {} },
+            { id: "goal", kind: "goal", label: "Goal", data: {} },
+          ],
+          edges: [
+            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.15 },
+            { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+            { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+          ],
         },
         options: [],
         quality: { overall: 0.8 },
-        trace: { request_id: "test-no-debug", pipeline: {} },
+        trace: { request_id: "test-prod-warning", pipeline: {} },
       };
 
       const v3Response = transformResponseToV3(v1Response, {
-        requestId: "test-no-debug",
-        includeDebug: false, // Sentinel disabled
+        requestId: "test-prod-warning",
+        includeDebug: false, // Production mode (sentinel disabled)
       });
 
-      // When sentinel is disabled, integrity_warnings won't exist
+      // Strength warning should appear in validation_warnings (user-facing)
+      expect(v3Response.validation_warnings).toBeDefined();
+      const strengthWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(strengthWarning).toBeDefined();
+      expect(strengthWarning?.message).toContain("3 of 3 edges");
+      expect(strengthWarning?.severity).toBe("warning");
+
+      // But integrity_warnings won't exist (sentinel disabled)
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown> | undefined;
       expect(pipeline?.integrity_warnings).toBeUndefined();
     });
