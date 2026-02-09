@@ -39,6 +39,17 @@ import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analys
 import { runIntegrityChecks, detectStrengthDefaults } from "../validation/integrity-sentinel.js";
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Default strength mean value applied when LLM omits strength data.
+ * Used in edge transformation fallback (schema-v3) and detection (integrity-sentinel).
+ * Shared constant prevents drift between fallback and detection logic.
+ */
+export const DEFAULT_STRENGTH_MEAN = 0.5;
+
+// ============================================================================
 // V3 Types
 // ============================================================================
 
@@ -248,7 +259,7 @@ export function transformEdgeToV3(
   _nodes: V1Node[]
 ): EdgeV3T {
   // V4 fields take precedence, fallback to legacy for backwards compatibility
-  const rawStrength = edge.strength_mean ?? edge.weight ?? 0.5;
+  const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
   const beliefExists = edge.belief_exists ?? edge.belief ?? 0.5;
 
   // In V3, strength_mean is a signed coefficient

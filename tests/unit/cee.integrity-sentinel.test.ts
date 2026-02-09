@@ -678,5 +678,51 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_defaults.defaulted_count).toBe(0);
       expect(result.strength_defaults.detected).toBe(false);
     });
+
+    it("excludes all option-outgoing edges from strength analysis", () => {
+      // Per Platform Contract v2.6 Appendix A, option nodes are organisational (not causal)
+      // and do not participate in inference. This test verifies that option-outgoing edges
+      // are excluded even when they have default strength values.
+      const rawNodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "option_b", kind: "option" },
+        { id: "factor_x", kind: "factor" },
+        { id: "factor_y", kind: "factor" },
+        { id: "outcome", kind: "outcome" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "option_b", kind: "option" },
+        { id: "factor_x", kind: "factor" },
+        { id: "factor_y", kind: "factor" },
+        { id: "outcome", kind: "outcome" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // Option-outgoing edges with 0.5 (excluded from analysis)
+        { from: "option_a", to: "factor_x", strength_mean: 0.5 },
+        { from: "option_a", to: "factor_y", strength_mean: 0.5 },
+        { from: "option_b", to: "factor_x", strength_mean: 0.5 },
+        { from: "option_b", to: "outcome", strength_mean: 0.5 },
+        // Decision→option edges (excluded)
+        { from: "decision", to: "option_a", strength_mean: 0.5 },
+        { from: "decision", to: "option_b", strength_mean: 0.5 },
+        // Causal edges with varied strengths (included)
+        { from: "factor_x", to: "outcome", strength_mean: 0.3 },
+        { from: "factor_y", to: "outcome", strength_mean: 0.7 },
+        { from: "outcome", to: "goal", strength_mean: 0.9 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Only 3 causal edges should be counted (all structural edges excluded)
+      expect(result.strength_defaults.total_edges).toBe(3);
+      // Causal edges have varied strengths → no defaulting detected
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+      expect(result.strength_defaults.detected).toBe(false);
+    });
   });
 });

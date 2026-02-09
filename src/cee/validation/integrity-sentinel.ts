@@ -23,6 +23,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import { normaliseIdBase } from "../utils/id-normalizer.js";
+import { DEFAULT_STRENGTH_MEAN } from "../transforms/schema-v3.js";
 
 // ============================================================================
 // Types
@@ -398,8 +399,6 @@ export function detectStrengthDefaults(
   v3Nodes: V3Node[],
   v3Edges: V3Edge[],
 ): StrengthDefaultsResult {
-  const DEFAULT_STRENGTH = 0.5;
-  const EPSILON = 0.001; // Tolerance for float comparison
   const THRESHOLD = 0.8; // 80%
   const MIN_EDGES = 3; // Minimum edges required for detection
 
@@ -424,7 +423,9 @@ export function detectStrengthDefaults(
     const toKind = nodeKindMap.get(edgeData.to);
     if (!fromKind || !toKind) return false; // Missing from or to node - exclude
 
-    // Exclude ALL option-outgoing edges (structural/synthetic)
+    // Option nodes are organisational (not causal). Per Platform Contract v2.6 Appendix A,
+    // option nodes do not participate in inference. All option-outgoing edges are synthetic
+    // pipeline edges and excluded from strength quality analysis.
     if (optionIds.has(edgeData.from)) return false;
 
     // Exclude decision→option edges (synthetic pipeline edges)
@@ -447,15 +448,13 @@ export function detectStrengthDefaults(
   }
 
   // Count edges with default strength value
+  // Use strict equality since DEFAULT_STRENGTH_MEAN is set programmatically (not via float arithmetic)
   let defaultedCount = 0;
   for (const edge of causalEdges) {
     const edgeData = edge as { strength_mean?: number; [key: string]: unknown };
     const strengthMean = edgeData.strength_mean;
 
-    if (
-      strengthMean !== undefined &&
-      Math.abs(strengthMean - DEFAULT_STRENGTH) < EPSILON
-    ) {
+    if (strengthMean === DEFAULT_STRENGTH_MEAN) {
       defaultedCount++;
     }
   }
@@ -467,6 +466,6 @@ export function detectStrengthDefaults(
     detected,
     total_edges: totalEdges,
     defaulted_count: defaultedCount,
-    default_value: detected ? DEFAULT_STRENGTH : null,
+    default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
   };
 }
