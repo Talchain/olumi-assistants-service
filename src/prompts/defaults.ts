@@ -1190,7 +1190,7 @@ Respond ONLY with valid JSON.`;
  * Version identifier for the decision review fallback prompt.
  * Used for telemetry when prompt admin is unavailable.
  */
-export const DECISION_REVIEW_PROMPT_VERSION = 'v8';
+export const DECISION_REVIEW_PROMPT_VERSION = 'v9';
 
 const DECISION_REVIEW_PROMPT = `<ROLE>
 You transform deterministic analysis signals into plain-English explanations,
@@ -1272,7 +1272,9 @@ Build your response in this order. Each step feeds the next — maintain coheren
 <GROUNDING_RULES>
 NUMBERS:
 - Descriptive fields (narrative_summary, robustness_explanation, readiness_rationale,
-  bias_findings.description, scenario_contexts, flip_thresholds): every number must appear in inputs (±10%).
+  bias_findings.description, scenario_contexts, flip_thresholds,
+  pre_mortem.failure_scenario, pre_mortem.warning_signs, pre_mortem.mitigation,
+  pre_mortem.review_trigger): every number must appear in inputs (±10%).
 - Prescriptive fields (specific_action, decision_hygiene, warning_signs, mitigation,
   suggested_action): prefer qualitative phrasing. Numbers from brief are valid if quoted accurately.
 - Percentages and decimals are equivalent: 0.77 = 77%. Do not round aggressively
@@ -1477,8 +1479,10 @@ pre_mortem (object, OPTIONAL):
     mitigation (string): One concrete risk-reduction step.
     grounded_in (string[]): Array of fragile edge_ids or evidence gap factor_ids. MUST be non-empty.
     review_trigger (string, optional): "Reconvene if [condition] within [timeframe]"
-      Avoid numerals in timeframe unless it appears in the brief. Prefer qualitative
-      timeframes ("before launch", "next planning cycle") over invented dates or durations.
+      Do NOT use numerals (percentages, durations, counts) unless they appear verbatim in
+      the brief as a timeframe or threshold. Use qualitative timeframes: "before launch",
+      "next planning cycle", "within one review period". Invented thresholds like "15%"
+      or "3 months" are grounding violations.
 
 framing_check (object, OPTIONAL):
   Include ONLY if options don't address the stated goal, or goal is framed as an action

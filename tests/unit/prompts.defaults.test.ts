@@ -233,13 +233,13 @@ describe('Integration with Loader', () => {
   });
 });
 
-describe('Decision Review Fallback Prompt (v8)', () => {
+describe('Decision Review Fallback Prompt (v9)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
 
-  it('exports DECISION_REVIEW_PROMPT_VERSION as v8', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v8');
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v9', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v9');
   });
 
   it('decision_review prompt is registered', () => {
