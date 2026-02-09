@@ -27,7 +27,7 @@ export const ExtractionMetadata = z.object({
   confidence: z.enum(["high", "medium", "low"]),
   /** Explanation for transparency */
   reasoning: z.string().optional(),
-});
+}).passthrough(); // CIL Phase 0.2: preserve additive fields
 export type ExtractionMetadataT = z.infer<typeof ExtractionMetadata>;
 
 /**

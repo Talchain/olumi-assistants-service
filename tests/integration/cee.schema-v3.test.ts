@@ -528,23 +528,23 @@ describe("CEE Schema V3 Integration", () => {
 
       const iw = pipeline!.integrity_warnings as {
         warnings: Array<{ code: string; node_id?: string; details: string }>;
-        raw_counts: { node_count: number; edge_count: number; node_ids: string[] };
+        input_counts: { node_count: number; edge_count: number; node_ids: string[] };
         output_counts: { node_count: number; edge_count: number; node_ids: string[] };
       };
 
       // Shape checks
       expect(Array.isArray(iw.warnings)).toBe(true);
-      expect(iw.raw_counts).toBeDefined();
+      expect(iw.input_counts).toBeDefined();
       expect(iw.output_counts).toBeDefined();
-      expect(typeof iw.raw_counts.node_count).toBe("number");
-      expect(typeof iw.raw_counts.edge_count).toBe("number");
-      expect(Array.isArray(iw.raw_counts.node_ids)).toBe(true);
+      expect(typeof iw.input_counts.node_count).toBe("number");
+      expect(typeof iw.input_counts.edge_count).toBe("number");
+      expect(Array.isArray(iw.input_counts.node_ids)).toBe(true);
       expect(typeof iw.output_counts.node_count).toBe("number");
       expect(typeof iw.output_counts.edge_count).toBe("number");
       expect(Array.isArray(iw.output_counts.node_ids)).toBe(true);
     });
 
-    it("includeDebug=true → raw_counts and output_counts reflect actual graph", () => {
+    it("includeDebug=true → input_counts and output_counts reflect actual graph", () => {
       const v3Response = transformResponseToV3(sampleV1Response, {
         requestId: "test-bundle-counts",
         includeDebug: true,
@@ -553,20 +553,20 @@ describe("CEE Schema V3 Integration", () => {
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
       const iw = pipeline.integrity_warnings as {
         warnings: Array<{ code: string; node_id?: string }>;
-        raw_counts: { node_count: number; edge_count: number; node_ids: string[] };
+        input_counts: { node_count: number; edge_count: number; node_ids: string[] };
         output_counts: { node_count: number; edge_count: number; node_ids: string[] };
       };
 
-      // raw_counts should reflect the V1 input graph
-      expect(iw.raw_counts.node_count).toBe(sampleV1Response.graph.nodes.length);
-      expect(iw.raw_counts.edge_count).toBe(sampleV1Response.graph.edges.length);
+      // input_counts should reflect the V1 input graph
+      expect(iw.input_counts.node_count).toBe(sampleV1Response.graph.nodes.length);
+      expect(iw.input_counts.edge_count).toBe(sampleV1Response.graph.edges.length);
 
       // output_counts should reflect the V3 output
       expect(iw.output_counts.node_count).toBe(v3Response.nodes.length);
       expect(iw.output_counts.edge_count).toBe(v3Response.edges.length);
     });
 
-    it("includeDebug=true → output node_ids are subset of raw node_ids after normalisation", () => {
+    it("includeDebug=true → output node_ids are subset of input node_ids after normalisation", () => {
       const v3Response = transformResponseToV3(sampleV1Response, {
         requestId: "test-bundle-subset",
         includeDebug: true,
@@ -575,17 +575,17 @@ describe("CEE Schema V3 Integration", () => {
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
       const iw = pipeline.integrity_warnings as {
         warnings: Array<{ code: string; node_id?: string }>;
-        raw_counts: { node_count: number; node_ids: string[] };
+        input_counts: { node_count: number; node_ids: string[] };
         output_counts: { node_count: number; node_ids: string[] };
       };
 
-      const rawNormIds = new Set(iw.raw_counts.node_ids.map((id: string) => normaliseIdForMatch(id)));
+      const inputNormIds = new Set(iw.input_counts.node_ids.map((id: string) => normaliseIdForMatch(id)));
       const outputNormIds = iw.output_counts.node_ids.map((id: string) => normaliseIdForMatch(id));
 
-      // Every output node should have a corresponding raw node (after normalisation)
+      // Every output node should have a corresponding input node (after normalisation)
       // OR a NODE_DROPPED / SYNTHETIC_NODE_INJECTED warning should exist
       for (const outId of outputNormIds) {
-        if (!rawNormIds.has(outId)) {
+        if (!inputNormIds.has(outId)) {
           // Must have a SYNTHETIC_NODE_INJECTED warning
           const syntheticWarning = iw.warnings.find(
             (w) => w.code === "SYNTHETIC_NODE_INJECTED" && normaliseIdForMatch(w.node_id ?? "") === outId
@@ -594,13 +594,13 @@ describe("CEE Schema V3 Integration", () => {
         }
       }
 
-      // Any raw node not in output should have a NODE_DROPPED warning
+      // Any input node not in output should have a NODE_DROPPED warning
       const outputNormIdSet = new Set(outputNormIds);
-      for (const rawId of iw.raw_counts.node_ids) {
-        const normRawId = normaliseIdForMatch(rawId);
-        if (!outputNormIdSet.has(normRawId)) {
+      for (const inputId of iw.input_counts.node_ids) {
+        const normInputId = normaliseIdForMatch(inputId);
+        if (!outputNormIdSet.has(normInputId)) {
           const droppedWarning = iw.warnings.find(
-            (w) => w.code === "NODE_DROPPED" && normaliseIdForMatch(w.node_id ?? "") === normRawId
+            (w) => w.code === "NODE_DROPPED" && normaliseIdForMatch(w.node_id ?? "") === normInputId
           );
           expect(droppedWarning).toBeDefined();
         }
@@ -618,6 +618,29 @@ describe("CEE Schema V3 Integration", () => {
       if (pipeline) {
         expect(pipeline.integrity_warnings).toBeUndefined();
       }
+    });
+
+    it("includeDebug=true → raw_counts (deprecated) aliases input_counts for backward compat", () => {
+      const v3Response = transformResponseToV3(sampleV1Response, {
+        requestId: "test-bundle-compat",
+        includeDebug: true,
+      });
+
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
+      const iw = pipeline.integrity_warnings as {
+        warnings: Array<{ code: string }>;
+        input_counts: { node_count: number; edge_count: number; node_ids: string[] };
+        raw_counts?: { node_count: number; edge_count: number; node_ids: string[] };
+      };
+
+      // Both keys should exist
+      expect(iw.input_counts).toBeDefined();
+      expect(iw.raw_counts).toBeDefined();
+
+      // raw_counts should be identical to input_counts (backward compat shim)
+      expect(iw.raw_counts!.node_count).toBe(iw.input_counts.node_count);
+      expect(iw.raw_counts!.edge_count).toBe(iw.input_counts.edge_count);
+      expect(iw.raw_counts!.node_ids).toEqual(iw.input_counts.node_ids);
     });
   });
 });

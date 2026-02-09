@@ -1,19 +1,24 @@
 /**
- * CIL Phase 0.1 — Sentinel Integrity Checks
+ * CIL Phase 0.2 — Sentinel Integrity Checks
  *
- * Compares LLM raw graph output against the final V3 response to detect
- * silent data loss between pipeline stages. Debug-only, non-blocking.
+ * Compares the post-pipeline V1 graph against the final V3 response to detect
+ * silent data loss during the V3 transform. Debug-only, non-blocking.
+ *
+ * Note: "input"/"pipeline" refers to the post-pipeline V1 graph, not the
+ * raw LLM output. Pre-pipeline losses (cycle breaking, isolated pruning,
+ * graph compliance) are traced via corrections[], not the sentinel.
+ * Phase 1 will capture actual LLM raw output for full-pipeline comparison.
  *
  * Gated by the debug bundle mechanism (observabilityEnabled / include_debug)
  * so sentinel output lands in debug bundles. Zero cost in production.
  *
  * Warning codes:
- * - CATEGORY_STRIPPED: factor node has category in raw but not in V3
- * - INTERVENTIONS_STRIPPED: option node has data.interventions in raw but V3 option interventions empty
- * - NODE_DROPPED: node in raw but missing from V3 (matched by normalised ID)
- * - SYNTHETIC_NODE_INJECTED: node in V3 but no corresponding raw node
- * - GOAL_THRESHOLD_STRIPPED: goal_threshold fields present in raw but absent in V3
- * - ENRICHMENT_STRIPPED: enrichment fields (raw_value/cap/factor_type/uncertainty_drivers) in raw but absent in V3 observed_state
+ * - CATEGORY_STRIPPED: factor node has category in input but not in V3
+ * - INTERVENTIONS_STRIPPED: option node has data.interventions in input but V3 option interventions empty
+ * - NODE_DROPPED: node in input but missing from V3 (matched by normalised ID)
+ * - SYNTHETIC_NODE_INJECTED: node in V3 but no corresponding input node
+ * - GOAL_THRESHOLD_STRIPPED: goal_threshold fields present in input but absent in V3
+ * - ENRICHMENT_STRIPPED: enrichment fields (raw_value/cap/factor_type/uncertainty_drivers) in input but absent in V3 observed_state
  */
 
 import { log } from "../../utils/telemetry.js";
@@ -38,8 +43,8 @@ export interface IntegrityWarning {
  */
 export interface IntegrityWarningsOutput {
   warnings: IntegrityWarning[];
-  /** Compact LLM raw graph summary (earliest parsed representation) */
-  raw_counts: {
+  /** Post-pipeline V1 graph summary (input to V3 transform) */
+  input_counts: {
     node_count: number;
     edge_count: number;
     node_ids: string[];
@@ -52,8 +57,8 @@ export interface IntegrityWarningsOutput {
   };
 }
 
-/** Minimal shape of a raw LLM node (pre-transform). */
-interface RawNode {
+/** Minimal shape of a pipeline V1 node (input to V3 transform). */
+interface InputNode {
   id: string;
   kind?: string;
   category?: string;
@@ -99,26 +104,26 @@ interface V3Option {
   [key: string]: unknown;
 }
 
-/** Minimal shape of a raw LLM edge (pre-transform). */
-interface RawEdge {
+/** Minimal shape of a pipeline V1 edge (input to V3 transform). */
+interface InputEdge {
   from: string;
   to: string;
   [key: string]: unknown;
 }
 
-/** Minimal shape of a V3 output edge. */
+/** Minimal shape of a V3 output edge. Must match EdgeV3 schema field names (from/to). */
 interface V3Edge {
-  source: string;
-  target: string;
+  from: string;
+  to: string;
   [key: string]: unknown;
 }
 
 // ============================================================================
-// ID Normalisation (for matching raw ↔ V3 nodes)
+// ID Normalisation (for matching pipeline V1 ↔ V3 nodes)
 // ============================================================================
 
 /**
- * Normalise an ID for matching between raw LLM output and V3 output.
+ * Normalise an ID for matching between pipeline V1 input and V3 output.
  *
  * Delegates to the production normaliseIdBase (steps 1-7 of normalizeToId,
  * without dedup suffix) so that matching uses the exact same algorithm that
@@ -134,37 +139,42 @@ export function normaliseIdForMatch(id: string): string {
 // ============================================================================
 
 /**
- * Run sentinel integrity checks comparing LLM raw graph against V3 output.
+ * Run sentinel integrity checks comparing pipeline V1 graph against V3 output.
+ *
+ * Note: "input"/"pipeline" refers to the post-pipeline V1 graph, not the
+ * raw LLM output. Pre-pipeline losses (cycle breaking, isolated pruning,
+ * graph compliance) are traced via corrections[], not the sentinel.
+ * Phase 1 will capture actual LLM raw output for full-pipeline comparison.
  *
  * Returns an enriched output containing both individual warnings and compact
- * graph evidence (raw_counts / output_counts) so that node/edge delta claims
+ * graph evidence (input_counts / output_counts) so that node/edge delta claims
  * are provable from a single debug bundle.
  *
- * @param rawNodes - Nodes from the earliest raw LLM representation
+ * @param inputNodes - Nodes from the post-pipeline V1 graph (input to V3 transform)
  * @param v3Nodes - Nodes from the final V3 response
  * @param v3Options - Options from the final V3 response
- * @param rawEdges - Edges from the earliest raw LLM representation (optional)
+ * @param inputEdges - Edges from the post-pipeline V1 graph (optional)
  * @param v3Edges - Edges from the final V3 response (optional)
  * @returns IntegrityWarningsOutput with warnings + evidence counts
  */
 export function runIntegrityChecks(
-  rawNodes: RawNode[],
+  inputNodes: InputNode[],
   v3Nodes: V3Node[],
   v3Options: V3Option[],
-  rawEdges: RawEdge[] = [],
+  inputEdges: InputEdge[] = [],
   v3Edges: V3Edge[] = [],
 ): IntegrityWarningsOutput {
   const warnings: IntegrityWarning[] = [];
 
   // Build lookup maps by normalised ID.
-  // Use arrays to handle collisions — multiple raw nodes may normalise to the
+  // Use arrays to handle collisions — multiple input nodes may normalise to the
   // same key (e.g. dedup suffixes __2, __3 stripped by normaliseIdBase).
-  const rawByNormId = new Map<string, RawNode[]>();
-  for (const node of rawNodes) {
+  const inputByNormId = new Map<string, InputNode[]>();
+  for (const node of inputNodes) {
     const key = normaliseIdForMatch(node.id);
-    const arr = rawByNormId.get(key) ?? [];
+    const arr = inputByNormId.get(key) ?? [];
     arr.push(node);
-    rawByNormId.set(key, arr);
+    inputByNormId.set(key, arr);
   }
 
   const v3ByNormId = new Map<string, V3Node[]>();
@@ -185,13 +195,13 @@ export function runIntegrityChecks(
   }
 
   // ── Check 1: NODE_DROPPED ──────────────────────────────────────────────
-  for (const [normId, rawArr] of rawByNormId) {
+  for (const [normId, inputArr] of inputByNormId) {
     if (!v3ByNormId.has(normId)) {
-      for (const rawNode of rawArr) {
+      for (const inputNode of inputArr) {
         warnings.push({
           code: "NODE_DROPPED",
-          node_id: rawNode.id,
-          details: `Node "${rawNode.id}" (kind=${rawNode.kind ?? "unknown"}) exists in LLM raw but missing from V3 output`,
+          node_id: inputNode.id,
+          details: `Node "${inputNode.id}" (kind=${inputNode.kind ?? "unknown"}) exists in pipeline input but missing from V3 output`,
         });
       }
     }
@@ -199,34 +209,34 @@ export function runIntegrityChecks(
 
   // ── Check 2: SYNTHETIC_NODE_INJECTED ───────────────────────────────────
   for (const [normId, v3Arr] of v3ByNormId) {
-    if (!rawByNormId.has(normId)) {
+    if (!inputByNormId.has(normId)) {
       for (const v3Node of v3Arr) {
         warnings.push({
           code: "SYNTHETIC_NODE_INJECTED",
           node_id: v3Node.id,
-          details: `Node "${v3Node.id}" (kind=${v3Node.kind ?? "unknown"}) in V3 output has no corresponding node in LLM raw`,
+          details: `Node "${v3Node.id}" (kind=${v3Node.kind ?? "unknown"}) in V3 output has no corresponding node in pipeline input`,
         });
       }
     }
   }
 
   // ── Per-node checks (matched pairs) ────────────────────────────────────
-  // Compare the first raw node against the first V3 node for each normalised
-  // key. When collisions exist, all raw entries are checked.
-  for (const [normId, rawArr] of rawByNormId) {
+  // Compare each input node against the corresponding V3 node for each normalised
+  // key. When collisions exist, all input entries are checked.
+  for (const [normId, inputArr] of inputByNormId) {
     const v3Arr = v3ByNormId.get(normId);
     if (!v3Arr || v3Arr.length === 0) continue; // Already reported as NODE_DROPPED
 
-    for (const rawNode of rawArr) {
+    for (const inputNode of inputArr) {
       // Find best-matching V3 node (prefer exact ID match, fall back to first)
-      const v3Node = v3Arr.find((n) => n.id === rawNode.id) ?? v3Arr[0];
+      const v3Node = v3Arr.find((n) => n.id === inputNode.id) ?? v3Arr[0];
 
       // ── Check 3: CATEGORY_STRIPPED ─────────────────────────────────────
-      if (rawNode.category && !v3Node.category) {
+      if (inputNode.category && !v3Node.category) {
         warnings.push({
           code: "CATEGORY_STRIPPED",
-          node_id: rawNode.id,
-          details: `Factor "${rawNode.id}" has category="${rawNode.category}" in LLM raw but category is absent in V3 output`,
+          node_id: inputNode.id,
+          details: `Factor "${inputNode.id}" has category="${inputNode.category}" in pipeline input but category is absent in V3 output`,
         });
       }
 
@@ -238,19 +248,19 @@ export function runIntegrityChecks(
         "goal_threshold_cap",
       ] as const;
       const strippedThresholds = thresholdFields.filter(
-        (f) => rawNode[f] !== undefined && v3Node[f] === undefined
+        (f) => inputNode[f] !== undefined && v3Node[f] === undefined
       );
       if (strippedThresholds.length > 0) {
         warnings.push({
           code: "GOAL_THRESHOLD_STRIPPED",
-          node_id: rawNode.id,
-          details: `Node "${rawNode.id}" has ${strippedThresholds.join(", ")} in LLM raw but absent in V3 output`,
+          node_id: inputNode.id,
+          details: `Node "${inputNode.id}" has ${strippedThresholds.join(", ")} in pipeline input but absent in V3 output`,
         });
       }
 
       // ── Check 5: ENRICHMENT_STRIPPED ────────────────────────────────────
-      // Compare raw node data fields against V3 observed_state
-      if (rawNode.data) {
+      // Compare input node data fields against V3 observed_state
+      if (inputNode.data) {
         const enrichmentFields = [
           "raw_value",
           "cap",
@@ -258,33 +268,33 @@ export function runIntegrityChecks(
           "uncertainty_drivers",
         ] as const;
         const strippedEnrichment = enrichmentFields.filter(
-          (f) => rawNode.data![f] !== undefined &&
+          (f) => inputNode.data![f] !== undefined &&
             (v3Node.observed_state === undefined || v3Node.observed_state[f] === undefined)
         );
         if (strippedEnrichment.length > 0) {
           warnings.push({
             code: "ENRICHMENT_STRIPPED",
-            node_id: rawNode.id,
-            details: `Node "${rawNode.id}" has ${strippedEnrichment.join(", ")} in LLM raw data but absent from V3 observed_state`,
+            node_id: inputNode.id,
+            details: `Node "${inputNode.id}" has ${strippedEnrichment.join(", ")} in pipeline input data but absent from V3 observed_state`,
           });
         }
       }
 
       // ── Check 6: INTERVENTIONS_STRIPPED ─────────────────────────────────
-      // Only for option nodes: check if raw has data.interventions but V3 option is empty
-      if (rawNode.kind === "option" && rawNode.data?.interventions) {
-        const rawInterventionCount = Object.keys(rawNode.data.interventions).length;
-        if (rawInterventionCount > 0) {
+      // Only for option nodes: check if input has data.interventions but V3 option is empty
+      if (inputNode.kind === "option" && inputNode.data?.interventions) {
+        const inputInterventionCount = Object.keys(inputNode.data.interventions).length;
+        if (inputInterventionCount > 0) {
           const v3OptArr = v3OptionByNormId.get(normId) ?? [];
-          const v3Option = v3OptArr.find((o) => o.id === rawNode.id) ?? v3OptArr[0];
+          const v3Option = v3OptArr.find((o) => o.id === inputNode.id) ?? v3OptArr[0];
           const v3InterventionCount = v3Option?.interventions
             ? Object.keys(v3Option.interventions).length
             : 0;
           if (v3InterventionCount === 0) {
             warnings.push({
               code: "INTERVENTIONS_STRIPPED",
-              node_id: rawNode.id,
-              details: `Option "${rawNode.id}" has ${rawInterventionCount} interventions in LLM raw but V3 option has 0 interventions`,
+              node_id: inputNode.id,
+              details: `Option "${inputNode.id}" has ${inputInterventionCount} interventions in pipeline input but V3 option has 0 interventions`,
             });
           }
         }
@@ -305,10 +315,10 @@ export function runIntegrityChecks(
 
   return {
     warnings,
-    raw_counts: {
-      node_count: rawNodes.length,
-      edge_count: rawEdges.length,
-      node_ids: rawNodes.map((n) => n.id),
+    input_counts: {
+      node_count: inputNodes.length,
+      edge_count: inputEdges.length,
+      node_ids: inputNodes.map((n) => n.id),
     },
     output_counts: {
       node_count: v3Nodes.length,

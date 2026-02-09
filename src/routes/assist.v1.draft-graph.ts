@@ -426,9 +426,8 @@ export default async function route(app: FastifyInstance) {
           brief: baseInput.brief,
           requestId,
           strictMode,
-          // CIL Phase 0.1: Enable sentinel integrity checks when debug bundle
-          // capture is active, so sentinel output lands in the response.
-          includeDebug: unsafeCaptureEnabled || (baseInput as any).include_debug === true,
+          // CIL 0.2: simplified; include_debug already equals unsafeCaptureEnabled
+          includeDebug: unsafeCaptureEnabled,
         });
 
         // DEBUG: Log V3 trace.pipeline after transform

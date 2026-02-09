@@ -7,13 +7,13 @@ import {
 } from "../../src/cee/validation/integrity-sentinel.js";
 
 /**
- * CIL Phase 0.1 — Sentinel integrity check tests.
+ * CIL Phase 0.2 — Sentinel integrity check tests.
  *
  * Verifies that runIntegrityChecks correctly detects data loss between
- * LLM raw output and V3 response, and returns enriched output with
- * raw_counts / output_counts evidence for debug bundles.
+ * pipeline V1 input and V3 response, and returns enriched output with
+ * input_counts / output_counts evidence for debug bundles.
  */
-describe("CIL Phase 0.1: Sentinel integrity checks", () => {
+describe("CIL Phase 0.2: Sentinel integrity checks", () => {
   // ── normaliseIdForMatch ────────────────────────────────────────────────
   describe("normaliseIdForMatch", () => {
     it("preserves IDs that already match the valid pattern", () => {
@@ -350,7 +350,7 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
 
       // Result is IntegrityWarningsOutput, not a flat array
       expect(result).toHaveProperty("warnings");
-      expect(result).toHaveProperty("raw_counts");
+      expect(result).toHaveProperty("input_counts");
       expect(result).toHaveProperty("output_counts");
       expect(result.warnings.length).toBeGreaterThan(0);
 
@@ -369,7 +369,7 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
       expect(result).toHaveProperty("warnings");
       expect(result.warnings).toHaveLength(0);
       // Counts still present even with no warnings
-      expect(result.raw_counts).toBeDefined();
+      expect(result.input_counts).toBeDefined();
       expect(result.output_counts).toBeDefined();
     });
   });
@@ -377,8 +377,8 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
   // ============================================================================
   // Task B: Evidence counts tests
   // ============================================================================
-  describe("Task B: raw_counts / output_counts evidence", () => {
-    it("raw_counts and output_counts match actual fixture data", () => {
+  describe("Task B: input_counts / output_counts evidence", () => {
+    it("input_counts and output_counts match actual fixture data", () => {
       const rawNodes = [
         { id: "goal_revenue", kind: "goal" },
         { id: "factor_price", kind: "factor" },
@@ -393,21 +393,21 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
         { id: "factor_price", kind: "factor" },
       ];
       const v3Edges = [
-        { source: "factor_price", target: "goal_revenue" },
+        { from: "factor_price", to: "goal_revenue" },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], rawEdges, v3Edges);
 
-      expect(result.raw_counts.node_count).toBe(3);
-      expect(result.raw_counts.edge_count).toBe(2);
-      expect(result.raw_counts.node_ids).toEqual(["goal_revenue", "factor_price", "factor_demand"]);
+      expect(result.input_counts.node_count).toBe(3);
+      expect(result.input_counts.edge_count).toBe(2);
+      expect(result.input_counts.node_ids).toEqual(["goal_revenue", "factor_price", "factor_demand"]);
 
       expect(result.output_counts.node_count).toBe(2);
       expect(result.output_counts.edge_count).toBe(1);
       expect(result.output_counts.node_ids).toEqual(["goal_revenue", "factor_price"]);
     });
 
-    it("dropped node appears in raw_counts.node_ids but not output_counts.node_ids, with NODE_DROPPED warning", () => {
+    it("dropped node appears in input_counts.node_ids but not output_counts.node_ids, with NODE_DROPPED warning", () => {
       const rawNodes = [
         { id: "factor_price", kind: "factor" },
         { id: "factor_demand", kind: "factor" },
@@ -418,8 +418,8 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, []);
 
-      // factor_demand is in raw but not output
-      expect(result.raw_counts.node_ids).toContain("factor_demand");
+      // factor_demand is in input but not output
+      expect(result.input_counts.node_ids).toContain("factor_demand");
       expect(result.output_counts.node_ids).not.toContain("factor_demand");
 
       // Corresponding NODE_DROPPED warning exists
@@ -432,13 +432,13 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
       const rawNodes = [{ id: "factor_price", kind: "factor" }];
       const rawEdges = [{ from: "factor_price", to: "goal" }];
       const v3Nodes = [{ id: "factor_price", kind: "factor" }];
-      const v3Edges = [{ source: "factor_price", target: "goal" }];
+      const v3Edges = [{ from: "factor_price", to: "goal" }];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], rawEdges, v3Edges);
 
       expect(result.warnings).toHaveLength(0);
-      expect(result.raw_counts.node_count).toBe(1);
-      expect(result.raw_counts.edge_count).toBe(1);
+      expect(result.input_counts.node_count).toBe(1);
+      expect(result.input_counts.edge_count).toBe(1);
       expect(result.output_counts.node_count).toBe(1);
       expect(result.output_counts.edge_count).toBe(1);
     });
@@ -449,7 +449,7 @@ describe("CIL Phase 0.1: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, []);
 
-      expect(result.raw_counts.edge_count).toBe(0);
+      expect(result.input_counts.edge_count).toBe(0);
       expect(result.output_counts.edge_count).toBe(0);
     });
   });

@@ -651,10 +651,10 @@ export function transformResponseToV3(
     };
   }
 
-  // CIL Phase 0.1: Sentinel integrity checks — compare LLM raw nodes against
-  // final V3 output to detect silent data loss. Gated on debug bundle mode
-  // (includeDebug) OR debugLoggingEnabled so sentinel output lands in bundles.
-  // Zero cost in production when both flags are off.
+  // CIL Phase 0.2: Sentinel integrity checks — compare post-pipeline V1 nodes
+  // against final V3 output to detect silent data loss in the V3 transform.
+  // Gated on debug bundle mode (includeDebug) OR debugLoggingEnabled so
+  // sentinel output lands in bundles. Zero cost in production when both flags are off.
   const sentinelEnabled = context.includeDebug || config.cee.debugLoggingEnabled;
   if (sentinelEnabled) {
     try {
@@ -677,7 +677,12 @@ export function transformResponseToV3(
         existing !== null && typeof existing === "object" && !Array.isArray(existing)
           ? (existing as Record<string, unknown>)
           : {};
-      pipeline.integrity_warnings = sentinelOutput;
+      // CIL Phase 0.2: Backward compatibility shim for raw_counts → input_counts rename.
+      // Include both keys during deprecation window so existing debug tooling doesn't break.
+      pipeline.integrity_warnings = {
+        ...sentinelOutput,
+        raw_counts: sentinelOutput.input_counts, // Deprecated: use input_counts
+      };
       v3Response.trace.pipeline = pipeline;
     } catch (err) {
       // Sentinel must never block the response

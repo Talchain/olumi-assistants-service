@@ -36,52 +36,19 @@ export function normalizeToId(
   label: string,
   existingIds: Set<string> = new Set()
 ): string {
-  if (label === null || label === undefined || typeof label !== "string") {
-    return generateUniqueId("unknown", existingIds);
-  }
-
-  if (PRESERVED_ID_REGEX.test(label)) {
-    const uniqueId = generateUniqueId(label, existingIds);
-    if (uniqueId !== label) {
-      log.warn(
-        { original_id: label, normalized_id: uniqueId, reason: "collision" },
-        "Normalized ID to resolve collision"
-      );
-    }
-    return uniqueId;
-  }
-
-  // Step 1: Lowercase
-  let id = label.toLowerCase();
-
-  // Step 2: Replace common separators with underscores
-  id = id.replace(/[\s\-–—:]/g, "_");
-
-  // Step 3: Remove parentheses but keep content
-  id = id.replace(/[()[\]{}]/g, "_");
-
-  // Step 4: Remove characters not in allowed set
-  id = id.replace(/[^a-z0-9_-]/g, "");
-
-  // Step 5: Collapse multiple underscores/colons/hyphens
-  id = id.replace(/_{2,}/g, "_");
-  id = id.replace(/-{2,}/g, "-");
-  id = id.replace(/:{2,}/g, ":");
-
-  // Step 6: Trim leading/trailing underscores and hyphens
-  id = id.replace(/^[_-]+|[_-]+$/g, "");
-
-  // Step 7: Ensure non-empty
-  if (!id) {
-    id = "node";
-  }
+  // Core normalisation (steps 1-7) delegated to normaliseIdBase — single source
+  // of truth shared with the integrity sentinel to prevent matching drift.
+  const id = normaliseIdBase(label);
 
   // Step 8: Handle duplicates
   const uniqueId = generateUniqueId(id, existingIds);
   if (uniqueId !== label) {
+    const reason = PRESERVED_ID_REGEX.test(label) ? "collision" : "normalized";
     log.warn(
-      { original_id: label, normalized_id: uniqueId, reason: "normalized" },
-      "Normalized ID to match policy"
+      { original_id: label, normalized_id: uniqueId, reason },
+      reason === "collision"
+        ? "Normalized ID to resolve collision"
+        : "Normalized ID to match policy"
     );
   }
   return uniqueId;
