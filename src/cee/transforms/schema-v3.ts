@@ -37,7 +37,7 @@ import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
 import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant } from "../validation/integrity-sentinel.js";
-import { DEFAULT_STRENGTH_MEAN } from "../constants.js";
+import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD } from "../constants.js";
 
 // ============================================================================
 // V3 Types
@@ -851,8 +851,26 @@ function generateValidationWarnings(
   for (const edge of graph.edges) {
     const absMean = Math.abs(edge.strength_mean);
 
-    if (absMean < 0.1) {
-      // Negligible edge (|mean| < 0.1)
+    if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {
+      // Low strength edge (|mean| < 0.05, v2.7 schema)
+      warnings.push({
+        code: "EDGE_STRENGTH_LOW",
+        severity: "info",
+        message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength_mean.toFixed(3)})`,
+        affected_node_id: edge.from,
+        suggestion: "Review the strength of this relationship",
+        details: {
+          edge_id: `${edge.from}->${edge.to}`,
+          mean: edge.strength_mean,
+        },
+      });
+      emit(TelemetryEvents.EdgeStrengthLow ?? "cee.edge.strength_low", {
+        edgeFrom: edge.from,
+        edgeTo: edge.to,
+        strengthMean: edge.strength_mean,
+      });
+    } else if (absMean < 0.1) {
+      // Negligible edge (0.05 ≤ |mean| < 0.1)
       warnings.push({
         code: "EDGE_STRENGTH_NEGLIGIBLE",
         severity: "info",
@@ -861,20 +879,6 @@ function generateValidationWarnings(
         suggestion: "Consider removing this edge or increasing its strength if the relationship is meaningful",
       });
       emit(TelemetryEvents.EdgeStrengthNegligible ?? "cee.edge.strength_negligible", {
-        edgeFrom: edge.from,
-        edgeTo: edge.to,
-        strengthMean: edge.strength_mean,
-      });
-    } else if (absMean < 0.5) {
-      // Low strength edge (|mean| < 0.5)
-      warnings.push({
-        code: "EDGE_STRENGTH_LOW",
-        severity: "warn",
-        message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength_mean.toFixed(3)})`,
-        affected_node_id: edge.from,
-        suggestion: "Review the strength of this relationship",
-      });
-      emit(TelemetryEvents.EdgeStrengthLow ?? "cee.edge.strength_low", {
         edgeFrom: edge.from,
         edgeTo: edge.to,
         strengthMean: edge.strength_mean,

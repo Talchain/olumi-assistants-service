@@ -263,7 +263,7 @@ describe("P1 CEE Verification", () => {
   // Task 6: Verify Warning Severity Levels
   // ==========================================================================
   describe("Task 6: Warning Severity Levels", () => {
-    it("negligible edges (|mean| < 0.1) get severity 'info'", () => {
+    it("negligible edges (0.05 ≤ |mean| < 0.1) get severity 'info'", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -272,8 +272,8 @@ describe("P1 CEE Verification", () => {
             { id: "factor_color", kind: "factor", label: "Background Color" },
           ],
           edges: [
-            // Very low weight = negligible strength
-            { from: "factor_color", to: "goal_revenue", weight: 0.05, belief: 0.9 },
+            // 0.07 is in the negligible range (0.05 ≤ x < 0.1)
+            { from: "factor_color", to: "goal_revenue", weight: 0.07, belief: 0.9 },
           ],
         },
       };
@@ -284,12 +284,11 @@ describe("P1 CEE Verification", () => {
         (w) => w.code === "EDGE_STRENGTH_NEGLIGIBLE"
       );
 
-      if (negligibleWarning) {
-        expect(negligibleWarning.severity).toBe("info");
-      }
+      expect(negligibleWarning).toBeDefined();
+      expect(negligibleWarning!.severity).toBe("info");
     });
 
-    it("low strength edges (0.1 ≤ |mean| < 0.5) get severity 'warning'", () => {
+    it("edge with |mean| = 0.04 triggers EDGE_STRENGTH_LOW", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -298,7 +297,56 @@ describe("P1 CEE Verification", () => {
             { id: "factor_font", kind: "factor", label: "Font Choice" },
           ],
           edges: [
-            // Low but not negligible weight
+            { from: "factor_font", to: "goal_revenue", weight: 0.04, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const lowWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW"
+      );
+
+      expect(lowWarning).toBeDefined();
+      expect(lowWarning!.severity).toBe("info");
+      expect(lowWarning!.details).toBeDefined();
+      expect(lowWarning!.details!.edge_id).toBe("factor_font->goal_revenue");
+      expect(lowWarning!.details!.mean).toBe(0.04);
+    });
+
+    it("edge with |mean| = 0.05 does NOT trigger EDGE_STRENGTH_LOW", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
+            { from: "factor_font", to: "goal_revenue", weight: 0.05, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const lowWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW"
+      );
+
+      expect(lowWarning).toBeUndefined();
+    });
+
+    it("edge with |mean| = 0.3 does NOT trigger EDGE_STRENGTH_LOW", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
             { from: "factor_font", to: "goal_revenue", weight: 0.3, belief: 0.9 },
           ],
         },
@@ -310,9 +358,30 @@ describe("P1 CEE Verification", () => {
         (w) => w.code === "EDGE_STRENGTH_LOW"
       );
 
-      if (lowWarning) {
-        expect(lowWarning.severity).toBe("warning");
-      }
+      expect(lowWarning).toBeUndefined();
+    });
+
+    it("edge with |mean| = 0.1 emits neither LOW nor NEGLIGIBLE", () => {
+      const response: V1DraftGraphResponse = {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_revenue", kind: "goal", label: "Revenue" },
+            { id: "factor_font", kind: "factor", label: "Font Choice" },
+          ],
+          edges: [
+            { from: "factor_font", to: "goal_revenue", weight: 0.1, belief: 0.9 },
+          ],
+        },
+      };
+
+      const v3Response = transformResponseToV3(response);
+
+      const strengthWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "EDGE_STRENGTH_LOW" || w.code === "EDGE_STRENGTH_NEGLIGIBLE"
+      );
+
+      expect(strengthWarning).toBeUndefined();
     });
   });
 });

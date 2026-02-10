@@ -42,3 +42,12 @@ export const DEFAULT_STRENGTH_STD = 0.125;
  * some edges have varied std but mean is still defaulted.
  */
 export const STRENGTH_MEAN_DOMINANT_THRESHOLD = 0.7;
+
+/**
+ * Threshold for EDGE_STRENGTH_LOW warning (v2.7 schema).
+ *
+ * Edges with |strength_mean| < 0.05 are flagged as informational —
+ * the relationship is so weak it may not contribute meaningfully
+ * to the causal model.
+ */
+export const EDGE_STRENGTH_LOW_THRESHOLD = 0.05;
