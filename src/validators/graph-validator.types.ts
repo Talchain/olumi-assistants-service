@@ -108,7 +108,7 @@ export type ValidationInfoCode =
 // Validation Issue
 // =============================================================================
 
-export type ValidationSeverity = "error" | "warning" | "info";
+export type ValidationSeverity = "error" | "warn" | "info";
 
 export interface ValidationIssue {
   /** Error/warning/info code */
