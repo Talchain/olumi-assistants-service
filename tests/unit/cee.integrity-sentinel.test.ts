@@ -468,9 +468,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -480,6 +480,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_defaults.total_edges).toBe(3);
       expect(result.strength_defaults.defaulted_count).toBe(3);
       expect(result.strength_defaults.default_value).toBe(0.5);
+      expect(result.strength_defaults.defaulted_edge_ids).toEqual([
+        "factor_a->factor_b",
+        "factor_b->goal",
+        "factor_a->goal",
+      ]);
 
       // Note: STRENGTH_DEFAULT_APPLIED warning is no longer added to result.warnings here.
       // It's added to validation_warnings in schema-v3.ts for production visibility.
@@ -526,11 +531,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5 },
-        { from: "factor_b", to: "goal", strength_mean: 0.8 }, // One varied edge
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "goal", strength_mean: 0.8, strength_std: 0.2 }, // One varied edge
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -556,11 +561,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5 },
-        { from: "factor_a", to: "goal", strength_mean: 0.7 },
-        { from: "factor_b", to: "goal", strength_mean: 0.8 },
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength_mean: 0.7, strength_std: 0.2 },
+        { from: "factor_b", to: "goal", strength_mean: 0.8, strength_std: 0.25 },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -575,8 +580,8 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       const rawNodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Nodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.5 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -602,12 +607,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Structural edges (excluded)
-        { from: "decision", to: "option_a", strength_mean: 0.5 },
-        { from: "option_a", to: "factor_price", strength_mean: 0.5 },
+        { from: "decision", to: "option_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "option_a", to: "factor_price", strength_mean: 0.5, strength_std: 0.125 },
         // Causal edges (included)
-        { from: "factor_price", to: "goal", strength_mean: 0.5 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -665,9 +670,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         // Note: factor_b is missing but referenced in edges
       ];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.5 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5 }, // Missing from node
-        { from: "factor_a", to: "factor_missing", strength_mean: 0.5 }, // Missing to node
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 }, // Missing from node
+        { from: "factor_a", to: "factor_missing", strength_mean: 0.5, strength_std: 0.125 }, // Missing to node
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -740,20 +745,286 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        // Negative defaults (sign-adjusted from 0.5 → -0.5)
-        { from: "risk_a", to: "goal", strength_mean: -0.5, effect_direction: "negative" },
-        { from: "risk_b", to: "goal", strength_mean: -0.5, effect_direction: "negative" },
+        // Negative defaults (sign-adjusted from 0.5 → -0.5), std still 0.125
+        { from: "risk_a", to: "goal", strength_mean: -0.5, strength_std: 0.125, effect_direction: "negative" },
+        { from: "risk_b", to: "goal", strength_mean: -0.5, strength_std: 0.125, effect_direction: "negative" },
         // Positive default
-        { from: "risk_a", to: "risk_b", strength_mean: 0.5 },
+        { from: "risk_a", to: "risk_b", strength_mean: 0.5, strength_std: 0.125 },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
-      // All 3 edges have default magnitude (|±0.5|) → 100% defaulted
+      // All 3 edges have default magnitude (|±0.5|) AND std (0.125) → 100% defaulted
       expect(result.strength_defaults.detected).toBe(true);
       expect(result.strength_defaults.total_edges).toBe(3);
       expect(result.strength_defaults.defaulted_count).toBe(3);
       expect(result.strength_defaults.default_value).toBe(0.5);
+    });
+  });
+
+  // ============================================================================
+  // CIL Phase 1.1: Strength Mean Dominant Detection (70% threshold, mean-only)
+  // ============================================================================
+  describe("Strength mean dominant detection (CIL Phase 1.1)", () => {
+    it("epsilon comparison catches near-default values (0.5000000001)", () => {
+      // Floating-point values very close to 0.5 should be detected via epsilon (1e-9)
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5000000001, strength_std: 0.2 },
+        { from: "factor_b", to: "goal", strength_mean: 0.4999999999, strength_std: 0.18 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // All 3 edges have mean ≈ 0.5 within epsilon → 100% mean-dominant
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.total_edges).toBe(3);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(3);
+      expect(result.strength_mean_dominant.default_value).toBe(0.5);
+      expect(result.strength_mean_dominant.mean_defaulted_edge_ids).toEqual([
+        "factor_a->factor_b",
+        "factor_b->goal",
+        "factor_a->goal",
+      ]);
+    });
+
+    it("detects when exactly 70% threshold is met (7 of 10 edges)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // 7 edges with mean = 0.5 but varying std (mean-dominant case)
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "factor_a", to: "factor_c", strength_mean: 0.5, strength_std: 0.12 },
+        { from: "factor_c", to: "factor_a", strength_mean: 0.5, strength_std: 0.19 },
+        // 3 edges with varied mean (not defaults)
+        { from: "factor_a", to: "factor_b", strength_mean: 0.3, strength_std: 0.1 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.7, strength_std: 0.2 },
+        { from: "factor_c", to: "goal", strength_mean: 0.9, strength_std: 0.15 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Exactly 70% threshold met - should be detected
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.total_edges).toBe(10);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(7);
+      expect(result.strength_mean_dominant.default_value).toBe(0.5);
+    });
+
+    it("does NOT detect when below 70% threshold (6 of 10 = 60%)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "factor_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // 6 edges with mean = 0.5
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "factor_a", to: "factor_c", strength_mean: 0.5, strength_std: 0.12 },
+        // 4 edges with varied mean
+        { from: "factor_c", to: "factor_a", strength_mean: 0.3, strength_std: 0.19 },
+        { from: "factor_a", to: "factor_b", strength_mean: 0.7, strength_std: 0.1 },
+        { from: "factor_b", to: "factor_c", strength_mean: 0.9, strength_std: 0.2 },
+        { from: "factor_c", to: "goal", strength_mean: 0.8, strength_std: 0.15 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Below 70% threshold (60%) - should NOT be detected
+      expect(result.strength_mean_dominant.detected).toBe(false);
+      expect(result.strength_mean_dominant.total_edges).toBe(10);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(6);
+      expect(result.strength_mean_dominant.default_value).toBe(null);
+    });
+
+    it("both warnings can fire simultaneously (≥80% mean+std AND ≥70% mean-only)", () => {
+      // When all edges have mean=0.5 AND std=0.125, both detections should fire
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Both detections should fire (100% match for both criteria)
+      expect(result.strength_defaults.detected).toBe(true);
+      expect(result.strength_defaults.defaulted_count).toBe(3);
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(3);
+    });
+
+    it("mean-dominant fires independently when std varies (mean=0.5, varied std)", () => {
+      // Case: LLM varied belief/provenance (different std) but defaulted magnitude (mean)
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "factor_b", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Mean-dominant should fire (100% mean=0.5)
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(3);
+      // Full default should NOT fire (std varies, not all 0.125)
+      expect(result.strength_defaults.detected).toBe(false);
+      expect(result.strength_defaults.defaulted_count).toBe(0);
+    });
+
+    it("detects negative mean defaults (-0.5) from effect_direction sign adjustment", () => {
+      // Like strength_defaults, mean-dominant should detect both +0.5 and -0.5 via Math.abs()
+      const rawNodes = [
+        { id: "risk_a", kind: "risk" },
+        { id: "risk_b", kind: "risk" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "risk_a", kind: "risk" },
+        { id: "risk_b", kind: "risk" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // Negative mean (sign-adjusted from 0.5 → -0.5), varied std
+        { from: "risk_a", to: "goal", strength_mean: -0.5, strength_std: 0.2 },
+        { from: "risk_b", to: "goal", strength_mean: -0.5, strength_std: 0.18 },
+        // Positive mean, varied std
+        { from: "risk_a", to: "risk_b", strength_mean: 0.5, strength_std: 0.25 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // All 3 edges have |mean| = 0.5 → 100% mean-dominant
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.total_edges).toBe(3);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(3);
+      expect(result.strength_mean_dominant.default_value).toBe(0.5);
+    });
+
+    it("excludes structural edges (decision→option, option→*) from mean-dominant analysis", () => {
+      const rawNodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "factor_price", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "decision", kind: "decision" },
+        { id: "option_a", kind: "option" },
+        { id: "factor_price", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // Structural edges with mean=0.5 (excluded from analysis)
+        { from: "decision", to: "option_a", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "option_a", to: "factor_price", strength_mean: 0.5, strength_std: 0.18 },
+        // Causal edges with mean=0.5 (included)
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
+        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Only 3 causal edges should be analyzed (structural excluded)
+      expect(result.strength_mean_dominant.detected).toBe(true);
+      expect(result.strength_mean_dominant.total_edges).toBe(3);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(3);
+    });
+
+    it("does NOT detect when edge count is below minimum (< 3 edges)", () => {
+      const rawNodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
+      const v3Nodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
+      const v3Edges = [
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.18 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Below minimum edge count (MIN_EDGES = 3) - should not be detected
+      expect(result.strength_mean_dominant.detected).toBe(false);
+      expect(result.strength_mean_dominant.total_edges).toBe(2);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(0);
+    });
+
+    it("strength_mean_dominant counter is always present (even when no dominance)", () => {
+      const rawNodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Nodes = [
+        { id: "factor_a", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        { from: "factor_a", to: "goal", strength_mean: 0.3 },
+        { from: "factor_a", to: "goal", strength_mean: 0.7 },
+        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+      ];
+
+      const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
+
+      // Counter should exist even when no dominance detected
+      expect(result.strength_mean_dominant).toBeDefined();
+      expect(result.strength_mean_dominant.total_edges).toBe(3);
+      expect(result.strength_mean_dominant.mean_default_count).toBe(0);
+      expect(result.strength_mean_dominant.default_value).toBe(null);
     });
   });
 });

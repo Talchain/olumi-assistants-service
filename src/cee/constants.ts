@@ -17,3 +17,28 @@
  * Detection should compare Math.abs(strength_mean) to account for both polarities.
  */
 export const DEFAULT_STRENGTH_MEAN = 0.5;
+
+/**
+ * Default strength std value derived when LLM omits strength data.
+ *
+ * Derived from deriveStrengthStd(0.5, 0.5, undefined):
+ *   cv = 0.3 * (1 - 0.5) + 0.1 = 0.25
+ *   std = 0.25 * 0.5 * 1.0 = 0.125
+ *
+ * Used in:
+ * - Strength default detection signature (integrity-sentinel)
+ *
+ * Part of the default signature: |strength_mean| === 0.5 AND strength_std === 0.125
+ */
+export const DEFAULT_STRENGTH_STD = 0.125;
+
+/**
+ * Threshold for dominant strength mean default detection (70%).
+ *
+ * When ≥70% of causal edges have |strength_mean| ≈ 0.5 (regardless of std),
+ * this indicates likely uniform defaulting even if belief/provenance vary.
+ *
+ * Lower threshold than STRENGTH_DEFAULT_APPLIED (80%) to catch cases where
+ * some edges have varied std but mean is still defaulted.
+ */
+export const STRENGTH_MEAN_DOMINANT_THRESHOLD = 0.7;

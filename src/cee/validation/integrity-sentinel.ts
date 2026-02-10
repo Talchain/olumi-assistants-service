@@ -23,7 +23,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import { normaliseIdBase } from "../utils/id-normalizer.js";
-import { DEFAULT_STRENGTH_MEAN } from "../constants.js";
+import { DEFAULT_STRENGTH_MEAN, DEFAULT_STRENGTH_STD, STRENGTH_MEAN_DOMINANT_THRESHOLD } from "../constants.js";
 
 // ============================================================================
 // Types
@@ -62,6 +62,15 @@ export interface IntegrityWarningsOutput {
     total_edges: number;
     defaulted_count: number;
     default_value: number | null;  // null if no defaulting detected
+    defaulted_edge_ids: string[];  // array of edge IDs in "{from}->{to}" format
+  };
+  /** CIL Phase 1.1: Strength mean dominant detection (70% threshold, mean-only) */
+  strength_mean_dominant: {
+    detected: boolean;
+    total_edges: number;
+    mean_default_count: number;
+    default_value: number | null;  // null if no dominance detected
+    mean_defaulted_edge_ids: string[];  // array of edge IDs in "{from}->{to}" format
   };
   /**
    * @deprecated Use input_counts instead. Removal target: Phase 2 or v2.0.0.
@@ -325,6 +334,12 @@ export function runIntegrityChecks(
   // the counter for debug bundle evidence.
   const strengthDefaults = detectStrengthDefaults(v3Nodes, v3Edges);
 
+  // ── CIL Phase 1.1: Strength Mean Dominant Detection ────────────────────
+  // Detects when ≥70% of edges have mean ≈ 0.5 regardless of std. This catches
+  // cases where belief/provenance vary (different std values) but mean is still
+  // uniformly defaulted. Fires independently - both warnings can appear.
+  const strengthMeanDominant = detectStrengthMeanDominant(v3Nodes, v3Edges);
+
   if (warnings.length > 0) {
     log.info(
       {
@@ -353,6 +368,14 @@ export function runIntegrityChecks(
       total_edges: strengthDefaults.total_edges,
       defaulted_count: strengthDefaults.defaulted_count,
       default_value: strengthDefaults.default_value,
+      defaulted_edge_ids: strengthDefaults.defaulted_edge_ids,
+    },
+    strength_mean_dominant: {
+      detected: strengthMeanDominant.detected,
+      total_edges: strengthMeanDominant.total_edges,
+      mean_default_count: strengthMeanDominant.mean_default_count,
+      default_value: strengthMeanDominant.default_value,
+      mean_defaulted_edge_ids: strengthMeanDominant.mean_defaulted_edge_ids,
     },
     // Backward compatibility shim (deprecated, remove in Phase 2)
     raw_counts: {
@@ -377,14 +400,26 @@ export interface StrengthDefaultsResult {
   defaulted_count: number;
   /** The default value detected, or null if no defaulting */
   default_value: number | null;
+  /** Array of edge IDs in "{from}->{to}" format that have default values */
+  defaulted_edge_ids: string[];
 }
 
 /**
  * Detect uniform strength defaults in V3 edges.
  *
- * Checks if ≥80% of causal edges have strength_mean === 0.5, indicating the
- * LLM did not output varied strength coefficients (strength data was missing
- * and fell back to the default in schema-v3.ts).
+ * Checks if ≥80% of causal edges match the default signature:
+ *   |strength_mean| === 0.5 AND strength_std === 0.125
+ *
+ * This indicates the LLM did not output varied strength coefficients (strength data
+ * was missing and fell back to defaults in schema-v3.ts, where mean defaults to 0.5
+ * and std is derived as 0.125 from mean=0.5 + belief=0.5).
+ *
+ * **Note on detection strictness**: This requires BOTH mean and std to match defaults.
+ * If the LLM omits strength_mean but provides explicit belief_exists (≠0.5) or
+ * provenance="hypothesis", the derived std will differ from 0.125 and won't be detected.
+ * This is intentional - it means the LLM provided *some* strength-related information
+ * (belief/provenance), just not the magnitude. The detection targets pure omission where
+ * ALL strength fields default (mean=0.5, belief=0.5, provenance=undefined → std=0.125).
  *
  * Excludes structural edges (decision→option, option→*) from analysis,
  * as these are synthetic edges added by the pipeline, not LLM output.
@@ -444,19 +479,29 @@ export function detectStrengthDefaults(
       total_edges: totalEdges,
       defaulted_count: 0,
       default_value: null,
+      defaulted_edge_ids: [],
     };
   }
 
-  // Count edges with default strength value (both positive and negative)
+  // Count edges with default strength signature (mean + std)
   // Use Math.abs() because transform applies sign adjustment based on effect_direction,
   // so defaulted edges may be +0.5 or -0.5 depending on polarity.
-  let defaultedCount = 0;
-  for (const edge of causalEdges) {
-    const edgeData = edge as { strength_mean?: number; [key: string]: unknown };
-    const strengthMean = edgeData.strength_mean;
+  // Default std is 0.125 (from constants), derived from deriveStrengthStd(0.5, 0.5, undefined).
 
-    if (strengthMean !== undefined && Math.abs(strengthMean) === DEFAULT_STRENGTH_MEAN) {
+  let defaultedCount = 0;
+  const defaultedEdgeIds: string[] = [];
+  for (const edge of causalEdges) {
+    const edgeData = edge as { from: string; to: string; strength_mean?: number; strength_std?: number; [key: string]: unknown };
+    const strengthMean = edgeData.strength_mean;
+    const strengthStd = edgeData.strength_std;
+
+    // Match default signature: |mean| ≈ 0.5 (epsilon) AND std ≈ 0.125 (epsilon)
+    const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;
+    const stdMatchesDefault = strengthStd !== undefined && Math.abs(strengthStd - DEFAULT_STRENGTH_STD) < 1e-9;
+
+    if (meanMatchesDefault && stdMatchesDefault) {
       defaultedCount++;
+      defaultedEdgeIds.push(`${edgeData.from}->${edgeData.to}`);
     }
   }
 
@@ -468,5 +513,130 @@ export function detectStrengthDefaults(
     total_edges: totalEdges,
     defaulted_count: defaultedCount,
     default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
+    defaulted_edge_ids: defaultedEdgeIds,
+  };
+}
+
+// ============================================================================
+// Strength Mean Dominant Detection (CIL Phase 1.1)
+// ============================================================================
+
+/** Result of strength mean dominant detection. */
+export interface StrengthMeanDominantResult {
+  /** Whether mean dominance was detected (≥70% threshold met) */
+  detected: boolean;
+  /** Total number of causal edges analyzed (excludes structural edges) */
+  total_edges: number;
+  /** Count of edges with mean ≈ 0.5 (regardless of std) */
+  mean_default_count: number;
+  /** The default value detected, or null if no dominance */
+  default_value: number | null;
+  /** Array of edge IDs in "{from}->{to}" format with mean ≈ 0.5 */
+  mean_defaulted_edge_ids: string[];
+}
+
+/**
+ * Detect dominant strength mean defaults in V3 edges (mean-only check).
+ *
+ * Checks if ≥70% of causal edges have |strength_mean| ≈ 0.5 (regardless of std).
+ * This catches cases where the LLM varied belief_exists or provenance (producing
+ * different std values) but still defaulted the magnitude (mean) uniformly.
+ *
+ * Lower threshold than STRENGTH_DEFAULT_APPLIED (80%) to catch cases where
+ * some edges have varied std but mean is still defaulted.
+ *
+ * This warning fires independently from STRENGTH_DEFAULT_APPLIED - both can
+ * appear simultaneously when ≥80% match both mean+std (full default) AND
+ * ≥70% have mean ≈ 0.5 regardless of std (mean dominance).
+ *
+ * Excludes structural edges (decision→option, option→*) from analysis,
+ * as these are synthetic edges added by the pipeline, not LLM output.
+ *
+ * Minimum threshold: 3 edges required to avoid false positives on tiny graphs.
+ *
+ * @param v3Nodes - V3 nodes (used to identify option nodes)
+ * @param v3Edges - V3 edges to analyze
+ * @returns Detection result with counts and detected flag
+ */
+export function detectStrengthMeanDominant(
+  v3Nodes: V3Node[],
+  v3Edges: V3Edge[],
+): StrengthMeanDominantResult {
+  const MIN_EDGES = 3; // Minimum edges required for detection
+
+  // Build lookup maps for O(1) node kind checks (performance optimization)
+  const nodeKindMap = new Map<string, string>();
+  for (const node of v3Nodes) {
+    if (node.kind) {
+      nodeKindMap.set(node.id, node.kind);
+    }
+  }
+
+  const optionIds = new Set(
+    v3Nodes.filter((n) => n.kind === "option").map((n) => n.id)
+  );
+
+  // Filter to causal edges only (exclude structural edges)
+  const causalEdges = v3Edges.filter((edge) => {
+    const edgeData = edge as { from: string; to: string; [key: string]: unknown };
+
+    // Defensively exclude edges with missing nodes (malformed graphs)
+    const fromKind = nodeKindMap.get(edgeData.from);
+    const toKind = nodeKindMap.get(edgeData.to);
+    if (!fromKind || !toKind) return false; // Missing from or to node - exclude
+
+    // Option nodes are organisational (not causal). Per Platform Contract v2.6 Appendix A,
+    // option nodes do not participate in inference. All option-outgoing edges are synthetic
+    // pipeline edges and excluded from strength quality analysis.
+    if (optionIds.has(edgeData.from)) return false;
+
+    // Exclude decision→option edges (synthetic pipeline edges)
+    const isDecisionToOption = fromKind === "decision" && optionIds.has(edgeData.to);
+    if (isDecisionToOption) return false;
+
+    return true;
+  });
+
+  const totalEdges = causalEdges.length;
+
+  // If too few edges, don't flag as issue (avoid false positives)
+  if (totalEdges < MIN_EDGES) {
+    return {
+      detected: false,
+      total_edges: totalEdges,
+      mean_default_count: 0,
+      default_value: null,
+      mean_defaulted_edge_ids: [],
+    };
+  }
+
+  // Count edges with mean ≈ 0.5 (ignore std)
+  // Use Math.abs() because transform applies sign adjustment based on effect_direction,
+  // so defaulted edges may be +0.5 or -0.5 depending on polarity.
+
+  let meanDefaultCount = 0;
+  const meanDefaultedEdgeIds: string[] = [];
+  for (const edge of causalEdges) {
+    const edgeData = edge as { from: string; to: string; strength_mean?: number; [key: string]: unknown };
+    const strengthMean = edgeData.strength_mean;
+
+    // Match mean default: |mean| ≈ 0.5 (epsilon comparison)
+    const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;
+
+    if (meanMatchesDefault) {
+      meanDefaultCount++;
+      meanDefaultedEdgeIds.push(`${edgeData.from}->${edgeData.to}`);
+    }
+  }
+
+  const meanDefaultPercentage = meanDefaultCount / totalEdges;
+  const detected = meanDefaultPercentage >= STRENGTH_MEAN_DOMINANT_THRESHOLD;
+
+  return {
+    detected,
+    total_edges: totalEdges,
+    mean_default_count: meanDefaultCount,
+    default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
+    mean_defaulted_edge_ids: meanDefaultedEdgeIds,
   };
 }

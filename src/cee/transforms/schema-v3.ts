@@ -36,7 +36,7 @@ import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
-import { runIntegrityChecks, detectStrengthDefaults } from "../validation/integrity-sentinel.js";
+import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant } from "../validation/integrity-sentinel.js";
 import { DEFAULT_STRENGTH_MEAN } from "../constants.js";
 
 // ============================================================================
@@ -632,10 +632,40 @@ export function transformResponseToV3(
 
   // Add STRENGTH_DEFAULT_APPLIED to validation_warnings if threshold exceeded
   if (strengthDefaults.detected) {
+    const defaultedPercentage = Number(((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100).toFixed(1));
     validationWarnings.push({
       code: "STRENGTH_DEFAULT_APPLIED",
-      message: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${Math.round((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100)}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
-      severity: "warning" as const,
+      message: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${defaultedPercentage}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
+      severity: "warn" as const,
+      details: {
+        total_edges: strengthDefaults.total_edges,
+        defaulted_count: strengthDefaults.defaulted_count,
+        defaulted_percentage: defaultedPercentage,
+        defaulted_edge_ids: strengthDefaults.defaulted_edge_ids,
+      },
+    });
+  }
+
+  // CIL Phase 1.1: Strength mean dominant detection (production-enabled, not debug-gated)
+  // Detects when ≥70% of edges have mean ≈ 0.5 regardless of std. Both warnings can fire.
+  const strengthMeanDominant = detectStrengthMeanDominant(
+    v3Graph.nodes as any[],
+    v3Graph.edges as any[]
+  );
+
+  // Add STRENGTH_MEAN_DEFAULT_DOMINANT to validation_warnings if threshold exceeded
+  if (strengthMeanDominant.detected) {
+    const meanDefaultPercentage = Number(((strengthMeanDominant.mean_default_count / strengthMeanDominant.total_edges) * 100).toFixed(1));
+    validationWarnings.push({
+      code: "STRENGTH_MEAN_DEFAULT_DOMINANT",
+      message: `Detected ${strengthMeanDominant.mean_default_count} of ${strengthMeanDominant.total_edges} edges (${meanDefaultPercentage}%) with mean ≈ ${strengthMeanDominant.default_value} regardless of std. This indicates the LLM may have varied belief/provenance but defaulted strength magnitude.`,
+      severity: "warn" as const,
+      details: {
+        total_edges: strengthMeanDominant.total_edges,
+        mean_default_count: strengthMeanDominant.mean_default_count,
+        mean_default_percentage: meanDefaultPercentage,
+        mean_defaulted_edge_ids: strengthMeanDominant.mean_defaulted_edge_ids,
+      },
     });
   }
 
@@ -746,7 +776,7 @@ function generateValidationWarnings(
   for (const missingOptionId of optionIdSummary.missingOptionIds) {
     warnings.push({
       code: "OPTION_ID_MISMATCH",
-      severity: "warning",
+      severity: "warn",
       message: `Option node "${missingOptionId}" has no matching entry in options[]`,
       affected_option_id: missingOptionId,
       suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -756,7 +786,7 @@ function generateValidationWarnings(
   for (const extraOptionId of optionIdSummary.extraOptionIds) {
     warnings.push({
       code: "OPTION_ID_MISMATCH",
-      severity: "warning",
+      severity: "warn",
       message: `Option "${extraOptionId}" exists in options[] but no option node matches`,
       affected_option_id: extraOptionId,
       suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -768,7 +798,7 @@ function generateValidationWarnings(
     if (option.status === "ready" && Object.keys(option.interventions ?? {}).length === 0) {
       warnings.push({
         code: "EMPTY_INTERVENTIONS_READY",
-        severity: "warning",
+        severity: "warn",
         message: `Option "${option.id}" has status='ready' but no interventions`,
         affected_option_id: option.id,
         suggestion: "Either add interventions or change status to 'needs_user_mapping'",
@@ -839,7 +869,7 @@ function generateValidationWarnings(
       // Low strength edge (|mean| < 0.5)
       warnings.push({
         code: "EDGE_STRENGTH_LOW",
-        severity: "warning",
+        severity: "warn",
         message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength_mean.toFixed(3)})`,
         affected_node_id: edge.from,
         suggestion: "Review the strength of this relationship",
@@ -904,6 +934,6 @@ export function getV3ResponseSummary(response: V3DraftGraphResponse): V3Response
       0
     ),
     validationErrorCount: warnings.filter((w) => w.severity === "error").length,
-    validationWarningCount: warnings.filter((w) => w.severity === "warning").length,
+    validationWarningCount: warnings.filter((w) => w.severity === "warn").length,
   };
 }

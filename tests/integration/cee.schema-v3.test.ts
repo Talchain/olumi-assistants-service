@@ -647,7 +647,7 @@ describe("CEE Schema V3 Integration", () => {
   // ── CIL Phase 1: Strength Default Detection ───────────────────────────
   describe("CIL Phase 1: Strength default warnings", () => {
     it("detects uniform 0.5 strength → warning in validation_warnings AND counter in integrity_warnings", () => {
-      // Create V1 response with edges that all have strength_mean = 0.5 (uniform default)
+      // Create V1 response with edges that all have strength_mean = 0.5 AND strength_std = 0.125 (uniform default)
       const v1Response = {
         graph: {
           nodes: [
@@ -656,9 +656,9 @@ describe("CEE Schema V3 Integration", () => {
             { id: "goal_revenue", kind: "goal", label: "Revenue", data: {} },
           ],
           edges: [
-            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.15 },
-            { from: "factor_b", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.15 },
-            { from: "factor_a", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.15 },
+            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_b", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_a", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.125 },
           ],
         },
         options: [],
@@ -677,9 +677,20 @@ describe("CEE Schema V3 Integration", () => {
         (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
       );
       expect(validationStrengthWarning).toBeDefined();
-      expect(validationStrengthWarning?.severity).toBe("warning");
+      expect(validationStrengthWarning?.severity).toBe("warn");
       expect(validationStrengthWarning?.message).toContain("3 of 3 edges");
       expect(validationStrengthWarning?.message).toContain("100%");
+
+      // Verify details payload
+      expect(validationStrengthWarning?.details).toBeDefined();
+      expect(validationStrengthWarning?.details?.total_edges).toBe(3);
+      expect(validationStrengthWarning?.details?.defaulted_count).toBe(3);
+      expect(validationStrengthWarning?.details?.defaulted_percentage).toBe(100.0);
+      expect(validationStrengthWarning?.details?.defaulted_edge_ids).toEqual([
+        "factor_a->factor_b",
+        "factor_b->goal_revenue",
+        "factor_a->goal_revenue",
+      ]);
 
       // Verify strength_defaults counter in integrity_warnings (debug evidence)
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
@@ -758,9 +769,9 @@ describe("CEE Schema V3 Integration", () => {
             { id: "goal", kind: "goal", label: "Goal", data: {} },
           ],
           edges: [
-            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.15 },
-            { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
-            { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
           ],
         },
         options: [],
@@ -780,11 +791,125 @@ describe("CEE Schema V3 Integration", () => {
       );
       expect(strengthWarning).toBeDefined();
       expect(strengthWarning?.message).toContain("3 of 3 edges");
-      expect(strengthWarning?.severity).toBe("warning");
+      expect(strengthWarning?.severity).toBe("warn");
 
       // But integrity_warnings won't exist (sentinel disabled)
       const pipeline = v3Response.trace?.pipeline as Record<string, unknown> | undefined;
       expect(pipeline?.integrity_warnings).toBeUndefined();
+    });
+
+    it("STRENGTH_MEAN_DEFAULT_DOMINANT appears when ≥70% have mean ≈ 0.5 with varied std", () => {
+      // CIL Phase 1.1: Detects when LLM varied belief/provenance but defaulted magnitude
+      const v1Response = {
+        graph: {
+          nodes: [
+            { id: "factor_a", kind: "factor", label: "Factor A", data: {} },
+            { id: "factor_b", kind: "factor", label: "Factor B", data: {} },
+            { id: "goal", kind: "goal", label: "Goal", data: {} },
+          ],
+          edges: [
+            // All have mean=0.5 but std varies (not the full default signature)
+            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
+            { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.18 },
+            { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+          ],
+        },
+        options: [],
+        quality: { overall: 0.8 },
+        trace: { request_id: "test-mean-dominant", pipeline: {} },
+      };
+
+      const v3Response = transformResponseToV3(v1Response, {
+        requestId: "test-mean-dominant",
+        includeDebug: true,
+      });
+
+      // Verify STRENGTH_MEAN_DEFAULT_DOMINANT appears in validation_warnings
+      expect(v3Response.validation_warnings).toBeDefined();
+      const meanDominantWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_MEAN_DEFAULT_DOMINANT"
+      );
+      expect(meanDominantWarning).toBeDefined();
+      expect(meanDominantWarning?.severity).toBe("warn");
+      expect(meanDominantWarning?.message).toContain("3 of 3 edges");
+      expect(meanDominantWarning?.message).toContain("100%");
+
+      // Verify details payload
+      expect(meanDominantWarning?.details).toBeDefined();
+      expect(meanDominantWarning?.details?.total_edges).toBe(3);
+      expect(meanDominantWarning?.details?.mean_default_count).toBe(3);
+      expect(meanDominantWarning?.details?.mean_default_percentage).toBe(100.0);
+      expect(meanDominantWarning?.details?.mean_defaulted_edge_ids).toEqual([
+        "factor_a->factor_b",
+        "factor_b->goal",
+        "factor_a->goal",
+      ]);
+
+      // Verify strength_mean_dominant counter in integrity_warnings (debug evidence)
+      const pipeline = v3Response.trace?.pipeline as Record<string, unknown>;
+      const iw = pipeline.integrity_warnings as {
+        warnings: Array<{ code: string }>;
+        strength_mean_dominant: {
+          detected: boolean;
+          total_edges: number;
+          mean_default_count: number;
+          default_value: number | null;
+        };
+      };
+
+      expect(iw.strength_mean_dominant).toBeDefined();
+      expect(iw.strength_mean_dominant.detected).toBe(true);
+      expect(iw.strength_mean_dominant.total_edges).toBe(3);
+      expect(iw.strength_mean_dominant.mean_default_count).toBe(3);
+      expect(iw.strength_mean_dominant.default_value).toBe(0.5);
+
+      // Also verify STRENGTH_DEFAULT_APPLIED does NOT fire (std varies, not all 0.125)
+      const fullDefaultWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      expect(fullDefaultWarning).toBeUndefined();
+    });
+
+    it("both STRENGTH_DEFAULT_APPLIED and STRENGTH_MEAN_DEFAULT_DOMINANT fire simultaneously", () => {
+      // When all edges have both mean=0.5 AND std=0.125, both warnings should appear
+      const v1Response = {
+        graph: {
+          nodes: [
+            { id: "factor_a", kind: "factor", label: "Factor A", data: {} },
+            { id: "factor_b", kind: "factor", label: "Factor B", data: {} },
+            { id: "goal", kind: "goal", label: "Goal", data: {} },
+          ],
+          edges: [
+            { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+            { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+          ],
+        },
+        options: [],
+        quality: { overall: 0.8 },
+        trace: { request_id: "test-both-warnings", pipeline: {} },
+      };
+
+      const v3Response = transformResponseToV3(v1Response, {
+        requestId: "test-both-warnings",
+        includeDebug: true,
+      });
+
+      // Both warnings should be present
+      expect(v3Response.validation_warnings).toBeDefined();
+      const strengthDefaultWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_DEFAULT_APPLIED"
+      );
+      const meanDominantWarning = v3Response.validation_warnings?.find(
+        (w) => w.code === "STRENGTH_MEAN_DEFAULT_DOMINANT"
+      );
+
+      expect(strengthDefaultWarning).toBeDefined();
+      expect(meanDominantWarning).toBeDefined();
+
+      // Both should report 100% (3 of 3)
+      expect(strengthDefaultWarning?.details?.defaulted_percentage).toBe(100.0);
+      expect(meanDominantWarning?.details?.mean_default_percentage).toBe(100.0);
     });
   });
 });
