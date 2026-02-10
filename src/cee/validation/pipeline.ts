@@ -830,6 +830,14 @@ export function buildCeeErrorResponse(
     details: baseDetails && Object.keys(baseDetails).length ? baseDetails : undefined,
   };
 
+  // Layer 2 guard: log if required fields are missing (should never happen)
+  if (!response.code || !response.message) {
+    log.error(
+      { event: "CEE_ERROR_BODY_INCOMPLETE", code: response.code, message: response.message },
+      "buildCeeErrorResponse produced incomplete error body — this is a bug",
+    );
+  }
+
   return response;
 }
 

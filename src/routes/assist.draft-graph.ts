@@ -102,6 +102,140 @@ function preserveCategoryFromOriginal(normalized: GraphT, original: GraphT): Gra
   return { ...normalized, nodes: nodesWithCategory };
 }
 
+/**
+ * Canonical V4 edge fields that the external validation engine may strip.
+ * Legacy aliases (weight, belief) are intentionally excluded — they are
+ * derived at the V3 transform layer and must not be back-filled here.
+ */
+export const V4_EDGE_FIELDS = [
+  "strength_mean",
+  "strength_std",
+  "belief_exists",
+  "effect_direction",
+  "provenance",
+  "provenance_source",
+] as const;
+
+/**
+ * Restore canonical V4 edge fields that the external PLoT engine's /v1/validate
+ * may strip from its normalized response.
+ *
+ * Rules (per addendum):
+ *  1. Only restore the V4 canonical set — never legacy weight/belief.
+ *  2. Only restore for edges present in BOTH graphs (keyed by from::to).
+ *     Edges the engine added are left untouched.
+ *  3. If the normalized edge already has a defined value for a field, keep it.
+ *  4. Log duplicate edge keys as a uniqueness guard.
+ *  5. Log edges removed and edges added by the engine.
+ */
+export function preserveEdgeFieldsFromOriginal(
+  normalized: GraphT,
+  original: GraphT,
+): GraphT {
+  // Build lookup from original edges keyed by from::to
+  const originalEdgeMap = new Map<string, (typeof original.edges)[number]>();
+  const duplicateKeys: string[] = [];
+  for (const edge of original.edges) {
+    const key = `${edge.from}::${edge.to}`;
+    if (originalEdgeMap.has(key)) {
+      duplicateKeys.push(key);
+    }
+    originalEdgeMap.set(key, edge);
+  }
+
+  if (duplicateKeys.length > 0) {
+    log.warn(
+      { event: "PRESERVE_EDGE_FIELDS_DUPLICATE_KEYS", keys: duplicateKeys },
+      `Original graph has ${duplicateKeys.length} duplicate edge key(s)`,
+    );
+  }
+
+  // Detect edges removed/added by the engine (observability)
+  const normalizedKeySet = new Set(
+    normalized.edges.map((e) => `${e.from}::${e.to}`),
+  );
+  const originalKeySet = new Set(originalEdgeMap.keys());
+
+  const removedByEngine = [...originalKeySet].filter(
+    (k) => !normalizedKeySet.has(k),
+  );
+  const addedByEngine = [...normalizedKeySet].filter(
+    (k) => !originalKeySet.has(k),
+  );
+
+  if (removedByEngine.length > 0 || addedByEngine.length > 0) {
+    log.info(
+      {
+        event: "PRESERVE_EDGE_FIELDS_ENGINE_DIFF",
+        removed_count: removedByEngine.length,
+        added_count: addedByEngine.length,
+        removed: removedByEngine.slice(0, 10),
+        added: addedByEngine.slice(0, 10),
+      },
+      "Engine modified edge set during normalization",
+    );
+  }
+
+  let restoredCount = 0;
+  const restoredSamples: string[] = [];
+
+  const edgesWithFields = normalized.edges.map((normEdge) => {
+    const key = `${normEdge.from}::${normEdge.to}`;
+    const origEdge = originalEdgeMap.get(key);
+
+    // Only restore for edges that existed in the original graph
+    if (!origEdge) return normEdge;
+
+    let didRestore = false;
+    const patched = { ...normEdge } as Record<string, unknown>;
+
+    for (const field of V4_EDGE_FIELDS) {
+      // Only restore if the normalized edge is missing the field
+      if (patched[field] !== undefined) continue;
+      const origValue = (origEdge as Record<string, unknown>)[field];
+      if (origValue !== undefined) {
+        patched[field] = origValue;
+        didRestore = true;
+      }
+    }
+
+    if (didRestore) {
+      restoredCount++;
+      if (restoredSamples.length < 5) {
+        restoredSamples.push(key);
+      }
+    }
+
+    return patched as (typeof normalized.edges)[number];
+  });
+
+  if (restoredCount > 0) {
+    log.info(
+      {
+        event: "PRESERVE_EDGE_FIELDS_RESTORED",
+        restored_count: restoredCount,
+        total_edges: normalized.edges.length,
+        samples: restoredSamples,
+      },
+      `Restored V4 edge fields on ${restoredCount}/${normalized.edges.length} edge(s)`,
+    );
+  }
+
+  return { ...normalized, edges: edgesWithFields };
+}
+
+/**
+ * Chain both field-preservation functions: node category + edge V4 fields.
+ * Drop-in replacement for the previous preserveCategoryFromOriginal calls.
+ */
+export function preserveFieldsFromOriginal(
+  normalized: GraphT,
+  original: GraphT,
+): GraphT {
+  const withCategory = preserveCategoryFromOriginal(normalized, original);
+  return preserveEdgeFieldsFromOriginal(withCategory, original);
+}
+
 // Lazy config access to avoid module-level initialization issues
 function getDeprecationSunset(): string {
   return config.server.deprecationSunset;
@@ -1113,7 +1247,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
         candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
       } else {
@@ -1162,7 +1296,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // Re-validate repaired graph
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
         candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
         emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
@@ -1184,7 +1318,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       const repaired = stabiliseGraph(ensureDagAndPrune(simpleRepair(candidate, correlationId), { collector }), { collector });
       const second = await validateGraph(repaired);
       if (second.ok && second.normalized) {
-        const normalizedWithCategory = preserveCategoryFromOriginal(second.normalized, repaired);
+        const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
         candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
         issues = second.violations;
       } else {
@@ -1199,8 +1333,8 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
     } // end of else block for !skipRepairDueToBudget
   } else if (first.normalized) {
-    // Preserve category field from original candidate (engine may not include it)
-    const normalizedWithCategory = preserveCategoryFromOriginal(first.normalized, candidate);
+    // Preserve node category + V4 edge fields from original candidate (engine may strip them)
+    const normalizedWithCategory = preserveFieldsFromOriginal(first.normalized, candidate);
     candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
   }
 

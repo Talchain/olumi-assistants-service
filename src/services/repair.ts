@@ -217,6 +217,11 @@ function getReachableFromDecision(
 /**
  * Node kinds that must be preserved during repair, even if unreachable.
  * Defined here so pruneUnreachable can reference it.
+ *
+ * Factors are included because external/observable factors may have no inbound
+ * edges from the decision chain but carry prior distributions needed for
+ * Monte Carlo environmental uncertainty sampling. Their outbound causal edges
+ * (factor→outcome, factor→risk) are structurally important.
  */
 const PROTECTED_KINDS_FOR_PRUNING = new Set([
   "goal",
@@ -224,12 +229,16 @@ const PROTECTED_KINDS_FOR_PRUNING = new Set([
   "option",
   "outcome",
   "risk",
+  "factor",
 ]);
 
 /**
  * Prune nodes unreachable from decision.
- * IMPORTANT: Protected kinds (goal, decision, option, outcome, risk) are NEVER pruned
- * to maintain structural integrity of the graph.
+ * IMPORTANT: Protected kinds (goal, decision, option, outcome, risk, factor)
+ * are NEVER pruned to maintain structural integrity of the graph.
+ *
+ * Factors are protected because external/observable factors have outbound-only
+ * causal edges (no inbound from decision chain) and carry priors for Monte Carlo.
  *
  * If no decision nodes exist, pruning is skipped entirely to avoid
  * over-deletion in malformed graphs.
@@ -246,6 +255,22 @@ function pruneUnreachable(
   }
 
   const reachable = getReachableFromDecision(nodes, edges);
+
+  // Log unreachable factors that are preserved (for observability)
+  const unreachableFactors = nodes.filter(
+    (n) => n.kind === "factor" && !reachable.has(n.id)
+  );
+  if (unreachableFactors.length > 0) {
+    log.info(
+      {
+        event: "SIMPLE_REPAIR_UNREACHABLE_FACTORS_PRESERVED",
+        request_id: requestId,
+        unreachable_factor_ids: unreachableFactors.map((n) => n.id),
+        count: unreachableFactors.length,
+      },
+      `Preserved ${unreachableFactors.length} unreachable factor(s) (protected kind)`
+    );
+  }
 
   const prunedIds: string[] = [];
   const keptNodes = nodes.filter((n) => {
@@ -288,8 +313,9 @@ function pruneUnreachable(
  * - option: Required alternatives (at least 2)
  * - outcome: Required positive consequences
  * - risk: Required negative consequences
+ * - factor: Carry prior distributions for Monte Carlo sampling (external/observable)
  */
-const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"]);
+const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk", "factor"]);
 
 /**
  * Simple repair that trims counts to caps.

@@ -409,8 +409,25 @@ await app.register(rateLimit, {
 }
 
 // Centralized error handler: structured error.v1 responses with request_id
+// Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
-  const errorV1 = toErrorV1(error, request);
+  let errorV1: ReturnType<typeof toErrorV1>;
+  try {
+    errorV1 = toErrorV1(error, request);
+  } catch {
+    // If toErrorV1 itself fails, produce a minimal fallback body
+    errorV1 = buildErrorV1("INTERNAL", "internal error", undefined, undefined);
+  }
+
+  // Guard: ensure errorV1 is a non-empty object with required code field
+  if (!errorV1 || typeof errorV1 !== "object" || !errorV1.code) {
+    app.log.error(
+      { event: "EMPTY_ERROR_V1", method: request.method, url: request.url },
+      "toErrorV1 returned empty/incomplete body — using fallback",
+    );
+    errorV1 = buildErrorV1("INTERNAL", "internal error", undefined, undefined);
+  }
+
   const statusCode = getStatusCodeForErrorCode(errorV1.code);
 
   // Track error for /v1/status metrics (separates 4xx vs 5xx)

@@ -304,7 +304,7 @@ describe("simpleRepair connectivity", () => {
   });
 
   describe("pruneUnreachable", () => {
-    it("prunes factor nodes unreachable from decision (but preserves protected kinds)", () => {
+    it("preserves factor nodes unreachable from decision (factors are protected)", () => {
       const graph = createTestGraph({
         nodes: [
           { id: "dec_1", kind: "decision", label: "Decision" },
@@ -344,14 +344,15 @@ describe("simpleRepair connectivity", () => {
 
       const result = simpleRepair(graph);
 
-      // orphan_fac (factor - unprotected) should be pruned
-      expect(result.nodes.find((n) => n.id === "orphan_fac")).toBeUndefined();
+      // orphan_fac (factor) is now protected — preserved for Monte Carlo priors
+      expect(result.nodes.find((n) => n.id === "orphan_fac")).toBeDefined();
 
-      // Protected kinds preserved even if unreachable
+      // All nodes preserved
       expect(result.nodes.find((n) => n.id === "dec_1")).toBeDefined();
       expect(result.nodes.find((n) => n.id === "opt_a")).toBeDefined();
       expect(result.nodes.find((n) => n.id === "fac_1")).toBeDefined();
       expect(result.nodes.find((n) => n.id === "goal_1")).toBeDefined();
+      expect(result.nodes.length).toBe(5);
     });
 
     it("does not prune protected kinds even when unreachable", () => {
@@ -438,7 +439,7 @@ describe("simpleRepair connectivity", () => {
       expect(wiringEdge).toBeDefined();
     });
 
-    it("removes edges to pruned nodes", () => {
+    it("preserves edges from unreachable factor nodes (factors protected)", () => {
       const graph = createTestGraph({
         nodes: [
           { id: "dec_1", kind: "decision", label: "Decision" },
@@ -486,12 +487,12 @@ describe("simpleRepair connectivity", () => {
 
       const result = simpleRepair(graph);
 
-      // Edge from orphan should be removed
+      // Edge from orphan factor is preserved (factors are now protected)
       const orphanEdge = result.edges.find((e) => e.from === "orphan_fac");
-      expect(orphanEdge).toBeUndefined();
+      expect(orphanEdge).toBeDefined();
 
-      // Other edges preserved
-      expect(result.edges.filter((e) => e.to === "goal_1").length).toBe(1);
+      // Both edges to goal_1 preserved (fac_1→goal_1 and orphan_fac→goal_1)
+      expect(result.edges.filter((e) => e.to === "goal_1").length).toBe(2);
     });
 
     it("handles multiple unreachable factor nodes", () => {
@@ -543,16 +544,52 @@ describe("simpleRepair connectivity", () => {
 
       const result = simpleRepair(graph);
 
-      // All orphan factors pruned (factors are not protected)
-      expect(result.nodes.find((n) => n.id === "orphan_1")).toBeUndefined();
-      expect(result.nodes.find((n) => n.id === "orphan_2")).toBeUndefined();
-      expect(result.nodes.find((n) => n.id === "orphan_3")).toBeUndefined();
+      // All orphan factors preserved (factors are now protected for Monte Carlo priors)
+      expect(result.nodes.find((n) => n.id === "orphan_1")).toBeDefined();
+      expect(result.nodes.find((n) => n.id === "orphan_2")).toBeDefined();
+      expect(result.nodes.find((n) => n.id === "orphan_3")).toBeDefined();
 
-      // Protected kinds preserved (dec_1, opt_a, goal_1)
-      expect(result.nodes.length).toBe(3);
+      // All 6 nodes preserved
+      expect(result.nodes.length).toBe(6);
 
-      // Orphan edges removed
-      expect(result.edges.length).toBe(2); // dec->opt, opt->goal
+      // All edges preserved (dec->opt, opt->goal, orphan_1->orphan_2, orphan_2->orphan_3)
+      expect(result.edges.length).toBe(4);
+    });
+
+    it("preserves external factors with outbound-only causal edges", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_ctrl", kind: "factor", label: "Controllable Factor" },
+          { id: "fac_competition", kind: "factor", label: "Competition" },
+          { id: "fac_regulations", kind: "factor", label: "Regulations" },
+          { id: "out_market_share", kind: "outcome", label: "Market Share" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" as const },
+          { from: "opt_a", to: "fac_ctrl", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" as const },
+          // External factors have OUTBOUND-only causal edges (no inbound from decision chain)
+          { from: "fac_competition", to: "out_market_share", strength_mean: -0.6, strength_std: 0.2, belief_exists: 0.8, effect_direction: "negative" as const },
+          { from: "fac_regulations", to: "out_market_share", strength_mean: -0.4, strength_std: 0.25, belief_exists: 0.7, effect_direction: "negative" as const },
+          { from: "fac_ctrl", to: "out_market_share", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" as const },
+          { from: "out_market_share", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" as const },
+        ],
+      });
+
+      const result = simpleRepair(graph);
+
+      // External factors must survive (protected kind)
+      expect(result.nodes.find((n) => n.id === "fac_competition")).toBeDefined();
+      expect(result.nodes.find((n) => n.id === "fac_regulations")).toBeDefined();
+
+      // Their causal edges must survive
+      expect(result.edges.find((e) => e.from === "fac_competition" && e.to === "out_market_share")).toBeDefined();
+      expect(result.edges.find((e) => e.from === "fac_regulations" && e.to === "out_market_share")).toBeDefined();
+
+      // All 7 nodes preserved
+      expect(result.nodes.length).toBe(7);
     });
   });
 
