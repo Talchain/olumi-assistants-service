@@ -29,7 +29,8 @@ import {
   SSE_DEGRADED_REDIS_REASON,
   SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
 } from "../utils/degraded-mode.js";
-import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs, FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_HEARTBEAT_INTERVAL_MS, SSE_RESUME_LIVE_TIMEOUT_MS, SSE_RESUME_POLL_INTERVAL_MS, SSE_RESUME_SNAPSHOT_RENEWAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs, FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS, LLM_POST_PROCESSING_HEADROOM_MS, SSE_HEARTBEAT_INTERVAL_MS, SSE_RESUME_LIVE_TIMEOUT_MS, SSE_RESUME_POLL_INTERVAL_MS, SSE_RESUME_SNAPSHOT_RENEWAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../adapters/llm/errors.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config, shouldUseStagingPrompts } from "../config/index.js";
 import { getModelConfig, getClientAllowedModels } from "../config/models.js";
@@ -497,6 +498,10 @@ export interface PipelineOpts {
   refreshPrompts?: boolean;
   /** Force use of hardcoded default prompt (skip store lookup) - ?default=1 URL param */
   forceDefault?: boolean;
+  /** AbortSignal for client disconnect / budget cancellation */
+  signal?: AbortSignal;
+  /** Request start timestamp for budget tracking */
+  requestStartMs?: number;
 }
 
 export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string, pipelineOpts?: PipelineOpts): Promise<PipelineResult> {
@@ -657,7 +662,16 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   }
 
   const llmStartTime = Date.now();
+  const effectiveLlmTimeout = DRAFT_LLM_TIMEOUT_MS;
   emit(TelemetryEvents.Stage, { stage: "llm_start", confidence, tokensIn, provider: draftAdapter.name, correlation_id: correlationId });
+
+  // Observability: cee.llm.call_start
+  log.info({
+    event: "cee.llm.call_start",
+    model: draftAdapter.model,
+    timeout_ms: effectiveLlmTimeout,
+    request_id: correlationId,
+  }, "LLM draft call starting");
 
   // V04: Telemetry for upstream calls with single retry on timeout
   let draftResult: DraftGraphResult | undefined;
@@ -677,12 +691,42 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
           includeDebug: input.include_debug === true,
         },
-        { requestId, timeoutMs: HTTP_CLIENT_TIMEOUT_MS, collector, bypassCache: pipelineOpts?.refreshPrompts, forceDefault: pipelineOpts?.forceDefault }
+        { requestId, timeoutMs: effectiveLlmTimeout, collector, bypassCache: pipelineOpts?.refreshPrompts, forceDefault: pipelineOpts?.forceDefault, signal: pipelineOpts?.signal }
       );
       break;
     } catch (error) {
       const err = error instanceof Error ? error : new Error("unexpected error");
       const isTimeout = err.name === "UpstreamTimeoutError";
+      const isAbort = err.name === "AbortError" || (pipelineOpts?.signal?.aborted === true);
+
+      // If the client disconnected, throw ClientDisconnectError immediately (no retry)
+      if (isAbort && !isTimeout) {
+        const llmDuration = Date.now() - llmStartTime;
+        log.info({
+          event: "cee.llm.call_aborted",
+          model: draftAdapter.model,
+          elapsed_ms: llmDuration,
+          reason: "client_disconnect",
+          request_id: correlationId,
+        }, "LLM draft call aborted due to client disconnect");
+        throw new ClientDisconnectError(
+          "Client disconnected during LLM draft call",
+          llmDuration,
+          correlationId,
+        );
+      }
+
+      if (isTimeout) {
+        const llmDuration = Date.now() - llmStartTime;
+        // Observability: cee.llm.call_timeout
+        log.warn({
+          event: "cee.llm.call_timeout",
+          model: draftAdapter.model,
+          timeout_ms: effectiveLlmTimeout,
+          elapsed_ms: llmDuration,
+          request_id: correlationId,
+        }, "LLM draft call timed out");
+      }
 
       if (!isTimeout || attempt >= 2) {
         const llmDuration = Date.now() - llmStartTime;
@@ -693,6 +737,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           provider: draftAdapter.name,
           correlation_id: correlationId,
         });
+
+        // Wrap timeout into typed LLMTimeoutError for the route handler
+        if (isTimeout) {
+          throw new LLMTimeoutError(
+            `LLM provider did not respond within ${Math.round(effectiveLlmTimeout / 1000)}s`,
+            draftAdapter.model,
+            effectiveLlmTimeout,
+            llmDuration,
+            correlationId,
+            err,
+          );
+        }
         throw err;
       }
 
@@ -709,21 +765,51 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     throw new Error("draft_graph_missing_result");
   }
 
+  // Observability: cee.llm.call_success
+  const llmDurationSuccess = Date.now() - llmStartTime;
+  log.info({
+    event: "cee.llm.call_success",
+    model: draftAdapter.model,
+    elapsed_ms: llmDurationSuccess,
+    request_id: correlationId,
+  }, "LLM draft call succeeded");
+
   const { graph, rationales, usage: draftUsage, debug: adapterDebug, meta: llmMeta } = draftResult;
-  const llmDuration = Date.now() - llmStartTime;
+  const llmDuration = llmDurationSuccess;
+
+  // Request budget guard: check if we've exceeded the overall request budget
+  const requestStartMs = pipelineOpts?.requestStartMs ?? llmStartTime;
+  const totalElapsed = Date.now() - requestStartMs;
+  if (totalElapsed > DRAFT_REQUEST_BUDGET_MS) {
+    log.warn({
+      event: "cee.request_budget.exceeded",
+      budget_ms: DRAFT_REQUEST_BUDGET_MS,
+      elapsed_ms: totalElapsed,
+      stage: "post_llm_draft",
+      request_id: correlationId,
+    }, "Request budget exceeded after LLM draft");
+    throw new RequestBudgetExceededError(
+      `Request exceeded ${Math.round(DRAFT_REQUEST_BUDGET_MS / 1000)}s budget`,
+      DRAFT_REQUEST_BUDGET_MS,
+      totalElapsed,
+      "post_llm_draft",
+      correlationId,
+    );
+  }
 
   // Time budget check: skip LLM repair if we've used too much time on draft
-  const draftBudgetMs = getDraftBudgetMs();
+  // Uses single budget source: remaining time = budget - total elapsed - headroom
+  const remainingForRepair = DRAFT_REQUEST_BUDGET_MS - totalElapsed - LLM_POST_PROCESSING_HEADROOM_MS;
   const repairTimeoutMs = getRepairTimeoutMs();
-  const remainingBudget = draftBudgetMs - llmDuration;
-  const skipRepairDueToBudget = remainingBudget < repairTimeoutMs;
+  const skipRepairDueToBudget = remainingForRepair < repairTimeoutMs;
 
   if (skipRepairDueToBudget) {
     log.warn({
       stage: "repair_budget_check",
       draft_duration_ms: llmDuration,
-      budget_ms: draftBudgetMs,
-      remaining_ms: remainingBudget,
+      total_elapsed_ms: totalElapsed,
+      budget_ms: DRAFT_REQUEST_BUDGET_MS,
+      remaining_for_repair_ms: remainingForRepair,
       repair_timeout_ms: repairTimeoutMs,
       skip_repair: true,
       correlation_id: correlationId,
@@ -1678,18 +1764,41 @@ async function handleSseResponse(
   } catch (error: unknown) {
     clearInterval(heartbeatInterval);
     const err = error instanceof Error ? error : new Error("unexpected error");
-    sseEndState = err.name === "AbortError" ? "timeout" : "error"; // V04: Track SSE end state
-    log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
-    const envelope = buildError("INTERNAL", err.message || "internal");
+    const streamDuration = Date.now() - streamStartTime;
+
+    // Typed error handling for budget/timeout/disconnect errors
+    let errorCode = "INTERNAL";
+    let errorMessage = err.message || "internal";
+
+    if (err instanceof LLMTimeoutError) {
+      sseEndState = "timeout";
+      errorCode = "CEE_LLM_TIMEOUT";
+      errorMessage = `LLM provider did not respond within ${Math.round(err.timeoutMs / 1000)}s`;
+      log.warn({ event: "cee.sse.llm_timeout", correlation_id: correlationId, elapsed_ms: err.elapsedMs }, "LLM timeout in SSE path");
+    } else if (err instanceof RequestBudgetExceededError) {
+      sseEndState = "timeout";
+      errorCode = "CEE_REQUEST_BUDGET_EXCEEDED";
+      errorMessage = `Request exceeded ${Math.round(err.budgetMs / 1000)}s budget`;
+      log.warn({ event: "cee.sse.budget_exceeded", correlation_id: correlationId, elapsed_ms: err.elapsedMs }, "Request budget exceeded in SSE path");
+    } else if (err instanceof ClientDisconnectError) {
+      sseEndState = "aborted";
+      errorCode = "CEE_CLIENT_DISCONNECT";
+      errorMessage = "Client disconnected";
+      log.info({ event: "cee.sse.client_disconnect", correlation_id: correlationId, elapsed_ms: err.elapsedMs }, "Client disconnected in SSE path");
+    } else {
+      sseEndState = err.name === "AbortError" ? "timeout" : "error";
+      log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
+    }
+
+    const envelope = buildError("INTERNAL", errorMessage);
     const payloadWithTelemetry = await withBufferTrimTelemetry(envelope);
     const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
     const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
     await writeStageAndBuffer({ stage: "COMPLETE", payload: completePayload });
-    const streamDuration = Date.now() - streamStartTime;
     emit(TelemetryEvents.SSEError, {
       stream_duration_ms: streamDuration,
-      error: err.message,
-      error_code: "INTERNAL",
+      error: errorMessage,
+      error_code: errorCode,
       error_type: err.name,
       fixture_shown: fixtureSent,
       correlation_id: correlationId,
@@ -1727,7 +1836,59 @@ async function handleJsonResponse(
   // V04: Echo correlation ID in response header
   reply.header("X-Correlation-ID", correlationId);
 
-  const result = await runDraftGraphPipeline(input, rawBody, correlationId);
+  let result: PipelineResult;
+  try {
+    result = await runDraftGraphPipeline(input, rawBody, correlationId);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error("unexpected error");
+
+    // LLM timeout — return typed 504
+    if (err instanceof LLMTimeoutError) {
+      const timeoutSec = Math.round(err.timeoutMs / 1000);
+      log.warn({ event: "cee.json.llm_timeout", request_id: correlationId, elapsed_ms: err.elapsedMs }, "LLM timeout in JSON path");
+      reply.code(504);
+      return reply.send({
+        error: "CEE_LLM_TIMEOUT",
+        message: `LLM provider did not respond within ${timeoutSec}s`,
+        retryable: true,
+        elapsed_ms: err.elapsedMs,
+        timeout_ms: err.timeoutMs,
+        model: err.model,
+        request_id: err.requestId,
+      });
+    }
+
+    // Request budget exceeded — return typed 504
+    if (err instanceof RequestBudgetExceededError) {
+      const budgetSec = Math.round(err.budgetMs / 1000);
+      log.warn({ event: "cee.json.budget_exceeded", request_id: correlationId, elapsed_ms: err.elapsedMs }, "Request budget exceeded in JSON path");
+      reply.code(504);
+      return reply.send({
+        error: "CEE_REQUEST_BUDGET_EXCEEDED",
+        message: `Request exceeded ${budgetSec}s budget`,
+        retryable: true,
+        elapsed_ms: err.elapsedMs,
+        budget_ms: err.budgetMs,
+        stage: err.stage,
+        request_id: err.requestId,
+      });
+    }
+
+    // Client disconnect — log and return 499 (won't reach client)
+    if (err instanceof ClientDisconnectError) {
+      log.info({ event: "cee.json.client_disconnect", request_id: correlationId, elapsed_ms: err.elapsedMs }, "Client disconnected in JSON path");
+      reply.code(499);
+      return reply.send({
+        error: "CEE_CLIENT_DISCONNECT",
+        message: "Client disconnected",
+        retryable: false,
+        request_id: err.requestId,
+      });
+    }
+
+    // Generic — re-throw for Fastify's default handler
+    throw err;
+  }
 
   // Handle errors
   if (result.kind === "error") {

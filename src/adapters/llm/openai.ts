@@ -510,6 +510,16 @@ export class OpenAIAdapter implements LLMAdapter {
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
+    // Wire external abort signal (e.g. client disconnect) to abort the in-flight request
+    const externalSignal = opts.signal ?? opts.abortSignal;
+    let onExternalAbort: (() => void) | undefined;
+    if (externalSignal && !externalSignal.aborted) {
+      onExternalAbort = () => abortController.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    } else if (externalSignal?.aborted) {
+      abortController.abort();
+    }
+
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('draft_graph');
@@ -558,6 +568,9 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
@@ -739,6 +752,9 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof Error) {

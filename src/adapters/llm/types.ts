@@ -265,6 +265,9 @@ export interface CallOpts {
   requestId: string;
   timeoutMs: number;
   abortSignal?: AbortSignal;
+  /** External abort signal (e.g. client disconnect / budget cancellation).
+   *  Preferred over abortSignal — both are supported for backward compatibility. */
+  signal?: AbortSignal;
   bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (?supa=1 or X-CEE-Refresh-Prompt header)
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
   collector?: CorrectionCollector; // Graph corrections tracking

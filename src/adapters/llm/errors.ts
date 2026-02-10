@@ -52,3 +52,68 @@ export class UpstreamHTTPError extends Error {
     }
   }
 }
+
+/**
+ * LLM call timeout error — thrown when the draft LLM call exceeds its
+ * derived budget (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS).
+ *
+ * Distinct from UpstreamTimeoutError (generic HTTP-level timeout) because
+ * this is budget-aware and carries the model + request_id for the 504 response.
+ */
+export class LLMTimeoutError extends Error {
+  readonly name = "LLMTimeoutError";
+
+  constructor(
+    message: string,
+    public readonly model: string,
+    public readonly timeoutMs: number,
+    public readonly elapsedMs: number,
+    public readonly requestId: string,
+    public readonly cause?: unknown
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, LLMTimeoutError);
+    }
+  }
+}
+
+/**
+ * Request budget exceeded error — thrown when the overall request budget
+ * (DRAFT_REQUEST_BUDGET_MS) expires during post-LLM processing.
+ */
+export class RequestBudgetExceededError extends Error {
+  readonly name = "RequestBudgetExceededError";
+
+  constructor(
+    message: string,
+    public readonly budgetMs: number,
+    public readonly elapsedMs: number,
+    public readonly stage: string,
+    public readonly requestId: string,
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, RequestBudgetExceededError);
+    }
+  }
+}
+
+/**
+ * Client disconnect error — thrown when the client closes the connection
+ * before CEE can return a response.
+ */
+export class ClientDisconnectError extends Error {
+  readonly name = "ClientDisconnectError";
+
+  constructor(
+    message: string,
+    public readonly elapsedMs: number,
+    public readonly requestId: string,
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, ClientDisconnectError);
+    }
+  }
+}

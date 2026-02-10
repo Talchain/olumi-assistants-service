@@ -164,6 +164,32 @@ export const REPAIR_TIMEOUT_MS = clampTimeout(
 );
 
 // ---------------------------------------------------------------------------
+// Request budget — single source of truth for draft-graph request lifecycle
+// ---------------------------------------------------------------------------
+
+/** Overall request budget for draft-graph requests (default: 90s).
+ *  CEE must return a response (success or error) before this deadline. */
+export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS", 90_000);
+
+/** Headroom reserved for post-LLM processing (validation, repair, enrichment).
+ *  The effective LLM timeout = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS */
+export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 10_000);
+
+/** Derived: maximum time the LLM draft call may run before being aborted.
+ *  Computed as DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS. */
+export const DRAFT_LLM_TIMEOUT_MS = Math.max(
+  MIN_TIMEOUT_MS,
+  DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS,
+);
+
+/** Derived: budget remaining for repair after the LLM draft call.
+ *  Repair is skipped when elapsed draft time exceeds this threshold.
+ *  Clamped to 0 — negative values mean repair can never run. */
+export function getDerivedRepairBudgetMs(): number {
+  return Math.max(0, DRAFT_LLM_TIMEOUT_MS - REPAIR_TIMEOUT_MS);
+}
+
+// ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling
 // ---------------------------------------------------------------------------
 
@@ -232,6 +258,27 @@ export function validateTimeoutRelationships(): string[] {
     );
   }
 
+  if (LLM_POST_PROCESSING_HEADROOM_MS >= DRAFT_REQUEST_BUDGET_MS) {
+    warnings.push(
+      `LLM_POST_PROCESSING_HEADROOM_MS (${LLM_POST_PROCESSING_HEADROOM_MS}ms) >= DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
+      `headroom exceeds budget, LLM calls will use minimum timeout (${MIN_TIMEOUT_MS}ms)`,
+    );
+  }
+
+  if (DRAFT_REQUEST_BUDGET_MS > ROUTE_TIMEOUT_MS) {
+    warnings.push(
+      `DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) > ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+      `request budget exceeds route timeout, Fastify will kill requests before budget expires`,
+    );
+  }
+
+  if (REPAIR_TIMEOUT_MS > DRAFT_LLM_TIMEOUT_MS) {
+    warnings.push(
+      `REPAIR_TIMEOUT_MS (${REPAIR_TIMEOUT_MS}ms) > DRAFT_LLM_TIMEOUT_MS (${DRAFT_LLM_TIMEOUT_MS}ms) — ` +
+      `repair timeout exceeds LLM draft budget, repair will always be skipped`,
+    );
+  }
+
   return warnings;
 }
 
@@ -259,6 +306,9 @@ export function getResolvedTimeouts(): Record<string, number> {
     FIXTURE_TIMEOUT_MS,
     DRAFT_BUDGET_MS,
     REPAIR_TIMEOUT_MS,
+    DRAFT_REQUEST_BUDGET_MS,
+    LLM_POST_PROCESSING_HEADROOM_MS,
+    DRAFT_LLM_TIMEOUT_MS,
     SSE_HEARTBEAT_INTERVAL_MS,
     SSE_RESUME_LIVE_TIMEOUT_MS,
     SSE_RESUME_POLL_INTERVAL_MS,

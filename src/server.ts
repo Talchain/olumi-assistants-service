@@ -56,7 +56,7 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
-import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
@@ -175,6 +175,14 @@ export async function build() {
   // Log all resolved timeout values at startup for diagnostics
   const resolvedTimeouts = getResolvedTimeouts();
   log.info({ event: 'config.timeouts', ...resolvedTimeouts }, 'Resolved timeout configuration');
+
+  // Log request budget configuration (single source of truth for draft-graph lifecycle)
+  log.info({
+    event: 'cee.config.request_budget',
+    draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
+    llm_post_processing_headroom_ms: LLM_POST_PROCESSING_HEADROOM_MS,
+    derived_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
+  }, `Request budget: ${DRAFT_REQUEST_BUDGET_MS}ms total, ${DRAFT_LLM_TIMEOUT_MS}ms LLM timeout, ${LLM_POST_PROCESSING_HEADROOM_MS}ms headroom`);
 
   // Validate timeout relationships (warn about misconfigurations)
   const timeoutWarnings = validateTimeoutRelationships();

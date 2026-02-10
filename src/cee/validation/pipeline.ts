@@ -9,6 +9,8 @@ import { getRequestId } from "../../utils/request-id.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { isSchemaValidationError, calculateBackoffDelay, SCHEMA_VALIDATION_RETRY_CONFIG } from "../../utils/retry.js";
 import { config, isProduction } from "../../config/index.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../../adapters/llm/errors.js";
+import { DRAFT_REQUEST_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS } from "../../config/timeouts.js";
 import { logCeeCall } from "../logging.js";
 import { persistDraftFailureBundle } from "../draft-failures/store.js";
 import { CEEDraftGraphResponseV1Schema } from "../../schemas/ceeResponses.js";
@@ -991,6 +993,24 @@ export async function finaliseCeeDraftResponse(
     log.info({ requestId }, 'Force default prompt requested via ?default=1 - will skip store lookup');
   }
 
+  // Abort controller for client disconnect detection
+  // When the client closes the socket, abort in-flight LLM calls immediately
+  const budgetAbortController = new AbortController();
+  const socket = request.raw?.socket;
+  let clientDisconnected = false;
+  const onSocketClose = () => {
+    clientDisconnected = true;
+    budgetAbortController.abort();
+    log.info({
+      event: "cee.client_disconnect",
+      request_id: requestId,
+      elapsed_ms: Date.now() - start,
+    }, "Client disconnected — aborting in-flight LLM work");
+  };
+  if (socket && !socket.destroyed) {
+    socket.once("close", onSocketClose);
+  }
+
   // Run pipeline with single retry for schema validation failures
   let pipelineResult: any;
   let lastError: Error | null = null;
@@ -998,7 +1018,12 @@ export async function finaliseCeeDraftResponse(
 
   for (let attempt = 1; attempt <= SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts; attempt++) {
     try {
-      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, { refreshPrompts, forceDefault: defaultQueryParam });
+      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, {
+        refreshPrompts,
+        forceDefault: defaultQueryParam,
+        signal: budgetAbortController.signal,
+        requestStartMs: start,
+      });
       lastError = null;
       break; // Success - exit retry loop
     } catch (error) {
@@ -1038,7 +1063,103 @@ export async function finaliseCeeDraftResponse(
     }
   }
 
-  // Handle error if pipeline failed
+  // Clean up socket listener now that pipeline is done
+  if (socket) {
+    socket.removeListener("close", onSocketClose);
+  }
+
+  // Handle typed budget/timeout errors before the generic error handler
+  if (lastError) {
+    const err = lastError;
+
+    // LLM timeout — return typed CEE_LLM_TIMEOUT 504
+    if (err instanceof LLMTimeoutError) {
+      const timeoutSec = Math.round(err.timeoutMs / 1000);
+      emit(TelemetryEvents.CeeDraftGraphFailed, {
+        request_id: requestId,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_LLM_TIMEOUT",
+        http_status: 504,
+      });
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "timeout",
+        errorCode: "CEE_LLM_TIMEOUT",
+        httpStatus: 504,
+      });
+      return {
+        statusCode: 504,
+        body: buildCeeErrorResponse("CEE_TIMEOUT" as CEEErrorCode, `LLM provider did not respond within ${timeoutSec}s`, {
+          retryable: true,
+          requestId,
+          details: {
+            error: "CEE_LLM_TIMEOUT",
+            elapsed_ms: err.elapsedMs,
+            timeout_ms: err.timeoutMs,
+            model: err.model,
+          },
+          stage: "llm_draft",
+        }),
+      };
+    }
+
+    // Request budget exceeded — return typed CEE_REQUEST_BUDGET_EXCEEDED 504
+    if (err instanceof RequestBudgetExceededError) {
+      const budgetSec = Math.round(err.budgetMs / 1000);
+      emit(TelemetryEvents.CeeDraftGraphFailed, {
+        request_id: requestId,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_REQUEST_BUDGET_EXCEEDED",
+        http_status: 504,
+      });
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "timeout",
+        errorCode: "CEE_REQUEST_BUDGET_EXCEEDED",
+        httpStatus: 504,
+      });
+      return {
+        statusCode: 504,
+        body: buildCeeErrorResponse("CEE_TIMEOUT" as CEEErrorCode, `Request exceeded ${budgetSec}s budget`, {
+          retryable: true,
+          requestId,
+          details: {
+            error: "CEE_REQUEST_BUDGET_EXCEEDED",
+            elapsed_ms: err.elapsedMs,
+            budget_ms: err.budgetMs,
+            stage: err.stage,
+          },
+          stage: err.stage,
+        }),
+      };
+    }
+
+    // Client disconnect — don't try to send a response, just log and return a minimal body
+    if (err instanceof ClientDisconnectError || clientDisconnected) {
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_CLIENT_DISCONNECT",
+        httpStatus: 499,
+      });
+      // Return 499 (client closed request) - won't actually be sent since client is gone
+      return {
+        statusCode: 499,
+        body: buildCeeErrorResponse("CEE_INTERNAL_ERROR" as CEEErrorCode, "Client disconnected", {
+          retryable: false,
+          requestId,
+        }),
+      };
+    }
+  }
+
+  // Handle error if pipeline failed (original handler for UpstreamTimeoutError, schema errors, etc.)
   if (lastError) {
     const err = lastError;
     const isTimeout = err.name === "UpstreamTimeoutError";
