@@ -174,7 +174,7 @@ export class EdgeDirectionValidator implements VerificationStage<unknown, unknow
     return {
       valid: true, // Still valid but with warnings
       stage: this.name,
-      severity: "warning",
+      severity: "warn",
       code: "EDGE_DIRECTION_VIOLATION",
       message: `${violations.length} edge direction violation(s) detected: ${goalOutgoingCount} goal outgoing, ${wrongDirectionCount} wrong direction`,
       details: {

@@ -17,7 +17,7 @@ export class MetadataEnricher {
       engine_validated: this.passed("engine_validation", results),
       numerical_grounding_score: this.numericalScore(results),
       issues_detected: results
-        .filter((r) => !r.valid || r.severity === "warning")
+        .filter((r) => !r.valid || r.severity === "warn")
         .map((r) => ({
           stage: r.stage,
           severity: r.severity ?? "info",

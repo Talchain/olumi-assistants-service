@@ -497,7 +497,7 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
   const warnings: Array<{
     id: string;
     type: string;
-    severity: "info" | "warning" | "error";
+    severity: "info" | "warn" | "error";
     message: string;
     affected_nodes?: string[];
     affected_edges?: string[];
@@ -509,7 +509,7 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
     warnings.push({
       id: generateBlockId(),
       type: "orphan_nodes",
-      severity: "warning",
+      severity: "warn",
       message: `${orphans.length} node(s) are not connected to the graph.`,
       affected_nodes: orphans,
     });
@@ -520,7 +520,7 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
     warnings.push({
       id: generateBlockId(),
       type: "cycle_detected",
-      severity: "warning",
+      severity: "warn",
       message: "Graph contains cycles. This may affect causal inference.",
     });
   }
@@ -547,7 +547,7 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
     warnings.push({
       id: generateBlockId(),
       type: "missing_options",
-      severity: "warning",
+      severity: "warn",
       message: "No option nodes found. Add options to represent alternatives.",
     });
   }
@@ -557,7 +557,7 @@ export function buildRisksBlock(ctx: BlockBuilderContext): BlockBuilderResult {
     warnings.push({
       id: generateBlockId(),
       type: "no_edges",
-      severity: "warning",
+      severity: "warn",
       message: "Graph has no edges. Connect nodes to show relationships.",
     });
   }

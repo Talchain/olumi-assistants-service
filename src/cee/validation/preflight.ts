@@ -98,7 +98,7 @@ const GIBBERISH_PATTERNS = [
 
 export type PreflightIssue = {
   code: string;
-  severity: "error" | "warning";
+  severity: "error" | "warn";
   message: string;
   details?: Record<string, unknown>;
 };
@@ -296,7 +296,7 @@ export function validateBriefPreflight(brief: string): PreflightResult {
   if (decisionRelevance < 0.2 && length >= BRIEF_MIN_LENGTH && wordCount >= BRIEF_MIN_WORDS) {
     issues.push({
       code: "BRIEF_LOW_DECISION_RELEVANCE",
-      severity: "warning",
+      severity: "warn",
       message: "Brief does not appear to describe a decision. Consider rephrasing as a question or decision statement.",
       details: {
         decision_relevance_score: decisionRelevance,
@@ -312,7 +312,7 @@ export function validateBriefPreflight(brief: string): PreflightResult {
     emit(TelemetryEvents.PreflightValidationPassed, {
       metrics,
       issue_count: issues.length,
-      warning_count: issues.filter(i => i.severity === "warning").length,
+      warning_count: issues.filter(i => i.severity === "warn").length,
     });
   } else {
     emit(TelemetryEvents.PreflightValidationFailed, {

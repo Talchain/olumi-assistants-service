@@ -2482,7 +2482,7 @@ export async function finaliseCeeDraftResponse(
           code: "ENGINE_VALIDATION_WARNING",
           message: msg,
           details: { scope: "engine_validate" },
-          severityOverride: "warning",
+          severityOverride: "warn",
         }),
       );
     }
@@ -2494,7 +2494,7 @@ export async function finaliseCeeDraftResponse(
         code: "CEE_REPRO_MISMATCH",
         message: "Engine reported a reproducibility mismatch for this graph and seed",
         details: { scope: "engine", hint: "response_hash_mismatch" },
-        severityOverride: "warning",
+        severityOverride: "warn",
       }),
     );
   }
@@ -2511,7 +2511,7 @@ export async function finaliseCeeDraftResponse(
         code: "ENGINE_DEGRADED",
         message: "Engine reported degraded mode",
         details: { scope: "engine", source: "x-olumi-degraded", hint: degradedHeader },
-        severityOverride: "warning",
+        severityOverride: "warn",
       }),
     );
   }

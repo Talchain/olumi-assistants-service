@@ -94,7 +94,7 @@ export class BranchProbabilityValidator implements VerificationStage<unknown, un
     return {
       valid: true,
       stage: this.name,
-      severity: "warning",
+      severity: "warn",
       code: "BRANCH_PROBABILITIES_UNNORMALIZED",
       message: "Some decision branch beliefs do not sum to 1.0",
       details: {

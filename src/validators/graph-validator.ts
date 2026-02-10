@@ -969,7 +969,7 @@ function collectWarnings(
       if (edge.strength_mean < -1 || edge.strength_mean > 1) {
         warnings.push({
           code: "STRENGTH_OUT_OF_RANGE",
-          severity: "warning",
+          severity: "warn",
           message: `Edge strength_mean ${edge.strength_mean} outside [-1, +1]`,
           path: `edges[${i}]`,
           context: { value: edge.strength_mean },
@@ -982,7 +982,7 @@ function collectWarnings(
       if (edge.belief_exists < 0 || edge.belief_exists > 1) {
         warnings.push({
           code: "PROBABILITY_OUT_OF_RANGE",
-          severity: "warning",
+          severity: "warn",
           message: `Edge belief_exists ${edge.belief_exists} outside [0, 1]`,
           path: `edges[${i}]`,
           context: { value: edge.belief_exists },
@@ -995,7 +995,7 @@ function collectWarnings(
       if (edge.strength_mean !== undefined && edge.strength_mean < 0) {
         warnings.push({
           code: "OUTCOME_NEGATIVE_POLARITY",
-          severity: "warning",
+          severity: "warn",
           message: `Outcome->goal edge has negative strength_mean (${edge.strength_mean})`,
           path: `edges[${i}]`,
           context: { from: edge.from, to: edge.to, value: edge.strength_mean },
@@ -1008,7 +1008,7 @@ function collectWarnings(
       if (edge.strength_mean !== undefined && edge.strength_mean > 0) {
         warnings.push({
           code: "RISK_POSITIVE_POLARITY",
-          severity: "warning",
+          severity: "warn",
           message: `Risk->goal edge has positive strength_mean (${edge.strength_mean})`,
           path: `edges[${i}]`,
           context: { from: edge.from, to: edge.to, value: edge.strength_mean },
@@ -1020,7 +1020,7 @@ function collectWarnings(
     if (edge.belief_exists !== undefined && edge.belief_exists < 0.3) {
       warnings.push({
         code: "LOW_EDGE_CONFIDENCE",
-        severity: "warning",
+        severity: "warn",
         message: `Edge has low confidence (belief_exists: ${edge.belief_exists})`,
         path: `edges[${i}]`,
         context: { value: edge.belief_exists },
@@ -1047,7 +1047,7 @@ function collectWarnings(
       if (!isCanonical) {
         warnings.push({
           code: "STRUCTURAL_EDGE_NOT_CANONICAL",
-          severity: "warning",
+          severity: "warn",
           message: `Structural edge ${fromNode.kind}->${toNode.kind} is not canonical`,
           path: `edges[${i}]`,
           context: {
@@ -1062,7 +1062,7 @@ function collectWarnings(
       if (std !== undefined && std < 0.05) {
         warnings.push({
           code: "LOW_STD_NON_STRUCTURAL",
-          severity: "warning",
+          severity: "warn",
           message: `Non-structural edge has low std (${std}); causal edges should have std >= 0.05`,
           path: `edges[${i}]`,
           context: { from: edge.from, to: edge.to, std, threshold: 0.05 },
@@ -1082,7 +1082,7 @@ function collectWarnings(
     if (data?.uncertainty_drivers && data.uncertainty_drivers.length === 0) {
       warnings.push({
         code: "EMPTY_UNCERTAINTY_DRIVERS",
-        severity: "warning",
+        severity: "warn",
         message: `Controllable factor "${factor.id}" has empty uncertainty_drivers`,
         path: `nodesById.${factor.id}.data.uncertainty_drivers`,
       });

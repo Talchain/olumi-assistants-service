@@ -58,7 +58,7 @@ export class NumericalValidator implements VerificationStage<unknown, unknown> {
       return {
         valid: true,
         stage: this.name,
-        severity: "warning",
+        severity: "warn",
         code: "NUMERICAL_UNGROUNDED",
         message: `${ungrounded.length}/${significant.length} numbers lack grounding in inference results`,
         details: {

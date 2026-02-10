@@ -23,7 +23,7 @@ export type FramingNudge = {
   id: string;
   type: "anchoring_warning" | "scope_prompt" | "alternatives_prompt" | "time_pressure" | "sunk_cost";
   message: string;
-  severity: "info" | "warning";
+  severity: "info" | "warn";
 };
 
 export type PreDecisionChecklist = {
@@ -151,7 +151,7 @@ function generateFramingNudges(graph: Graph, brief: string): FramingNudge[] {
       id: "nudge_time_pressure",
       type: "time_pressure",
       message: "Time pressure can lead to hasty decisions. Verify if the urgency is real or perceived.",
-      severity: "warning",
+      severity: "warn",
     });
   }
 
@@ -161,7 +161,7 @@ function generateFramingNudges(graph: Graph, brief: string): FramingNudge[] {
       id: "nudge_sunk_cost",
       type: "sunk_cost",
       message: "Past investments shouldn't influence future decisions. Focus on forward-looking costs and benefits.",
-      severity: "warning",
+      severity: "warn",
     });
   }
 

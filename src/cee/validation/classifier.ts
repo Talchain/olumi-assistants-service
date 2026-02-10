@@ -4,7 +4,7 @@ import { log } from "../../utils/telemetry.js";
 // Shared CEE types from OpenAPI
 export type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
-export type CeeSeverity = "error" | "warning" | "info";
+export type CeeSeverity = "error" | "warn" | "info";
 
 /**
  * Structural warning severity levels for CEEStructuralWarningV1.
@@ -52,7 +52,7 @@ export type CanonicalSeverity = StructuralWarningSeverity;
  *
  * Mapping:
  * - error → blocker (blocks execution)
- * - warning → medium (degrades quality, consistent with draft_warnings patterns)
+ * - warn → medium (degrades quality, consistent with draft_warnings patterns)
  * - info → low (informational)
  * - unknown → medium (safe default)
  */
@@ -61,7 +61,7 @@ export function toCanonicalSeverity(
 ): CanonicalSeverity {
   switch (validatorSeverity) {
     case "error": return "blocker";
-    case "warning": return "medium";
+    case "warn": return "medium";
     case "info": return "low";
     default: return "medium";
   }
@@ -154,14 +154,14 @@ export function classifyIssueSeverity(code: string | undefined | null): CeeSever
   const normalized = typeof code === "string" ? code.toUpperCase() : "";
 
   if (ERROR_CODE_SET.has(normalized)) return "error";
-  if (WARNING_CODE_SET.has(normalized)) return "warning";
+  if (WARNING_CODE_SET.has(normalized)) return "warn";
   if (INFO_CODE_SET.has(normalized)) return "info";
 
   // Defensive default: unknown codes are treated as warnings so they do not block execution.
   if (normalized) {
     log.warn({ code: normalized }, "Unknown validation code encountered in CEE");
   }
-  return "warning";
+  return "warn";
 }
 
 export interface CeeValidationResult {
@@ -182,7 +182,7 @@ export function summariseValidationIssues(issues: CEEValidationIssue[]): CeeVali
     const sev = issue?.severity as CeeSeverity | undefined;
     if (sev === "error") {
       error_count += 1;
-    } else if (sev === "warning") {
+    } else if (sev === "warn") {
       warning_count += 1;
     } else if (sev === "info") {
       info_count += 1;

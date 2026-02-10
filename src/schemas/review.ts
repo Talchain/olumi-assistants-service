@@ -335,7 +335,7 @@ export const PredictionBlock = BaseBlock.extend({
 export const StructuralWarning = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
-  severity: z.enum(["info", "warning", "error"]),
+  severity: z.enum(["info", "warn", "error"]),
   message: z.string().min(1),
   affected_nodes: z.array(z.string()).optional(),
   affected_edges: z.array(z.string()).optional(),

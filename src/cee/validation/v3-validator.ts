@@ -118,7 +118,7 @@ export function validateV3Response(
  */
 function categorizeWarnings(warnings: ValidationWarningV3T[]): V3ValidationResult {
   const errors = warnings.filter((w) => w.severity === "error");
-  const warningsOnly = warnings.filter((w) => w.severity === "warning");
+  const warningsOnly = warnings.filter((w) => w.severity === "warn");
   const info = warnings.filter((w) => w.severity === "info");
 
   return {
@@ -156,7 +156,7 @@ function validateGoalNode(response: CEEGraphResponseV3T): ValidationWarningV3T[]
   if (goalNode && goalNode.kind !== "goal") {
     warnings.push({
       code: "GOAL_NODE_WRONG_KIND",
-      severity: "warning",
+      severity: "warn",
       message: `goal_node_id "${response.goal_node_id}" references a node with kind="${goalNode.kind}", expected "goal"`,
       affected_node_id: response.goal_node_id,
       suggestion: "Set the node kind to 'goal' or use a different goal_node_id",
@@ -266,7 +266,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       if (incoming.length > 0) {
         warnings.push({
           code: "DECISION_HAS_INCOMING_EDGES",
-          severity: "warning",
+          severity: "warn",
           message: `Decision node "${node.id}" has ${incoming.length} incoming edge(s) but should have none`,
           affected_node_id: node.id,
           suggestion: "Decision nodes should not have any incoming edges",
@@ -281,7 +281,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       if (outgoing.length === 0) {
         warnings.push({
           code: `${node.kind.toUpperCase()}_NO_OUTGOING_EDGE`,
-          severity: "warning",
+          severity: "warn",
           message: `${node.kind} node "${node.id}" has no outgoing edge to goal`,
           affected_node_id: node.id,
           suggestion: `${node.kind} nodes must connect to the goal node`,
@@ -302,7 +302,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
         if (targetKind !== "goal") {
           warnings.push({
             code: `${node.kind.toUpperCase()}_NOT_CONNECTED_TO_GOAL`,
-            severity: "warning",
+            severity: "warn",
             message: `${node.kind} node "${node.id}" connects to "${outgoing[0]}" (${targetKind}) instead of goal`,
             affected_node_id: node.id,
             affected_edge_id: `${node.id}→${outgoing[0]}`,
@@ -335,7 +335,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     if (uniqueStrengths.size === 1) {
       warnings.push({
         code: "UNIFORM_STRENGTHS",
-        severity: "warning",
+        severity: "warn",
         message: `All ${causalStrengths.length} causal edges have identical strength (${causalStrengths[0].toFixed(2)}). This will produce undifferentiated results.`,
         suggestion: "Review edge strengths — different relationships should have different effect sizes.",
         stage,
@@ -426,7 +426,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     if (edge.effect_direction !== expectedDirection) {
       warnings.push({
         code: "EFFECT_DIRECTION_MISMATCH",
-        severity: "warning",
+        severity: "warn",
         message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength_mean=${edge.strength_mean} suggests "${expectedDirection}"`,
         affected_edge_id: edgeId,
         suggestion: "Ensure effect_direction matches the sign of strength_mean",
@@ -585,7 +585,7 @@ function validateOptions(
     if (!optionIdSet.has(optionNodeId)) {
       warnings.push({
         code: "OPTION_ID_MISMATCH",
-        severity: "warning",
+        severity: "warn",
         message: `Option node "${optionNodeId}" has no matching entry in options[]`,
         affected_option_id: optionNodeId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -598,7 +598,7 @@ function validateOptions(
     if (!optionNodeIdSet.has(optionId)) {
       warnings.push({
         code: "OPTION_ID_MISMATCH",
-        severity: "warning",
+        severity: "warn",
         message: `Option "${optionId}" exists in options[] but no option node matches`,
         affected_option_id: optionId,
         suggestion: "Ensure options[] IDs match option node IDs in the graph",
@@ -634,7 +634,7 @@ function validateOptions(
       const existingOptionId = interventionSignatures.get(interventionEntries);
       warnings.push({
         code: "IDENTICAL_OPTION_INTERVENTIONS",
-        severity: "warning",
+        severity: "warn",
         message: `Options "${option.id}" and "${existingOptionId}" have identical interventions`,
         affected_option_id: option.id,
         suggestion: "Options must differ in at least one intervention value",
@@ -661,7 +661,7 @@ function validateOptions(
     if (option.status === "ready" && !hasInterventions) {
       warnings.push({
         code: "EMPTY_INTERVENTIONS_READY",
-        severity: "warning",
+        severity: "warn",
         message: `Option "${option.id}" has status='ready' but no interventions`,
         affected_option_id: option.id,
         suggestion: "Add interventions or change status to 'needs_user_mapping'",
@@ -732,7 +732,7 @@ function validateInterventions(
       if (!factorIds.has(intervention.target_match.node_id)) {
         warnings.push({
           code: "INTERVENTION_TARGET_NOT_FACTOR",
-          severity: "warning",
+          severity: "warn",
           message: `Option "${option.id}": intervention target "${intervention.target_match.node_id}" is not a factor node`,
           affected_option_id: option.id,
           affected_node_id: intervention.target_match.node_id,
@@ -751,7 +751,7 @@ function validateInterventions(
         if (!hasPath) {
           warnings.push({
             code: "INTERVENTION_TARGET_DISCONNECTED",
-            severity: "warning",
+            severity: "warn",
             message: `Option "${option.id}": target "${intervention.target_match.node_id}" has no path to goal`,
             affected_option_id: option.id,
             affected_node_id: intervention.target_match.node_id,
@@ -857,7 +857,7 @@ function validateInterventionEdgeConsistency(
       if (factorKey !== interventionTarget) {
         warnings.push({
           code: "INTERVENTION_KEY_MISMATCH",
-          severity: "warning",
+          severity: "warn",
           message: `Option "${option.id}": intervention key "${factorKey}" does not match target_match.node_id "${interventionTarget}"`,
           affected_option_id: option.id,
           affected_node_id: interventionTarget,
@@ -871,7 +871,7 @@ function validateInterventionEdgeConsistency(
       if (!edgeTargets.has(interventionTarget)) {
         warnings.push({
           code: "INTERVENTION_NO_EDGE",
-          severity: "warning",
+          severity: "warn",
           message: `Option "${option.id}" has intervention for "${interventionTarget}" but no option→factor edge`,
           affected_option_id: option.id,
           affected_node_id: interventionTarget,
@@ -887,7 +887,7 @@ function validateInterventionEdgeConsistency(
       if (!interventionTargets.has(edgeTarget)) {
         warnings.push({
           code: "EDGE_NO_INTERVENTION",
-          severity: "warning",
+          severity: "warn",
           message: `Option "${option.id}" has edge to "${edgeTarget}" but no corresponding intervention`,
           affected_option_id: option.id,
           affected_node_id: edgeTarget,
