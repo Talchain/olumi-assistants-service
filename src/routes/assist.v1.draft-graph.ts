@@ -371,7 +371,45 @@ export default async function route(app: FastifyInstance) {
       }
     }
 
-    const { statusCode, body, headers } = await finaliseCeeDraftResponse(baseInput, req.body, req);
+    let statusCode: number;
+    let body: unknown;
+    let headers: Record<string, string> | undefined;
+    try {
+      const result = await finaliseCeeDraftResponse(baseInput, req.body, req);
+      statusCode = result.statusCode;
+      body = result.body;
+      headers = result.headers;
+    } catch (pipelineError) {
+      // Layer 1 safety net: guarantee JSON body even if pipeline throws unexpectedly
+      log.error(
+        { error: pipelineError, request_id: requestId, event: "cee.pipeline.unhandled" },
+        "Unhandled pipeline error — returning 500 with JSON body",
+      );
+      reply.header("X-CEE-API-Version", "v1");
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      reply.code(500);
+      return reply.send(
+        buildCeeErrorResponse("CEE_INTERNAL_ERROR", "unexpected pipeline error", {
+          retryable: false,
+          requestId,
+          stage: "route_handler",
+        }),
+      );
+    }
+
+    // Guard: never send an empty body (Layer 1 body-presence guarantee)
+    if (body === undefined || body === null) {
+      log.error(
+        { request_id: requestId, original_status: statusCode, event: "cee.empty_body" },
+        "Pipeline returned empty body — synthesizing fallback error body",
+      );
+      body = buildCeeErrorResponse("CEE_INTERNAL_ERROR", "empty response body", {
+        retryable: false,
+        requestId,
+      });
+      statusCode = 500;
+    }
 
     // Check for schema version request via query parameter
     // Default is V3 (includes analysis_ready) - V1/V2 are deprecated
