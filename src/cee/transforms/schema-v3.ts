@@ -639,6 +639,7 @@ export function transformResponseToV3(
       severity: "warn" as const,
       details: {
         total_edges: strengthDefaults.total_edges,
+        structural_edges_excluded: strengthDefaults.structural_edges_excluded,
         defaulted_count: strengthDefaults.defaulted_count,
         defaulted_percentage: defaultedPercentage,
         defaulted_edge_ids: strengthDefaults.defaulted_edge_ids,
@@ -662,6 +663,7 @@ export function transformResponseToV3(
       severity: "warn" as const,
       details: {
         total_edges: strengthMeanDominant.total_edges,
+        structural_edges_excluded: strengthMeanDominant.structural_edges_excluded,
         mean_default_count: strengthMeanDominant.mean_default_count,
         mean_default_percentage: meanDefaultPercentage,
         mean_defaulted_edge_ids: strengthMeanDominant.mean_defaulted_edge_ids,

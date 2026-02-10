@@ -60,6 +60,7 @@ export interface IntegrityWarningsOutput {
   strength_defaults: {
     detected: boolean;
     total_edges: number;
+    structural_edges_excluded: number;
     defaulted_count: number;
     default_value: number | null;  // null if no defaulting detected
     defaulted_edge_ids: string[];  // array of edge IDs in "{from}->{to}" format
@@ -68,6 +69,7 @@ export interface IntegrityWarningsOutput {
   strength_mean_dominant: {
     detected: boolean;
     total_edges: number;
+    structural_edges_excluded: number;
     mean_default_count: number;
     default_value: number | null;  // null if no dominance detected
     mean_defaulted_edge_ids: string[];  // array of edge IDs in "{from}->{to}" format
@@ -366,6 +368,7 @@ export function runIntegrityChecks(
     strength_defaults: {
       detected: strengthDefaults.detected,
       total_edges: strengthDefaults.total_edges,
+      structural_edges_excluded: strengthDefaults.structural_edges_excluded,
       defaulted_count: strengthDefaults.defaulted_count,
       default_value: strengthDefaults.default_value,
       defaulted_edge_ids: strengthDefaults.defaulted_edge_ids,
@@ -373,6 +376,7 @@ export function runIntegrityChecks(
     strength_mean_dominant: {
       detected: strengthMeanDominant.detected,
       total_edges: strengthMeanDominant.total_edges,
+      structural_edges_excluded: strengthMeanDominant.structural_edges_excluded,
       mean_default_count: strengthMeanDominant.mean_default_count,
       default_value: strengthMeanDominant.default_value,
       mean_defaulted_edge_ids: strengthMeanDominant.mean_defaulted_edge_ids,
@@ -396,6 +400,8 @@ export interface StrengthDefaultsResult {
   detected: boolean;
   /** Total number of causal edges analyzed (excludes structural edges) */
   total_edges: number;
+  /** Number of structural edges excluded from analysis (decision→*, option→*) */
+  structural_edges_excluded: number;
   /** Count of edges with default strength value (0.5) */
   defaulted_count: number;
   /** The default value detected, or null if no defaulting */
@@ -421,12 +427,12 @@ export interface StrengthDefaultsResult {
  * (belief/provenance), just not the magnitude. The detection targets pure omission where
  * ALL strength fields default (mean=0.5, belief=0.5, provenance=undefined → std=0.125).
  *
- * Excludes structural edges (decision→option, option→*) from analysis,
- * as these are synthetic edges added by the pipeline, not LLM output.
+ * Excludes structural edges (decision→*, option→*) from analysis,
+ * as these are organisational wiring, not causal LLM output.
  *
  * Minimum threshold: 3 edges required to avoid false positives on tiny graphs.
  *
- * @param v3Nodes - V3 nodes (used to identify option nodes)
+ * @param v3Nodes - V3 nodes (used to identify structural node kinds)
  * @param v3Edges - V3 edges to analyze
  * @returns Detection result with counts and detected flag
  */
@@ -437,7 +443,7 @@ export function detectStrengthDefaults(
   const THRESHOLD = 0.8; // 80%
   const MIN_EDGES = 3; // Minimum edges required for detection
 
-  // Build lookup maps for O(1) node kind checks (performance optimization)
+  // Build lookup map for O(1) node kind checks
   const nodeKindMap = new Map<string, string>();
   for (const node of v3Nodes) {
     if (node.kind) {
@@ -445,27 +451,22 @@ export function detectStrengthDefaults(
     }
   }
 
-  const optionIds = new Set(
-    v3Nodes.filter((n) => n.kind === "option").map((n) => n.id)
-  );
-
-  // Filter to causal edges only (exclude structural edges)
+  // Partition edges into causal vs structural
+  // Structural edges: decision→* and option→* (organisational wiring, not causal)
+  let structuralExcluded = 0;
   const causalEdges = v3Edges.filter((edge) => {
     const edgeData = edge as { from: string; to: string; [key: string]: unknown };
 
     // Defensively exclude edges with missing nodes (malformed graphs)
     const fromKind = nodeKindMap.get(edgeData.from);
     const toKind = nodeKindMap.get(edgeData.to);
-    if (!fromKind || !toKind) return false; // Missing from or to node - exclude
+    if (!fromKind || !toKind) return false;
 
-    // Option nodes are organisational (not causal). Per Platform Contract v2.6 Appendix A,
-    // option nodes do not participate in inference. All option-outgoing edges are synthetic
-    // pipeline edges and excluded from strength quality analysis.
-    if (optionIds.has(edgeData.from)) return false;
-
-    // Exclude decision→option edges (synthetic pipeline edges)
-    const isDecisionToOption = fromKind === "decision" && optionIds.has(edgeData.to);
-    if (isDecisionToOption) return false;
+    // Exclude structural edges: decision→* and option→*
+    if (fromKind === "decision" || fromKind === "option") {
+      structuralExcluded++;
+      return false;
+    }
 
     return true;
   });
@@ -477,6 +478,7 @@ export function detectStrengthDefaults(
     return {
       detected: false,
       total_edges: totalEdges,
+      structural_edges_excluded: structuralExcluded,
       defaulted_count: 0,
       default_value: null,
       defaulted_edge_ids: [],
@@ -511,6 +513,7 @@ export function detectStrengthDefaults(
   return {
     detected,
     total_edges: totalEdges,
+    structural_edges_excluded: structuralExcluded,
     defaulted_count: defaultedCount,
     default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
     defaulted_edge_ids: defaultedEdgeIds,
@@ -527,6 +530,8 @@ export interface StrengthMeanDominantResult {
   detected: boolean;
   /** Total number of causal edges analyzed (excludes structural edges) */
   total_edges: number;
+  /** Number of structural edges excluded from analysis (decision→*, option→*) */
+  structural_edges_excluded: number;
   /** Count of edges with mean ≈ 0.5 (regardless of std) */
   mean_default_count: number;
   /** The default value detected, or null if no dominance */
@@ -549,12 +554,12 @@ export interface StrengthMeanDominantResult {
  * appear simultaneously when ≥80% match both mean+std (full default) AND
  * ≥70% have mean ≈ 0.5 regardless of std (mean dominance).
  *
- * Excludes structural edges (decision→option, option→*) from analysis,
- * as these are synthetic edges added by the pipeline, not LLM output.
+ * Excludes structural edges (decision→*, option→*) from analysis,
+ * as these are organisational wiring, not causal LLM output.
  *
  * Minimum threshold: 3 edges required to avoid false positives on tiny graphs.
  *
- * @param v3Nodes - V3 nodes (used to identify option nodes)
+ * @param v3Nodes - V3 nodes (used to identify structural node kinds)
  * @param v3Edges - V3 edges to analyze
  * @returns Detection result with counts and detected flag
  */
@@ -564,7 +569,7 @@ export function detectStrengthMeanDominant(
 ): StrengthMeanDominantResult {
   const MIN_EDGES = 3; // Minimum edges required for detection
 
-  // Build lookup maps for O(1) node kind checks (performance optimization)
+  // Build lookup map for O(1) node kind checks
   const nodeKindMap = new Map<string, string>();
   for (const node of v3Nodes) {
     if (node.kind) {
@@ -572,27 +577,22 @@ export function detectStrengthMeanDominant(
     }
   }
 
-  const optionIds = new Set(
-    v3Nodes.filter((n) => n.kind === "option").map((n) => n.id)
-  );
-
-  // Filter to causal edges only (exclude structural edges)
+  // Partition edges into causal vs structural
+  // Structural edges: decision→* and option→* (organisational wiring, not causal)
+  let structuralExcluded = 0;
   const causalEdges = v3Edges.filter((edge) => {
     const edgeData = edge as { from: string; to: string; [key: string]: unknown };
 
     // Defensively exclude edges with missing nodes (malformed graphs)
     const fromKind = nodeKindMap.get(edgeData.from);
     const toKind = nodeKindMap.get(edgeData.to);
-    if (!fromKind || !toKind) return false; // Missing from or to node - exclude
+    if (!fromKind || !toKind) return false;
 
-    // Option nodes are organisational (not causal). Per Platform Contract v2.6 Appendix A,
-    // option nodes do not participate in inference. All option-outgoing edges are synthetic
-    // pipeline edges and excluded from strength quality analysis.
-    if (optionIds.has(edgeData.from)) return false;
-
-    // Exclude decision→option edges (synthetic pipeline edges)
-    const isDecisionToOption = fromKind === "decision" && optionIds.has(edgeData.to);
-    if (isDecisionToOption) return false;
+    // Exclude structural edges: decision→* and option→*
+    if (fromKind === "decision" || fromKind === "option") {
+      structuralExcluded++;
+      return false;
+    }
 
     return true;
   });
@@ -604,6 +604,7 @@ export function detectStrengthMeanDominant(
     return {
       detected: false,
       total_edges: totalEdges,
+      structural_edges_excluded: structuralExcluded,
       mean_default_count: 0,
       default_value: null,
       mean_defaulted_edge_ids: [],
@@ -635,6 +636,7 @@ export function detectStrengthMeanDominant(
   return {
     detected,
     total_edges: totalEdges,
+    structural_edges_excluded: structuralExcluded,
     mean_default_count: meanDefaultCount,
     default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
     mean_defaulted_edge_ids: meanDefaultedEdgeIds,

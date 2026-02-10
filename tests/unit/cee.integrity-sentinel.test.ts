@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   runIntegrityChecks,
   normaliseIdForMatch,
+  detectStrengthDefaults,
+  detectStrengthMeanDominant,
   type IntegrityWarning,
   type IntegrityWarningsOutput,
 } from "../../src/cee/validation/integrity-sentinel.js";
@@ -1025,6 +1027,257 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_mean_dominant.total_edges).toBe(3);
       expect(result.strength_mean_dominant.mean_default_count).toBe(0);
       expect(result.strength_mean_dominant.default_value).toBe(null);
+    });
+  });
+
+  // ============================================================================
+  // Structural Edge Exclusion (decision→*, option→*)
+  // ============================================================================
+  describe("Structural edge exclusion", () => {
+    // Shared graph fixture: decision, 2 options, 2 factors, 1 outcome, 1 goal
+    const structuralNodes = [
+      { id: "dec", kind: "decision" },
+      { id: "opt_a", kind: "option" },
+      { id: "opt_b", kind: "option" },
+      { id: "fac_price", kind: "factor" },
+      { id: "fac_demand", kind: "factor" },
+      { id: "out_revenue", kind: "outcome" },
+      { id: "goal_profit", kind: "goal" },
+    ];
+
+    it("decision→option edges excluded from default count (both warnings)", () => {
+      const v3Edges = [
+        // Structural: decision→option (excluded)
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
+        // Causal edges (included) — all defaulted
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      const dominant = detectStrengthMeanDominant(structuralNodes, v3Edges);
+
+      // Decision edges excluded from both
+      expect(defaults.total_edges).toBe(3);
+      expect(defaults.structural_edges_excluded).toBe(2);
+      expect(defaults.defaulted_count).toBe(3);
+
+      expect(dominant.total_edges).toBe(3);
+      expect(dominant.structural_edges_excluded).toBe(2);
+      expect(dominant.mean_default_count).toBe(3);
+    });
+
+    it("option→factor edges excluded from default count (both warnings)", () => {
+      const v3Edges = [
+        // Structural: option→factor (excluded)
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        // Causal edges (included) — all defaulted
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      const dominant = detectStrengthMeanDominant(structuralNodes, v3Edges);
+
+      expect(defaults.total_edges).toBe(3);
+      expect(defaults.structural_edges_excluded).toBe(2);
+      expect(dominant.total_edges).toBe(3);
+      expect(dominant.structural_edges_excluded).toBe(2);
+    });
+
+    it("causal edges (factor→outcome, outcome→goal, risk→goal) still counted correctly", () => {
+      const nodes = [
+        ...structuralNodes,
+        { id: "risk_inflation", kind: "risk" },
+      ];
+      const v3Edges = [
+        // Causal edges with varied strengths
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.2 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.3, strength_std: 0.1 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.8, strength_std: 0.15 },
+        { from: "risk_inflation", to: "goal_profit", strength_mean: -0.4, strength_std: 0.18 },
+      ];
+
+      const defaults = detectStrengthDefaults(nodes, v3Edges);
+
+      expect(defaults.total_edges).toBe(4);
+      expect(defaults.structural_edges_excluded).toBe(0);
+      expect(defaults.defaulted_count).toBe(0);
+      expect(defaults.detected).toBe(false);
+    });
+
+    it("total_edges in details reflects causal-only count", () => {
+      const v3Edges = [
+        // 4 structural edges
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        // 3 causal edges
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      const dominant = detectStrengthMeanDominant(structuralNodes, v3Edges);
+
+      // total_edges = causal only (7 edges - 4 structural = 3)
+      expect(defaults.total_edges).toBe(3);
+      expect(dominant.total_edges).toBe(3);
+    });
+
+    it("structural_edges_excluded is present and correct in both results", () => {
+      const v3Edges = [
+        // 4 structural
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        // 3 causal
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      const dominant = detectStrengthMeanDominant(structuralNodes, v3Edges);
+
+      expect(defaults.structural_edges_excluded).toBe(4);
+      expect(dominant.structural_edges_excluded).toBe(4);
+    });
+
+    it("graph with ONLY structural edges → no warning fires (no division by zero)", () => {
+      const v3Edges = [
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      const dominant = detectStrengthMeanDominant(structuralNodes, v3Edges);
+
+      expect(defaults.detected).toBe(false);
+      expect(defaults.total_edges).toBe(0);
+      expect(defaults.structural_edges_excluded).toBe(4);
+      expect(defaults.defaulted_count).toBe(0);
+
+      expect(dominant.detected).toBe(false);
+      expect(dominant.total_edges).toBe(0);
+      expect(dominant.structural_edges_excluded).toBe(4);
+      expect(dominant.mean_default_count).toBe(0);
+    });
+
+    it("mixed structural + causal edges → correct counts", () => {
+      const v3Edges = [
+        // 3 structural
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        // 4 causal — 3 defaulted, 1 varied
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "goal_profit", strength_mean: 0.8, strength_std: 0.2 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+
+      expect(defaults.structural_edges_excluded).toBe(3);
+      expect(defaults.total_edges).toBe(4);
+      expect(defaults.defaulted_count).toBe(3);
+      // 3/4 = 75% < 80% threshold → not detected
+      expect(defaults.detected).toBe(false);
+      expect(defaults.defaulted_edge_ids).toEqual([
+        "fac_price->out_revenue",
+        "fac_demand->out_revenue",
+        "out_revenue->goal_profit",
+      ]);
+    });
+
+    it("edge from factor→option is NOT excluded (only from-node kind matters)", () => {
+      const v3Edges = [
+        // factor→option edge: NOT structural (from-node is factor, not decision/option)
+        { from: "fac_price", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        // Normal causal edges
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+
+      // factor→option counts as causal (from-node is factor)
+      expect(defaults.total_edges).toBe(4);
+      expect(defaults.structural_edges_excluded).toBe(0);
+      expect(defaults.defaulted_count).toBe(4);
+    });
+
+    it("existing STRENGTH_DEFAULT_APPLIED threshold unchanged (fires at ≥80%)", () => {
+      const v3Edges = [
+        // 4 of 5 causal edges defaulted = 80%
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        // 1 varied
+        { from: "fac_demand", to: "goal_profit", strength_mean: 0.8, strength_std: 0.2 },
+      ];
+
+      const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
+      expect(defaults.detected).toBe(true);
+      expect(defaults.defaulted_count).toBe(4);
+      expect(defaults.total_edges).toBe(5);
+    });
+
+    it("existing STRENGTH_MEAN_DEFAULT_DOMINANT threshold unchanged (fires at ≥70%)", () => {
+      const nodes = [
+        { id: "fac_a", kind: "factor" },
+        { id: "fac_b", kind: "factor" },
+        { id: "fac_c", kind: "factor" },
+        { id: "goal", kind: "goal" },
+      ];
+      const v3Edges = [
+        // 7 of 10 edges with mean=0.5 (varied std) = 70%
+        { from: "fac_a", to: "fac_b", strength_mean: 0.5, strength_std: 0.2 },
+        { from: "fac_b", to: "fac_c", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "fac_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
+        { from: "fac_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
+        { from: "fac_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "fac_a", to: "fac_c", strength_mean: 0.5, strength_std: 0.12 },
+        { from: "fac_c", to: "fac_a", strength_mean: 0.5, strength_std: 0.19 },
+        // 3 varied
+        { from: "fac_a", to: "fac_b", strength_mean: 0.3, strength_std: 0.1 },
+        { from: "fac_b", to: "fac_c", strength_mean: 0.7, strength_std: 0.2 },
+        { from: "fac_c", to: "goal", strength_mean: 0.9, strength_std: 0.15 },
+      ];
+
+      const dominant = detectStrengthMeanDominant(nodes, v3Edges);
+      expect(dominant.detected).toBe(true);
+      expect(dominant.mean_default_count).toBe(7);
+      expect(dominant.total_edges).toBe(10);
+    });
+
+    it("structural_edges_excluded propagates to runIntegrityChecks output", () => {
+      const v3Edges = [
+        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+
+      const result = runIntegrityChecks(structuralNodes, structuralNodes, [], [], v3Edges);
+
+      expect(result.strength_defaults.structural_edges_excluded).toBe(2);
+      expect(result.strength_defaults.total_edges).toBe(3);
+      expect(result.strength_mean_dominant.structural_edges_excluded).toBe(2);
+      expect(result.strength_mean_dominant.total_edges).toBe(3);
     });
   });
 });
