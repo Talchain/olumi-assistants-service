@@ -296,7 +296,7 @@ export const ValidationWarningV3 = z.object({
   /** Warning code */
   code: z.string(),
   /** Severity level */
-  severity: z.enum(["info", "warning", "error"]),
+  severity: z.enum(["info", "warn", "error"]),
   /** Human-readable message */
   message: z.string(),
   /** Affected option ID */
@@ -307,6 +307,8 @@ export const ValidationWarningV3 = z.object({
   affected_edge_id: z.string().optional(),
   /** Suggested fix */
   suggestion: z.string().optional(),
+  /** Additional details payload (code-specific structure) */
+  details: z.record(z.unknown()).optional(),
   /** Pipeline stage that detected this issue */
   stage: z.string().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields
