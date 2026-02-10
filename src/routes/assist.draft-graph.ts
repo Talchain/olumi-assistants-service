@@ -1790,7 +1790,11 @@ async function handleSseResponse(
       log.error({ err, correlation_id: correlationId }, "SSE draft graph failure");
     }
 
-    const envelope = buildError("INTERNAL", errorMessage);
+    // Pass typed error code through details so SSE consumers can detect specific failures
+    const errorDetails = errorCode !== "INTERNAL"
+      ? { cee_error_code: errorCode, retryable: errorCode !== "CEE_CLIENT_DISCONNECT" }
+      : undefined;
+    const envelope = buildError("INTERNAL", errorMessage, errorDetails);
     const payloadWithTelemetry = await withBufferTrimTelemetry(envelope);
     const diagnostics = buildDiagnosticsFromPayload(payloadWithTelemetry as any, correlationId);
     const completePayload = withDiagnostics(payloadWithTelemetry, diagnostics);
