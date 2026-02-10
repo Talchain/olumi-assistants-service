@@ -98,17 +98,21 @@ export const LLMMetadataSchema = z.object({
 
 export type LLMMetadataT = z.infer<typeof LLMMetadataSchema>;
 
-/** LLM raw output preview pattern */
+/** LLM raw output trace (full output + preview) */
 export const LLMRawSchema = z.object({
+  /** Full untruncated LLM text output */
+  text: z.string(),
   /** First 2000 chars of raw LLM text */
   output_preview: z.string(),
-  /** SHA-256 of stored output (may be truncated by adapters) */
+  /** Total character count of the full output */
+  char_count: z.number(),
+  /** SHA-256 of stored output */
   output_hash: z.string(),
   /** Quick check: how many nodes in parsed output */
   output_node_count: z.number(),
   /** Quick check: how many edges in parsed output */
   output_edge_count: z.number(),
-  /** True if preview was truncated */
+  /** True if preview was truncated (output > 2000 chars) */
   truncated: z.boolean(),
   /** True if full output stored for later retrieval */
   full_output_available: z.boolean(),

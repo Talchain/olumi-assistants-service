@@ -8,14 +8,14 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
-import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
+import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
-import { extractJsonFromResponse } from '../../utils/json-extractor.js';
+import { extractJsonFromResponse, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
 import {
   LLMNode as AnthropicNode,
   LLMEdge as AnthropicEdge,
@@ -68,6 +68,34 @@ function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean 
   };
 }
 
+/**
+ * Safe wrapper around extractJsonFromResponse that throws UpstreamNonJsonError
+ * instead of generic Error when JSON extraction fails.
+ */
+function safeExtractJson(
+  content: string,
+  opts: JsonExtractionOptions,
+  operation: string,
+  elapsedMs: number,
+  requestId?: string,
+): JsonExtractionResult {
+  try {
+    return extractJsonFromResponse(content, opts);
+  } catch (cause) {
+    throw new UpstreamNonJsonError(
+      `anthropic ${operation} returned non-JSON response`,
+      "anthropic",
+      operation,
+      elapsedMs,
+      content.slice(0, 500),
+      undefined,
+      undefined,
+      requestId,
+      cause,
+    );
+  }
+}
+
 // Schemas imported from shared-schemas.ts (AnthropicNode, AnthropicEdge, etc.)
 
 // Use centralized config for API key (lazy access via getter)
@@ -106,7 +134,6 @@ function getClient(): Anthropic {
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
 
-const RAW_LLM_TEXT_MAX_CHARS = 10_000;
 const RAW_LLM_PREVIEW_MAX_CHARS = 500;
 
 function isAnthropicPromptCacheEnabled(): boolean {
@@ -393,12 +420,12 @@ export async function draftGraphWithAnthropic(
 
     // Extract JSON from response using robust extractor
     // Handles: raw JSON, markdown code blocks, conversational preamble/suffix
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "draft_graph",
       model,
       correlationId: idempotencyKey,
       includeRawContent: args.includeDebug, // Preserve full raw text for debugging
-    });
+    }, "draft_graph", providerLatencyMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
@@ -712,11 +739,11 @@ export async function suggestOptionsWithAnthropic(args: {
     }
 
     // Extract JSON from response using robust extractor
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "suggest_options",
       model,
       correlationId: idempotencyKey,
-    });
+    }, "suggest_options", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
     // Validate with Zod
@@ -1019,11 +1046,11 @@ export async function repairGraphWithAnthropic(
     }
 
     // Extract JSON from response using robust extractor
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "repair_graph",
       model,
       correlationId: idempotencyKey,
-    });
+    }, "repair_graph", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
     // Normalise non-standard node kinds, ensure factor baselines, then validate with Zod
@@ -1345,11 +1372,11 @@ export async function clarifyBriefWithAnthropic(
     }
 
     // Extract JSON from response using robust extractor
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "clarify_brief",
       model,
       correlationId: idempotencyKey,
-    });
+    }, "clarify_brief", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
     // Validate with Zod
@@ -1558,11 +1585,11 @@ export async function critiqueGraphWithAnthropic(
     }
 
     // Extract JSON from response using robust extractor
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "critique_graph",
       model,
       correlationId: idempotencyKey,
-    });
+    }, "critique_graph", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
     // Validate with Zod
@@ -1723,11 +1750,11 @@ Return ONLY valid JSON in this format:
     }
 
     // Extract JSON from response using robust extractor
-    const extractionResult = extractJsonFromResponse(content.text, {
+    const extractionResult = safeExtractJson(content.text, {
       task: "explain_diff",
       model,
       correlationId: idempotencyKey,
-    });
+    }, "explain_diff", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
     // Validate with Zod

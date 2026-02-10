@@ -54,6 +54,34 @@ export class UpstreamHTTPError extends Error {
 }
 
 /**
+ * Upstream non-JSON error — thrown when the LLM returns content that
+ * cannot be parsed as JSON (e.g. HTML error page, plain text).
+ *
+ * Carries a body preview (first 500 chars) for diagnostics without
+ * leaking the full upstream response into logs or client responses.
+ */
+export class UpstreamNonJsonError extends Error {
+  readonly name = "UpstreamNonJsonError";
+
+  constructor(
+    message: string,
+    public readonly provider: string,
+    public readonly operation: string,
+    public readonly elapsedMs: number,
+    public readonly bodyPreview: string,
+    public readonly contentType?: string,
+    public readonly upstreamStatus?: number,
+    public readonly upstreamRequestId?: string,
+    public readonly cause?: unknown
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, UpstreamNonJsonError);
+    }
+  }
+}
+
+/**
  * LLM call timeout error — thrown when the draft LLM call exceeds its
  * derived budget (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS).
  *

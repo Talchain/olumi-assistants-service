@@ -9,7 +9,7 @@ import { getRequestId } from "../../utils/request-id.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { isSchemaValidationError, calculateBackoffDelay, SCHEMA_VALIDATION_RETRY_CONFIG } from "../../utils/retry.js";
 import { config, isProduction } from "../../config/index.js";
-import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../../adapters/llm/errors.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DRAFT_REQUEST_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS } from "../../config/timeouts.js";
 import { logCeeCall } from "../logging.js";
 import { persistDraftFailureBundle } from "../draft-failures/store.js";
@@ -1030,8 +1030,8 @@ export async function finaliseCeeDraftResponse(
       const err = error instanceof Error ? error : new Error("unexpected error");
       lastError = err;
 
-      // Only retry on schema validation failures, and only once
-      if (isSchemaValidationError(err) && attempt < SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts) {
+      // Retry on schema validation failures or upstream non-JSON errors, and only once
+      if ((isSchemaValidationError(err) || err instanceof UpstreamNonJsonError) && attempt < SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts) {
         schemaRetryAttempted = true;
         const delay = calculateBackoffDelay(attempt, SCHEMA_VALIDATION_RETRY_CONFIG);
 
@@ -1178,6 +1178,16 @@ export async function finaliseCeeDraftResponse(
       statusCode = 502; // Bad Gateway - upstream returned invalid response
       code = "CEE_LLM_VALIDATION_FAILED";
       retryable = false; // Already retried once, don't suggest client retry
+    } else if (err instanceof UpstreamNonJsonError) {
+      // LLM returned non-JSON content (HTML error page, plain text, etc.)
+      statusCode = 502;
+      code = "CEE_LLM_UPSTREAM_ERROR" as CEEErrorCode;
+      retryable = true;
+    } else if (err instanceof UpstreamHTTPError) {
+      // LLM returned an HTTP error (4xx/5xx)
+      statusCode = 502;
+      code = "CEE_LLM_UPSTREAM_ERROR" as CEEErrorCode;
+      retryable = true;
     } else {
       statusCode = 500;
       code = "CEE_INTERNAL_ERROR";
@@ -1214,12 +1224,27 @@ export async function finaliseCeeDraftResponse(
       errorCode: code,
       httpStatus: statusCode,
     });
+    // Build details object with upstream-specific diagnostic fields
+    const details: Record<string, unknown> = {};
+    if (err instanceof UpstreamNonJsonError) {
+      details.upstream_body_preview = err.bodyPreview;
+      details.upstream_content_type = err.contentType;
+      details.elapsed_ms = err.elapsedMs;
+      details.provider = err.provider;
+    } else if (err instanceof UpstreamHTTPError) {
+      details.upstream_status = err.status;
+      details.elapsed_ms = err.elapsedMs;
+      details.provider = err.provider;
+      details.upstream_error_code = err.code;
+    }
+
     return {
       statusCode,
       body: buildCeeErrorResponse(code, isTimeout ? "upstream timeout" : err.message || "internal error", {
         retryable,
         requestId,
         stage,
+        ...(Object.keys(details).length > 0 ? { details } : {}),
       }),
     };
   }

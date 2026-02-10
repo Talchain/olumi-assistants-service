@@ -8,7 +8,7 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
-import { UpstreamTimeoutError, UpstreamHTTPError } from "./errors.js";
+import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
@@ -418,7 +418,6 @@ Return ONLY the JSON object, no markdown formatting`;
  */
 const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
 
-const RAW_LLM_TEXT_MAX_CHARS = 10_000;
 const RAW_LLM_PREVIEW_MAX_CHARS = 500;
 
 /**
@@ -436,6 +435,34 @@ function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean 
     output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
     truncated: true,
   };
+}
+
+/**
+ * Parse JSON with upstream error wrapping.
+ * Converts SyntaxError from JSON.parse into a typed UpstreamNonJsonError
+ * so the pipeline can classify it as a 502 upstream failure.
+ */
+function safeParseJson(
+  content: string,
+  operation: string,
+  elapsedMs: number,
+  requestId?: string,
+): any {
+  try {
+    return JSON.parse(content);
+  } catch (cause) {
+    throw new UpstreamNonJsonError(
+      `openai ${operation} returned non-JSON response`,
+      "openai",
+      operation,
+      elapsedMs,
+      content.slice(0, 500),
+      undefined,
+      undefined,
+      requestId,
+      cause,
+    );
+  }
 }
 
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
@@ -582,7 +609,7 @@ export class OpenAIAdapter implements LLMAdapter {
       const finishReason = response.choices[0]?.finish_reason;
 
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-      const rawJson = JSON.parse(content);
+      const rawJson = safeParseJson(content, "draft_graph", _elapsedMs, idempotencyKey);
       const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
         ? ((rawJson as any).nodes as any[])
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
@@ -859,7 +886,7 @@ export class OpenAIAdapter implements LLMAdapter {
         throw new Error("openai_empty_response");
       }
 
-      const rawJson = JSON.parse(content);
+      const rawJson = safeParseJson(content, "suggest_options", _elapsedMs, idempotencyKey);
       const parseResult = OpenAIOptionsResponse.safeParse(rawJson);
 
       if (!parseResult.success) {
@@ -984,7 +1011,7 @@ export class OpenAIAdapter implements LLMAdapter {
       }
 
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-      const rawJson = JSON.parse(content);
+      const rawJson = safeParseJson(content, "repair_graph", _elapsedMs, idempotencyKey);
       const normalised = normaliseDraftResponse(rawJson);
       const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
       if (repairDefaultedFactors.length > 0) {
@@ -1230,7 +1257,17 @@ export class OpenAIAdapter implements LLMAdapter {
         rawJson = JSON.parse(jsonText);
       } catch (parseError) {
         log.error({ error: parseError, content: jsonText.slice(0, 500) }, "Failed to parse OpenAI clarify response as JSON");
-        throw new Error("openai_clarify_invalid_json: Response was not valid JSON");
+        throw new UpstreamNonJsonError(
+          "openai clarify_brief returned non-JSON response",
+          "openai",
+          "clarify_brief",
+          elapsedMs,
+          jsonText.slice(0, 500),
+          undefined,
+          undefined,
+          requestId,
+          parseError,
+        );
       }
 
       const parseResult = OpenAIClarifyResponse.safeParse(rawJson);

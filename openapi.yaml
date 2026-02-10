@@ -3188,6 +3188,7 @@ components:
         - CEE_ENGINE_DEGRADED
         - CEE_REPRO_MISMATCH
         - CEE_LLM_VALIDATION_FAILED
+        - CEE_LLM_UPSTREAM_ERROR
 
     CEEErrorResponseV1:
       type: object
