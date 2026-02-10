@@ -177,6 +177,8 @@ export function preserveEdgeFieldsFromOriginal(
   }
 
   let restoredCount = 0;
+  let keptNormalisedCount = 0;
+  let noMatchCount = 0;
   const restoredSamples: string[] = [];
 
   const edgesWithFields = normalized.edges.map((normEdge) => {
@@ -184,7 +186,22 @@ export function preserveEdgeFieldsFromOriginal(
     const origEdge = originalEdgeMap.get(key);
 
     // Only restore for edges that existed in the original graph
-    if (!origEdge) return normEdge;
+    if (!origEdge) {
+      noMatchCount++;
+      // Diagnostic: per-edge log
+      log.info({
+        event: "PRESERVE_EDGE_FIELDS_DIAGNOSTIC",
+        edge_key: key,
+        original: null,
+        normalised: {
+          strength_mean: normEdge.strength_mean,
+          strength_std: normEdge.strength_std,
+          belief_exists: normEdge.belief_exists,
+        },
+        action: "no_original_match",
+      }, `Edge ${key}: no original match`);
+      return normEdge;
+    }
 
     let didRestore = false;
     const patched = { ...normEdge } as Record<string, unknown>;
@@ -199,27 +216,48 @@ export function preserveEdgeFieldsFromOriginal(
       }
     }
 
+    // Diagnostic: per-edge log with full before/after visibility
+    const action = didRestore ? "restored" : "kept_normalised";
+    log.info({
+      event: "PRESERVE_EDGE_FIELDS_DIAGNOSTIC",
+      edge_key: key,
+      original: {
+        strength_mean: origEdge.strength_mean,
+        strength_std: origEdge.strength_std,
+        belief_exists: origEdge.belief_exists,
+      },
+      normalised: {
+        strength_mean: normEdge.strength_mean,
+        strength_std: normEdge.strength_std,
+        belief_exists: normEdge.belief_exists,
+      },
+      action,
+    }, `Edge ${key}: ${action}`);
+
     if (didRestore) {
       restoredCount++;
       if (restoredSamples.length < 5) {
         restoredSamples.push(key);
       }
+    } else {
+      keptNormalisedCount++;
     }
 
     return patched as (typeof normalized.edges)[number];
   });
 
-  if (restoredCount > 0) {
-    log.info(
-      {
-        event: "PRESERVE_EDGE_FIELDS_RESTORED",
-        restored_count: restoredCount,
-        total_edges: normalized.edges.length,
-        samples: restoredSamples,
-      },
-      `Restored V4 edge fields on ${restoredCount}/${normalized.edges.length} edge(s)`,
-    );
-  }
+  // Diagnostic: summary log
+  log.info(
+    {
+      event: "PRESERVE_EDGE_FIELDS_SUMMARY",
+      total_edges: normalized.edges.length,
+      restored_count: restoredCount,
+      kept_normalised_count: keptNormalisedCount,
+      no_match_count: noMatchCount,
+      samples: restoredSamples,
+    },
+    `Edge field preservation: ${restoredCount} restored, ${keptNormalisedCount} kept normalised, ${noMatchCount} no match (${normalized.edges.length} total)`,
+  );
 
   return { ...normalized, edges: edgesWithFields };
 }
