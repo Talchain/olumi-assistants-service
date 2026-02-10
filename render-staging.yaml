@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    branch: release/v1.1.1-ops
+    branch: staging
     buildCommand: pnpm install --frozen-lockfile && pnpm build
     startCommand: node dist/src/server.js
     healthCheckPath: /healthz
