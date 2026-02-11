@@ -650,6 +650,10 @@ app.get("/healthz", async () => {
     },
     cee: {
       diagnostics_enabled: env.CEE_DIAGNOSTICS_ENABLED === "true",
+      pipeline_checkpoints_enabled: {
+        env_raw: env.CEE_PIPELINE_CHECKPOINTS_ENABLED ?? null,
+        config_parsed: config.cee.pipelineCheckpointsEnabled,
+      },
       config: ceeConfig,
       timeouts: {
         route_ms: ROUTE_TIMEOUT_MS,
