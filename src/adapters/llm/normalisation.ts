@@ -276,11 +276,16 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       };
     });
 
-    // [DIAGNOSTIC] Temporary: capture raw edge field state after V4 extraction.
-    // Shows whether LLM outputs nested strength, flat strength_mean, or neither.
-    // Remove after confirming extraction behaviour on staging (plan step 5).
+    // [DIAGNOSTIC] Temporary: stratified edge field sample after V4 extraction.
+    // Samples 1 structural + 1 causal + 1 bridge edge to avoid sampling bias
+    // (previous .slice(0,3) always picked structural dec→opt edges without strength).
+    // Remove after confirming extraction behaviour on staging.
     if ((obj.edges as any[]).length > 0) {
-      const diagSample = (obj.edges as any[]).slice(0, 3).map((e: any) => ({
+      const allEdges = (obj.edges as any[]).filter((e: any) => e && typeof e === 'object');
+      const sorted = [...allEdges].sort((a: any, b: any) =>
+        `${a.from ?? ''}::${a.to ?? ''}`.localeCompare(`${b.from ?? ''}::${b.to ?? ''}`)
+      );
+      const mapEdge = (e: any) => ({
         from: e.from,
         to: e.to,
         strength_mean: e.strength_mean ?? 'MISSING',
@@ -289,10 +294,27 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           : (e.strength === undefined ? 'UNDEFINED' : `TYPE:${typeof e.strength}`),
         weight: e.weight ?? 'MISSING',
         belief_exists: e.belief_exists ?? 'MISSING',
-      }));
-      log.info(
-        { event: 'llm.normalisation.post_extraction_diagnostic', sample_edges: diagSample },
-        '[DIAGNOSTIC] Edge fields after normaliseDraftResponse V4 extraction',
+      });
+      // Stratified: 1 structural (dec_/opt_ source), 1 causal (fac_ source), 1 bridge (→goal_ target)
+      // Falls back to first sorted edge if no prefixed IDs found
+      const structural = sorted.find((e: any) => e.from?.startsWith('dec_') || e.from?.startsWith('opt_'));
+      const causal = sorted.find((e: any) => e.from?.startsWith('fac_'));
+      const bridge = sorted.find((e: any) => e.to?.startsWith('goal_'));
+      const stratified = [structural, causal, bridge].filter(Boolean);
+      const diagSample = (stratified.length > 0 ? stratified : sorted.slice(0, 3)).map(mapEdge);
+
+      const withStrengthCount = allEdges.filter((e: any) => e.strength_mean !== undefined).length;
+      const withNestedCount = allEdges.filter((e: any) => typeof e.strength === 'object' && e.strength !== null).length;
+
+      log.debug(
+        {
+          event: 'llm.normalisation.post_extraction_diagnostic',
+          edge_count: allEdges.length,
+          edges_with_strength_mean: withStrengthCount,
+          edges_with_nested_strength: withNestedCount,
+          sample_edges: diagSample,
+        },
+        `[DIAGNOSTIC] Edge fields after V4 extraction: ${withStrengthCount}/${allEdges.length} have strength_mean`,
       );
     }
   }

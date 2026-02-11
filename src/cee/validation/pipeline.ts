@@ -3055,20 +3055,34 @@ export async function finaliseCeeDraftResponse(
   });
 
   // Diagnostic log for edge coefficient values at CEE output boundary
+  // Uses stratified sampling: 1 structural + 1 causal + 1 bridge edge
+  // (previous .slice(0,3) always picked structural edges without strength values)
   const responseEdges = (verifiedResponse as any).graph?.edges ?? [];
-  const sampleEdges = responseEdges.slice(0, 3).map((e: any) => ({
+  const sortedBoundaryEdges = [...responseEdges].sort((a: any, b: any) =>
+    `${a.from}::${a.to}`.localeCompare(`${b.from}::${b.to}`)
+  );
+  const mapBoundaryEdge = (e: any) => ({
     from: e.from,
     to: e.to,
-    strength_mean: e.strength_mean ?? e.strength?.mean ?? 'MISSING',
-    strength_std: e.strength_std ?? e.strength?.std ?? 'MISSING',
-    belief_exists: e.belief_exists ?? e.exists_probability ?? 'MISSING',
-  }));
+    strength_mean: e.strength_mean ?? 'MISSING',
+    strength_std: e.strength_std ?? 'MISSING',
+    belief_exists: e.belief_exists ?? 'MISSING',
+  });
+  // Falls back to first 3 sorted edges if no prefixed IDs found
+  const bStructural = sortedBoundaryEdges.find((e: any) => e.from?.startsWith('dec_') || e.from?.startsWith('opt_'));
+  const bCausal = sortedBoundaryEdges.find((e: any) => e.from?.startsWith('fac_'));
+  const bBridge = sortedBoundaryEdges.find((e: any) => e.to?.startsWith('goal_'));
+  const bStratified = [bStructural, bCausal, bBridge].filter(Boolean);
+  const sampleEdges = (bStratified.length > 0 ? bStratified : sortedBoundaryEdges.slice(0, 3)).map(mapBoundaryEdge);
+
+  const edgesWithStrength = responseEdges.filter((e: any) => e.strength_mean !== undefined).length;
   log.info({
     request_id: requestId,
     event: 'cee.boundary.edge_values',
     edge_count: responseEdges.length,
+    edges_with_strength_mean: edgesWithStrength,
     sample_edges: sampleEdges,
-  }, '[BOUNDARY-CEE-OUT] Edge coefficient values in response');
+  }, `[BOUNDARY-CEE-OUT] Edge values: ${edgesWithStrength}/${responseEdges.length} have strength_mean`);
 
   // Add observability metadata when enabled (CEE_OBSERVABILITY_ENABLED=true or include_debug=true)
   // This provides debug panel visibility into LLM calls, validation, and orchestrator activity
