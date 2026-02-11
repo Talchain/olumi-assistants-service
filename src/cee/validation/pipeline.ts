@@ -1266,7 +1266,12 @@ export async function finaliseCeeDraftResponse(
         stage,
         ...(Object.keys(details).length > 0 ? { details } : {}),
         ...(checkpointsEnabled && pipelineCheckpoints.length > 0
-          ? { pipelineTrace: { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) } }
+          ? { pipelineTrace: {
+              status: "failed" as const,
+              total_duration_ms: Date.now() - start,
+              stages: pipelineStages.length > 0 ? pipelineStages : [{ name: "llm_draft", status: "failed", duration_ms: Date.now() - start }],
+              pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints),
+            } as any }
           : {}),
       }),
     };
@@ -1351,7 +1356,7 @@ export async function finaliseCeeDraftResponse(
 
     // Build minimal pipeline trace for early errors
     // At this point we may only have partial stage info, but it's better than nothing
-    const earlyErrorPipelineTrace: Record<string, unknown> = {
+    const earlyErrorPipelineTrace = {
       status: "failed" as const,
       total_duration_ms: Date.now() - start,
       stages: pipelineStages.length > 0 ? pipelineStages : [{
@@ -1359,11 +1364,10 @@ export async function finaliseCeeDraftResponse(
         status: "failed" as const,
         duration_ms: Date.now() - start,
       }],
+      ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+        ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+        : {}),
     };
-    // Attach accumulated checkpoints to error trace
-    if (checkpointsEnabled && pipelineCheckpoints.length > 0) {
-      earlyErrorPipelineTrace.pipeline_checkpoints = applyCheckpointSizeGuard(pipelineCheckpoints);
-    }
 
     return {
       statusCode,
@@ -3085,7 +3089,12 @@ export async function finaliseCeeDraftResponse(
         retryable: false,
         requestId,
         ...(checkpointsEnabled && pipelineCheckpoints.length > 0
-          ? { pipelineTrace: { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) } }
+          ? { pipelineTrace: {
+              status: "failed" as const,
+              total_duration_ms: latencyMs,
+              stages: pipelineStages.length > 0 ? pipelineStages : [{ name: "verification", status: "failed", duration_ms: latencyMs }],
+              pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints),
+            } as any }
           : {}),
       }),
     };
