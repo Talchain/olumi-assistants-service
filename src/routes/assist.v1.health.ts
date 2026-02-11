@@ -1,13 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { env } from "node:process";
-import { SERVICE_VERSION, GIT_COMMIT_SHORT } from "../version.js";
+import { SERVICE_VERSION, GIT_COMMIT_SHORT, BUILD_TIMESTAMP } from "../version.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { getAllFeatureFlags } from "../utils/feature-flags.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRecentCeeErrors } from "../cee/logging.js";
 import { DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS } from "../config/timeouts.js";
-
-const BUILD_TIMESTAMP = new Date().toISOString();
 
 export default async function route(app: FastifyInstance) {
   app.get("/assist/v1/health", async (_req, reply) => {

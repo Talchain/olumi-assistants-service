@@ -73,6 +73,11 @@ export interface DraftGraphResult {
     cache_status?: 'fresh' | 'stale' | 'expired' | 'miss';
     use_staging_mode?: boolean;
 
+    // Pipeline checkpoint / provenance fields (for debug bundles)
+    prompt_source?: 'store' | 'default';
+    prompt_store_version?: number | null;
+    pipeline_checkpoints?: unknown[];
+
     // Unsafe (admin-gated)
     raw_output_preview?: string;
     raw_llm_text?: string;

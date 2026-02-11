@@ -12,6 +12,7 @@ import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from ".
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -435,6 +436,18 @@ export async function draftGraphWithAnthropic(
         .filter(Boolean)
       : [];
     const normalised = normaliseDraftResponse(rawJson);
+
+    // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
+    const checkpointsEnabled = config.cee.pipelineCheckpointsEnabled;
+    const adapterCheckpoints: PipelineCheckpoint[] = [];
+    if (checkpointsEnabled) {
+      adapterCheckpoints.push(
+        captureCheckpoint('post_adapter_normalisation', normalised, {
+          includeNestedStrengthDetection: true,
+        }),
+      );
+    }
+
     const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
     if (defaultedFactors.length > 0) {
       log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
@@ -616,6 +629,10 @@ export async function draftGraphWithAnthropic(
         finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
         provider_latency_ms: providerLatencyMs,
         node_kinds_raw_json: rawNodeKinds,
+        // Pipeline checkpoint / provenance fields
+        prompt_source: promptMeta.source,
+        prompt_store_version: promptMeta.version ?? null,
+        pipeline_checkpoints: checkpointsEnabled ? adapterCheckpoints : undefined,
         // Always include raw output for LLM observability trace (preview + full text for storage)
         raw_output_preview: rawPreview,
         raw_llm_text: rawTextFull,

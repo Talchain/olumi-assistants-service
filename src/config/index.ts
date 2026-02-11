@@ -295,6 +295,8 @@ const ConfigSchema = z.object({
     // Debug logging settings
     debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
+    // Pipeline checkpoint settings
+    pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -543,6 +545,7 @@ function parseConfig(): Config {
       // Debug logging settings
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
+      pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

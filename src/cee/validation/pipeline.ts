@@ -56,7 +56,8 @@ import {
 import { randomUUID, createHash } from "node:crypto";
 import { buildLLMRawTrace, storeLLMOutput } from "../llm-output-store.js";
 import { createCorrectionCollector } from "../corrections.js";
-import { SERVICE_VERSION } from "../../version.js";
+import { SERVICE_VERSION, GIT_COMMIT_SHORT, BUILD_TIMESTAMP } from "../../version.js";
+import { captureCheckpoint, assembleCeeProvenance, applyCheckpointSizeGuard, type PipelineCheckpoint } from "../pipeline-checkpoints.js";
 import {
   createObservabilityCollector,
   createNoOpObservabilityCollector,
@@ -962,6 +963,10 @@ export async function finaliseCeeDraftResponse(
   let llmMeta: any | undefined;
   let failureBundleId: string | undefined;
 
+  // Pipeline checkpoints (gated by feature flag)
+  const checkpointsEnabled = config.cee.pipelineCheckpointsEnabled;
+  const pipelineCheckpoints: PipelineCheckpoint[] = [];
+
   // Enhanced trace tracking for LLM observability
   const transforms: TransformEntry[] = [];
   let nodeCountsRaw: Record<string, number> = {};
@@ -1260,6 +1265,9 @@ export async function finaliseCeeDraftResponse(
         requestId,
         stage,
         ...(Object.keys(details).length > 0 ? { details } : {}),
+        ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+          ? { pipelineTrace: { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) } }
+          : {}),
       }),
     };
   }
@@ -1343,7 +1351,7 @@ export async function finaliseCeeDraftResponse(
 
     // Build minimal pipeline trace for early errors
     // At this point we may only have partial stage info, but it's better than nothing
-    const earlyErrorPipelineTrace = {
+    const earlyErrorPipelineTrace: Record<string, unknown> = {
       status: "failed" as const,
       total_duration_ms: Date.now() - start,
       stages: pipelineStages.length > 0 ? pipelineStages : [{
@@ -1352,6 +1360,10 @@ export async function finaliseCeeDraftResponse(
         duration_ms: Date.now() - start,
       }],
     };
+    // Attach accumulated checkpoints to error trace
+    if (checkpointsEnabled && pipelineCheckpoints.length > 0) {
+      earlyErrorPipelineTrace.pipeline_checkpoints = applyCheckpointSizeGuard(pipelineCheckpoints);
+    }
 
     return {
       statusCode,
@@ -1425,6 +1437,11 @@ export async function finaliseCeeDraftResponse(
   }
 
   let graph = normaliseCeeGraphVersionAndProvenance(payload.graph as GraphV1 | undefined);
+
+  // Pipeline checkpoint: post_normalisation
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('post_normalisation', graph));
+  }
 
   // Capture raw node IDs from LLM output (before normalisation)
   nodeIdsRaw = Array.isArray(payload.graph?.nodes)
@@ -1665,6 +1682,11 @@ export async function finaliseCeeDraftResponse(
     payload.graph = graph as any;
   }
 
+  // Pipeline checkpoint: post_repair
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('post_repair', graph));
+  }
+
   // Node extraction (pre-validation) - safe
   nodeKindsPreValidation = extractNodeKinds(graph);
   // Track validated node counts (after node validation fixes)
@@ -1741,6 +1763,9 @@ export async function finaliseCeeDraftResponse(
           status: "failed",
           total_duration_ms: latencyMs,
           stages: pipelineStages,
+          ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+            ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+            : {}),
         },
       });
         (errBody as any).trace = {
@@ -1814,6 +1839,9 @@ export async function finaliseCeeDraftResponse(
           status: "failed",
           total_duration_ms: latencyMs,
           stages: pipelineStages,
+          ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+            ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+            : {}),
         },
       });
         (errBody as any).trace = {
@@ -2422,6 +2450,10 @@ export async function finaliseCeeDraftResponse(
       transforms: transforms.length > 0 ? transforms : undefined,
       // LLM raw output preview
       llm_raw: errorLlmRawTrace,
+      // Pipeline checkpoints (accumulated up to the failure point)
+      ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+        ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+        : {}),
     } as any;
 
     // Best-effort persistence of failure bundle (bounded await; never blocks response)
@@ -2828,6 +2860,11 @@ export async function finaliseCeeDraftResponse(
     intervention_hints: interventionHints.length > 0 ? interventionHints : undefined,
   };
 
+  // Pipeline checkpoint: post_stabilisation (final graph state before verification)
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('post_stabilisation', cappedPayload.graph));
+  }
+
   const draftWarningCount = Array.isArray(draftWarnings) ? draftWarnings.length : 0;
   const uncertainNodeCount =
     confidenceFlags && Array.isArray((confidenceFlags as any).uncertain_nodes)
@@ -2859,6 +2896,13 @@ export async function finaliseCeeDraftResponse(
     );
     verifiedResponse = response as CEEDraftGraphResponseV1;
     const finalValidationEnd = Date.now();
+
+    // Pipeline checkpoint: pre_boundary (after verification, before return)
+    if (checkpointsEnabled) {
+      pipelineCheckpoints.push(
+        captureCheckpoint('pre_boundary', (verifiedResponse as any).graph),
+      );
+    }
 
     // Add final_validation stage
     pipelineStages.push({
@@ -2974,6 +3018,25 @@ export async function finaliseCeeDraftResponse(
         : [],
     };
 
+    // Pipeline checkpoints (edge field presence tracking)
+    if (checkpointsEnabled) {
+      const adapterCheckpoints = Array.isArray(llmMeta?.pipeline_checkpoints)
+        ? llmMeta.pipeline_checkpoints as PipelineCheckpoint[]
+        : [];
+      const allCheckpoints = [...adapterCheckpoints, ...pipelineCheckpoints];
+      pipelineTrace.pipeline_checkpoints = applyCheckpointSizeGuard(allCheckpoints);
+    }
+
+    // Provenance (always on — no feature flag)
+    pipelineTrace.cee_provenance = assembleCeeProvenance({
+      pipelinePath: 'A',
+      model: llmMeta?.model ?? model,
+      promptVersion: llmMeta?.prompt_version,
+      promptSource: llmMeta?.prompt_source,
+      promptStoreVersion: llmMeta?.prompt_store_version,
+      modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
+    });
+
     // Unsafe additions: only when explicitly gated
     if (unsafeCaptureEnabled && llmMeta) {
       pipelineTrace.unsafe = {
@@ -3021,6 +3084,9 @@ export async function finaliseCeeDraftResponse(
       body: buildCeeErrorResponse("CEE_INTERNAL_ERROR", message, {
         retryable: false,
         requestId,
+        ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+          ? { pipelineTrace: { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) } }
+          : {}),
       }),
     };
   }

@@ -33,6 +33,7 @@ import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs, FIXTURE_TIMEOUT_MS, DR
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../adapters/llm/errors.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config, shouldUseStagingPrompts } from "../config/index.js";
+import { captureCheckpoint, assembleCeeProvenance, applyCheckpointSizeGuard, type PipelineCheckpoint } from "../cee/pipeline-checkpoints.js";
 import { getModelConfig, getClientAllowedModels } from "../config/models.js";
 import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import {
@@ -680,6 +681,10 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Create correction collector for tracking graph modifications
   const collector = createCorrectionCollector();
 
+  // Pipeline checkpoints (gated by feature flag)
+  const checkpointsEnabled = config.cee.pipelineCheckpointsEnabled;
+  const pipelineCheckpoints: PipelineCheckpoint[] = [];
+
   // Helper to validate a model parameter
   const validateModelParam = (modelId: string, paramName: string): PipelineResult | null => {
     const modelConfig = getModelConfig(modelId);
@@ -1197,6 +1202,9 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
               suggestion: "Review the validation errors and adjust your decision brief.",
               hint: "The graph structure may have issues that automatic repair couldn't fix.",
             },
+            ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+              ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+              : {}),
           }
         ),
       };
@@ -1397,6 +1405,11 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }
   }
 
+  // Pipeline checkpoint: post_repair (after repair loop + validateAndFixGraph)
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('post_repair', candidate));
+  }
+
   // DEBUG: Track node counts after goal merging and validation fixes
   log.info({
     stage: "4_goal_merge_and_fix",
@@ -1472,6 +1485,9 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
             example:
               "We need to decide whether to build the feature in-house or outsource it. Options are: hire contractors, use an agency, or build with the current team. Success means launching within 3 months under $50k.",
           },
+          ...(checkpointsEnabled && pipelineCheckpoints.length > 0
+            ? { pipeline_checkpoints: applyCheckpointSizeGuard(pipelineCheckpoints) }
+            : {}),
         },
       ),
     };
@@ -1549,6 +1565,11 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }, "Compound goal constraints integrated into graph");
   }
 
+  // Pipeline checkpoint: post_stabilisation (final graph state before output assembly)
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('post_stabilisation', candidate));
+  }
+
   const payload = DraftGraphOutput.parse({
     graph: candidate,
     patch: defaultPatch,
@@ -1560,6 +1581,33 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     trace: tracePayload,
     goal_constraints: goalConstraints,
   });
+
+  // Pipeline checkpoint: pre_boundary (after Zod parse, before return)
+  if (checkpointsEnabled) {
+    pipelineCheckpoints.push(captureCheckpoint('pre_boundary', (payload as any).graph));
+  }
+
+  // Assemble pipeline checkpoints + provenance into trace
+  {
+    const traceObj = (payload as any).trace ?? {};
+    // Pipeline checkpoints (gated by feature flag)
+    if (checkpointsEnabled) {
+      const adapterCps = Array.isArray(llmMeta?.pipeline_checkpoints)
+        ? llmMeta.pipeline_checkpoints as PipelineCheckpoint[]
+        : [];
+      traceObj.pipeline_checkpoints = applyCheckpointSizeGuard([...adapterCps, ...pipelineCheckpoints]);
+    }
+    // Provenance (always on — no feature flag)
+    traceObj.cee_provenance = assembleCeeProvenance({
+      pipelinePath: 'B',
+      model: draftAdapter.model,
+      promptVersion: llmMeta?.prompt_version,
+      promptSource: llmMeta?.prompt_source,
+      promptStoreVersion: llmMeta?.prompt_store_version,
+      modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
+    });
+    (payload as any).trace = traceObj;
+  }
 
   // Check for legacy string provenance (for deprecation tracking)
   const legacy = hasLegacyProvenance(candidate);
