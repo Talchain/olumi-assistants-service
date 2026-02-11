@@ -265,7 +265,7 @@ describe("Graph Guards", () => {
       const nodes: NodeT[] = [
         { id: "a", kind: "goal" },
         { id: "b", kind: "decision" },
-        { id: "isolated", kind: "factor" }, // factor is NOT protected, should be pruned
+        { id: "isolated", kind: "action" }, // action is NOT protected, should be pruned
       ];
 
       const edges: EdgeT[] = [{ from: "a", to: "b" }];
@@ -324,33 +324,35 @@ describe("Graph Guards", () => {
       expect(pruned).toHaveLength(3); // All nodes preserved
     });
 
-    it("prunes non-protected isolated nodes while preserving goal/decision/option/outcome/risk", () => {
+    it("prunes non-protected isolated nodes while preserving goal/decision/option/outcome/risk/factor", () => {
       const nodes: NodeT[] = [
         { id: "decision_1", kind: "decision" },
         { id: "option_1", kind: "option" },
         { id: "goal_isolated", kind: "goal" }, // Isolated but protected
-        { id: "factor_isolated", kind: "factor" }, // Isolated and NOT protected - should be pruned
+        { id: "factor_isolated", kind: "factor" }, // Isolated but protected - should be preserved
         { id: "outcome_isolated", kind: "outcome" }, // Isolated but protected - should be preserved
         { id: "risk_isolated", kind: "risk" }, // Isolated but protected - should be preserved
         { id: "option_isolated", kind: "option" }, // Isolated but protected - should be preserved
+        { id: "action_isolated", kind: "action" }, // Isolated and NOT protected - should be pruned
       ];
 
       const edges: EdgeT[] = [{ from: "decision_1", to: "option_1" }];
 
       const pruned = pruneIsolatedNodes(nodes, edges);
 
-      // Protected nodes preserved (goal, decision, option, outcome, risk)
+      // Protected nodes preserved (goal, decision, option, outcome, risk, factor)
       expect(pruned.find(n => n.id === "goal_isolated")).toBeDefined();
       expect(pruned.find(n => n.id === "decision_1")).toBeDefined();
       expect(pruned.find(n => n.id === "option_1")).toBeDefined();
-      expect(pruned.find(n => n.id === "option_isolated")).toBeDefined(); // NEW: option is now protected
+      expect(pruned.find(n => n.id === "option_isolated")).toBeDefined();
       expect(pruned.find(n => n.id === "outcome_isolated")).toBeDefined();
       expect(pruned.find(n => n.id === "risk_isolated")).toBeDefined();
+      expect(pruned.find(n => n.id === "factor_isolated")).toBeDefined();
 
-      // Non-protected isolated nodes pruned (only factor)
-      expect(pruned.find(n => n.id === "factor_isolated")).toBeUndefined();
+      // Non-protected isolated nodes pruned (only action)
+      expect(pruned.find(n => n.id === "action_isolated")).toBeUndefined();
 
-      expect(pruned).toHaveLength(6); // All protected kinds preserved
+      expect(pruned).toHaveLength(7); // All protected kinds preserved
     });
   });
 
@@ -406,7 +408,7 @@ describe("Graph Guards", () => {
         nodes: [
           { id: "z", kind: "goal" },
           { id: "a", kind: "decision" },
-          { id: "isolated", kind: "factor" }, // factor is NOT protected, should be pruned
+          { id: "isolated", kind: "action" }, // action is NOT protected, should be pruned
         ],
         edges: [
           { from: "z", to: "a" },
@@ -426,7 +428,7 @@ describe("Graph Guards", () => {
       expect(compliant.nodes[0].id).toBe("a");
       expect(compliant.nodes[1].id).toBe("z");
 
-      // Isolated non-protected node pruned (factor is not protected)
+      // Isolated non-protected node pruned (action is not protected)
       expect(compliant.nodes.find(n => n.id === "isolated")).toBeUndefined();
 
       // Cycle broken (DAG)
@@ -521,6 +523,38 @@ describe("Graph Guards", () => {
       const compliant = enforceGraphCompliance(graph);
 
       expect(compliant.nodes[0].label).toBe("Test Goal");
+    });
+
+    it("preserves isolated factor nodes (protected kind)", () => {
+      const graph: GraphT = {
+        version: "1",
+        default_seed: 42,
+        nodes: [
+          { id: "dec_pricing", kind: "decision" },
+          { id: "opt_premium", kind: "option" },
+          { id: "goal_grow", kind: "goal" },
+          { id: "fac_isolated", kind: "factor", label: "Market Size" }, // Isolated factor — must survive
+        ],
+        edges: [
+          { from: "dec_pricing", to: "opt_premium" },
+          { from: "opt_premium", to: "goal_grow" },
+        ],
+        meta: {
+          source: "assistant" as const,
+          roots: [],
+          leaves: [],
+          suggested_positions: {},
+        },
+      };
+
+      const compliant = enforceGraphCompliance(graph);
+
+      // Factor node must be preserved even though it has zero edges
+      const factor = compliant.nodes.find(n => n.id === "fac_isolated");
+      expect(factor).toBeDefined();
+      expect(factor!.kind).toBe("factor");
+      expect(factor!.label).toBe("Market Size");
+      expect(compliant.nodes).toHaveLength(4);
     });
   });
 });

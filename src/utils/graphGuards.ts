@@ -219,11 +219,11 @@ export function findIsolatedNodes(nodes: NodeT[], edges: EdgeT[]): string[] {
  *
  * IMPORTANT: This must match PROTECTED_KINDS in src/services/repair.ts
  */
-const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"]);
+const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk", "factor"]);
 
 /**
  * Prune isolated nodes from graph.
- * Protected kinds (goal, decision, option, outcome, risk) are never pruned regardless of connectivity.
+ * Protected kinds (goal, decision, option, outcome, risk, factor) are never pruned regardless of connectivity.
  */
 export function pruneIsolatedNodes(
   nodes: NodeT[],
