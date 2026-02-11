@@ -1,53 +1,46 @@
 /**
  * CEE Shared Constants
  *
- * Centralized constants to avoid circular dependencies between modules.
+ * Re-exports canonical CIL constants from @talchain/schemas to avoid
+ * circular dependencies between modules and prevent definition drift.
  */
+
+import {
+  STRENGTH_DEFAULT_SIGNATURE,
+  STRENGTH_DEFAULT_THRESHOLD,
+  STRENGTH_MEAN_DEFAULT_THRESHOLD,
+  STRENGTH_DEFAULT_MIN_EDGES,
+  EDGE_STRENGTH_LOW_THRESHOLD as _EDGE_STRENGTH_LOW_THRESHOLD,
+  EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD,
+} from "@talchain/schemas";
 
 /**
  * Default strength mean value applied when LLM omits strength data.
- *
- * Used in:
- * - Edge transformation fallback (schema-v3)
- * - Strength default detection (integrity-sentinel)
- *
- * Shared constant prevents drift between fallback application and detection logic.
- *
- * Note: This value may be negated during sign adjustment based on effect_direction.
- * Detection should compare Math.abs(strength_mean) to account for both polarities.
+ * Source: @talchain/schemas STRENGTH_DEFAULT_SIGNATURE.mean
  */
-export const DEFAULT_STRENGTH_MEAN = 0.5;
+export const DEFAULT_STRENGTH_MEAN = STRENGTH_DEFAULT_SIGNATURE.mean;
 
 /**
  * Default strength std value derived when LLM omits strength data.
- *
- * Derived from deriveStrengthStd(0.5, 0.5, undefined):
- *   cv = 0.3 * (1 - 0.5) + 0.1 = 0.25
- *   std = 0.25 * 0.5 * 1.0 = 0.125
- *
- * Used in:
- * - Strength default detection signature (integrity-sentinel)
- *
- * Part of the default signature: |strength_mean| === 0.5 AND strength_std === 0.125
+ * Source: @talchain/schemas STRENGTH_DEFAULT_SIGNATURE.std
  */
-export const DEFAULT_STRENGTH_STD = 0.125;
+export const DEFAULT_STRENGTH_STD = STRENGTH_DEFAULT_SIGNATURE.std;
 
 /**
  * Threshold for dominant strength mean default detection (70%).
- *
- * When ≥70% of causal edges have |strength_mean| ≈ 0.5 (regardless of std),
- * this indicates likely uniform defaulting even if belief/provenance vary.
- *
- * Lower threshold than STRENGTH_DEFAULT_APPLIED (80%) to catch cases where
- * some edges have varied std but mean is still defaulted.
+ * Source: @talchain/schemas STRENGTH_MEAN_DEFAULT_THRESHOLD
  */
-export const STRENGTH_MEAN_DOMINANT_THRESHOLD = 0.7;
+export const STRENGTH_MEAN_DOMINANT_THRESHOLD = STRENGTH_MEAN_DEFAULT_THRESHOLD;
 
 /**
- * Threshold for EDGE_STRENGTH_LOW warning (v2.7 schema).
- *
- * Edges with |strength_mean| < 0.05 are flagged as informational —
- * the relationship is so weak it may not contribute meaningfully
- * to the causal model.
+ * Threshold for EDGE_STRENGTH_LOW warning.
+ * Source: @talchain/schemas EDGE_STRENGTH_LOW_THRESHOLD
  */
-export const EDGE_STRENGTH_LOW_THRESHOLD = 0.05;
+export const EDGE_STRENGTH_LOW_THRESHOLD = _EDGE_STRENGTH_LOW_THRESHOLD;
+
+// Re-export additional thresholds from shared package for direct use
+export {
+  STRENGTH_DEFAULT_THRESHOLD,
+  STRENGTH_DEFAULT_MIN_EDGES,
+  EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD,
+};

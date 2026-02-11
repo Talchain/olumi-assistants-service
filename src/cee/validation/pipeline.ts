@@ -66,6 +66,13 @@ import {
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
+/**
+ * CEEErrorCode — full set of CEE error codes from OpenAPI spec.
+ *
+ * Note: @talchain/schemas exports a narrower CeeErrorCode covering LLM-layer
+ * errors only (6 codes). The pipeline uses the full OpenAPI set (12 codes
+ * including CEE_GRAPH_INVALID, CEE_TIMEOUT, etc.) so we keep the OpenAPI type.
+ */
 type CEEErrorCode = components["schemas"]["CEEErrorCode"];
 type CEETraceMeta = components["schemas"]["CEETraceMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];

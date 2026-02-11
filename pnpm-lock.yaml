@@ -29,6 +29,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.90.1
         version: 2.90.1
+      '@talchain/schemas':
+        specifier: file:/Users/paulslee/Documents/GitHub/olumi-schemas
+        version: file:../olumi-schemas
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -1670,6 +1673,10 @@ packages:
   '@szmarczak/http-timer@4.0.6':
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
+
+  '@talchain/schemas@file:../olumi-schemas':
+    resolution: {directory: ../olumi-schemas, type: directory}
+    engines: {node: '>=18.0.0'}
 
   '@types/archiver@7.0.0':
     resolution: {integrity: sha512-/3vwGwx9n+mCQdYZ2IKGGHEFL30I96UgBlk8EtRDDFQ9uxM1l4O5Ci6r00EMAkiDaTqD9DQ6nVrWRICnBPtzzg==}
@@ -6806,6 +6813,10 @@ snapshots:
   '@szmarczak/http-timer@4.0.6':
     dependencies:
       defer-to-connect: 2.0.1
+
+  '@talchain/schemas@file:../olumi-schemas':
+    dependencies:
+      zod: 3.25.76
 
   '@types/archiver@7.0.0':
     dependencies:

@@ -23,7 +23,13 @@
 
 import { log } from "../../utils/telemetry.js";
 import { normaliseIdBase } from "../utils/id-normalizer.js";
-import { DEFAULT_STRENGTH_MEAN, DEFAULT_STRENGTH_STD, STRENGTH_MEAN_DOMINANT_THRESHOLD } from "../constants.js";
+import {
+  DEFAULT_STRENGTH_MEAN,
+  DEFAULT_STRENGTH_STD,
+  STRENGTH_MEAN_DOMINANT_THRESHOLD,
+  STRENGTH_DEFAULT_THRESHOLD,
+  STRENGTH_DEFAULT_MIN_EDGES,
+} from "../constants.js";
 
 // ============================================================================
 // Types
@@ -440,8 +446,8 @@ export function detectStrengthDefaults(
   v3Nodes: V3Node[],
   v3Edges: V3Edge[],
 ): StrengthDefaultsResult {
-  const THRESHOLD = 0.8; // 80%
-  const MIN_EDGES = 3; // Minimum edges required for detection
+  const THRESHOLD = STRENGTH_DEFAULT_THRESHOLD; // 80% — from @talchain/schemas
+  const MIN_EDGES = STRENGTH_DEFAULT_MIN_EDGES; // from @talchain/schemas
 
   // Build lookup map for O(1) node kind checks
   const nodeKindMap = new Map<string, string>();
@@ -567,7 +573,7 @@ export function detectStrengthMeanDominant(
   v3Nodes: V3Node[],
   v3Edges: V3Edge[],
 ): StrengthMeanDominantResult {
-  const MIN_EDGES = 3; // Minimum edges required for detection
+  const MIN_EDGES = STRENGTH_DEFAULT_MIN_EDGES; // from @talchain/schemas
 
   // Build lookup map for O(1) node kind checks
   const nodeKindMap = new Map<string, string>();

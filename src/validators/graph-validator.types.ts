@@ -203,6 +203,22 @@ export interface AllowedEdgeRule {
 // Constants
 // =============================================================================
 
+/**
+ * CEE graph validation limits.
+ *
+ * Platform defaults from @talchain/schemas LIMITS: MAX_NODES=50, MAX_EDGES=100, MAX_OPTIONS=10.
+ * CEE intentionally diverges on EDGE_LIMIT and MAX_OPTIONS:
+ *
+ * - EDGE_LIMIT (200 vs platform 100): CEE causal graphs are more densely connected
+ *   than typical platform graphs. Factor→outcome and cross-factor edges can easily
+ *   exceed 100 in complex decision models with 5+ options.
+ *
+ * - MAX_OPTIONS (6 vs platform 10): CEE caps options lower because each option
+ *   generates a full intervention bundle with factor mappings. More than 6 options
+ *   degrades LLM output quality and response time without improving decision value.
+ *
+ * NODE_LIMIT matches the platform standard (50).
+ */
 export const NODE_LIMIT = 50;
 export const EDGE_LIMIT = 200;
 export const MIN_OPTIONS = 2;

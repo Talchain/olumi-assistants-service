@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import { GoalConstraintSchema } from "./assist.js";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
 
 // ============================================================================
 // Node Types
@@ -274,6 +275,7 @@ export type OptionV3T = z.infer<typeof OptionV3>;
 
 /**
  * Validation warning codes.
+ * Includes CEE-specific intervention/structure codes plus CIL codes from @talchain/schemas.
  */
 export const ValidationWarningCode = z.enum([
   "INTERVENTION_TARGET_DISCONNECTED",
@@ -286,19 +288,20 @@ export const ValidationWarningCode = z.enum([
   "OPTION_NODE_IN_GRAPH",
   "DUPLICATE_NODE_ID",
   "INVALID_NODE_ID",
+  // CIL warning codes from @talchain/schemas
+  CIL_WARNING_CODES.STRENGTH_DEFAULT_APPLIED,
+  CIL_WARNING_CODES.STRENGTH_MEAN_DEFAULT_DOMINANT,
+  CIL_WARNING_CODES.EDGE_STRENGTH_LOW,
+  CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
 ]);
 export type ValidationWarningCodeT = z.infer<typeof ValidationWarningCode>;
 
 /**
  * Validation warning.
+ * Extends SharedValidationWarningSchema (code, message, severity, details)
+ * with CEE-specific fields for affected entities and suggestions.
  */
-export const ValidationWarningV3 = z.object({
-  /** Warning code */
-  code: z.string(),
-  /** Severity level */
-  severity: z.enum(["info", "warn", "error"]),
-  /** Human-readable message */
-  message: z.string(),
+export const ValidationWarningV3 = SharedValidationWarningSchema.extend({
   /** Affected option ID */
   affected_option_id: z.string().optional(),
   /** Affected node ID */
@@ -307,11 +310,9 @@ export const ValidationWarningV3 = z.object({
   affected_edge_id: z.string().optional(),
   /** Suggested fix */
   suggestion: z.string().optional(),
-  /** Additional details payload (code-specific structure) */
-  details: z.record(z.unknown()).optional(),
   /** Pipeline stage that detected this issue */
   stage: z.string().optional(),
-}).passthrough(); // CIL Phase 0: preserve additive fields
+}); // SharedValidationWarningSchema already uses .passthrough()
 export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
 
 // ============================================================================

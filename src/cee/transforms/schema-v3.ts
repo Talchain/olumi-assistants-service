@@ -37,7 +37,8 @@ import { config } from "../../config/index.js";
 import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
 import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant } from "../validation/integrity-sentinel.js";
-import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD } from "../constants.js";
+import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD } from "../constants.js";
+import { CIL_WARNING_CODES } from "@talchain/schemas";
 
 // ============================================================================
 // V3 Types
@@ -634,7 +635,7 @@ export function transformResponseToV3(
   if (strengthDefaults.detected) {
     const defaultedPercentage = Number(((strengthDefaults.defaulted_count / strengthDefaults.total_edges) * 100).toFixed(1));
     validationWarnings.push({
-      code: "STRENGTH_DEFAULT_APPLIED",
+      code: CIL_WARNING_CODES.STRENGTH_DEFAULT_APPLIED,
       message: `Detected ${strengthDefaults.defaulted_count} of ${strengthDefaults.total_edges} edges (${defaultedPercentage}%) with default strength value ${strengthDefaults.default_value}. This indicates the LLM may not have output varied strength coefficients.`,
       severity: "warn" as const,
       details: {
@@ -658,7 +659,7 @@ export function transformResponseToV3(
   if (strengthMeanDominant.detected) {
     const meanDefaultPercentage = Number(((strengthMeanDominant.mean_default_count / strengthMeanDominant.total_edges) * 100).toFixed(1));
     validationWarnings.push({
-      code: "STRENGTH_MEAN_DEFAULT_DOMINANT",
+      code: CIL_WARNING_CODES.STRENGTH_MEAN_DEFAULT_DOMINANT,
       message: `Detected ${strengthMeanDominant.mean_default_count} of ${strengthMeanDominant.total_edges} edges (${meanDefaultPercentage}%) with mean ≈ ${strengthMeanDominant.default_value} regardless of std. This indicates the LLM may have varied belief/provenance but defaulted strength magnitude.`,
       severity: "warn" as const,
       details: {
@@ -856,7 +857,7 @@ function generateValidationWarnings(
     if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {
       // Low strength edge (|mean| < 0.05, v2.7 schema)
       warnings.push({
-        code: "EDGE_STRENGTH_LOW",
+        code: CIL_WARNING_CODES.EDGE_STRENGTH_LOW,
         severity: "info",
         message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength_mean.toFixed(3)})`,
         affected_node_id: edge.from,
@@ -871,10 +872,10 @@ function generateValidationWarnings(
         edgeTo: edge.to,
         strengthMean: edge.strength_mean,
       });
-    } else if (absMean < 0.1) {
+    } else if (absMean < EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD) {
       // Negligible edge (0.05 ≤ |mean| < 0.1)
       warnings.push({
-        code: "EDGE_STRENGTH_NEGLIGIBLE",
+        code: CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
         severity: "info",
         message: `Edge from "${edge.from}" to "${edge.to}" has negligible strength (${edge.strength_mean.toFixed(3)})`,
         affected_node_id: edge.from,
