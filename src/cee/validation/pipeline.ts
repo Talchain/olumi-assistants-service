@@ -3028,7 +3028,14 @@ export async function finaliseCeeDraftResponse(
         ? llmMeta.pipeline_checkpoints as PipelineCheckpoint[]
         : [];
       const allCheckpoints = [...adapterCheckpoints, ...pipelineCheckpoints];
+      // Always assign (even if empty) so absence vs empty is distinguishable
       pipelineTrace.pipeline_checkpoints = applyCheckpointSizeGuard(allCheckpoints);
+      pipelineTrace.pipeline_checkpoints_meta = {
+        enabled: true,
+        adapter_count: adapterCheckpoints.length,
+        pipeline_count: pipelineCheckpoints.length,
+        total_count: allCheckpoints.length,
+      };
     }
 
     // Provenance (always on — no feature flag)

@@ -1595,7 +1595,15 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       const adapterCps = Array.isArray(llmMeta?.pipeline_checkpoints)
         ? llmMeta.pipeline_checkpoints as PipelineCheckpoint[]
         : [];
-      traceObj.pipeline_checkpoints = applyCheckpointSizeGuard([...adapterCps, ...pipelineCheckpoints]);
+      const allCps = [...adapterCps, ...pipelineCheckpoints];
+      // Always assign (even if empty) so absence vs empty is distinguishable
+      traceObj.pipeline_checkpoints = applyCheckpointSizeGuard(allCps);
+      traceObj.pipeline_checkpoints_meta = {
+        enabled: true,
+        adapter_count: adapterCps.length,
+        pipeline_count: pipelineCheckpoints.length,
+        total_count: allCps.length,
+      };
     }
     // Provenance (always on — no feature flag)
     traceObj.cee_provenance = assembleCeeProvenance({
