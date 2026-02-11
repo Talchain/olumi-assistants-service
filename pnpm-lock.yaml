@@ -30,8 +30,8 @@ importers:
         specifier: ^2.90.1
         version: 2.90.1
       '@talchain/schemas':
-        specifier: file:/Users/paulslee/Documents/GitHub/olumi-schemas
-        version: file:../olumi-schemas
+        specifier: 0.1.0
+        version: 0.1.0
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -1674,8 +1674,8 @@ packages:
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
 
-  '@talchain/schemas@file:../olumi-schemas':
-    resolution: {directory: ../olumi-schemas, type: directory}
+  '@talchain/schemas@0.1.0':
+    resolution: {integrity: sha512-vpT7IuHdIrNwhbRFOQhG/nyBZSBWwhbmRHLypOP+VHAO/xTc1mCSu5r/+3UVQB9art0eCjK4Lrh2mGF27hF80Q==, tarball: https://npm.pkg.github.com/download/@talchain/schemas/0.1.0/703ae6da58439f5e5035e2de05436e86b16341aa}
     engines: {node: '>=18.0.0'}
 
   '@types/archiver@7.0.0':
@@ -6814,7 +6814,7 @@ snapshots:
     dependencies:
       defer-to-connect: 2.0.1
 
-  '@talchain/schemas@file:../olumi-schemas':
+  '@talchain/schemas@0.1.0':
     dependencies:
       zod: 3.25.76
 
