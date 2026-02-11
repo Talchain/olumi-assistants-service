@@ -275,6 +275,26 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         belief,
       };
     });
+
+    // [DIAGNOSTIC] Temporary: capture raw edge field state after V4 extraction.
+    // Shows whether LLM outputs nested strength, flat strength_mean, or neither.
+    // Remove after confirming extraction behaviour on staging (plan step 5).
+    if ((obj.edges as any[]).length > 0) {
+      const diagSample = (obj.edges as any[]).slice(0, 3).map((e: any) => ({
+        from: e.from,
+        to: e.to,
+        strength_mean: e.strength_mean ?? 'MISSING',
+        strength_nested: typeof e.strength === 'object' && e.strength !== null
+          ? { mean: e.strength.mean, std: e.strength.std }
+          : (e.strength === undefined ? 'UNDEFINED' : `TYPE:${typeof e.strength}`),
+        weight: e.weight ?? 'MISSING',
+        belief_exists: e.belief_exists ?? 'MISSING',
+      }));
+      log.info(
+        { event: 'llm.normalisation.post_extraction_diagnostic', sample_edges: diagSample },
+        '[DIAGNOSTIC] Edge fields after normaliseDraftResponse V4 extraction',
+      );
+    }
   }
 
   if (normalisedCount > 0) {
