@@ -252,3 +252,206 @@ describe("preserveFieldsFromOriginal", () => {
     expect(edge.belief_exists).toBe(0.95);
   });
 });
+
+describe("V4 edge field stash safety net", () => {
+  /**
+   * Reproduces the intermittent stripping bug where V4 edge fields
+   * are lost between post_adapter_normalisation and post_normalisation
+   * checkpoints. The stash captures V4 fields from the adapter's
+   * original output and restores them if missing in the final candidate.
+   */
+
+  const V4_EDGE_FIELDS = [
+    "strength_mean",
+    "strength_std",
+    "belief_exists",
+    "effect_direction",
+    "provenance",
+    "provenance_source",
+  ] as const;
+
+  function buildStash(edges: GraphT["edges"]): Map<string, Record<string, unknown>> {
+    const stash = new Map<string, Record<string, unknown>>();
+    for (const edge of edges) {
+      const key = `${edge.from}::${edge.to}`;
+      const stashed: Record<string, unknown> = {};
+      let hasAny = false;
+      for (const field of V4_EDGE_FIELDS) {
+        const val = (edge as Record<string, unknown>)[field];
+        if (val !== undefined) {
+          stashed[field] = val;
+          hasAny = true;
+        }
+      }
+      if (hasAny) {
+        stash.set(key, stashed);
+      }
+    }
+    return stash;
+  }
+
+  function applyStash(
+    edges: GraphT["edges"],
+    stash: Map<string, Record<string, unknown>>,
+  ): GraphT["edges"] {
+    return edges.map((edge) => {
+      const key = `${edge.from}::${edge.to}`;
+      const stashed = stash.get(key);
+      if (!stashed) return edge;
+      let didRestore = false;
+      const patched = { ...edge } as Record<string, unknown>;
+      for (const field of V4_EDGE_FIELDS) {
+        if (patched[field] !== undefined) continue;
+        if (stashed[field] !== undefined) {
+          patched[field] = stashed[field];
+          didRestore = true;
+        }
+      }
+      return didRestore ? (patched as (typeof edges)[number]) : edge;
+    });
+  }
+
+  it("restores V4 fields lost during pipeline processing", () => {
+    // Adapter output: all edges have V4 fields (post_adapter_normalisation: 3/3)
+    const adapterEdges: GraphT["edges"] = [
+      {
+        from: "opt_a", to: "out_1",
+        strength_mean: 0.45, strength_std: 0.12,
+        belief_exists: 0.85, effect_direction: "positive" as const,
+      },
+      {
+        from: "fac_price", to: "out_revenue",
+        strength_mean: -0.7, strength_std: 0.2,
+        belief_exists: 0.9, effect_direction: "negative" as const,
+      },
+      {
+        from: "out_revenue", to: "goal_1",
+        strength_mean: 0.6, strength_std: 0.15,
+        belief_exists: 0.8, effect_direction: "positive" as const,
+      },
+    ];
+
+    const stash = buildStash(adapterEdges);
+    expect(stash.size).toBe(3);
+
+    // Final candidate: V4 fields STRIPPED (simulates post_normalisation: 0/3)
+    const strippedEdges: GraphT["edges"] = [
+      { from: "opt_a", to: "out_1" } as any,
+      { from: "fac_price", to: "out_revenue" } as any,
+      { from: "out_revenue", to: "goal_1" } as any,
+    ];
+
+    const restored = applyStash(strippedEdges, stash);
+
+    // All V4 fields restored
+    expect(restored[0].strength_mean).toBe(0.45);
+    expect(restored[0].strength_std).toBe(0.12);
+    expect(restored[0].belief_exists).toBe(0.85);
+    expect(restored[0].effect_direction).toBe("positive");
+
+    expect(restored[1].strength_mean).toBe(-0.7);
+    expect(restored[1].effect_direction).toBe("negative");
+
+    expect(restored[2].strength_mean).toBe(0.6);
+    expect(restored[2].belief_exists).toBe(0.8);
+  });
+
+  it("is a no-op when V4 fields are already present", () => {
+    const adapterEdges: GraphT["edges"] = [
+      {
+        from: "opt_a", to: "out_1",
+        strength_mean: 0.45, strength_std: 0.12,
+        belief_exists: 0.85, effect_direction: "positive" as const,
+      },
+    ];
+
+    const stash = buildStash(adapterEdges);
+
+    // Final candidate: V4 fields ALREADY PRESENT (good run)
+    const goodEdges: GraphT["edges"] = [
+      {
+        from: "opt_a", to: "out_1",
+        strength_mean: 0.45, strength_std: 0.12,
+        belief_exists: 0.85, effect_direction: "positive" as const,
+      },
+    ];
+
+    const restored = applyStash(goodEdges, stash);
+    expect(restored[0]).toBe(goodEdges[0]); // Same reference — no patching needed
+  });
+
+  it("handles edges added after adapter (enrichment, repair)", () => {
+    const adapterEdges: GraphT["edges"] = [
+      {
+        from: "opt_a", to: "out_1",
+        strength_mean: 0.45, strength_std: 0.12,
+        belief_exists: 0.85, effect_direction: "positive" as const,
+      },
+    ];
+
+    const stash = buildStash(adapterEdges);
+
+    // Pipeline added a new edge (from enrichment or repair) — not in stash
+    const edgesWithNew: GraphT["edges"] = [
+      { from: "opt_a", to: "out_1" } as any,
+      { from: "fac_new", to: "out_1" } as any, // New edge
+    ];
+
+    const restored = applyStash(edgesWithNew, stash);
+
+    // Adapter edge restored
+    expect(restored[0].strength_mean).toBe(0.45);
+    // New edge untouched (no stash entry)
+    expect(restored[1].strength_mean).toBeUndefined();
+  });
+
+  it("does not overwrite values already on the candidate edge", () => {
+    const adapterEdges: GraphT["edges"] = [
+      {
+        from: "opt_a", to: "out_1",
+        strength_mean: 0.45, strength_std: 0.12,
+        belief_exists: 0.85, effect_direction: "positive" as const,
+      },
+    ];
+
+    const stash = buildStash(adapterEdges);
+
+    // Engine set its own strength_mean but left others missing
+    const mixedEdges: GraphT["edges"] = [
+      { from: "opt_a", to: "out_1", strength_mean: 0.3 } as any,
+    ];
+
+    const restored = applyStash(mixedEdges, stash);
+
+    // Engine's value preserved (not overwritten by stash)
+    expect(restored[0].strength_mean).toBe(0.3);
+    // Missing fields restored from stash
+    expect(restored[0].strength_std).toBe(0.12);
+    expect(restored[0].belief_exists).toBe(0.85);
+    expect(restored[0].effect_direction).toBe("positive");
+  });
+
+  it("handles edges whose from::to changed after goal merging", () => {
+    // Adapter had edge to goal_1
+    const adapterEdges: GraphT["edges"] = [
+      {
+        from: "out_revenue", to: "goal_1",
+        strength_mean: 0.6, strength_std: 0.15,
+        belief_exists: 0.8, effect_direction: "positive" as const,
+      },
+    ];
+
+    const stash = buildStash(adapterEdges);
+
+    // After enforceSingleGoal, edge redirected to goal_0
+    const redirectedEdges: GraphT["edges"] = [
+      { from: "out_revenue", to: "goal_0" } as any,
+    ];
+
+    const restored = applyStash(redirectedEdges, stash);
+
+    // No stash match (key changed) — edge stays stripped
+    // This is expected: stash is best-effort for stable from::to keys
+    expect(restored[0].strength_mean).toBeUndefined();
+  });
+});

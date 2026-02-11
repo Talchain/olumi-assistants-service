@@ -954,6 +954,29 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   const { graph, rationales, usage: draftUsage, debug: adapterDebug, meta: llmMeta } = draftResult;
   const llmDuration = llmDurationSuccess;
 
+  // === V4 EDGE FIELD STASH ===
+  // Stash V4 edge fields from the adapter's original output (known good from
+  // post_adapter_normalisation checkpoint). These fields can be lost during
+  // external engine validation (PLoT /v1/validate strips unknown fields) when
+  // edge key matching in preserveFieldsFromOriginal fails. This stash provides
+  // a final safety net before output assembly.
+  const adapterEdgeFieldStash = new Map<string, Record<string, unknown>>();
+  for (const edge of graph.edges) {
+    const key = `${edge.from}::${edge.to}`;
+    const stashed: Record<string, unknown> = {};
+    let hasAny = false;
+    for (const field of V4_EDGE_FIELDS) {
+      const val = (edge as Record<string, unknown>)[field];
+      if (val !== undefined) {
+        stashed[field] = val;
+        hasAny = true;
+      }
+    }
+    if (hasAny) {
+      adapterEdgeFieldStash.set(key, stashed);
+    }
+  }
+
   // Request budget guard: check if we've exceeded the overall request budget
   const requestStartMs = pipelineOpts?.requestStartMs ?? llmStartTime;
   const totalElapsed = Date.now() - requestStartMs;
@@ -1563,6 +1586,61 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       constraints_skipped_no_target: skippedCount,
       is_compound: compoundGoalResult.isCompound,
     }, "Compound goal constraints integrated into graph");
+  }
+
+  // === V4 EDGE FIELD RESTORATION (safety net) ===
+  // Restore any V4 edge fields that were lost during pipeline processing.
+  // The external PLoT engine (/v1/validate) strips fields it doesn't recognise,
+  // and preserveFieldsFromOriginal may fail to restore them when from::to keys
+  // diverge (e.g., after goal merging or engine-side node ID changes).
+  // Uses the adapter edge stash as the authoritative source.
+  {
+    let stashRestored = 0;
+    let stashKept = 0;
+    let stashNoMatch = 0;
+    const restoredEdges = candidate.edges.map((edge) => {
+      const key = `${edge.from}::${edge.to}`;
+      const stashed = adapterEdgeFieldStash.get(key);
+      if (!stashed) {
+        stashNoMatch++;
+        return edge;
+      }
+      let didRestore = false;
+      const patched = { ...edge } as Record<string, unknown>;
+      for (const field of V4_EDGE_FIELDS) {
+        if (patched[field] !== undefined) continue;
+        if (stashed[field] !== undefined) {
+          patched[field] = stashed[field];
+          didRestore = true;
+        }
+      }
+      if (didRestore) {
+        stashRestored++;
+      } else {
+        stashKept++;
+      }
+      return patched as (typeof candidate.edges)[number];
+    });
+
+    if (stashRestored > 0) {
+      log.warn({
+        event: "cee.v4_edge_stash.restored",
+        restored: stashRestored,
+        kept: stashKept,
+        no_match: stashNoMatch,
+        total: candidate.edges.length,
+        correlation_id: correlationId,
+      }, `V4 edge stash safety net: restored ${stashRestored}/${candidate.edges.length} edges`);
+      candidate = { ...candidate, edges: restoredEdges };
+    } else {
+      log.debug({
+        event: "cee.v4_edge_stash.noop",
+        kept: stashKept,
+        no_match: stashNoMatch,
+        total: candidate.edges.length,
+        correlation_id: correlationId,
+      }, "V4 edge stash safety net: no restoration needed");
+    }
   }
 
   // Pipeline checkpoint: post_stabilisation (final graph state before output assembly)
