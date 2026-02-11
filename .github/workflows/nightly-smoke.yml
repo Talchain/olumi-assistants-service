@@ -24,6 +24,8 @@ jobs:
         uses: actions/setup-node@v4
         with: { node-version: 18 }
       - run: pnpm install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run smoke tests
         id: smoke
         continue-on-error: true

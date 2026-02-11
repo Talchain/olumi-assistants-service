@@ -23,6 +23,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
       - name: Lint
@@ -72,6 +74,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Check for duplicate files (prevents drift from shadow copies)
         run: |
           # Fail if any duplicate-pattern files exist in tracked files
@@ -114,6 +118,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run live LLM tests
         if: ${{ env.ANTHROPIC_API_KEY != '' }}
         env:
