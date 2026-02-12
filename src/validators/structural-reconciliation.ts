@@ -221,6 +221,19 @@ function controllableDataCompletenessRule(
   const mutations: STRPMutation[] = [];
   const factors = nodeMap.byKind.get("factor") ?? [];
 
+  // TEMP DIAG — remove after verification
+  console.log("[STRP-DIAG] Rule 5 entered", {
+    factor_count: factors.length,
+    controllable: factors.filter(n => factorCategories.get(n.id)?.category === "controllable").map(n => ({
+      id: n.id,
+      category: factorCategories.get(n.id)?.category,
+      hasOptionEdge: factorCategories.get(n.id)?.hasOptionEdge,
+      has_factor_type: !!(n.data as any)?.factor_type,
+      has_uncertainty_drivers: !!(n.data as any)?.uncertainty_drivers,
+    })),
+  });
+  // END TEMP DIAG
+
   for (const node of factors) {
     const info = factorCategories.get(node.id);
     if (!info || info.category !== "controllable") continue;
