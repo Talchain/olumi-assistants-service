@@ -162,6 +162,16 @@ export function transformNodeToV3(
       ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
       ...(node.data.uncertainty_drivers !== undefined && { uncertainty_drivers: node.data.uncertainty_drivers }),
     };
+  } else if (isFactorData(node.data)) {
+    // Controllable factors without value: preserve factor_type and uncertainty_drivers
+    // directly on the node (NodeV3 .passthrough() preserves them). Required by PLoT's
+    // graph validator — stripping them causes CONTROLLABLE_MISSING_DATA errors.
+    if (node.data.factor_type !== undefined) {
+      (v3Node as any).factor_type = node.data.factor_type;
+    }
+    if (node.data.uncertainty_drivers !== undefined) {
+      (v3Node as any).uncertainty_drivers = node.data.uncertainty_drivers;
+    }
   }
 
   return v3Node;
@@ -612,6 +622,8 @@ export function transformResponseToV3(
       goal_handling: v1Response.trace?.goal_handling,
       // P0: Pipeline diagnostics for debug panel
       pipeline: v1Response.trace?.pipeline,
+      // STRP mutation records for observability
+      ...((v1Response.trace as any)?.strp && { strp: (v1Response.trace as any).strp }),
     },
     draft_warnings: v1Response.draft_warnings,
   };
