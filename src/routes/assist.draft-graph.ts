@@ -1598,19 +1598,20 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }, "Compound goal constraints integrated into graph");
   }
 
-  // Normalise constraint node_id values via STRP Rule 3 (late-pipeline pass)
-  // This is a second STRP call — Rules 1/2/4 are idempotent and produce zero mutations
-  // on the already-reconciled graph. Rule 3 runs here because constraints are only
-  // available after compound goal extraction.
+  // Late-pipeline STRP pass: constraint normalisation + data completeness.
+  // Rules 1/2/4 are idempotent — typically zero mutations unless downstream steps
+  // (enrichment, repair) introduced new enum violations or sign mismatches.
+  // Rule 3 runs here because constraints are only available after compound goal extraction.
+  // Rule 5 (fillControllableData) fills factor_type/uncertainty_drivers on controllable
+  // factors — must run late because enrichment and repair overwrite early-STRP values.
   let constraintStrpResult: ReturnType<typeof reconcileStructuralTruth> | undefined;
-  if (goalConstraints && goalConstraints.length > 0) {
-    constraintStrpResult = reconcileStructuralTruth(candidate, {
-      goalConstraints,
-      requestId: correlationId,
-    });
-    if (constraintStrpResult.goalConstraints) {
-      goalConstraints = constraintStrpResult.goalConstraints as typeof goalConstraints;
-    }
+  constraintStrpResult = reconcileStructuralTruth(candidate, {
+    goalConstraints: goalConstraints?.length ? goalConstraints : undefined,
+    requestId: correlationId,
+    fillControllableData: true,
+  });
+  if (constraintStrpResult.goalConstraints) {
+    goalConstraints = constraintStrpResult.goalConstraints as typeof goalConstraints;
   }
 
   // === V4 EDGE FIELD RESTORATION (safety net) ===

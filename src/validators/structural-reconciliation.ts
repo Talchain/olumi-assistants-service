@@ -201,8 +201,26 @@ function categoryOverrideRule(
     });
   }
 
-  // Data-completeness pass: fill missing factor_type / uncertainty_drivers
-  // on ALL controllable factors, not just those that were overridden above.
+  return mutations;
+}
+
+// =============================================================================
+// Rule 5: Controllable Data Completeness (late-pipeline only)
+// =============================================================================
+
+/**
+ * Fill missing factor_type / uncertainty_drivers on ALL controllable factors.
+ * Runs as a separate rule gated by `fillControllableData` so that it only
+ * executes in the late-pipeline STRP pass — after enrichment and repair have
+ * finished and can no longer overwrite the filled values.
+ */
+function controllableDataCompletenessRule(
+  nodeMap: NodeMap,
+  factorCategories: Map<string, FactorCategoryInfo>
+): STRPMutation[] {
+  const mutations: STRPMutation[] = [];
+  const factors = nodeMap.byKind.get("factor") ?? [];
+
   for (const node of factors) {
     const info = factorCategories.get(node.id);
     if (!info || info.category !== "controllable") continue;
@@ -213,7 +231,7 @@ function categoryOverrideRule(
       data.factor_type = FACTOR_TYPE_DEFAULT;
       if (!node.data) (node as any).data = data;
       mutations.push({
-        rule: "category_override",
+        rule: "controllable_data_completeness",
         code: "CONTROLLABLE_DATA_FILLED",
         node_id: node.id,
         field: "data.factor_type",
@@ -228,7 +246,7 @@ function categoryOverrideRule(
       data.uncertainty_drivers = ["Estimation uncertainty"];
       if (!node.data) (node as any).data = data;
       mutations.push({
-        rule: "category_override",
+        rule: "controllable_data_completeness",
         code: "CONTROLLABLE_DATA_FILLED",
         node_id: node.id,
         field: "data.uncertainty_drivers",
@@ -542,6 +560,7 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
  * 2. Enum validation — correct invalid enum values to safe defaults
  * 3. Constraint target — remap/drop mismatched constraint node_ids (when provided)
  * 4. Sign reconciliation — align effect_direction with strength_mean sign
+ * 5. Controllable data completeness — fill missing factor_type/uncertainty_drivers (when fillControllableData)
  *
  * Mutates the graph in place and returns mutation records for observability.
  */
@@ -550,6 +569,9 @@ export function reconcileStructuralTruth(
   options?: {
     goalConstraints?: Array<{ node_id: string; [key: string]: unknown }>;
     requestId?: string;
+    /** Run data-completeness pass for controllable factors. Use in late-pipeline
+     *  STRP only — early calls skip this because enrichment/repair overwrite the values. */
+    fillControllableData?: boolean;
   },
 ): STRPResult {
   const requestId = options?.requestId;
@@ -577,6 +599,11 @@ export function reconcileStructuralTruth(
 
   // Rule 4: Sign reconciliation
   mutations.push(...signReconciliationRule(graph));
+
+  // Rule 5: Controllable data completeness (late-pipeline only)
+  if (options?.fillControllableData) {
+    mutations.push(...controllableDataCompletenessRule(nodeMap, factorCategories));
+  }
 
   const durationMs = Date.now() - startTime;
 

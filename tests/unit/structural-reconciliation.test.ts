@@ -128,16 +128,15 @@ describe('reconcileStructuralTruth', () => {
     });
 
     // =========================================================================
-    // Data-completeness pass (CONTROLLABLE_DATA_FILLED)
+    // Data-completeness pass (CONTROLLABLE_DATA_FILLED) — requires fillControllableData
     // =========================================================================
 
-    it('fills factor_type on controllable factor with correct category but missing field', () => {
+    it('fills factor_type on controllable factor when fillControllableData is true', () => {
       const graph = createValidGraph();
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
-      // Controllable factor (has option edges) — no category mismatch, but missing factor_type
       delete (factor.data as any).factor_type;
 
-      const result = reconcileStructuralTruth(graph);
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
 
       expect((factor.data as any).factor_type).toBe('other');
       const mutation = result.mutations.find(
@@ -150,12 +149,12 @@ describe('reconcileStructuralTruth', () => {
       expect(mutation!.severity).toBe('info');
     });
 
-    it('fills uncertainty_drivers on controllable factor with correct category but missing field', () => {
+    it('fills uncertainty_drivers on controllable factor when fillControllableData is true', () => {
       const graph = createValidGraph();
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
       delete (factor.data as any).uncertainty_drivers;
 
-      const result = reconcileStructuralTruth(graph);
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
 
       expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
       const mutation = result.mutations.find(
@@ -168,31 +167,29 @@ describe('reconcileStructuralTruth', () => {
 
     it('does not emit CONTROLLABLE_DATA_FILLED when both fields already present', () => {
       const graph = createValidGraph();
-      // fac_price already has factor_type: 'price' and uncertainty_drivers: ['market volatility']
-      const result = reconcileStructuralTruth(graph);
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
       expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
     });
 
-    it('emits both CATEGORY_OVERRIDE and CONTROLLABLE_DATA_FILLED when overriding to controllable with missing fields', () => {
+    it('fills data via override when reclassifying to controllable (Rule 5 is a no-op since override already filled)', () => {
       const graph = createValidGraph();
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
       factor.category = 'external' as any;
       delete (factor.data as any).factor_type;
       delete (factor.data as any).uncertainty_drivers;
 
-      const result = reconcileStructuralTruth(graph);
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
 
-      // Category override fires first
+      // Category override fires and fills data inline (lines 171-181)
       expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
-      // Data-completeness pass fills missing fields (override pass fills during override,
-      // but completeness pass catches any remaining gaps)
       expect((factor.data as any).factor_type).toBe('other');
       expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // Rule 5 finds fields already present — no CONTROLLABLE_DATA_FILLED mutations
+      expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
     });
 
     it('does not fill factor_type on observable/external factors', () => {
       const graph = createValidGraph();
-      // Add an observable factor (has value, no option edge) with missing factor_type
       graph.nodes.push({
         id: 'fac_obs',
         kind: 'factor',
@@ -204,13 +201,26 @@ describe('reconcileStructuralTruth', () => {
         { from: 'fac_obs', to: 'outcome_1', strength_mean: 0.6, belief_exists: 0.9 },
       );
 
-      const result = reconcileStructuralTruth(graph);
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
 
       const obsFactor = graph.nodes.find(n => n.id === 'fac_obs')!;
       expect((obsFactor.data as any).factor_type).toBeUndefined();
       expect(
         result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED' && m.node_id === 'fac_obs')
       ).toHaveLength(0);
+    });
+
+    it('does NOT fill missing fields when fillControllableData is not set', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect((factor.data as any).factor_type).toBeUndefined();
+      expect((factor.data as any).uncertainty_drivers).toBeUndefined();
+      expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
     });
   });
 
@@ -456,12 +466,12 @@ describe('reconcileStructuralTruth', () => {
         strength_mean: -0.3, effect_direction: 'positive',
       });
 
-      // First pass
-      const result1 = reconcileStructuralTruth(graph);
+      // First pass (with data-completeness)
+      const result1 = reconcileStructuralTruth(graph, { fillControllableData: true });
       expect(result1.mutations.length).toBeGreaterThan(0);
 
       // Second pass — should produce zero mutations
-      const result2 = reconcileStructuralTruth(graph);
+      const result2 = reconcileStructuralTruth(graph, { fillControllableData: true });
       expect(result2.mutations).toHaveLength(0);
     });
 
@@ -475,7 +485,7 @@ describe('reconcileStructuralTruth', () => {
 
       // Without STRP, validateGraph would fail on Tier 4
       // With STRP, category is fixed + fields auto-filled
-      reconcileStructuralTruth(graph);
+      reconcileStructuralTruth(graph, { fillControllableData: true });
       const result = validateGraph({ graph });
 
       expect(result.valid).toBe(true);
