@@ -1851,4 +1851,190 @@ describe('validateGraphPostNormalisation', () => {
       expect(overrideIssues.length).toBe(0);
     });
   });
+
+  // =============================================================================
+  // Outcome/Risk Reachability Exemption & Controllability Summary
+  // =============================================================================
+
+  describe('outcome/risk reachability exemption', () => {
+    it('passes with EXEMPT info when outcome unreachable from decision, fed only by external factors, has path to goal', () => {
+      const graph = createValidGraph();
+      // Add external factor (no option edge, no value = external)
+      graph.nodes.push({
+        id: 'fac_external',
+        kind: 'factor',
+        label: 'External Factor',
+        data: { extractionType: 'explicit' } as never,
+      });
+      // Add outcome fed only by the external factor
+      graph.nodes.push({ id: 'out_ext', kind: 'outcome', label: 'External Outcome' });
+      graph.edges.push({ from: 'fac_external', to: 'out_ext', strength_mean: 0.5 });
+      graph.edges.push({ from: 'out_ext', to: 'goal_1', strength_mean: 0.6 });
+
+      const result = validateGraph({ graph });
+      expect(result.valid).toBe(true);
+      expect(hasError(result, 'UNREACHABLE_FROM_DECISION')).toBe(false);
+
+      const exemptInfo = result.warnings.filter(w => w.code === 'EXEMPT_UNREACHABLE_OUTCOME_RISK');
+      expect(exemptInfo).toHaveLength(1);
+      expect(exemptInfo[0].severity).toBe('info');
+      expect(exemptInfo[0].path).toBe('nodesById.out_ext');
+      expect(exemptInfo[0].message).toContain('no controllable path from decision');
+      expect(exemptInfo[0].context?.reason).toBe('exogenous');
+    });
+
+    it('passes with EXEMPT info when risk unreachable from decision, fed only by observable factors, has path to goal', () => {
+      const graph = createValidGraph();
+      // Add observable factor (no option edge, has value = observable)
+      graph.nodes.push({
+        id: 'fac_obs',
+        kind: 'factor',
+        label: 'Observable Factor',
+        data: { value: 42, extractionType: 'explicit' },
+      });
+      // Add risk fed only by the observable factor
+      graph.nodes.push({ id: 'risk_obs', kind: 'risk', label: 'Observable Risk' });
+      graph.edges.push({ from: 'fac_obs', to: 'risk_obs', strength_mean: 0.4 });
+      graph.edges.push({ from: 'risk_obs', to: 'goal_1', strength_mean: -0.3 });
+
+      const result = validateGraph({ graph });
+      expect(result.valid).toBe(true);
+      expect(hasError(result, 'UNREACHABLE_FROM_DECISION')).toBe(false);
+
+      const exemptInfo = result.warnings.filter(w => w.code === 'EXEMPT_UNREACHABLE_OUTCOME_RISK');
+      expect(exemptInfo).toHaveLength(1);
+      expect(exemptInfo[0].context?.kind).toBe('risk');
+    });
+
+    it('still fails with UNREACHABLE_FROM_DECISION for non-outcome/risk factor unreachable from decision', () => {
+      const graph = createValidGraph();
+      // Add controllable factor that is not connected from decision
+      graph.nodes.push({
+        id: 'fac_orphan',
+        kind: 'factor',
+        label: 'Orphan Controllable',
+        data: { value: 10, extractionType: 'explicit', factor_type: 'cost', uncertainty_drivers: ['test'] },
+      });
+      // Add an option node pointing to it (makes it controllable) but option is not connected to decision
+      graph.nodes.push({ id: 'opt_orphan', kind: 'option', label: 'Orphan Option', data: { interventions: { fac_orphan: 10 } } });
+      graph.edges.push({ from: 'opt_orphan', to: 'fac_orphan', strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: 'positive' });
+      graph.edges.push({ from: 'fac_orphan', to: 'outcome_1', strength_mean: 0.5 });
+
+      const result = validateGraph({ graph });
+      // The orphan option and factor are unreachable from decision
+      expect(hasError(result, 'UNREACHABLE_FROM_DECISION')).toBe(true);
+      const unreachableErrors = result.errors.filter(e => e.code === 'UNREACHABLE_FROM_DECISION');
+      // opt_orphan should be flagged (it's an option, not outcome/risk)
+      expect(unreachableErrors.some(e => e.path === 'nodesById.opt_orphan')).toBe(true);
+    });
+
+    it('does not emit exemption info when outcome is reachable from decision through controllable factor', () => {
+      const graph = createValidGraph();
+      // outcome_1 is already reachable from decision via fac_price
+      const result = validateGraph({ graph });
+      expect(result.valid).toBe(true);
+      const exemptInfo = result.warnings.filter(w => w.code === 'EXEMPT_UNREACHABLE_OUTCOME_RISK');
+      expect(exemptInfo).toHaveLength(0);
+    });
+
+    it('passes but reports all outcomes/risks without controllable ancestry when decision has zero leverage', () => {
+      const graph: GraphT = {
+        version: '1',
+        default_seed: 42,
+        nodes: [
+          { id: 'decision_1', kind: 'decision', label: 'Which option?' },
+          { id: 'opt_a', kind: 'option', label: 'Option A', data: { interventions: {} } },
+          { id: 'opt_b', kind: 'option', label: 'Option B', data: { interventions: {} } },
+          { id: 'fac_ext_1', kind: 'factor', label: 'External 1', data: { extractionType: 'explicit' } as never },
+          { id: 'fac_ext_2', kind: 'factor', label: 'External 2', data: { value: 10, extractionType: 'explicit' } },
+          { id: 'out_1', kind: 'outcome', label: 'Outcome 1' },
+          { id: 'risk_1', kind: 'risk', label: 'Risk 1' },
+          { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        ],
+        edges: [
+          { from: 'decision_1', to: 'opt_a', strength_mean: 1, belief_exists: 1 },
+          { from: 'decision_1', to: 'opt_b', strength_mean: 1, belief_exists: 1 },
+          { from: 'fac_ext_1', to: 'out_1', strength_mean: 0.5 },
+          { from: 'fac_ext_2', to: 'risk_1', strength_mean: 0.3 },
+          { from: 'out_1', to: 'goal_1', strength_mean: 0.8 },
+          { from: 'risk_1', to: 'goal_1', strength_mean: -0.4 },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+      };
+
+      const result = validateGraph({ graph });
+      // Should pass (outcomes/risks are exempt from UNREACHABLE_FROM_DECISION)
+      // But options have no outgoing edges to controllable factors — check only outcome/risk exemption
+      expect(hasError(result, 'UNREACHABLE_FROM_DECISION')).toBe(false);
+
+      const exemptInfo = result.warnings.filter(w => w.code === 'EXEMPT_UNREACHABLE_OUTCOME_RISK');
+      expect(exemptInfo).toHaveLength(2);
+
+      expect(result.controllability_summary).toBeDefined();
+      expect(result.controllability_summary!.total_outcome_risk_nodes).toBe(2);
+      expect(result.controllability_summary!.without_controllable_ancestry).toBe(2);
+      expect(result.controllability_summary!.with_controllable_ancestry).toBe(0);
+      expect(result.controllability_summary!.exempt_count).toBe(2);
+      expect(result.controllability_summary!.exempt_node_ids).toEqual(
+        expect.arrayContaining(['out_1', 'risk_1'])
+      );
+    });
+
+    it('reports correct controllability_summary for mixed graph', () => {
+      const graph = createValidGraph();
+      // outcome_1 is already controllable (via fac_price ← options ← decision)
+      // Add an external-only outcome
+      graph.nodes.push({
+        id: 'fac_ext',
+        kind: 'factor',
+        label: 'External Factor',
+        data: { extractionType: 'explicit' } as never,
+      });
+      graph.nodes.push({ id: 'out_ext', kind: 'outcome', label: 'External Outcome' });
+      graph.edges.push({ from: 'fac_ext', to: 'out_ext', strength_mean: 0.5 });
+      graph.edges.push({ from: 'out_ext', to: 'goal_1', strength_mean: 0.6 });
+
+      const result = validateGraph({ graph });
+      expect(result.valid).toBe(true);
+      expect(result.controllability_summary).toBeDefined();
+      expect(result.controllability_summary!.total_outcome_risk_nodes).toBe(2);
+      expect(result.controllability_summary!.with_controllable_ancestry).toBe(1);
+      expect(result.controllability_summary!.without_controllable_ancestry).toBe(1);
+      expect(result.controllability_summary!.exempt_count).toBe(1);
+      expect(result.controllability_summary!.exempt_node_ids).toEqual(['out_ext']);
+    });
+
+    it('does not affect existing passing graphs (regression)', () => {
+      const graph = createValidGraph();
+      const result = validateGraph({ graph });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.controllability_summary).toBeDefined();
+      expect(result.controllability_summary!.total_outcome_risk_nodes).toBe(1);
+      expect(result.controllability_summary!.with_controllable_ancestry).toBe(1);
+      expect(result.controllability_summary!.without_controllable_ancestry).toBe(0);
+      expect(result.controllability_summary!.exempt_count).toBe(0);
+      expect(result.controllability_summary!.exempt_node_ids).toEqual([]);
+    });
+
+    it('NO_PATH_TO_GOAL still fires for outcome/risk with no forward path to goal, even if exempt from reachability', () => {
+      const graph = createValidGraph();
+      // Add outcome with no path to goal
+      graph.nodes.push({ id: 'out_dead', kind: 'outcome', label: 'Dead End Outcome' });
+      // Connect from external factor (unreachable from decision) but no edge to goal
+      graph.nodes.push({
+        id: 'fac_ext_dead',
+        kind: 'factor',
+        label: 'External Dead',
+        data: { extractionType: 'explicit' } as never,
+      });
+      graph.edges.push({ from: 'fac_ext_dead', to: 'out_dead', strength_mean: 0.5 });
+
+      const result = validateGraph({ graph });
+      // NO_PATH_TO_GOAL should fire for out_dead
+      expect(hasError(result, 'NO_PATH_TO_GOAL')).toBe(true);
+      const noPathIssues = result.errors.filter(e => e.code === 'NO_PATH_TO_GOAL');
+      expect(noPathIssues.some(e => e.path === 'nodesById.out_dead')).toBe(true);
+    });
+  });
 });

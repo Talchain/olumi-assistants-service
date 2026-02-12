@@ -17,9 +17,11 @@ export {
 export {
   type GraphValidationInput,
   type GraphValidationResult,
+  type ControllabilitySummary,
   type ValidationIssue,
   type ValidationErrorCode,
   type ValidationWarningCode,
+  type ValidationInfoCode,
   type ValidationSeverity,
   type StructuralErrorCode,
   type TopologyErrorCode,

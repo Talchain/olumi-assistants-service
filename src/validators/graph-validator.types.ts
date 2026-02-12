@@ -103,7 +103,8 @@ export type ValidationWarningCode =
 
 export type ValidationInfoCode =
   | "EDGE_ORIGIN_DEFAULTED"
-  | "CATEGORY_OVERRIDE";
+  | "CATEGORY_OVERRIDE"
+  | "EXEMPT_UNREACHABLE_OUTCOME_RISK";
 
 // =============================================================================
 // Validation Issue
@@ -156,6 +157,15 @@ export interface GraphValidationInput {
   requestId?: string;
 }
 
+export interface ControllabilitySummary {
+  total_outcome_risk_nodes: number;
+  with_controllable_ancestry: number;
+  without_controllable_ancestry: number;
+  /** Subset of without_controllable_ancestry that were exempted from UNREACHABLE_FROM_DECISION */
+  exempt_count: number;
+  exempt_node_ids: string[];
+}
+
 export interface GraphValidationResult {
   /** Whether the graph is valid (no errors) */
   valid: boolean;
@@ -163,6 +173,8 @@ export interface GraphValidationResult {
   errors: ValidationIssue[];
   /** Non-blocking warnings */
   warnings: ValidationIssue[];
+  /** Controllability metrics for outcome/risk nodes (metadata only) */
+  controllability_summary?: ControllabilitySummary;
 }
 
 // =============================================================================

@@ -13,6 +13,7 @@ import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/
 import {
   type GraphValidationInput,
   type GraphValidationResult,
+  type ControllabilitySummary,
   type ValidationIssue,
   type NodeMap,
   type AdjacencyLists,
@@ -622,15 +623,16 @@ function validateReachability(
   nodeMap: NodeMap,
   adjacency: AdjacencyLists,
   factorCategories: Map<string, FactorCategoryInfo>
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
+): { errors: ValidationIssue[]; infoIssues: ValidationIssue[] } {
+  const errors: ValidationIssue[] = [];
+  const infoIssues: ValidationIssue[] = [];
 
   const decisions = nodeMap.byKind.get("decision") ?? [];
   const goals = nodeMap.byKind.get("goal") ?? [];
 
   if (decisions.length === 0 || goals.length === 0) {
     // Can't check reachability without decision and goal
-    return issues;
+    return { errors, infoIssues };
   }
 
   const decisionId = decisions[0].id;
@@ -644,6 +646,7 @@ function validateReachability(
 
   // UNREACHABLE_FROM_DECISION: Must be reachable from decision
   // Exception: observable/external factors may be exogenous roots IF they have path to goal
+  // Exception: outcome/risk nodes are exempt (emit info instead of error)
   for (const node of graph.nodes) {
     if (node.kind === "decision" || node.kind === "goal") continue;
 
@@ -659,7 +662,23 @@ function validateReachability(
         continue;
       }
 
-      issues.push({
+      // Exempt outcome/risk nodes: emit info instead of error
+      if ((node.kind === "outcome" || node.kind === "risk") && canReachGoal.has(node.id)) {
+        // Determine exemption reason: exogenous (has ancestors outside decision path) vs isolated
+        const ancestors = adjacency.reverse.get(node.id) ?? [];
+        const reason = ancestors.length > 0 ? "exogenous" : "isolated";
+
+        infoIssues.push({
+          code: "EXEMPT_UNREACHABLE_OUTCOME_RISK",
+          severity: "info",
+          message: `Outcome/risk "${node.label ?? node.id}" has no controllable path from decision — decision influence is limited`,
+          path: `nodesById.${node.id}`,
+          context: { kind: node.kind, nodeId: node.id, reason },
+        });
+        continue;
+      }
+
+      errors.push({
         code: "UNREACHABLE_FROM_DECISION",
         severity: "error",
         message: `Node "${node.id}" is not reachable from decision`,
@@ -674,7 +693,7 @@ function validateReachability(
     if (node.kind === "decision") continue; // Exempt decision from reverse check
 
     if (!canReachGoal.has(node.id)) {
-      issues.push({
+      errors.push({
         code: "NO_PATH_TO_GOAL",
         severity: "error",
         message: `Node "${node.id}" has no path to goal`,
@@ -684,7 +703,72 @@ function validateReachability(
     }
   }
 
-  return issues;
+  return { errors, infoIssues };
+}
+
+// =============================================================================
+// Controllability Summary
+// =============================================================================
+
+/**
+ * Compute controllable ancestry for each outcome/risk node.
+ * Uses reverse BFS from each outcome/risk, stopping when a controllable factor is found.
+ */
+function computeControllabilitySummary(
+  graph: GraphT,
+  nodeMap: NodeMap,
+  adjacency: AdjacencyLists,
+  factorCategories: Map<string, FactorCategoryInfo>,
+  exemptNodeIds: string[]
+): ControllabilitySummary {
+  const outcomeRiskNodes = [
+    ...(nodeMap.byKind.get("outcome") ?? []),
+    ...(nodeMap.byKind.get("risk") ?? []),
+  ];
+
+  let withControllable = 0;
+  let withoutControllable = 0;
+
+  for (const node of outcomeRiskNodes) {
+    // Reverse BFS from this node to find controllable ancestors
+    const visited = new Set<string>();
+    const queue = [node.id];
+    let foundControllable = false;
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      const info = factorCategories.get(current);
+      if (info?.category === "controllable") {
+        foundControllable = true;
+        break;
+      }
+
+      // Traverse reverse edges (parents)
+      const parents = adjacency.reverse.get(current) ?? [];
+      for (const parent of parents) {
+        if (!visited.has(parent)) {
+          queue.push(parent);
+        }
+      }
+    }
+
+    if (foundControllable) {
+      withControllable++;
+    } else {
+      withoutControllable++;
+    }
+  }
+
+  return {
+    total_outcome_risk_nodes: outcomeRiskNodes.length,
+    with_controllable_ancestry: withControllable,
+    without_controllable_ancestry: withoutControllable,
+    exempt_count: exemptNodeIds.length,
+    exempt_node_ids: exemptNodeIds,
+  };
 }
 
 // =============================================================================
@@ -1284,7 +1368,8 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
   errors.push(...validateTopology(graph, nodeMap, adjacency, factorCategories));
 
   // Tier 3: Reachability
-  errors.push(...validateReachability(graph, nodeMap, adjacency, factorCategories));
+  const reachabilityResult = validateReachability(graph, nodeMap, adjacency, factorCategories);
+  errors.push(...reachabilityResult.errors);
 
   // Tier 4: Factor Data Consistency
   errors.push(...validateFactorData(nodeMap, factorCategories));
@@ -1301,6 +1386,17 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
   // Append category override info issues for observability
   warnings.push(...categoryOverrides);
 
+  // Append outcome/risk reachability exemption info issues
+  warnings.push(...reachabilityResult.infoIssues);
+
+  // Compute controllability summary metadata
+  const exemptNodeIds = reachabilityResult.infoIssues
+    .map((i) => i.context?.nodeId as string)
+    .filter(Boolean);
+  const controllability_summary = computeControllabilitySummary(
+    graph, nodeMap, adjacency, factorCategories, exemptNodeIds
+  );
+
   const durationMs = Date.now() - startTime;
 
   log.info(
@@ -1309,6 +1405,7 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
       requestId,
       errorCount: errors.length,
       warningCount: warnings.length,
+      controllability_summary,
       durationMs,
       valid: errors.length === 0,
     },
@@ -1319,5 +1416,6 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
     valid: errors.length === 0,
     errors,
     warnings,
+    controllability_summary,
   };
 }
