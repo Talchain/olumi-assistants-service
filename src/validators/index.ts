@@ -10,6 +10,13 @@ export {
 } from './graph-validator.js';
 
 export {
+  reconcileStructuralTruth,
+  normaliseConstraintTargets,
+  type STRPMutation,
+  type STRPResult,
+} from './structural-reconciliation.js';
+
+export {
   zodToValidationErrors,
   isZodError,
 } from './zod-error-mapper.js';
@@ -17,6 +24,7 @@ export {
 export {
   type GraphValidationInput,
   type GraphValidationResult,
+  type ConstraintNormalisationResult,
   type ControllabilitySummary,
   type ValidationIssue,
   type ValidationErrorCode,

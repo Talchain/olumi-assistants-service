@@ -95,7 +95,9 @@ export type ValidationWarningCode =
   | "LOW_EDGE_CONFIDENCE"
   | "EMPTY_UNCERTAINTY_DRIVERS"
   | "STRUCTURAL_EDGE_NOT_CANONICAL"
-  | "LOW_STD_NON_STRUCTURAL";
+  | "LOW_STD_NON_STRUCTURAL"
+  | "ENUM_VALUE_CORRECTED"
+  | "SIGN_CORRECTED";
 
 // =============================================================================
 // Info Codes (non-blocking observability hints)
@@ -104,7 +106,9 @@ export type ValidationWarningCode =
 export type ValidationInfoCode =
   | "EDGE_ORIGIN_DEFAULTED"
   | "CATEGORY_OVERRIDE"
-  | "EXEMPT_UNREACHABLE_OUTCOME_RISK";
+  | "EXEMPT_UNREACHABLE_OUTCOME_RISK"
+  | "CONSTRAINT_NODE_REMAPPED"
+  | "CONSTRAINT_DROPPED_NO_TARGET";
 
 // =============================================================================
 // Validation Issue
@@ -155,6 +159,18 @@ export interface GraphValidationInput {
   graph: GraphT;
   /** Optional request ID for telemetry */
   requestId?: string;
+}
+
+export interface ConstraintNormalisationResult {
+  /** Normalised constraints (valid + remapped, dropped ones removed) */
+  constraints: Array<{ node_id: string; [key: string]: unknown }>;
+  /** Info issues for observability */
+  issues: ValidationIssue[];
+  /** Counts */
+  constraints_total: number;
+  constraints_valid: number;
+  constraints_remapped: number;
+  constraints_dropped: number;
 }
 
 export interface ControllabilitySummary {

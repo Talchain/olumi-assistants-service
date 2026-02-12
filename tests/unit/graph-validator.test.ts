@@ -10,6 +10,7 @@ import {
   validateGraph,
   validateGraphPostNormalisation,
 } from '../../src/validators/graph-validator.js';
+import { reconcileStructuralTruth, normaliseConstraintTargets } from '../../src/validators/structural-reconciliation.js';
 import type { GraphT, NodeT } from '../../src/schemas/graph.js';
 import {
   NODE_LIMIT,
@@ -837,13 +838,15 @@ describe('validateGraph', () => {
         const factor = graph.nodes.find((n) => n.id === 'fac_price') as NodeT;
         (factor as Record<string, unknown>).category = 'observable'; // Wrong!
 
+        // STRP reconciles categories before validateGraph
+        const strp = reconcileStructuralTruth(graph);
         const result = validateGraph({ graph });
         // Category override normalises the mismatch before Tier 4 runs
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
-        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
-        expect(overrideIssue).toBeDefined();
-        expect(overrideIssue!.context?.declaredCategory).toBe('observable');
-        expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
+        const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+        expect(overrideMutation).toBeDefined();
+        expect(overrideMutation!.before).toBe('observable');
+        expect(overrideMutation!.after).toBe('controllable');
       });
 
       it('overrides external→controllable and emits CATEGORY_OVERRIDE info (no CATEGORY_MISMATCH error)', () => {
@@ -851,12 +854,13 @@ describe('validateGraph', () => {
         const factor = graph.nodes.find((n) => n.id === 'fac_price') as NodeT;
         (factor as Record<string, unknown>).category = 'external'; // Wrong!
 
+        const strp = reconcileStructuralTruth(graph);
         const result = validateGraph({ graph });
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
-        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
-        expect(overrideIssue).toBeDefined();
-        expect(overrideIssue!.context?.declaredCategory).toBe('external');
-        expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
+        const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+        expect(overrideMutation).toBeDefined();
+        expect(overrideMutation!.before).toBe('external');
+        expect(overrideMutation!.after).toBe('controllable');
       });
 
       it('overrides controllable→observable and strips extra fields (no CATEGORY_MISMATCH error)', () => {
@@ -871,13 +875,14 @@ describe('validateGraph', () => {
         } as never);
         graph.edges.push({ from: 'fac_obs', to: 'outcome_1', strength_mean: 0.3 });
 
+        const strp = reconcileStructuralTruth(graph);
         const result = validateGraph({ graph });
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
         expect(hasError(result, 'OBSERVABLE_EXTRA_DATA')).toBe(false);
-        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
-        expect(overrideIssue).toBeDefined();
-        expect(overrideIssue!.context?.declaredCategory).toBe('controllable');
-        expect(overrideIssue!.context?.inferredCategory).toBe('observable');
+        const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+        expect(overrideMutation).toBeDefined();
+        expect(overrideMutation!.before).toBe('controllable');
+        expect(overrideMutation!.after).toBe('observable');
       });
 
       it('passes when explicit category matches inferred category (no override)', () => {
@@ -1117,9 +1122,10 @@ describe('validateGraph', () => {
           category: 'controllable',  // Declared controllable, but structurally observable
           data: { value: 50000, extractionType: 'explicit' },
         } as never);
-        // No option edge — category normalisation overrides to observable
+        // No option edge — STRP category override reclassifies to observable
         graph.edges.push({ from: 'fac_controllable_declared', to: 'outcome_1', strength_mean: 0.5 });
 
+        reconcileStructuralTruth(graph);
         const result = validateGraph({ graph });
         // Category was overridden from controllable → observable, so goal-number check applies
         expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
@@ -1661,7 +1667,7 @@ describe('validateGraphPostNormalisation', () => {
   // Category Override Normalisation
   // ===========================================================================
 
-  describe('Category Override Normalisation', () => {
+  describe('Category Override Normalisation (STRP)', () => {
     it('reclassifies observable→controllable when factor has option edge, auto-fills missing fields', () => {
       const graph = createValidGraph();
       // fac_price already has option edges (opt_a, opt_b → fac_price)
@@ -1672,6 +1678,8 @@ describe('validateGraphPostNormalisation', () => {
       delete (factor.data as any).factor_type;
       delete (factor.data as any).uncertainty_drivers;
 
+      // STRP runs before validateGraph in the pipeline
+      const strp = reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       // Should pass — category override + auto-fill prevents CATEGORY_MISMATCH and CONTROLLABLE_MISSING_DATA
@@ -1684,12 +1692,12 @@ describe('validateGraphPostNormalisation', () => {
       expect((factor.data as any).factor_type).toBe('other');
       expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
 
-      // Override recorded as info in warnings
-      const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
-      expect(overrideIssue).toBeDefined();
-      expect(overrideIssue!.severity).toBe('info');
-      expect(overrideIssue!.context?.declaredCategory).toBe('observable');
-      expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
+      // Override recorded as STRP mutation
+      const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+      expect(overrideMutation).toBeDefined();
+      expect(overrideMutation!.severity).toBe('info');
+      expect(overrideMutation!.before).toBe('observable');
+      expect(overrideMutation!.after).toBe('controllable');
     });
 
     it('reclassifies controllable→observable when factor has no option edge, strips extra fields', () => {
@@ -1713,6 +1721,7 @@ describe('validateGraphPostNormalisation', () => {
         { from: 'fac_ext', to: 'outcome_1', strength_mean: 0.6, belief_exists: 0.9 },
       );
 
+      reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       // fac_ext has no option edge → inferred as observable (has value)
@@ -1746,6 +1755,7 @@ describe('validateGraphPostNormalisation', () => {
         { from: 'fac_new', to: 'outcome_1', strength_mean: 0.7, belief_exists: 0.9 },
       );
 
+      reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       const factor = graph.nodes.find(n => n.id === 'fac_new')!;
@@ -1763,11 +1773,12 @@ describe('validateGraphPostNormalisation', () => {
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
       factor.category = 'controllable' as any;
 
-      const result = validateGraph({ graph });
+      const strp = reconcileStructuralTruth(graph);
+      validateGraph({ graph });
 
-      // No override issue should be emitted
-      const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
-      expect(overrideIssue).toBeUndefined();
+      // No override mutation should be emitted
+      const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+      expect(overrideMutation).toBeUndefined();
 
       // Original data untouched
       expect((factor.data as any).factor_type).toBe('price');
@@ -1797,11 +1808,12 @@ describe('validateGraphPostNormalisation', () => {
         { from: 'fac_obs', to: 'outcome_1', strength_mean: 0.5, belief_exists: 0.8 },
       );
 
-      const result = validateGraph({ graph });
+      const strp = reconcileStructuralTruth(graph);
+      validateGraph({ graph });
 
       // Both should be overridden
-      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
-      expect(overrideIssues.length).toBe(2);
+      const overrideMutations = strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE');
+      expect(overrideMutations.length).toBe(2);
 
       expect(factor1.category).toBe('controllable');
       const factor2 = graph.nodes.find(n => n.id === 'fac_obs')!;
@@ -1819,6 +1831,7 @@ describe('validateGraphPostNormalisation', () => {
       delete (factor.data as any).factor_type;
       delete (factor.data as any).uncertainty_drivers;
 
+      reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       // No CONTROLLABLE_MISSING_DATA — factor_type and uncertainty_drivers were auto-filled
@@ -1830,11 +1843,11 @@ describe('validateGraphPostNormalisation', () => {
     it('does not affect graphs with no declared categories (regression)', () => {
       // createValidGraph has no category fields — should be completely unaffected
       const graph = createValidGraph();
+      const strp = reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       expect(result.valid).toBe(true);
-      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
-      expect(overrideIssues.length).toBe(0);
+      expect(strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE').length).toBe(0);
     });
 
     it('does not override when factor has no declared category even if inferred differs', () => {
@@ -1844,11 +1857,11 @@ describe('validateGraphPostNormalisation', () => {
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
       delete (factor as any).category;
 
+      const strp = reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
 
       expect(result.valid).toBe(true);
-      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
-      expect(overrideIssues.length).toBe(0);
+      expect(strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE').length).toBe(0);
     });
   });
 
@@ -2036,5 +2049,173 @@ describe('validateGraphPostNormalisation', () => {
       const noPathIssues = result.errors.filter(e => e.code === 'NO_PATH_TO_GOAL');
       expect(noPathIssues.some(e => e.path === 'nodesById.out_dead')).toBe(true);
     });
+  });
+});
+
+// =============================================================================
+// Constraint Target Normalisation Tests
+// =============================================================================
+
+describe('normaliseConstraintTargets', () => {
+  const sampleNodeIds = [
+    'decision_1', 'opt_a', 'opt_b',
+    'fac_churn_rate', 'fac_delivery_time_months', 'fac_budget',
+    'out_revenue', 'risk_attrition', 'goal_1',
+  ];
+
+  function makeConstraint(nodeId: string, id?: string) {
+    return {
+      constraint_id: id ?? `constraint_${nodeId}`,
+      node_id: nodeId,
+      operator: '<=',
+      value: 100,
+      label: `Constraint on ${nodeId}`,
+    };
+  }
+
+  it('keeps constraint with exact node_id match unchanged', () => {
+    const constraints = [makeConstraint('fac_budget')];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(1);
+    expect(result.constraints[0].node_id).toBe('fac_budget');
+    expect(result.constraints_valid).toBe(1);
+    expect(result.constraints_remapped).toBe(0);
+    expect(result.constraints_dropped).toBe(0);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it('remaps constraint with partial match (fac_churn → fac_churn_rate)', () => {
+    const constraints = [makeConstraint('fac_churn')];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(1);
+    expect(result.constraints[0].node_id).toBe('fac_churn_rate');
+    expect(result.constraints_remapped).toBe(1);
+
+    const remapIssue = result.issues.find(i => i.code === 'CONSTRAINT_NODE_REMAPPED');
+    expect(remapIssue).toBeDefined();
+    expect(remapIssue!.severity).toBe('info');
+    expect(remapIssue!.context?.original_node_id).toBe('fac_churn');
+    expect(remapIssue!.context?.remapped_node_id).toBe('fac_churn_rate');
+  });
+
+  it('remaps constraint missing prefix (delivery_time_months → fac_delivery_time_months)', () => {
+    const constraints = [makeConstraint('delivery_time_months')];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(1);
+    expect(result.constraints[0].node_id).toBe('fac_delivery_time_months');
+    expect(result.constraints_remapped).toBe(1);
+  });
+
+  it('drops constraint targeting non-existent node with no fuzzy match', () => {
+    const constraints = [makeConstraint('fac_totally_unknown')];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(0);
+    expect(result.constraints_dropped).toBe(1);
+
+    const dropIssue = result.issues.find(i => i.code === 'CONSTRAINT_DROPPED_NO_TARGET');
+    expect(dropIssue).toBeDefined();
+    expect(dropIssue!.severity).toBe('info');
+    expect(dropIssue!.context?.original_node_id).toBe('fac_totally_unknown');
+  });
+
+  it('handles mix of valid, remapped, and dropped constraints with correct counts', () => {
+    const constraints = [
+      makeConstraint('fac_budget'),           // exact match
+      makeConstraint('fac_churn'),            // fuzzy → fac_churn_rate
+      makeConstraint('fac_nonexistent'),      // no match → dropped
+      makeConstraint('out_revenue'),          // exact match
+    ];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints_total).toBe(4);
+    expect(result.constraints_valid).toBe(2);
+    expect(result.constraints_remapped).toBe(1);
+    expect(result.constraints_dropped).toBe(1);
+    expect(result.constraints).toHaveLength(3);
+
+    // Verify order preserved for kept constraints
+    expect(result.constraints[0].node_id).toBe('fac_budget');
+    expect(result.constraints[1].node_id).toBe('fac_churn_rate');
+    expect(result.constraints[2].node_id).toBe('out_revenue');
+  });
+
+  it('returns empty result for empty constraints array', () => {
+    const result = normaliseConstraintTargets([], sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(0);
+    expect(result.constraints_total).toBe(0);
+    expect(result.constraints_valid).toBe(0);
+    expect(result.constraints_remapped).toBe(0);
+    expect(result.constraints_dropped).toBe(0);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it('drops constraint when match is ambiguous (two nodes could match)', () => {
+    // Both fac_churn_rate and fac_churn_risk contain "churn"
+    const ambiguousNodeIds = [...sampleNodeIds, 'fac_churn_risk'];
+    const constraints = [makeConstraint('fac_churn')];
+    const result = normaliseConstraintTargets(constraints, ambiguousNodeIds);
+
+    expect(result.constraints).toHaveLength(0);
+    expect(result.constraints_dropped).toBe(1);
+
+    const dropIssue = result.issues.find(i => i.code === 'CONSTRAINT_DROPPED_NO_TARGET');
+    expect(dropIssue).toBeDefined();
+  });
+
+  it('does not affect existing passing graphs (regression)', () => {
+    const graph = createValidGraph();
+    const result = validateGraph({ graph });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('drops constraint with short stem to avoid false positives', () => {
+    // "fac_go" has stem "go" (2 chars < 4 minimum) — should not fuzzy match "fac_goal_score"
+    const nodeIds = ['fac_goal_score', 'out_revenue', 'goal_1'];
+    const constraints = [makeConstraint('fac_go')];
+    const result = normaliseConstraintTargets(constraints, nodeIds);
+
+    expect(result.constraints).toHaveLength(0);
+    expect(result.constraints_dropped).toBe(1);
+  });
+
+  it('does not cross-match across different kind prefixes', () => {
+    // fac_revenue should not match out_revenue (different prefix)
+    const nodeIds = ['out_revenue', 'goal_1'];
+    const constraints = [makeConstraint('fac_revenue')];
+    const result = normaliseConstraintTargets(constraints, nodeIds);
+
+    expect(result.constraints).toHaveLength(0);
+    expect(result.constraints_dropped).toBe(1);
+  });
+
+  it('preserves all constraint fields besides node_id when remapping', () => {
+    const constraints = [{
+      constraint_id: 'c1',
+      node_id: 'fac_churn',
+      operator: '>=',
+      value: 42,
+      label: 'Keep churn above 42',
+      unit: '%',
+      confidence: 0.9,
+      provenance: 'explicit',
+    }];
+    const result = normaliseConstraintTargets(constraints, sampleNodeIds);
+
+    expect(result.constraints).toHaveLength(1);
+    const c = result.constraints[0];
+    expect(c.node_id).toBe('fac_churn_rate');
+    expect(c.constraint_id).toBe('c1');
+    expect(c.operator).toBe('>=');
+    expect(c.value).toBe(42);
+    expect(c.label).toBe('Keep churn above 42');
+    expect(c.unit).toBe('%');
+    expect(c.confidence).toBe(0.9);
+    expect(c.provenance).toBe('explicit');
   });
 });

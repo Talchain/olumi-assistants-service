@@ -41,6 +41,7 @@ import {
   GraphValidationError,
   type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
+import { reconcileStructuralTruth } from "../validators/structural-reconciliation.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
@@ -1103,6 +1104,15 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     };
   }
 
+  // === STRUCTURAL TRUTH RECONCILIATION PASS (STRP) ===
+  // Deterministic metadata reconciliation BEFORE simpleRepair and validateGraph.
+  // Corrects LLM-declared metadata that contradicts graph structure:
+  //   Rule 1: Category override (align declared vs structural)
+  //   Rule 2: Enum validation (invalid values → safe defaults)
+  //   Rule 4: Sign reconciliation (effect_direction vs strength_mean)
+  // Rule 3 (constraint targets) runs late-pipeline after compound goal extraction.
+  const strpResult = reconcileStructuralTruth(graph, { requestId: correlationId });
+
   // === PRE-ORCHESTRATOR DETERMINISTIC REPAIR ===
   // Run simpleRepair UNCONDITIONALLY before any validation (orchestrator or legacy).
   // This wires orphaned outcome/risk nodes to the causal chain, ensuring reachability.
@@ -1588,6 +1598,21 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     }, "Compound goal constraints integrated into graph");
   }
 
+  // Normalise constraint node_id values via STRP Rule 3 (late-pipeline pass)
+  // This is a second STRP call — Rules 1/2/4 are idempotent and produce zero mutations
+  // on the already-reconciled graph. Rule 3 runs here because constraints are only
+  // available after compound goal extraction.
+  let constraintStrpResult: ReturnType<typeof reconcileStructuralTruth> | undefined;
+  if (goalConstraints && goalConstraints.length > 0) {
+    constraintStrpResult = reconcileStructuralTruth(candidate, {
+      goalConstraints,
+      requestId: correlationId,
+    });
+    if (constraintStrpResult.goalConstraints) {
+      goalConstraints = constraintStrpResult.goalConstraints as typeof goalConstraints;
+    }
+  }
+
   // === V4 EDGE FIELD RESTORATION (safety net) ===
   // Restore any V4 edge fields that were lost during pipeline processing.
   // The external PLoT engine (/v1/validate) strips fields it doesn't recognise,
@@ -1692,6 +1717,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       promptStoreVersion: llmMeta?.prompt_store_version,
       modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
     });
+    // STRP mutations summary (merge early + late-pipeline passes)
+    const allStrpMutations = [
+      ...strpResult.mutations,
+      ...(constraintStrpResult?.mutations ?? []),
+    ];
+    if (allStrpMutations.length > 0) {
+      traceObj.strp = {
+        mutation_count: allStrpMutations.length,
+        rules_triggered: [...new Set(allStrpMutations.map(m => m.rule))],
+        mutations: allStrpMutations,
+      };
+    }
     (payload as any).trace = traceObj;
   }
 

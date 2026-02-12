@@ -127,96 +127,6 @@ function inferFactorCategories(
 }
 
 /**
- * Normalise factor categories by overwriting LLM-declared categories with
- * structurally inferred ones. When a factor is reclassified, auto-fill or
- * strip data fields so downstream Tier 4 validation passes.
- *
- * Mutates `graph.nodes` in place for the categories and data fields.
- * Returns info-level issues for observability.
- */
-function normaliseCategoryOverrides(
-  graph: GraphT,
-  nodeMap: NodeMap,
-  factorCategories: Map<string, FactorCategoryInfo>,
-  requestId?: string,
-): { overrides: ValidationIssue[]; overrideCount: number } {
-  const overrides: ValidationIssue[] = [];
-  const factors = nodeMap.byKind.get("factor") ?? [];
-
-  for (const node of factors) {
-    const info = factorCategories.get(node.id);
-    if (!info) continue;
-
-    const declared = node.category as FactorCategory | undefined;
-    const inferred = info.category;
-
-    // Nothing to override when categories already agree or no declared category
-    if (!declared || declared === inferred) continue;
-
-    // Overwrite the node's declared category with the inferred one
-    (node as any).category = inferred;
-
-    // Update the factorCategories map so downstream CATEGORY_MISMATCH check
-    // sees the corrected explicitCategory (now matches inferred)
-    factorCategories.set(node.id, { ...info, explicitCategory: inferred });
-
-    const data = (node.data ?? {}) as Record<string, unknown>;
-
-    if (inferred === "controllable") {
-      // Reclassified TO controllable — auto-fill missing required fields
-      if (!data.factor_type) {
-        data.factor_type = "other";
-      }
-      if (!data.uncertainty_drivers) {
-        data.uncertainty_drivers = ["Estimation uncertainty"];
-      }
-      // Ensure data is attached if it wasn't before
-      if (!node.data) {
-        (node as any).data = data;
-      }
-    } else {
-      // Reclassified FROM controllable to observable/external — strip extra fields
-      if (data.factor_type !== undefined) {
-        delete data.factor_type;
-      }
-      if (data.uncertainty_drivers !== undefined) {
-        delete data.uncertainty_drivers;
-      }
-    }
-
-    overrides.push({
-      code: "CATEGORY_OVERRIDE",
-      severity: "info",
-      message: `Factor "${node.id}" category overridden: "${declared}" → "${inferred}" (structural inference)`,
-      path: `nodesById.${node.id}`,
-      context: {
-        nodeId: node.id,
-        declaredCategory: declared,
-        inferredCategory: inferred,
-      },
-    });
-  }
-
-  if (overrides.length > 0) {
-    log.info(
-      {
-        event: "graph_validator.category_overrides",
-        requestId,
-        overrideCount: overrides.length,
-        overrides: overrides.map((o) => ({
-          nodeId: o.context?.nodeId,
-          from: o.context?.declaredCategory,
-          to: o.context?.inferredCategory,
-        })),
-      },
-      `Overrode ${overrides.length} factor category mismatch(es)`
-    );
-  }
-
-  return { overrides, overrideCount: overrides.length };
-}
-
-/**
  * BFS forward traversal from a set of starting nodes.
  * Returns all reachable node IDs.
  */
@@ -1351,12 +1261,6 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
   const adjacency = buildAdjacencyLists(graph.edges);
   const factorCategories = inferFactorCategories(graph.nodes, graph.edges, nodeMap);
 
-  // Normalise: override LLM-declared categories with structural inference.
-  // Auto-fills/strips data fields so Tier 4 sees consistent state.
-  const { overrides: categoryOverrides } = normaliseCategoryOverrides(
-    graph, nodeMap, factorCategories, requestId
-  );
-
   // Collect all errors (don't short-circuit)
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
@@ -1382,9 +1286,6 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
 
   // Collect warnings
   warnings.push(...collectWarnings(graph, nodeMap, factorCategories));
-
-  // Append category override info issues for observability
-  warnings.push(...categoryOverrides);
 
   // Append outcome/risk reachability exemption info issues
   warnings.push(...reachabilityResult.infoIssues);
