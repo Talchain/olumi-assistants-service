@@ -165,7 +165,7 @@ function normaliseCategoryOverrides(
     if (inferred === "controllable") {
       // Reclassified TO controllable — auto-fill missing required fields
       if (!data.factor_type) {
-        data.factor_type = "general";
+        data.factor_type = "other";
       }
       if (!data.uncertainty_drivers) {
         data.uncertainty_drivers = ["Estimation uncertainty"];

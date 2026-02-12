@@ -1681,7 +1681,7 @@ describe('validateGraphPostNormalisation', () => {
       // Node should be mutated to controllable
       expect(factor.category).toBe('controllable');
       // Missing fields auto-filled
-      expect((factor.data as any).factor_type).toBe('general');
+      expect((factor.data as any).factor_type).toBe('other');
       expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
 
       // Override recorded as info in warnings
@@ -1750,7 +1750,7 @@ describe('validateGraphPostNormalisation', () => {
 
       const factor = graph.nodes.find(n => n.id === 'fac_new')!;
       expect(factor.category).toBe('controllable');
-      expect((factor.data as any).factor_type).toBe('general');
+      expect((factor.data as any).factor_type).toBe('other');
       expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
 
       expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
