@@ -102,7 +102,8 @@ export type ValidationWarningCode =
 // =============================================================================
 
 export type ValidationInfoCode =
-  | "EDGE_ORIGIN_DEFAULTED";
+  | "EDGE_ORIGIN_DEFAULTED"
+  | "CATEGORY_OVERRIDE";
 
 // =============================================================================
 // Validation Issue

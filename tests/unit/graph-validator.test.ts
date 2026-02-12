@@ -830,33 +830,36 @@ describe('validateGraph', () => {
       });
     });
 
-    describe('CATEGORY_MISMATCH', () => {
-      it('errors when explicit category "observable" but structure indicates "controllable"', () => {
+    describe('CATEGORY_MISMATCH (normalised by category override)', () => {
+      it('overrides observable→controllable and emits CATEGORY_OVERRIDE info (no CATEGORY_MISMATCH error)', () => {
         const graph = createValidGraph();
         // The controllable factor (has option edges) claims to be observable
         const factor = graph.nodes.find((n) => n.id === 'fac_price') as NodeT;
         (factor as Record<string, unknown>).category = 'observable'; // Wrong!
 
         const result = validateGraph({ graph });
-        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(true);
-        const issue = findIssue(result.errors, 'CATEGORY_MISMATCH');
-        expect(issue?.context?.explicit).toBe('observable');
-        expect(issue?.context?.inferred).toBe('controllable');
+        // Category override normalises the mismatch before Tier 4 runs
+        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+        expect(overrideIssue).toBeDefined();
+        expect(overrideIssue!.context?.declaredCategory).toBe('observable');
+        expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
       });
 
-      it('errors when explicit category "external" but structure indicates "controllable"', () => {
+      it('overrides external→controllable and emits CATEGORY_OVERRIDE info (no CATEGORY_MISMATCH error)', () => {
         const graph = createValidGraph();
         const factor = graph.nodes.find((n) => n.id === 'fac_price') as NodeT;
         (factor as Record<string, unknown>).category = 'external'; // Wrong!
 
         const result = validateGraph({ graph });
-        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(true);
-        const issue = findIssue(result.errors, 'CATEGORY_MISMATCH');
-        expect(issue?.context?.explicit).toBe('external');
-        expect(issue?.context?.inferred).toBe('controllable');
+        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+        expect(overrideIssue).toBeDefined();
+        expect(overrideIssue!.context?.declaredCategory).toBe('external');
+        expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
       });
 
-      it('errors when explicit category "controllable" but structure indicates "observable"', () => {
+      it('overrides controllable→observable and strips extra fields (no CATEGORY_MISMATCH error)', () => {
         const graph = createValidGraph();
         // Add an observable factor (has value, no option edge) but claim it's controllable
         graph.nodes.push({
@@ -864,18 +867,20 @@ describe('validateGraph', () => {
           kind: 'factor',
           label: 'Observable Factor',
           category: 'controllable', // Wrong - no option edges
-          data: { value: 100, extractionType: 'explicit' },
+          data: { value: 100, extractionType: 'explicit', factor_type: 'cost', uncertainty_drivers: ['market'] },
         } as never);
         graph.edges.push({ from: 'fac_obs', to: 'outcome_1', strength_mean: 0.3 });
 
         const result = validateGraph({ graph });
-        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(true);
-        const issue = findIssue(result.errors, 'CATEGORY_MISMATCH');
-        expect(issue?.context?.explicit).toBe('controllable');
-        expect(issue?.context?.inferred).toBe('observable');
+        expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+        expect(hasError(result, 'OBSERVABLE_EXTRA_DATA')).toBe(false);
+        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+        expect(overrideIssue).toBeDefined();
+        expect(overrideIssue!.context?.declaredCategory).toBe('controllable');
+        expect(overrideIssue!.context?.inferredCategory).toBe('observable');
       });
 
-      it('passes when explicit category matches inferred category', () => {
+      it('passes when explicit category matches inferred category (no override)', () => {
         const graph = createValidGraph();
         // Set correct explicit category on controllable factor
         const factor = graph.nodes.find((n) => n.id === 'fac_price') as NodeT;
@@ -883,13 +888,17 @@ describe('validateGraph', () => {
 
         const result = validateGraph({ graph });
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+        expect(overrideIssue).toBeUndefined();
       });
 
-      it('passes when explicit category is absent (fallback to inference)', () => {
+      it('passes when explicit category is absent (fallback to inference, no override)', () => {
         const graph = createValidGraph();
         // No explicit category - should infer from structure
         const result = validateGraph({ graph });
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+        const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+        expect(overrideIssue).toBeUndefined();
       });
     });
   });
@@ -1095,21 +1104,25 @@ describe('validateGraph', () => {
       });
 
       // T1: Controllability detection edge cases
-      it('passes when factor has category=controllable but no option edge yet', () => {
+      // After category normalisation, a factor declared controllable but structurally
+      // observable (no option edge) is reclassified. The goal-number check then
+      // correctly applies since the factor is non-controllable with a goal-like name.
+      it('errors when factor has category=controllable but no option edge (category normalised)', () => {
         const graph = createValidGraph();
-        // Factor with goal-like name AND category: controllable (trust declaration)
+        // Factor with goal-like name AND category: controllable (but no option edge)
         graph.nodes.push({
           id: 'fac_controllable_declared',
           kind: 'factor',
           label: '50k revenue',
-          category: 'controllable',  // Declared controllable
+          category: 'controllable',  // Declared controllable, but structurally observable
           data: { value: 50000, extractionType: 'explicit' },
         } as never);
-        // No option edge - but category says controllable, should NOT flag
+        // No option edge — category normalisation overrides to observable
         graph.edges.push({ from: 'fac_controllable_declared', to: 'outcome_1', strength_mean: 0.5 });
 
         const result = validateGraph({ graph });
-        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(false);
+        // Category was overridden from controllable → observable, so goal-number check applies
+        expect(hasError(result, 'GOAL_NUMBER_AS_FACTOR')).toBe(true);
       });
 
       it('errors when factor has no category, no option edge, and matches goal-number pattern', () => {
@@ -1641,6 +1654,201 @@ describe('validateGraphPostNormalisation', () => {
 
       const result = validateGraphPostNormalisation({ graph });
       expect(result.valid).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // Category Override Normalisation
+  // ===========================================================================
+
+  describe('Category Override Normalisation', () => {
+    it('reclassifies observable→controllable when factor has option edge, auto-fills missing fields', () => {
+      const graph = createValidGraph();
+      // fac_price already has option edges (opt_a, opt_b → fac_price)
+      // Declare it as 'observable' — should be overridden to 'controllable'
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'observable' as any;
+      // Remove factor_type and uncertainty_drivers to test auto-fill
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = validateGraph({ graph });
+
+      // Should pass — category override + auto-fill prevents CATEGORY_MISMATCH and CONTROLLABLE_MISSING_DATA
+      expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+      expect(hasError(result, 'CONTROLLABLE_MISSING_DATA')).toBe(false);
+
+      // Node should be mutated to controllable
+      expect(factor.category).toBe('controllable');
+      // Missing fields auto-filled
+      expect((factor.data as any).factor_type).toBe('general');
+      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+
+      // Override recorded as info in warnings
+      const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+      expect(overrideIssue).toBeDefined();
+      expect(overrideIssue!.severity).toBe('info');
+      expect(overrideIssue!.context?.declaredCategory).toBe('observable');
+      expect(overrideIssue!.context?.inferredCategory).toBe('controllable');
+    });
+
+    it('reclassifies controllable→observable when factor has no option edge, strips extra fields', () => {
+      const graph = createValidGraph();
+      // Add an external factor with no option edge but declare it as 'controllable'
+      graph.nodes.push({
+        id: 'fac_ext',
+        kind: 'factor',
+        label: 'External Factor',
+        category: 'controllable' as any,
+        data: {
+          value: 42,
+          extractionType: 'explicit',
+          factor_type: 'cost',
+          uncertainty_drivers: ['supply chain'],
+        },
+      });
+      // Wire it into the graph for connectivity: fac_price → fac_ext → outcome_1
+      graph.edges.push(
+        { from: 'fac_price', to: 'fac_ext', strength_mean: 0.5, belief_exists: 0.8 },
+        { from: 'fac_ext', to: 'outcome_1', strength_mean: 0.6, belief_exists: 0.9 },
+      );
+
+      const result = validateGraph({ graph });
+
+      // fac_ext has no option edge → inferred as observable (has value)
+      const factor = graph.nodes.find(n => n.id === 'fac_ext')!;
+      expect(factor.category).toBe('observable');
+      // Extra fields should be stripped
+      expect((factor.data as any).factor_type).toBeUndefined();
+      expect((factor.data as any).uncertainty_drivers).toBeUndefined();
+
+      // No CATEGORY_MISMATCH or OBSERVABLE_EXTRA_DATA errors
+      expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+      expect(hasError(result, 'OBSERVABLE_EXTRA_DATA')).toBe(false);
+    });
+
+    it('reclassifies external→controllable when factor has option edge, auto-fills data', () => {
+      const graph = createValidGraph();
+      // Add a factor declared as 'external' but with an option edge
+      graph.nodes.push({
+        id: 'fac_new',
+        kind: 'factor',
+        label: 'New Factor',
+        category: 'external' as any,
+        data: {
+          value: 10,
+          extractionType: 'inferred',
+        },
+      });
+      // Wire: opt_a → fac_new (makes it controllable), fac_new → outcome_1
+      graph.edges.push(
+        { from: 'opt_a', to: 'fac_new', strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: 'positive' },
+        { from: 'fac_new', to: 'outcome_1', strength_mean: 0.7, belief_exists: 0.9 },
+      );
+
+      const result = validateGraph({ graph });
+
+      const factor = graph.nodes.find(n => n.id === 'fac_new')!;
+      expect(factor.category).toBe('controllable');
+      expect((factor.data as any).factor_type).toBe('general');
+      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+
+      expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+      expect(hasError(result, 'CONTROLLABLE_MISSING_DATA')).toBe(false);
+    });
+
+    it('does not override when declared category matches inferred', () => {
+      const graph = createValidGraph();
+      // fac_price has option edges → inferred controllable; declare it controllable
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'controllable' as any;
+
+      const result = validateGraph({ graph });
+
+      // No override issue should be emitted
+      const overrideIssue = result.warnings.find(w => w.code === 'CATEGORY_OVERRIDE');
+      expect(overrideIssue).toBeUndefined();
+
+      // Original data untouched
+      expect((factor.data as any).factor_type).toBe('price');
+    });
+
+    it('overrides multiple factors independently in same graph', () => {
+      const graph = createValidGraph();
+      // Factor 1: fac_price — declare as 'observable' but has option edges → should become controllable
+      const factor1 = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor1.category = 'observable' as any;
+
+      // Factor 2: new factor declared as 'controllable' but no option edge → should become observable
+      graph.nodes.push({
+        id: 'fac_obs',
+        kind: 'factor',
+        label: 'Observable Factor',
+        category: 'controllable' as any,
+        data: {
+          value: 99,
+          extractionType: 'explicit',
+          factor_type: 'revenue',
+          uncertainty_drivers: ['market'],
+        },
+      });
+      graph.edges.push(
+        { from: 'fac_price', to: 'fac_obs', strength_mean: 0.4, belief_exists: 0.7 },
+        { from: 'fac_obs', to: 'outcome_1', strength_mean: 0.5, belief_exists: 0.8 },
+      );
+
+      const result = validateGraph({ graph });
+
+      // Both should be overridden
+      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
+      expect(overrideIssues.length).toBe(2);
+
+      expect(factor1.category).toBe('controllable');
+      const factor2 = graph.nodes.find(n => n.id === 'fac_obs')!;
+      expect(factor2.category).toBe('observable');
+      // factor2 extra fields stripped
+      expect((factor2.data as any).factor_type).toBeUndefined();
+      expect((factor2.data as any).uncertainty_drivers).toBeUndefined();
+    });
+
+    it('auto-filled defaults satisfy downstream Tier 4 validation', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'external' as any;
+      // Strip all optional factor data — only keep value and extractionType
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = validateGraph({ graph });
+
+      // No CONTROLLABLE_MISSING_DATA — factor_type and uncertainty_drivers were auto-filled
+      expect(hasError(result, 'CONTROLLABLE_MISSING_DATA')).toBe(false);
+      expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
+      expect(result.valid).toBe(true);
+    });
+
+    it('does not affect graphs with no declared categories (regression)', () => {
+      // createValidGraph has no category fields — should be completely unaffected
+      const graph = createValidGraph();
+      const result = validateGraph({ graph });
+
+      expect(result.valid).toBe(true);
+      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
+      expect(overrideIssues.length).toBe(0);
+    });
+
+    it('does not override when factor has no declared category even if inferred differs', () => {
+      const graph = createValidGraph();
+      // fac_price has no category field at all — inferFactorCategories will note the
+      // explicitCategory as undefined. Override should NOT fire.
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor as any).category;
+
+      const result = validateGraph({ graph });
+
+      expect(result.valid).toBe(true);
+      const overrideIssues = result.warnings.filter(w => w.code === 'CATEGORY_OVERRIDE');
+      expect(overrideIssues.length).toBe(0);
     });
   });
 });
