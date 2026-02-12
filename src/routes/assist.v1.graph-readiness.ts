@@ -120,7 +120,7 @@ function assessV3Readiness(
       continue;
     }
 
-    // Handle status (Raw+Encoded pattern support)
+    // Handle status (Raw+Encoded pattern support + Phase 2B needs_user_input)
     switch (opt.status) {
       case "ready":
         readyOptions.push(opt.id);
@@ -136,6 +136,17 @@ function assessV3Readiness(
         issues.push(`Option "${opt.id}" has status "${opt.status}" instead of "ready"`);
         blockedOptions.push(opt.id);
         break;
+    }
+  }
+
+  // Surface payload-level blockers (Phase 2B: needs_user_input)
+  if (analysisReady.status === "needs_user_input" && analysisReady.blockers?.length) {
+    for (const blocker of analysisReady.blockers) {
+      const optLabel = blocker.option_label ?? blocker.option_id ?? "all";
+      issues.push(`Blocker: ${blocker.message} (option: ${optLabel}, factor: ${blocker.factor_id})`);
+      if (blocker.option_id && !blockedOptions.includes(blocker.option_id)) {
+        blockedOptions.push(blocker.option_id);
+      }
     }
   }
 

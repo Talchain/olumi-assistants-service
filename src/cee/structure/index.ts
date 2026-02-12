@@ -1356,7 +1356,7 @@ export function detectGoalNoBaselineValue(graph: GraphV1 | undefined): GoalNoBas
     return { detected: false, goalHasValue: false };
   }
 
-  const observedValue = goalNode?.observed_state?.value ?? goalNode?.data?.observed_value;
+  const observedValue = goalNode?.observed_state?.value ?? goalNode?.data?.observed_value ?? goalNode?.data?.value;
   const hasValue = observedValue !== undefined && observedValue !== null;
 
   if (hasValue) {

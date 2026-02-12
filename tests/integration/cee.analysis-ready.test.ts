@@ -671,18 +671,25 @@ describe("CEE Analysis-Ready Output - Summary Statistics", () => {
 
 describe("CEE Analysis-Ready Output - Backwards Compatibility", () => {
   describe("Status alias handling", () => {
-    it("should normalize 'needs_user_input' input to 'needs_user_mapping' output via Zod", () => {
+    it("should accept 'needs_user_input' as a first-class status (CIL Phase 2)", () => {
       const input = {
         options: [{ id: "opt", label: "Option", status: "needs_user_mapping", interventions: {} }],
         goal_node_id: "goal",
-        status: "needs_user_input", // Legacy input
-        user_questions: ["What is the baseline?"],
+        status: "needs_user_input",
+        blockers: [{
+          factor_id: "fac_1",
+          factor_label: "Price",
+          blocker_type: "missing_value",
+          message: "Needs value",
+          suggested_action: "add_value",
+        }],
       };
 
       const result = AnalysisReadyPayload.parse(input);
 
-      // Should be normalized to needs_user_mapping
-      expect(result.status).toBe("needs_user_mapping");
+      // needs_user_input is now a first-class status (Phase 2B), not aliased
+      expect(result.status).toBe("needs_user_input");
+      expect(result.blockers).toHaveLength(1);
     });
 
     it("should accept 'needs_user_mapping' as-is", () => {

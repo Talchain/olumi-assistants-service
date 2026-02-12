@@ -69,7 +69,7 @@ export const LLMEdge = z.object({
   belief: z.number().min(0).max(1).optional(),
   provenance: StructuredProvenance.optional(),
   provenance_source: ProvenanceSource.optional(),
-});
+}).passthrough();
 
 export type LLMEdgeT = z.infer<typeof LLMEdge>;
 

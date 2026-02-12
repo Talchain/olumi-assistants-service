@@ -221,6 +221,12 @@ export function constraintEdgesToGraphEdges(
     from: ce.from,
     to: ce.to,
     belief_exists: ce.belief_exists,
+    origin: "default" as const,
+    provenance: {
+      source: "synthetic",
+      quote: "Constraint edge (structural, not causal)",
+    },
+    provenance_source: "synthetic" as const,
   }));
 }
 

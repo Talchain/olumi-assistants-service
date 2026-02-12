@@ -242,6 +242,9 @@ export const PipelineStatusSchema = z.enum([
   "failed",
 ]);
 
+// WARNING: The runtime pipelineTrace object contains fields beyond this schema
+// (checkpoints, llm_metadata, cee_provenance, pipeline_checkpoints, etc.).
+// .passthrough() is required — do not add .strict() or remove .passthrough().
 /** Complete pipeline trace */
 export const PipelineTraceSchema = z.object({
   status: PipelineStatusSchema,
@@ -251,7 +254,7 @@ export const PipelineTraceSchema = z.object({
   connectivity: ConnectivityDiagnosticSchema.optional(),
   llm_calls: z.array(LlmCallTraceSchema).optional(),
   final_graph: FinalGraphTraceSchema.optional(),
-});
+}).passthrough();
 
 export type PipelineTraceT = z.infer<typeof PipelineTraceSchema>;
 

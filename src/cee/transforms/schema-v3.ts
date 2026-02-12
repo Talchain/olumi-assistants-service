@@ -690,7 +690,7 @@ export function transformResponseToV3(
   }
 
   // Add retry suggestion if price-related factors are missing
-  if (priceCheck.detected && analysisReady.status === "needs_user_mapping") {
+  if (priceCheck.detected && (analysisReady.status === "needs_user_mapping" || analysisReady.status === "needs_user_input")) {
     v3Response._retry_suggestion = {
       should_retry: true,
       reason: "LLM did not create factor nodes for quantitative dimensions",

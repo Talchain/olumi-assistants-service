@@ -1269,6 +1269,35 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     correlation_id: correlationId,
   }, "Pipeline stage: Factor enrichment complete");
 
+  // Task 2D: Post-Enrich invariant — observability check
+  // After enrichment, verify that controllable factors have numeric data.value.
+  // Catches the qualitative brief dead-end where enrichment didn't extract numbers.
+  {
+    const controllableFactors = enrichedGraph.nodes.filter(
+      (n: any) => n.kind === "factor" && n.category === "controllable"
+    );
+    const factorsWithoutValue = controllableFactors.filter(
+      (n: any) => {
+        const value = n.data?.value;
+        return value === undefined || value === null || typeof value !== "number";
+      }
+    );
+    if (factorsWithoutValue.length > 0) {
+      log.warn({
+        event: "cee.post_enrich.controllable_without_value",
+        request_id: correlationId,
+        total_controllable: controllableFactors.length,
+        without_value: factorsWithoutValue.length,
+        factor_ids: factorsWithoutValue.map((n: any) => n.id),
+      }, `Post-enrich invariant: ${factorsWithoutValue.length}/${controllableFactors.length} controllable factor(s) lack numeric data.value`);
+      emit("cee.post_enrich.invariant_violation", {
+        total_controllable: controllableFactors.length,
+        without_value: factorsWithoutValue.length,
+        factor_ids: factorsWithoutValue.map((n: any) => n.id),
+      });
+    }
+  }
+
   // Calculate draft cost immediately (provider-specific pricing)
   const draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);
 

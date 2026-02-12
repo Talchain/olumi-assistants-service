@@ -533,35 +533,20 @@ export async function draftGraphWithAnthropic(
 
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
+    // Assign stable edge IDs - spread preserves all fields (V4 + legacy + unknown)
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
-        from: e.from,
-        to: e.to,
-        // V4 nested format (from LLM)
-        strength: e.strength,
-        exists_probability: e.exists_probability,
-        // V4 flat format (from normaliseDraftResponse)
-        strength_mean: e.strength_mean,
-        strength_std: e.strength_std,
-        belief_exists: e.belief_exists,
-        effect_direction: e.effect_direction,
-        // Legacy format (for backwards compatibility)
+        ...e,
+        // Legacy fallbacks (for backwards compatibility)
         weight: e.weight ?? e.strength_mean,
         belief: e.belief ?? e.belief_exists,
-        provenance: e.provenance,
-        provenance_source: e.provenance_source,
       }))
     );
 
-    // Build graph
+    // Build graph — spread preserves all fields (aligns with OpenAI adapter)
     const nodes: NodeT[] = parsed.nodes.map((n) => ({
-      id: n.id,
+      ...n,
       kind: n.kind as NodeT["kind"],
-      label: n.label,
-      body: n.body,
-      category: n.category,
-      data: n.data,
     }));
 
     // Calculate roots and leaves
@@ -1157,24 +1142,13 @@ export async function repairGraphWithAnthropic(
 
     const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
-    // Assign stable edge IDs - preserve V4 fields alongside legacy fields
+    // Assign stable edge IDs - spread preserves all fields (V4 + legacy + unknown)
     const edgesWithIds = assignStableEdgeIds(
       validEdges.map((e) => ({
-        from: e.from,
-        to: e.to,
-        // V4 nested format (from LLM)
-        strength: e.strength,
-        exists_probability: e.exists_probability,
-        // V4 flat format (from normaliseDraftResponse)
-        strength_mean: e.strength_mean,
-        strength_std: e.strength_std,
-        belief_exists: e.belief_exists,
-        effect_direction: e.effect_direction,
-        // Legacy format (for backwards compatibility)
+        ...e,
+        // Legacy fallbacks (for backwards compatibility)
         weight: e.weight ?? e.strength_mean,
         belief: e.belief ?? e.belief_exists,
-        provenance: e.provenance,
-        provenance_source: e.provenance_source,
       }))
     );
 
@@ -1182,12 +1156,8 @@ export async function repairGraphWithAnthropic(
       version: args.graph.version || "1",
       default_seed: args.graph.default_seed || 17,
       nodes: parsed.nodes.map((n) => ({
-        id: n.id,
-        kind: n.kind,
-        label: n.label,
-        body: n.body,
-        category: n.category,
-        data: n.data,
+        ...n,
+        kind: n.kind as NodeT["kind"],
       })),
       edges: edgesWithIds,
       meta: args.graph.meta || {

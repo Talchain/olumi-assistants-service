@@ -426,7 +426,12 @@ export function enrichGraphWithFactors(
       const newEdge: EdgeT = {
         from: nodeId,
         to: targetId,
-        belief: factor.confidence,
+        belief: factor.confidence ?? 0.8,
+        belief_exists: factor.confidence ?? 0.8,
+        strength_mean: 0.5,
+        strength_std: 0.2,
+        effect_direction: "positive",
+        origin: "enrichment",
         provenance: {
           source: "hypothesis",
           quote: `Extracted from brief: "${factor.matchedText}"`,
@@ -830,7 +835,12 @@ export async function enrichGraphWithFactorsAsync(
       ? {
           from: nodeId,
           to: targetId,
-          belief: factor.confidence,
+          belief: factor.confidence ?? 0.8,
+          belief_exists: factor.confidence ?? 0.8,
+          strength_mean: 0.5,
+          strength_std: 0.2,
+          effect_direction: "positive",
+          origin: "enrichment",
           provenance: {
             source: "hypothesis",
             quote: `Extracted from brief: "${factor.matchedText}"`,

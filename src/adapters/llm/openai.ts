@@ -469,10 +469,12 @@ function safeParseJson(
 function sortGraph(graph: { nodes: NodeT[]; edges: EdgeT[] }): { nodes: NodeT[]; edges: EdgeT[] } {
   const nodesSorted = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
 
-  // Assign stable IDs to edges if missing
+  // Assign stable IDs to edges if missing + legacy fallbacks (aligned with Anthropic adapter)
   const edgesWithIds = graph.edges.map((edge, idx) => ({
     ...edge,
     id: edge.id || `${edge.from}::${edge.to}::${idx}`,
+    weight: edge.weight ?? edge.strength_mean,
+    belief: edge.belief ?? edge.belief_exists,
   }));
 
   const edgesSorted = [...edgesWithIds].sort((a, b) => {

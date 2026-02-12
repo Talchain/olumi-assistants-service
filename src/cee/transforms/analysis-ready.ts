@@ -13,10 +13,14 @@
 import type {
   OptionV3T,
   GraphV3T,
+  NodeV3T,
 } from "../../schemas/cee-v3.js";
 import type {
   OptionForAnalysisT,
   AnalysisReadyPayloadT,
+  AnalysisReadyStatusT,
+  AnalysisBlockerT,
+  ModelAdjustmentT,
   ExtractionMetadataT,
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
@@ -175,6 +179,122 @@ export function buildAnalysisReadyPayload(
   // Transform all options
   const analysisOptions = options.map(transformOptionToAnalysisReady);
 
+  // === Task 2A+2B: Factor value fallback + blocker emission ===
+  // For qualitative briefs, V3 options may have empty interventions because
+  // enrichment didn't set data.value on factor nodes. We recover values from
+  // the V3 factor node's observed_state or V1 data field (preserved via passthrough).
+  const blockers: AnalysisBlockerT[] = [];
+  let fallbackCount = 0;
+  // Task 9: Track provenance of each fallback intervention
+  const fallbackSources: Array<{ optionId: string; factorId: string; source: string }> = [];
+
+  // Build factor node lookup and node kind map
+  const factorNodeMap = new Map<string, NodeV3T>();
+  const nodeKindLookup = new Map<string, string>();
+  for (const node of graph.nodes) {
+    nodeKindLookup.set(node.id, node.kind);
+    if (node.kind === "factor") {
+      factorNodeMap.set(node.id, node);
+    }
+  }
+
+  // Build option→factor adjacency from V3 graph edges
+  const optionFactorAdj = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.from) === "option" && nodeKindLookup.get(edge.to) === "factor") {
+      const list = optionFactorAdj.get(edge.from) ?? [];
+      list.push(edge.to);
+      optionFactorAdj.set(edge.from, list);
+    }
+  }
+
+  // For each analysis option, fill missing interventions from factor node values
+  for (let i = 0; i < analysisOptions.length; i++) {
+    const analysisOpt = analysisOptions[i];
+    const v3Option = options[i]; // Parallel array — same index
+    const connectedFactors = optionFactorAdj.get(v3Option.id) ?? [];
+
+    for (const factorId of connectedFactors) {
+      // Skip if option already has an intervention for this factor
+      if (analysisOpt.interventions[factorId] !== undefined) continue;
+
+      const factorNode = factorNodeMap.get(factorId);
+      if (!factorNode) continue;
+
+      // Task 6: Only skip if category is explicitly set to a non-controllable value.
+      // When category is undefined but an option→factor edge exists, treat as
+      // potentially controllable (the edge IS the signal).
+      if (factorNode.category && factorNode.category !== "controllable") continue;
+
+      // Fallback chain: observed_state.value → data.value (V1 passthrough)
+      const observedValue = factorNode.observed_state?.value;
+      const rawData = (factorNode as Record<string, unknown>).data;
+      const dataValue =
+        typeof rawData === "object" && rawData !== null && "value" in rawData
+          ? (rawData as { value: unknown }).value
+          : undefined;
+
+      if (typeof observedValue === "number") {
+        analysisOpt.interventions[factorId] = observedValue;
+        fallbackCount++;
+        // Task 9: Track provenance of fallback source
+        fallbackSources.push({ optionId: analysisOpt.id, factorId, source: "observed_state" });
+      } else if (typeof dataValue === "number") {
+        analysisOpt.interventions[factorId] = dataValue;
+        fallbackCount++;
+        // Task 9: Track provenance of fallback source
+        fallbackSources.push({ optionId: analysisOpt.id, factorId, source: "data.value" });
+      } else {
+        // No computable value — emit blocker (Task 2B)
+        // Task 5: factor_label fallback chain
+        const factorLabel = factorNode.label ?? factorId ?? "Unknown factor";
+        blockers.push({
+          option_id: analysisOpt.id,
+          option_label: analysisOpt.label,
+          factor_id: factorId,
+          factor_label: factorLabel,
+          blocker_type: "missing_value",
+          message: `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
+          suggested_action: "add_value",
+        });
+      }
+    }
+
+    // Re-evaluate option status after fallback may have added interventions.
+    // The original status may have been "needs_user_mapping" because there were
+    // no interventions. Now that fallback recovered values, re-compute properly.
+    if (
+      analysisOpt.status === "needs_user_mapping" &&
+      Object.keys(analysisOpt.interventions).length > 0
+    ) {
+      analysisOpt.status = "ready";
+      analysisOpt.status_reason = "Resolved via factor node value fallback";
+    }
+  }
+
+  // Task 7: Deduplicate blockers by (option_id, factor_id) pair
+  const blockerKeys = new Set<string>();
+  const dedupedBlockers: AnalysisBlockerT[] = [];
+  for (const blocker of blockers) {
+    const key = `${blocker.option_id ?? "_all_"}::${blocker.factor_id}`;
+    if (!blockerKeys.has(key)) {
+      blockerKeys.add(key);
+      dedupedBlockers.push(blocker);
+    }
+  }
+
+  if (fallbackCount > 0 || dedupedBlockers.length > 0) {
+    log.info({
+      event: "cee.analysis_ready.fallback_applied",
+      request_id: context.requestId,
+      fallback_count: fallbackCount,
+      blocker_count: dedupedBlockers.length,
+      // Task 9: Provenance source marker for data.value fallbacks
+      fallback_sources: fallbackSources,
+    }, `analysis-ready: resolved ${fallbackCount} intervention(s) via factor node fallback, ${dedupedBlockers.length} blocker(s)`);
+  }
+  // === End Task 2A+2B ===
+
   // Determine status based on transformed options (Raw+Encoded pattern)
   // Priority: needs_user_mapping > needs_encoding > ready
   const hasIncompleteOptions = analysisOptions.some(
@@ -224,9 +344,11 @@ export function buildAnalysisReadyPayload(
     (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
   ).length;
 
-  // Determine payload status (priority: needs_user_mapping > needs_encoding > ready)
-  let payloadStatus: "ready" | "needs_user_mapping" | "needs_encoding";
-  if (hasIncompleteOptions) {
+  // Determine payload status (priority: needs_user_input > needs_user_mapping > needs_encoding > ready)
+  let payloadStatus: AnalysisReadyStatusT;
+  if (dedupedBlockers.length > 0) {
+    payloadStatus = "needs_user_input";
+  } else if (hasIncompleteOptions) {
     payloadStatus = "needs_user_mapping";
   } else if (hasEncodingNeeded) {
     payloadStatus = "needs_encoding";
@@ -246,6 +368,11 @@ export function buildAnalysisReadyPayload(
     payload.user_questions = uniqueQuestions;
   }
 
+  // Add blockers when status is needs_user_input (Task 2B, deduplicated per Task 7)
+  if (dedupedBlockers.length > 0) {
+    payload.blockers = dedupedBlockers;
+  }
+
   // Emit telemetry with option status breakdown for observability
   emit(TelemetryEvents.AnalysisReadyBuilt ?? "cee.analysis_ready.built", {
     optionCount: analysisOptions.length,
@@ -257,6 +384,9 @@ export function buildAnalysisReadyPayload(
     readyOptionsCount,
     optionsNeedingEncoding,
     optionsNeedingMapping,
+    // Task 2A+2B observability
+    fallbackCount,
+    blockerCount: dedupedBlockers.length,
   });
 
   return payload;
@@ -394,6 +524,15 @@ export function validateAnalysisReadyPayload(
     });
   }
 
+  // Rule 5b: needs_user_input requires blockers (Phase 2B)
+  if (payload.status === "needs_user_input" && (!payload.blockers || payload.blockers.length === 0)) {
+    errors.push({
+      code: "NEEDS_USER_INPUT_WITHOUT_BLOCKERS",
+      message: "Status is 'needs_user_input' but no blockers provided",
+      field: "blockers",
+    });
+  }
+
   // Rule 6: needs_encoding status consistency (Raw+Encoded pattern)
   // When status is "needs_encoding", at least one option should have raw_interventions
   // with non-numeric values that justify the encoding requirement
@@ -494,7 +633,7 @@ export interface AnalysisReadySummary {
   optionCount: number;
   totalInterventions: number;
   averageInterventionsPerOption: number;
-  status: "ready" | "needs_user_mapping" | "needs_encoding";
+  status: "ready" | "needs_user_mapping" | "needs_encoding" | "needs_user_input";
   userQuestionCount: number;
   readyOptions: number;
   incompleteOptions: number;
@@ -523,4 +662,121 @@ export function getAnalysisReadySummary(payload: AnalysisReadyPayloadT): Analysi
     readyOptions: payload.options.length - incompleteOptions,
     incompleteOptions,
   };
+}
+
+// ============================================================================
+// Model Adjustments Mapping (Task 2C)
+// ============================================================================
+
+/**
+ * STRP mutation code → user-facing ModelAdjustment code.
+ * Only codes with a mapping are surfaced; unmapped codes are internal-only.
+ */
+const STRP_CODE_MAP: Record<string, ModelAdjustmentT["code"]> = {
+  CATEGORY_OVERRIDE: "category_reclassified",
+  SIGN_CORRECTED: "risk_coefficient_corrected",
+  CONTROLLABLE_DATA_FILLED: "data_filled",
+  ENUM_VALUE_CORRECTED: "enum_corrected",
+};
+
+/**
+ * Graph correction type → user-facing ModelAdjustment code.
+ * Only the `edge_added` type from goal wiring/enrichment is surfaced.
+ */
+const CORRECTION_TYPE_MAP: Record<string, ModelAdjustmentT["code"]> = {
+  edge_added: "connectivity_repaired",
+};
+
+/**
+ * Minimal shape of an STRP mutation for mapping purposes.
+ * Avoids coupling to the full STRPMutation interface.
+ */
+interface MutationInput {
+  code: string;
+  node_id?: string;
+  edge_id?: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  reason: string;
+}
+
+/**
+ * Minimal shape of a graph correction for mapping purposes.
+ */
+interface CorrectionInput {
+  type: string;
+  target: { node_id?: string; edge_id?: string };
+  before?: unknown;
+  after?: unknown;
+  reason: string;
+}
+
+/**
+ * Map STRP mutations and graph corrections to user-facing model adjustments.
+ *
+ * Only mutations with a known mapping are surfaced. Unmapped internal codes
+ * (e.g., CONSTRAINT_REMAPPED) remain in trace.strp only.
+ *
+ * Task 10B: Malformed entries (missing code/type/reason) are skipped with a warning.
+ *
+ * @param strpMutations - STRP mutation records (from trace.strp.mutations)
+ * @param corrections - Graph correction records (from trace.corrections)
+ * @param nodeLabels - Optional lookup map from node ID → label for enrichment (Task 10A)
+ * @returns Model adjustments for the analysis_ready payload
+ */
+export function mapMutationsToAdjustments(
+  strpMutations?: MutationInput[],
+  corrections?: CorrectionInput[],
+  nodeLabels?: Map<string, string>,
+): ModelAdjustmentT[] {
+  const adjustments: ModelAdjustmentT[] = [];
+
+  for (const m of strpMutations ?? []) {
+    // Task 10B: Skip malformed entries
+    if (!m || typeof m.code !== "string" || typeof m.reason !== "string") {
+      log.warn({ mutation: m }, "Skipping malformed STRP mutation (missing code or reason)");
+      continue;
+    }
+    const code = STRP_CODE_MAP[m.code];
+    if (code) {
+      // Task 10A: Enrich with node label if available
+      const label = m.node_id ? nodeLabels?.get(m.node_id) : undefined;
+      const reason = label ? `${m.reason} (${label})` : m.reason;
+      adjustments.push({
+        code,
+        node_id: m.node_id,
+        edge_id: m.edge_id,
+        field: m.field,
+        before: m.before,
+        after: m.after,
+        reason,
+      });
+    }
+  }
+
+  for (const c of corrections ?? []) {
+    // Task 10B: Skip malformed entries
+    if (!c || typeof c.type !== "string" || typeof c.reason !== "string") {
+      log.warn({ correction: c }, "Skipping malformed graph correction (missing type or reason)");
+      continue;
+    }
+    const code = CORRECTION_TYPE_MAP[c.type];
+    if (code) {
+      // Task 10A: Enrich with node label if available
+      const label = c.target?.node_id ? nodeLabels?.get(c.target.node_id) : undefined;
+      const reason = label ? `${c.reason} (${label})` : c.reason;
+      adjustments.push({
+        code,
+        node_id: c.target?.node_id,
+        edge_id: c.target?.edge_id,
+        field: c.type,
+        before: c.before,
+        after: c.after,
+        reason,
+      });
+    }
+  }
+
+  return adjustments;
 }

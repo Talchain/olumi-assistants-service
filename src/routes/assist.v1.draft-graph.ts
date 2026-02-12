@@ -16,6 +16,7 @@ import {
   transformResponseToV3,
   validateStrictModeV3,
 } from "../cee/transforms/index.js";
+import { mapMutationsToAdjustments } from "../cee/transforms/analysis-ready.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -467,6 +468,26 @@ export default async function route(app: FastifyInstance) {
           // CIL 0.2: simplified; include_debug already equals unsafeCaptureEnabled
           includeDebug: unsafeCaptureEnabled,
         });
+
+        // Task 2C: Surface STRP/repair mutations as model_adjustments on analysis_ready
+        const strpMutations = v1Trace?.strp?.mutations;
+        const graphCorrections = v1Trace?.corrections;
+        if (v3Body.analysis_ready && (strpMutations?.length || graphCorrections?.length)) {
+          // Task 10A: Build node label lookup for adjustment enrichment
+          const nodeLabels = new Map<string, string>();
+          const graphNodes = (v3Body.graph as any)?.nodes;
+          if (Array.isArray(graphNodes)) {
+            for (const node of graphNodes) {
+              if (node?.id && node?.label) {
+                nodeLabels.set(node.id, node.label);
+              }
+            }
+          }
+          const adjustments = mapMutationsToAdjustments(strpMutations, graphCorrections, nodeLabels);
+          if (adjustments.length > 0) {
+            v3Body.analysis_ready.model_adjustments = adjustments;
+          }
+        }
 
         // DEBUG: Log V3 trace.pipeline after transform
         log.info({

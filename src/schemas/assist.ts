@@ -162,8 +162,8 @@ export const DraftGraphOutput = z.object({
     // Graph corrections
     corrections: z.array(GraphCorrectionSchema).optional(),
     corrections_summary: CorrectionsSummarySchema.optional(),
-  }).optional(),
-});
+  }).passthrough().optional(),
+}).passthrough();
 
 export const SuggestOptionsInput = z.object({
   goal: z.string().min(5),

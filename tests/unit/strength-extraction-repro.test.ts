@@ -326,7 +326,7 @@ describe("Strength extraction reproduction", () => {
       expect(priceToRevenue!.belief_exists).toBe(0.9);
     });
 
-    it("strips nested strength object (by design — EdgeInput doesn't include it)", () => {
+    it("preserves nested strength object via .passthrough() (CIL Phase 2)", () => {
       const raw = cloneFixture();
       const normalised = normaliseDraftResponse(raw);
       const { response: withBaselines } = ensureControllableFactorBaselines(normalised);
@@ -356,12 +356,12 @@ describe("Strength extraction reproduction", () => {
       expect(graphResult.success).toBe(true);
       if (!graphResult.success) return;
 
-      // After Graph.safeParse, nested strength object should be stripped
-      // (EdgeInput doesn't include a strength field)
+      // After Graph.safeParse, nested strength object is preserved via .passthrough()
+      // (CIL Phase 2: internal schemas use .passthrough() to prevent silent field loss)
       const priceToRevenue = graphResult.data.edges.find(
         e => e.from === "fac_pro_price" && e.to === "out_revenue"
       );
-      expect((priceToRevenue as any).strength).toBeUndefined();
+      expect((priceToRevenue as any).strength).toBeDefined();
 
       // But flat strength_mean should survive
       expect(priceToRevenue!.strength_mean).toBe(0.6);

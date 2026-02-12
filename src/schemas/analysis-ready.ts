@@ -79,6 +79,82 @@ export const OptionForAnalysis = z.object({
 export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
 
 // ============================================================================
+// Analysis Blockers (Phase 2B)
+// ============================================================================
+
+/**
+ * Blocker type for analysis-ready payload.
+ * Identifies why an option-factor pair can't produce an intervention magnitude.
+ */
+export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection"]);
+
+/**
+ * Suggested action to resolve a blocker.
+ */
+export const AnalysisBlockerAction = z.enum(["add_value", "confirm_value", "add_edge"]);
+
+/**
+ * Blocker entry for an option-factor pair that can't produce an intervention magnitude.
+ * Emitted when a controllable factor connected to an option has neither
+ * observed_state.value nor data.value.
+ */
+export const AnalysisBlocker = z.object({
+  /** Which option needs this input (undefined = applies to all) */
+  option_id: z.string().optional(),
+  /** Human-readable option label */
+  option_label: z.string().optional(),
+  /** Factor node ID */
+  factor_id: z.string(),
+  /** Human-readable factor label */
+  factor_label: z.string(),
+  /** Type of blocker */
+  blocker_type: AnalysisBlockerType,
+  /** Actionable message for the user */
+  message: z.string(),
+  /** Suggested action to resolve */
+  suggested_action: AnalysisBlockerAction,
+});
+export type AnalysisBlockerT = z.infer<typeof AnalysisBlocker>;
+
+// ============================================================================
+// Model Adjustments (Phase 2C)
+// ============================================================================
+
+/**
+ * User-facing code describing what the system adjusted.
+ * Maps from internal STRP/repair codes to human-friendly labels.
+ */
+export const ModelAdjustmentCode = z.enum([
+  "category_reclassified",
+  "connectivity_repaired",
+  "risk_coefficient_corrected",
+  "data_filled",
+  "enum_corrected",
+]);
+
+/**
+ * A model adjustment surfaced to the user.
+ * Represents a repair or reconciliation mutation made by the pipeline.
+ */
+export const ModelAdjustment = z.object({
+  /** User-facing adjustment code */
+  code: ModelAdjustmentCode,
+  /** Affected node ID */
+  node_id: z.string().optional(),
+  /** Affected edge ID */
+  edge_id: z.string().optional(),
+  /** Field that was modified */
+  field: z.string(),
+  /** Value before adjustment */
+  before: z.unknown().optional(),
+  /** Value after adjustment */
+  after: z.unknown().optional(),
+  /** Human-readable explanation */
+  reason: z.string(),
+});
+export type ModelAdjustmentT = z.infer<typeof ModelAdjustment>;
+
+// ============================================================================
 // Analysis Ready Payload
 // ============================================================================
 
@@ -87,15 +163,15 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
  * - ready: All interventions encoded, ready for PLoT analysis
  * - needs_user_mapping: Missing factor matches or values
  * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
- *
- * Accepts 'needs_user_input' as backwards-compatible input alias,
- * but ALWAYS outputs 'needs_user_mapping'.
+ * - needs_user_input: Blockers exist — user must provide missing factor values
  */
-export const AnalysisReadyStatus = z
-  .enum(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"])
-  .transform((val) => (val === "needs_user_input" ? "needs_user_mapping" : val)) as z.ZodType<
-  "ready" | "needs_user_mapping" | "needs_encoding"
->;
+export const AnalysisReadyStatus = z.enum([
+  "ready",
+  "needs_user_mapping",
+  "needs_encoding",
+  "needs_user_input",
+]);
+export type AnalysisReadyStatusT = z.infer<typeof AnalysisReadyStatus>;
 
 /**
  * Complete analysis-ready payload.
@@ -104,16 +180,21 @@ export const AnalysisReadyStatus = z
  * Supports the Raw+Encoded pattern at the payload level:
  * - When status is "ready", all options have encoded numeric interventions
  * - When status is "needs_encoding", some options have raw values awaiting encoding
+ * - When status is "needs_user_input", blockers identify missing factor values
  */
 export const AnalysisReadyPayload = z.object({
   /** Options with numeric interventions */
   options: z.array(OptionForAnalysis),
   /** Goal node ID - must match a goal node in graph */
   goal_node_id: z.string(),
-  /** Status: ready, needs_user_mapping, or needs_encoding */
+  /** Status: ready, needs_user_mapping, needs_encoding, or needs_user_input */
   status: AnalysisReadyStatus,
   /** Questions for user when status is needs_user_mapping */
   user_questions: z.array(z.string()).optional(),
+  /** Blockers identifying missing factor values (Phase 2B) */
+  blockers: z.array(AnalysisBlocker).optional(),
+  /** Model adjustments surfaced from STRP/repair mutations (Phase 2C) */
+  model_adjustments: z.array(ModelAdjustment).optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 

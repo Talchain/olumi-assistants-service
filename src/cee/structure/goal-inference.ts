@@ -192,6 +192,13 @@ export function wireOutcomesToGoal(
         strength_mean: isRisk ? -0.5 : 0.7,
         strength_std: 0.15,
         belief_exists: 0.9,
+        effect_direction: isRisk ? "negative" as const : "positive" as const,
+        origin: "default" as const,
+        provenance: {
+          source: "synthetic",
+          quote: `Wired ${kind} to goal (synthetic edge)`,
+        },
+        provenance_source: "synthetic",
       };
 
       newEdges.push(newEdge);
