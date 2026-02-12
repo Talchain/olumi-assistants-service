@@ -201,6 +201,45 @@ function categoryOverrideRule(
     });
   }
 
+  // Data-completeness pass: fill missing factor_type / uncertainty_drivers
+  // on ALL controllable factors, not just those that were overridden above.
+  for (const node of factors) {
+    const info = factorCategories.get(node.id);
+    if (!info || info.category !== "controllable") continue;
+
+    const data = (node.data ?? {}) as Record<string, unknown>;
+
+    if (!data.factor_type) {
+      data.factor_type = FACTOR_TYPE_DEFAULT;
+      if (!node.data) (node as any).data = data;
+      mutations.push({
+        rule: "category_override",
+        code: "CONTROLLABLE_DATA_FILLED",
+        node_id: node.id,
+        field: "data.factor_type",
+        before: undefined,
+        after: FACTOR_TYPE_DEFAULT,
+        reason: "Controllable factor missing required factor_type — filled with schema default",
+        severity: "info",
+      });
+    }
+
+    if (!data.uncertainty_drivers) {
+      data.uncertainty_drivers = ["Estimation uncertainty"];
+      if (!node.data) (node as any).data = data;
+      mutations.push({
+        rule: "category_override",
+        code: "CONTROLLABLE_DATA_FILLED",
+        node_id: node.id,
+        field: "data.uncertainty_drivers",
+        before: undefined,
+        after: ["Estimation uncertainty"],
+        reason: "Controllable factor missing required uncertainty_drivers — filled with default",
+        severity: "info",
+      });
+    }
+  }
+
   return mutations;
 }
 

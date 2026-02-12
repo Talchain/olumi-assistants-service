@@ -126,6 +126,92 @@ describe('reconcileStructuralTruth', () => {
       const result = reconcileStructuralTruth(graph);
       expect(result.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE')).toHaveLength(0);
     });
+
+    // =========================================================================
+    // Data-completeness pass (CONTROLLABLE_DATA_FILLED)
+    // =========================================================================
+
+    it('fills factor_type on controllable factor with correct category but missing field', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      // Controllable factor (has option edges) — no category mismatch, but missing factor_type
+      delete (factor.data as any).factor_type;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect((factor.data as any).factor_type).toBe('other');
+      const mutation = result.mutations.find(
+        m => m.code === 'CONTROLLABLE_DATA_FILLED' && m.field === 'data.factor_type'
+      );
+      expect(mutation).toBeDefined();
+      expect(mutation!.node_id).toBe('fac_price');
+      expect(mutation!.before).toBeUndefined();
+      expect(mutation!.after).toBe('other');
+      expect(mutation!.severity).toBe('info');
+    });
+
+    it('fills uncertainty_drivers on controllable factor with correct category but missing field', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      const mutation = result.mutations.find(
+        m => m.code === 'CONTROLLABLE_DATA_FILLED' && m.field === 'data.uncertainty_drivers'
+      );
+      expect(mutation).toBeDefined();
+      expect(mutation!.node_id).toBe('fac_price');
+      expect(mutation!.severity).toBe('info');
+    });
+
+    it('does not emit CONTROLLABLE_DATA_FILLED when both fields already present', () => {
+      const graph = createValidGraph();
+      // fac_price already has factor_type: 'price' and uncertainty_drivers: ['market volatility']
+      const result = reconcileStructuralTruth(graph);
+      expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
+    });
+
+    it('emits both CATEGORY_OVERRIDE and CONTROLLABLE_DATA_FILLED when overriding to controllable with missing fields', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'external' as any;
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = reconcileStructuralTruth(graph);
+
+      // Category override fires first
+      expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
+      // Data-completeness pass fills missing fields (override pass fills during override,
+      // but completeness pass catches any remaining gaps)
+      expect((factor.data as any).factor_type).toBe('other');
+      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+    });
+
+    it('does not fill factor_type on observable/external factors', () => {
+      const graph = createValidGraph();
+      // Add an observable factor (has value, no option edge) with missing factor_type
+      graph.nodes.push({
+        id: 'fac_obs',
+        kind: 'factor',
+        label: 'Observable Factor',
+        data: { value: 42, extractionType: 'explicit' },
+      });
+      graph.edges.push(
+        { from: 'fac_price', to: 'fac_obs', strength_mean: 0.5, belief_exists: 0.8 },
+        { from: 'fac_obs', to: 'outcome_1', strength_mean: 0.6, belief_exists: 0.9 },
+      );
+
+      const result = reconcileStructuralTruth(graph);
+
+      const obsFactor = graph.nodes.find(n => n.id === 'fac_obs')!;
+      expect((obsFactor.data as any).factor_type).toBeUndefined();
+      expect(
+        result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED' && m.node_id === 'fac_obs')
+      ).toHaveLength(0);
+    });
   });
 
   // =============================================================================

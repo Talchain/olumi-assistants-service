@@ -2680,6 +2680,12 @@ export async function finaliseCeeDraftResponse(
 
   const { cappedPayload, limits } = applyResponseCaps(payload);
 
+  // Merge STRP mutations from inner pipeline trace (assist.draft-graph.ts injects
+  // trace.strp after DraftGraphOutput.parse, but this trace object overwrites it)
+  if (cappedPayload.trace?.strp) {
+    (trace as any).strp = cappedPayload.trace.strp;
+  }
+
   const anyTruncated = ceeAnyTruncated(limits);
 
   let draftWarnings: CEEStructuralWarningV1[] | undefined;
