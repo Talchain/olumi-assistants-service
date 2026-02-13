@@ -40,6 +40,7 @@ function createValidGraph(): GraphT {
         id: 'fac_price',
         kind: 'factor',
         label: 'Price',
+        category: 'controllable' as any,
         data: {
           value: 150,
           extractionType: 'explicit',
@@ -879,7 +880,7 @@ describe('validateGraph', () => {
         const result = validateGraph({ graph });
         expect(hasError(result, 'CATEGORY_MISMATCH')).toBe(false);
         expect(hasError(result, 'OBSERVABLE_EXTRA_DATA')).toBe(false);
-        const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+        const overrideMutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_obs');
         expect(overrideMutation).toBeDefined();
         expect(overrideMutation!.before).toBe('controllable');
         expect(overrideMutation!.after).toBe('observable');
@@ -1840,8 +1841,8 @@ describe('validateGraphPostNormalisation', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('does not affect graphs with no declared categories (regression)', () => {
-      // createValidGraph has no category fields — should be completely unaffected
+    it('does not affect graphs with correct declared categories (regression)', () => {
+      // createValidGraph has category: 'controllable' on fac_price — matches inferred
       const graph = createValidGraph();
       const strp = reconcileStructuralTruth(graph);
       const result = validateGraph({ graph });
@@ -1850,10 +1851,10 @@ describe('validateGraphPostNormalisation', () => {
       expect(strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE').length).toBe(0);
     });
 
-    it('does not override when factor has no declared category even if inferred differs', () => {
+    it('overrides when factor has no declared category — fills from structural inference', () => {
       const graph = createValidGraph();
-      // fac_price has no category field at all — inferFactorCategories will note the
-      // explicitCategory as undefined. Override should NOT fire.
+      // Remove category — inferFactorCategories will infer "controllable" from option edges.
+      // Override should fire and set category.
       const factor = graph.nodes.find(n => n.id === 'fac_price')!;
       delete (factor as any).category;
 
@@ -1861,7 +1862,10 @@ describe('validateGraphPostNormalisation', () => {
       const result = validateGraph({ graph });
 
       expect(result.valid).toBe(true);
-      expect(strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE').length).toBe(0);
+      expect(strp.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE').length).toBe(1);
+      const mutation = strp.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+      expect(mutation!.before).toBeUndefined();
+      expect(mutation!.after).toBe('controllable');
     });
   });
 

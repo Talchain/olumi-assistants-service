@@ -29,6 +29,7 @@ function createValidGraph(): GraphT {
         id: 'fac_price',
         kind: 'factor',
         label: 'Price',
+        category: 'controllable' as any,
         data: {
           value: 150,
           extractionType: 'explicit',
@@ -120,11 +121,18 @@ describe('reconcileStructuralTruth', () => {
       expect((factor.data as any).factor_type).toBe('price'); // untouched
     });
 
-    it('does not fire when category is absent', () => {
+    it('sets category when absent (null/undefined) — infers from structure', () => {
       const graph = createValidGraph();
-      // Default createValidGraph has no category fields
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor as any).category; // simulate LLM omitting category
+
       const result = reconcileStructuralTruth(graph);
-      expect(result.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE')).toHaveLength(0);
+
+      expect(factor.category).toBe('controllable');
+      const mutation = result.mutations.find(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_price');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBeUndefined();
+      expect(mutation!.after).toBe('controllable');
     });
 
     // =========================================================================
@@ -221,6 +229,130 @@ describe('reconcileStructuralTruth', () => {
       expect((factor.data as any).factor_type).toBeUndefined();
       expect((factor.data as any).uncertainty_drivers).toBeUndefined();
       expect(result.mutations.filter(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toHaveLength(0);
+    });
+  });
+
+  // =============================================================================
+  // Rule 1 — absent/undefined category override scenarios
+  // =============================================================================
+
+  describe('Rule 1: Absent Category Override', () => {
+    it('sets category to controllable when null and factor has incoming option edge', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      (factor as any).category = null;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect(factor.category).toBe('controllable');
+      const mutation = result.mutations.find(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_price');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBeNull();
+      expect(mutation!.after).toBe('controllable');
+    });
+
+    it('overrides observable→controllable when factor has incoming option edge (existing behaviour)', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'observable' as any;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect(factor.category).toBe('controllable');
+      const mutation = result.mutations.find(m => m.code === 'CATEGORY_OVERRIDE');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBe('observable');
+      expect(mutation!.after).toBe('controllable');
+    });
+
+    it('does not override when category is already controllable and factor has option edge', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      factor.category = 'controllable' as any;
+
+      const result = reconcileStructuralTruth(graph);
+
+      expect(factor.category).toBe('controllable');
+      expect(result.mutations.filter(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_price')).toHaveLength(0);
+    });
+
+    it('does not set category to controllable when null and factor has NO incoming option edge', () => {
+      const graph = createValidGraph();
+      // Add a factor with no option edge and no value — should infer external, not controllable
+      graph.nodes.push({
+        id: 'fac_ext',
+        kind: 'factor',
+        label: 'External Factor',
+        data: { extractionType: 'inferred' },
+      });
+      graph.edges.push(
+        { from: 'fac_ext', to: 'outcome_1', strength_mean: 0.4, belief_exists: 0.7 },
+      );
+
+      const result = reconcileStructuralTruth(graph);
+
+      const factor = graph.nodes.find(n => n.id === 'fac_ext')!;
+      expect(factor.category).toBe('external');
+      expect(factor.category).not.toBe('controllable');
+      const mutation = result.mutations.find(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_ext');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBeUndefined();
+      expect(mutation!.after).toBe('external');
+    });
+
+    it('sets category to observable when absent and factor has value but no option edge', () => {
+      const graph = createValidGraph();
+      // Add a factor with value (→ observable) but no option edge
+      graph.nodes.push({
+        id: 'fac_obs',
+        kind: 'factor',
+        label: 'Observable Factor',
+        data: { value: 42, extractionType: 'explicit' },
+      });
+      graph.edges.push(
+        { from: 'fac_obs', to: 'outcome_1', strength_mean: 0.6, belief_exists: 0.9 },
+      );
+
+      const result = reconcileStructuralTruth(graph);
+
+      const factor = graph.nodes.find(n => n.id === 'fac_obs')!;
+      expect(factor.category).toBe('observable');
+      const mutation = result.mutations.find(m => m.code === 'CATEGORY_OVERRIDE' && m.node_id === 'fac_obs');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBeUndefined();
+      expect(mutation!.after).toBe('observable');
+    });
+
+    it('does not auto-fill data fields when category was absent (deferred to Rule 5)', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor as any).category;
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      reconcileStructuralTruth(graph);
+
+      // Category set, but data fields NOT auto-filled — Rule 5 handles that in late STRP
+      expect(factor.category).toBe('controllable');
+      expect((factor.data as any).factor_type).toBeUndefined();
+      expect((factor.data as any).uncertainty_drivers).toBeUndefined();
+    });
+
+    it('auto-fills data fields when category was absent AND fillControllableData is true (Rule 5)', () => {
+      const graph = createValidGraph();
+      const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+      delete (factor as any).category;
+      delete (factor.data as any).factor_type;
+      delete (factor.data as any).uncertainty_drivers;
+
+      const result = reconcileStructuralTruth(graph, { fillControllableData: true });
+
+      expect(factor.category).toBe('controllable');
+      expect((factor.data as any).factor_type).toBe('other');
+      expect((factor.data as any).uncertainty_drivers).toEqual(['Estimation uncertainty']);
+      // Rule 1 sets category, Rule 5 fills data
+      expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
+      expect(result.mutations.some(m => m.code === 'CONTROLLABLE_DATA_FILLED')).toBe(true);
     });
   });
 

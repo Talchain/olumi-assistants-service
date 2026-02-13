@@ -157,8 +157,8 @@ function categoryOverrideRule(
     const declared = node.category as FactorCategory | undefined;
     const inferred = info.category;
 
-    // Nothing to override when categories already agree or no declared category
-    if (!declared || declared === inferred) continue;
+    // Nothing to override when categories already agree
+    if (declared === inferred) continue;
 
     // Overwrite the node's declared category with the inferred one
     (node as any).category = inferred;
@@ -166,26 +166,31 @@ function categoryOverrideRule(
     // Update the factorCategories map so downstream checks see corrected state
     factorCategories.set(node.id, { ...info, explicitCategory: inferred });
 
-    const data = (node.data ?? {}) as Record<string, unknown>;
+    // Only adjust data fields when correcting a WRONG declared category.
+    // When category was absent (undefined/null), just set category and let
+    // Rule 5 (controllable data completeness) handle data fill in late STRP.
+    if (declared) {
+      const data = (node.data ?? {}) as Record<string, unknown>;
 
-    if (inferred === "controllable") {
-      // Reclassified TO controllable — auto-fill missing required fields
-      if (!data.factor_type) {
-        data.factor_type = FACTOR_TYPE_DEFAULT;
-      }
-      if (!data.uncertainty_drivers) {
-        data.uncertainty_drivers = ["Estimation uncertainty"];
-      }
-      if (!node.data) {
-        (node as any).data = data;
-      }
-    } else {
-      // Reclassified FROM controllable to observable/external — strip extra fields
-      if (data.factor_type !== undefined) {
-        delete data.factor_type;
-      }
-      if (data.uncertainty_drivers !== undefined) {
-        delete data.uncertainty_drivers;
+      if (inferred === "controllable") {
+        // Reclassified TO controllable — auto-fill missing required fields
+        if (!data.factor_type) {
+          data.factor_type = FACTOR_TYPE_DEFAULT;
+        }
+        if (!data.uncertainty_drivers) {
+          data.uncertainty_drivers = ["Estimation uncertainty"];
+        }
+        if (!node.data) {
+          (node as any).data = data;
+        }
+      } else {
+        // Reclassified FROM controllable to observable/external — strip extra fields
+        if (data.factor_type !== undefined) {
+          delete data.factor_type;
+        }
+        if (data.uncertainty_drivers !== undefined) {
+          delete data.uncertainty_drivers;
+        }
       }
     }
 
