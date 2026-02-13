@@ -624,6 +624,8 @@ export function transformResponseToV3(
       pipeline: v1Response.trace?.pipeline,
       // STRP mutation records for observability
       ...((v1Response.trace as any)?.strp && { strp: (v1Response.trace as any).strp }),
+      // Enrichment metadata (Pipeline B, Step 12)
+      ...((v1Response.trace as any)?.enrich && { enrich: (v1Response.trace as any).enrich }),
     },
     draft_warnings: v1Response.draft_warnings,
   };
