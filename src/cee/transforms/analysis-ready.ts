@@ -752,6 +752,8 @@ export function mapMutationsToAdjustments(
         after: m.after,
         reason,
       });
+    } else {
+      log.debug({ strp_code: m.code, node_id: m.node_id }, "STRP mutation code not mapped to user-facing adjustment (internal-only)");
     }
   }
 

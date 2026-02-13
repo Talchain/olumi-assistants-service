@@ -474,8 +474,9 @@ export default async function route(app: FastifyInstance) {
         const graphCorrections = v1Trace?.corrections;
         if (v3Body.analysis_ready && (strpMutations?.length || graphCorrections?.length)) {
           // Task 10A: Build node label lookup for adjustment enrichment
+          // V3 responses have nodes at root level (not nested under .graph)
           const nodeLabels = new Map<string, string>();
-          const graphNodes = (v3Body.graph as any)?.nodes;
+          const graphNodes = (v3Body as any)?.nodes;
           if (Array.isArray(graphNodes)) {
             for (const node of graphNodes) {
               if (node?.id && node?.label) {

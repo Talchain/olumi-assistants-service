@@ -49,6 +49,12 @@ export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
 export const OptionForAnalysisStatus = z.enum(["ready", "needs_user_mapping", "needs_encoding"]);
 export type OptionForAnalysisStatusT = z.infer<typeof OptionForAnalysisStatus>;
 
+// Compile-time guard: needs_user_input is payload-level only, never option-level (CIL Step 12)
+type _AssertNeedsUserInputNotOptionStatus =
+  "needs_user_input" extends OptionForAnalysisStatusT ? never : true;
+const _assertOptionStatusExcludesNeedsUserInput: _AssertNeedsUserInputNotOptionStatus = true;
+void _assertOptionStatusExcludesNeedsUserInput;
+
 /**
  * Option ready for analysis - interventions are plain numbers.
  *

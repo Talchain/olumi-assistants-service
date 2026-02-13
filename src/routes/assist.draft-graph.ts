@@ -1747,6 +1747,15 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       promptStoreVersion: llmMeta?.prompt_store_version,
       modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
     });
+    // Enrichment metadata for Pipeline A observability (CIL Step 12)
+    traceObj.enrich = {
+      called_count: 1,
+      extraction_mode: enrichmentResult.extractionMode,
+      factors_added: enrichmentResult.factorsAdded,
+      factors_enhanced: enrichmentResult.factorsEnhanced,
+      factors_skipped: enrichmentResult.factorsSkipped,
+      llm_success: enrichmentResult.llmSuccess,
+    };
     // STRP mutations summary (merge early + late-pipeline passes)
     const allStrpMutations = [
       ...strpResult.mutations,

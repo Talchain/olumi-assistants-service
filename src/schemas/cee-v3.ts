@@ -238,6 +238,12 @@ export type OptionProvenanceV3T = z.infer<typeof OptionProvenanceV3>;
 export const OptionStatusV3 = z.enum(["ready", "needs_user_mapping", "needs_encoding"]);
 export type OptionStatusV3T = z.infer<typeof OptionStatusV3>;
 
+// Compile-time guard: needs_user_input is payload-level only, never option-level (CIL Step 12)
+type _AssertNeedsUserInputNotV3OptionStatus =
+  "needs_user_input" extends OptionStatusV3T ? never : true;
+const _assertV3OptionStatusExcludesNeedsUserInput: _AssertNeedsUserInputNotV3OptionStatus = true;
+void _assertV3OptionStatusExcludesNeedsUserInput;
+
 /**
  * V3 option schema - decision paths with intervention bundles.
  *

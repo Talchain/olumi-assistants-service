@@ -42,7 +42,7 @@ import {
   type StructuralMeta
 } from "../structure/index.js";
 import { sortBiasFindings } from "../bias/index.js";
-import { enrichGraphWithFactorsAsync } from "../factor-extraction/enricher.js";
+// enrichGraphWithFactorsAsync removed — runs once in Pipeline B (CIL Step 12)
 import {
   detectAmbiguities,
   detectConvergence,
@@ -1613,27 +1613,31 @@ export async function finaliseCeeDraftResponse(
     });
   }
 
-  // === FACTOR ENRICHMENT: Extract quantitative factors from brief ===
-  // This runs after LLM graph generation but before validation, matching the legacy endpoint's order.
-  // Ensures factor nodes have value/baseline/unit data for ISL sensitivity analysis.
-  // Uses LLM-first extraction when CEE_LLM_FIRST_EXTRACTION_ENABLED=true
+  // === ENRICHMENT GUARD (CIL Step 12 — RISK-12) ===
+  // Factor enrichment runs once in Pipeline B (assist.draft-graph.ts).
+  // Duplicate call removed here; this observational guard confirms enrichment ran.
   if (graph) {
-    const enrichmentResult = await enrichGraphWithFactorsAsync(graph as any, input.brief, { collector });
-    graph = enrichmentResult.graph as GraphV1;
-    payload.graph = graph as any;
+    const factorNodes = ((graph as any).nodes ?? []).filter(
+      (n: any) => n.kind === "factor"
+    );
+    const enrichedFactorCount = factorNodes.filter(
+      (n: any) => n.data?.value !== undefined || n.data?.factor_type !== undefined
+    ).length;
 
-    if (enrichmentResult.factorsAdded > 0 || enrichmentResult.factorsEnhanced > 0) {
-      log.debug(
-        {
-          request_id: requestId,
-          factors_added: enrichmentResult.factorsAdded,
-          factors_enhanced: enrichmentResult.factorsEnhanced,
-          factors_skipped: enrichmentResult.factorsSkipped,
-          extraction_mode: enrichmentResult.extractionMode,
-          llm_success: enrichmentResult.llmSuccess,
-        },
-        "Factor enrichment applied to graph"
-      );
+    const enrichmentTrace = (pipelineResult as any)?.trace?.enrich;
+    const extractionMode: string = enrichmentTrace?.extraction_mode
+      ?? (enrichedFactorCount > 0 ? "regex" : "none");
+
+    log.info({
+      request_id: requestId,
+      factor_nodes_total: factorNodes.length,
+      factor_nodes_enriched: enrichedFactorCount,
+      extraction_mode: extractionMode,
+      enrichment_trace_present: !!enrichmentTrace,
+      event: "cee.enrichment.single_call_guard",
+    }, "Enrichment: single-call mode (Pipeline A duplicate removed)");
+    if (!enrichmentTrace) {
+      log.warn({ request_id: requestId, event: "cee.enrichment.trace_missing" }, "Pipeline B enrichment trace absent — extraction_mode inferred from graph heuristics");
     }
   }
 
@@ -3018,6 +3022,15 @@ export async function finaliseCeeDraftResponse(
       corrections: collector.hasCorrections() ? collector.getCorrections() : undefined,
       corrections_summary: collector.hasCorrections() ? collector.getSummary() : undefined,
     };
+
+    // Enrichment metadata from Pipeline B trace (CIL Step 12)
+    const pipelineBEnrich = (pipelineResult as any)?.trace?.enrich;
+    if (pipelineBEnrich) {
+      pipelineTrace.enrich = {
+        ...pipelineBEnrich,
+        source: "pipeline_b",
+      };
+    }
 
     // Include final graph summary for debugging (safe)
     pipelineTrace.final_graph = {
