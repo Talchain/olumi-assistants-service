@@ -17,6 +17,7 @@ import {
   validateStrictModeV3,
 } from "../cee/transforms/index.js";
 import { mapMutationsToAdjustments } from "../cee/transforms/analysis-ready.js";
+import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -372,6 +373,33 @@ export default async function route(app: FastifyInstance) {
       }
     }
 
+    // ── Unified pipeline (CIL Phase 3B) ──────────────────────────────
+    if (config.cee.unifiedPipelineEnabled) {
+      const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
+      const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
+
+      const result = await runUnifiedPipeline(baseInput, req.body, req, {
+        schemaVersion,
+        strictMode,
+        includeDebug: unsafeCaptureEnabled,
+        rawOutput: (baseInput as any).raw_output,
+        refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
+        forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
+        signal: req.raw.destroyed ? AbortSignal.abort() : undefined,
+        requestStartMs: start,
+      });
+
+      reply.header("X-CEE-API-Version", schemaVersion);
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      if (result.headers) {
+        for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
+      }
+      reply.code(result.statusCode);
+      return reply.send(result.body);
+    }
+
+    // ── Legacy pipeline (Pipeline A + B) ─────────────────────────────
     let statusCode: number;
     let body: unknown;
     let headers: Record<string, string> | undefined;

@@ -57,7 +57,7 @@ export interface CEEProvenance {
   prompt_source: 'supabase' | 'defaults' | 'env_override';
   prompt_override_active: boolean;
   model: string;
-  pipeline_path: 'A' | 'B';
+  pipeline_path: 'A' | 'B' | 'unified';
   engine_base_url_configured: boolean;
   model_override_active: boolean;
   prompt_store_version: number | null;
@@ -210,7 +210,7 @@ function sampleEdgesStratified(
 // =============================================================================
 
 export interface ProvenanceInput {
-  pipelinePath: 'A' | 'B';
+  pipelinePath: 'A' | 'B' | 'unified';
   model: string;
   promptVersion?: string;
   promptSource?: 'store' | 'default';

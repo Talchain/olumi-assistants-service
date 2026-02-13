@@ -300,7 +300,7 @@ function refinementEnabled(): boolean {
   return config.cee.refinementEnabled;
 }
 
-function buildRefinementBrief(
+export function buildRefinementBrief(
   brief: string,
   previousGraph: GraphT,
   options: {
@@ -620,7 +620,7 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
  *
  * @throws Error with details for over-limit files or processing failures
  */
-async function groundAttachments(
+export async function groundAttachments(
   input: DraftGraphInputT,
   rawBody: unknown
 ): Promise<{ docs: DocPreview[]; stats: GroundingStats }> {

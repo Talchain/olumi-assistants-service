@@ -307,6 +307,8 @@ export interface SingleGoalResult {
   hadMultipleGoals: boolean;
   originalGoalCount: number;
   mergedGoalIds?: string[];
+  /** Maps each merged-away goal ID to the primary goal ID it was merged into. */
+  nodeRenames?: Map<string, string>;
 }
 
 /**
@@ -367,6 +369,12 @@ export function enforceSingleGoal(
   // Multiple goals - merge into compound goal
   const primaryId = goalIds[0];
   const otherGoalIds = new Set(goalIds.slice(1));
+
+  // Build nodeRenames map: each merged-away goal → primary goal
+  const nodeRenames = new Map<string, string>();
+  for (const otherId of otherGoalIds) {
+    nodeRenames.set(otherId, primaryId);
+  }
 
   // Combine labels into compound goal
   const labels = goalNodes
@@ -441,6 +449,7 @@ export function enforceSingleGoal(
     hadMultipleGoals: true,
     originalGoalCount: goalNodes.length,
     mergedGoalIds: goalIds,
+    nodeRenames,
   };
 }
 
@@ -558,6 +567,8 @@ export interface GraphValidationAndFixResult {
     singleGoalApplied: boolean;
     originalGoalCount?: number;
     mergedGoalIds?: string[];
+    /** Maps each merged-away goal ID to the primary goal ID. Only set when goals were actually merged. */
+    nodeRenames?: Map<string, string>;
     outcomeBeliefsFilled: number;
     decisionBranchesNormalized: boolean;
   };
@@ -641,6 +652,7 @@ export function validateAndFixGraph(
     singleGoalApplied: false,
     originalGoalCount: undefined as number | undefined,
     mergedGoalIds: undefined as string[] | undefined,
+    nodeRenames: undefined as Map<string, string> | undefined,
     outcomeBeliefsFilled: 0,
     decisionBranchesNormalized: false,
   };
@@ -653,6 +665,9 @@ export function validateAndFixGraph(
       fixes.singleGoalApplied = singleGoalResult.hadMultipleGoals;
       fixes.originalGoalCount = singleGoalResult.originalGoalCount;
       fixes.mergedGoalIds = singleGoalResult.mergedGoalIds;
+      if (singleGoalResult.hadMultipleGoals && singleGoalResult.nodeRenames?.size) {
+        fixes.nodeRenames = singleGoalResult.nodeRenames;
+      }
     }
   }
 
