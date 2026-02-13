@@ -1214,7 +1214,7 @@ export async function finaliseCeeDraftResponse(
         repair_success: true,
         before_counts: beforeCounts,
         after_counts: afterCounts,
-        coefficients_modified: normResult.corrections.map(c => ({
+        coefficients_modified: normResult.corrections.map((c: any) => ({
           edge_id: `${c.source}::${c.target}`,
           field: "strength_mean",
           before: c.original,
@@ -1794,7 +1794,7 @@ export async function finaliseCeeDraftResponse(
         ? "Add at least one outcome or risk node to connect factors to your goal"
         : structure.connectivity_failed
           ? "Ensure there is a path from decision through options to outcomes/risks and finally to goal"
-          : `Add at least ${structure.missing.map(k => `1 ${k} node`).join(", ")}`,
+          : `Add at least ${structure.missing.map((k: string) => `1 ${k} node`).join(", ")}`,
     };
 
     // Determine failure type: outcome/risk missing takes precedence over connectivity
