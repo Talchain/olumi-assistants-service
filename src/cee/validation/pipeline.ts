@@ -25,6 +25,10 @@ import {
   CEE_EVIDENCE_SUGGESTIONS_MAX,
   CEE_SENSITIVITY_SUGGESTIONS_MAX,
 } from "../config/limits.js";
+import { normaliseCeeGraphVersionAndProvenance } from "../transforms/graph-normalisation.js";
+import { normaliseRiskCoefficients, type RiskCoefficientCorrection } from "../transforms/risk-normalisation.js";
+import { applyResponseCaps, capList, type ResponseLimitsMeta } from "../transforms/response-caps.js";
+import { validateMinimumStructure, checkConnectedMinimumStructure, MINIMUM_STRUCTURE_REQUIREMENT, type MinimumStructureResult, type ConnectivityDiagnostic } from "../transforms/structure-checks.js";
 import {
   detectStructuralWarnings,
   detectUniformStrengths,
@@ -94,24 +98,7 @@ function getCostMaxUsd(): number {
   return config.graph.costMaxUsd;
 }
 
-type ResponseLimitsMeta = {
-  bias_findings_max: number;
-  bias_findings_truncated: boolean;
-  options_max: number;
-  options_truncated: boolean;
-  evidence_suggestions_max: number;
-  evidence_suggestions_truncated: boolean;
-  sensitivity_suggestions_max: number;
-  sensitivity_suggestions_truncated: boolean;
-};
-
-// Minimum structure requirements for draft graphs.
-// A usable decision model must include at least one goal, one decision, and one option.
-const MINIMUM_STRUCTURE_REQUIREMENT: Readonly<Record<string, number>> = {
-  goal: 1,
-  decision: 1,
-  option: 1,
-};
+// ResponseLimitsMeta, MINIMUM_STRUCTURE_REQUIREMENT → imported from transforms/
 
 function extractNodeKinds(data: unknown): string[] {
   if (!data || typeof data !== "object") return [];
@@ -173,333 +160,10 @@ function isAdminAuthorized(request: FastifyRequest): boolean {
   return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
 }
 
-type MinimumStructureResult = {
-  valid: boolean;
-  missing: string[];
-  counts: Record<string, number>;
-  /** Connectivity diagnostic - only populated if kind counts pass */
-  connectivity?: ConnectivityDiagnostic;
-  /** Whether connectivity check specifically failed (kinds present but not connected) */
-  connectivity_failed?: boolean;
-  /** Whether outcome OR risk requirement failed (needs at least one) */
-  outcome_or_risk_missing?: boolean;
-};
-
-/**
- * Connectivity diagnostic result
- */
-type ConnectivityDiagnostic = {
-  passed: boolean;
-  decision_ids: string[];
-  reachable_options: string[];
-  reachable_goals: string[];
-  unreachable_nodes: string[];
-  all_option_ids: string[];
-  all_goal_ids: string[];
-};
-
-/**
- * Check if graph has connected minimum structure with diagnostic info.
- * Returns both pass/fail and detailed diagnostics for observability.
- */
-function checkConnectedMinimumStructure(graph: GraphV1 | undefined): ConnectivityDiagnostic {
-  const emptyDiagnostic: ConnectivityDiagnostic = {
-    passed: false,
-    decision_ids: [],
-    reachable_options: [],
-    reachable_goals: [],
-    unreachable_nodes: [],
-    all_option_ids: [],
-    all_goal_ids: [],
-  };
-
-  if (!graph || !Array.isArray(graph.nodes) || !Array.isArray((graph as any).edges)) {
-    return emptyDiagnostic;
-  }
-
-  const nodes = graph.nodes;
-  const edges = (graph as any).edges as Array<{ from?: string; to?: string }>;
-
-  const kinds = new Map<string, string>();
-  const decisions: string[] = [];
-  const options: string[] = [];
-  const goals: string[] = [];
-  const adjacency = new Map<string, Set<string>>();
-  const allNodeIds: string[] = [];
-
-  for (const node of nodes) {
-    const id = typeof (node as any).id === "string" ? ((node as any).id as string) : undefined;
-    const kind = node.kind as unknown as string | undefined;
-    if (!id || !kind) {
-      continue;
-    }
-
-    kinds.set(id, kind);
-    allNodeIds.push(id);
-    if (!adjacency.has(id)) {
-      adjacency.set(id, new Set());
-    }
-    if (kind === "decision") {
-      decisions.push(id);
-    } else if (kind === "option") {
-      options.push(id);
-    } else if (kind === "goal") {
-      goals.push(id);
-    }
-  }
-
-  for (const edge of edges) {
-    const from = typeof edge.from === "string" ? (edge.from as string) : undefined;
-    const to = typeof edge.to === "string" ? (edge.to as string) : undefined;
-    if (!from || !to) {
-      continue;
-    }
-
-    if (!adjacency.has(from)) {
-      adjacency.set(from, new Set());
-    }
-    if (!adjacency.has(to)) {
-      adjacency.set(to, new Set());
-    }
-
-    adjacency.get(from)!.add(to);
-    adjacency.get(to)!.add(from);
-  }
-
-  if (decisions.length === 0) {
-    return {
-      ...emptyDiagnostic,
-      all_option_ids: options,
-      all_goal_ids: goals,
-      unreachable_nodes: [...options, ...goals],
-    };
-  }
-
-  // Track all reachable nodes from any decision
-  const allReachable = new Set<string>();
-  let foundValidPath = false;
-
-  for (const decisionId of decisions) {
-    const visited = new Set<string>();
-    const queue: string[] = [decisionId];
-    let hasGoal = false;
-    let hasOption = false;
-    const reachableFromDecision = new Set<string>();
-
-    while (queue.length > 0) {
-      const current = queue.shift() as string;
-      if (visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-      reachableFromDecision.add(current);
-      allReachable.add(current);
-
-      const kind = kinds.get(current);
-      if (kind === "goal") {
-        hasGoal = true;
-      } else if (kind === "option") {
-        hasOption = true;
-      }
-
-      if (hasGoal && hasOption) {
-        foundValidPath = true;
-      }
-
-      const neighbours = adjacency.get(current);
-      if (!neighbours) {
-        continue;
-      }
-
-      for (const next of neighbours) {
-        if (!visited.has(next)) {
-          queue.push(next);
-        }
-      }
-    }
-  }
-
-  // Compute reachable options and goals
-  const reachableOptions = options.filter(id => allReachable.has(id));
-  const reachableGoals = goals.filter(id => allReachable.has(id));
-
-  // Compute unreachable nodes (options and goals not reachable from any decision)
-  const unreachableNodes = allNodeIds.filter(id => {
-    const kind = kinds.get(id);
-    // Only report options and goals as "unreachable" since they're the key targets
-    return (kind === "option" || kind === "goal") && !allReachable.has(id);
-  });
-
-  return {
-    passed: foundValidPath,
-    decision_ids: decisions,
-    reachable_options: reachableOptions,
-    reachable_goals: reachableGoals,
-    unreachable_nodes: unreachableNodes,
-    all_option_ids: options,
-    all_goal_ids: goals,
-  };
-}
-
-/**
- * Simple boolean check for backward compatibility.
- */
-function _hasConnectedMinimumStructure(graph: GraphV1 | undefined): boolean {
-  return checkConnectedMinimumStructure(graph).passed;
-}
-
-function validateMinimumStructure(graph: GraphV1 | undefined): MinimumStructureResult {
-  const counts: Record<string, number> = {};
-
-  if (graph?.nodes) {
-    for (const node of graph.nodes) {
-      const kind = node.kind as unknown as string | undefined;
-      if (typeof kind === "string" && kind.length > 0) {
-        counts[kind] = (counts[kind] ?? 0) + 1;
-      }
-    }
-  }
-
-  const missing: string[] = [];
-  for (const [kind, min] of Object.entries(MINIMUM_STRUCTURE_REQUIREMENT)) {
-    if ((counts[kind] ?? 0) < min) {
-      missing.push(kind);
-    }
-  }
-
-  const hasMinimumCounts = missing.length === 0;
-
-  // Only check connectivity if kind counts pass
-  if (!hasMinimumCounts) {
-    return {
-      valid: false,
-      missing,
-      counts,
-    };
-  }
-
-  // Check outcome OR risk requirement (at least one must exist)
-  // This check happens BEFORE connectivity to give a clearer error message.
-  // Outcomes and risks are the bridges between factors and goal in the topology.
-  const outcomeCount = counts["outcome"] ?? 0;
-  const riskCount = counts["risk"] ?? 0;
-  if (outcomeCount + riskCount === 0) {
-    return {
-      valid: false,
-      missing: [], // All required kinds are present, but outcome/risk bridge is missing
-      counts,
-      outcome_or_risk_missing: true,
-    };
-  }
-
-  // Get full connectivity diagnostic
-  const connectivity = checkConnectedMinimumStructure(graph);
-  const connectivityFailed = !connectivity.passed;
-
-  return {
-    valid: connectivity.passed,
-    missing,
-    counts,
-    connectivity,
-    connectivity_failed: connectivityFailed,
-  };
-}
-
-function capList<T>(value: unknown, max: number): { list?: T[]; truncated: boolean } {
-  if (!Array.isArray(value)) {
-    return { list: undefined, truncated: false };
-  }
-  if (value.length <= max) {
-    return { list: value as T[], truncated: false };
-  }
-  return { list: (value as T[]).slice(0, max), truncated: true };
-}
-
-function applyResponseCaps(payload: any): { cappedPayload: any; limits: ResponseLimitsMeta } {
-  const cappedPayload = { ...payload };
-
-  const bias = capList<any>(payload.bias_findings, CEE_BIAS_FINDINGS_MAX);
-  if (bias.list) cappedPayload.bias_findings = bias.list;
-
-  const opts = capList<any>(payload.options, CEE_OPTIONS_MAX);
-  if (opts.list) cappedPayload.options = opts.list;
-
-  const evidence = capList<any>(payload.evidence_suggestions, CEE_EVIDENCE_SUGGESTIONS_MAX);
-  if (evidence.list) cappedPayload.evidence_suggestions = evidence.list;
-
-  const sensitivity = capList<any>(payload.sensitivity_suggestions, CEE_SENSITIVITY_SUGGESTIONS_MAX);
-  if (sensitivity.list) cappedPayload.sensitivity_suggestions = sensitivity.list;
-
-  const limits: ResponseLimitsMeta = {
-    bias_findings_max: CEE_BIAS_FINDINGS_MAX,
-    bias_findings_truncated: bias.truncated,
-    options_max: CEE_OPTIONS_MAX,
-    options_truncated: opts.truncated,
-    evidence_suggestions_max: CEE_EVIDENCE_SUGGESTIONS_MAX,
-    evidence_suggestions_truncated: evidence.truncated,
-    sensitivity_suggestions_max: CEE_SENSITIVITY_SUGGESTIONS_MAX,
-    sensitivity_suggestions_truncated: sensitivity.truncated,
-  };
-
-  return { cappedPayload, limits };
-}
-
-function normaliseCeeGraphVersionAndProvenance(graph: GraphV1 | undefined): GraphV1 | undefined {
-  if (!graph) {
-    return graph;
-  }
-
-  const edges = Array.isArray((graph as any).edges) ? ((graph as any).edges as any[]) : undefined;
-
-  if (!edges) {
-    return {
-      ...graph,
-      version: "1.2",
-    };
-  }
-
-  const normalisedEdges = edges.map((edge: any) => {
-    if (!edge || edge.provenance_source) {
-      return edge;
-    }
-
-    const cloned = { ...edge };
-
-    // If there is no provenance at all, treat this as an engine-originated edge.
-    if (cloned.provenance === undefined || cloned.provenance === null) {
-      cloned.provenance_source = "engine";
-      return cloned;
-    }
-
-    const prov = cloned.provenance;
-
-    // Lightweight inference for hypothesis provenance when structured provenance is present.
-    if (prov && typeof prov === "object" && typeof (prov as any).source === "string") {
-      const src = ((prov as any).source as string).toLowerCase();
-      if (src === "hypothesis") {
-        cloned.provenance_source = "hypothesis";
-      }
-      return cloned;
-    }
-
-    // Legacy string provenance: infer "hypothesis" when clearly marked, otherwise leave undefined.
-    if (typeof prov === "string") {
-      const src = prov.toLowerCase();
-      if (src.includes("hypothesis")) {
-        cloned.provenance_source = "hypothesis";
-      }
-      return cloned;
-    }
-
-    return cloned;
-  });
-
-  return {
-    ...graph,
-    version: "1.2",
-    edges: normalisedEdges as any,
-  };
-}
+// MinimumStructureResult, ConnectivityDiagnostic, checkConnectedMinimumStructure,
+// validateMinimumStructure → imported from transforms/structure-checks.ts
+// capList, applyResponseCaps, ResponseLimitsMeta → imported from transforms/response-caps.ts
+// normaliseCeeGraphVersionAndProvenance → imported from transforms/graph-normalisation.ts
 
 function archetypesEnabled(): boolean {
   return config.cee.draftArchetypesEnabled;
@@ -511,7 +175,7 @@ function clarifierEnabled(): boolean {
 
 type CEEClarifierBlockV1 = components["schemas"]["CEEClarifierBlockV1"];
 
-interface ClarifierIntegrationResult {
+export interface ClarifierIntegrationResult {
   clarifier?: CEEClarifierBlockV1;
   refinedGraph?: GraphV1;
   previousQuality?: number;
@@ -519,7 +183,7 @@ interface ClarifierIntegrationResult {
   convergenceStatus?: "complete" | "max_rounds" | "confident";
 }
 
-async function integrateClarifier(
+export async function integrateClarifier(
   input: DraftInputWithCeeExtras,
   graph: GraphV1,
   quality: { overall: number },
@@ -858,12 +522,7 @@ type PipelineStageEntry = {
 };
 
 // Risk coefficient correction record
-type RiskCoefficientCorrection = {
-  source: string;
-  target: string;
-  original: number;
-  corrected: number;
-};
+// RiskCoefficientCorrection → imported from transforms/risk-normalisation.ts
 
 // Transform record for pipeline observability
 type TransformEntry = {
@@ -898,44 +557,8 @@ type ValidationSummaryEntry = {
   suggestion?: string;
 };
 
-/**
- * Normalise risk coefficients: risk→goal and risk→outcome edges should have negative strength_mean.
- * LLM sometimes generates positive coefficients for risks, which is semantically incorrect.
- * This follows the "trust but verify" pattern used by goal repair.
- */
-export function normaliseRiskCoefficients(
-  nodes: Array<{ id: string; kind?: string }>,
-  edges: Array<{ from?: string; to?: string; strength_mean?: number; strength?: { mean?: number } }>
-): { edges: typeof edges; corrections: RiskCoefficientCorrection[] } {
-  const nodeKindMap = new Map(nodes.map(n => [n.id, n.kind?.toLowerCase()]));
-  const corrections: RiskCoefficientCorrection[] = [];
-
-  const normalisedEdges = edges.map(edge => {
-    const sourceKind = nodeKindMap.get(edge.from ?? "");
-    const targetKind = nodeKindMap.get(edge.to ?? "");
-
-    // Only process risk→goal and risk→outcome edges
-    if (sourceKind === "risk" && (targetKind === "goal" || targetKind === "outcome")) {
-      // Get the current strength_mean (checking both flat and nested formats)
-      const original = edge.strength_mean ?? edge.strength?.mean ?? 0.5;
-
-      // If positive, make it negative (risks should have negative impact on goals/outcomes)
-      if (original > 0) {
-        const corrected = -Math.abs(original);
-        corrections.push({
-          source: edge.from ?? "",
-          target: edge.to ?? "",
-          original,
-          corrected,
-        });
-        return { ...edge, strength_mean: corrected };
-      }
-    }
-    return edge;
-  });
-
-  return { edges: normalisedEdges, corrections };
-}
+// normaliseRiskCoefficients → imported from transforms/risk-normalisation.ts (re-exported for backwards compat)
+export { normaliseRiskCoefficients };
 
 export async function finaliseCeeDraftResponse(
   input: DraftInputWithCeeExtras,
@@ -1624,7 +1247,7 @@ export async function finaliseCeeDraftResponse(
       (n: any) => n.data?.value !== undefined || n.data?.factor_type !== undefined
     ).length;
 
-    const enrichmentTrace = (pipelineResult as any)?.trace?.enrich;
+    const enrichmentTrace = (payload as any)?.trace?.enrich;
     const extractionMode: string = enrichmentTrace?.extraction_mode
       ?? (enrichedFactorCount > 0 ? "regex" : "none");
 
@@ -2689,6 +2312,9 @@ export async function finaliseCeeDraftResponse(
   if (cappedPayload.trace?.strp) {
     (trace as any).strp = cappedPayload.trace.strp;
   }
+  if ((cappedPayload.trace as any)?.enrich) {
+    (trace as any).enrich = (cappedPayload.trace as any).enrich;
+  }
 
   const anyTruncated = ceeAnyTruncated(limits);
 
@@ -3024,7 +2650,7 @@ export async function finaliseCeeDraftResponse(
     };
 
     // Enrichment metadata from Pipeline B trace (CIL Step 12)
-    const pipelineBEnrich = (pipelineResult as any)?.trace?.enrich;
+    const pipelineBEnrich = (payload as any)?.trace?.enrich;
     if (pipelineBEnrich) {
       pipelineTrace.enrich = {
         ...pipelineBEnrich,
