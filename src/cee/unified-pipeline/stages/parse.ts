@@ -24,7 +24,7 @@ import {
   REPAIR_TIMEOUT_MS,
   getJitteredRetryDelayMs,
 } from "../../../config/timeouts.js";
-import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../../../adapters/llm/errors.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/telemetry.js";
 
@@ -187,6 +187,24 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         }, "LLM draft call aborted due to client disconnect");
         throw new ClientDisconnectError(
           "Client disconnected during LLM draft call",
+          llmDuration,
+          ctx.requestId,
+        );
+      }
+
+      // UpstreamTimeoutError with pre_aborted phase = external signal abort, not timeout.
+      // Route to ClientDisconnectError instead of retrying or wrapping in LLMTimeoutError.
+      if (error instanceof UpstreamTimeoutError && error.timeoutPhase === "pre_aborted") {
+        const llmDuration = Date.now() - llmStartTime;
+        log.info({
+          event: "cee.llm.call_aborted",
+          model: draftAdapter.model,
+          elapsed_ms: llmDuration,
+          reason: "client_disconnect_pre_aborted",
+          request_id: ctx.requestId,
+        }, "LLM draft call aborted due to pre-aborted signal (client disconnect)");
+        throw new ClientDisconnectError(
+          "Client disconnected before LLM draft call",
           llmDuration,
           ctx.requestId,
         );

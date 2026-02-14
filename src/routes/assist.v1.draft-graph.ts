@@ -16,7 +16,7 @@ import {
   transformResponseToV3,
   validateStrictModeV3,
 } from "../cee/transforms/index.js";
-import { mapMutationsToAdjustments } from "../cee/transforms/analysis-ready.js";
+import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../cee/transforms/analysis-ready.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 
 // Simple in-memory rate limiter for CEE Draft My Model
@@ -378,25 +378,43 @@ export default async function route(app: FastifyInstance) {
       const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
       const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
 
-      const result = await runUnifiedPipeline(baseInput, req.body, req, {
-        schemaVersion,
-        strictMode,
-        includeDebug: unsafeCaptureEnabled,
-        rawOutput: (baseInput as any).raw_output,
-        refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
-        forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
-        signal: req.raw.destroyed ? AbortSignal.abort() : undefined,
-        requestStartMs: start,
-      });
-
-      reply.header("X-CEE-API-Version", schemaVersion);
-      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
-      reply.header("X-CEE-Request-ID", requestId);
-      if (result.headers) {
-        for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
+      // Client disconnect detection — mirrors legacy pipeline (pipeline.ts:641-655).
+      // IMPORTANT: Check socket.destroyed, NOT req.raw.destroyed.
+      // req.raw (IncomingMessage) is always destroyed after Fastify reads the POST body.
+      // The TCP socket remains alive until the client actually disconnects.
+      const pipelineAbortController = new AbortController();
+      const socket = req.raw?.socket;
+      let socketCloseHandler: (() => void) | undefined;
+      if (socket && !socket.destroyed) {
+        socketCloseHandler = () => pipelineAbortController.abort();
+        socket.once("close", socketCloseHandler);
       }
-      reply.code(result.statusCode);
-      return reply.send(result.body);
+
+      try {
+        const result = await runUnifiedPipeline(baseInput, req.body, req, {
+          schemaVersion,
+          strictMode,
+          includeDebug: unsafeCaptureEnabled,
+          rawOutput: (baseInput as any).raw_output,
+          refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
+          forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
+          signal: pipelineAbortController.signal,
+          requestStartMs: start,
+        });
+
+        reply.header("X-CEE-API-Version", schemaVersion);
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        if (result.headers) {
+          for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
+        }
+        reply.code(result.statusCode);
+        return reply.send(result.body);
+      } finally {
+        if (socket && socketCloseHandler) {
+          socket.removeListener("close", socketCloseHandler);
+        }
+      }
     }
 
     // ── Legacy pipeline (Pipeline A + B) ─────────────────────────────
@@ -515,6 +533,15 @@ export default async function route(app: FastifyInstance) {
           const adjustments = mapMutationsToAdjustments(strpMutations, graphCorrections, nodeLabels);
           if (adjustments.length > 0) {
             v3Body.analysis_ready.model_adjustments = adjustments;
+          }
+        }
+
+        // Surface STRP constraint drops as blockers on analysis_ready
+        if (v3Body.analysis_ready && strpMutations?.length) {
+          const constraintBlockers = extractConstraintDropBlockers(strpMutations);
+          if (constraintBlockers.length > 0) {
+            if (!v3Body.analysis_ready.blockers) v3Body.analysis_ready.blockers = [];
+            v3Body.analysis_ready.blockers.push(...constraintBlockers);
           }
         }
 

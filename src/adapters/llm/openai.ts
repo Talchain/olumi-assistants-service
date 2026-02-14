@@ -806,14 +806,20 @@ export class OpenAIAdapter implements LLMAdapter {
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI draft call timed out");
+          // Distinguish external abort (client disconnect) from internal timeout
+          const isExternalAbort = externalSignal?.aborted === true;
+          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+          const msg = phase === "pre_aborted"
+            ? "OpenAI draft_graph aborted before LLM call started (possible client disconnect)"
+            : "OpenAI draft_graph timed out";
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, phase }, msg);
           throw new UpstreamTimeoutError(
-            "OpenAI draft_graph timed out",
+            msg,
             "openai",
             "draft_graph",
-            "body",
+            phase,
             elapsedMs,
-            error
+            { name: error.name, message: error.message }
           );
         }
 
@@ -833,7 +839,7 @@ export class OpenAIAdapter implements LLMAdapter {
             apiError.code || apiError.type,
             requestId,
             elapsedMs,
-            error
+            { name: error.name, message: error.message }
           );
         }
       }

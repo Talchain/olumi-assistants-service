@@ -78,6 +78,7 @@ import { groundAttachments, buildRefinementBrief } from "../../src/routes/assist
 import { calcConfidence, shouldClarify } from "../../src/utils/confidence.js";
 import { allowedCostUSD } from "../../src/utils/costGuard.js";
 import { getAdapter } from "../../src/adapters/llm/router.js";
+import { UpstreamTimeoutError, ClientDisconnectError } from "../../src/adapters/llm/errors.js";
 import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
@@ -373,5 +374,50 @@ describe("runStageParse", () => {
 
     // Restore
     (config as any).cee.refinementEnabled = false;
+  });
+
+  // ── Pre-aborted signal → ClientDisconnectError (regression) ────────────
+
+  it("throws ClientDisconnectError (not LLMTimeoutError) for pre_aborted UpstreamTimeoutError", async () => {
+    setupMocks();
+    const preAbortedErr = new UpstreamTimeoutError(
+      "OpenAI draft_graph aborted before LLM call started (possible client disconnect)",
+      "openai",
+      "draft_graph",
+      "pre_aborted",
+      1,
+      { name: "AbortError", message: "The operation was aborted." },
+    );
+
+    mockAdapter.draftGraph.mockRejectedValueOnce(preAbortedErr);
+
+    const ctx = makeCtx();
+    await expect(runStageParse(ctx)).rejects.toThrow(ClientDisconnectError);
+    // Must NOT retry — only 1 adapter call
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("pre_aborted UpstreamTimeoutError does not surface as LLMTimeoutError", async () => {
+    setupMocks();
+    const preAbortedErr = new UpstreamTimeoutError(
+      "OpenAI draft_graph aborted before LLM call started (possible client disconnect)",
+      "openai",
+      "draft_graph",
+      "pre_aborted",
+      2,
+      { name: "AbortError", message: "The operation was aborted." },
+    );
+
+    mockAdapter.draftGraph.mockRejectedValueOnce(preAbortedErr);
+
+    const ctx = makeCtx();
+    try {
+      await runStageParse(ctx);
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClientDisconnectError);
+      expect(err).not.toBeInstanceOf(UpstreamTimeoutError);
+      expect((err as any).message).toContain("Client disconnected");
+    }
   });
 });

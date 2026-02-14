@@ -16,7 +16,7 @@ export class UpstreamTimeoutError extends Error {
     message: string,
     public readonly provider: string,
     public readonly operation: string,
-    public readonly timeoutPhase: "connect" | "headers" | "body",
+    public readonly timeoutPhase: "connect" | "headers" | "body" | "pre_aborted",
     public readonly elapsedMs: number,
     public readonly cause?: unknown
   ) {
