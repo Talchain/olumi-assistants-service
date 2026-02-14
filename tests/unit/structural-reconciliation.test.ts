@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   reconcileStructuralTruth,
   normaliseConstraintTargets,
+  fuzzyMatchNodeId,
   type STRPResult,
 } from '../../src/validators/structural-reconciliation.js';
 import { validateGraph } from '../../src/validators/graph-validator.js';
@@ -629,5 +630,178 @@ describe('reconcileStructuralTruth', () => {
       const result = reconcileStructuralTruth(graph);
       expect(result.graph).toBe(graph);
     });
+  });
+
+  // =============================================================================
+  // Rule 3: Label-based fuzzy matching
+  // =============================================================================
+
+  describe('Rule 3: Label-based Constraint Matching', () => {
+    it('remaps constraint via label when stem matching fails', () => {
+      const graph = createValidGraph();
+      // Constraint targets fac_customer_retention, graph has fac_retention_rate
+      // Stems: "customer_retention" vs "retention_rate" → no substring match
+      // But label "Customer Retention Rate" → normalised "customer_retention_rate" → matches
+      graph.nodes.push({
+        id: 'fac_retention_rate',
+        kind: 'factor',
+        label: 'Customer Retention Rate',
+        data: { value: 0.85, extractionType: 'explicit' },
+      } as any);
+      graph.edges.push(
+        { from: 'fac_retention_rate', to: 'outcome_1', strength_mean: 0.7, belief_exists: 0.9 },
+      );
+
+      const nodeLabels = new Map<string, string>();
+      for (const n of graph.nodes) {
+        if (n.label) nodeLabels.set(n.id, n.label);
+      }
+
+      const constraints = [{ node_id: 'fac_customer_retention', constraint_id: 'c1', operator: '>=', value: 80 }];
+      const result = reconcileStructuralTruth(graph, {
+        goalConstraints: constraints as any,
+        nodeLabels,
+      });
+
+      expect(result.goalConstraints).toHaveLength(1);
+      expect(result.goalConstraints![0].node_id).toBe('fac_retention_rate');
+      const mutation = result.mutations.find(m => m.code === 'CONSTRAINT_REMAPPED');
+      expect(mutation).toBeDefined();
+      expect(mutation!.before).toBe('fac_customer_retention');
+      expect(mutation!.after).toBe('fac_retention_rate');
+    });
+
+    it('does not use label matching when stem matching already succeeds', () => {
+      const graph = createValidGraph();
+      // fac_pric → fac_price is a stem substring match
+      const constraints = [{ node_id: 'fac_pric', constraint_id: 'c1', operator: '>=', value: 100 }];
+      const nodeLabels = new Map<string, string>();
+      for (const n of graph.nodes) {
+        if (n.label) nodeLabels.set(n.id, n.label);
+      }
+
+      const result = reconcileStructuralTruth(graph, {
+        goalConstraints: constraints as any,
+        nodeLabels,
+      });
+
+      expect(result.goalConstraints![0].node_id).toBe('fac_price');
+    });
+
+    it('drops constraint when neither stem nor label produces unambiguous match', () => {
+      const graph = createValidGraph();
+      // Add two fac_ nodes whose labels both contain "throughput"
+      graph.nodes.push(
+        { id: 'fac_tp_alpha', kind: 'factor', label: 'Network Throughput' } as any,
+        { id: 'fac_tp_beta', kind: 'factor', label: 'Data Throughput' } as any,
+      );
+      const nodeLabels = new Map<string, string>();
+      for (const n of graph.nodes) {
+        if (n.label) nodeLabels.set(n.id, n.label);
+      }
+
+      const constraints = [{ node_id: 'fac_throughput', constraint_id: 'c1', operator: '>=', value: 100 }];
+      const result = reconcileStructuralTruth(graph, {
+        goalConstraints: constraints as any,
+        nodeLabels,
+      });
+
+      // Stem "throughput" doesn't match "tp_alpha" or "tp_beta"
+      // Label fallback: both normalise to contain "throughput" → ambiguous → drop
+      expect(result.goalConstraints).toHaveLength(0);
+      expect(result.mutations.find(m => m.code === 'CONSTRAINT_DROPPED')).toBeDefined();
+    });
+  });
+});
+
+// =============================================================================
+// fuzzyMatchNodeId — exported unit tests
+// =============================================================================
+
+describe('fuzzyMatchNodeId', () => {
+  const nodeIds = ['fac_price', 'fac_retention_rate', 'fac_churn', 'out_revenue', 'fac_marketing_budget'];
+
+  it('returns exact substring match on stems', () => {
+    // "pric" is substring of "price"
+    expect(fuzzyMatchNodeId('fac_pric', nodeIds)).toBe('fac_price');
+  });
+
+  it('returns undefined for ambiguous stem matches', () => {
+    // Both fac_price and fac_retention_rate could match something too broad
+    // "fac_" stem is too short
+    expect(fuzzyMatchNodeId('fac_a', nodeIds)).toBeUndefined();
+  });
+
+  it('returns undefined for stems shorter than MIN_FUZZY_STEM_LENGTH', () => {
+    expect(fuzzyMatchNodeId('fac_ab', nodeIds)).toBeUndefined();
+  });
+
+  it('respects prefix filtering (fac_ vs out_)', () => {
+    // fac_revenue won't match out_revenue due to prefix mismatch
+    expect(fuzzyMatchNodeId('fac_revenue', nodeIds)).toBeUndefined();
+  });
+
+  it('matches via label when stem matching fails', () => {
+    const labels = new Map([
+      ['fac_retention_rate', 'Customer Retention Rate'],
+      ['fac_price', 'Price'],
+      ['fac_churn', 'Churn Rate'],
+    ]);
+
+    // "customer_retention" doesn't substring-match "retention_rate" (stem)
+    // But does match normalised label "customer_retention_rate"
+    expect(fuzzyMatchNodeId('fac_customer_retention', nodeIds, labels)).toBe('fac_retention_rate');
+  });
+
+  it('returns undefined when label matching is ambiguous', () => {
+    // Use IDs where stem matching fails (no substring match on stems)
+    // but labels both contain the constraint stem
+    const ids = ['fac_rate_alpha', 'fac_rate_beta', 'fac_price'];
+    const labels = new Map([
+      ['fac_rate_alpha', 'Customer Satisfaction Score'],
+      ['fac_rate_beta', 'Employee Satisfaction Index'],
+    ]);
+
+    // Constraint stem "satisfaction" doesn't match stems "rate_alpha" or "rate_beta"
+    // But labels both normalise to contain "satisfaction" → ambiguous
+    expect(fuzzyMatchNodeId('fac_satisfaction', ids, labels)).toBeUndefined();
+  });
+
+  it('returns undefined when no labels provided and stem fails', () => {
+    expect(fuzzyMatchNodeId('fac_customer_retention', nodeIds)).toBeUndefined();
+  });
+
+  it('label matching normalises special characters', () => {
+    const labels = new Map([
+      ['fac_marketing_budget', 'Marketing & Advertising Budget'],
+    ]);
+
+    // "marketing" is substring of "marketing___advertising_budget" normalised
+    expect(fuzzyMatchNodeId('fac_marketing', nodeIds, labels)).toBe('fac_marketing_budget');
+  });
+
+  it('label fallback respects prefix filtering (fac_ constraint does not match out_ node)', () => {
+    // Constraint is fac_revenue, only label match is on out_revenue which has prefix out_
+    const ids = ['out_revenue_growth', 'fac_price', 'fac_churn'];
+    const labels = new Map([
+      ['out_revenue_growth', 'Revenue Growth Forecast'],
+      ['fac_price', 'Price'],
+      ['fac_churn', 'Churn Rate'],
+    ]);
+
+    // Stem "revenue" doesn't match any fac_ node stems
+    // Label "revenue_growth_forecast" matches but node is out_ prefix → must be rejected
+    expect(fuzzyMatchNodeId('fac_revenue', ids, labels)).toBeUndefined();
+  });
+
+  it('label fallback allows same-prefix match while rejecting cross-prefix', () => {
+    const ids = ['fac_rev_target', 'out_revenue_growth'];
+    const labels = new Map([
+      ['fac_rev_target', 'Annual Revenue Target'],
+      ['out_revenue_growth', 'Revenue Growth Outcome'],
+    ]);
+
+    // Both labels contain "revenue", but only fac_rev_target shares the fac_ prefix
+    expect(fuzzyMatchNodeId('fac_revenue', ids, labels)).toBe('fac_rev_target');
   });
 });

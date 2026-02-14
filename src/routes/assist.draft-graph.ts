@@ -41,7 +41,7 @@ import {
   GraphValidationError,
   type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
-import { reconcileStructuralTruth } from "../validators/structural-reconciliation.js";
+import { reconcileStructuralTruth, fuzzyMatchNodeId } from "../validators/structural-reconciliation.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
@@ -1591,11 +1591,35 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     // Add constraint nodes and edges to the candidate graph
     // Only add constraints whose target node exists (avoid orphan nodes)
     const existingNodeIds = new Set(candidate.nodes.map(n => n.id));
+    const existingNodeIdList = [...existingNodeIds];
 
-    // Filter constraint edges to only include those whose target exists
-    const edgesToAdd = constraintEdgesToGraphEdges(constraintEdges).filter(
-      e => existingNodeIds.has(e.to)
-    );
+    // Build label map for label-based fuzzy matching fallback
+    const nodeLabelsForConstraints = new Map<string, string>();
+    for (const n of candidate.nodes) {
+      if (n.label) nodeLabelsForConstraints.set(n.id, n.label);
+    }
+
+    // Filter constraint edges: exact match → keep, fuzzy match → remap, else drop
+    let fuzzyRemapCount = 0;
+    const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
+    const edgesToAdd = rawEdges.filter((e) => {
+      if (existingNodeIds.has(e.to)) return true;
+
+      const match = fuzzyMatchNodeId(e.to, existingNodeIdList, nodeLabelsForConstraints);
+      if (match) {
+        log.info({
+          event: "cee.compound_goal.fuzzy_remap",
+          request_id: correlationId,
+          original_target: e.to,
+          remapped_target: match,
+        }, `Constraint edge target fuzzy-remapped: ${e.to} → ${match}`);
+        (e as any).to = match;
+        fuzzyRemapCount++;
+        return true;
+      }
+
+      return false;
+    });
 
     // Get the set of constraint IDs that have valid edges (their targets exist)
     const constraintIdsWithValidTargets = new Set(edgesToAdd.map(e => e.from));
@@ -1622,6 +1646,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       constraint_count: goalConstraints.length,
       constraint_nodes_added: nodesToAdd.length,
       constraint_edges_added: edgesToAdd.length,
+      constraint_edges_fuzzy_remapped: fuzzyRemapCount,
       constraints_skipped_no_target: skippedCount,
       is_compound: compoundGoalResult.isCompound,
     }, "Compound goal constraints integrated into graph");
@@ -1633,11 +1658,18 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   // Rule 3 runs here because constraints are only available after compound goal extraction.
   // Rule 5 (fillControllableData) fills factor_type/uncertainty_drivers on controllable
   // factors — must run late because enrichment and repair overwrite early-STRP values.
+  // Build nodeLabels for label-based fuzzy matching in Rule 3
+  const lateStrpNodeLabels = new Map<string, string>();
+  for (const n of candidate.nodes) {
+    if (n.label) lateStrpNodeLabels.set(n.id, n.label);
+  }
+
   let constraintStrpResult: ReturnType<typeof reconcileStructuralTruth> | undefined;
   constraintStrpResult = reconcileStructuralTruth(candidate, {
     goalConstraints: goalConstraints?.length ? goalConstraints : undefined,
     requestId: correlationId,
     fillControllableData: true,
+    nodeLabels: lateStrpNodeLabels,
   });
   if (constraintStrpResult.goalConstraints) {
     goalConstraints = constraintStrpResult.goalConstraints as typeof goalConstraints;

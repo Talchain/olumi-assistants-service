@@ -368,9 +368,21 @@ function stripNodePrefix(id: string): { stem: string; prefix: string } {
   return { stem: id, prefix: "" };
 }
 
-function fuzzyMatchNodeId(
+/**
+ * Fuzzy-match a constraint node ID against a set of graph node IDs.
+ *
+ * Matching strategy (in order):
+ *  1. Case-insensitive substring on de-prefixed stems (existing)
+ *  2. If stem matching is ambiguous or empty AND nodeLabels is provided,
+ *     normalise each node's label to a slug and try substring matching
+ *     against the constraint stem.
+ *
+ * Returns the matched node ID if exactly 1 unambiguous match; undefined otherwise.
+ */
+export function fuzzyMatchNodeId(
   constraintNodeId: string,
-  nodeIds: string[]
+  nodeIds: string[],
+  nodeLabels?: Map<string, string>,
 ): string | undefined {
   const { stem: constraintStem, prefix: constraintPrefix } = stripNodePrefix(constraintNodeId);
   const constraintStemLower = constraintStem.toLowerCase();
@@ -391,7 +403,35 @@ function fuzzyMatchNodeId(
     }
   }
 
-  return matches.length === 1 ? matches[0] : undefined;
+  if (matches.length === 1) return matches[0];
+
+  // ── Label-based fallback ───────────────────────────────────────────────
+  // When stem matching produces 0 or >1 results, try matching against
+  // normalised node labels (e.g. "Customer Retention Rate" → "customer_retention_rate").
+  if (nodeLabels && nodeLabels.size > 0) {
+    const labelMatches: string[] = [];
+
+    for (const nodeId of nodeIds) {
+      // Apply same prefix safety as stem matching — don't cross node families
+      const { prefix: nodePrefix } = stripNodePrefix(nodeId);
+      if (constraintPrefix && nodePrefix && constraintPrefix !== nodePrefix) continue;
+
+      const label = nodeLabels.get(nodeId);
+      if (!label) continue;
+
+      // Normalise label the same way the extractor normalises target names
+      const normLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      if (normLabel.length < MIN_FUZZY_STEM_LENGTH) continue;
+
+      if (normLabel.includes(constraintStemLower) || constraintStemLower.includes(normLabel)) {
+        labelMatches.push(nodeId);
+      }
+    }
+
+    if (labelMatches.length === 1) return labelMatches[0];
+  }
+
+  return undefined;
 }
 
 /**
@@ -405,6 +445,7 @@ export function normaliseConstraintTargets(
   constraints: Array<{ node_id: string; [key: string]: unknown }>,
   nodeIds: string[],
   requestId?: string,
+  nodeLabels?: Map<string, string>,
 ): ConstraintNormalisationResult {
   const issues: ValidationIssue[] = [];
   const result: Array<{ node_id: string; [key: string]: unknown }> = [];
@@ -423,7 +464,7 @@ export function normaliseConstraintTargets(
       continue;
     }
 
-    const match = fuzzyMatchNodeId(originalNodeId, nodeIds);
+    const match = fuzzyMatchNodeId(originalNodeId, nodeIds, nodeLabels);
 
     if (match) {
       result.push({ ...constraint, node_id: match });
@@ -482,8 +523,9 @@ function constraintTargetRule(
   goalConstraints: Array<{ node_id: string; [key: string]: unknown }>,
   nodeIds: string[],
   requestId?: string,
+  nodeLabels?: Map<string, string>,
 ): { mutations: STRPMutation[]; constraints: Array<{ node_id: string; [key: string]: unknown }> } {
-  const normResult = normaliseConstraintTargets(goalConstraints, nodeIds, requestId);
+  const normResult = normaliseConstraintTargets(goalConstraints, nodeIds, requestId, nodeLabels);
   const mutations: STRPMutation[] = [];
 
   for (const issue of normResult.issues) {
@@ -577,6 +619,8 @@ export function reconcileStructuralTruth(
     /** Run data-completeness pass for controllable factors. Use in late-pipeline
      *  STRP only — early calls skip this because enrichment/repair overwrite the values. */
     fillControllableData?: boolean;
+    /** Map of node ID → label for label-based fuzzy matching in Rule 3 */
+    nodeLabels?: Map<string, string>;
   },
 ): STRPResult {
   const requestId = options?.requestId;
@@ -597,7 +641,7 @@ export function reconcileStructuralTruth(
   let normalisedConstraints = options?.goalConstraints;
   if (normalisedConstraints && normalisedConstraints.length > 0) {
     const nodeIds = graph.nodes.map((n) => n.id);
-    const constraintResult = constraintTargetRule(normalisedConstraints, nodeIds, requestId);
+    const constraintResult = constraintTargetRule(normalisedConstraints, nodeIds, requestId, options?.nodeLabels);
     mutations.push(...constraintResult.mutations);
     normalisedConstraints = constraintResult.constraints;
   }

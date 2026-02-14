@@ -12,10 +12,17 @@ import { reconcileStructuralTruth } from "../../../../validators/structural-reco
 export function runLateStrp(ctx: StageContext): void {
   if (!ctx.graph) return;
 
+  // Build nodeLabels map for label-based fuzzy matching in Rule 3
+  const nodeLabels = new Map<string, string>();
+  for (const node of (ctx.graph as any).nodes) {
+    if (node.label) nodeLabels.set(node.id, node.label);
+  }
+
   const result = reconcileStructuralTruth(ctx.graph as any, {
     goalConstraints: ctx.goalConstraints?.length ? ctx.goalConstraints : undefined,
     requestId: ctx.requestId,
     fillControllableData: true,
+    nodeLabels,
   });
 
   ctx.graph = result.graph as any;

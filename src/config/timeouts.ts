@@ -158,9 +158,9 @@ export const DRAFT_BUDGET_MS = clampTimeout(
   parseTimeoutEnv("CEE_DRAFT_BUDGET_MS", 25_000),
 );
 
-/** Repair LLM call timeout (default: 10s, clamped 5s–5m) */
+/** Repair LLM call timeout (default: 20s, clamped 5s–5m) */
 export const REPAIR_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("CEE_REPAIR_TIMEOUT_MS", 10_000),
+  parseTimeoutEnv("CEE_REPAIR_TIMEOUT_MS", 20_000),
 );
 
 // ---------------------------------------------------------------------------
