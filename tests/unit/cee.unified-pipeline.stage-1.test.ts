@@ -420,4 +420,32 @@ describe("runStageParse", () => {
       expect((err as any).message).toContain("Client disconnected");
     }
   });
+
+  it("body UpstreamTimeoutError still retries and throws LLMTimeoutError (not ClientDisconnectError)", async () => {
+    setupMocks();
+    const bodyTimeoutErr = new UpstreamTimeoutError(
+      "OpenAI draft_graph timed out",
+      "openai",
+      "draft_graph",
+      "body",
+      80000,
+      { name: "AbortError", message: "The operation was aborted." },
+    );
+
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(bodyTimeoutErr)
+      .mockRejectedValueOnce(bodyTimeoutErr);
+
+    const ctx = makeCtx();
+    try {
+      await runStageParse(ctx);
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      // Must be LLMTimeoutError, NOT ClientDisconnectError
+      expect((err as any).name).toBe("LLMTimeoutError");
+      expect(err).not.toBeInstanceOf(ClientDisconnectError);
+      // Must have retried (2 attempts)
+      expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+    }
+  });
 });
