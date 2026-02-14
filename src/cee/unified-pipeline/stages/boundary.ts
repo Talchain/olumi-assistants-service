@@ -9,7 +9,7 @@
 import type { StageContext } from "../types.js";
 import { transformResponseToV3, validateStrictModeV3 } from "../../transforms/schema-v3.js";
 import { transformResponseToV2 } from "../../transforms/schema-v2.js";
-import { mapMutationsToAdjustments } from "../../transforms/analysis-ready.js";
+import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../transforms/analysis-ready.js";
 import { log } from "../../../utils/telemetry.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
@@ -49,6 +49,15 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       const adjustments = mapMutationsToAdjustments(strpMutations, graphCorrections, nodeLabels);
       if (adjustments.length > 0) {
         v3Body.analysis_ready.model_adjustments = adjustments;
+      }
+    }
+
+    // Surface STRP constraint drops as blockers
+    if (v3Body.analysis_ready && strpMutations?.length) {
+      const constraintBlockers = extractConstraintDropBlockers(strpMutations);
+      if (constraintBlockers.length > 0) {
+        if (!v3Body.analysis_ready.blockers) v3Body.analysis_ready.blockers = [];
+        v3Body.analysis_ready.blockers.push(...constraintBlockers);
       }
     }
 

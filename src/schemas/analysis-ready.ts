@@ -92,12 +92,12 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
  * Blocker type for analysis-ready payload.
  * Identifies why an option-factor pair can't produce an intervention magnitude.
  */
-export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection"]);
+export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection", "constraint_dropped"]);
 
 /**
  * Suggested action to resolve a blocker.
  */
-export const AnalysisBlockerAction = z.enum(["add_value", "confirm_value", "add_edge"]);
+export const AnalysisBlockerAction = z.enum(["add_value", "confirm_value", "add_edge", "review_constraint"]);
 
 /**
  * Blocker entry for an option-factor pair that can't produce an intervention magnitude.

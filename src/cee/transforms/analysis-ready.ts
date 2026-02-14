@@ -782,3 +782,58 @@ export function mapMutationsToAdjustments(
 
   return adjustments;
 }
+
+// ============================================================================
+// Constraint-Drop Blocker Extraction
+// ============================================================================
+
+/**
+ * Extract STRP constraint-drop mutations as analysis_ready blockers.
+ *
+ * When STRP drops a constraint because the target node doesn't exist in the
+ * graph, the mutation has code "CONSTRAINT_DROPPED". This function converts
+ * those mutations into properly typed AnalysisBlocker entries so users see
+ * that their constraints were silently removed.
+ *
+ * Note: These blockers are informational — they do NOT change analysis_ready.status.
+ * The status is computed before constraint-drop blockers are injected, and is not
+ * recomputed afterwards. This is by design: dropped constraints mean the graph is
+ * still runnable, it just won't enforce those constraints.
+ *
+ * Field mapping:
+ * - factor_id: The target node_id the constraint referenced (from mutation.before)
+ * - factor_label: Same as factor_id (the node doesn't exist, so we have no label)
+ * - message: Includes constraint_id for traceability
+ *
+ * @param mutations - STRP mutation records (from trace.strp.mutations)
+ * @returns Deduplicated blocker entries for dropped constraints
+ */
+export function extractConstraintDropBlockers(
+  mutations: Array<{ code?: string; constraint_id?: string; before?: unknown; reason?: string }>,
+): AnalysisBlockerT[] {
+  const seen = new Set<string>();
+  const blockers: AnalysisBlockerT[] = [];
+
+  for (const m of mutations) {
+    if (m.code !== "CONSTRAINT_DROPPED") continue;
+
+    // Dedup by constraint_id (or target node_id if no constraint_id)
+    const dedupKey = m.constraint_id ?? (typeof m.before === "string" ? m.before : "");
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+
+    // factor_id = target node_id (matches AnalysisBlocker schema: "Factor node ID")
+    const targetNodeId = typeof m.before === "string" ? m.before : "unknown";
+    const constraintLabel = m.constraint_id ? ` (${m.constraint_id})` : "";
+
+    blockers.push({
+      factor_id: targetNodeId,
+      factor_label: targetNodeId,
+      blocker_type: "constraint_dropped" as const,
+      message: `Constraint dropped${constraintLabel}: ${m.reason ?? "target node not found in graph"}`,
+      suggested_action: "review_constraint" as const,
+    });
+  }
+
+  return blockers;
+}

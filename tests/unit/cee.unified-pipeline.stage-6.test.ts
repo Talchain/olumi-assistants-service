@@ -21,6 +21,7 @@ vi.mock("../../src/cee/transforms/schema-v2.js", () => ({
 // Mock analysis-ready
 vi.mock("../../src/cee/transforms/analysis-ready.js", () => ({
   mapMutationsToAdjustments: vi.fn(),
+  extractConstraintDropBlockers: vi.fn(),
 }));
 
 // Mock telemetry
@@ -31,7 +32,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";
 import { transformResponseToV3, validateStrictModeV3 } from "../../src/cee/transforms/schema-v3.js";
 import { transformResponseToV2 } from "../../src/cee/transforms/schema-v2.js";
-import { mapMutationsToAdjustments } from "../../src/cee/transforms/analysis-ready.js";
+import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../src/cee/transforms/analysis-ready.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ function setupDefaultMocks() {
   (mapMutationsToAdjustments as any).mockReturnValue([
     { type: "strength_clamp", description: "Clamped" },
   ]);
+  (extractConstraintDropBlockers as any).mockReturnValue([]);
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -223,5 +225,100 @@ describe("runStageBoundary", () => {
     expect(transformResponseToV3).not.toHaveBeenCalled();
     expect(transformResponseToV2).not.toHaveBeenCalled();
     expect(ctx.finalResponse).toBe(ctx.ceeResponse);
+  });
+
+  // ── Constraint-drop blockers ────────────────────────────────────────
+
+  it("injects constraint-drop blockers into analysis_ready.blockers", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): no match", suggested_action: "review_constraint" },
+      { factor_id: "fac_y", factor_label: "fac_y", blocker_type: "constraint_dropped", message: "Constraint dropped (c2): no match", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {
+          strp: {
+            mutations: [
+              { code: "CONSTRAINT_DROPPED", constraint_id: "c1", before: "fac_x", reason: "no match" },
+              { code: "CONSTRAINT_DROPPED", constraint_id: "c2", before: "fac_y", reason: "no match" },
+            ],
+          },
+        },
+      },
+    });
+
+    await runStageBoundary(ctx);
+
+    expect(extractConstraintDropBlockers).toHaveBeenCalledTimes(1);
+    expect(ctx.finalResponse.analysis_ready.blockers).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.blockers[0]).toEqual(
+      expect.objectContaining({ blocker_type: "constraint_dropped", factor_id: "fac_x" }),
+    );
+  });
+
+  it("preserves existing blockers when adding constraint-drop blockers", async () => {
+    const existingBlocker = {
+      option_id: "o1",
+      factor_id: "f1",
+      factor_label: "Factor 1",
+      blocker_type: "missing_value",
+      message: "needs value",
+      suggested_action: "add_value",
+    };
+
+    (transformResponseToV3 as any).mockReturnValue({
+      ...structuredClone(v3Body),
+      analysis_ready: {
+        status: "needs_user_input",
+        blockers: [existingBlocker],
+      },
+    });
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): dropped", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.blockers).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.blockers[0]).toEqual(existingBlocker);
+    expect(ctx.finalResponse.analysis_ready.blockers[1].blocker_type).toBe("constraint_dropped");
+  });
+
+  it("does not change analysis_ready.status when constraint-drop blockers are added", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([
+      { factor_id: "fac_x", factor_label: "fac_x", blocker_type: "constraint_dropped", message: "Constraint dropped (c1): dropped", suggested_action: "review_constraint" },
+    ]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    // Status was "ready" before injection — it must remain "ready"
+    expect(ctx.finalResponse.analysis_ready.status).toBe("ready");
+  });
+
+  it("does not add blockers when extractConstraintDropBlockers returns empty", async () => {
+    (extractConstraintDropBlockers as any).mockReturnValue([]);
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    // analysis_ready should not have a blockers array
+    expect(ctx.finalResponse.analysis_ready.blockers).toBeUndefined();
+  });
+
+  it("does not inject blockers when analysis_ready is absent", async () => {
+    (transformResponseToV3 as any).mockReturnValue({
+      nodes: [],
+      edges: [],
+      analysis_ready: undefined,
+    });
+
+    const ctx = makeCtx();
+    await runStageBoundary(ctx);
+
+    expect(extractConstraintDropBlockers).not.toHaveBeenCalled();
   });
 });
