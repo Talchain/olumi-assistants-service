@@ -196,12 +196,20 @@ export function handleUnreachableFactors(
       action: `Reclassified unreachable factor "${node.label ?? node.id}" to external`,
     });
 
-    // Strip controllable-only fields when reclassifying to external
+    // Strip controllable-only fields when reclassifying to external.
+    // After stripping, if `data` can't satisfy any NodeData union branch
+    // (OptionData needs `interventions`, ConstraintNodeData needs `operator`,
+    // FactorData needs `value`), remove `data` entirely — Node.data is optional.
     const data = (node as any).data;
     if (data) {
       delete data.value;
       delete data.factor_type;
       delete data.uncertainty_drivers;
+      // If remaining data has no union-required key, remove the property
+      // so DraftGraphOutput.parse() doesn't fail on a partial object.
+      if (!("interventions" in data) && !("operator" in data) && !("value" in data)) {
+        delete (node as any).data;
+      }
     }
 
     // Check if factor has path to goal

@@ -39,8 +39,8 @@ export const FactorData = z.object({
     min: z.number(),
     max: z.number()
   }).optional(),
-  /** How the value was extracted (explicit, inferred, range) */
-  extractionType: z.enum(["explicit", "inferred", "range"]).optional(),
+  /** How the value was extracted (explicit, inferred, range, observed) */
+  extractionType: z.enum(["explicit", "inferred", "range", "observed"]).optional(),
   /** Extraction confidence (0-1) for uncertainty derivation */
   confidence: z.number().min(0).max(1).optional(),
   /** For range extractions: minimum bound */

@@ -393,6 +393,8 @@ describe("unreachable factors", () => {
     expect(result.reclassified).toContain("fac_market");
     const marketNode = graph.nodes.find((n: any) => n.id === "fac_market");
     expect(marketNode.category).toBe("external");
+    // data removed: after stripping value/factor_type, no union-required key remains
+    expect(marketNode.data).toBeUndefined();
   });
 
   it("preserves external factor with path to goal (no blocker)", () => {
@@ -1134,6 +1136,9 @@ describe("handleUnreachableFactors — proactive scan", () => {
     expect(result.reclassified).toContain("fac_orphan");
     const orphanNode = graph.nodes.find((n: any) => n.id === "fac_orphan");
     expect(orphanNode.category).toBe("external");
+    // data is removed entirely because after stripping value/factor_type/uncertainty_drivers,
+    // the remaining object can't satisfy any NodeData union branch (FactorData requires value)
+    expect(orphanNode.data).toBeUndefined();
   });
 
   it("does NOT reclassify factors reachable via factor→factor chains", () => {

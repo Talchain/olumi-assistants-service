@@ -58,8 +58,8 @@ export const ObservedStateV3 = z.object({
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
   cap: z.number().optional(),
-  /** How the value was extracted (explicit, inferred, range) */
-  extractionType: z.enum(["explicit", "inferred", "range"]).optional(),
+  /** How the value was extracted (explicit, inferred, range, observed) */
+  extractionType: z.enum(["explicit", "inferred", "range", "observed"]).optional(),
   /** Factor type classification for downstream enrichment */
   factor_type: FactorTypeV3.optional(),
   /** 1-2 short phrases explaining sources of epistemic uncertainty */

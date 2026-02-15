@@ -404,10 +404,12 @@ function fixObservableMissingData(
       changed = true;
     }
 
-    const data = (node as any).data ?? {};
-    if (data.extractionType === undefined) {
+    // Only add extractionType to data if data already has a union-satisfying key
+    // (FactorData requires `value`). Creating data={extractionType:"observed"} alone
+    // would fail the NodeData union validation in DraftGraphOutput.parse().
+    const data = (node as any).data;
+    if (data && data.value !== undefined && data.extractionType === undefined) {
       data.extractionType = "observed";
-      (node as any).data = data;
       changed = true;
     }
 
@@ -492,7 +494,11 @@ function fixExternalHasData(
       delete data.uncertainty_drivers;
       changed = true;
     }
-    // Preserve extractionType
+    // After stripping, if `data` can't satisfy any NodeData union branch,
+    // remove it entirely — Node.data is optional in the schema.
+    if (changed && !("interventions" in data) && !("operator" in data) && !("value" in data)) {
+      delete (node as any).data;
+    }
 
     if (changed) {
       repairs.push({

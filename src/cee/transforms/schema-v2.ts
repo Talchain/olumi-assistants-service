@@ -154,6 +154,7 @@ export interface V1DraftGraphResponse {
     };
     /** Pipeline diagnostics (P0) */
     pipeline?: Record<string, unknown>;
+    [key: string]: unknown;
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{
