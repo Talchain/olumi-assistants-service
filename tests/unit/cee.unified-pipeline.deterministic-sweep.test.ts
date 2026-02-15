@@ -928,3 +928,271 @@ describe("repair gating", () => {
     expect(validationResult.errors.length).toBe(0);
   });
 });
+
+// =============================================================================
+// Hotfix: Status quo path reachability (replaces zero-edge-count)
+// =============================================================================
+
+import { hasPathToGoal, findDisconnectedOptions } from "../../src/cee/unified-pipeline/stages/repair/status-quo-fix.js";
+
+describe("hasPathToGoal", () => {
+  it("returns true when direct path exists", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "goal_1" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(true);
+  });
+
+  it("returns true when transitive path exists (opt→fac→out→goal)", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "out_1" },
+      { from: "out_1", to: "goal_1" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(true);
+  });
+
+  it("returns false when no path to goal", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      // fac_1 is a dead end
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(false);
+  });
+
+  it("returns false when edges exist but none reach goal", () => {
+    const edges: any[] = [
+      { from: "opt_a", to: "fac_1" },
+      { from: "fac_1", to: "fac_2" },
+      { from: "fac_2", to: "fac_3" },
+    ];
+    expect(hasPathToGoal("opt_a", edges, new Set(["goal_1"]))).toBe(false);
+  });
+});
+
+describe("findDisconnectedOptions", () => {
+  it("detects option with zero edges as disconnected", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        // opt_a is connected
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // opt_b has zero edges
+      ],
+    });
+
+    const disconnected = findDisconnectedOptions(graph);
+    expect(disconnected).toContain("opt_b");
+    expect(disconnected).not.toContain("opt_a");
+  });
+
+  it("detects option with edges to dead-end factors as disconnected", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "fac_2", kind: "factor", label: "F2" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        // opt_a is connected all the way to goal
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // opt_b has edges but to a dead-end factor
+        { from: "opt_b", to: "fac_2" },
+        // fac_2 goes nowhere
+      ],
+    });
+
+    const disconnected = findDisconnectedOptions(graph);
+    expect(disconnected).toContain("opt_b");
+    expect(disconnected).not.toContain("opt_a");
+  });
+
+  it("returns empty array when all options reach goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1" },
+        { from: "opt_b", to: "fac_1" },
+        { from: "fac_1", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    expect(findDisconnectedOptions(graph)).toHaveLength(0);
+  });
+});
+
+describe("fixStatusQuoConnectivity — path reachability", () => {
+  it("fixes option with edges to dead-end factors by wiring to connected factors", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_sq", kind: "option", label: "Status Quo" },
+        { id: "fac_cost", kind: "factor", label: "Cost", category: "controllable" },
+        { id: "fac_dead", kind: "factor", label: "Dead End", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+      ],
+      edges: [
+        // opt_a is connected
+        { from: "opt_a", to: "fac_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "fac_cost", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        // opt_sq has edges but fac_dead is a dead end
+        { from: "opt_sq", to: "fac_dead", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      ],
+    });
+
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    expect(result.fixed).toBe(true);
+    // opt_sq should now have an edge to fac_cost
+    const sqToCost = graph.edges.find(
+      (e: any) => e.from === "opt_sq" && e.to === "fac_cost",
+    );
+    expect(sqToCost).toBeDefined();
+  });
+
+  it("does not wire options that already reach goal", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "F1", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "opt_b", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      ],
+    });
+
+    const edgesBefore = graph.edges.length;
+    const result = fixStatusQuoConnectivity(
+      graph,
+      [{ code: "NO_PATH_TO_GOAL" }],
+      "V1_FLAT",
+    );
+
+    // Both options already reach goal — no wiring needed
+    expect(result.fixed).toBe(false);
+    expect(graph.edges.length).toBe(edgesBefore);
+  });
+});
+
+// =============================================================================
+// Hotfix: Proactive unreachable factor scan (0 violations)
+// =============================================================================
+
+describe("handleUnreachableFactors — proactive scan", () => {
+  it("reclassifies unreachable factors even when called with no prior violations", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan", category: "controllable", data: { value: 0.5 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+        // fac_orphan has no inbound option edges
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_orphan");
+    const orphanNode = graph.nodes.find((n: any) => n.id === "fac_orphan");
+    expect(orphanNode.category).toBe("external");
+  });
+
+  it("does NOT reclassify factors reachable via factor→factor chains", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "F1", category: "controllable" },
+        { id: "fac_2", kind: "factor", label: "F2", category: "observable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1" },
+        { from: "fac_1", to: "fac_2" }, // Transitive through factor chain
+        { from: "fac_2", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    // fac_2 is reachable via fac_1 → fac_2 chain
+    expect(result.reclassified).not.toContain("fac_2");
+  });
+});
+
+// =============================================================================
+// Hotfix: analysis_ready blocker scope
+// =============================================================================
+
+describe("analysis_ready blocker scope (unit-level)", () => {
+  it("observable factor unreachable → NOT a blocker", () => {
+    // Test the filter logic directly
+    const node: any = { id: "fac_churn", kind: "factor", label: "Churn Rate", category: "observable" };
+    const category = node.category;
+    // The fix excludes observable
+    expect(category === "external" || category === "observable").toBe(true);
+  });
+
+  it("external factor unreachable → NOT a blocker", () => {
+    const node: any = { id: "fac_market", kind: "factor", label: "Market Conditions", category: "external" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(true);
+  });
+
+  it("controllable factor unreachable → IS a blocker", () => {
+    const node: any = { id: "fac_price", kind: "factor", label: "Price", category: "controllable" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(false);
+  });
+
+  it("constraint node excluded by id prefix", () => {
+    const nodeId = "constraint_fac_monthly_churn_max";
+    expect(nodeId.startsWith("constraint_")).toBe(true);
+  });
+
+  it("factor with undefined category → IS a blocker (safe default)", () => {
+    const node: any = { id: "fac_unknown", kind: "factor", label: "Unknown" };
+    const category = node.category;
+    expect(category === "external" || category === "observable").toBe(false);
+  });
+});

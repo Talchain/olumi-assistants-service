@@ -626,6 +626,8 @@ export function transformResponseToV3(
       ...((v1Response.trace as any)?.strp && { strp: (v1Response.trace as any).strp }),
       // Enrichment metadata (Pipeline B, Step 12)
       ...((v1Response.trace as any)?.enrich && { enrich: (v1Response.trace as any).enrich }),
+      // Deterministic repair summary for observability
+      ...((v1Response.trace as any)?.repair_summary && { repair_summary: (v1Response.trace as any).repair_summary }),
     },
     draft_warnings: v1Response.draft_warnings,
   };

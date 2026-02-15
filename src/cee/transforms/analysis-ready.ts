@@ -388,13 +388,19 @@ export function buildAnalysisReadyPayload(
   const unreachableControllableBlockers: AnalysisBlockerT[] = [];
   for (const node of graph.nodes) {
     if (node.kind !== "factor") continue;
+    // Exclude constraint nodes by ID prefix (compound-goals creates constraint_* nodes with kind=constraint,
+    // but guard against any that might be mis-tagged as factor)
+    if (node.id.startsWith("constraint_")) continue;
     if (transitivelyReachableFactors.has(node.id)) continue;
     // Skip factors that already have mapped interventions (reachable via V3 option data)
     if (factorsWithInterventions.has(node.id)) continue;
-    // Only controllable factors trigger this blocker — external factors are legitimate
+    // Only controllable factors (or undefined category) trigger this blocker.
+    // External and observable factors are contextual — they influence outcomes but
+    // aren't intervention targets, so they're legitimate without option connections.
     const category = (node as any).category;
     if (category === "external") continue;
-    // If category is undefined or "controllable" or "observable", it's a blocker
+    if (category === "observable") continue;
+    // Only category === "controllable" or category === undefined triggers blocker
     unreachableControllableBlockers.push({
       factor_id: node.id,
       factor_label: node.label ?? node.id,

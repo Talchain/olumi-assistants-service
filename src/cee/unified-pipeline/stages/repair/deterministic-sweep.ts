@@ -18,7 +18,7 @@ import { validateGraph as validateGraphDeterministic } from "../../../../validat
 import { detectEdgeFormat, canonicalStructuralEdge } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
-import { fixStatusQuoConnectivity } from "./status-quo-fix.js";
+import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { log } from "../../../../utils/telemetry.js";
 
 // ---------------------------------------------------------------------------
@@ -536,102 +536,114 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const nodesBefore = nodes.length;
   const edgesBefore = edges.length;
 
-  // Step 2: Collect validation errors using the graph-validator
+  // Step 2: Detect edge format once (needed by all downstream steps)
+  const format = detectEdgeFormat(edges);
+  ctx.detectedEdgeFormat = format;
+
+  // Step 3: Collect validation errors using the graph-validator
   const validationResult = validateGraphDeterministic({ graph, requestId: ctx.requestId });
   const allViolations = validationResult.errors;
 
-  if (allViolations.length === 0) {
-    // No violations — no sweep needed
-    ctx.deterministicRepairs = [];
-    ctx.remainingViolations = [];
-    ctx.llmRepairNeeded = false;
-    ctx.detectedEdgeFormat = detectEdgeFormat(edges);
+  const allRepairs: Repair[] = [];
+
+  // Step 4: Apply Bucket A/B fixes when violations exist
+  if (allViolations.length > 0) {
+    // Partition into buckets
+    const bucketA = allViolations.filter((v) => BUCKET_A_CODES.has(v.code));
+    const bucketB = allViolations.filter((v) => BUCKET_B_CODES.has(v.code));
+    const bucketC = allViolations.filter((v) => BUCKET_C_CODES.has(v.code));
+    const citedBCodes = new Set(bucketB.map((v) => v.code));
 
     log.info({
       requestId: ctx.requestId,
       stage: "deterministic_sweep",
-      violations_before: 0,
-    }, "Deterministic sweep: no violations found, skipping");
-    return;
+      violations_total: allViolations.length,
+      bucket_a: bucketA.length,
+      bucket_b: bucketB.length,
+      bucket_c: bucketC.length,
+      bucket_a_codes: [...new Set(bucketA.map((v) => v.code))],
+      bucket_b_codes: [...citedBCodes],
+      bucket_c_codes: [...new Set(bucketC.map((v) => v.code))],
+    }, "Deterministic sweep: violation routing");
+
+    // Apply Bucket A in single pass
+    allRepairs.push(...fixNanValues(graph, bucketA));
+    allRepairs.push(...fixSignMismatch(graph, bucketA));
+    allRepairs.push(...fixStructuralEdgesNotCanonical(graph, bucketA, format));
+    allRepairs.push(...fixInvalidEdgeRefs(graph, bucketA));
+    allRepairs.push(...fixGoalHasOutgoing(graph, bucketA));
+    allRepairs.push(...fixDecisionHasIncoming(graph, bucketA));
+
+    // Apply Bucket B only for codes present in violations
+    if (citedBCodes.has("CATEGORY_MISMATCH")) {
+      allRepairs.push(...fixCategoryMismatch(graph, bucketB));
+    }
+    if (citedBCodes.has("CONTROLLABLE_MISSING_DATA")) {
+      allRepairs.push(...fixControllableMissingData(graph, bucketB));
+    }
+    if (citedBCodes.has("OBSERVABLE_MISSING_DATA")) {
+      allRepairs.push(...fixObservableMissingData(graph, bucketB));
+    }
+    if (citedBCodes.has("OBSERVABLE_EXTRA_DATA")) {
+      allRepairs.push(...fixObservableExtraData(graph, bucketB));
+    }
+    if (citedBCodes.has("EXTERNAL_HAS_DATA")) {
+      allRepairs.push(...fixExternalHasData(graph, bucketB));
+    }
   }
 
-  // Step 3: Detect edge format once
-  const format = detectEdgeFormat(edges);
-  ctx.detectedEdgeFormat = format;
-
-  // Step 4: Partition into buckets
-  const bucketA = allViolations.filter((v) => BUCKET_A_CODES.has(v.code));
-  const bucketB = allViolations.filter((v) => BUCKET_B_CODES.has(v.code));
-  const bucketC = allViolations.filter((v) => BUCKET_C_CODES.has(v.code));
-  const citedBCodes = new Set(bucketB.map((v) => v.code));
-
-  log.info({
-    requestId: ctx.requestId,
-    stage: "deterministic_sweep",
-    violations_total: allViolations.length,
-    bucket_a: bucketA.length,
-    bucket_b: bucketB.length,
-    bucket_c: bucketC.length,
-    bucket_a_codes: [...new Set(bucketA.map((v) => v.code))],
-    bucket_b_codes: [...citedBCodes],
-    bucket_c_codes: [...new Set(bucketC.map((v) => v.code))],
-  }, "Deterministic sweep: violation routing");
-
-  // Step 5: Apply Bucket A in single pass
-  const allRepairs: Repair[] = [];
-
-  allRepairs.push(...fixNanValues(graph, bucketA));
-  allRepairs.push(...fixSignMismatch(graph, bucketA));
-  allRepairs.push(...fixStructuralEdgesNotCanonical(graph, bucketA, format));
-  allRepairs.push(...fixInvalidEdgeRefs(graph, bucketA));
-  allRepairs.push(...fixGoalHasOutgoing(graph, bucketA));
-  allRepairs.push(...fixDecisionHasIncoming(graph, bucketA));
-
-  // Step 6: Apply Bucket B only for codes present in violations
-  if (citedBCodes.has("CATEGORY_MISMATCH")) {
-    allRepairs.push(...fixCategoryMismatch(graph, bucketB));
-  }
-  if (citedBCodes.has("CONTROLLABLE_MISSING_DATA")) {
-    allRepairs.push(...fixControllableMissingData(graph, bucketB));
-  }
-  if (citedBCodes.has("OBSERVABLE_MISSING_DATA")) {
-    allRepairs.push(...fixObservableMissingData(graph, bucketB));
-  }
-  if (citedBCodes.has("OBSERVABLE_EXTRA_DATA")) {
-    allRepairs.push(...fixObservableExtraData(graph, bucketB));
-  }
-  if (citedBCodes.has("EXTERNAL_HAS_DATA")) {
-    allRepairs.push(...fixExternalHasData(graph, bucketB));
-  }
-
-  // Step 7: Unreachable factor handling
+  // Step 5: Proactive unreachable factor handling — ALWAYS run regardless of violations.
+  // simpleRepair (Stage 3) preserves unreachable factors but doesn't reclassify them.
+  // The sweep must detect and reclassify them so model_adjustments gets populated.
   const unreachableResult = handleUnreachableFactors(graph, format);
   allRepairs.push(...unreachableResult.repairs);
 
-  // Step 8: Status quo fix
-  const statusQuoResult = fixStatusQuoConnectivity(
-    graph,
-    allViolations.map((v) => ({ code: v.code })),
-    format,
-  );
+  // Step 6: Status quo / disconnected option fix — ALWAYS run.
+  // Uses proactive reachability check (BFS from each option to goal).
+  // This catches cases where the graph validator doesn't flag NO_PATH_TO_GOAL
+  // but the orchestrator validation loop would later (causing 422s).
+  const disconnectedBefore = findDisconnectedOptions(graph);
+  const violationCodes = allViolations.map((v) => ({ code: v.code }));
+
+  // If we proactively found disconnected options, synthesize violations to trigger the fix
+  if (disconnectedBefore.length > 0 && !violationCodes.some((v) => v.code === "NO_PATH_TO_GOAL")) {
+    violationCodes.push({ code: "NO_PATH_TO_GOAL" });
+  }
+
+  const statusQuoResult = fixStatusQuoConnectivity(graph, violationCodes, format);
   allRepairs.push(...statusQuoResult.repairs);
 
-  // Step 9: Re-validate using same validator
+  // Step 7: Re-validate using same validator
   const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId });
+  const remainingErrors = revalidation.errors;
 
-  // Step 10: Oscillation guard — do not reapply same codes
-  const appliedCodes = new Set(allRepairs.map((r) => r.code));
-  const remainingErrors = revalidation.errors.filter((v) => {
-    // If the same code was already applied and still remains, don't count it as fixable
-    return true; // We just report all remaining
-  });
+  // Step 8: Proactive disconnected-option check after all fixes.
+  // If options are still disconnected after the status quo fix, flag for LLM repair.
+  const disconnectedAfter = findDisconnectedOptions(graph);
+  let proactiveDisconnected = false;
+  if (disconnectedAfter.length > 0) {
+    proactiveDisconnected = true;
+    // Add synthetic remaining violations for disconnected options not already flagged
+    const existingPaths = new Set(remainingErrors.filter((v) => v.code === "NO_PATH_TO_GOAL").map((v) => v.path));
+    for (const optId of disconnectedAfter) {
+      const path = `nodes[${optId}]`;
+      if (!existingPaths.has(path)) {
+        remainingErrors.push({
+          code: "NO_PATH_TO_GOAL" as any,
+          severity: "error" as any,
+          message: `Option "${optId}" has no directed path to goal (proactive check)`,
+          path,
+        });
+      }
+    }
+  }
 
   // Determine if LLM repair is needed
   const remainingBucketC = remainingErrors.filter((v) => BUCKET_C_CODES.has(v.code));
-  const externalValidationNeeded = !revalidation.valid;
+  const externalValidationNeeded = !revalidation.valid || proactiveDisconnected;
   const llmRepairNeeded = remainingBucketC.length > 0 && externalValidationNeeded;
 
-  // Step 11: Write to ctx
+  // Step 9: Write to ctx
   ctx.deterministicRepairs = allRepairs;
   ctx.remainingViolations = remainingErrors.map((v) => ({
     code: v.code,
@@ -653,6 +665,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         fixed: statusQuoResult.fixed,
         marked_droppable: statusQuoResult.markedDroppable,
       },
+      disconnected_options_before: disconnectedBefore,
+      disconnected_options_after: disconnectedAfter,
       violations_before: allViolations.length,
       violations_after: remainingErrors.length,
       llm_repair_needed: llmRepairNeeded,
@@ -676,6 +690,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,
     status_quo_fixed: statusQuoResult.fixed,
+    disconnected_before: disconnectedBefore.length,
+    disconnected_after: disconnectedAfter.length,
     edge_format: format,
   }, "Deterministic sweep complete");
 }
