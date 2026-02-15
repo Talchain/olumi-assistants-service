@@ -20,6 +20,7 @@ import {
 } from "../validators/graph-validator.js";
 import type { ValidationIssue } from "../validators/graph-validator.types.js";
 import { zodToValidationErrors, isZodError } from "../validators/zod-error-mapper.js";
+import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { log } from "../utils/telemetry.js";
 import type { ObservabilityCollector } from "./observability/collector.js";
 import { config } from "../config/index.js";
@@ -280,6 +281,7 @@ export async function generateGraph(
             requestId: attemptRequestId,
             attempt: attempt + 1,
             errorCount: lastErrors.length,
+            first_issues: extractZodIssues(parseResult.error, 3),
           },
           "Zod validation failed"
         );
@@ -670,6 +672,7 @@ export async function validateAndRepairGraph(
           requestId: attemptRequestId,
           attempt: attempt + 1,
           errorCount: lastErrors.length,
+          first_issues: extractZodIssues(zodResult.error, 3),
         },
         "Zod validation failed"
       );

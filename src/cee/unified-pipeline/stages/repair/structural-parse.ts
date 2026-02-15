@@ -8,6 +8,7 @@
 import type { StageContext } from "../../types.js";
 import { DraftGraphOutput } from "../../../../schemas/assist.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+import { extractZodIssues } from "../../../../schemas/llmExtraction.js";
 import { log } from "../../../../utils/telemetry.js";
 
 export function runStructuralParse(ctx: StageContext): void {
@@ -23,16 +24,13 @@ export function runStructuralParse(ctx: StageContext): void {
   try {
     DraftGraphOutput.parse(input);
   } catch (error) {
-    const zodErrors = (error as any)?.errors ?? (error as any)?.issues;
-    const firstIssue = Array.isArray(zodErrors) ? zodErrors[0] : undefined;
+    const zodError = (error as any)?.issues ? (error as any) : undefined;
+    const issueCount = zodError?.issues?.length ?? 0;
+    const firstIssues = zodError ? extractZodIssues(zodError, 3) : [];
     log.warn({
       event: "cee.structural_parse.failed",
-      error_count: zodErrors?.length ?? 0,
-      first_issue_path: firstIssue?.path?.join("."),
-      first_issue_message: firstIssue?.message,
-      first_issue_code: firstIssue?.code,
-      first_issue_expected: (firstIssue as any)?.expected,
-      first_issue_received: (firstIssue as any)?.received,
+      error_count: issueCount,
+      first_issues: firstIssues,
       request_id: ctx.requestId,
     }, "Structural parse failed — graph does not conform to DraftGraphOutput schema");
 

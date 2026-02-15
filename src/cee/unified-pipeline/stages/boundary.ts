@@ -11,6 +11,7 @@ import { transformResponseToV3, validateStrictModeV3 } from "../../transforms/sc
 import { transformResponseToV2 } from "../../transforms/schema-v2.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../transforms/analysis-ready.js";
 import { CEEGraphResponseV3 } from "../../../schemas/cee-v3.js";
+import { extractZodIssues } from "../../../schemas/llmExtraction.js";
 import { log } from "../../../utils/telemetry.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
@@ -102,13 +103,10 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     // Logs diagnostic details before the opaque downstream structural_parse error.
     const parseResult = CEEGraphResponseV3.safeParse(v3Body);
     if (!parseResult.success) {
-      const firstIssue = parseResult.error.issues[0];
       log.error({
         event: "cee.boundary.output_validation_failed",
-        first_issue_path: firstIssue?.path?.join("."),
-        first_issue_message: firstIssue?.message,
-        first_issue_code: firstIssue?.code,
-        issue_count: parseResult.error.issues.length,
+        error_count: parseResult.error.issues.length,
+        first_issues: extractZodIssues(parseResult.error, 3),
         request_id: ctx.requestId,
       }, "V3 output failed CEEGraphResponseV3 schema validation (non-blocking)");
     }

@@ -26,6 +26,7 @@ import {
   LLMCritiqueResponse as AnthropicCritiqueResponse,
   LLMExplainDiffResponse as AnthropicExplainDiffResponse,
 } from './shared-schemas.js';
+import { extractZodIssues } from '../../schemas/llmExtraction.js';
 
 export type DraftArgs = {
   brief: string;
@@ -752,7 +753,7 @@ export async function suggestOptionsWithAnthropic(args: {
     const parseResult = AnthropicOptionsResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten() }, "Anthropic options response failed schema validation");
+      log.error({ errors: parseResult.error.flatten(), first_issues: extractZodIssues(parseResult.error, 3) }, "Anthropic options response failed schema validation");
       throw new Error("anthropic_response_invalid_schema");
     }
 
@@ -1382,7 +1383,7 @@ export async function clarifyBriefWithAnthropic(
     const parseResult = AnthropicClarifyResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten() }, "Anthropic clarify response failed schema validation");
+      log.error({ errors: parseResult.error.flatten(), first_issues: extractZodIssues(parseResult.error, 3) }, "Anthropic clarify response failed schema validation");
       throw new Error("anthropic_clarify_invalid_schema");
     }
 
@@ -1595,7 +1596,7 @@ export async function critiqueGraphWithAnthropic(
     const parseResult = AnthropicCritiqueResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten() }, "Anthropic critique response failed schema validation");
+      log.error({ errors: parseResult.error.flatten(), first_issues: extractZodIssues(parseResult.error, 3) }, "Anthropic critique response failed schema validation");
       throw new Error("anthropic_critique_invalid_schema");
     }
 
@@ -1760,7 +1761,7 @@ Return ONLY valid JSON in this format:
     const parseResult = AnthropicExplainDiffResponse.safeParse(rawJson);
 
     if (!parseResult.success) {
-      log.error({ errors: parseResult.error.flatten() }, "Anthropic explain-diff response failed schema validation");
+      log.error({ errors: parseResult.error.flatten(), first_issues: extractZodIssues(parseResult.error, 3) }, "Anthropic explain-diff response failed schema validation");
       throw new Error("anthropic_explain_diff_invalid_schema");
     }
 

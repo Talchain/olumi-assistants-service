@@ -12,6 +12,7 @@ import {
   type LLMConstraint,
   type ConstraintOperatorType,
   flattenZodErrors,
+  extractZodIssues,
 } from "../../schemas/llmExtraction.js";
 import {
   type ResolvedContext,
@@ -195,6 +196,7 @@ export async function extractConstraintsLLM(
         {
           event: "cee.llm_constraint_extraction.parse_error",
           errors,
+          first_issues: extractZodIssues(parseResult.error, 3),
         },
         "LLM response failed schema validation"
       );

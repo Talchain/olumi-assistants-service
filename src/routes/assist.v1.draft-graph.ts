@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { DraftGraphInput, type DraftGraphInputT } from "../schemas/assist.js";
+import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
 import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -185,7 +186,7 @@ export default async function route(app: FastifyInstance) {
       const errorBody = buildCeeErrorResponse("CEE_VALIDATION_FAILED", "invalid input", {
         retryable: false,
         requestId,
-        details: { field_errors: parsed.error.flatten() },
+        details: { field_errors: parsed.error.flatten(), first_issues: extractZodIssues(parsed.error, 3) },
       });
 
       emit(TelemetryEvents.CeeDraftGraphFailed, {

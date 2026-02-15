@@ -10,6 +10,7 @@ import {
   LLMFactorExtractionResponseSchema,
   type LLMFactor,
   flattenZodErrors,
+  extractZodIssues,
 } from "../../schemas/llmExtraction.js";
 import {
   type ResolvedContext,
@@ -175,6 +176,7 @@ export async function extractFactorsLLM(
         {
           event: "cee.llm_factor_extraction.parse_error",
           errors,
+          first_issues: extractZodIssues(parseResult.error, 3),
         },
         "LLM response failed schema validation"
       );

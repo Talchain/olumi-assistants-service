@@ -512,12 +512,17 @@ describe("Structural parse — diagnostic logging", () => {
     expect(ctx.earlyReturn).toBeDefined();
     expect(ctx.earlyReturn.statusCode).toBe(400);
 
-    // Verify diagnostic fields are logged
+    // Verify diagnostic fields are logged (first_issues array with up to 3 entries)
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "cee.structural_parse.failed",
-        first_issue_path: expect.any(String),
-        first_issue_message: expect.any(String),
+        first_issues: expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.any(String),
+            message: expect.any(String),
+            code: expect.any(String),
+          }),
+        ]),
       }),
       expect.any(String),
     );

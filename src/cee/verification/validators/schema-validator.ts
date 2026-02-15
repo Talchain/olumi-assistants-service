@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { VerificationResult, VerificationStage } from "../types.js";
+import { extractZodIssues } from "../../../schemas/llmExtraction.js";
 
 /**
  * Zod-based schema validator for CEE responses.
@@ -40,6 +41,7 @@ export class SchemaValidator implements VerificationStage<unknown, unknown> {
         details: {
           error_paths: errorPaths,
           error_count: parseResult.error.errors.length,
+          first_issues: extractZodIssues(parseResult.error, 3),
         },
       } as VerificationResult<T>;
     }
