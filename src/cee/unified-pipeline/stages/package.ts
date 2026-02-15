@@ -240,6 +240,30 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     };
   }
 
+  // ── Step 9c: Merge deterministic repair summary onto trace ──────────────
+  {
+    const sweepTrace = (ctx.repairTrace as any)?.deterministic_sweep;
+    const repairs = ctx.deterministicRepairs ?? [];
+    trace.repair_summary = {
+      deterministic_repairs_count: repairs.length,
+      deterministic_repairs: repairs,
+      unreachable_factors: sweepTrace?.unreachable_factors ?? { reclassified: [], marked_droppable: [] },
+      status_quo: sweepTrace?.status_quo ?? { fixed: false, marked_droppable: false },
+      llm_repair_called: ctx.llmRepairNeeded ?? false,
+      llm_repair_brief_included: ctx.llmRepairBriefIncluded ?? false,
+      llm_repair_skipped_reason: ctx.llmRepairNeeded === false ? "deterministic_sweep_sufficient" : undefined,
+      remaining_violations_count: ctx.remainingViolations?.length ?? 0,
+      remaining_violation_codes: [...new Set((ctx.remainingViolations ?? []).map((v) => v.code))],
+      edge_format_detected: ctx.detectedEdgeFormat ?? "NONE",
+      graph_delta: sweepTrace?.graph_delta ?? {
+        nodes_before: 0,
+        nodes_after: Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0,
+        edges_before: 0,
+        edges_after: Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0,
+      },
+    };
+  }
+
   // ── Step 10: Clarifier status ────────────────────────────────────────────
   let clarifierStatus: string | undefined;
   if (!ctx.clarifierResult?.clarifier) {

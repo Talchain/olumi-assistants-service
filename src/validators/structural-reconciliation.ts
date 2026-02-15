@@ -482,6 +482,57 @@ export function normaliseConstraintTargets(
       });
     } else {
       dropped++;
+
+      // Build diagnostic info for the drop
+      const { stem: constraintStem, prefix: constraintPrefix } = stripNodePrefix(originalNodeId);
+      const constraintStemLower = constraintStem.toLowerCase();
+
+      // Compute fuzzy candidates for diagnostics
+      const fuzzyCandidates: Array<{ id: string; score: number; prefix_match: boolean }> = [];
+      for (const nodeId of nodeIds) {
+        const { stem: nodeStem, prefix: nodePrefix } = stripNodePrefix(nodeId);
+        const nodeStemLower = nodeStem.toLowerCase();
+        const prefixMatch = !constraintPrefix || !nodePrefix || constraintPrefix === nodePrefix;
+
+        // Simple substring overlap score
+        let score = 0;
+        if (nodeStemLower.includes(constraintStemLower) || constraintStemLower.includes(nodeStemLower)) {
+          score = Math.min(constraintStemLower.length, nodeStemLower.length) / Math.max(constraintStemLower.length, nodeStemLower.length);
+        }
+
+        if (score > 0 || prefixMatch) {
+          fuzzyCandidates.push({ id: nodeId, score, prefix_match: prefixMatch });
+        }
+      }
+      fuzzyCandidates.sort((a, b) => b.score - a.score);
+
+      // Determine drop reason
+      let dropReason: string;
+      if (fuzzyCandidates.length === 0 || fuzzyCandidates.every((c) => c.score === 0)) {
+        dropReason = "no_candidates";
+      } else if (fuzzyCandidates.filter((c) => c.score > 0 && !c.prefix_match).length > 0 &&
+                 fuzzyCandidates.filter((c) => c.score > 0 && c.prefix_match).length === 0) {
+        dropReason = "prefix_mismatch";
+      } else if (fuzzyCandidates.filter((c) => c.score > 0).length > 1) {
+        dropReason = "ambiguous";
+      } else if (nodeLabels && nodeLabels.size === 0) {
+        dropReason = "missing_node_labels";
+      } else {
+        dropReason = "below_threshold";
+      }
+
+      // Log enhanced diagnostics (no PII — only node IDs and structural info)
+      log.info({
+        event: "CONSTRAINT_DROPPED",
+        constraint_target_id: originalNodeId,
+        constraint_target_label: (constraint as any).label ?? null,
+        exact_match_found: false,
+        fuzzy_candidates_top3: fuzzyCandidates.slice(0, 3),
+        drop_reason: dropReason,
+        available_node_ids: nodeIds,
+        stage: requestId?.startsWith("unified") ? "unified" : "legacy",
+      }, `Constraint dropped: ${originalNodeId} — ${dropReason}`);
+
       issues.push({
         code: "CONSTRAINT_DROPPED_NO_TARGET",
         severity: "info",
@@ -490,6 +541,8 @@ export function normaliseConstraintTargets(
         context: {
           original_node_id: originalNodeId,
           constraint_id: constraint.constraint_id,
+          drop_reason: dropReason,
+          fuzzy_candidates_top3: fuzzyCandidates.slice(0, 3),
         },
       });
     }

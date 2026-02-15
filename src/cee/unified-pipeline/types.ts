@@ -11,6 +11,7 @@ import type { DraftGraphInputT } from "../../schemas/assist.js";
 import type { PipelineCheckpoint } from "../pipeline-checkpoints.js";
 import type { EdgeFieldStash } from "./edge-identity.js";
 import type { RiskCoefficientCorrection } from "../transforms/risk-normalisation.js";
+import type { EdgeFormat } from "./utils/edge-format.js";
 import type { components } from "../../generated/openapi.d.ts";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
@@ -109,6 +110,13 @@ export interface StageContext {
   orchestratorRepairUsed?: boolean;
   orchestratorWarnings?: any[];
   repairTrace?: Record<string, unknown>;
+
+  // ── Stage 4 Substep 1b (Deterministic sweep) outputs ─────────────────
+  deterministicRepairs?: Array<{ code: string; path: string; action: string }>;
+  remainingViolations?: Array<{ code: string; path?: string; message?: string }>;
+  llmRepairNeeded?: boolean;
+  llmRepairBriefIncluded?: boolean;
+  detectedEdgeFormat?: EdgeFormat;
 
   // ── Stage 5 (Package) outputs ──────────────────────────────────────────
   quality: CEEQualityMeta | undefined;

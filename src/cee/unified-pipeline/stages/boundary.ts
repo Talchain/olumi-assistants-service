@@ -52,6 +52,19 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
+    // Append deterministic repair adjustments to model_adjustments (never overwrite)
+    if (v3Body.analysis_ready && ctx.deterministicRepairs && ctx.deterministicRepairs.length > 0) {
+      const repairAdjustments = ctx.deterministicRepairs.map((r) => ({
+        code: "deterministic_repair" as const,
+        field: r.path,
+        reason: r.action,
+      }));
+      if (!v3Body.analysis_ready.model_adjustments) {
+        v3Body.analysis_ready.model_adjustments = [];
+      }
+      v3Body.analysis_ready.model_adjustments.push(...repairAdjustments as any[]);
+    }
+
     // Surface STRP constraint drops as blockers
     if (v3Body.analysis_ready && strpMutations?.length) {
       const constraintBlockers = extractConstraintDropBlockers(strpMutations);

@@ -276,7 +276,11 @@ function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated
   };
 }
 
-async function buildRepairPrompt(graph: GraphT, violations: string[]): Promise<{ system: string; userContent: string }> {
+async function buildRepairPrompt(
+  graph: GraphT,
+  violations: string[],
+  options?: { brief?: string; docs?: Array<{ title?: string; content?: string }>; attempt?: number; maxAttempts?: number },
+): Promise<{ system: string; userContent: string }> {
   const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(graph);
   const graphJson = JSON.stringify(
     {
@@ -290,11 +294,22 @@ async function buildRepairPrompt(graph: GraphT, violations: string[]): Promise<{
 
   const violationsText = violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
 
-  const userContent = `## Current Graph (INVALID)${truncatedNote}
-${graphJson}
+  // Build context sections
+  const briefText = options?.brief ?? "Not provided";
+  const docsText = options?.docs ? JSON.stringify(options.docs.slice(0, 3)) : "None";
+  const attempt = options?.attempt ?? 1;
+  const maxAttempts = options?.maxAttempts ?? 1;
+  const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
+  const userContent = `Brief: ${briefText}
+Docs: ${docsText}
+Attempt: ${attempt} of ${maxAttempts}
+${escalationText}
 ## Violations Found
-${violationsText}`;
+${violationsText}
+
+## Current Graph (INVALID)${truncatedNote}
+${graphJson}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   const systemPrompt = await getSystemPrompt('repair_graph');
@@ -970,9 +985,9 @@ export class OpenAIAdapter implements LLMAdapter {
   }
 
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    const { graph, violations } = args;
+    const { graph, violations, brief, docs } = args;
     const collector = opts.collector;
-    const prompt = await buildRepairPrompt(graph, violations);
+    const prompt = await buildRepairPrompt(graph, violations, { brief, docs: docs as any });
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();

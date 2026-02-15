@@ -38,6 +38,33 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
 
   const issues = first.violations;
 
+  // Repair gating: if deterministic sweep determined LLM repair is not needed,
+  // skip LLM repair but still run PLoT validation for normalization.
+  if (ctx.llmRepairNeeded === false) {
+    log.info({
+      event: "REPAIR_SKIPPED",
+      reason: "deterministic_sweep_sufficient",
+      remaining_violations: ctx.remainingViolations?.length ?? 0,
+      correlation_id: ctx.requestId,
+    }, "Skipping LLM repair — deterministic sweep resolved all actionable violations");
+
+    // Still apply simple repair for normalization
+    const repaired = stabiliseGraph(
+      ensureDagAndPrune(simpleRepair(candidate, ctx.requestId), { collector }),
+      { collector },
+    );
+    const second = await validateGraph(repaired);
+    if (second.ok && second.normalized) {
+      const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
+      candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
+    } else {
+      candidate = repaired;
+    }
+
+    ctx.graph = candidate;
+    return;
+  }
+
   // Budget exceeded → skip LLM repair, use simple repair only
   if (ctx.skipRepairDueToBudget) {
     log.info({
@@ -78,9 +105,15 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
     const repairAdapter = getAdapter("repair_graph", modelOverride);
 
     const repairResult = await repairAdapter.repairGraph(
-      { graph: candidate, violations: issues || [] },
+      {
+        graph: candidate,
+        violations: issues || [],
+        brief: ctx.effectiveBrief || undefined,
+        docs: (ctx.input as any).docs || undefined,
+      },
       { requestId: `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs },
     );
+    ctx.llmRepairBriefIncluded = Boolean(ctx.effectiveBrief);
 
     ctx.repairCost += calculateCost(
       repairAdapter.model,

@@ -983,11 +983,23 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
 
   const violationsText = args.violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
 
-  const userContent = `## Current Graph (INVALID)${truncatedNote}
-${graphJson}
+  // Build context sections
+  const briefText = (args as any).brief ?? "Not provided";
+  const docsRaw = (args as any).docs;
+  const docsText = docsRaw ? JSON.stringify(docsRaw.slice(0, 3)) : "None";
+  const attempt = (args as any).attempt ?? 1;
+  const maxAttempts = (args as any).maxAttempts ?? 1;
+  const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
+  const userContent = `Brief: ${briefText}
+Docs: ${docsText}
+Attempt: ${attempt} of ${maxAttempts}
+${escalationText}
 ## Violations Found
-${violationsText}`;
+${violationsText}
+
+## Current Graph (INVALID)${truncatedNote}
+${graphJson}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   const systemPrompt = await getSystemPrompt('repair_graph');

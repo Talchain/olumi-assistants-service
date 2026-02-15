@@ -6,8 +6,9 @@
  *
  * ORDERING INVARIANT — do not reorder substeps
  *
- * 1. Orchestrator validation  — optional pre-check (gated)
- * 2. PLoT validation          — external validation + LLM repair
+ * 1.  Orchestrator validation — optional pre-check (gated)
+ * 1b. Deterministic sweep     — resolves mechanical violations, unreachable factors, status quo
+ * 2.  PLoT validation         — external validation + LLM repair (only if Bucket C remains)
  * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
  * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
  * 5. Compound goals           — generates constraint nodes/edges
@@ -36,6 +37,7 @@ import type { StageContext } from "../../types.js";
 import { log } from "../../../../utils/telemetry.js";
 
 import { runOrchestratorValidation } from "./orchestrator-validation.js";
+import { runDeterministicSweep } from "./deterministic-sweep.js";
 import { runPlotValidation } from "./plot-validation.js";
 import { runEdgeStabilisation } from "./edge-stabilisation.js";
 import { runGoalMerge } from "./goal-merge.js";
@@ -59,7 +61,10 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   await runOrchestratorValidation(ctx);
   if (ctx.earlyReturn) return;
 
-  // Substep 2: PLoT validation + LLM repair
+  // Substep 1b: Deterministic sweep — resolves mechanical violations, unreachable factors, status quo
+  await runDeterministicSweep(ctx);
+
+  // Substep 2: PLoT validation + LLM repair (gated by deterministic sweep)
   await runPlotValidation(ctx);
   if (ctx.earlyReturn) return;
 
