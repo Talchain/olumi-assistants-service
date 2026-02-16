@@ -19,6 +19,7 @@ import { detectEdgeFormat, canonicalStructuralEdge } from "../../utils/edge-form
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
+import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
 
 // ---------------------------------------------------------------------------
@@ -552,21 +553,29 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
 
   const allRepairs: Repair[] = [];
 
+  // Hoist bucket counts so they are available for repairTrace regardless of violations
+  let bucketACount = 0;
+  let bucketBCount = 0;
+  let bucketCCount = 0;
+
   // Step 4: Apply Bucket A/B fixes when violations exist
   if (allViolations.length > 0) {
     // Partition into buckets
     const bucketA = allViolations.filter((v) => BUCKET_A_CODES.has(v.code));
     const bucketB = allViolations.filter((v) => BUCKET_B_CODES.has(v.code));
     const bucketC = allViolations.filter((v) => BUCKET_C_CODES.has(v.code));
+    bucketACount = bucketA.length;
+    bucketBCount = bucketB.length;
+    bucketCCount = bucketC.length;
     const citedBCodes = new Set(bucketB.map((v) => v.code));
 
     log.info({
       requestId: ctx.requestId,
       stage: "deterministic_sweep",
       violations_total: allViolations.length,
-      bucket_a: bucketA.length,
-      bucket_b: bucketB.length,
-      bucket_c: bucketC.length,
+      bucket_a: bucketACount,
+      bucket_b: bucketBCount,
+      bucket_c: bucketCCount,
       bucket_a_codes: [...new Set(bucketA.map((v) => v.code))],
       bucket_b_codes: [...citedBCodes],
       bucket_c_codes: [...new Set(bucketC.map((v) => v.code))],
@@ -658,10 +667,14 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   }));
   ctx.llmRepairNeeded = llmRepairNeeded;
 
-  // Store unreachable factor and status quo results on repairTrace for observability
+  // Store unreachable factor and status quo results on repairTrace for observability.
+  // Always emitted — proves the sweep executed regardless of whether it had work to do.
   ctx.repairTrace = {
     ...(ctx.repairTrace ?? {}),
     deterministic_sweep: {
+      sweep_ran: true,
+      sweep_version: DETERMINISTIC_SWEEP_VERSION,
+      bucket_summary: { a: bucketACount, b: bucketBCount, c: bucketCCount },
       repairs_count: allRepairs.length,
       unreachable_factors: {
         reclassified: unreachableResult.reclassified,

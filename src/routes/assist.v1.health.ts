@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { env } from "node:process";
 import { SERVICE_VERSION, GIT_COMMIT_SHORT, BUILD_TIMESTAMP } from "../version.js";
+import { DETERMINISTIC_SWEEP_VERSION } from "../cee/constants/versions.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { getAllFeatureFlags } from "../utils/feature-flags.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -85,6 +86,7 @@ export default async function route(app: FastifyInstance) {
       version: SERVICE_VERSION,
       commit: GIT_COMMIT_SHORT,
       build_timestamp: BUILD_TIMESTAMP,
+      deterministic_sweep_version: DETERMINISTIC_SWEEP_VERSION,
       provider: adapter.name,
       model: adapter.model,
       limits_source: env.ENGINE_BASE_URL ? "engine" : "config",

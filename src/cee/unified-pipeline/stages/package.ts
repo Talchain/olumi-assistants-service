@@ -38,6 +38,20 @@ import {
 import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
 
+/**
+ * Derive a single status_quo_action enum from the sweep trace.
+ * "wired" = edges were added, "droppable" = unfixable, "none" = no status quo issue detected.
+ */
+function deriveStatusQuoAction(
+  sweepTrace: Record<string, unknown> | undefined,
+): "wired" | "droppable" | "none" {
+  const sq = (sweepTrace as any)?.status_quo;
+  if (!sq) return "none";
+  if (sq.fixed) return "wired";
+  if (sq.marked_droppable) return "droppable";
+  return "none";
+}
+
 export async function runStagePackage(ctx: StageContext): Promise<void> {
   if (!ctx.graph) return;
 
@@ -245,6 +259,14 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     const sweepTrace = (ctx.repairTrace as any)?.deterministic_sweep;
     const repairs = ctx.deterministicRepairs ?? [];
     trace.repair_summary = {
+      // Sweep execution proof — consumers should gate on deterministic_sweep_ran
+      // before reading bucket_summary (null = sweep didn't run, {0,0,0} = ran with zero violations).
+      deterministic_sweep_ran: sweepTrace?.sweep_ran ?? false,
+      deterministic_sweep_version: sweepTrace?.sweep_version ?? "unknown",
+      bucket_summary: sweepTrace ? (sweepTrace.bucket_summary ?? null) : null,
+      status_quo_action: deriveStatusQuoAction(sweepTrace),
+      llm_repair_needed: ctx.llmRepairNeeded ?? false,
+      // Existing fields
       deterministic_repairs_count: repairs.length,
       deterministic_repairs: repairs,
       unreachable_factors: sweepTrace?.unreachable_factors ?? { reclassified: [], marked_droppable: [] },
