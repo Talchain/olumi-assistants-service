@@ -379,13 +379,13 @@ export const CEEGraphResponseV3 = z.object({
   goal_constraints: z.array(GoalConstraintSchema).optional(),
   /** Graph metadata */
   meta: GraphMetaV3.optional(),
-  /** Quality metrics (carried from V2) */
+  /** Quality metrics (1–10 integer scale; see computeQuality / openapi.yaml CEEQualityMeta) */
   quality: z.object({
-    overall: z.number().min(0).max(1),
-    structure: z.number().min(0).max(1).optional(),
-    coverage: z.number().min(0).max(1).optional(),
-    causality: z.number().min(0).max(1).optional(),
-    safety: z.number().min(0).max(1).optional(),
+    overall: z.number().min(1).max(10),
+    structure: z.number().min(1).max(10).optional(),
+    coverage: z.number().min(1).max(10).optional(),
+    causality: z.number().min(1).max(10).optional(),
+    safety: z.number().min(1).max(10).optional(),
   }).optional(),
   /** Trace information */
   trace: z.object({

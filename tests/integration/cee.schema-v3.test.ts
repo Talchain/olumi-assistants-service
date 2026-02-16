@@ -42,10 +42,10 @@ describe("CEE Schema V3 Integration", () => {
       },
     },
     quality: {
-      overall: 0.85,
-      structure: 0.9,
-      coverage: 0.8,
-      causality: 0.85,
+      overall: 8,
+      structure: 9,
+      coverage: 8,
+      causality: 8,
     },
     trace: {
       request_id: "test-req-123",
@@ -142,7 +142,7 @@ describe("CEE Schema V3 Integration", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
       expect(v3Response.quality).toBeDefined();
-      expect(v3Response.quality?.overall).toBe(0.85);
+      expect(v3Response.quality?.overall).toBe(8);
     });
 
     it("includes trace information", () => {
@@ -176,6 +176,51 @@ describe("CEE Schema V3 Integration", () => {
       const parseResult = CEEGraphResponseV3.safeParse(v3Response);
 
       expect(parseResult.success).toBe(true);
+    });
+
+    it("accepts quality scores in the 1–10 range (computeQuality output)", () => {
+      // computeQuality() produces integer scores clamped to 1–10 via clampScore().
+      // The Zod schema must accept this range (was previously mis-set to 0–1).
+      const v3Response = transformResponseToV3(sampleV1Response);
+
+      for (const overall of [1, 5, 7, 10]) {
+        const withQuality = {
+          ...v3Response,
+          quality: { overall, structure: 8, coverage: 6, causality: 8, safety: 9 },
+        };
+        const result = CEEGraphResponseV3.safeParse(withQuality);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("rejects quality scores above 10", () => {
+      const v3Response = transformResponseToV3(sampleV1Response);
+      const withBadQuality = {
+        ...v3Response,
+        quality: { overall: 11 },
+      };
+      const result = CEEGraphResponseV3.safeParse(withBadQuality);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects quality score of 0 (minimum is 1)", () => {
+      const v3Response = transformResponseToV3(sampleV1Response);
+      const withBadQuality = {
+        ...v3Response,
+        quality: { overall: 0 },
+      };
+      const result = CEEGraphResponseV3.safeParse(withBadQuality);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects negative quality scores", () => {
+      const v3Response = transformResponseToV3(sampleV1Response);
+      const withBadQuality = {
+        ...v3Response,
+        quality: { overall: -1 },
+      };
+      const result = CEEGraphResponseV3.safeParse(withBadQuality);
+      expect(result.success).toBe(false);
     });
 
     it("detects missing goal node", () => {
