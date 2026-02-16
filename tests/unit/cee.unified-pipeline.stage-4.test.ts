@@ -59,9 +59,12 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 
 vi.mock("../../src/cee/validation/pipeline.js", () => ({
   buildCeeErrorResponse: (code: string, msg: string, meta?: any) => ({
-    error: { code, message: msg, ...meta },
+    error: { code, message: msg },
+    trace: meta?.requestId ? { request_id: meta.requestId, correlation_id: meta.requestId } : undefined,
+    details: meta?.details,
   }),
   integrateClarifier: vi.fn(),
+  isAdminAuthorized: () => false,
 }));
 
 vi.mock("../../src/services/validateClientWithCache.js", () => ({
@@ -453,6 +456,34 @@ describe("Substep 1: Orchestrator validation", () => {
     expect(ctx.earlyReturn).toBeDefined();
     expect(ctx.earlyReturn.statusCode).toBe(422);
     expect((ctx.earlyReturn.body as any).error.code).toBe("CEE_GRAPH_INVALID");
+
+    (config as any).cee.orchestratorValidationEnabled = false;
+  });
+
+  it("422 trace has sweep diagnostics at top-level trace.details (not details.trace)", async () => {
+    (config as any).cee.orchestratorValidationEnabled = true;
+    const error = new (GraphValidationError as any)(
+      "validation failed",
+      [{ code: "NO_PATH_TO_GOAL", message: "no path", path: "nodes[opt_sq]" }],
+      1,
+    );
+    (validateAndRepairGraph as any).mockRejectedValue(error);
+
+    const ctx = makeCtx();
+    ctx.repairTrace = {
+      deterministic_sweep: { sweep_ran: true, sweep_version: "v3", bucket_summary: { a: 0, b: 0, c: 1 } },
+    };
+    await runOrchestratorValidation(ctx);
+
+    const body = ctx.earlyReturn.body as any;
+    // Sweep trace should be at top-level trace.details, not nested in details.trace
+    expect(body.trace).toBeDefined();
+    expect(body.trace.request_id).toBeDefined();
+    expect(body.trace.details.deterministic_sweep_ran).toBe(true);
+    expect(body.trace.details.deterministic_sweep_version).toBe("v3");
+    expect(body.trace.details.last_phase).toBe("orchestrator_validation");
+    // details should NOT contain a nested trace
+    expect(body.details?.trace).toBeUndefined();
 
     (config as any).cee.orchestratorValidationEnabled = false;
   });

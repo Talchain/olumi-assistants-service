@@ -551,6 +551,15 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const validationResult = validateGraphDeterministic({ graph, requestId: ctx.requestId });
   const allViolations = validationResult.errors;
 
+  log.info({
+    event: "cee.deterministic_sweep.started",
+    request_id: ctx.requestId,
+    sweep_version: DETERMINISTIC_SWEEP_VERSION,
+    violations_in: allViolations.length,
+    node_count: nodesBefore,
+    edge_count: edgesBefore,
+  }, "Deterministic sweep started");
+
   const allRepairs: Repair[] = [];
 
   // Hoist bucket counts so they are available for repairTrace regardless of violations
@@ -580,6 +589,20 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       bucket_b_codes: [...citedBCodes],
       bucket_c_codes: [...new Set(bucketC.map((v) => v.code))],
     }, "Deterministic sweep: violation routing");
+
+    // Per-violation routing log for debugging (capped at 30 to avoid log flood)
+    for (const v of allViolations.slice(0, 30)) {
+      const bucket = BUCKET_A_CODES.has(v.code) ? "A" : BUCKET_B_CODES.has(v.code) ? "B" : "C";
+      const action = bucket === "A" ? "fixed" : bucket === "B" ? "fixed" : "forwarded_to_llm";
+      log.info({
+        event: "cee.deterministic_sweep.violation_routed",
+        request_id: ctx.requestId,
+        code: v.code,
+        node_id: v.path,
+        bucket,
+        action,
+      }, `Violation ${v.code} → Bucket ${bucket}`);
+    }
 
     // Apply Bucket A in single pass
     allRepairs.push(...fixNanValues(graph, bucketA));
@@ -699,18 +722,23 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     },
   };
 
+  // Derive status quo action for log
+  const statusQuoAction: "wired" | "droppable" | "none" =
+    statusQuoResult.fixed ? "wired" : statusQuoResult.markedDroppable ? "droppable" : "none";
+
   log.info({
-    requestId: ctx.requestId,
-    stage: "deterministic_sweep",
+    event: "cee.deterministic_sweep.completed",
+    request_id: ctx.requestId,
+    sweep_version: DETERMINISTIC_SWEEP_VERSION,
+    violations_in: allViolations.length,
+    violations_out: remainingErrors.length,
     repairs_count: allRepairs.length,
-    violations_before: allViolations.length,
-    violations_after: remainingErrors.length,
+    status_quo_action: statusQuoAction,
     llm_repair_needed: llmRepairNeeded,
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,
-    status_quo_fixed: statusQuoResult.fixed,
     disconnected_before: disconnectedBefore.length,
     disconnected_after: disconnectedAfter.length,
     edge_format: format,
-  }, "Deterministic sweep complete");
+  }, "Deterministic sweep completed");
 }

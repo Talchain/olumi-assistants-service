@@ -4,10 +4,10 @@
  * Calls each substep sequentially. Each substep is an individually
  * exported function in its own file for testability.
  *
- * ORDERING INVARIANT — do not reorder substeps
+ * ORDERING INVARIANT — do not reorder substeps (except 1/1b swap below)
  *
- * 1.  Orchestrator validation — optional pre-check (gated)
- * 1b. Deterministic sweep     — resolves mechanical violations, unreachable factors, status quo
+ * 1.  Deterministic sweep     — resolves mechanical violations, unreachable factors, status quo
+ * 1b. Orchestrator validation — optional LLM-backed validation (gated), runs AFTER sweep
  * 2.  PLoT validation         — external validation + LLM repair (only if Bucket C remains)
  * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
  * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
@@ -26,11 +26,11 @@
  * - 9 BEFORE 10: structural parse validates final graph state
  *
  * EARLY RETURN RULES:
- * Only substeps 1 and 10 set ctx.earlyReturn.
+ * Only substeps 1b and 10 set ctx.earlyReturn.
  * Substep 2 falls back to simpleRepair (never early-returns).
  * Substep 8 writes validationSummary (never early-returns).
- * Substeps 3-7 and 9 are deterministic transforms that must not fail.
- * The earlyReturn guards after substeps 1 and 2 are defensive only.
+ * Substeps 1, 3-7 and 9 are deterministic transforms that must not fail.
+ * The earlyReturn guards after substeps 1b and 2 are defensive only.
  */
 
 import type { StageContext } from "../../types.js";
@@ -57,12 +57,14 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
 
   log.info({ requestId: ctx.requestId, stage: "repair" }, "Unified pipeline: Stage 4 (Repair) started");
 
-  // Substep 1: Orchestrator validation
+  // Substep 1: Deterministic sweep — resolves mechanical violations, unreachable factors, status quo
+  // Runs FIRST so mechanical fixes (NaN, sign, status quo wiring) are applied
+  // before orchestrator validation can 422 on issues the sweep can resolve.
+  await runDeterministicSweep(ctx);
+
+  // Substep 1b: Orchestrator validation (gated by config.cee.orchestratorValidationEnabled)
   await runOrchestratorValidation(ctx);
   if (ctx.earlyReturn) return;
-
-  // Substep 1b: Deterministic sweep — resolves mechanical violations, unreachable factors, status quo
-  await runDeterministicSweep(ctx);
 
   // Substep 2: PLoT validation + LLM repair (gated by deterministic sweep)
   await runPlotValidation(ctx);

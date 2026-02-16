@@ -13,6 +13,8 @@ import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../
 import { CEEGraphResponseV3 } from "../../../schemas/cee-v3.js";
 import { extractZodIssues } from "../../../schemas/llmExtraction.js";
 import { log } from "../../../utils/telemetry.js";
+import { isAdminAuthorized } from "../../validation/pipeline.js";
+import { DETERMINISTIC_SWEEP_VERSION } from "../../constants/versions.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
@@ -85,6 +87,22 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
           request_id: ctx.requestId,
           error: (err as Error).message,
         }, "V3 strict mode validation failed");
+
+        // Sweep trace for 422 debugging — use CEETraceMeta shape (request_id + details)
+        const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
+        const traceDetails: Record<string, unknown> = {
+          deterministic_sweep_ran: sweepTrace?.sweep_ran ?? false,
+          deterministic_sweep_version: sweepTrace?.sweep_version ?? DETERMINISTIC_SWEEP_VERSION,
+          last_phase: "boundary_strict_mode",
+          llm_repair_called: ctx.orchestratorRepairUsed ?? false,
+          llm_repair_timeout_ms: ctx.repairTimeoutMs,
+        };
+
+        // Full repair_summary behind admin key
+        if (ctx.request && isAdminAuthorized(ctx.request)) {
+          traceDetails.repair_summary = ctx.repairTrace;
+        }
+
         ctx.earlyReturn = {
           statusCode: 422,
           body: {
@@ -92,6 +110,11 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
               code: "CEE_V3_VALIDATION_FAILED",
               message: (err as Error).message,
               validation_warnings: (v3Body as any).validation_warnings,
+              trace: {
+                request_id: ctx.requestId,
+                correlation_id: ctx.requestId,
+                details: traceDetails,
+              },
             },
           },
         };

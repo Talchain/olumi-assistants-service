@@ -241,6 +241,93 @@ describe("Sweep status quo integration — mocked validator", () => {
     expect(sweepTrace.bucket_summary).toEqual({ a: 0, b: 0, c: 0 });
     expect(ctx.llmRepairNeeded).toBe(false);
   });
+
+  it("reproduces 'hire tech lead or two developers' failure — 3-option graph with disconnected status_quo", async () => {
+    // Exact scenario from the reported failure:
+    // Brief: "Should I hire a Tech lead or two developers to increase productivity?"
+    // LLM produces 3 options: hire_tech_lead, hire_developers, status_quo
+    // status_quo has zero option→factor edges → 422 without sweep fix
+    const graph = {
+      version: "1",
+      default_seed: 42,
+      nodes: [
+        { id: "dec_hiring", kind: "decision", label: "Should I hire a tech lead or two developers?" },
+        { id: "opt_tech_lead", kind: "option", label: "Hire a Tech Lead", data: { interventions: { fac_leadership: 0.9, fac_cost: 150000 } } },
+        { id: "opt_two_devs", kind: "option", label: "Hire Two Developers", data: { interventions: { fac_output: 0.8, fac_cost: 200000 } } },
+        { id: "opt_status_quo", kind: "option", label: "Keep current team" },
+        { id: "fac_leadership", kind: "factor", label: "Technical Leadership", category: "controllable", data: { value: 0.3, extractionType: "inferred", factor_type: "quality", uncertainty_drivers: ["hiring timeline"] } },
+        { id: "fac_output", kind: "factor", label: "Development Output", category: "controllable", data: { value: 0.5, extractionType: "inferred", factor_type: "capacity", uncertainty_drivers: ["onboarding time"] } },
+        { id: "fac_cost", kind: "factor", label: "Annual Cost", category: "controllable", data: { value: 100000, extractionType: "explicit", factor_type: "cost", uncertainty_drivers: ["market rates"] } },
+        { id: "out_productivity", kind: "outcome", label: "Team Productivity" },
+        { id: "goal_1", kind: "goal", label: "Increase productivity" },
+      ],
+      edges: [
+        // Decision → options
+        { from: "dec_hiring", to: "opt_tech_lead", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "dec_hiring", to: "opt_two_devs", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        { from: "dec_hiring", to: "opt_status_quo", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+        // opt_tech_lead → factors
+        { from: "opt_tech_lead", to: "fac_leadership", strength_mean: 0.9, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+        { from: "opt_tech_lead", to: "fac_cost", strength_mean: 1, strength_std: 0.05, belief_exists: 1, effect_direction: "negative" },
+        // opt_two_devs → factors
+        { from: "opt_two_devs", to: "fac_output", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "opt_two_devs", to: "fac_cost", strength_mean: 1, strength_std: 0.05, belief_exists: 1, effect_direction: "negative" },
+        // opt_status_quo → NO EDGES (the bug)
+        // Factors → outcome → goal
+        { from: "fac_leadership", to: "out_productivity", strength_mean: 0.7, strength_std: 0.15, belief_exists: 0.85, effect_direction: "positive" },
+        { from: "fac_output", to: "out_productivity", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "fac_cost", to: "out_productivity", strength_mean: -0.3, strength_std: 0.1, belief_exists: 0.7, effect_direction: "negative" },
+        { from: "out_productivity", to: "goal_1", strength_mean: 0.9, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+      ],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+    };
+
+    // Initial validation: status_quo has no path to goal
+    mockValidateGraph.mockReturnValueOnce({
+      valid: false,
+      errors: [
+        { code: "NO_PATH_TO_GOAL", severity: "error", message: 'Option "opt_status_quo" has no path to goal', path: "nodes[opt_status_quo]" },
+      ],
+      warnings: [],
+      errorCount: 1,
+      warningCount: 0,
+      normalized: null,
+    });
+
+    // Re-validation: fixed
+    mockValidateGraph.mockReturnValueOnce({
+      valid: true,
+      errors: [],
+      warnings: [],
+      errorCount: 0,
+      warningCount: 0,
+      normalized: null,
+    });
+
+    const ctx = makeCtx(graph);
+    await runDeterministicSweep(ctx);
+
+    // Sweep should fix status_quo by wiring it to the union of factors from connected options
+    const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
+    expect(sweepTrace.sweep_ran).toBe(true);
+    expect(sweepTrace.status_quo.fixed).toBe(true);
+    expect(ctx.llmRepairNeeded).toBe(false);
+
+    // opt_status_quo now has edges to factor nodes (union of fac_leadership, fac_output, fac_cost)
+    const statusQuoFactorEdges = graph.edges.filter(
+      (e: any) => e.from === "opt_status_quo" && e.to.startsWith("fac_"),
+    );
+    expect(statusQuoFactorEdges.length).toBeGreaterThanOrEqual(2);
+
+    // Repairs should include STATUS_QUO_WIRED entries
+    const wiredRepairs = ctx.deterministicRepairs.filter((r: any) => r.code === "STATUS_QUO_WIRED");
+    expect(wiredRepairs.length).toBeGreaterThan(0);
+
+    // Trace should have the new observability fields
+    expect(sweepTrace.sweep_version).toBe(DETERMINISTIC_SWEEP_VERSION);
+    expect(sweepTrace.bucket_summary).toBeDefined();
+    expect(sweepTrace.violations_before).toBeGreaterThan(0);
+  });
 });
 
 // =============================================================================

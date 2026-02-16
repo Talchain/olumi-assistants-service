@@ -15,7 +15,8 @@ import {
 import { getAdapter } from "../../../../adapters/llm/router.js";
 import { config } from "../../../../config/index.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/telemetry.js";
-import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+import { buildCeeErrorResponse, isAdminAuthorized } from "../../../validation/pipeline.js";
+import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 
 export async function runOrchestratorValidation(ctx: StageContext): Promise<void> {
   if (!config.cee.orchestratorValidationEnabled) return;
@@ -95,23 +96,46 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
         error_count: error.errors.length,
       });
 
+      // Build 422 error with sweep trace at top-level trace.details (matches CEETraceMeta schema)
+      const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
+
+      const errorBody = buildCeeErrorResponse(
+        "CEE_GRAPH_INVALID",
+        `Graph validation failed after ${error.attempts} attempt(s)`,
+        {
+          requestId: ctx.requestId,
+          details: {
+            validation_errors: error.errors.map((e) => ({
+              code: e.code,
+              message: e.message,
+              path: e.path,
+            })),
+            attempts: error.attempts,
+          },
+        },
+      );
+
+      // Merge sweep diagnostics into top-level trace.details (CEETraceMeta.details is freeform)
+      const trace = (errorBody as any).trace ?? {};
+      trace.details = {
+        ...(trace.details ?? {}),
+        deterministic_sweep_ran: sweepTrace?.sweep_ran ?? false,
+        deterministic_sweep_version: sweepTrace?.sweep_version ?? DETERMINISTIC_SWEEP_VERSION,
+        last_phase: "orchestrator_validation",
+        llm_repair_called: ctx.orchestratorRepairUsed ?? false,
+        llm_repair_timeout_ms: ctx.repairTimeoutMs,
+      };
+
+      // Full repair_summary behind admin key
+      if (ctx.request && isAdminAuthorized(ctx.request)) {
+        trace.details.repair_summary = ctx.repairTrace;
+      }
+
+      (errorBody as any).trace = trace;
+
       ctx.earlyReturn = {
         statusCode: 422,
-        body: buildCeeErrorResponse(
-          "CEE_GRAPH_INVALID",
-          `Graph validation failed after ${error.attempts} attempt(s)`,
-          {
-            requestId: ctx.requestId,
-            details: {
-              validation_errors: error.errors.map((e) => ({
-                code: e.code,
-                message: e.message,
-                path: e.path,
-              })),
-              attempts: error.attempts,
-            },
-          },
-        ),
+        body: errorBody,
       };
       return;
     }

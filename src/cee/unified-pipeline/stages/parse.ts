@@ -313,23 +313,27 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     );
   }
 
-  // ── Step 12: Repair budget ──────────────────────────────────────────────
+  // ── Step 12: Repair budget (budget-aware) ───────────────────────────────
+  // Calculate effective repair timeout: min(configured, remaining - 2s safety margin).
+  // If no time budget remains, skip repair entirely.
+  const REPAIR_SAFETY_MARGIN_MS = 2_000;
   const remainingForRepair = DRAFT_REQUEST_BUDGET_MS - totalElapsed - LLM_POST_PROCESSING_HEADROOM_MS;
-  ctx.repairTimeoutMs = REPAIR_TIMEOUT_MS;
-  ctx.skipRepairDueToBudget = remainingForRepair < REPAIR_TIMEOUT_MS;
+  const effectiveRepairTimeout = Math.min(REPAIR_TIMEOUT_MS, remainingForRepair - REPAIR_SAFETY_MARGIN_MS);
+  ctx.skipRepairDueToBudget = effectiveRepairTimeout <= 0;
+  ctx.repairTimeoutMs = ctx.skipRepairDueToBudget ? 0 : effectiveRepairTimeout;
 
-  if (ctx.skipRepairDueToBudget) {
-    log.warn({
-      stage: "repair_budget_check",
-      draft_duration_ms: llmDurationSuccess,
-      total_elapsed_ms: totalElapsed,
-      budget_ms: DRAFT_REQUEST_BUDGET_MS,
-      remaining_for_repair_ms: remainingForRepair,
-      repair_timeout_ms: REPAIR_TIMEOUT_MS,
-      skip_repair: true,
-      correlation_id: ctx.requestId,
-    }, "Time budget exceeded - will skip LLM repair and use simple repair if needed");
-  }
+  log.info({
+    event: "cee.repair_budget",
+    repair_timeout_configured_ms: REPAIR_TIMEOUT_MS,
+    repair_timeout_effective_ms: ctx.repairTimeoutMs,
+    remaining_for_repair_ms: remainingForRepair,
+    total_elapsed_ms: totalElapsed,
+    budget_ms: DRAFT_REQUEST_BUDGET_MS,
+    skip_repair: ctx.skipRepairDueToBudget,
+    request_id: ctx.requestId,
+  }, ctx.skipRepairDueToBudget
+    ? "No time budget for LLM repair - will use simple repair if needed"
+    : "Repair budget calculated");
 
   // ── Step 13: Draft cost ─────────────────────────────────────────────────
   ctx.draftCost = calculateCost(draftAdapter.model, draftUsage.input_tokens, draftUsage.output_tokens);

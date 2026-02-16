@@ -317,11 +317,24 @@ describe("runStageParse", () => {
 
   it("sets skipRepairDueToBudget when remaining time is insufficient", async () => {
     setupMocks();
-    // Set requestStartMs so that elapsed ≈ 75s (within 90s budget but leaves < 10s for repair after headroom)
-    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 75_000 } });
+    // Budget-aware: skip when effectiveRepairTimeout <= 0
+    // Formula: remaining = 90s - elapsed - 10s headroom; effective = min(20s, remaining - 2s safety)
+    // Need remaining <= 2s → elapsed >= 78s
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 79_000 } });
     await runStageParse(ctx);
 
     expect(ctx.skipRepairDueToBudget).toBe(true);
+  });
+
+  it("uses budget-aware effective repair timeout when time is limited", async () => {
+    setupMocks();
+    // Elapsed 75s → remaining = 90 - 75 - 10 = 5s → effective = min(20, 5 - 2) = 3s
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 75_000 } });
+    await runStageParse(ctx);
+
+    expect(ctx.skipRepairDueToBudget).toBe(false);
+    expect(ctx.repairTimeoutMs).toBeLessThanOrEqual(3000);
+    expect(ctx.repairTimeoutMs).toBeGreaterThan(0);
   });
 
   // ── Confidence / clarifier ────────────────────────────────────────────

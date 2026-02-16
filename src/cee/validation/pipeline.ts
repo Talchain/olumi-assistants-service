@@ -152,7 +152,7 @@ function isUnsafeCaptureRequested(request: FastifyRequest): boolean {
   return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
 }
 
-function isAdminAuthorized(request: FastifyRequest): boolean {
+export function isAdminAuthorized(request: FastifyRequest): boolean {
   const providedKey = request.headers["x-admin-key"] as string | undefined;
   if (!providedKey) return false;
   const adminKey = config.prompts?.adminApiKey;
