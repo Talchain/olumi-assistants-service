@@ -31,7 +31,9 @@ export const LLMNode = z.object({
   goal_threshold_raw: z.number().optional(),
   goal_threshold_unit: z.string().optional(),
   goal_threshold_cap: z.number().optional(),
-});
+  // .passthrough() preserves additive fields the LLM may return that are not
+  // yet in the schema (same pattern as LLMEdge and Node in graph.ts).
+}).passthrough();
 
 export type LLMNodeT = z.infer<typeof LLMNode>;
 
@@ -90,7 +92,9 @@ export const LLMDraftResponse = z.object({
   nodes: z.array(LLMNode),
   edges: z.array(LLMEdge),
   rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
-});
+  // .passthrough() preserves additive fields (e.g. goal_constraints, future
+  // LLM output) so the normalisation → Zod pipeline doesn't silently drop them.
+}).passthrough();
 
 export type LLMDraftResponseT = z.infer<typeof LLMDraftResponse>;
 
