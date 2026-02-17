@@ -157,6 +157,8 @@ export const ModelAdjustment = z.object({
   after: z.unknown().optional(),
   /** Human-readable explanation */
   reason: z.string(),
+  /** Origin of the adjustment (e.g., "strp", "deterministic_sweep") */
+  source: z.string().optional(),
 });
 export type ModelAdjustmentT = z.infer<typeof ModelAdjustment>;
 

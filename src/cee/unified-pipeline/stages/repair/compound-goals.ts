@@ -2,8 +2,12 @@
  * Stage 4 Substep 5: Compound goals
  *
  * Source: Pipeline B lines 1578-1628
- * Extracts compound goals from brief, generates constraint nodes/edges,
- * filters to only those with valid targets, and adds to graph.
+ * Extracts compound goals from brief, remaps constraint targets against
+ * actual graph nodes, and emits goal_constraints[] for the response.
+ *
+ * Constraint data lives only in goal_constraints[] — constraints are metadata,
+ * not causal factors, so they must NOT be emitted as graph nodes or edges
+ * (F.6: CEE generates, PLoT computes, UI displays).
  */
 
 import type { StageContext } from "../../types.js";
@@ -11,10 +15,6 @@ import {
   extractCompoundGoals,
   toGoalConstraints,
   remapConstraintTargets,
-  generateConstraintNodes,
-  generateConstraintEdges,
-  constraintNodesToGraphNodes,
-  constraintEdgesToGraphEdges,
 } from "../../../compound-goal/index.js";
 import { log } from "../../../../utils/telemetry.js";
 
@@ -36,7 +36,7 @@ export function runCompoundGoals(ctx: StageContext): void {
   }
 
   // Remap constraint targets against actual graph nodes BEFORE generating
-  // nodes/edges. This fixes the root cause: the regex extractor invents IDs
+  // goal_constraints. This fixes the root cause: the regex extractor invents IDs
   // from brief text that don't match LLM-generated node IDs.
   const remapResult = remapConstraintTargets(
     compoundGoalResult.constraints,
@@ -57,39 +57,13 @@ export function runCompoundGoals(ctx: StageContext): void {
 
   ctx.goalConstraints = toGoalConstraints(validConstraints);
 
-  const constraintNodes = generateConstraintNodes(validConstraints);
-  const constraintEdges = generateConstraintEdges(validConstraints);
-
-  const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
-
-  // After remapping, all edge targets should exist in the graph.
-  // Filter is retained as a safety net but should be a no-op.
-  const edgesToAdd = rawEdges.filter((e: any) => existingNodeIds.has(e.to));
-
-  const constraintIdsWithValidTargets = new Set(edgesToAdd.map((e: any) => e.from));
-
-  const nodesToAdd = constraintNodesToGraphNodes(constraintNodes).filter(
-    (n: any) => constraintIdsWithValidTargets.has(n.id) && !existingNodeIds.has(n.id),
-  );
-
-  const skippedCount = constraintNodes.length - nodesToAdd.length;
-
-  ctx.graph = {
-    ...(ctx.graph as any),
-    nodes: [...(ctx.graph as any).nodes, ...nodesToAdd],
-    edges: [...(ctx.graph as any).edges, ...edgesToAdd],
-  } as any;
-
   log.info({
     event: "cee.compound_goal.integrated",
     request_id: ctx.requestId,
     constraint_count: ctx.goalConstraints.length,
-    constraint_nodes_added: nodesToAdd.length,
-    constraint_edges_added: edgesToAdd.length,
     constraints_remapped: remapResult.remapped,
     constraints_rejected_junk: remapResult.rejected_junk,
     constraints_rejected_no_match: remapResult.rejected_no_match,
-    constraints_skipped_no_target: skippedCount,
     is_compound: compoundGoalResult.isCompound,
-  }, "Compound goal constraints integrated into graph");
+  }, "Compound goal constraints emitted to goal_constraints[]");
 }

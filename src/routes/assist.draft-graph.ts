@@ -46,10 +46,6 @@ import {
   extractCompoundGoals,
   toGoalConstraints,
   remapConstraintTargets,
-  generateConstraintNodes,
-  generateConstraintEdges,
-  constraintNodesToGraphNodes,
-  constraintEdgesToGraphEdges,
 } from "../cee/compound-goal/index.js";
 
 const EVENT_STREAM = "text/event-stream";
@@ -1602,42 +1598,20 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
     const validConstraints = remapResult.constraints;
 
     if (validConstraints.length > 0) {
-      // Convert to goal_constraints format for PLoT
+      // Convert to goal_constraints format for PLoT.
+      // Constraints are metadata — they live only in goal_constraints[], not as
+      // graph nodes/edges (F.6: CEE generates, PLoT computes, UI displays).
       goalConstraints = toGoalConstraints(validConstraints);
-
-      // Generate constraint nodes and edges for the graph
-      const constraintNodes = generateConstraintNodes(validConstraints);
-      const constraintEdges = generateConstraintEdges(validConstraints);
-
-      // After remapping, all edge targets should exist in the graph.
-      // Filter is retained as a safety net but should be a no-op.
-      const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
-      const edgesToAdd = rawEdges.filter((e) => existingNodeIds.has(e.to));
-
-      const constraintIdsWithValidTargets = new Set(edgesToAdd.map(e => e.from));
-      const nodesToAdd = constraintNodesToGraphNodes(constraintNodes).filter(
-        n => constraintIdsWithValidTargets.has(n.id) && !existingNodeIds.has(n.id)
-      );
-      const skippedCount = constraintNodes.length - nodesToAdd.length;
-
-      candidate = {
-        ...candidate,
-        nodes: [...candidate.nodes, ...nodesToAdd],
-        edges: [...candidate.edges, ...edgesToAdd],
-      };
 
       log.info({
         event: "cee.compound_goal.integrated",
         request_id: correlationId,
         constraint_count: goalConstraints.length,
-        constraint_nodes_added: nodesToAdd.length,
-        constraint_edges_added: edgesToAdd.length,
         constraints_remapped: remapResult.remapped,
         constraints_rejected_junk: remapResult.rejected_junk,
         constraints_rejected_no_match: remapResult.rejected_no_match,
-        constraints_skipped_no_target: skippedCount,
         is_compound: compoundGoalResult.isCompound,
-      }, "Compound goal constraints integrated into graph");
+      }, "Compound goal constraints emitted to goal_constraints[]");
     }
   }
 

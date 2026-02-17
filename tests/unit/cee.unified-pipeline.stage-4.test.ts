@@ -100,10 +100,6 @@ vi.mock("../../src/cee/compound-goal/index.js", () => ({
   extractCompoundGoals: vi.fn().mockReturnValue({ constraints: [], isCompound: false }),
   toGoalConstraints: vi.fn().mockReturnValue([]),
   remapConstraintTargets: vi.fn().mockReturnValue({ constraints: [], remapped: 0, rejected_junk: 0, rejected_no_match: 0 }),
-  generateConstraintNodes: vi.fn().mockReturnValue([]),
-  generateConstraintEdges: vi.fn().mockReturnValue([]),
-  constraintNodesToGraphNodes: vi.fn().mockReturnValue([]),
-  constraintEdgesToGraphEdges: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("../../src/validators/structural-reconciliation.js", () => ({
@@ -159,7 +155,7 @@ import { validateGraph } from "../../src/services/validateClientWithCache.js";
 import { simpleRepair } from "../../src/services/repair.js";
 import { enforceStableEdgeIds } from "../../src/utils/graph-determinism.js";
 import { validateAndFixGraph, ensureGoalNode, hasGoalNode, wireOutcomesToGoal } from "../../src/cee/structure/index.js";
-import { extractCompoundGoals, toGoalConstraints, remapConstraintTargets, generateConstraintNodes, generateConstraintEdges, constraintNodesToGraphNodes, constraintEdgesToGraphEdges } from "../../src/cee/compound-goal/index.js";
+import { extractCompoundGoals, toGoalConstraints, remapConstraintTargets } from "../../src/cee/compound-goal/index.js";
 import { reconcileStructuralTruth } from "../../src/validators/structural-reconciliation.js";
 import { restoreEdgeFields } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { validateMinimumStructure } from "../../src/cee/transforms/structure-checks.js";
@@ -661,7 +657,7 @@ describe("Substep 5: Compound goals", () => {
     expect(ctx.goalConstraints).toBeUndefined();
   });
 
-  it("generates and adds constraint nodes/edges to graph", () => {
+  it("emits goal_constraints without adding constraint nodes/edges to graph", () => {
     const constraints = [{ metric: "cost", operator: "<=", threshold: 1000, targetNodeId: "g1" }];
     (extractCompoundGoals as any).mockReturnValue({ constraints, isCompound: true });
     (remapConstraintTargets as any).mockReturnValue({
@@ -671,17 +667,15 @@ describe("Substep 5: Compound goals", () => {
       rejected_no_match: 0,
     });
     (toGoalConstraints as any).mockReturnValue([{ node_id: "c1" }]);
-    (generateConstraintNodes as any).mockReturnValue([{ id: "c1" }]);
-    (generateConstraintEdges as any).mockReturnValue([]);
-    (constraintNodesToGraphNodes as any).mockReturnValue([{ id: "c1", kind: "constraint" }]);
-    (constraintEdgesToGraphEdges as any).mockReturnValue([{ from: "c1", to: "g1" }]);
 
     const ctx = makeCtx();
     runCompoundGoals(ctx);
 
+    // goal_constraints should be populated
     expect(ctx.goalConstraints).toEqual([{ node_id: "c1" }]);
-    expect((ctx.graph as any).nodes.length).toBe(validGraph.nodes.length + 1);
-    expect((ctx.graph as any).edges.length).toBe(validGraph.edges.length + 1);
+    // Graph must NOT be mutated — constraints are metadata, not graph nodes
+    expect((ctx.graph as any).nodes.length).toBe(validGraph.nodes.length);
+    expect((ctx.graph as any).edges.length).toBe(validGraph.edges.length);
   });
 });
 

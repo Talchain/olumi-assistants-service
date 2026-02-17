@@ -56,17 +56,33 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
-    // Append deterministic repair adjustments to model_adjustments (never overwrite)
-    if (v3Body.analysis_ready && ctx.deterministicRepairs && ctx.deterministicRepairs.length > 0) {
-      const repairAdjustments = ctx.deterministicRepairs.map((r) => ({
-        code: "deterministic_repair" as const,
-        field: r.path,
-        reason: r.action,
-      }));
+    // Append deterministic sweep reclassifications as model_adjustments.
+    // Only UNREACHABLE_FACTOR_RECLASSIFIED repairs are user-visible — other codes
+    // (NAN_VALUE, SIGN_MISMATCH, etc.) are mechanical fixes the user doesn't need to review.
+    // Expand REPAIR_CODE_TO_ADJUSTMENT intentionally when new user-visible repairs are added.
+    if (v3Body.analysis_ready) {
+      const REPAIR_CODE_TO_ADJUSTMENT: Record<string, "category_reclassified"> = {
+        UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
+      };
+
+      const repairAdjustments = (ctx.deterministicRepairs ?? [])
+        .filter((r) => r.code in REPAIR_CODE_TO_ADJUSTMENT)
+        .map((r) => {
+          // Extract node_id from path format "nodes[fac_x].category"
+          const nodeIdMatch = r.path.match(/^nodes\[([^\]]+)\]/);
+          return {
+            code: REPAIR_CODE_TO_ADJUSTMENT[r.code],
+            node_id: nodeIdMatch?.[1],
+            field: r.path,
+            reason: r.action,
+            source: "deterministic_sweep" as const,
+          };
+        });
+
       if (!v3Body.analysis_ready.model_adjustments) {
         v3Body.analysis_ready.model_adjustments = [];
       }
-      v3Body.analysis_ready.model_adjustments.push(...repairAdjustments as any[]);
+      v3Body.analysis_ready.model_adjustments.push(...repairAdjustments);
     }
 
     // Surface STRP constraint drops as blockers

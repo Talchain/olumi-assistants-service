@@ -321,4 +321,122 @@ describe("runStageBoundary", () => {
 
     expect(extractConstraintDropBlockers).not.toHaveBeenCalled();
   });
+
+  // ── Deterministic repair → model_adjustments ────────────────────────
+
+  it("maps UNREACHABLE_FACTOR_RECLASSIFIED repairs to category_reclassified model_adjustments", async () => {
+    // No STRP mutations so mapMutationsToAdjustments is not called
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: 'Reclassified unreachable factor "Factor X" to external' },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([
+      {
+        code: "category_reclassified",
+        node_id: "fac_x",
+        field: "nodes[fac_x].category",
+        reason: 'Reclassified unreachable factor "Factor X" to external',
+        source: "deterministic_sweep",
+      },
+    ]);
+  });
+
+  it("filters out non-user-visible repair codes (NAN_VALUE, SIGN_MISMATCH)", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+        { code: "SIGN_MISMATCH", path: "edges[c→d].strength_mean", action: "Flipped sign" },
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "Reclassified" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    // Only the UNREACHABLE_FACTOR_RECLASSIFIED repair should appear
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toHaveLength(1);
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].code).toBe("category_reclassified");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].source).toBe("deterministic_sweep");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].node_id).toBe("fac_x");
+  });
+
+  it("model_adjustments is [] when no reclassifications occurred", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [
+        { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("model_adjustments is [] when deterministicRepairs is undefined", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: undefined,
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("model_adjustments is [] when deterministicRepairs is empty", async () => {
+    (transformResponseToV3 as any).mockReturnValue(structuredClone(v3Body));
+
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: {},
+      },
+      deterministicRepairs: [],
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toEqual([]);
+  });
+
+  it("appends repair adjustments after STRP adjustments", async () => {
+    (mapMutationsToAdjustments as any).mockReturnValue([
+      { code: "category_reclassified", field: "category", reason: "STRP override" },
+    ]);
+
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_y].category", action: "Reclassified Y" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    // Both STRP and repair adjustments should be present
+    expect(ctx.finalResponse.analysis_ready.model_adjustments).toHaveLength(2);
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[0].reason).toBe("STRP override");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].reason).toBe("Reclassified Y");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].source).toBe("deterministic_sweep");
+    expect(ctx.finalResponse.analysis_ready.model_adjustments[1].node_id).toBe("fac_y");
+  });
 });

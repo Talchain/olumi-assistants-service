@@ -411,8 +411,8 @@ describe("Pipeline-to-schema integration — full boundary path", () => {
     // Simulate boundary stage: add model_adjustments + blockers
     if (v3.analysis_ready) {
       v3.analysis_ready.model_adjustments = [
-        { code: "rule_3_edge_direction" as any, field: "effect_direction", reason: "Corrected edge direction" },
-        { code: "deterministic_repair" as any, field: "nodes[fac_churn].category", reason: "Reclassified to external" },
+        { code: "connectivity_repaired" as any, field: "effect_direction", reason: "Corrected edge direction" },
+        { code: "category_reclassified" as any, field: "nodes[fac_churn].category", reason: "Reclassified to external" },
       ];
     }
 
@@ -461,6 +461,187 @@ describe("Pipeline-to-schema integration — full boundary path", () => {
     expect(v3.goal_constraints).toBeDefined();
     expect(v3.goal_constraints).toHaveLength(1);
     expect(v3.goal_constraints![0].node_id).toBe("fac_cost");
+  });
+});
+
+// =============================================================================
+// Task 3: goal_threshold + goal_constraints passthrough verification
+// =============================================================================
+
+describe("goal_threshold fields — serialisation passthrough", () => {
+  it("goal_threshold fields survive DraftGraphOutput.parse()", () => {
+    const input = {
+      graph: {
+        version: "1",
+        default_seed: 42,
+        nodes: [
+          { id: "decision_1", kind: "decision", label: "Test" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "fac_1", kind: "factor", label: "Factor", category: "controllable", data: { value: 0.5 } },
+          { id: "out_1", kind: "outcome", label: "Outcome" },
+          {
+            id: "goal_1", kind: "goal", label: "Grow to 800 customers",
+            goal_threshold: 0.8,
+            goal_threshold_raw: 800,
+            goal_threshold_unit: "customers",
+            goal_threshold_cap: 1000,
+          },
+        ],
+        edges: [
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.15, belief_exists: 0.8, effect_direction: "positive" },
+          { from: "out_1", to: "goal_1", strength_mean: 0.9, strength_std: 0.05, belief_exists: 1, effect_direction: "positive" },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      },
+    };
+
+    const result = DraftGraphOutput.safeParse(input);
+    if (!result.success) {
+      const first = result.error.issues[0];
+      throw new Error(
+        `DraftGraphOutput failed: path=${first?.path?.join(".")}, message=${first?.message}`,
+      );
+    }
+    expect(result.success).toBe(true);
+
+    // Verify goal_threshold fields survived Zod parse
+    const goalNode = (result.data as any).graph.nodes.find((n: any) => n.id === "goal_1");
+    expect(goalNode.goal_threshold).toBe(0.8);
+    expect(goalNode.goal_threshold_raw).toBe(800);
+    expect(goalNode.goal_threshold_unit).toBe("customers");
+    expect(goalNode.goal_threshold_cap).toBe(1000);
+  });
+
+  it("goal_threshold fields survive V1→V3 transform", () => {
+    const v1 = makeSimpleV1Response();
+    // Add goal_threshold fields to the goal node
+    const goalNode = v1.graph.nodes.find((n: any) => n.kind === "goal")!;
+    (goalNode as any).goal_threshold = 0.8;
+    (goalNode as any).goal_threshold_raw = 800;
+    (goalNode as any).goal_threshold_unit = "customers";
+    (goalNode as any).goal_threshold_cap = 1000;
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-threshold-001" });
+
+    // Verify fields survive V3 transform
+    const v3GoalNode = v3.nodes.find((n) => n.kind === "goal")!;
+    expect(v3GoalNode.goal_threshold).toBe(0.8);
+    expect(v3GoalNode.goal_threshold_raw).toBe(800);
+    expect(v3GoalNode.goal_threshold_unit).toBe("customers");
+    expect(v3GoalNode.goal_threshold_cap).toBe(1000);
+
+    // Verify V3 response still passes schema
+    const result = CEEGraphResponseV3.safeParse(v3);
+    if (!result.success) {
+      const first = result.error.issues[0];
+      throw new Error(
+        `CEEGraphResponseV3 validation failed: path=${first?.path?.join(".")}, message=${first?.message}`,
+      );
+    }
+    expect(result.success).toBe(true);
+
+    // Verify fields survived schema validation
+    const parsedGoal = (result.data as any).nodes.find((n: any) => n.kind === "goal");
+    expect(parsedGoal.goal_threshold).toBe(0.8);
+    expect(parsedGoal.goal_threshold_raw).toBe(800);
+    expect(parsedGoal.goal_threshold_unit).toBe("customers");
+    expect(parsedGoal.goal_threshold_cap).toBe(1000);
+  });
+});
+
+describe("goal_constraints — serialisation passthrough", () => {
+  it("goal_constraints survive DraftGraphOutput.parse()", () => {
+    const input = {
+      graph: {
+        version: "1",
+        default_seed: 42,
+        nodes: [
+          { id: "decision_1", kind: "decision", label: "Test" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "fac_cost", kind: "factor", label: "Cost", category: "controllable", data: { value: 50 } },
+          { id: "out_1", kind: "outcome", label: "Outcome" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "opt_a", to: "fac_cost", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "fac_cost", to: "out_1", strength_mean: -0.6, strength_std: 0.15, belief_exists: 0.9, effect_direction: "negative" },
+          { from: "out_1", to: "goal_1", strength_mean: 0.9, strength_std: 0.05, belief_exists: 1, effect_direction: "positive" },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      },
+      goal_constraints: [
+        {
+          constraint_id: "gc_budget_cap",
+          node_id: "fac_cost",
+          operator: "<=",
+          value: 100000,
+          label: "Budget cap",
+          confidence: 0.9,
+          provenance: "explicit",
+        },
+      ],
+    };
+
+    const result = DraftGraphOutput.safeParse(input);
+    if (!result.success) {
+      const first = result.error.issues[0];
+      throw new Error(
+        `DraftGraphOutput failed: path=${first?.path?.join(".")}, message=${first?.message}`,
+      );
+    }
+    expect(result.success).toBe(true);
+
+    // Verify goal_constraints survived Zod parse
+    const gc = (result.data as any).goal_constraints;
+    expect(gc).toHaveLength(1);
+    expect(gc[0].node_id).toBe("fac_cost");
+    expect(gc[0].operator).toBe("<=");
+    expect(gc[0].value).toBe(100000);
+  });
+
+  it("goal_constraints survive full V1→V3→CEEGraphResponseV3 round-trip", () => {
+    const v1 = makeSimpleV1Response();
+    (v1 as any).goal_constraints = [
+      {
+        constraint_id: "gc_churn_cap",
+        node_id: "fac_cost",
+        operator: "<=",
+        value: 0.05,
+        label: "Churn cap",
+        confidence: 0.85,
+        provenance: "explicit",
+      },
+      {
+        constraint_id: "gc_revenue_floor",
+        node_id: "out_success",
+        operator: ">=",
+        value: 1000000,
+        label: "Revenue floor",
+        confidence: 0.9,
+        provenance: "explicit",
+      },
+    ];
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-gc-roundtrip-001" });
+
+    // V3 transform must carry goal_constraints
+    expect(v3.goal_constraints).toHaveLength(2);
+    expect(v3.goal_constraints![0].node_id).toBe("fac_cost");
+    expect(v3.goal_constraints![1].node_id).toBe("out_success");
+
+    // Schema validation must pass and preserve them
+    const result = CEEGraphResponseV3.safeParse(v3);
+    if (!result.success) {
+      const first = result.error.issues[0];
+      throw new Error(
+        `CEEGraphResponseV3 validation failed: path=${first?.path?.join(".")}, message=${first?.message}`,
+      );
+    }
+    expect(result.success).toBe(true);
+    expect((result.data as any).goal_constraints).toHaveLength(2);
   });
 });
 

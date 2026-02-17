@@ -858,20 +858,27 @@ describe("observability", () => {
     expect(repairSummary.graph_delta.nodes_before).toBe(7);
   });
 
-  it("model_adjustments includes repair entries", () => {
+  it("model_adjustments allowlist filters to user-visible repairs only", () => {
+    // Only UNREACHABLE_FACTOR_RECLASSIFIED is user-visible; NAN_VALUE is mechanical
+    const REPAIR_CODE_TO_ADJUSTMENT: Record<string, string> = {
+      UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
+    };
     const repairs = [
       { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN" },
+      { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "Reclassified" },
     ];
 
-    const adjustments = repairs.map((r) => ({
-      type: "deterministic_repair",
-      field: r.path,
-      detail: r.action,
-    }));
+    const adjustments = repairs
+      .filter((r) => r.code in REPAIR_CODE_TO_ADJUSTMENT)
+      .map((r) => ({
+        code: REPAIR_CODE_TO_ADJUSTMENT[r.code],
+        field: r.path,
+        reason: r.action,
+      }));
 
     expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].type).toBe("deterministic_repair");
-    expect(adjustments[0].field).toBe("edges[a→b].strength_mean");
+    expect(adjustments[0].code).toBe("category_reclassified");
+    expect(adjustments[0].field).toBe("nodes[fac_x].category");
   });
 
   it("graph_delta counts are accurate", () => {
