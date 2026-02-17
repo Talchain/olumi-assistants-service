@@ -228,6 +228,63 @@ describe("V3 transform conformance — CEEGraphResponseV3 schema", () => {
     expect((v3 as any).trace?.repair_summary?.deterministic_repairs_count).toBe(3);
   });
 
+  it("repair_summary read from pipeline.repair_summary (production path)", () => {
+    const v1 = makeSimpleV1Response();
+    // Simulate production: repair_summary lives on trace.pipeline.repair_summary
+    // (added to pipelineTrace after Zod verification, so it survives).
+    (v1.trace as any).pipeline = {
+      status: "success",
+      repair_summary: {
+        deterministic_sweep_ran: true,
+        deterministic_sweep_version: "1.0",
+        bucket_summary: { a: 1, b: 0, c: 0 },
+        deterministic_repairs_count: 1,
+        deterministic_repairs: [
+          { code: "NAN_VALUE", path: "edges[a→b].strength_mean", action: "Replaced NaN with 0.5" },
+        ],
+        unreachable_factors: { reclassified: [], marked_droppable: [] },
+        status_quo: { fixed: false, marked_droppable: false },
+        llm_repair_called: false,
+        llm_repair_brief_included: false,
+        llm_repair_skipped_reason: "deterministic_sweep_sufficient",
+        remaining_violations_count: 0,
+        remaining_violation_codes: [],
+        edge_format_detected: "V1_FLAT",
+        graph_delta: { nodes_before: 9, nodes_after: 9, edges_before: 11, edges_after: 11 },
+      },
+    };
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-pipeline-repair-001" });
+
+    const result = CEEGraphResponseV3.safeParse(v3);
+    if (!result.success) {
+      const first = result.error.issues[0];
+      throw new Error(
+        `CEEGraphResponseV3 validation failed: path=${first?.path?.join(".")}, message=${first?.message}`,
+      );
+    }
+    expect(result.success).toBe(true);
+
+    // repair_summary should come from pipeline.repair_summary
+    const rs = (v3 as any).trace?.repair_summary;
+    expect(rs).toBeDefined();
+    expect(rs.deterministic_repairs_count).toBe(1);
+    expect(rs.deterministic_repairs).toHaveLength(1);
+    expect(rs.deterministic_repairs[0].code).toBe("NAN_VALUE");
+  });
+
+  it("repair_summary present with zero repairs (key always exists)", () => {
+    const v1 = makeMinimalV1Response();
+    // No repair_summary on trace or pipeline — should fall back to default
+    const v3 = transformResponseToV3(v1, { requestId: "test-zero-repairs-001" });
+
+    // repair_summary must always be present
+    const rs = (v3 as any).trace?.repair_summary;
+    expect(rs).toBeDefined();
+    expect(rs.deterministic_repairs_count).toBe(0);
+    expect(rs.deterministic_repairs).toEqual([]);
+  });
+
   it("minimal fixture passes CEEGraphResponseV3 schema", () => {
     const v1 = makeMinimalV1Response();
     const v3 = transformResponseToV3(v1, { requestId: "test-minimal-001" });

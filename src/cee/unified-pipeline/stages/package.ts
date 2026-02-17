@@ -395,6 +395,12 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     pipelineTrace.repair = ctx.repairTrace;
   }
 
+  // Deterministic repair summary for observability.
+  // Must live on pipelineTrace (not the pre-verification trace object) because
+  // Zod's intersection parse in Step 13 may strip unknown keys from the trace.
+  // The V3 transform reads from trace.pipeline.repair_summary.
+  pipelineTrace.repair_summary = trace.repair_summary;
+
   // Stage snapshots (goal_threshold field tracking across pipeline stages)
   if (ctx.stageSnapshots) {
     pipelineTrace.stage_snapshots = ctx.stageSnapshots;

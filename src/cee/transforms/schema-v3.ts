@@ -628,8 +628,14 @@ export function transformResponseToV3(
       ...((v1Response.trace as any)?.strp && { strp: (v1Response.trace as any).strp }),
       // Enrichment metadata (Pipeline B, Step 12)
       ...((v1Response.trace as any)?.enrich && { enrich: (v1Response.trace as any).enrich }),
-      // Deterministic repair summary for observability
-      ...((v1Response.trace as any)?.repair_summary && { repair_summary: (v1Response.trace as any).repair_summary }),
+      // Deterministic repair summary for observability.
+      // Primary path: trace.pipeline.repair_summary (survives Zod verification in Step 13).
+      // Fallback: trace.repair_summary (pre-verification, for backward-compatible fixtures).
+      // Always emitted so the UI can depend on the key existing.
+      repair_summary:
+        (v1Response.trace as any)?.pipeline?.repair_summary
+        ?? (v1Response.trace as any)?.repair_summary
+        ?? { deterministic_repairs_count: 0, deterministic_repairs: [] },
     },
     draft_warnings: v1Response.draft_warnings,
   };
