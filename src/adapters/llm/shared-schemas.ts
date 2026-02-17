@@ -26,6 +26,11 @@ export const LLMNode = z.object({
   category: FactorCategory.optional(),
   // Node data depends on kind: FactorData for factors, OptionData (interventions) for options
   data: NodeData.optional(),
+  // Goal node fields — must match draft-graph prompt GOAL THRESHOLD section
+  goal_threshold: z.number().optional(),
+  goal_threshold_raw: z.number().optional(),
+  goal_threshold_unit: z.string().optional(),
+  goal_threshold_cap: z.number().optional(),
 });
 
 export type LLMNodeT = z.infer<typeof LLMNode>;

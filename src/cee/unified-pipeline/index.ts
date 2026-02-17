@@ -16,7 +16,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { StageContext, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras } from "./types.js";
+import type { StageContext, StageSnapshot, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras } from "./types.js";
 import { getRequestId } from "../../utils/request-id.js";
 import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
@@ -98,6 +98,23 @@ function buildInitialContext(
   };
 }
 
+/**
+ * Capture a lightweight snapshot of goal node state for observability.
+ * Reads the goal node from ctx.graph and returns the 6 tracking fields.
+ */
+function captureStageSnapshot(ctx: StageContext): StageSnapshot {
+  const nodes = (ctx.graph as any)?.nodes as Array<{ id: string; kind: string; [k: string]: unknown }> | undefined;
+  const goalNode = nodes?.find((n) => n.kind === "goal");
+  return {
+    goal_node_id: goalNode?.id ?? null,
+    goal_threshold: (goalNode?.goal_threshold as number) ?? null,
+    goal_threshold_raw: (goalNode?.goal_threshold_raw as number) ?? null,
+    goal_threshold_unit: (goalNode?.goal_threshold_unit as string) ?? null,
+    goal_threshold_cap: (goalNode?.goal_threshold_cap as number) ?? null,
+    goal_constraints_count: Array.isArray(ctx.goalConstraints) ? ctx.goalConstraints.length : 0,
+  };
+}
+
 function buildRawOutputResponse(ctx: StageContext): UnifiedPipelineResult {
   return {
     statusCode: 200,
@@ -156,20 +173,24 @@ export async function runUnifiedPipeline(
     await runStageParse(ctx);
     if (ctx.earlyReturn) return ctx.earlyReturn;
     if (ctx.opts.rawOutput) return buildRawOutputResponse(ctx);
+    ctx.stageSnapshots = { stage_1_parse: captureStageSnapshot(ctx) };
 
     // Stage 2: Normalise — STRP + risk coefficients
     await runStageNormalise(ctx);
 
     // Stage 3: Enrich — Factor enrichment (ONCE)
     await runStageEnrich(ctx);
+    ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
     await runStageRepair(ctx);
     if (ctx.earlyReturn) return ctx.earlyReturn;
+    ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     await runStagePackage(ctx);
     if (ctx.earlyReturn) return ctx.earlyReturn;
+    ctx.stageSnapshots.stage_5_package = captureStageSnapshot(ctx);
 
     // Stage 6: Boundary — V3/V2/V1 transform
     await runStageBoundary(ctx);

@@ -395,6 +395,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     pipelineTrace.repair = ctx.repairTrace;
   }
 
+  // Stage snapshots (goal_threshold field tracking across pipeline stages)
+  if (ctx.stageSnapshots) {
+    pipelineTrace.stage_snapshots = ctx.stageSnapshots;
+  }
+
   // Final graph summary
   const nodeCount = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0;
   const edgeCount = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0;

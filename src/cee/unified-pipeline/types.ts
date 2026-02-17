@@ -133,4 +133,17 @@ export interface StageContext {
   pipelineCheckpoints: PipelineCheckpoint[];
   checkpointsEnabled: boolean;
   earlyReturn?: UnifiedPipelineResult;
+
+  // ── Stage snapshots (observability — goal_threshold field tracking) ──
+  stageSnapshots?: Record<string, StageSnapshot>;
+}
+
+/** Lightweight snapshot of goal node state at a pipeline stage boundary. */
+export interface StageSnapshot {
+  goal_node_id: string | null;
+  goal_threshold: number | null;
+  goal_threshold_raw: number | null;
+  goal_threshold_unit: string | null;
+  goal_threshold_cap: number | null;
+  goal_constraints_count: number;
 }
