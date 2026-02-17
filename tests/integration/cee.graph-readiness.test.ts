@@ -12,6 +12,7 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
 
 describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;
@@ -231,6 +232,59 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
 
     expect(typeof body.readiness_score).toBe("number");
     expect(["ready", "fair", "needs_work"]).toContain(body.readiness_level);
+  });
+
+  it("emits total_factor_count, user_question_count, and deprecated factor_count in telemetry and response", async () => {
+    // Build a graph with exactly 4 factor nodes
+    const graphWith4Factors = {
+      version: "1",
+      default_seed: 42,
+      nodes: [
+        { id: "goal", kind: "goal", label: "Increase revenue" },
+        { id: "decision", kind: "decision", label: "Pricing" },
+        { id: "opt_a", kind: "option", label: "Premium" },
+        { id: "fac_price", kind: "factor", label: "Price", category: "controllable", data: { value: 100 } },
+        { id: "fac_quality", kind: "factor", label: "Quality", category: "controllable", data: { value: 0.8 } },
+        { id: "fac_demand", kind: "factor", label: "Demand", category: "observable", data: { value: 500 } },
+        { id: "fac_competition", kind: "factor", label: "Competition", category: "external", data: { value: 0.5 } },
+        { id: "outcome_1", kind: "outcome", label: "Revenue" },
+      ],
+      edges: [
+        { id: "e1", from: "decision", to: "opt_a" },
+        { id: "e2", from: "opt_a", to: "outcome_1" },
+      ],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+    };
+
+    const emitSpy = vi.spyOn(await import("../../src/utils/telemetry.js"), "emit");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersAlt,
+      payload: { graph: graphWith4Factors },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // Telemetry: verify emit payload
+    const completedCall = emitSpy.mock.calls.find(
+      (call) => call[0] === TelemetryEvents.CeeGraphReadinessCompleted,
+    );
+    expect(completedCall).toBeDefined();
+
+    const eventData = completedCall![1] as any;
+    expect(eventData.total_factor_count).toBe(4);
+    expect(typeof eventData.user_question_count).toBe("number");
+    expect(typeof eventData.factor_count).toBe("number");
+
+    // Response payload: verify all three factor count fields
+    const body = res.json();
+    expect(body.total_factor_count).toBe(4);
+    expect(typeof body.user_question_count).toBe("number");
+    expect(typeof body.factor_count).toBe("number");
+
+    emitSpy.mockRestore();
   });
 
   it("accepts minimal graph without version/default_seed/meta (uses defaults)", async () => {

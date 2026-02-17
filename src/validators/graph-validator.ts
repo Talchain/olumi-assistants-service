@@ -1243,13 +1243,14 @@ export function validateGraphPostNormalisation(
  * @returns Validation result with errors and warnings
  */
 export function validateGraph(input: GraphValidationInput): GraphValidationResult {
-  const { graph, requestId } = input;
+  const { graph, requestId, phase } = input;
   const startTime = Date.now();
 
   log.info(
     {
       event: "graph_validator.start",
       requestId,
+      phase,
       nodeCount: graph.nodes.length,
       edgeCount: graph.edges.length,
     },
@@ -1304,6 +1305,7 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
     {
       event: "graph_validator.complete",
       requestId,
+      phase,
       errorCount: errors.length,
       warningCount: warnings.length,
       controllability_summary,

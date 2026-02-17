@@ -24,6 +24,7 @@ export {
 export {
   type GraphValidationInput,
   type GraphValidationResult,
+  type ValidatorPhase,
   type ConstraintNormalisationResult,
   type ControllabilitySummary,
   type ValidationIssue,

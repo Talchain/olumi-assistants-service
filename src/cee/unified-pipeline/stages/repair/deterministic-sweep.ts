@@ -548,7 +548,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   ctx.detectedEdgeFormat = format;
 
   // Step 3: Collect validation errors using the graph-validator
-  const validationResult = validateGraphDeterministic({ graph, requestId: ctx.requestId });
+  // Pre-sweep diagnostic — informational only, do not fail on these results
+  const validationResult = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "pre_sweep_diagnostic" });
   const allViolations = validationResult.errors;
 
   log.info({
@@ -651,8 +652,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const statusQuoResult = fixStatusQuoConnectivity(graph, violationCodes, format);
   allRepairs.push(...statusQuoResult.repairs);
 
-  // Step 7: Re-validate using same validator
-  const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId });
+  // Step 7: Re-validate using same validator (post-sweep authoritative pass)
+  const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "post_sweep_authoritative" });
   const remainingErrors = revalidation.errors;
 
   // Step 8: Proactive disconnected-option check after all fixes.

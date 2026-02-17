@@ -40,6 +40,12 @@ interface CEEGraphReadinessResponseV1 {
     /** Human-readable summary */
     summary: string;
   };
+  // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
+  factor_count?: number;
+  /** Count of nodes with kind === "factor" (all categories) */
+  total_factor_count: number;
+  /** Count of quality assessment dimensions (legacy quality_factors.length) */
+  user_question_count: number;
   trace?: CEETraceMeta;
 }
 
@@ -410,6 +416,10 @@ export default async function route(app: FastifyInstance) {
 
         const v3Result = assessV3Readiness(graph, input.analysis_ready);
 
+        const totalFactorCount = (graph.nodes ?? []).filter(
+          (n: any) => n.kind === "factor",
+        ).length;
+
         // Return V3-specific response with extended fields
         const v3Response = {
           readiness_score: v3Result.readiness_score,
@@ -425,6 +435,10 @@ export default async function route(app: FastifyInstance) {
           options_total: v3Result.options_total,
           goal_node_valid: v3Result.goal_node_valid,
           issues: v3Result.issues,
+          // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
+          factor_count: 0,
+          total_factor_count: totalFactorCount,
+          user_question_count: 0,
           trace,
         };
 
@@ -436,7 +450,10 @@ export default async function route(app: FastifyInstance) {
           readiness_score: v3Result.readiness_score,
           readiness_level: v3Result.readiness_level,
           can_run_analysis: v3Result.can_run_analysis,
+          // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
           factor_count: 0,
+          total_factor_count: totalFactorCount,
+          user_question_count: 0,
           v3_mode: true,
           options_ready: v3Result.options_ready,
           options_total: v3Result.options_total,
@@ -460,6 +477,10 @@ export default async function route(app: FastifyInstance) {
       // Fall back to legacy V1/V2 assessment (options in graph nodes)
       const assessment = assessGraphReadiness(graph);
 
+      const totalFactorCountV1 = (graph.nodes ?? []).filter(
+        (n: any) => n.kind === "factor",
+      ).length;
+
       const response: CEEGraphReadinessResponseV1 = {
         readiness_score: assessment.readiness_score,
         readiness_level: assessment.readiness_level,
@@ -469,6 +490,10 @@ export default async function route(app: FastifyInstance) {
         can_run_analysis: assessment.can_run_analysis,
         blocker_reason: assessment.blocker_reason,
         evidence_quality: assessment.evidence_quality,
+        // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
+        factor_count: assessment.quality_factors.length,
+        total_factor_count: totalFactorCountV1,
+        user_question_count: assessment.quality_factors.length,
         trace,
       };
 
@@ -480,7 +505,10 @@ export default async function route(app: FastifyInstance) {
         readiness_score: assessment.readiness_score,
         readiness_level: assessment.readiness_level,
         can_run_analysis: assessment.can_run_analysis,
+        // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
         factor_count: assessment.quality_factors.length,
+        total_factor_count: totalFactorCountV1,
+        user_question_count: assessment.quality_factors.length,
       });
 
       logCeeCall({

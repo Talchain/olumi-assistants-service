@@ -155,11 +155,16 @@ export interface FactorCategoryInfo {
 // Input/Output Types
 // =============================================================================
 
+/** Distinguishes diagnostic vs authoritative validator calls in logs. */
+export type ValidatorPhase = "pre_sweep_diagnostic" | "post_sweep_authoritative";
+
 export interface GraphValidationInput {
   /** The graph to validate */
   graph: GraphT;
   /** Optional request ID for telemetry */
   requestId?: string;
+  /** Optional phase label for log disambiguation */
+  phase?: ValidatorPhase;
 }
 
 export interface ConstraintNormalisationResult {
