@@ -458,6 +458,171 @@ function isJunkNodeId(nodeId: string): boolean {
 }
 
 // ============================================================================
+// Deterministic Alias Map
+// ============================================================================
+
+/**
+ * Maps common constraint phrases (extracted from briefs) to an ordered list
+ * of node-ID stem patterns that frequently appear in LLM-generated graphs.
+ *
+ * Lookup key: lowercased targetName from the regex extractor.
+ * Values: candidate node-ID stems to match against (order = preference).
+ *
+ * Used AFTER exact-ID and exact-label matching, BEFORE fuzzy substring matching.
+ *
+ * Expand intentionally — add entries when new domain patterns recur in briefs.
+ * Key matching is substring-based: "monthly churn rate" matches the "churn rate" key.
+ * Stem matching is also substring-based: candidate "churn" matches node stem "customer_churn".
+ */
+export const CONSTRAINT_ALIASES: Record<string, string[]> = {
+  // ── Churn / retention ─────────────────────────────────────────────────
+  churn:              ["customer_churn", "churn_rate", "monthly_churn", "annual_churn"],
+  "churn rate":       ["churn_rate", "customer_churn", "monthly_churn"],
+  "monthly churn":    ["monthly_churn", "churn_rate", "customer_churn"],
+  retention:          ["retention_rate", "customer_retention", "revenue_retention"],
+  "retention rate":   ["retention_rate", "customer_retention"],
+  "customer retention": ["customer_retention", "retention_rate"],
+
+  // ── Revenue / growth ──────────────────────────────────────────────────
+  revenue:            ["revenue_growth", "total_revenue", "annual_revenue", "mrr"],
+  "revenue growth":   ["revenue_growth", "total_revenue"],
+  mrr:                ["mrr", "monthly_recurring_revenue", "revenue_growth"],
+  arr:                ["arr", "annual_recurring_revenue", "revenue_growth"],
+
+  // ── Cost / budget / spend ─────────────────────────────────────────────
+  budget:             ["marketing_spend", "total_budget", "operating_budget", "budget"],
+  "marketing spend":  ["marketing_spend", "marketing_budget", "marketing_cost"],
+  "marketing budget": ["marketing_budget", "marketing_spend", "marketing_cost"],
+  costs:              ["operating_costs", "total_costs", "cost"],
+  cost:               ["operating_costs", "total_costs", "cost"],
+  spend:              ["marketing_spend", "total_spend", "operating_spend"],
+  spending:           ["marketing_spend", "total_spend", "operating_spend"],
+
+  // ── Team / capacity ───────────────────────────────────────────────────
+  team:               ["team_capacity", "team_size", "headcount"],
+  "team capacity":    ["team_capacity", "team_size"],
+  headcount:          ["headcount", "team_size", "team_capacity"],
+
+  // ── Market / share ────────────────────────────────────────────────────
+  "market share":     ["market_share", "market_penetration"],
+  market:             ["market_share", "market_penetration", "market_size"],
+
+  // ── Margin / profit ───────────────────────────────────────────────────
+  margin:             ["profit_margin", "gross_margin", "operating_margin", "margin"],
+  "profit margin":    ["profit_margin", "gross_margin"],
+  profit:             ["profit", "net_profit", "profit_margin"],
+
+  // ── Satisfaction / NPS ────────────────────────────────────────────────
+  satisfaction:       ["customer_satisfaction", "nps_score", "csat"],
+  "customer satisfaction": ["customer_satisfaction", "nps_score", "csat"],
+  nps:                ["nps_score", "customer_satisfaction"],
+};
+
+/**
+ * Try to match a constraint's targetName against CONSTRAINT_ALIASES,
+ * then resolve the alias stems against actual graph node IDs.
+ *
+ * Key matching is substring-based: if the normalised targetName contains an
+ * alias key (or vice versa), the alias candidates are used. When multiple keys
+ * match, the longest key wins (most specific match).
+ *
+ * Stem matching is also substring-based: alias candidate "churn" matches a
+ * node stem "customer_churn" (either direction). Only unambiguous single
+ * matches are returned.
+ *
+ * Returns the first matching node ID, or undefined if no alias matches.
+ */
+function aliasMatchNodeId(
+  targetName: string,
+  nodeIds: string[],
+): string | undefined {
+  const normName = targetName.toLowerCase().trim();
+
+  // Find alias candidates — exact key first, then substring (longest key wins)
+  let aliasCandidates = CONSTRAINT_ALIASES[normName];
+  if (!aliasCandidates) {
+    let bestKey: string | undefined;
+    let bestKeyLen = 0;
+    for (const aliasKey of Object.keys(CONSTRAINT_ALIASES)) {
+      if (normName.includes(aliasKey) || aliasKey.includes(normName)) {
+        if (aliasKey.length > bestKeyLen) {
+          bestKey = aliasKey;
+          bestKeyLen = aliasKey.length;
+        }
+      }
+    }
+    if (bestKey) {
+      aliasCandidates = CONSTRAINT_ALIASES[bestKey];
+    }
+  }
+  if (!aliasCandidates) return undefined;
+
+  // Build a list of { stem, nodeId } for matching
+  const nodeStems: Array<{ stem: string; nodeId: string }> = [];
+  for (const nodeId of nodeIds) {
+    let stem = nodeId;
+    for (const prefix of ["fac_", "out_", "risk_"]) {
+      if (stem.startsWith(prefix)) {
+        stem = stem.slice(prefix.length);
+        break;
+      }
+    }
+    nodeStems.push({ stem: stem.toLowerCase(), nodeId });
+  }
+
+  // Try each alias candidate in preference order — substring matching
+  for (const candidateStem of aliasCandidates) {
+    const candidateLower = candidateStem.toLowerCase();
+    const matches: string[] = [];
+
+    for (const { stem, nodeId } of nodeStems) {
+      // Exact stem match or substring match (either direction)
+      if (stem === candidateLower || stem.includes(candidateLower) || candidateLower.includes(stem)) {
+        matches.push(nodeId);
+      }
+    }
+
+    // Only use this candidate if it produces an unambiguous single match
+    if (matches.length === 1) return matches[0];
+    // If exact match among multiple, prefer it
+    if (matches.length > 1) {
+      const exact = matches.find((m) => {
+        let s = m;
+        for (const p of ["fac_", "out_", "risk_"]) {
+          if (s.startsWith(p)) { s = s.slice(p.length); break; }
+        }
+        return s.toLowerCase() === candidateLower;
+      });
+      if (exact) return exact;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Try to match a constraint's targetName against node labels (exact label match).
+ *
+ * Normalises both the targetName and each node label to a lowercase slug,
+ * then checks for an exact match.
+ *
+ * Returns the first matching node ID, or undefined if no label matches.
+ */
+function labelExactMatchNodeId(
+  targetName: string,
+  nodeLabels: Map<string, string>,
+): string | undefined {
+  const normTarget = targetName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  if (normTarget.length < 3) return undefined;
+
+  for (const [nodeId, label] of nodeLabels) {
+    const normLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (normLabel === normTarget) return nodeId;
+  }
+  return undefined;
+}
+
+// ============================================================================
 // Post-Extraction Remapping Against Graph Nodes
 // ============================================================================
 
@@ -471,26 +636,28 @@ export interface RemapResult {
 /**
  * Remap extracted constraint targetNodeIds against actual graph nodes.
  *
- * This is the critical fix for the constraint-targeting problem:
- * the regex extractor invents node IDs from brief text, which may not
- * match the LLM-generated graph nodes. This function:
- *
- * 1. Rejects junk IDs (stop-word-only stems like "fac_we_have")
- * 2. Keeps exact matches as-is
- * 3. Fuzzy-remaps near-misses using fuzzyMatchNodeId()
- * 4. Drops constraints with no valid target
- * 5. Deduplicates constraints that map to the same target+operator
+ * Matching order (first hit wins):
+ *  0. Temporal → pass through (deadlines don't target graph nodes)
+ *  1. Reject junk IDs (stop-word-only stems)
+ *  2. Exact ID match
+ *  3. Exact label match (normalised targetName == normalised node label)
+ *  4. Alias match (deterministic CONSTRAINT_ALIASES lookup)
+ *  5. Fuzzy match (stem substring + label substring via fuzzyMatchNodeId)
+ *  6. Drop (no match)
+ *  7. Deduplicate
  *
  * @param constraints - Extracted constraints with invented targetNodeIds
  * @param nodeIds - Actual graph node IDs from the LLM-generated graph
  * @param nodeLabels - Optional node ID → label map for label-based fallback
  * @param requestId - Optional request ID for telemetry
+ * @param goalNodeId - Optional goal node ID for temporal constraint binding
  */
 export function remapConstraintTargets(
   constraints: ExtractedGoalConstraint[],
   nodeIds: string[],
   nodeLabels?: Map<string, string>,
   requestId?: string,
+  goalNodeId?: string,
 ): RemapResult {
   const nodeIdSet = new Set(nodeIds);
   const remapped: ExtractedGoalConstraint[] = [];
@@ -499,10 +666,31 @@ export function remapConstraintTargets(
   let noMatchCount = 0;
 
   for (const constraint of constraints) {
-    // Step 0: Temporal constraints (deadlines) don't target graph nodes —
-    // pass them through without matching or junk filtering
+    // Step 0: Temporal constraints — bind to goal node or drop with reason
     if (constraint.deadlineMetadata) {
-      remapped.push(constraint);
+      if (goalNodeId) {
+        remapped.push({
+          ...constraint,
+          targetNodeId: goalNodeId,
+        });
+        if (constraint.targetNodeId !== goalNodeId) {
+          remapCount++;
+          log.info({
+            event: "cee.compound_goal.temporal_bound_to_goal",
+            request_id: requestId,
+            original_target: constraint.targetNodeId,
+            goal_node_id: goalNodeId,
+          }, `Temporal constraint bound to goal node: ${constraint.targetNodeId} → ${goalNodeId}`);
+        }
+      } else {
+        noMatchCount++;
+        log.info({
+          event: "cee.compound_goal.temporal_dropped",
+          request_id: requestId,
+          target_node_id: constraint.targetNodeId,
+          drop_reason: "no_goal_node",
+        }, `Temporal constraint dropped: no goal node to bind to`);
+      }
       continue;
     }
 
@@ -518,31 +706,72 @@ export function remapConstraintTargets(
       continue;
     }
 
-    // Step 2: Exact match — keep as-is
+    // Step 2: Exact ID match — keep as-is
     if (nodeIdSet.has(constraint.targetNodeId)) {
       remapped.push(constraint);
       continue;
     }
 
-    // Step 3: Fuzzy match — try stem then label-based matching
-    const match = fuzzyMatchNodeId(constraint.targetNodeId, nodeIds, nodeLabels);
-    if (match) {
+    // Step 3: Exact label match — normalised targetName matches a node label
+    if (nodeLabels && nodeLabels.size > 0) {
+      const labelMatch = labelExactMatchNodeId(constraint.targetName, nodeLabels);
+      if (labelMatch) {
+        remapCount++;
+        log.info({
+          event: "cee.compound_goal.target_remapped",
+          request_id: requestId,
+          original_target: constraint.targetNodeId,
+          remapped_target: labelMatch,
+          target_name: constraint.targetName,
+          match_strategy: "exact_label",
+        }, `Constraint target remapped via exact label: ${constraint.targetNodeId} → ${labelMatch}`);
+        remapped.push({
+          ...constraint,
+          targetNodeId: labelMatch,
+        });
+        continue;
+      }
+    }
+
+    // Step 4: Alias match — deterministic CONSTRAINT_ALIASES lookup
+    const aliasMatch = aliasMatchNodeId(constraint.targetName, nodeIds);
+    if (aliasMatch) {
       remapCount++;
       log.info({
         event: "cee.compound_goal.target_remapped",
         request_id: requestId,
         original_target: constraint.targetNodeId,
-        remapped_target: match,
+        remapped_target: aliasMatch,
         target_name: constraint.targetName,
-      }, `Constraint target remapped: ${constraint.targetNodeId} → ${match}`);
+        match_strategy: "alias",
+      }, `Constraint target remapped via alias: ${constraint.targetNodeId} → ${aliasMatch}`);
       remapped.push({
         ...constraint,
-        targetNodeId: match,
+        targetNodeId: aliasMatch,
       });
       continue;
     }
 
-    // Step 4: No match — drop this constraint
+    // Step 5: Fuzzy match — try stem then label-based matching
+    const fuzzyMatch = fuzzyMatchNodeId(constraint.targetNodeId, nodeIds, nodeLabels);
+    if (fuzzyMatch) {
+      remapCount++;
+      log.info({
+        event: "cee.compound_goal.target_remapped",
+        request_id: requestId,
+        original_target: constraint.targetNodeId,
+        remapped_target: fuzzyMatch,
+        target_name: constraint.targetName,
+        match_strategy: "fuzzy",
+      }, `Constraint target remapped: ${constraint.targetNodeId} → ${fuzzyMatch}`);
+      remapped.push({
+        ...constraint,
+        targetNodeId: fuzzyMatch,
+      });
+      continue;
+    }
+
+    // Step 6: No match — drop this constraint
     noMatchCount++;
     log.info({
       event: "cee.compound_goal.target_no_match",
@@ -553,7 +782,7 @@ export function remapConstraintTargets(
     }, `Constraint target dropped (no match): ${constraint.targetNodeId}`);
   }
 
-  // Step 5: Deduplicate after remapping (two different extracted names
+  // Step 7: Deduplicate after remapping (two different extracted names
   // may now point to the same graph node)
   const deduplicated = deduplicateConstraints(remapped);
 

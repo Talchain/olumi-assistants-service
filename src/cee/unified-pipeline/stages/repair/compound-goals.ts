@@ -25,7 +25,7 @@ export function runCompoundGoals(ctx: StageContext): void {
 
   if (compoundGoalResult.constraints.length === 0) return;
 
-  const graphNodes = (ctx.graph as any).nodes as Array<{ id: string; label?: string }>;
+  const graphNodes = (ctx.graph as any).nodes as Array<{ id: string; kind?: string; label?: string }>;
   const existingNodeIds = new Set(graphNodes.map((n) => n.id));
   const existingNodeIdList = [...existingNodeIds];
 
@@ -35,6 +35,10 @@ export function runCompoundGoals(ctx: StageContext): void {
     if (n.label) nodeLabels.set(n.id, n.label);
   }
 
+  // Find goal node ID for temporal constraint binding
+  const goalNode = graphNodes.find((n) => n.kind === "goal");
+  const goalNodeId = goalNode?.id;
+
   // Remap constraint targets against actual graph nodes BEFORE generating
   // goal_constraints. This fixes the root cause: the regex extractor invents IDs
   // from brief text that don't match LLM-generated node IDs.
@@ -43,6 +47,7 @@ export function runCompoundGoals(ctx: StageContext): void {
     existingNodeIdList,
     nodeLabels,
     ctx.requestId,
+    goalNodeId,
   );
   const validConstraints = remapResult.constraints;
 

@@ -16,6 +16,7 @@ export {
   extractCompoundGoals,
   toGoalConstraints,
   remapConstraintTargets,
+  CONSTRAINT_ALIASES,
   type CompoundGoalExtractionResult,
   type ExtractedGoalConstraint,
   type RemapResult,

@@ -220,6 +220,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
       expect.arrayContaining(["fac_retention_rate", "fac_monthly_churn", "out_revenue"]),
       expect.any(Map),
       "test-compound-goals",
+      "g1", // goalNodeId — goal node from the test graph
     );
 
     const labelMap = (remapConstraintTargets as any).mock.calls[0][2] as Map<string, string>;

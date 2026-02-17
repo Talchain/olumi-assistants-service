@@ -437,9 +437,11 @@ export function fuzzyMatchNodeId(
 /**
  * Normalise goal_constraints node_id values against actual graph nodes.
  *
- * - Exact match → keep
- * - Single fuzzy match → remap + emit CONSTRAINT_NODE_REMAPPED info
- * - No match / ambiguous → drop + emit CONSTRAINT_DROPPED_NO_TARGET info
+ * Matching order:
+ *  1. Exact ID match → keep
+ *  2. Label-based remap → normalise constraint label against node labels
+ *  3. Fuzzy match → stem substring + label substring via fuzzyMatchNodeId()
+ *  4. No match / ambiguous → drop + emit CONSTRAINT_DROPPED_NO_TARGET info
  */
 export function normaliseConstraintTargets(
   constraints: Array<{ node_id: string; [key: string]: unknown }>,
@@ -458,12 +460,54 @@ export function normaliseConstraintTargets(
   for (const constraint of constraints) {
     const originalNodeId = constraint.node_id;
 
+    // Step 1: Exact ID match
     if (nodeIdSet.has(originalNodeId)) {
       result.push(constraint);
       valid++;
       continue;
     }
 
+    // Step 2: Label-based exact remap — if constraint has a label, try matching
+    // it against normalised node labels before falling back to fuzzy matching
+    if (nodeLabels && nodeLabels.size > 0) {
+      const constraintLabel = (constraint as any).label as string | undefined;
+      if (constraintLabel) {
+        const normConstraintLabel = constraintLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")
+          // strip common suffixes added by the extractor ("ceiling", "floor", "minimum", "maximum")
+          .replace(/_(ceiling|floor|minimum|maximum|cap|min|max)$/, "");
+
+        if (normConstraintLabel.length >= 4) {
+          const labelMatches: string[] = [];
+          for (const [nodeId, label] of nodeLabels) {
+            const normLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+            if (normLabel === normConstraintLabel ||
+                normLabel.includes(normConstraintLabel) ||
+                normConstraintLabel.includes(normLabel)) {
+              labelMatches.push(nodeId);
+            }
+          }
+          if (labelMatches.length === 1) {
+            result.push({ ...constraint, node_id: labelMatches[0] });
+            remapped++;
+            issues.push({
+              code: "CONSTRAINT_NODE_REMAPPED",
+              severity: "info",
+              message: `Constraint node_id "${originalNodeId}" remapped to "${labelMatches[0]}" via label match`,
+              path: `goal_constraints[].node_id`,
+              context: {
+                original_node_id: originalNodeId,
+                remapped_node_id: labelMatches[0],
+                constraint_id: constraint.constraint_id,
+                match_strategy: "label",
+              },
+            });
+            continue;
+          }
+        }
+      }
+    }
+
+    // Step 3: Fuzzy match (stem substring + label substring)
     const match = fuzzyMatchNodeId(originalNodeId, nodeIds, nodeLabels);
 
     if (match) {
