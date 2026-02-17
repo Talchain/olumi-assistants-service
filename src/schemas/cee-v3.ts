@@ -143,6 +143,8 @@ export const EdgeV3 = z.object({
   effect_direction: z.enum(["positive", "negative"]),
   /** Provenance */
   provenance: EdgeProvenanceV3.optional(),
+  /** Edge creation source: ai, user, repair, enrichment, default */
+  origin: z.string().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type EdgeV3T = z.infer<typeof EdgeV3>;
 

@@ -646,6 +646,142 @@ describe("goal_constraints — serialisation passthrough", () => {
 });
 
 // =============================================================================
+// Phase 1 stripping prevention — passthrough + edge origin tests
+// =============================================================================
+
+describe("Graph schema passthrough — internal pipeline boundary", () => {
+  it("Graph.parse() preserves unknown top-level fields via passthrough", async () => {
+    const { Graph } = await vi.importActual<typeof import("../../src/schemas/graph.js")>(
+      "../../src/schemas/graph.js"
+    );
+
+    const input = {
+      version: "1",
+      default_seed: 42,
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      // Unknown field added by a future pipeline stage
+      _custom_field: "preserved",
+    };
+
+    const result = (Graph as any).safeParse(input);
+    expect(result.success).toBe(true);
+    expect(result.data._custom_field).toBe("preserved");
+  });
+
+  it("Node schema preserves unknown fields via passthrough (existing behaviour)", async () => {
+    const { Node } = await vi.importActual<typeof import("../../src/schemas/graph.js")>(
+      "../../src/schemas/graph.js"
+    );
+
+    const input = {
+      id: "test_node",
+      kind: "factor",
+      label: "Test Factor",
+      _enrichment_score: 0.95,
+    };
+
+    const result = (Node as any).safeParse(input);
+    expect(result.success).toBe(true);
+    expect(result.data._enrichment_score).toBe(0.95);
+  });
+});
+
+describe("GoalConstraintSchema passthrough — preserves additive metadata", () => {
+  it("GoalConstraintSchema preserves known optional fields after parse", async () => {
+    const { GoalConstraintSchema } = await vi.importActual<typeof import("../../src/schemas/assist.js")>(
+      "../../src/schemas/assist.js"
+    );
+
+    const input = {
+      constraint_id: "gc_test",
+      node_id: "fac_cost",
+      operator: "<=",
+      value: 100000,
+      source_quote: "Budget must not exceed £100k",
+      confidence: 0.9,
+      provenance: "explicit",
+      deadline_metadata: {
+        deadline_date: "2025-12-31",
+        reference_date: "2025-01-01",
+        assumed_reference_date: false,
+      },
+    };
+
+    const result = (GoalConstraintSchema as any).safeParse(input);
+    expect(result.success).toBe(true);
+    expect(result.data.source_quote).toBe("Budget must not exceed £100k");
+    expect(result.data.confidence).toBe(0.9);
+    expect(result.data.provenance).toBe("explicit");
+    expect(result.data.deadline_metadata.deadline_date).toBe("2025-12-31");
+  });
+
+  it("GoalConstraintSchema preserves unknown additive fields via passthrough", async () => {
+    const { GoalConstraintSchema } = await vi.importActual<typeof import("../../src/schemas/assist.js")>(
+      "../../src/schemas/assist.js"
+    );
+
+    const input = {
+      constraint_id: "gc_test",
+      node_id: "fac_cost",
+      operator: "<=",
+      value: 100000,
+      // Future additive field — should survive parse
+      _priority: "high",
+    };
+
+    const result = (GoalConstraintSchema as any).safeParse(input);
+    expect(result.success).toBe(true);
+    expect(result.data._priority).toBe("high");
+  });
+});
+
+describe("V3 edge origin — transformEdgeToV3 output", () => {
+  it("edges with explicit origin preserve it in V3 output", () => {
+    const v1 = makeSimpleV1Response();
+    // Set origin on first edge
+    (v1.graph.edges[0] as any).origin = "user";
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-origin-001" });
+
+    // First edge should have origin 'user'
+    const firstEdge = v3.edges[0];
+    expect((firstEdge as any).origin).toBe("user");
+  });
+
+  it("edges without origin default to 'ai' in V3 output", () => {
+    const v1 = makeSimpleV1Response();
+    // Ensure no origin is set
+    for (const edge of v1.graph.edges) {
+      delete (edge as any).origin;
+    }
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-origin-default-001" });
+
+    // All edges should default to origin 'ai'
+    for (const edge of v3.edges) {
+      expect((edge as any).origin).toBe("ai");
+    }
+  });
+
+  it("edge origin survives CEEGraphResponseV3 schema validation", () => {
+    const v1 = makeSimpleV1Response();
+    (v1.graph.edges[0] as any).origin = "repair";
+
+    const v3 = transformResponseToV3(v1, { requestId: "test-origin-schema-001" });
+
+    const result = CEEGraphResponseV3.safeParse(v3);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data.edges[0] as any).origin).toBe("repair");
+    }
+  });
+});
+
+// =============================================================================
 // Structural parse logging test
 // =============================================================================
 

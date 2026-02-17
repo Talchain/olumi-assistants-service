@@ -117,6 +117,8 @@ export interface V1Edge {
   strength_mean?: number;
   strength_std?: number;
   belief_exists?: number;
+  // Edge origin: set by graph-orchestrator (default 'ai'), survives to V3 response
+  origin?: string;
 }
 
 export interface V1Graph {

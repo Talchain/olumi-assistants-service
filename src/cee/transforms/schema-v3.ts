@@ -314,6 +314,8 @@ export function transformEdgeToV3(
     belief_exists: beliefExists,
     effect_direction: effectDirection,
     provenance,
+    // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
+    origin: edge.origin ?? "ai",
   };
 }
 

@@ -253,6 +253,7 @@ export const Edge = EdgeInput.transform((edge) => {
   };
 });
 
+// .passthrough() — internal pipeline boundary, preserves fields added by upstream stages
 export const Graph = z.object({
   version: z.string().default("1"),
   default_seed: z.number().default(17),
@@ -266,7 +267,7 @@ export const Graph = z.object({
       source: z.enum(["assistant", "fixtures", "test"]).default("assistant")
     })
     .default({ roots: [], leaves: [], suggested_positions: {}, source: "assistant" })
-});
+}).passthrough();
 
 export type GraphT = z.infer<typeof Graph>;
 export type EdgeT = z.infer<typeof Edge>;

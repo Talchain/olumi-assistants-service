@@ -94,6 +94,7 @@ export const CorrectionsSummarySchema = z.object({
  * Defines a threshold constraint on a target node.
  * PLoT merges explicit goal_constraints[] with compiled constraint nodes.
  */
+// .passthrough() — preserves constraint metadata (source_quote, confidence, provenance, deadline_metadata)
 export const GoalConstraintSchema = z.object({
   /** Unique constraint identifier */
   constraint_id: z.string().min(1),
@@ -119,7 +120,7 @@ export const GoalConstraintSchema = z.object({
     reference_date: z.string().optional(),
     assumed_reference_date: z.boolean().optional(),
   }).optional(),
-});
+}).passthrough();
 
 export type GoalConstraintT = z.infer<typeof GoalConstraintSchema>;
 
