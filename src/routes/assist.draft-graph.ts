@@ -41,10 +41,11 @@ import {
   GraphValidationError,
   type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
-import { reconcileStructuralTruth, fuzzyMatchNodeId } from "../validators/structural-reconciliation.js";
+import { reconcileStructuralTruth } from "../validators/structural-reconciliation.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  remapConstraintTargets,
   generateConstraintNodes,
   generateConstraintEdges,
   constraintNodesToGraphNodes,
@@ -1581,75 +1582,63 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
   let goalConstraints: ReturnType<typeof toGoalConstraints> | undefined;
 
   if (compoundGoalResult.constraints.length > 0) {
-    // Convert to goal_constraints format for PLoT
-    goalConstraints = toGoalConstraints(compoundGoalResult.constraints);
-
-    // Generate constraint nodes and edges for the graph
-    const constraintNodes = generateConstraintNodes(compoundGoalResult.constraints);
-    const constraintEdges = generateConstraintEdges(compoundGoalResult.constraints);
-
-    // Add constraint nodes and edges to the candidate graph
-    // Only add constraints whose target node exists (avoid orphan nodes)
+    // Build graph context for constraint remapping
     const existingNodeIds = new Set(candidate.nodes.map(n => n.id));
     const existingNodeIdList = [...existingNodeIds];
-
-    // Build label map for label-based fuzzy matching fallback
     const nodeLabelsForConstraints = new Map<string, string>();
     for (const n of candidate.nodes) {
       if (n.label) nodeLabelsForConstraints.set(n.id, n.label);
     }
 
-    // Filter constraint edges: exact match → keep, fuzzy match → remap, else drop
-    let fuzzyRemapCount = 0;
-    const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
-    const edgesToAdd = rawEdges.filter((e) => {
-      if (existingNodeIds.has(e.to)) return true;
-
-      const match = fuzzyMatchNodeId(e.to, existingNodeIdList, nodeLabelsForConstraints);
-      if (match) {
-        log.info({
-          event: "cee.compound_goal.fuzzy_remap",
-          request_id: correlationId,
-          original_target: e.to,
-          remapped_target: match,
-        }, `Constraint edge target fuzzy-remapped: ${e.to} → ${match}`);
-        (e as any).to = match;
-        fuzzyRemapCount++;
-        return true;
-      }
-
-      return false;
-    });
-
-    // Get the set of constraint IDs that have valid edges (their targets exist)
-    const constraintIdsWithValidTargets = new Set(edgesToAdd.map(e => e.from));
-
-    // Only add constraint nodes that have valid targets (avoid orphan nodes)
-    // Also check for ID collisions with existing nodes
-    const nodesToAdd = constraintNodesToGraphNodes(constraintNodes).filter(
-      n => constraintIdsWithValidTargets.has(n.id) && !existingNodeIds.has(n.id)
+    // Remap constraint targets against actual graph nodes BEFORE generating
+    // nodes/edges. This fixes the root cause: the regex extractor invents IDs
+    // from brief text that don't match LLM-generated node IDs.
+    const remapResult = remapConstraintTargets(
+      compoundGoalResult.constraints,
+      existingNodeIdList,
+      nodeLabelsForConstraints,
+      correlationId,
     );
+    const validConstraints = remapResult.constraints;
 
-    // Track how many constraints were skipped due to missing targets
-    const skippedCount = constraintNodes.length - nodesToAdd.length;
+    if (validConstraints.length > 0) {
+      // Convert to goal_constraints format for PLoT
+      goalConstraints = toGoalConstraints(validConstraints);
 
-    // Update candidate with new nodes and edges
-    candidate = {
-      ...candidate,
-      nodes: [...candidate.nodes, ...nodesToAdd],
-      edges: [...candidate.edges, ...edgesToAdd],
-    };
+      // Generate constraint nodes and edges for the graph
+      const constraintNodes = generateConstraintNodes(validConstraints);
+      const constraintEdges = generateConstraintEdges(validConstraints);
 
-    log.info({
-      event: "cee.compound_goal.integrated",
-      request_id: correlationId,
-      constraint_count: goalConstraints.length,
-      constraint_nodes_added: nodesToAdd.length,
-      constraint_edges_added: edgesToAdd.length,
-      constraint_edges_fuzzy_remapped: fuzzyRemapCount,
-      constraints_skipped_no_target: skippedCount,
-      is_compound: compoundGoalResult.isCompound,
-    }, "Compound goal constraints integrated into graph");
+      // After remapping, all edge targets should exist in the graph.
+      // Filter is retained as a safety net but should be a no-op.
+      const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
+      const edgesToAdd = rawEdges.filter((e) => existingNodeIds.has(e.to));
+
+      const constraintIdsWithValidTargets = new Set(edgesToAdd.map(e => e.from));
+      const nodesToAdd = constraintNodesToGraphNodes(constraintNodes).filter(
+        n => constraintIdsWithValidTargets.has(n.id) && !existingNodeIds.has(n.id)
+      );
+      const skippedCount = constraintNodes.length - nodesToAdd.length;
+
+      candidate = {
+        ...candidate,
+        nodes: [...candidate.nodes, ...nodesToAdd],
+        edges: [...candidate.edges, ...edgesToAdd],
+      };
+
+      log.info({
+        event: "cee.compound_goal.integrated",
+        request_id: correlationId,
+        constraint_count: goalConstraints.length,
+        constraint_nodes_added: nodesToAdd.length,
+        constraint_edges_added: edgesToAdd.length,
+        constraints_remapped: remapResult.remapped,
+        constraints_rejected_junk: remapResult.rejected_junk,
+        constraints_rejected_no_match: remapResult.rejected_no_match,
+        constraints_skipped_no_target: skippedCount,
+        is_compound: compoundGoalResult.isCompound,
+      }, "Compound goal constraints integrated into graph");
+    }
   }
 
   // Late-pipeline STRP pass: constraint normalisation + data completeness.

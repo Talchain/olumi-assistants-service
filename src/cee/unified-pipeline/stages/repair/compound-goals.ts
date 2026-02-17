@@ -10,12 +10,12 @@ import type { StageContext } from "../../types.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  remapConstraintTargets,
   generateConstraintNodes,
   generateConstraintEdges,
   constraintNodesToGraphNodes,
   constraintEdgesToGraphEdges,
 } from "../../../compound-goal/index.js";
-import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { log } from "../../../../utils/telemetry.js";
 
 export function runCompoundGoals(ctx: StageContext): void {
@@ -24,11 +24,6 @@ export function runCompoundGoals(ctx: StageContext): void {
   const compoundGoalResult = extractCompoundGoals(ctx.effectiveBrief, { includeProxies: false });
 
   if (compoundGoalResult.constraints.length === 0) return;
-
-  ctx.goalConstraints = toGoalConstraints(compoundGoalResult.constraints);
-
-  const constraintNodes = generateConstraintNodes(compoundGoalResult.constraints);
-  const constraintEdges = generateConstraintEdges(compoundGoalResult.constraints);
 
   const graphNodes = (ctx.graph as any).nodes as Array<{ id: string; label?: string }>;
   const existingNodeIds = new Set(graphNodes.map((n) => n.id));
@@ -40,29 +35,36 @@ export function runCompoundGoals(ctx: StageContext): void {
     if (n.label) nodeLabels.set(n.id, n.label);
   }
 
-  let fuzzyRemapCount = 0;
+  // Remap constraint targets against actual graph nodes BEFORE generating
+  // nodes/edges. This fixes the root cause: the regex extractor invents IDs
+  // from brief text that don't match LLM-generated node IDs.
+  const remapResult = remapConstraintTargets(
+    compoundGoalResult.constraints,
+    existingNodeIdList,
+    nodeLabels,
+    ctx.requestId,
+  );
+  const validConstraints = remapResult.constraints;
+
+  if (validConstraints.length === 0) {
+    log.info({
+      event: "cee.compound_goal.all_dropped",
+      request_id: ctx.requestId,
+      original_count: compoundGoalResult.constraints.length,
+    }, "All constraints dropped after remapping — skipping graph integration");
+    return;
+  }
+
+  ctx.goalConstraints = toGoalConstraints(validConstraints);
+
+  const constraintNodes = generateConstraintNodes(validConstraints);
+  const constraintEdges = generateConstraintEdges(validConstraints);
+
   const rawEdges = constraintEdgesToGraphEdges(constraintEdges);
 
-  const edgesToAdd = rawEdges.filter((e: any) => {
-    // Exact match — keep as-is
-    if (existingNodeIds.has(e.to)) return true;
-
-    // Fuzzy match — remap target
-    const match = fuzzyMatchNodeId(e.to, existingNodeIdList, nodeLabels);
-    if (match) {
-      log.info({
-        event: "cee.compound_goal.fuzzy_remap",
-        request_id: ctx.requestId,
-        original_target: e.to,
-        remapped_target: match,
-      }, `Constraint edge target fuzzy-remapped: ${e.to} → ${match}`);
-      e.to = match;
-      fuzzyRemapCount++;
-      return true;
-    }
-
-    return false;
-  });
+  // After remapping, all edge targets should exist in the graph.
+  // Filter is retained as a safety net but should be a no-op.
+  const edgesToAdd = rawEdges.filter((e: any) => existingNodeIds.has(e.to));
 
   const constraintIdsWithValidTargets = new Set(edgesToAdd.map((e: any) => e.from));
 
@@ -84,7 +86,9 @@ export function runCompoundGoals(ctx: StageContext): void {
     constraint_count: ctx.goalConstraints.length,
     constraint_nodes_added: nodesToAdd.length,
     constraint_edges_added: edgesToAdd.length,
-    constraint_edges_fuzzy_remapped: fuzzyRemapCount,
+    constraints_remapped: remapResult.remapped,
+    constraints_rejected_junk: remapResult.rejected_junk,
+    constraints_rejected_no_match: remapResult.rejected_no_match,
     constraints_skipped_no_target: skippedCount,
     is_compound: compoundGoalResult.isCompound,
   }, "Compound goal constraints integrated into graph");

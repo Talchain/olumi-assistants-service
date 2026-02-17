@@ -15,8 +15,10 @@
 export {
   extractCompoundGoals,
   toGoalConstraints,
+  remapConstraintTargets,
   type CompoundGoalExtractionResult,
   type ExtractedGoalConstraint,
+  type RemapResult,
 } from "./extractor.js";
 
 export {

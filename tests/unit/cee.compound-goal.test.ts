@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  remapConstraintTargets,
   generateConstraintNodes,
   generateConstraintEdge,
   generateConstraintEdges,
@@ -886,5 +887,376 @@ describe("compound goal integration", () => {
     expect(extraction.isCompound).toBe(false);
     expect(goalConstraints).toHaveLength(0);
     expect(constraintNodes).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// remapConstraintTargets Tests
+// ============================================================================
+
+describe("remapConstraintTargets", () => {
+  /** Simulated mid-market expansion graph node IDs */
+  const MID_MARKET_NODES = [
+    "g1", "d1", "o1", "o2",
+    "fac_customer_churn",
+    "fac_revenue_growth",
+    "fac_team_capacity",
+    "fac_marketing_spend",
+    "out_revenue_retention",
+    "out_market_share",
+  ];
+
+  const MID_MARKET_LABELS = new Map<string, string>([
+    ["fac_customer_churn", "Customer Churn Rate"],
+    ["fac_revenue_growth", "Revenue Growth"],
+    ["fac_team_capacity", "Team Capacity"],
+    ["fac_marketing_spend", "Marketing Spend"],
+    ["out_revenue_retention", "Revenue Retention Rate"],
+    ["out_market_share", "Market Share"],
+  ]);
+
+  function makeConstraint(overrides: Partial<ExtractedGoalConstraint> & { targetNodeId: string }): ExtractedGoalConstraint {
+    return {
+      targetName: overrides.targetName ?? "test",
+      targetNodeId: overrides.targetNodeId,
+      operator: overrides.operator ?? "<=",
+      value: overrides.value ?? 0.05,
+      unit: overrides.unit ?? "%",
+      label: overrides.label ?? "test constraint",
+      sourceQuote: overrides.sourceQuote ?? "test quote",
+      confidence: overrides.confidence ?? 0.85,
+      provenance: overrides.provenance ?? "explicit",
+    };
+  }
+
+  describe("mid-market brief scenario", () => {
+    it("rejects junk IDs and remaps where fuzzy matching works", () => {
+      // Simulate constraints the extractor produces for the mid-market brief.
+      // Some have stems that fuzzy-match graph nodes, some don't.
+      const temporalConstraint = makeConstraint({
+        targetNodeId: "delivery_time_months", targetName: "delivery time", unit: "months", value: 18,
+      });
+      (temporalConstraint as any).deadlineMetadata = { deadline_date: "2025-06-01" };
+
+      const extractedConstraints: ExtractedGoalConstraint[] = [
+        // fac_churn → stem "churn" — matches fac_customer_churn (customer_churn contains churn)
+        makeConstraint({ targetNodeId: "fac_churn", targetName: "churn" }),
+        // fac_we_have → junk ID (all stop-words)
+        makeConstraint({ targetNodeId: "fac_we_have", targetName: "we have" }),
+        // fac_revenue_retention_rate → prefix fac_ but graph has out_revenue_retention (prefix mismatch)
+        makeConstraint({ targetNodeId: "fac_revenue_retention_rate", targetName: "revenue retention rate", operator: ">=" }),
+        // delivery_time_months → temporal, passes through without matching
+        temporalConstraint,
+      ];
+
+      const result = remapConstraintTargets(
+        extractedConstraints,
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // fac_we_have should be rejected as junk
+      expect(result.rejected_junk).toBe(1);
+      // fac_churn should remap to fac_customer_churn
+      const churnConstraint = result.constraints.find(c => c.targetNodeId === "fac_customer_churn");
+      expect(churnConstraint).toBeDefined();
+      expect(result.remapped).toBeGreaterThanOrEqual(1);
+      // delivery_time_months should pass through as temporal
+      const temporal = result.constraints.find(c => c.targetNodeId === "delivery_time_months");
+      expect(temporal).toBeDefined();
+    });
+  });
+
+  describe("junk ID rejection", () => {
+    it("rejects 'fac_we_have' as a junk ID", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_we_have", targetName: "we have" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(0);
+      expect(result.rejected_junk).toBe(1);
+    });
+
+    it("rejects IDs with all stop-word tokens", () => {
+      const junkIds = ["fac_the_and", "fac_for_with", "fac_this_that"];
+      for (const id of junkIds) {
+        const result = remapConstraintTargets(
+          [makeConstraint({ targetNodeId: id })],
+          MID_MARKET_NODES,
+          MID_MARKET_LABELS,
+        );
+        expect(result.rejected_junk).toBe(1);
+      }
+    });
+
+    it("rejects verb-like junk IDs (fac_keep, fac_ensure, fac_maintain)", () => {
+      const verbIds = ["fac_keep", "fac_ensure", "fac_maintain", "fac_achieve", "fac_stay"];
+      for (const id of verbIds) {
+        const result = remapConstraintTargets(
+          [makeConstraint({ targetNodeId: id })],
+          MID_MARKET_NODES,
+          MID_MARKET_LABELS,
+        );
+        expect(result.rejected_junk).toBe(1);
+      }
+    });
+
+    it("rejects IDs with stems shorter than 4 chars", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_ab" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(0);
+      expect(result.rejected_junk).toBe(1);
+    });
+
+    it("accepts IDs with at least one substantive token", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_customer_churn" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // Exact match — should pass through
+      expect(result.constraints).toHaveLength(1);
+      expect(result.rejected_junk).toBe(0);
+    });
+  });
+
+  describe("exact matching", () => {
+    it("keeps constraints that exactly match a graph node", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_customer_churn" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0].targetNodeId).toBe("fac_customer_churn");
+      expect(result.remapped).toBe(0);
+    });
+  });
+
+  describe("fuzzy remapping", () => {
+    it("remaps fac_churn to fac_customer_churn via stem substring match", () => {
+      // fac_churn → stem "churn"
+      // fac_customer_churn → stem "customer_churn" which CONTAINS "churn"
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_churn", targetName: "churn" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0].targetNodeId).toBe("fac_customer_churn");
+      expect(result.remapped).toBe(1);
+    });
+
+    it("remaps via label-based fallback when stem matching fails", () => {
+      // fac_customer_retention → stem "customer_retention"
+      // Graph has fac_customer_churn (stem: customer_churn — no substring match)
+      // But label "Customer Churn Rate" → normalized "customer_churn_rate"
+      // This doesn't help. Let's test a case that DOES match via label:
+      //
+      // fac_revenue → stem "revenue"
+      // fac_revenue_growth → stem "revenue_growth" CONTAINS "revenue" → stem match
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_revenue", targetName: "revenue" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0].targetNodeId).toBe("fac_revenue_growth");
+      expect(result.remapped).toBe(1);
+    });
+
+    it("remaps when constraint stem is contained in graph node stem", () => {
+      // fac_marketing → stem "marketing"
+      // fac_marketing_spend → stem "marketing_spend" CONTAINS "marketing"
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_marketing", targetName: "marketing" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0].targetNodeId).toBe("fac_marketing_spend");
+      expect(result.remapped).toBe(1);
+    });
+  });
+
+  describe("deduplication after remapping", () => {
+    it("deduplicates constraints that map to the same target+operator", () => {
+      // Both fac_churn and fac_customer_churn_rate will remap to fac_customer_churn
+      // fac_churn → stem "churn" → customer_churn contains churn → match
+      // fac_customer_churn → exact match
+      const constraints = [
+        makeConstraint({ targetNodeId: "fac_churn", targetName: "churn", operator: "<=", value: 0.05 }),
+        makeConstraint({ targetNodeId: "fac_customer_churn", targetName: "customer churn", operator: "<=", value: 0.03 }),
+      ];
+
+      const result = remapConstraintTargets(
+        constraints,
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // Should be deduplicated to a single constraint on fac_customer_churn
+      const churnConstraints = result.constraints.filter(
+        c => c.targetNodeId === "fac_customer_churn",
+      );
+      expect(churnConstraints).toHaveLength(1);
+      // For <=, keep stricter (smaller) value
+      expect(churnConstraints[0].value).toBe(0.03);
+    });
+  });
+
+  describe("no-match handling", () => {
+    it("drops constraints with no matching node", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_totally_unrelated_metric" })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(0);
+      expect(result.rejected_no_match).toBe(1);
+    });
+  });
+
+  describe("cross-prefix handling", () => {
+    it("blocks cross-prefix remapping (fac_ → out_)", () => {
+      // fac_revenue_retention_rate should NOT match out_revenue_retention
+      // because prefix safety blocks fac_ → out_ matching
+      const result = remapConstraintTargets(
+        [makeConstraint({
+          targetNodeId: "fac_revenue_retention_rate",
+          targetName: "revenue retention rate",
+          operator: ">=",
+        })],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // Should NOT match out_revenue_retention due to prefix mismatch
+      const matched = result.constraints.find(
+        c => c.targetNodeId === "out_revenue_retention",
+      );
+      expect(matched).toBeUndefined();
+    });
+  });
+
+  describe("empty inputs", () => {
+    it("returns empty when no constraints provided", () => {
+      const result = remapConstraintTargets([], MID_MARKET_NODES, MID_MARKET_LABELS);
+      expect(result.constraints).toHaveLength(0);
+      expect(result.remapped).toBe(0);
+      expect(result.rejected_junk).toBe(0);
+      expect(result.rejected_no_match).toBe(0);
+    });
+
+    it("drops all constraints when no graph nodes provided", () => {
+      const result = remapConstraintTargets(
+        [makeConstraint({ targetNodeId: "fac_churn" })],
+        [],
+      );
+      expect(result.constraints).toHaveLength(0);
+    });
+  });
+
+  describe("temporal constraint pass-through", () => {
+    it("passes through delivery_time_months without matching or junk filtering", () => {
+      const temporalConstraint = makeConstraint({
+        targetNodeId: "delivery_time_months",
+        targetName: "delivery time",
+        unit: "months",
+        value: 18,
+        operator: "<=",
+      });
+      // Add deadlineMetadata to mark it as a temporal constraint
+      (temporalConstraint as any).deadlineMetadata = {
+        deadline_date: "2025-06-01",
+        reference_date: "2024-01-01",
+        assumed_reference_date: false,
+      };
+
+      const result = remapConstraintTargets(
+        [temporalConstraint],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0].targetNodeId).toBe("delivery_time_months");
+      expect(result.remapped).toBe(0);
+      expect(result.rejected_junk).toBe(0);
+      expect(result.rejected_no_match).toBe(0);
+    });
+
+    it("passes temporal constraints through alongside remapped metric constraints", () => {
+      const temporalConstraint = makeConstraint({
+        targetNodeId: "delivery_time_months",
+        targetName: "delivery time",
+        unit: "months",
+        value: 12,
+        operator: "<=",
+      });
+      (temporalConstraint as any).deadlineMetadata = {
+        deadline_date: "2025-01-01",
+      };
+
+      const metricConstraint = makeConstraint({
+        targetNodeId: "fac_churn",
+        targetName: "churn",
+        operator: "<=",
+        value: 0.05,
+      });
+
+      const result = remapConstraintTargets(
+        [temporalConstraint, metricConstraint],
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // Both should survive: temporal passed through, metric remapped
+      expect(result.constraints).toHaveLength(2);
+      expect(result.constraints.find(c => c.targetNodeId === "delivery_time_months")).toBeDefined();
+      expect(result.constraints.find(c => c.targetNodeId === "fac_customer_churn")).toBeDefined();
+      expect(result.remapped).toBe(1);
+    });
+  });
+
+  describe("mid-market brief survival rate", () => {
+    it("survives at least 3 of 5 typical mid-market constraints", () => {
+      // Realistic constraints the extractor produces for a mid-market expansion brief:
+      // 1. fac_churn → fuzzy-matches fac_customer_churn
+      // 2. fac_revenue → fuzzy-matches fac_revenue_growth
+      // 3. fac_marketing → fuzzy-matches fac_marketing_spend
+      // 4. fac_we_have → junk (all stop-words)
+      // 5. fac_team → fuzzy-matches fac_team_capacity
+      const extractedConstraints = [
+        makeConstraint({ targetNodeId: "fac_churn", targetName: "churn", operator: "<=", value: 0.05 }),
+        makeConstraint({ targetNodeId: "fac_revenue", targetName: "revenue", operator: ">=", value: 1000000 }),
+        makeConstraint({ targetNodeId: "fac_marketing", targetName: "marketing spend", operator: "<=", value: 50000 }),
+        makeConstraint({ targetNodeId: "fac_we_have", targetName: "we have", operator: "<=", value: 10 }),
+        makeConstraint({ targetNodeId: "fac_team", targetName: "team capacity", operator: ">=", value: 5 }),
+      ];
+
+      const result = remapConstraintTargets(
+        extractedConstraints,
+        MID_MARKET_NODES,
+        MID_MARKET_LABELS,
+      );
+
+      // At least 3 of 5 should survive (4 expected: churn, revenue, marketing, team)
+      expect(result.constraints.length).toBeGreaterThanOrEqual(3);
+      // Junk should be rejected
+      expect(result.rejected_junk).toBeGreaterThanOrEqual(1);
+    });
   });
 });

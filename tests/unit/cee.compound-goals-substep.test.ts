@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../../src/cee/compound-goal/index.js", () => ({
   extractCompoundGoals: vi.fn(),
   toGoalConstraints: vi.fn(),
+  remapConstraintTargets: vi.fn(),
   generateConstraintNodes: vi.fn(),
   generateConstraintEdges: vi.fn(),
   constraintNodesToGraphNodes: vi.fn(),
@@ -27,12 +28,11 @@ vi.mock("../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// Do NOT mock structural-reconciliation — we want real fuzzyMatchNodeId
-
 import { runCompoundGoals } from "../../src/cee/unified-pipeline/stages/repair/compound-goals.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  remapConstraintTargets,
   generateConstraintNodes,
   generateConstraintEdges,
   constraintNodesToGraphNodes,
@@ -68,15 +68,30 @@ function makeCtx(overrides?: Record<string, any>): any {
 function setupMocksForConstraints(opts: {
   constraintEdges: Array<{ from: string; to: string }>;
   constraintNodes: Array<{ id: string }>;
+  /** Constraints returned after remapping (if different from extracted) */
+  remappedConstraints?: Array<{ targetName: string; targetNodeId: string; operator?: string; value?: number }>;
+  remapResult?: { remapped: number; rejected_junk: number; rejected_no_match: number };
 }) {
+  const extractedConstraints = [{ targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05 }];
+  const validConstraints = opts.remappedConstraints ?? extractedConstraints;
+
   (extractCompoundGoals as any).mockReturnValue({
-    constraints: [{ targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05 }],
+    constraints: extractedConstraints,
     isCompound: true,
     warnings: [],
   });
-  (toGoalConstraints as any).mockReturnValue([
-    { constraint_id: "constraint_fac_churn_max", node_id: "fac_churn", operator: "<=", value: 0.05 },
-  ]);
+  (remapConstraintTargets as any).mockReturnValue({
+    constraints: validConstraints,
+    ...(opts.remapResult ?? { remapped: 0, rejected_junk: 0, rejected_no_match: 0 }),
+  });
+  (toGoalConstraints as any).mockReturnValue(
+    validConstraints.map((c: any) => ({
+      constraint_id: `constraint_${c.targetNodeId}_max`,
+      node_id: c.targetNodeId,
+      operator: c.operator ?? "<=",
+      value: c.value ?? 0.05,
+    })),
+  );
   (generateConstraintNodes as any).mockReturnValue(opts.constraintNodes);
   (generateConstraintEdges as any).mockReturnValue([]);
   (constraintNodesToGraphNodes as any).mockReturnValue(
@@ -94,57 +109,43 @@ describe("runCompoundGoals — fuzzy remapping", () => {
     vi.clearAllMocks();
   });
 
-  it("remaps constraint edge target via stem substring match", () => {
-    // Constraint targets "fac_churn" → stem "churn"
-    // Graph has "fac_monthly_churn" → stem "monthly_churn" which CONTAINS "churn"
+  it("adds constraint nodes/edges when remapConstraintTargets returns valid constraints", () => {
+    // remapConstraintTargets has already remapped fac_churn → fac_monthly_churn
     setupMocksForConstraints({
-      constraintEdges: [{ from: "constraint_fac_churn_max", to: "fac_churn" }],
-      constraintNodes: [{ id: "constraint_fac_churn_max" }],
+      constraintEdges: [{ from: "constraint_fac_monthly_churn_max", to: "fac_monthly_churn" }],
+      constraintNodes: [{ id: "constraint_fac_monthly_churn_max" }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remapResult: { remapped: 1, rejected_junk: 0, rejected_no_match: 0 },
     });
 
     const ctx = makeCtx();
     runCompoundGoals(ctx);
 
-    // Edge should be remapped to fac_monthly_churn
+    // Edge should point to fac_monthly_churn (post-remap)
     const constraintEdges = ctx.graph.edges.filter(
-      (e: any) => e.from === "constraint_fac_churn_max",
+      (e: any) => e.from === "constraint_fac_monthly_churn_max",
     );
     expect(constraintEdges).toHaveLength(1);
     expect(constraintEdges[0].to).toBe("fac_monthly_churn");
 
     // Constraint node should also be added
     const constraintNodes = ctx.graph.nodes.filter(
-      (n: any) => n.id === "constraint_fac_churn_max",
+      (n: any) => n.id === "constraint_fac_monthly_churn_max",
     );
     expect(constraintNodes).toHaveLength(1);
   });
 
-  it("remaps constraint edge target via label matching", () => {
-    // Constraint targets "fac_customer_retention" → stem "customer_retention"
-    // Graph has "fac_retention_rate" → stem "retention_rate"
-    // Stem: "customer_retention" doesn't substring-match "retention_rate" → fail
-    // Label: "Customer Retention Rate" → normalised "customer_retention_rate"
-    //   "customer_retention" IS substring of "customer_retention_rate" → MATCH
-    setupMocksForConstraints({
-      constraintEdges: [{ from: "constraint_fac_customer_retention_min", to: "fac_customer_retention" }],
-      constraintNodes: [{ id: "constraint_fac_customer_retention_min" }],
+  it("drops all constraints when remapConstraintTargets returns empty", () => {
+    (extractCompoundGoals as any).mockReturnValue({
+      constraints: [{ targetName: "unknown", targetNodeId: "fac_totally_unknown", operator: "<=", value: 0.05 }],
+      isCompound: true,
+      warnings: [],
     });
-
-    const ctx = makeCtx();
-    runCompoundGoals(ctx);
-
-    const constraintEdges = ctx.graph.edges.filter(
-      (e: any) => e.from === "constraint_fac_customer_retention_min",
-    );
-    expect(constraintEdges).toHaveLength(1);
-    expect(constraintEdges[0].to).toBe("fac_retention_rate");
-  });
-
-  it("drops constraint edge when no match found (exact, stem, or label)", () => {
-    // Constraint targets "fac_totally_unknown" — no node matches
-    setupMocksForConstraints({
-      constraintEdges: [{ from: "constraint_fac_totally_unknown_max", to: "fac_totally_unknown" }],
-      constraintNodes: [{ id: "constraint_fac_totally_unknown_max" }],
+    (remapConstraintTargets as any).mockReturnValue({
+      constraints: [],
+      remapped: 0,
+      rejected_junk: 0,
+      rejected_no_match: 1,
     });
 
     const ctx = makeCtx();
@@ -155,13 +156,15 @@ describe("runCompoundGoals — fuzzy remapping", () => {
     // No constraint edge or node should be added
     expect(ctx.graph.edges.length).toBe(originalEdgeCount);
     expect(ctx.graph.nodes.length).toBe(originalNodeCount);
+    expect(ctx.goalConstraints).toBeUndefined();
   });
 
   it("keeps constraint edge as-is when target is an exact match", () => {
-    // Constraint targets "fac_retention_rate" — exact match exists
+    // remapConstraintTargets keeps exact matches unchanged
     setupMocksForConstraints({
       constraintEdges: [{ from: "constraint_fac_retention_rate_min", to: "fac_retention_rate" }],
       constraintNodes: [{ id: "constraint_fac_retention_rate_min" }],
+      remappedConstraints: [{ targetName: "retention_rate", targetNodeId: "fac_retention_rate", operator: ">=", value: 0.85 }],
     });
 
     const ctx = makeCtx();
@@ -174,8 +177,12 @@ describe("runCompoundGoals — fuzzy remapping", () => {
     expect(constraintEdges[0].to).toBe("fac_retention_rate");
   });
 
-  it("handles multiple constraints with mixed match outcomes", () => {
-    // One constraint matches via label, another matches exactly, one drops
+  it("handles multiple constraints with mixed outcomes after remapping", () => {
+    // remapConstraintTargets has already filtered: c1 remapped, c2 exact, c3 dropped
+    const validConstraints = [
+      { targetName: "customer_retention", targetNodeId: "fac_retention_rate" },
+      { targetName: "retention_rate", targetNodeId: "fac_retention_rate" },
+    ];
     (extractCompoundGoals as any).mockReturnValue({
       constraints: [
         { targetName: "customer_retention", targetNodeId: "fac_customer_retention" },
@@ -185,47 +192,82 @@ describe("runCompoundGoals — fuzzy remapping", () => {
       isCompound: true,
       warnings: [],
     });
+    (remapConstraintTargets as any).mockReturnValue({
+      constraints: validConstraints,
+      remapped: 1,
+      rejected_junk: 0,
+      rejected_no_match: 1,
+    });
     (toGoalConstraints as any).mockReturnValue([
-      { constraint_id: "c1", node_id: "fac_customer_retention" },
+      { constraint_id: "c1", node_id: "fac_retention_rate" },
       { constraint_id: "c2", node_id: "fac_retention_rate" },
-      { constraint_id: "c3", node_id: "fac_unknown_metric" },
     ]);
     (generateConstraintNodes as any).mockReturnValue([
-      { id: "c1" }, { id: "c2" }, { id: "c3" },
+      { id: "c1" }, { id: "c2" },
     ]);
     (generateConstraintEdges as any).mockReturnValue([]);
     (constraintNodesToGraphNodes as any).mockReturnValue([
       { id: "c1", kind: "constraint", label: "C1" },
       { id: "c2", kind: "constraint", label: "C2" },
-      { id: "c3", kind: "constraint", label: "C3" },
     ]);
     (constraintEdgesToGraphEdges as any).mockReturnValue([
-      { from: "c1", to: "fac_customer_retention", strength_mean: 1 },   // label match → fac_retention_rate
-      { from: "c2", to: "fac_retention_rate", strength_mean: 1 },        // exact match
-      { from: "c3", to: "fac_unknown_metric", strength_mean: 1 },        // no match → dropped
+      { from: "c1", to: "fac_retention_rate", strength_mean: 1 },
+      { from: "c2", to: "fac_retention_rate", strength_mean: 1 },
     ]);
 
     const ctx = makeCtx();
     runCompoundGoals(ctx);
 
-    // c1 should be remapped to fac_retention_rate via label
+    // Both c1 and c2 should have edges to fac_retention_rate
     const c1Edges = ctx.graph.edges.filter((e: any) => e.from === "c1");
     expect(c1Edges).toHaveLength(1);
     expect(c1Edges[0].to).toBe("fac_retention_rate");
 
-    // c2 should be exact match
     const c2Edges = ctx.graph.edges.filter((e: any) => e.from === "c2");
     expect(c2Edges).toHaveLength(1);
     expect(c2Edges[0].to).toBe("fac_retention_rate");
 
-    // c3 should be dropped (no match)
-    const c3Edges = ctx.graph.edges.filter((e: any) => e.from === "c3");
-    expect(c3Edges).toHaveLength(0);
-
-    // Only c1 and c2 constraint nodes should be added (c3 has no valid edge)
+    // Both constraint nodes should be added
     const constraintNodes = ctx.graph.nodes.filter((n: any) => ["c1", "c2"].includes(n.id));
     expect(constraintNodes).toHaveLength(2);
-    expect(ctx.graph.nodes.find((n: any) => n.id === "c3")).toBeUndefined();
+  });
+
+  it("passes graph node IDs and labels to remapConstraintTargets", () => {
+    const extractedConstraints = [
+      { targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05 },
+    ];
+    (extractCompoundGoals as any).mockReturnValue({
+      constraints: extractedConstraints,
+      isCompound: true,
+      warnings: [],
+    });
+    (remapConstraintTargets as any).mockReturnValue({
+      constraints: extractedConstraints,
+      remapped: 0,
+      rejected_junk: 0,
+      rejected_no_match: 0,
+    });
+    (toGoalConstraints as any).mockReturnValue([]);
+    (generateConstraintNodes as any).mockReturnValue([]);
+    (generateConstraintEdges as any).mockReturnValue([]);
+    (constraintNodesToGraphNodes as any).mockReturnValue([]);
+    (constraintEdgesToGraphEdges as any).mockReturnValue([]);
+
+    const ctx = makeCtx();
+    runCompoundGoals(ctx);
+
+    // Verify remapConstraintTargets was called with the correct arguments
+    expect(remapConstraintTargets).toHaveBeenCalledWith(
+      extractedConstraints,
+      expect.arrayContaining(["fac_retention_rate", "fac_monthly_churn", "out_revenue"]),
+      expect.any(Map),
+      "test-compound-goals",
+    );
+
+    // Verify label map was passed
+    const labelMap = (remapConstraintTargets as any).mock.calls[0][2] as Map<string, string>;
+    expect(labelMap.get("fac_retention_rate")).toBe("Customer Retention Rate");
+    expect(labelMap.get("fac_monthly_churn")).toBe("Monthly Churn Rate");
   });
 
   it("no-op when extractCompoundGoals returns empty constraints", () => {

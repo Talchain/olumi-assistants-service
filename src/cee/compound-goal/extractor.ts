@@ -19,6 +19,7 @@ import { log } from "../../utils/telemetry.js";
 import type { GoalConstraintT } from "../../schemas/assist.js";
 import { extractDeadline } from "./deadline-extractor.js";
 import { mapQualitativeToProxy } from "./qualitative-proxy.js";
+import { fuzzyMatchNodeId } from "../../validators/structural-reconciliation.js";
 
 // ============================================================================
 // Types
@@ -404,6 +405,177 @@ function deduplicateConstraints(constraints: ExtractedGoalConstraint[]): Extract
   }
 
   return Array.from(seen.values());
+}
+
+// ============================================================================
+// Junk ID Detection
+// ============================================================================
+
+/** Common stop-words that should not appear as standalone constraint targets */
+const STOP_WORDS = new Set([
+  "we", "have", "the", "and", "for", "not", "with", "this", "that", "are",
+  "from", "will", "but", "its", "our", "can", "all", "has", "was", "been",
+  "they", "their", "more", "also", "any", "into", "just", "than", "each",
+  "how", "may", "per", "via", "yet",
+  // Verb-like stems captured by constraint patterns ("keep X under Y", "ensure X stays above Y")
+  // that produce junk IDs like fac_keep or fac_ensure when the regex misparses
+  "keep", "ensure", "maintain", "achieve", "reach", "stay", "stays",
+  "make", "get", "set", "run", "put", "let", "do",
+]);
+
+/**
+ * Check whether a generated node ID is semantically valid.
+ * Rejects IDs derived from stop-words or sentence fragments.
+ *
+ * Rules:
+ * 1. Stem (after prefix strip) must be >= 4 chars
+ * 2. Every underscore-separated token must be >= 2 chars
+ * 3. At least one token must NOT be a stop-word
+ */
+function isJunkNodeId(nodeId: string): boolean {
+  // Strip known prefixes
+  let stem = nodeId;
+  for (const prefix of ["fac_", "out_", "risk_"]) {
+    if (stem.startsWith(prefix)) {
+      stem = stem.slice(prefix.length);
+      break;
+    }
+  }
+
+  if (stem.length < 4) return true;
+
+  const tokens = stem.split("_").filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  // Every token must be at least 2 chars
+  if (tokens.some((t) => t.length < 2)) return true;
+
+  // At least one token must not be a stop-word
+  const hasSubstantiveToken = tokens.some((t) => !STOP_WORDS.has(t));
+  if (!hasSubstantiveToken) return true;
+
+  return false;
+}
+
+// ============================================================================
+// Post-Extraction Remapping Against Graph Nodes
+// ============================================================================
+
+export interface RemapResult {
+  constraints: ExtractedGoalConstraint[];
+  remapped: number;
+  rejected_junk: number;
+  rejected_no_match: number;
+}
+
+/**
+ * Remap extracted constraint targetNodeIds against actual graph nodes.
+ *
+ * This is the critical fix for the constraint-targeting problem:
+ * the regex extractor invents node IDs from brief text, which may not
+ * match the LLM-generated graph nodes. This function:
+ *
+ * 1. Rejects junk IDs (stop-word-only stems like "fac_we_have")
+ * 2. Keeps exact matches as-is
+ * 3. Fuzzy-remaps near-misses using fuzzyMatchNodeId()
+ * 4. Drops constraints with no valid target
+ * 5. Deduplicates constraints that map to the same target+operator
+ *
+ * @param constraints - Extracted constraints with invented targetNodeIds
+ * @param nodeIds - Actual graph node IDs from the LLM-generated graph
+ * @param nodeLabels - Optional node ID → label map for label-based fallback
+ * @param requestId - Optional request ID for telemetry
+ */
+export function remapConstraintTargets(
+  constraints: ExtractedGoalConstraint[],
+  nodeIds: string[],
+  nodeLabels?: Map<string, string>,
+  requestId?: string,
+): RemapResult {
+  const nodeIdSet = new Set(nodeIds);
+  const remapped: ExtractedGoalConstraint[] = [];
+  let remapCount = 0;
+  let junkCount = 0;
+  let noMatchCount = 0;
+
+  for (const constraint of constraints) {
+    // Step 0: Temporal constraints (deadlines) don't target graph nodes —
+    // pass them through without matching or junk filtering
+    if (constraint.deadlineMetadata) {
+      remapped.push(constraint);
+      continue;
+    }
+
+    // Step 1: Reject junk IDs before any matching attempt
+    if (isJunkNodeId(constraint.targetNodeId)) {
+      junkCount++;
+      log.info({
+        event: "cee.compound_goal.junk_id_rejected",
+        request_id: requestId,
+        target_node_id: constraint.targetNodeId,
+        target_name: constraint.targetName,
+      }, `Junk constraint target rejected: ${constraint.targetNodeId}`);
+      continue;
+    }
+
+    // Step 2: Exact match — keep as-is
+    if (nodeIdSet.has(constraint.targetNodeId)) {
+      remapped.push(constraint);
+      continue;
+    }
+
+    // Step 3: Fuzzy match — try stem then label-based matching
+    const match = fuzzyMatchNodeId(constraint.targetNodeId, nodeIds, nodeLabels);
+    if (match) {
+      remapCount++;
+      log.info({
+        event: "cee.compound_goal.target_remapped",
+        request_id: requestId,
+        original_target: constraint.targetNodeId,
+        remapped_target: match,
+        target_name: constraint.targetName,
+      }, `Constraint target remapped: ${constraint.targetNodeId} → ${match}`);
+      remapped.push({
+        ...constraint,
+        targetNodeId: match,
+      });
+      continue;
+    }
+
+    // Step 4: No match — drop this constraint
+    noMatchCount++;
+    log.info({
+      event: "cee.compound_goal.target_no_match",
+      request_id: requestId,
+      target_node_id: constraint.targetNodeId,
+      target_name: constraint.targetName,
+      available_node_count: nodeIds.length,
+    }, `Constraint target dropped (no match): ${constraint.targetNodeId}`);
+  }
+
+  // Step 5: Deduplicate after remapping (two different extracted names
+  // may now point to the same graph node)
+  const deduplicated = deduplicateConstraints(remapped);
+
+  if (remapCount > 0 || junkCount > 0 || noMatchCount > 0) {
+    log.info({
+      event: "cee.compound_goal.remap_summary",
+      request_id: requestId,
+      input_count: constraints.length,
+      output_count: deduplicated.length,
+      remapped: remapCount,
+      rejected_junk: junkCount,
+      rejected_no_match: noMatchCount,
+      deduplicated: remapped.length - deduplicated.length,
+    }, `Constraint remap: ${deduplicated.length}/${constraints.length} survived (${remapCount} remapped, ${junkCount} junk, ${noMatchCount} no-match)`);
+  }
+
+  return {
+    constraints: deduplicated,
+    remapped: remapCount,
+    rejected_junk: junkCount,
+    rejected_no_match: noMatchCount,
+  };
 }
 
 // ============================================================================
