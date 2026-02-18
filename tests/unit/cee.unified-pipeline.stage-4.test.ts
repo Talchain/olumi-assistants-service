@@ -344,18 +344,39 @@ describe("Stage 4: Repair Orchestrator", () => {
     (config as any).cee.orchestratorValidationEnabled = false;
   });
 
-  it("earlyReturn from substep 1 stops substeps 2-10", async () => {
+  it("earlyReturn from substep 1b when llmRepairNeeded is false", async () => {
     (config as any).cee.orchestratorValidationEnabled = true;
     const error = new (GraphValidationError as any)("test", [{ code: "ERR", message: "fail" }], 1);
     (validateAndRepairGraph as any).mockRejectedValue(error);
 
     const ctx = makeCtx();
-    await runStageRepair(ctx);
+    // Force llmRepairNeeded=false so orchestrator validation produces a hard 422.
+    // In production, this happens when the sweep resolves all Bucket C violations.
+    ctx.llmRepairNeeded = false;
+    await runOrchestratorValidation(ctx);
 
     expect(ctx.earlyReturn).toBeDefined();
     expect(ctx.earlyReturn.statusCode).toBe(422);
-    expect(validateGraph).not.toHaveBeenCalled();
-    expect(enforceStableEdgeIds).not.toHaveBeenCalled();
+
+    (config as any).cee.orchestratorValidationEnabled = false;
+  });
+
+  it("substep 1b defers to PLoT when llmRepairNeeded is true", async () => {
+    (config as any).cee.orchestratorValidationEnabled = true;
+    const lastGraph = { nodes: [{ id: "g1", kind: "goal" }], edges: [] };
+    const error = new (GraphValidationError as any)(
+      "test", [{ code: "INVALID_EDGE_TYPE", message: "factor→goal" }], 2, lastGraph,
+    );
+    (validateAndRepairGraph as any).mockRejectedValue(error);
+
+    const ctx = makeCtx();
+    ctx.llmRepairNeeded = true;
+    await runOrchestratorValidation(ctx);
+
+    // Should NOT early-return — defers to PLoT repair (substep 2)
+    expect(ctx.earlyReturn).toBeUndefined();
+    // Should preserve the best graph from the orchestrator for PLoT
+    expect(ctx.graph).toBe(lastGraph);
 
     (config as any).cee.orchestratorValidationEnabled = false;
   });

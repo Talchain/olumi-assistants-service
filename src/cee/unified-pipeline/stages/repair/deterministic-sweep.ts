@@ -15,7 +15,7 @@ import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { ValidationIssue } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
-import { detectEdgeFormat, canonicalStructuralEdge } from "../../utils/edge-format.js";
+import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
@@ -514,6 +514,94 @@ function fixExternalHasData(
 }
 
 // ---------------------------------------------------------------------------
+// Topology repair: factor→goal edge splitting
+// ---------------------------------------------------------------------------
+
+/**
+ * Proactively detect and repair factor→goal edges by injecting intermediate
+ * outcome nodes. This addresses the B4 minimisation failure where the LLM
+ * short-circuits the causal chain (factor→goal) instead of building the
+ * required factor→outcome→goal topology.
+ *
+ * For each factor→goal edge:
+ *  1. Create outcome node: id = `out_${factorId}_impact`, kind = 'outcome'
+ *  2. Replace edge: factor→goal → factor→outcome (original strength) + outcome→goal (defaults)
+ *  3. Log repair with code FACTOR_GOAL_EDGE_SPLIT
+ *
+ * Runs proactively (not gated by violations) like unreachable-factor handling.
+ */
+export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs: Repair[]; splitCount: number } {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  const nodeLabelMap = new Map<string, string>();
+  for (const node of nodes) {
+    nodeKindMap.set(node.id, node.kind);
+    nodeLabelMap.set(node.id, node.label ?? node.id);
+  }
+
+  const keptEdges: EdgeT[] = [];
+  const newNodes: NodeT[] = [];
+  let splitCount = 0;
+
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    if (fromKind === "factor" && toKind === "goal") {
+      const outcomeId = `out_${edge.from}_impact`;
+      const factorLabel = nodeLabelMap.get(edge.from) ?? edge.from;
+
+      // Only create the outcome node once (multiple factor→goal edges from same factor)
+      if (!nodeKindMap.has(outcomeId)) {
+        newNodes.push({
+          id: outcomeId,
+          kind: "outcome",
+          label: `${factorLabel} Impact`,
+        } as NodeT);
+        nodeKindMap.set(outcomeId, "outcome");
+      }
+
+      // factor→outcome: preserve original strength (causal relationship)
+      const origMean = edge.strength_mean ?? ((edge as Record<string, unknown>).weight as number | undefined) ?? 0.5;
+      const origStd = edge.strength_std ?? 0.15;
+      const origExist = edge.belief_exists ?? ((edge as Record<string, unknown>).belief as number | undefined) ?? 0.9;
+
+      keptEdges.push(patchEdgeNumeric(
+        { from: edge.from, to: outcomeId, effect_direction: edge.effect_direction ?? "positive", origin: "repair" } as EdgeT,
+        format,
+        { mean: origMean, std: origStd, existence: origExist },
+      ));
+
+      // outcome→goal: moderate defaults
+      keptEdges.push(patchEdgeNumeric(
+        { from: outcomeId, to: edge.to, effect_direction: "positive", origin: "repair" } as EdgeT,
+        format,
+        { mean: 0.5, std: 0.15, existence: 0.9 },
+      ));
+
+      splitCount++;
+      repairs.push({
+        code: "FACTOR_GOAL_EDGE_SPLIT",
+        path: `edges[${edge.from}→${edge.to}]`,
+        action: `Split factor→goal into factor→${outcomeId}→${edge.to} via synthetic outcome node`,
+      });
+    } else {
+      keptEdges.push(edge);
+    }
+  }
+
+  if (splitCount > 0) {
+    (graph as any).nodes = [...nodes, ...newNodes];
+    (graph as any).edges = keptEdges;
+  }
+
+  return { repairs, splitCount };
+}
+
+// ---------------------------------------------------------------------------
 // Main sweep
 // ---------------------------------------------------------------------------
 
@@ -526,6 +614,7 @@ function fixExternalHasData(
  * 4. Partition into Bucket A, B, C
  * 5. Apply Bucket A fixes
  * 6. Apply Bucket B fixes (only for cited codes)
+ * 6b. Factor→goal topology repair (proactive)
  * 7. Unreachable factor handling
  * 8. Status quo fix
  * 9. Re-validate
@@ -631,6 +720,21 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }
   }
 
+  // Step 4b: Factor→goal topology repair — ALWAYS run regardless of violations.
+  // The LLM may short-circuit the causal chain under cost-reduction / minimisation framing,
+  // producing factor→goal edges that violate the ALLOWED_EDGES topology.
+  // This splits each factor→goal edge into factor→outcome→goal via a synthetic outcome node.
+  const factorGoalResult = fixFactorGoalEdges(graph, format);
+  allRepairs.push(...factorGoalResult.repairs);
+
+  if (factorGoalResult.splitCount > 0) {
+    log.info({
+      event: "cee.deterministic_sweep.factor_goal_split",
+      request_id: ctx.requestId,
+      split_count: factorGoalResult.splitCount,
+    }, `Split ${factorGoalResult.splitCount} factor→goal edge(s) via synthetic outcome nodes`);
+  }
+
   // Step 5: Proactive unreachable factor handling — ALWAYS run regardless of violations.
   // simpleRepair (Stage 3) preserves unreachable factors but doesn't reclassify them.
   // The sweep must detect and reclassify them so model_adjustments gets populated.
@@ -704,6 +808,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         reclassified: unreachableResult.reclassified,
         marked_droppable: unreachableResult.markedDroppable,
       },
+      factor_goal_splits: factorGoalResult.splitCount,
       status_quo: {
         fixed: statusQuoResult.fixed,
         marked_droppable: statusQuoResult.markedDroppable,
@@ -736,6 +841,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     repairs_count: allRepairs.length,
     status_quo_action: statusQuoAction,
     llm_repair_needed: llmRepairNeeded,
+    factor_goal_splits: factorGoalResult.splitCount,
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,
     disconnected_before: disconnectedBefore.length,

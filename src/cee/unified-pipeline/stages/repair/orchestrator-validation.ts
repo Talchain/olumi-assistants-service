@@ -88,6 +88,7 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
         stage: "orchestrator_validation_failed",
         error_count: error.errors.length,
         attempts: error.attempts,
+        llm_repair_needed: ctx.llmRepairNeeded,
         correlation_id: ctx.requestId,
       }, "Orchestrator validation failed after all retries");
 
@@ -95,6 +96,25 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
         violation_type: "orchestrator_validation_failed",
         error_count: error.errors.length,
       });
+
+      // If the deterministic sweep flagged that LLM repair is needed,
+      // defer to PLoT repair (substep 2) instead of returning a 422 here.
+      // The orchestrator's limited repair budget may not suffice for semantic
+      // errors (INVALID_EDGE_TYPE, CYCLE_DETECTED, etc.) that PLoT repair
+      // handles with fuller context (brief + docs + violation details).
+      if (ctx.llmRepairNeeded) {
+        log.info({
+          stage: "orchestrator_validation_deferred",
+          error_count: error.errors.length,
+          correlation_id: ctx.requestId,
+        }, "Orchestrator validation failed but deferring to PLoT repair (llmRepairNeeded=true)");
+
+        // Preserve the best graph the orchestrator produced for PLoT repair
+        if (error.lastGraph) {
+          ctx.graph = error.lastGraph as any;
+        }
+        return;
+      }
 
       // Build 422 error with sweep trace at top-level trace.details (matches CEETraceMeta schema)
       const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;

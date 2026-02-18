@@ -1471,3 +1471,161 @@ describe("analysis_ready blocker scope (unit-level)", () => {
     expect(category === "external" || category === "observable").toBe(false);
   });
 });
+
+// =============================================================================
+// Factor→Goal Edge Splitting (B4 minimisation topology fix)
+// =============================================================================
+
+import { fixFactorGoalEdges } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
+
+describe("fixFactorGoalEdges", () => {
+  it("splits a factor→goal edge into factor→outcome→goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_support_cost", kind: "factor", label: "Support Cost" },
+        { id: "goal_reduce_costs", kind: "goal", label: "Reduce Costs" },
+      ],
+      edges: [
+        { from: "fac_support_cost", to: "goal_reduce_costs", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.85, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(1);
+    expect(result.repairs).toHaveLength(1);
+    expect(result.repairs[0].code).toBe("FACTOR_GOAL_EDGE_SPLIT");
+
+    // Should have 3 nodes: original factor, original goal, new outcome
+    expect(graph.nodes).toHaveLength(3);
+    const outcomeNode = graph.nodes.find((n: any) => n.kind === "outcome");
+    expect(outcomeNode).toBeDefined();
+    expect(outcomeNode.id).toBe("out_fac_support_cost_impact");
+    expect(outcomeNode.label).toBe("Support Cost Impact");
+
+    // Should have 2 edges: factor→outcome, outcome→goal
+    expect(graph.edges).toHaveLength(2);
+    const factorToOutcome = graph.edges.find((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact");
+    const outcomeToGoal = graph.edges.find((e: any) => e.from === "out_fac_support_cost_impact" && e.to === "goal_reduce_costs");
+
+    expect(factorToOutcome).toBeDefined();
+    expect(outcomeToGoal).toBeDefined();
+
+    // factor→outcome preserves original strength
+    expect(factorToOutcome.strength_mean).toBe(0.7);
+    expect(factorToOutcome.strength_std).toBe(0.1);
+    expect(factorToOutcome.belief_exists).toBe(0.85);
+    expect(factorToOutcome.effect_direction).toBe("negative");
+    expect(factorToOutcome.origin).toBe("repair");
+
+    // outcome→goal uses moderate defaults
+    expect(outcomeToGoal.strength_mean).toBe(0.5);
+    expect(outcomeToGoal.strength_std).toBe(0.15);
+    expect(outcomeToGoal.belief_exists).toBe(0.9);
+    expect(outcomeToGoal.effect_direction).toBe("positive");
+    expect(outcomeToGoal.origin).toBe("repair");
+  });
+
+  it("leaves valid edges untouched", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "out_efficiency", kind: "outcome", label: "Efficiency" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "out_efficiency", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "out_efficiency", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(0);
+    expect(result.repairs).toHaveLength(0);
+    expect(graph.nodes).toHaveLength(3);
+    expect(graph.edges).toHaveLength(2);
+  });
+
+  it("handles multiple factor→goal edges to the same goal", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_a", kind: "factor", label: "Factor A" },
+        { id: "fac_b", kind: "factor", label: "Factor B" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_b", to: "goal_1", strength_mean: 0.3, strength_std: 0.2, belief_exists: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(2);
+    // 3 original + 2 synthetic outcome nodes
+    expect(graph.nodes).toHaveLength(5);
+    // 2 original edges replaced by 4 (2 factor→outcome + 2 outcome→goal)
+    expect(graph.edges).toHaveLength(4);
+    // No factor→goal edges remain
+    const factorGoalEdges = graph.edges.filter((e: any) => {
+      const from = graph.nodes.find((n: any) => n.id === e.from);
+      const to = graph.nodes.find((n: any) => n.id === e.to);
+      return from?.kind === "factor" && to?.kind === "goal";
+    });
+    expect(factorGoalEdges).toHaveLength(0);
+  });
+
+  it("works with LEGACY edge format", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", weight: 0.6, belief: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "LEGACY");
+
+    expect(result.splitCount).toBe(1);
+    expect(graph.edges).toHaveLength(2);
+
+    const factorToOutcome = graph.edges.find((e: any) => e.to === "out_fac_cost_impact");
+    expect((factorToOutcome as any).weight).toBe(0.6);
+    expect((factorToOutcome as any).belief).toBe(0.8);
+  });
+
+  it("no-op on empty graph", () => {
+    const graph: any = { nodes: [], edges: [] };
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+    expect(result.splitCount).toBe(0);
+    expect(result.repairs).toHaveLength(0);
+  });
+
+  it("deduplicates outcome node when same factor targets multiple goals", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+        { id: "goal_2", kind: "goal", label: "Goal 2" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "goal_2", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(2);
+    // Only 1 synthetic outcome node created (shared by both goals)
+    const outcomeNodes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(outcomeNodes).toHaveLength(1);
+    expect(outcomeNodes[0].id).toBe("out_fac_cost_impact");
+    // 4 edges: fac→out (x1, shared), out→goal_1, fac→out (x1 shared source), out→goal_2
+    // Actually: fac→out (edge 1), out→goal_1 (edge 2), fac→out (edge 3, same from/to), out→goal_2 (edge 4)
+    expect(graph.edges).toHaveLength(4);
+  });
+});
