@@ -153,6 +153,17 @@ export const DraftGraphOutput = z.object({
    * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
+  /** LLM coaching output — optional decision-quality insights */
+  coaching: z.object({
+    summary: z.string(),
+    strengthen_items: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      detail: z.string(),
+      action_type: z.string(),
+      bias_category: z.string().optional(),
+    }).passthrough()),
+  }).passthrough().optional(),
   // Graph corrections tracking + pipeline repair observability
   trace: z.object({
     // Pipeline repair tracking fields

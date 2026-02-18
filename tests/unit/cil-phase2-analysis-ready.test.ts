@@ -713,3 +713,70 @@ describe("Validation: needs_user_input requires blockers", () => {
     expect(result.errors.some((e) => e.code === "NEEDS_USER_INPUT_WITHOUT_BLOCKERS")).toBe(false);
   });
 });
+
+// ============================================================================
+// Goal threshold passthrough
+// ============================================================================
+
+describe("Goal threshold fields in analysis_ready", () => {
+  it("populates all four threshold fields from goal node", () => {
+    const graph = createV3Graph(
+      [
+        { id: "goal_mid_market", kind: "goal", label: "Mid-market expansion" },
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+      ],
+      [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },
+        { from: "fac_1", to: "goal_mid_market" },
+      ]
+    );
+
+    // Add threshold fields to goal node (preserved via .passthrough())
+    const goalNode = graph.nodes.find((n) => n.id === "goal_mid_market")!;
+    (goalNode as any).goal_threshold = 0.2;
+    (goalNode as any).goal_threshold_raw = 200;
+    (goalNode as any).goal_threshold_unit = "customers";
+    (goalNode as any).goal_threshold_cap = 1000;
+
+    const option = createV3Option("opt_1", "Option A", {
+      fac_1: { value: 10, factorId: "fac_1" },
+    });
+
+    const payload = buildAnalysisReadyPayload([option], "goal_mid_market", graph);
+
+    expect(payload.goal_threshold).toBe(0.2);
+    expect(payload.goal_threshold_raw).toBe(200);
+    expect(payload.goal_threshold_unit).toBe("customers");
+    expect(payload.goal_threshold_cap).toBe(1000);
+  });
+
+  it("leaves threshold fields undefined when goal node has none", () => {
+    const graph = createV3Graph(
+      [
+        { id: "goal_1", kind: "goal", label: "Revenue growth" },
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_1", kind: "option", label: "Option A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+      ],
+      [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_1" },
+        { from: "fac_1", to: "goal_1" },
+      ]
+    );
+
+    const option = createV3Option("opt_1", "Option A", {
+      fac_1: { value: 10, factorId: "fac_1" },
+    });
+
+    const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
+
+    expect(payload.goal_threshold).toBeUndefined();
+    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_unit).toBeUndefined();
+    expect(payload.goal_threshold_cap).toBeUndefined();
+  });
+});

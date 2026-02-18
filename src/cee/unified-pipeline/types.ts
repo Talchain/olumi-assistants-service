@@ -79,6 +79,8 @@ export interface StageContext {
   skipRepairDueToBudget: boolean;
   repairTimeoutMs: number;
   draftDurationMs: number;
+  /** LLM coaching output — preserved via .passthrough() from draft adapter */
+  coaching?: unknown;
 
   // ── Stage 2 (Normalise) outputs ────────────────────────────────────────
   strpResult: any;

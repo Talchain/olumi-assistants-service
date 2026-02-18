@@ -78,6 +78,9 @@ const GOAL_VERB_PATTERNS = [
   /\b(grow|increase|boost)\s+(\w+(?:\s+\w+){0,3})\s+(?:from\s+[£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?\s+)?to\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
 ];
 
+/** Extended value pattern fragment — captures numeric value with optional composite unit suffix */
+const _VAL = `[£$€]?\\d+(?:,\\d{3})*(?:\\.\\d+)?[kKmMbB]?%?(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:hours?|months?|days?|weeks?|years?|percent))?`;
+
 /** Upper bound constraint patterns (operator: <=) */
 const UPPER_BOUND_PATTERNS = [
   // "while keeping X under/below Y"
@@ -96,6 +99,8 @@ const UPPER_BOUND_PATTERNS = [
   /within\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?)\s*(budget|limit|cap)/gi,
   // "X under Y" (simple form)
   /(\w+(?:\s+\w+){0,2})\s+(?:under|below)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  // Subject-optional: "under/below Y [unit]" (bare phrase — subject defaults to "unspecified")
+  new RegExp(`(?:^|\\s)(?:under|below)\\s+(${_VAL})`, "gi"),
 ];
 
 /** Lower bound constraint patterns (operator: >=) */
@@ -112,6 +117,8 @@ const LOWER_BOUND_PATTERNS = [
   /minimum\s+(?:of\s+)?([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s*(\w+(?:\s+\w+){0,2})?/gi,
   // "X above Y" (simple form)
   /(\w+(?:\s+\w+){0,2})\s+(?:above|over)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  // Subject-optional: "above/over Y [unit]" (bare phrase — subject defaults to "unspecified")
+  new RegExp(`(?:^|\\s)(?:above|over)\\s+(${_VAL})`, "gi"),
 ];
 
 /** "Between X and Y" pattern (generates two constraints) */
@@ -123,11 +130,28 @@ const BETWEEN_PATTERN = /(\w+(?:\s+\w+){0,3})\s+between\s+([£$€]?\d+(?:,\d{3}
 
 /**
  * Parse a value string into a number.
- * Handles currency symbols, percentages, and suffixes (k, m, b).
+ * Handles currency symbols, percentages, suffixes (k, m, b),
+ * composite units ("2 hours", "£50k/month"), and period suffixes.
  */
 function parseValue(valueStr: string): { value: number; unit: string } {
   let cleaned = valueStr.trim();
   let unit = "";
+
+  // Extract trailing composite unit: "/month", "/year", etc.
+  const periodMatch = cleaned.match(/\s*\/\s*(month|year|quarter|week|day|hr|hour)$/i);
+  let periodSuffix = "";
+  if (periodMatch) {
+    periodSuffix = `/${periodMatch[1].toLowerCase()}`;
+    cleaned = cleaned.slice(0, cleaned.length - periodMatch[0].length).trim();
+  }
+
+  // Extract trailing word-unit: "hours", "months", "days", "percent", etc.
+  const wordUnitMatch = cleaned.match(/\s+(hours?|months?|days?|weeks?|years?|percent)$/i);
+  let wordUnit = "";
+  if (wordUnitMatch) {
+    wordUnit = wordUnitMatch[1].toLowerCase();
+    cleaned = cleaned.slice(0, cleaned.length - wordUnitMatch[0].length).trim();
+  }
 
   // Extract currency symbol
   const currencyMatch = cleaned.match(/^([£$€])/);
@@ -137,10 +161,11 @@ function parseValue(valueStr: string): { value: number; unit: string } {
   }
 
   // Handle percentage
-  if (cleaned.endsWith("%")) {
+  if (cleaned.endsWith("%") || wordUnit === "percent") {
     unit = "%";
-    cleaned = cleaned.slice(0, -1);
+    if (cleaned.endsWith("%")) cleaned = cleaned.slice(0, -1);
     const num = parseFloat(cleaned.replace(/,/g, ""));
+    if (periodSuffix) unit += periodSuffix;
     return { value: num / 100, unit }; // Convert to decimal
   }
 
@@ -159,6 +184,15 @@ function parseValue(valueStr: string): { value: number; unit: string } {
   }
 
   const num = parseFloat(cleaned.replace(/,/g, "")) * multiplier;
+
+  // Build final unit string
+  if (wordUnit) {
+    unit = unit ? `${unit}/${wordUnit}` : wordUnit;
+  }
+  if (periodSuffix) {
+    unit += periodSuffix;
+  }
+
   return { value: num, unit };
 }
 
@@ -222,7 +256,11 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
       let targetName: string;
       let valueStr: string;
 
-      if (match[2] && match[1].match(/^[£$€]?\d/)) {
+      if (!match[2]) {
+        // Subject-optional pattern: only 1 capture group (value only)
+        valueStr = match[1];
+        targetName = "unspecified";
+      } else if (match[2] && match[1].match(/^[£$€]?\d/)) {
         // Value comes first: "no more than Y X"
         valueStr = match[1];
         targetName = match[2] || "budget";
@@ -232,7 +270,7 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         valueStr = match[2];
       }
 
-      if (!targetName || !valueStr) continue;
+      if (!valueStr) continue;
 
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
@@ -245,7 +283,7 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         unit,
         label: `${targetName.trim()} ceiling`,
         sourceQuote: match[0].slice(0, 200),
-        confidence: 0.85,
+        confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
       });
     }
@@ -267,7 +305,11 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
       let targetName: string;
       let valueStr: string;
 
-      if (match[2] && match[1].match(/^[£$€]?\d/)) {
+      if (!match[2]) {
+        // Subject-optional pattern: only 1 capture group (value only)
+        valueStr = match[1];
+        targetName = "unspecified";
+      } else if (match[2] && match[1].match(/^[£$€]?\d/)) {
         valueStr = match[1];
         targetName = match[2] || "target";
       } else {
@@ -275,7 +317,7 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         valueStr = match[2];
       }
 
-      if (!targetName || !valueStr) continue;
+      if (!valueStr) continue;
 
       const { value, unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName.trim());
@@ -288,7 +330,7 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         unit,
         label: `${targetName.trim()} floor`,
         sourceQuote: match[0].slice(0, 200),
-        confidence: 0.85,
+        confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
       });
     }
@@ -855,8 +897,8 @@ export function extractCompoundGoals(
     }
   }
 
-  // Determine if compound
-  const isCompound = constraints.length > 0 || (primaryGoal !== undefined && constraints.length > 0);
+  // Determine if compound — a primary goal OR any constraints signals compound intent
+  const isCompound = constraints.length > 0 || primaryGoal !== undefined;
 
   // Log extraction
   log.info({

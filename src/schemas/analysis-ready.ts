@@ -203,6 +203,14 @@ export const AnalysisReadyPayload = z.object({
   blockers: z.array(AnalysisBlocker).optional(),
   /** Model adjustments surfaced from STRP/repair mutations (Phase 2C) */
   model_adjustments: z.array(ModelAdjustment).optional(),
+  /** Goal threshold (normalised 0–1 probability from the goal node) */
+  goal_threshold: z.number().optional(),
+  /** Goal threshold in raw user-facing units (e.g. 200 customers) */
+  goal_threshold_raw: z.number().optional(),
+  /** Unit of the raw threshold (e.g. "customers", "revenue") */
+  goal_threshold_unit: z.string().optional(),
+  /** Upper cap for the threshold metric */
+  goal_threshold_cap: z.number().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 

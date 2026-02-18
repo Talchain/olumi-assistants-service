@@ -1428,3 +1428,66 @@ describe("remapConstraintTargets", () => {
     });
   });
 });
+
+// ============================================================================
+// Subject-optional patterns and composite unit support
+// ============================================================================
+
+describe("subject-optional constraint extraction", () => {
+  it("extracts 'above 110%' as a lower-bound constraint", () => {
+    const result = extractCompoundGoals("above 110%");
+
+    expect(result.constraints.length).toBeGreaterThanOrEqual(1);
+    const c = result.constraints.find((c) => c.operator === ">=");
+    expect(c).toBeDefined();
+    expect(c!.value).toBe(1.1); // 110% as decimal
+    expect(c!.unit).toBe("%");
+  });
+
+  it("extracts 'below 2 hours' as an upper-bound constraint with unit", () => {
+    const result = extractCompoundGoals("below 2 hours");
+
+    expect(result.constraints.length).toBeGreaterThanOrEqual(1);
+    const c = result.constraints.find((c) => c.operator === "<=");
+    expect(c).toBeDefined();
+    expect(c!.value).toBe(2);
+    expect(c!.unit).toBe("hours");
+  });
+
+  it("extracts 'under £50k/month' as an upper-bound constraint with period unit", () => {
+    const result = extractCompoundGoals("under £50k/month");
+
+    expect(result.constraints.length).toBeGreaterThanOrEqual(1);
+    const c = result.constraints.find((c) => c.operator === "<=");
+    expect(c).toBeDefined();
+    expect(c!.value).toBe(50000);
+    expect(c!.unit).toBe("£/month");
+  });
+
+  it("existing pattern 'keep churn under 4%' still works", () => {
+    const result = extractCompoundGoals("keep churn under 4%");
+
+    expect(result.constraints.length).toBeGreaterThanOrEqual(1);
+    const c = result.constraints.find((c) => c.operator === "<=");
+    expect(c).toBeDefined();
+    expect(c!.value).toBe(0.04); // 4% as decimal
+    expect(c!.targetName.toLowerCase()).toContain("churn");
+  });
+
+  it("existing pattern 'revenue retention rate above 110%' still works", () => {
+    const result = extractCompoundGoals("revenue retention rate above 110%");
+
+    expect(result.constraints.length).toBeGreaterThanOrEqual(1);
+    const c = result.constraints.find((c) => c.operator === ">=");
+    expect(c).toBeDefined();
+    expect(c!.value).toBe(1.1);
+  });
+
+  it("brief with primary goal but zero matching constraints reports is_compound: true", () => {
+    // "grow MRR to £50k" has a primary goal but no constraints
+    const result = extractCompoundGoals("grow MRR to £50k");
+
+    expect(result.primaryGoal).toBeDefined();
+    expect(result.isCompound).toBe(true);
+  });
+});

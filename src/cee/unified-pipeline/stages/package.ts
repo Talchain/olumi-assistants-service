@@ -102,6 +102,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     rationales: ctx.rationales,
     confidence: ctx.confidence,
     goal_constraints: ctx.goalConstraints,
+    // Coaching passthrough from LLM output (undefined if not present)
+    ...(ctx.coaching ? { coaching: ctx.coaching } : {}),
   };
 
   if (Array.isArray((payload as any).bias_findings)) {

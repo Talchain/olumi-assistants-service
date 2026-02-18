@@ -261,6 +261,8 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   const { graph, rationales, usage: draftUsage, meta: llmMeta } = draftResult;
   ctx.rationales = rationales ?? [];
   ctx.llmMeta = llmMeta;
+  // Coaching passthrough: stash LLM coaching for V3 output assembly
+  ctx.coaching = (draftResult as any).coaching;
 
   // Graph shape assertion — must come before createEdgeFieldStash()
   if (!Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {

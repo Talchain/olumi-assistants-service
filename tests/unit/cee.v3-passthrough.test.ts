@@ -16,6 +16,8 @@ import {
   OptionForAnalysis,
   AnalysisReadyPayload,
 } from "../../src/schemas/analysis-ready.js";
+import { DraftGraphOutput } from "../../src/schemas/assist.js";
+import { LLMDraftResponse } from "../../src/adapters/llm/shared-schemas.js";
 
 /**
  * CIL Phase 0 — Verify .passthrough() on V3 egress schemas.
@@ -235,5 +237,78 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     };
     const result = EdgeV3.safeParse(input);
     expect(result.success).toBe(false);
+  });
+});
+
+// ============================================================================
+// Coaching passthrough across schema boundaries
+// ============================================================================
+
+describe("Coaching passthrough across schema boundaries", () => {
+  const coachingPayload = {
+    summary: "Your expansion hinges on an unverified investment estimate",
+    strengthen_items: [
+      {
+        id: "str_1",
+        label: "Add cost ceiling",
+        detail: "Brief mentions budget but no number",
+        action_type: "add_constraint",
+        bias_category: "framing",
+      },
+    ],
+  };
+
+  it("LLMDraftResponse preserves coaching via .passthrough()", () => {
+    const input = {
+      nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+      edges: [],
+      coaching: coachingPayload,
+    };
+    const result = LLMDraftResponse.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.coaching).toEqual(coachingPayload);
+  });
+
+  it("DraftGraphOutput validates coaching field", () => {
+    const input = {
+      graph: {
+        version: "1",
+        default_seed: 42,
+        nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+        edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      },
+      coaching: coachingPayload,
+    };
+    const result = DraftGraphOutput.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.coaching).toEqual(coachingPayload);
+  });
+
+  it("CEEGraphResponseV3 validates coaching field", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      coaching: coachingPayload,
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.coaching).toEqual(coachingPayload);
+  });
+
+  it("CEEGraphResponseV3 is valid without coaching", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.coaching).toBeUndefined();
   });
 });

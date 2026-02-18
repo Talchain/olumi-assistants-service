@@ -425,10 +425,17 @@ export function buildAnalysisReadyPayload(
     payloadStatus = "ready";
   }
 
+  // Look up goal node for threshold fields
+  const goalNode = graph.nodes.find((n) => n.id === goalNodeId);
+
   const payload: AnalysisReadyPayloadT = {
     options: analysisOptions,
     goal_node_id: goalNodeId,
     status: payloadStatus,
+    ...(goalNode?.goal_threshold !== undefined && { goal_threshold: goalNode.goal_threshold }),
+    ...(goalNode?.goal_threshold_raw !== undefined && { goal_threshold_raw: goalNode.goal_threshold_raw }),
+    ...(goalNode?.goal_threshold_unit !== undefined && { goal_threshold_unit: goalNode.goal_threshold_unit }),
+    ...(goalNode?.goal_threshold_cap !== undefined && { goal_threshold_cap: goalNode.goal_threshold_cap }),
   };
 
   // Add user_questions when status is needs_user_mapping

@@ -591,6 +591,8 @@ export async function draftGraphWithAnthropic(
     return {
       graph,
       rationales: parsed.rationales || [],
+      // Coaching passthrough: preserved via .passthrough() on LLMDraftResponse
+      ...((parsed as any).coaching ? { coaching: (parsed as any).coaching } : {}),
       debug: unsafeCaptureEnabled ? {
         raw_llm_output: rawOutput.output,
         raw_llm_output_truncated: rawOutput.truncated,
@@ -2004,6 +2006,9 @@ export class AnthropicAdapter implements LLMAdapter {
       graph: result.graph,
       rationales: result.rationales,
       usage: result.usage,
+      ...((result as any).coaching ? { coaching: (result as any).coaching } : {}),
+      ...(result.debug ? { debug: result.debug } : {}),
+      ...(result.meta ? { meta: result.meta } : {}),
     };
   }
 
