@@ -82,6 +82,14 @@ check_stale_js() {
   header "Check 4: Stale .js detection"
   ((CHECKS_RUN++)) || true
 
+  # Only flag stale .js when the repo gitignores compiled JS in src/.
+  # If .gitignore doesn't contain a pattern for src JS, tracked .js files
+  # are intentional and this check does not apply.
+  if ! grep -qE 'src/.*\.js|src/\*\*/\*\.js' .gitignore 2>/dev/null; then
+    pass "Stale .js check skipped (repo does not gitignore src/ JS artifacts)"
+    return
+  fi
+
   local stale_files=()
   while IFS= read -r jsfile; do
     [[ -z "$jsfile" ]] && continue
@@ -140,6 +148,13 @@ check_deps() {
 check_openapi() {
   header "Check 6: OpenAPI freshness"
   ((CHECKS_RUN++)) || true
+
+  # Only run if an openapi:generate script exists in package.json.
+  # Repos with only linting (openapi:validate) have no generation to drift-check.
+  if ! node -e "const p=require('./package.json'); process.exit(p.scripts?.['openapi:generate'] ? 0 : 1)" 2>/dev/null; then
+    pass "OpenAPI freshness skipped (no openapi:generate script in package.json)"
+    return
+  fi
 
   # Regenerate the OpenAPI types and check for drift
   if ! pnpm openapi:generate > /dev/null 2>&1; then
