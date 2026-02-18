@@ -24,3 +24,7 @@ test-results/
 # Editor/IDE
 .idea/
 .vscode/
+
+# Claude Code
+.claude/*
+!.claude/settings.json

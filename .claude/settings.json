@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/claude-pre-push-gate.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
