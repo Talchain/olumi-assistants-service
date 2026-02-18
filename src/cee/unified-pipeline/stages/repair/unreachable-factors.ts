@@ -11,6 +11,7 @@
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge } from "../../utils/edge-format.js";
+import { log } from "../../../../utils/telemetry.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +21,10 @@ export interface UnreachableFactorRepair {
   code: string;
   path: string;
   action: string;
+  /** Set when a prior was synthesised from the original data.value during reclassification */
+  prior_synthesised?: boolean;
+  /** The synthesised prior range (only present when prior_synthesised is true) */
+  synthesised_range?: { range_min: number; range_max: number };
 }
 
 export interface UnreachableFactorResult {
@@ -124,6 +129,37 @@ function findMostCommonOutcomeRiskTarget(
 }
 
 // ---------------------------------------------------------------------------
+// Prior synthesis
+// ---------------------------------------------------------------------------
+
+/**
+ * Synthesise a uniform prior from a known baseline value when reclassifying
+ * a factor from observable/controllable to external.
+ *
+ * Margin calculation:
+ *   margin = max(0.1, value * 0.5)
+ *   — gives at least ±0.1 spread, or ±50% of the baseline for larger values.
+ *
+ * Special cases:
+ *   - Binary values (exactly 0 or 1): full uncertainty [0.0, 1.0]
+ *   - Out-of-domain values (negative or > 1): full uncertainty [0.0, 1.0]
+ *     (upstream normalisation should ensure [0,1], but we guard defensively
+ *     to avoid inverted range_min > range_max from clamping arithmetic)
+ *   - All ranges clamped to [0, 1] since priors are on a normalised scale.
+ */
+function synthesisePriorFromBaseline(value: number): { range_min: number; range_max: number } {
+  // Binary or out-of-domain: full uncertainty
+  if (value <= 0 || value >= 1) {
+    return { range_min: 0.0, range_max: 1.0 };
+  }
+  const margin = Math.max(0.1, value * 0.5);
+  return {
+    range_min: Math.max(0, value - margin),
+    range_max: Math.min(1, value + margin),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -190,17 +226,16 @@ export function handleUnreachableFactors(
     // This factor is unreachable from options — reclassify as external
     (node as any).category = "external";
     reclassified.push(node.id);
-    repairs.push({
-      code: "UNREACHABLE_FACTOR_RECLASSIFIED",
-      path: `nodes[${node.id}].category`,
-      action: `Reclassified unreachable factor "${node.label ?? node.id}" to external`,
-    });
+
+    // Capture original data.value before stripping — needed for prior synthesis.
+    const data = (node as any).data;
+    const originalValue: number | undefined =
+      data && typeof data.value === "number" ? data.value : undefined;
 
     // Strip controllable-only fields when reclassifying to external.
     // After stripping, if `data` can't satisfy any NodeData union branch
     // (OptionData needs `interventions`, ConstraintNodeData needs `operator`,
     // FactorData needs `value`), remove `data` entirely — Node.data is optional.
-    const data = (node as any).data;
     if (data) {
       delete data.value;
       delete data.factor_type;
@@ -211,6 +246,38 @@ export function handleUnreachableFactors(
         delete (node as any).data;
       }
     }
+
+    // Synthesise a prior from the original baseline value so the reclassified
+    // external factor arrives at ISL with a meaningful distribution instead of
+    // intercept=0. Without this, any constraint targeting the node evaluates
+    // trivially (P=1.0 or P=0.0 depending on operator).
+    const repair: UnreachableFactorRepair = {
+      code: "UNREACHABLE_FACTOR_RECLASSIFIED",
+      path: `nodes[${node.id}].category`,
+      action: `Reclassified unreachable factor "${node.label ?? node.id}" to external`,
+    };
+
+    if (originalValue !== undefined) {
+      const { range_min, range_max } = synthesisePriorFromBaseline(originalValue);
+      (node as any).prior = {
+        distribution: "uniform",
+        range_min,
+        range_max,
+      };
+      repair.prior_synthesised = true;
+      repair.synthesised_range = { range_min, range_max };
+      repair.action += ` with synthesised prior [${range_min}, ${range_max}]`;
+
+      log.info({
+        event: "cee.repair.prior_synthesised_from_baseline",
+        node_id: node.id,
+        original_value: originalValue,
+        range_min,
+        range_max,
+      }, `Synthesised prior for reclassified factor "${node.id}" from baseline ${originalValue}`);
+    }
+
+    repairs.push(repair);
 
     // Check if factor has path to goal
     if (hasPathToGoal(node.id, edges, goalIds)) {

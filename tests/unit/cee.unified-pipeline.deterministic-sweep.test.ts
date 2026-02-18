@@ -33,6 +33,7 @@ import {
 import type { EdgeFormat } from "../../src/cee/unified-pipeline/utils/edge-format.js";
 import { handleUnreachableFactors } from "../../src/cee/unified-pipeline/stages/repair/unreachable-factors.js";
 import { fixStatusQuoConnectivity } from "../../src/cee/unified-pipeline/stages/repair/status-quo-fix.js";
+import { log } from "../../src/utils/telemetry.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1169,6 +1170,268 @@ describe("handleUnreachableFactors — proactive scan", () => {
 
     // fac_2 is reachable via fac_1 → fac_2 chain
     expect(result.reclassified).not.toContain("fac_2");
+  });
+});
+
+// =============================================================================
+// Prior synthesis on reclassification
+// =============================================================================
+
+describe("handleUnreachableFactors — prior synthesis from baseline", () => {
+  it("synthesises prior from data.value: 0.04 (low value, margin=0.1)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Customer Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_churn");
+    const churnNode = graph.nodes.find((n: any) => n.id === "fac_churn");
+    expect(churnNode.category).toBe("external");
+    // data.value stripped → data removed entirely
+    expect(churnNode.data).toBeUndefined();
+    // Prior synthesised: margin = max(0.1, 0.04*0.5) = 0.1
+    expect(churnNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0, // clamp(0.04 - 0.1, 0, 1) = 0.0
+      range_max: 0.14, // clamp(0.04 + 0.1, 0, 1) = 0.14
+    });
+  });
+
+  it("synthesises prior from data.value: 0.6 (medium value, margin=0.3)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_demand", kind: "factor", label: "Demand", category: "observable", data: { value: 0.6 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_demand", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_demand");
+    const demandNode = graph.nodes.find((n: any) => n.id === "fac_demand");
+    // margin = max(0.1, 0.6*0.5) = 0.3
+    expect(demandNode.prior.distribution).toBe("uniform");
+    expect(demandNode.prior.range_min).toBeCloseTo(0.3, 10); // 0.6 - 0.3
+    expect(demandNode.prior.range_max).toBeCloseTo(0.9, 10); // 0.6 + 0.3
+  });
+
+  it("synthesises full-range prior for binary value 0", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_binary", kind: "factor", label: "Binary", category: "controllable", data: { value: 0 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_binary", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_binary");
+    const binaryNode = graph.nodes.find((n: any) => n.id === "fac_binary");
+    expect(binaryNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0,
+      range_max: 1.0,
+    });
+  });
+
+  it("does NOT synthesise prior when factor has no data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_nodata", kind: "factor", label: "No Data", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_nodata", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_nodata");
+    const nodataNode = graph.nodes.find((n: any) => n.id === "fac_nodata");
+    expect(nodataNode.category).toBe("external");
+    expect(nodataNode.prior).toBeUndefined();
+  });
+
+  it("includes prior_synthesised in repair record", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    const reclassRepair = result.repairs.find(
+      (r) => r.code === "UNREACHABLE_FACTOR_RECLASSIFIED" && r.path.includes("fac_churn"),
+    );
+    expect(reclassRepair).toBeDefined();
+    expect(reclassRepair!.prior_synthesised).toBe(true);
+    expect(reclassRepair!.synthesised_range).toEqual({ range_min: 0.0, range_max: 0.14 });
+    expect(reclassRepair!.action).toContain("synthesised prior");
+  });
+
+  it("repair record omits prior_synthesised when no data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_ext", kind: "factor", label: "External", category: "external" },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_ext", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    const reclassRepair = result.repairs.find(
+      (r) => r.code === "UNREACHABLE_FACTOR_RECLASSIFIED" && r.path.includes("fac_ext"),
+    );
+    expect(reclassRepair).toBeDefined();
+    expect(reclassRepair!.prior_synthesised).toBeUndefined();
+    expect(reclassRepair!.synthesised_range).toBeUndefined();
+  });
+
+  it("falls back to full uncertainty for negative data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_neg", kind: "factor", label: "Negative", category: "observable", data: { value: -0.5 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_neg", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_neg");
+    const negNode = graph.nodes.find((n: any) => n.id === "fac_neg");
+    // Out-of-domain negative → full uncertainty (guards against inverted ranges)
+    expect(negNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0,
+      range_max: 1.0,
+    });
+  });
+
+  it("falls back to full uncertainty for out-of-range high data.value", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_high", kind: "factor", label: "High", category: "observable", data: { value: 110 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_high", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    const result = handleUnreachableFactors(graph, "V1_FLAT");
+
+    expect(result.reclassified).toContain("fac_high");
+    const highNode = graph.nodes.find((n: any) => n.id === "fac_high");
+    // Out-of-domain (>1) → full uncertainty (guards against inverted ranges)
+    expect(highNode.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0.0,
+      range_max: 1.0,
+    });
+  });
+
+  it("emits cee.repair.prior_synthesised_from_baseline log event", () => {
+    vi.mocked(log.info).mockClear();
+
+    const graph = makeGraph({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_connected", kind: "factor", label: "Connected", category: "controllable" },
+        { id: "fac_churn", kind: "factor", label: "Churn", category: "observable", data: { value: 0.04 } },
+        { id: "out_1", kind: "outcome", label: "O1" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_connected" },
+        { from: "fac_connected", to: "out_1" },
+        { from: "fac_churn", to: "out_1" },
+        { from: "out_1", to: "goal_1" },
+      ],
+    });
+
+    handleUnreachableFactors(graph, "V1_FLAT");
+
+    const synthCall = vi.mocked(log.info).mock.calls.find(
+      (args) => (args[0] as any)?.event === "cee.repair.prior_synthesised_from_baseline",
+    );
+    expect(synthCall).toBeDefined();
+    expect((synthCall![0] as any).node_id).toBe("fac_churn");
+    expect((synthCall![0] as any).original_value).toBe(0.04);
+    expect((synthCall![0] as any).range_min).toBe(0.0);
+    expect((synthCall![0] as any).range_max).toBe(0.14);
   });
 });
 
