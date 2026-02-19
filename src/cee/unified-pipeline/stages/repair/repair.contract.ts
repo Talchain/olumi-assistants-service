@@ -50,6 +50,10 @@ export const STAGE_CONTRACT = {
    * `node.data` entirely when remaining fields can't satisfy any NodeData
    * union branch (no `interventions`, `operator`, or `value`).
    *
+   * NodeData union branches (schemas/graph.ts):
+   *   OptionData requires `interventions`, ConstraintNodeData requires `operator`,
+   *   FactorData requires `value`. When none of these keys survive, data is cleared.
+   *
    * This only applies to external factors after field stripping.
    */
   allowedDataClear: {

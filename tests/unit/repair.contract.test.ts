@@ -720,7 +720,8 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
 
       // Non-external node sentinels must survive
       for (const baselineNode of baseline.nodes) {
-        if (baselineNode.id === "fac_ext") continue; // external factor — data may be cleared
+        // node.data cleared under allowedDataClear.externalFactors — per-field drop checks skipped for this node
+        if (baselineNode.id === "fac_ext") continue;
         const outputNode = (ctx.graph as any).nodes.find(
           (n: any) => n.id === baselineNode.id || n.label === baselineNode.label,
         );
