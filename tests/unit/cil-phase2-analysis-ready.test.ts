@@ -719,7 +719,7 @@ describe("Validation: needs_user_input requires blockers", () => {
 // ============================================================================
 
 describe("Goal threshold fields in analysis_ready", () => {
-  it("populates all four threshold fields from goal node", () => {
+  it("includes goal_threshold but excludes display metadata from analysis_ready; goal node keeps all four", () => {
     const graph = createV3Graph(
       [
         { id: "goal_mid_market", kind: "goal", label: "Mid-market expansion" },
@@ -734,7 +734,7 @@ describe("Goal threshold fields in analysis_ready", () => {
       ]
     );
 
-    // Add threshold fields to goal node (preserved via .passthrough())
+    // Add all four threshold fields to goal node (preserved via .passthrough())
     const goalNode = graph.nodes.find((n) => n.id === "goal_mid_market")!;
     (goalNode as any).goal_threshold = 0.2;
     (goalNode as any).goal_threshold_raw = 200;
@@ -747,13 +747,21 @@ describe("Goal threshold fields in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_mid_market", graph);
 
+    // analysis_ready: only goal_threshold (PLoT needs it), NOT display metadata
     expect(payload.goal_threshold).toBe(0.2);
-    expect(payload.goal_threshold_raw).toBe(200);
-    expect(payload.goal_threshold_unit).toBe("customers");
-    expect(payload.goal_threshold_cap).toBe(1000);
+    expect(payload).not.toHaveProperty("goal_threshold_raw");
+    expect(payload).not.toHaveProperty("goal_threshold_unit");
+    expect(payload).not.toHaveProperty("goal_threshold_cap");
+
+    // Goal node in graph still carries all four fields (UI reads display metadata here)
+    const gn = graph.nodes.find((n) => n.id === "goal_mid_market")!;
+    expect((gn as any).goal_threshold).toBe(0.2);
+    expect((gn as any).goal_threshold_raw).toBe(200);
+    expect((gn as any).goal_threshold_unit).toBe("customers");
+    expect((gn as any).goal_threshold_cap).toBe(1000);
   });
 
-  it("leaves threshold fields undefined when goal node has none", () => {
+  it("leaves goal_threshold undefined when goal node has none", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Revenue growth" },
@@ -775,8 +783,8 @@ describe("Goal threshold fields in analysis_ready", () => {
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
     expect(payload.goal_threshold).toBeUndefined();
-    expect(payload.goal_threshold_raw).toBeUndefined();
-    expect(payload.goal_threshold_unit).toBeUndefined();
-    expect(payload.goal_threshold_cap).toBeUndefined();
+    expect(payload).not.toHaveProperty("goal_threshold_raw");
+    expect(payload).not.toHaveProperty("goal_threshold_unit");
+    expect(payload).not.toHaveProperty("goal_threshold_cap");
   });
 });
