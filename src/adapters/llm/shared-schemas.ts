@@ -113,9 +113,9 @@ export const LLMOptionsResponse = z.object({
       pros: z.array(z.string()).min(2).max(3),
       cons: z.array(z.string()).min(2).max(3),
       evidence_to_gather: z.array(z.string()).min(2).max(3),
-    })
+    }).passthrough()
   ),
-});
+}).passthrough();
 
 export type LLMOptionsResponseT = z.infer<typeof LLMOptionsResponse>;
 
@@ -133,11 +133,11 @@ export const LLMClarifyResponse = z.object({
       choices: z.array(z.string()).optional(),
       why_we_ask: z.string().min(20),
       impacts_draft: z.string().min(20),
-    })
+    }).passthrough()
   ).min(1).max(5),
   confidence: z.number().min(0).max(1),
   should_continue: z.boolean(),
-});
+}).passthrough();
 
 export type LLMClarifyResponseT = z.infer<typeof LLMClarifyResponse>;
 
@@ -154,11 +154,11 @@ export const LLMCritiqueResponse = z.object({
       level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
       note: z.string().min(10).max(280),
       target: z.string().optional(),
-    })
+    }).passthrough()
   ),
   suggested_fixes: z.array(z.string()).max(5),
   overall_quality: z.enum(["poor", "fair", "good", "excellent"]).optional(),
-});
+}).passthrough();
 
 export type LLMCritiqueResponseT = z.infer<typeof LLMCritiqueResponse>;
 
@@ -175,8 +175,8 @@ export const LLMExplainDiffResponse = z.object({
       target: z.string().min(1),
       why: z.string().min(10).max(280),
       provenance_source: z.string().optional(),
-    })
+    }).passthrough()
   ).min(1),
-});
+}).passthrough();
 
 export type LLMExplainDiffResponseT = z.infer<typeof LLMExplainDiffResponse>;

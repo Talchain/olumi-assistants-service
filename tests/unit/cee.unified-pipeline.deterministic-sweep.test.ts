@@ -154,6 +154,15 @@ describe("edge-format utility", () => {
       expect(result.strength_mean).toBe(-0.3);
       expect(result.effect_direction).toBe("negative");
     });
+
+    it("includes provenance and provenance_source fields", () => {
+      const result = neutralCausalEdge("V1_FLAT", { from: "fac_a", to: "out_1" });
+      expect(result.provenance).toEqual({
+        source: "synthetic",
+        quote: "Repair edge (structural connectivity)",
+      });
+      expect(result.provenance_source).toBe("synthetic");
+    });
   });
 });
 

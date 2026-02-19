@@ -1,3 +1,28 @@
+/**
+ * Graph Schema — single source of truth for graph node/edge structures.
+ *
+ * .passthrough() policy:
+ *   Every schema that parses LLM output or inter-stage pipeline data uses
+ *   .passthrough() to preserve additive fields the LLM or upstream stages
+ *   may produce. This prevents silent field stripping at Zod parse boundaries.
+ *
+ *   Schemas that SHOULD use .passthrough():
+ *   - Node, EdgeInput, Graph, StructuredProvenance, FactorData, OptionData,
+ *     ConstraintNodeData, ConstraintMetadata, ConstraintObservedState
+ *     — all internal pipeline schemas (this file)
+ *   - LLMNode, LLMEdge, LLMDraftResponse, LLMOptionsResponse,
+ *     LLMClarifyResponse, LLMCritiqueResponse, LLMExplainDiffResponse
+ *     (shared-schemas.ts)
+ *   - NodeV3, EdgeV3, CEEGraphResponseV3 (cee-v3.ts)
+ *   - DraftGraphOutput, GoalConstraintSchema (assist.ts)
+ *
+ *   Schemas that SHOULD NOT use .passthrough():
+ *   - Inbound API request validation schemas (security boundary)
+ *
+ * @see src/adapters/llm/shared-schemas.ts  — LLM adapter Zod schemas
+ * @see src/schemas/cee-v3.ts              — V3 output schemas
+ * @see src/schemas/assist.ts              — route I/O schemas
+ */
 import { z } from "zod";
 
 export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine", "synthetic"]);
@@ -95,7 +120,7 @@ export const ConstraintMetadata = z.object({
   reference_date: z.string().optional(),
   /** Whether reference date was assumed vs explicit */
   assumed_reference_date: z.boolean().optional(),
-});
+}).passthrough();
 
 /**
  * Observed state for constraint nodes.
@@ -106,7 +131,7 @@ export const ConstraintObservedState = z.object({
   value: z.number(),
   /** Metadata including the explicit operator */
   metadata: ConstraintMetadata,
-});
+}).passthrough();
 
 /**
  * Data field for constraint nodes (redundant operator for PLoT compatibility).
@@ -170,11 +195,12 @@ export const Node = z.object({
 }).passthrough();
 
 // Structured provenance for production trust and traceability
+// .passthrough() — preserve additive fields from LLM/enrichment provenance
 export const StructuredProvenance = z.object({
   source: z.string().min(1), // File name, metric name, or "hypothesis"
   quote: z.string().max(100), // Short citation or statement
   location: z.string().optional(), // "page 3", "row 42", "line 15", etc.
-});
+}).passthrough();
 
 /**
  * Effect direction for causal edges.

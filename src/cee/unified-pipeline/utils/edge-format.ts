@@ -126,6 +126,11 @@ export function neutralCausalEdge(
     to: params.to,
     effect_direction: params.sign ?? "positive",
     origin: "repair" as const,
+    provenance: {
+      source: "synthetic",
+      quote: "Repair edge (structural connectivity)",
+    },
+    provenance_source: "synthetic" as const,
   };
 
   return patchEdgeNumeric(edge, format, { mean, std: 0.2, existence: 0.7 });

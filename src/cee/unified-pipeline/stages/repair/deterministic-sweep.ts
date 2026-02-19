@@ -570,14 +570,14 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
       const origExist = edge.belief_exists ?? ((edge as Record<string, unknown>).belief as number | undefined) ?? 0.9;
 
       keptEdges.push(patchEdgeNumeric(
-        { from: edge.from, to: outcomeId, effect_direction: edge.effect_direction ?? "positive", origin: "repair" } as EdgeT,
+        { from: edge.from, to: outcomeId, effect_direction: edge.effect_direction ?? "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: origMean, std: origStd, existence: origExist },
       ));
 
       // outcome→goal: moderate defaults
       keptEdges.push(patchEdgeNumeric(
-        { from: outcomeId, to: edge.to, effect_direction: "positive", origin: "repair" } as EdgeT,
+        { from: outcomeId, to: edge.to, effect_direction: "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: 0.5, std: 0.15, existence: 0.9 },
       ));

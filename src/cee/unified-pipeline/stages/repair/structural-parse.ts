@@ -3,6 +3,11 @@
  *
  * Uses DraftGraphOutput.parse() to validate the final graph state.
  * This catches any schema violations before Stage 5 (Package).
+ *
+ * Note: DraftGraphOutput and its nested Graph/Node/Edge schemas all use
+ * .passthrough(), so additive fields survive Zod validation here.
+ * The parse is validation-only — ctx.graph is not replaced with the
+ * parsed result, so no fields are actually stripped.
  */
 
 import type { StageContext } from "../../types.js";

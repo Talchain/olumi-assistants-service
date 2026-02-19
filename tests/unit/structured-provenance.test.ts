@@ -80,6 +80,25 @@ describe("StructuredProvenance Schema", () => {
   });
 });
 
+describe("StructuredProvenance .passthrough()", () => {
+  it("preserves unknown fields through parse", () => {
+    const input = {
+      source: "report.pdf",
+      quote: "Revenue grew 23% YoY",
+      location: "page 3",
+      confidence: 0.95,
+      page_number: 3,
+    };
+
+    const result = StructuredProvenance.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as any).confidence).toBe(0.95);
+      expect((result.data as any).page_number).toBe(3);
+    }
+  });
+});
+
 describe("Edge Provenance Union Type", () => {
   it("accepts edge with structured provenance", () => {
     const edge = {

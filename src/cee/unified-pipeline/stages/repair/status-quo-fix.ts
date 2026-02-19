@@ -205,7 +205,13 @@ export function fixStatusQuoConnectivity(
         const baseEdge: EdgeT = {
           from: sq.id,
           to: factorId,
+          effect_direction: "positive" as const,
           origin: "repair" as const,
+          provenance: {
+            source: "synthetic",
+            quote: "Status-quo option wired to factor",
+          },
+          provenance_source: "synthetic" as const,
         };
         const newEdge = canonicalStructuralEdge(baseEdge, format);
         (graph as any).edges.push(newEdge);

@@ -4,6 +4,10 @@
  * Converts extracted constraints into risk nodes for graph integration.
  * Max constraints become "risk of exceeding X"
  * Min constraints become "risk of falling below X"
+ *
+ * NOTE: Currently unused — constraints are now metadata-only in
+ * goal_constraints[] (F.6: CEE generates, PLoT computes, UI displays).
+ * Kept for potential future use if constraints need graph representation.
  */
 
 import { log } from "../../utils/telemetry.js";
@@ -172,12 +176,20 @@ export function constraintToRiskNode(
     edge = {
       from: relatedFactorId,
       to: nodeId,
+      // V4 fields (primary)
+      strength_mean: edgeWeight,
+      strength_std: 0.2,
+      belief_exists: constraint.confidence,
+      effect_direction: "negative" as const,
+      // Legacy fields (backward compat)
       weight: edgeWeight,
       belief: constraint.confidence,
+      origin: "enrichment" as const,
       provenance: {
         source: "constraint_extraction",
         quote: constraint.sourceQuote.substring(0, 100),
       },
+      provenance_source: "synthetic" as const,
     };
   }
 
