@@ -1,8 +1,8 @@
 /**
  * Deterministic Pre-Repair Sweep
  *
- * Runs after orchestrator validation (substep 1) and before PLoT validation
- * (substep 2). Resolves mechanical violations deterministically, handles
+ * Runs as substep 1 (before orchestrator validation) and before PLoT
+ * validation (substep 2). Resolves mechanical violations deterministically, handles
  * unreachable factors, and fixes status quo connectivity.
  *
  * Violation routing:
@@ -514,6 +514,50 @@ function fixExternalHasData(
 }
 
 // ---------------------------------------------------------------------------
+// Goal threshold validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip goal_threshold when goal_threshold_raw is absent/null/undefined.
+ *
+ * The LLM prompt instructs it to omit goal_threshold for qualitative goals,
+ * but this is sometimes ignored. A normalised threshold without a grounded
+ * raw value is unreliable — strip all four threshold fields.
+ *
+ * If goal_threshold_raw IS present (even if the goal seems qualitative),
+ * the extraction was grounded in a real number from the brief and is preserved.
+ *
+ * Runs proactively (not gated by violations).
+ */
+export function fixGoalThresholdNoRaw(graph: GraphT): Repair[] {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+
+  for (const node of nodes) {
+    if (node.kind !== "goal") continue;
+
+    const gt = (node as any).goal_threshold;
+    const gtRaw = (node as any).goal_threshold_raw;
+
+    // Only strip when goal_threshold is present but goal_threshold_raw is absent/null/undefined
+    if (gt !== undefined && gt !== null && (gtRaw === undefined || gtRaw === null)) {
+      delete (node as any).goal_threshold;
+      delete (node as any).goal_threshold_raw;
+      delete (node as any).goal_threshold_unit;
+      delete (node as any).goal_threshold_cap;
+
+      repairs.push({
+        code: "GOAL_THRESHOLD_STRIPPED_NO_RAW",
+        path: `nodes[${node.id}].goal_threshold`,
+        action: "Goal threshold removed: no raw target value extracted from brief",
+      });
+    }
+  }
+
+  return repairs;
+}
+
+// ---------------------------------------------------------------------------
 // Topology repair: factor→goal edge splitting
 // ---------------------------------------------------------------------------
 
@@ -614,7 +658,8 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
  * 4. Partition into Bucket A, B, C
  * 5. Apply Bucket A fixes
  * 6. Apply Bucket B fixes (only for cited codes)
- * 6b. Factor→goal topology repair (proactive)
+ * 6b. Goal threshold validation (proactive)
+ * 6c. Factor→goal topology repair (proactive)
  * 7. Unreachable factor handling
  * 8. Status quo fix
  * 9. Re-validate
@@ -720,7 +765,21 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }
   }
 
-  // Step 4b: Factor→goal topology repair — ALWAYS run regardless of violations.
+  // Step 4b: Goal threshold validation — ALWAYS run regardless of violations.
+  // The LLM sometimes invents a normalised threshold without grounding it in a raw number
+  // from the brief. Strip all four threshold fields when goal_threshold_raw is absent.
+  const goalThresholdRepairs = fixGoalThresholdNoRaw(graph);
+  allRepairs.push(...goalThresholdRepairs);
+
+  if (goalThresholdRepairs.length > 0) {
+    log.warn({
+      event: "cee.deterministic_sweep.goal_threshold_stripped",
+      request_id: ctx.requestId,
+      goal_ids: goalThresholdRepairs.map((r) => r.path),
+    }, "Goal threshold stripped: no raw target value extracted from brief");
+  }
+
+  // Step 4c: Factor→goal topology repair — ALWAYS run regardless of violations.
   // The LLM may short-circuit the causal chain under cost-reduction / minimisation framing,
   // producing factor→goal edges that violate the ALLOWED_EDGES topology.
   // This splits each factor→goal edge into factor→outcome→goal via a synthetic outcome node.
@@ -808,6 +867,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         reclassified: unreachableResult.reclassified,
         marked_droppable: unreachableResult.markedDroppable,
       },
+      goal_threshold_stripped: goalThresholdRepairs.length,
       factor_goal_splits: factorGoalResult.splitCount,
       status_quo: {
         fixed: statusQuoResult.fixed,
@@ -841,6 +901,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     repairs_count: allRepairs.length,
     status_quo_action: statusQuoAction,
     llm_repair_needed: llmRepairNeeded,
+    goal_threshold_stripped: goalThresholdRepairs.length,
     factor_goal_splits: factorGoalResult.splitCount,
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,

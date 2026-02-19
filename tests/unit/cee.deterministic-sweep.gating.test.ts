@@ -256,6 +256,61 @@ describe("LLM repair gating — bucket-specific scenarios", () => {
     expect(sweepTrace.bucket_summary.c).toBeGreaterThan(0);
   });
 
+  it("goal threshold stripped via Step 4b when goal_threshold_raw absent", async () => {
+    mockValidateGraph.mockReturnValue(validResult());
+
+    const graph = makeGraph();
+    // Inject ungrounded goal_threshold (no goal_threshold_raw)
+    const goal = graph.nodes.find((n: any) => n.kind === "goal");
+    goal.goal_threshold = 0.7;
+    goal.goal_threshold_unit = "%";
+    goal.goal_threshold_cap = 100;
+
+    const ctx = makeCtx(graph);
+    await runDeterministicSweep(ctx);
+
+    // Fields stripped from graph
+    const outputGoal = ctx.graph.nodes.find((n: any) => n.kind === "goal");
+    expect(outputGoal.goal_threshold).toBeUndefined();
+    expect(outputGoal.goal_threshold_raw).toBeUndefined();
+    expect(outputGoal.goal_threshold_unit).toBeUndefined();
+    expect(outputGoal.goal_threshold_cap).toBeUndefined();
+
+    // Repair record
+    expect(ctx.deterministicRepairs).toBeDefined();
+    expect(ctx.deterministicRepairs.some((r: any) => r.code === "GOAL_THRESHOLD_STRIPPED_NO_RAW")).toBe(true);
+
+    // Observability trace
+    const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
+    expect(sweepTrace.goal_threshold_stripped).toBe(1);
+  });
+
+  it("goal threshold preserved via Step 4b when goal_threshold_raw present", async () => {
+    mockValidateGraph.mockReturnValue(validResult());
+
+    const graph = makeGraph();
+    const goal = graph.nodes.find((n: any) => n.kind === "goal");
+    goal.goal_threshold = 0.8;
+    goal.goal_threshold_raw = 800;
+    goal.goal_threshold_unit = "customers";
+    goal.goal_threshold_cap = 1000;
+
+    const ctx = makeCtx(graph);
+    await runDeterministicSweep(ctx);
+
+    const outputGoal = ctx.graph.nodes.find((n: any) => n.kind === "goal");
+    expect(outputGoal.goal_threshold).toBe(0.8);
+    expect(outputGoal.goal_threshold_raw).toBe(800);
+    expect(outputGoal.goal_threshold_unit).toBe("customers");
+    expect(outputGoal.goal_threshold_cap).toBe(1000);
+
+    // No threshold repair
+    expect(ctx.deterministicRepairs.some((r: any) => r.code === "GOAL_THRESHOLD_STRIPPED_NO_RAW")).toBe(false);
+
+    const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
+    expect(sweepTrace.goal_threshold_stripped).toBe(0);
+  });
+
   it("Bucket C resolved by status-quo fix → llmRepairNeeded = false", async () => {
     // Initial: Bucket C violation for disconnected status quo
     mockValidateGraph.mockReturnValueOnce({
