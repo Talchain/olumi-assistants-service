@@ -96,6 +96,52 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     ceeIssues: validationIssues,
   });
 
+  // ── Step 2b: STATUS_QUO_ABSENT coaching injection ─────────────────────────
+  // If no option has a status-quo-like label, inject a coaching strengthen_item
+  // so the user is prompted to add a baseline comparator.
+  // Patterns aligned with detectMissingBaseline() in structure/index.ts.
+  {
+    const STATUS_QUO_PATTERNS: RegExp[] = [
+      /status\s*quo/i,
+      /do\s*nothing/i,
+      /no\s*action/i,
+      /no\s*change/i,
+      /baseline/i,
+      /current/i,
+      /as\s*is/i,
+    ];
+    const nodes = ((ctx.graph as any).nodes ?? []) as Array<{ id: string; kind: string; label?: string; data?: any }>;
+    const options = nodes.filter((n) => n.kind === "option");
+    const hasStatusQuo = options.some((opt) => {
+      if (opt.data?.is_status_quo === true) return true;
+      const text = `${opt.id} ${opt.label ?? ""}`;
+      return STATUS_QUO_PATTERNS.some((p) => p.test(text));
+    });
+
+    if (!hasStatusQuo && options.length > 0) {
+      const coaching = (ctx.coaching ?? { summary: "", strengthen_items: [] }) as {
+        summary: string;
+        strengthen_items: Array<Record<string, unknown>>;
+      };
+      if (!Array.isArray(coaching.strengthen_items)) {
+        coaching.strengthen_items = [];
+      }
+      const alreadyPresent = coaching.strengthen_items.some(
+        (item) => item.id === "str_status_quo",
+      );
+      if (!alreadyPresent) {
+        coaching.strengthen_items.push({
+          id: "str_status_quo",
+          label: "Add baseline option",
+          detail: "No status quo option detected — add one to measure improvement",
+          action_type: "add_option",
+          bias_category: "framing",
+        });
+        ctx.coaching = coaching;
+      }
+    }
+  }
+
   // ── Step 3: Build payload + sort bias findings ───────────────────────────
   const payload: Record<string, unknown> = {
     graph: ctx.graph,

@@ -557,6 +557,48 @@ export function fixGoalThresholdNoRaw(graph: GraphT): Repair[] {
   return repairs;
 }
 
+/**
+ * Heuristic: warn when goal_threshold looks LLM-inferred rather than grounded.
+ *
+ * Fires when ALL of:
+ *  1. goal_threshold AND goal_threshold_raw are both present
+ *  2. goal_threshold_unit is absent or "%"
+ *  3. goal_threshold_raw is a round number (ends in 0 or 5)
+ *  4. goal label contains no digits
+ *
+ * This catches the common pattern where the LLM invents "70%" for
+ * "improve UX". Does NOT strip — just emits a warning repair record.
+ *
+ * Runs proactively after fixGoalThresholdNoRaw.
+ */
+export function warnGoalThresholdPossiblyInferred(graph: GraphT): Repair[] {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+
+  for (const node of nodes) {
+    if (node.kind !== "goal") continue;
+
+    const gt = (node as any).goal_threshold;
+    const gtRaw = (node as any).goal_threshold_raw;
+    if (gt === undefined || gt === null || gtRaw === undefined || gtRaw === null) continue;
+
+    const unit = (node as any).goal_threshold_unit as string | undefined;
+    const unitIsPercentOrAbsent = !unit || unit === "%";
+    const rawIsRound = typeof gtRaw === "number" && gtRaw % 5 === 0;
+    const labelHasNoDigits = !/\d/.test(node.label ?? "");
+
+    if (unitIsPercentOrAbsent && rawIsRound && labelHasNoDigits) {
+      repairs.push({
+        code: "GOAL_THRESHOLD_POSSIBLY_INFERRED",
+        path: `nodes[${node.id}].goal_threshold`,
+        action: "Goal threshold may not reflect an explicit target from the brief. Verify or remove.",
+      });
+    }
+  }
+
+  return repairs;
+}
+
 // ---------------------------------------------------------------------------
 // Topology repair: factor→goal edge splitting
 // ---------------------------------------------------------------------------
@@ -779,6 +821,19 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }, "Goal threshold stripped: no raw target value extracted from brief");
   }
 
+  // Step 4b-ii: Goal threshold inference heuristic — warn (don't strip) when the
+  // LLM fabricates both goal_threshold and goal_threshold_raw on qualitative goals.
+  const goalThresholdWarnings = warnGoalThresholdPossiblyInferred(graph);
+  allRepairs.push(...goalThresholdWarnings);
+
+  if (goalThresholdWarnings.length > 0) {
+    log.warn({
+      event: "cee.deterministic_sweep.goal_threshold_possibly_inferred",
+      request_id: ctx.requestId,
+      goal_ids: goalThresholdWarnings.map((r) => r.path),
+    }, "Goal threshold may be LLM-inferred (round number, no digits in label)");
+  }
+
   // Step 4c: Factor→goal topology repair — ALWAYS run regardless of violations.
   // The LLM may short-circuit the causal chain under cost-reduction / minimisation framing,
   // producing factor→goal edges that violate the ALLOWED_EDGES topology.
@@ -868,6 +923,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         marked_droppable: unreachableResult.markedDroppable,
       },
       goal_threshold_stripped: goalThresholdRepairs.length,
+      goal_threshold_possibly_inferred: goalThresholdWarnings.length,
       factor_goal_splits: factorGoalResult.splitCount,
       status_quo: {
         fixed: statusQuoResult.fixed,
@@ -902,6 +958,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     status_quo_action: statusQuoAction,
     llm_repair_needed: llmRepairNeeded,
     goal_threshold_stripped: goalThresholdRepairs.length,
+    goal_threshold_possibly_inferred: goalThresholdWarnings.length,
     factor_goal_splits: factorGoalResult.splitCount,
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,
