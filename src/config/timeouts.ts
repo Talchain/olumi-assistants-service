@@ -47,7 +47,7 @@ export const HTTP_CLIENT_TIMEOUT_MS = clampTimeout(
 );
 
 export const ROUTE_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("ROUTE_TIMEOUT_MS", 115_000),
+  parseTimeoutEnv("ROUTE_TIMEOUT_MS", 135_000),
 );
 
 /**
@@ -165,15 +165,16 @@ export const REPAIR_TIMEOUT_MS = clampTimeout(
 
 // ---------------------------------------------------------------------------
 // Request budget — single source of truth for draft-graph request lifecycle
+// Intended chain: CEE LLM (105s) < CEE budget (120s) < PLoT proxy (135s) < Render gateway (~150s)
 // ---------------------------------------------------------------------------
 
-/** Overall request budget for draft-graph requests (default: 90s).
+/** Overall request budget for draft-graph requests (default: 120s).
  *  CEE must return a response (success or error) before this deadline. */
-export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS", 90_000);
+export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS", 120_000);
 
 /** Headroom reserved for post-LLM processing (validation, repair, enrichment).
  *  The effective LLM timeout = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS */
-export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 10_000);
+export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 15_000);
 
 /** Derived: maximum time the LLM draft call may run before being aborted.
  *  Computed as DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS. */

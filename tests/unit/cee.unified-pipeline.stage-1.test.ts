@@ -51,9 +51,9 @@ vi.mock("../../src/cee/transforms/graph-normalisation.js", () => ({
 }));
 
 vi.mock("../../src/config/timeouts.js", () => ({
-  DRAFT_REQUEST_BUDGET_MS: 90_000,
-  DRAFT_LLM_TIMEOUT_MS: 80_000,
-  LLM_POST_PROCESSING_HEADROOM_MS: 10_000,
+  DRAFT_REQUEST_BUDGET_MS: 120_000,
+  DRAFT_LLM_TIMEOUT_MS: 105_000,
+  LLM_POST_PROCESSING_HEADROOM_MS: 15_000,
   REPAIR_TIMEOUT_MS: 10_000,
   getJitteredRetryDelayMs: vi.fn().mockReturnValue(0),
 }));
@@ -307,8 +307,8 @@ describe("runStageParse", () => {
 
   it("throws RequestBudgetExceededError when elapsed exceeds budget", async () => {
     setupMocks();
-    // Set requestStartMs far in the past to exceed 90s budget
-    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 100_000 } });
+    // Set requestStartMs far in the past to exceed 120s budget
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 130_000 } });
 
     await expect(runStageParse(ctx)).rejects.toThrow("budget");
   });
@@ -318,9 +318,9 @@ describe("runStageParse", () => {
   it("sets skipRepairDueToBudget when remaining time is insufficient", async () => {
     setupMocks();
     // Budget-aware: skip when effectiveRepairTimeout <= 0
-    // Formula: remaining = 90s - elapsed - 10s headroom; effective = min(20s, remaining - 2s safety)
-    // Need remaining <= 2s → elapsed >= 78s
-    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 79_000 } });
+    // Formula: remaining = 120s - elapsed - 15s headroom; effective = min(10s, remaining - 2s safety)
+    // Need remaining <= 2s → elapsed >= 103s
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 104_000 } });
     await runStageParse(ctx);
 
     expect(ctx.skipRepairDueToBudget).toBe(true);
@@ -328,8 +328,8 @@ describe("runStageParse", () => {
 
   it("uses budget-aware effective repair timeout when time is limited", async () => {
     setupMocks();
-    // Elapsed 75s → remaining = 90 - 75 - 10 = 5s → effective = min(20, 5 - 2) = 3s
-    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 75_000 } });
+    // Elapsed 100s → remaining = 120 - 100 - 15 = 5s → effective = min(10, 5 - 2) = 3s
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", requestStartMs: Date.now() - 100_000 } });
     await runStageParse(ctx);
 
     expect(ctx.skipRepairDueToBudget).toBe(false);

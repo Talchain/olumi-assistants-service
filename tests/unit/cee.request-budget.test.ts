@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 describe("Request budget configuration", () => {
-  it("uses sensible defaults (90s budget, 10s headroom, 80s derived LLM timeout)", async () => {
+  it("uses sensible defaults (120s budget, 15s headroom, 105s derived LLM timeout)", async () => {
     // These are module-level constants with default values
     const {
       DRAFT_REQUEST_BUDGET_MS,
@@ -14,9 +14,9 @@ describe("Request budget configuration", () => {
       MIN_TIMEOUT_MS,
     } = await import("../../src/config/timeouts.js");
 
-    expect(DRAFT_REQUEST_BUDGET_MS).toBe(90_000);
-    expect(LLM_POST_PROCESSING_HEADROOM_MS).toBe(10_000);
-    expect(DRAFT_LLM_TIMEOUT_MS).toBe(80_000);
+    expect(DRAFT_REQUEST_BUDGET_MS).toBe(120_000);
+    expect(LLM_POST_PROCESSING_HEADROOM_MS).toBe(15_000);
+    expect(DRAFT_LLM_TIMEOUT_MS).toBe(105_000);
     // Derived timeout must always be >= MIN_TIMEOUT_MS
     expect(DRAFT_LLM_TIMEOUT_MS).toBeGreaterThanOrEqual(MIN_TIMEOUT_MS);
   });
@@ -38,7 +38,7 @@ describe("Request budget configuration", () => {
       await import("../../src/config/timeouts.js");
     const expected = Math.max(0, DRAFT_LLM_TIMEOUT_MS - REPAIR_TIMEOUT_MS);
     expect(getDerivedRepairBudgetMs()).toBe(expected);
-    // With defaults (80s LLM, 10s repair), result should be 70s
+    // With defaults (105s LLM, 20s repair), result should be 85s
     expect(getDerivedRepairBudgetMs()).toBeGreaterThanOrEqual(0);
   });
 
@@ -63,6 +63,26 @@ describe("Request budget configuration", () => {
     for (const w of warnings) {
       expect(typeof w).toBe("string");
     }
+  });
+
+  it("timeout ordering invariant holds with defaults: LLM < budget < route", async () => {
+    const {
+      DRAFT_LLM_TIMEOUT_MS,
+      DRAFT_REQUEST_BUDGET_MS,
+      ROUTE_TIMEOUT_MS,
+      LLM_POST_PROCESSING_HEADROOM_MS,
+      validateTimeoutRelationships,
+    } = await import("../../src/config/timeouts.js");
+
+    // CEE LLM call (105s) < CEE request budget (120s) < route timeout (135s)
+    expect(DRAFT_LLM_TIMEOUT_MS).toBeLessThan(DRAFT_REQUEST_BUDGET_MS);
+    expect(DRAFT_REQUEST_BUDGET_MS).toBeLessThanOrEqual(ROUTE_TIMEOUT_MS);
+    expect(DRAFT_LLM_TIMEOUT_MS).toBe(DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS);
+
+    // No warnings about budget exceeding route timeout
+    const warnings = validateTimeoutRelationships();
+    const budgetVsRouteWarning = warnings.find(w => w.includes("DRAFT_REQUEST_BUDGET_MS") && w.includes("ROUTE_TIMEOUT_MS"));
+    expect(budgetVsRouteWarning).toBeUndefined();
   });
 });
 
