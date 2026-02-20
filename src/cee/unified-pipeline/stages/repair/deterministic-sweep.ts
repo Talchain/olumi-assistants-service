@@ -807,11 +807,17 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }
   }
 
-  // Step 4b: Goal threshold hygiene — MOVED to standalone Stage 4b (threshold-sweep.ts).
-  // Functions fixGoalThresholdNoRaw and warnGoalThresholdPossiblyInferred remain exported
-  // for backward-compatible unit test imports but are no longer called from the sweep.
-  const goalThresholdRepairs: Repair[] = [];
-  const goalThresholdWarnings: Repair[] = [];
+  // Step 4b: Goal threshold hygiene — execution moved to Stage 4b (threshold-sweep.ts).
+  // Helper functions (fixGoalThresholdNoRaw, warnGoalThresholdPossiblyInferred) remain
+  // exported for backward-compatible unit tests. Stage 4b writes final counts to
+  // ctx.repairTrace.deterministic_sweep after this function creates the trace object.
+  const THRESHOLD_SWEEP_MOVED_TO_STAGE_4B = true;
+  if (!THRESHOLD_SWEEP_MOVED_TO_STAGE_4B) {
+    // Dead code — retained so the intent of the gate is unmissable.
+    // Remove this block entirely once Stage 4b has been stable for several releases.
+    fixGoalThresholdNoRaw(graph);
+    warnGoalThresholdPossiblyInferred(graph);
+  }
 
   // Step 4c: Factor→goal topology repair — ALWAYS run regardless of violations.
   // The LLM may short-circuit the causal chain under cost-reduction / minimisation framing,
@@ -901,8 +907,9 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         reclassified: unreachableResult.reclassified,
         marked_droppable: unreachableResult.markedDroppable,
       },
-      goal_threshold_stripped: goalThresholdRepairs.length,
-      goal_threshold_possibly_inferred: goalThresholdWarnings.length,
+      // Initialised to 0 — Stage 4b (threshold-sweep.ts) overwrites with actual counts.
+      goal_threshold_stripped: 0,
+      goal_threshold_possibly_inferred: 0,
       factor_goal_splits: factorGoalResult.splitCount,
       status_quo: {
         fixed: statusQuoResult.fixed,
@@ -936,8 +943,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     repairs_count: allRepairs.length,
     status_quo_action: statusQuoAction,
     llm_repair_needed: llmRepairNeeded,
-    goal_threshold_stripped: goalThresholdRepairs.length,
-    goal_threshold_possibly_inferred: goalThresholdWarnings.length,
+    // goal_threshold_stripped / goal_threshold_possibly_inferred: emitted by Stage 4b event
     factor_goal_splits: factorGoalResult.splitCount,
     unreachable_reclassified: unreachableResult.reclassified.length,
     unreachable_droppable: unreachableResult.markedDroppable.length,
