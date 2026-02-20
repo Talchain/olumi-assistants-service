@@ -940,7 +940,11 @@ export function normaliseConstraintUnits(
       return {
         ...c,
         unit: "fraction",
-        provenance_unit_normalised: "percent_to_fraction" as any,
+        provenance_unit_normalised: {
+          rule: "percent_to_fraction",
+          original_value: c.value,
+          original_unit: c.unit,
+        } as any,
       };
     }
     return c;

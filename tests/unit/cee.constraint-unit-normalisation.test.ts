@@ -34,7 +34,11 @@ describe("normaliseConstraintUnits", () => {
     expect(result).toHaveLength(1);
     expect(result[0].unit).toBe("fraction");
     expect(result[0].value).toBe(0.04);
-    expect((result[0] as any).provenance_unit_normalised).toBe("percent_to_fraction");
+    expect((result[0] as any).provenance_unit_normalised).toEqual({
+      rule: "percent_to_fraction",
+      original_value: 0.04,
+      original_unit: "%",
+    });
   });
 
   it("preserves non-percentage constraints unchanged", () => {
@@ -45,6 +49,20 @@ describe("normaliseConstraintUnits", () => {
     expect(result[0].unit).toBe("£");
     expect(result[0].value).toBe(50000);
     expect((result[0] as any).provenance_unit_normalised).toBeUndefined();
+  });
+
+  it("value 0.5 stays 0.5 (not re-converted to 0.005) and provenance preserves originals", () => {
+    const input = [makeConstraint({ value: 0.5, unit: "%" })];
+    const result = normaliseConstraintUnits(input);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].value).toBe(0.5);
+    expect(result[0].unit).toBe("fraction");
+    expect((result[0] as any).provenance_unit_normalised).toEqual({
+      rule: "percent_to_fraction",
+      original_value: 0.5,
+      original_unit: "%",
+    });
   });
 
   it("preserves percentage-unit constraints where value >= 1 (already in pp form)", () => {
@@ -94,7 +112,11 @@ describe("normaliseConstraintUnits", () => {
     const goalConstraints = toGoalConstraints(normalised);
 
     expect(goalConstraints).toHaveLength(1);
-    expect((goalConstraints[0] as any).provenance_unit_normalised).toBe("percent_to_fraction");
+    expect((goalConstraints[0] as any).provenance_unit_normalised).toEqual({
+      rule: "percent_to_fraction",
+      original_value: 0.04,
+      original_unit: "%",
+    });
     expect(goalConstraints[0].unit).toBe("fraction");
   });
 });

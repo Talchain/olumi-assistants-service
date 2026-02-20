@@ -353,7 +353,7 @@ describe("pipelineTrace.threshold_sweep via runStagePackage", () => {
     expect(ctx.pipelineTrace.threshold_sweep).toBeDefined();
     expect(ctx.pipelineTrace.threshold_sweep.ran).toBe(true);
     expect(ctx.pipelineTrace.threshold_sweep.strips_applied).toBe(1);
-    expect(ctx.pipelineTrace.threshold_sweep.codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_RAW");
+    expect(ctx.pipelineTrace.threshold_sweep.codes).toEqual(["GOAL_THRESHOLD_STRIPPED_NO_RAW"]);
   });
 
   it("omits threshold_sweep from pipelineTrace when ctx.thresholdSweepTrace is undefined", async () => {

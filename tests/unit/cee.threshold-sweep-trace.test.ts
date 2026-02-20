@@ -69,8 +69,11 @@ describe("threshold sweep trace (Task B)", () => {
     expect(ctx.thresholdSweepTrace.goals_checked).toBe(1);
     expect(ctx.thresholdSweepTrace.strips_applied).toBe(1);
     expect(ctx.thresholdSweepTrace.warnings_emitted).toBe(1);
-    expect(ctx.thresholdSweepTrace.codes).toContain("GOAL_THRESHOLD_POSSIBLY_INFERRED");
-    expect(ctx.thresholdSweepTrace.codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_DIGITS");
+    // Deterministic order: warn (POSSIBLY_INFERRED) emitted before strip (STRIPPED_NO_DIGITS)
+    expect(ctx.thresholdSweepTrace.codes).toEqual([
+      "GOAL_THRESHOLD_POSSIBLY_INFERRED",
+      "GOAL_THRESHOLD_STRIPPED_NO_DIGITS",
+    ]);
   });
 
   it("tracks strip for raw-absent threshold", async () => {
@@ -81,23 +84,34 @@ describe("threshold sweep trace (Task B)", () => {
 
     expect(ctx.thresholdSweepTrace.strips_applied).toBe(1);
     expect(ctx.thresholdSweepTrace.warnings_emitted).toBe(0);
-    expect(ctx.thresholdSweepTrace.codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_RAW");
+    expect(ctx.thresholdSweepTrace.codes).toEqual(["GOAL_THRESHOLD_STRIPPED_NO_RAW"]);
   });
 
   it("writes noop trace when graph is undefined (early return)", async () => {
     const ctx = { requestId: "test", graph: undefined, thresholdSweepTrace: undefined } as any;
     await runStageThresholdSweep(ctx);
 
-    expect(ctx.thresholdSweepTrace).toBeDefined();
-    expect(ctx.thresholdSweepTrace.ran).toBe(false);
-    expect(ctx.thresholdSweepTrace.goals_checked).toBe(0);
+    expect(ctx.thresholdSweepTrace).toEqual({
+      ran: false,
+      duration_ms: 0,
+      goals_checked: 0,
+      strips_applied: 0,
+      warnings_emitted: 0,
+      codes: [],
+    });
   });
 
   it("writes noop trace when nodes is not an array (early return)", async () => {
     const ctx = { requestId: "test", graph: { nodes: "bad" }, thresholdSweepTrace: undefined } as any;
     await runStageThresholdSweep(ctx);
 
-    expect(ctx.thresholdSweepTrace).toBeDefined();
-    expect(ctx.thresholdSweepTrace.ran).toBe(false);
+    expect(ctx.thresholdSweepTrace).toEqual({
+      ran: false,
+      duration_ms: 0,
+      goals_checked: 0,
+      strips_applied: 0,
+      warnings_emitted: 0,
+      codes: [],
+    });
   });
 });
