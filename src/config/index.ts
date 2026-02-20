@@ -299,6 +299,7 @@ const ConfigSchema = z.object({
     pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
     // Unified pipeline (CIL Phase 3B)
     unifiedPipelineEnabled: booleanString.default(false), // If true, use unified 6-stage pipeline instead of Pipeline A+B
+    legacyPipelineEnabled: booleanString.default(false), // If true, allow legacy Pipeline B; if false, throw on entry
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -549,6 +550,7 @@ function parseConfig(): Config {
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
+      legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

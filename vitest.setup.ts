@@ -10,6 +10,10 @@
 import { beforeAll, beforeEach } from "vitest";
 import { _resetConfigCache } from "./src/config/index.js";
 
+// Enable legacy Pipeline B for existing tests that exercise it.
+// The flag test (legacy-pipeline-flag.test.ts) uses vi.stubEnv() to test the real default.
+process.env.CEE_LEGACY_PIPELINE_ENABLED = "true";
+
 /**
  * Reset config cache before ALL tests in a file
  *

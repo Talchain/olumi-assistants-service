@@ -1,3 +1,11 @@
+/**
+ * @archived — NOT runnable from this location.
+ *
+ * Preserved as reference for Pipeline B lineage. Relative imports are
+ * intentionally stale; the live call-site now imports runDraftGraphPipeline
+ * directly in src/cee/validation/pipeline.ts.
+ */
+
 import type { DraftGraphInputT } from "../schemas/assist.js";
 import { runDraftGraphPipeline, type PipelineOpts } from "../routes/assist.draft-graph.js";
 

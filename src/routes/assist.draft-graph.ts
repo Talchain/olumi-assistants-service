@@ -676,6 +676,10 @@ export interface PipelineOpts {
 }
 
 export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: unknown, correlationId: string, pipelineOpts?: PipelineOpts): Promise<PipelineResult> {
+  if (!config.cee.legacyPipelineEnabled) {
+    throw new Error("Pipeline B is archived. Set CEE_LEGACY_PIPELINE_ENABLED=true to re-enable.");
+  }
+
   // Create correction collector for tracking graph modifications
   const collector = createCorrectionCollector();
 

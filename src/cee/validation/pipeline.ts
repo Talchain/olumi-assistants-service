@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
-import { runCeeDraftPipeline } from "../draft-pipeline-adapter.js";
+import { runDraftGraphPipeline } from "../../routes/assist.draft-graph.js";
 import { SSE_DEGRADED_HEADER_NAME_LOWER } from "../../utils/degraded-mode.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
 import { validateResponse } from "../../utils/responseGuards.js";
@@ -569,6 +569,10 @@ export async function finaliseCeeDraftResponse(
   body: CEEDraftGraphResponseV1 | CEEErrorResponseV1;
   headers?: Record<string, string>;
 }> {
+  if (!config.cee.legacyPipelineEnabled) {
+    throw new Error("Pipeline B is archived. Set CEE_LEGACY_PIPELINE_ENABLED=true to re-enable.");
+  }
+
   const start = Date.now();
   const requestId = getRequestId(request);
 
@@ -661,7 +665,7 @@ export async function finaliseCeeDraftResponse(
 
   for (let attempt = 1; attempt <= SCHEMA_VALIDATION_RETRY_CONFIG.maxAttempts; attempt++) {
     try {
-      pipelineResult = await runCeeDraftPipeline(input, rawBody, requestId, {
+      pipelineResult = await runDraftGraphPipeline(input, rawBody, requestId, {
         refreshPrompts,
         forceDefault: defaultQueryParam,
         signal: budgetAbortController.signal,
