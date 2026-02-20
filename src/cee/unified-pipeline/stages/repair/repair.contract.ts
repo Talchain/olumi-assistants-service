@@ -75,14 +75,66 @@ export const STAGE_CONTRACT = {
    */
   allowedModifications: {
     topLevel: [] as string[],
-    node: ["id", "category", "kind"] as string[],
+    node: [
+      /** WHY: fixCategoryMismatch (deterministic-sweep.ts:325) and late STRP Rule 1 reclassify factor categories */
+      "category",
+      /** WHY: connectivity.ts may change kind when inferring missing goal node */
+      "kind",
+      /** WHY: goal-merge (structure/index.ts:312) combines labels when merging multiple goals into one */
+      "label",
+    ] as string[],
     edge: [
-      "id", "from", "to",
-      "strength_mean", "strength_std", "belief_exists",
-      "effect_direction", "provenance",
+      /** WHY: enforceStableEdgeIds (graph-determinism.ts:33) assigns deterministic from::to::index IDs */
+      "id",
+      /** WHY: goal-merge (structure/index.ts:370-376) redirects edges pointing to merged-away goals */
+      "from",
+      /** WHY: goal-merge (structure/index.ts:370-376) redirects edges pointing to merged-away goals */
+      "to",
+      /** WHY: fixNanValues (deterministic-sweep.ts:95) replaces NaN with 0.5 */
+      /** WHY: fixSignMismatch (deterministic-sweep.ts:143) flips sign to match effect_direction */
+      "strength_mean",
+      /** WHY: fixNanValues (deterministic-sweep.ts:100) replaces NaN with 0.1 */
+      "strength_std",
+      /** WHY: fixNanValues (deterministic-sweep.ts:105) replaces NaN with 0.8 */
+      "belief_exists",
+      /** WHY: late STRP Rule 4 (structural-reconciliation.ts:676) reconciles direction with sign */
+      "effect_direction",
+      /** WHY: edge-restoration (edge-identity.ts:151) restores provenance from stash */
+      "provenance",
     ] as string[],
     option: [] as string[],
-    nodeData: ["value", "factor_type", "uncertainty_drivers", "baseline"] as string[],
+    nodeData: [
+      /** WHY: fixControllableMissingData (deterministic-sweep.ts:356) fills default value */
+      "value",
+      /** WHY: fixControllableMissingData (deterministic-sweep.ts:364) fills default factor_type */
+      /** WHY: late STRP Rule 1 (structural-reconciliation.ts:178) fills factor_type on reclassification */
+      "factor_type",
+      /** WHY: fixControllableMissingData (deterministic-sweep.ts:367) fills default uncertainty_drivers */
+      /** WHY: late STRP Rule 1 (structural-reconciliation.ts:181) fills uncertainty_drivers on reclassification */
+      "uncertainty_drivers",
+      /** WHY: Collateral value change when node.data is partially reconstructed */
+      "baseline",
+    ] as string[],
+  },
+
+  /**
+   * Critical invariants — cannot be changed or dropped.
+   * A violation of any field here is always a contract error regardless of
+   * allowedDrops/allowedModifications.
+   */
+  preservationGuarantees: {
+    topLevel: [
+      /** graph version and seed are identity fields — repair must not touch them */
+      "version",
+      "default_seed",
+    ] as string[],
+    node: [
+      /** WHY: no repair substep reassigns existing node IDs — enforceStableEdgeIds only sorts nodes by id */
+      "id",
+    ] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
   },
 
   /**

@@ -18,6 +18,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/repair/repair.contract.js";
+import {
+  assertSentinel,
+  assertPreservationGuarantees,
+  validateContractCompliance,
+  type StageContract,
+} from "./stage-contract-harness.js";
 
 // ── Mocks (must be before imports) ──────────────────────────────────────────
 
@@ -313,6 +319,139 @@ function makeCtx(graphOverride?: any): any {
   };
 }
 
+/**
+ * Build a graph with an external factor that has data.value, data.factor_type,
+ * and data.uncertainty_drivers — fields that the graph-validator flags as
+ * EXTERNAL_HAS_DATA and the deterministic sweep strips.
+ *
+ * The non-external nodes carry sentinel fields that must survive.
+ */
+function buildExternalDataGraph() {
+  return {
+    version: "1",
+    default_seed: 17,
+    _sentinel_top: "ext_top_marker",
+    nodes: [
+      {
+        id: "goal_1",
+        kind: "goal",
+        label: "Grow revenue",
+        description: "Increase annual revenue",
+        _sentinel_node: "goal_1_ext_marker",
+      },
+      {
+        id: "dec_1",
+        kind: "decision",
+        label: "Pricing strategy",
+        _sentinel_node: "dec_1_ext_marker",
+      },
+      {
+        id: "opt_1",
+        kind: "option",
+        label: "Premium pricing",
+        data: {
+          interventions: { fac_ctrl: 100 },
+          _sentinel_option_data: "opt_1_ext_marker",
+        },
+        _sentinel_node: "opt_1_ext_marker",
+      },
+      {
+        // Controllable factor — connected to option, should keep its data
+        id: "fac_ctrl",
+        kind: "factor",
+        label: "Price level",
+        category: "controllable",
+        data: {
+          value: 0.7,
+          baseline: 0.5,
+          factor_type: "cost",
+          uncertainty_drivers: ["Market volatility"],
+          _sentinel_data: "fac_ctrl_data_marker",
+        },
+        _sentinel_node: "fac_ctrl_ext_marker",
+      },
+      {
+        // External factor WITH prohibited data fields — triggers EXTERNAL_HAS_DATA
+        id: "fac_ext",
+        kind: "factor",
+        label: "Competitor pricing",
+        category: "external",
+        data: {
+          value: 0.6,
+          factor_type: "price",
+          uncertainty_drivers: ["Market uncertainty"],
+          _sentinel_data: "fac_ext_data_marker",
+        },
+        _sentinel_node: "fac_ext_ext_marker",
+      },
+      {
+        id: "outcome_1",
+        kind: "outcome",
+        label: "Revenue impact",
+        _sentinel_node: "outcome_1_ext_marker",
+      },
+    ],
+    edges: [
+      {
+        id: "e_dec_opt",
+        from: "dec_1",
+        to: "opt_1",
+        strength_mean: 1.0,
+        strength_std: 0.01,
+        belief_exists: 1.0,
+        effect_direction: "positive",
+        _sentinel_edge: "e_dec_opt_ext_marker",
+      },
+      {
+        id: "e_opt_fac",
+        from: "opt_1",
+        to: "fac_ctrl",
+        strength_mean: 0.8,
+        strength_std: 0.1,
+        belief_exists: 0.9,
+        effect_direction: "positive",
+        _sentinel_edge: "e_opt_fac_ext_marker",
+      },
+      {
+        id: "e_fac_out",
+        from: "fac_ctrl",
+        to: "outcome_1",
+        strength_mean: 0.7,
+        strength_std: 0.12,
+        belief_exists: 0.8,
+        effect_direction: "positive",
+        _sentinel_edge: "e_fac_out_ext_marker",
+      },
+      {
+        id: "e_ext_out",
+        from: "fac_ext",
+        to: "outcome_1",
+        strength_mean: -0.4,
+        strength_std: 0.15,
+        belief_exists: 0.7,
+        effect_direction: "negative",
+        _sentinel_edge: "e_ext_out_ext_marker",
+      },
+      {
+        id: "e_out_goal",
+        from: "outcome_1",
+        to: "goal_1",
+        strength_mean: 0.8,
+        strength_std: 0.1,
+        belief_exists: 0.9,
+        effect_direction: "positive",
+        _sentinel_edge: "e_out_goal_ext_marker",
+      },
+    ],
+    meta: {
+      roots: ["dec_1"],
+      leaves: ["goal_1"],
+      suggested_positions: {},
+      source: "assistant",
+    },
+  };
+}
+
 function setupDefaults(): void {
   vi.clearAllMocks();
 
@@ -334,25 +473,6 @@ function setupDefaults(): void {
     },
     warnings: [],
   }));
-}
-
-/**
- * Assert a sentinel field survived at a given path. On failure, reports
- * whether it was an unexpected drop or unexpected modification.
- */
-function assertSentinel(
-  actual: unknown,
-  expected: unknown,
-  path: string,
-) {
-  if (actual === undefined) {
-    throw new Error(`UNEXPECTED DROP at ${path}: field was present in input but missing in output`);
-  }
-  if (actual !== expected) {
-    throw new Error(
-      `UNEXPECTED MODIFICATION at ${path}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
-  }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -557,139 +677,6 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
   });
 
   describe("EXTERNAL_HAS_DATA path (external factor with prohibited data fields)", () => {
-    /**
-     * Build a graph with an external factor that has data.value, data.factor_type,
-     * and data.uncertainty_drivers — fields that the graph-validator flags as
-     * EXTERNAL_HAS_DATA and the deterministic sweep strips.
-     *
-     * The non-external nodes carry sentinel fields that must survive.
-     */
-    function buildExternalDataGraph() {
-      return {
-        version: "1",
-        default_seed: 17,
-        _sentinel_top: "ext_top_marker",
-        nodes: [
-          {
-            id: "goal_1",
-            kind: "goal",
-            label: "Grow revenue",
-            description: "Increase annual revenue",
-            _sentinel_node: "goal_1_ext_marker",
-          },
-          {
-            id: "dec_1",
-            kind: "decision",
-            label: "Pricing strategy",
-            _sentinel_node: "dec_1_ext_marker",
-          },
-          {
-            id: "opt_1",
-            kind: "option",
-            label: "Premium pricing",
-            data: {
-              interventions: { fac_ctrl: 100 },
-              _sentinel_option_data: "opt_1_ext_marker",
-            },
-            _sentinel_node: "opt_1_ext_marker",
-          },
-          {
-            // Controllable factor — connected to option, should keep its data
-            id: "fac_ctrl",
-            kind: "factor",
-            label: "Price level",
-            category: "controllable",
-            data: {
-              value: 0.7,
-              baseline: 0.5,
-              factor_type: "cost",
-              uncertainty_drivers: ["Market volatility"],
-              _sentinel_data: "fac_ctrl_data_marker",
-            },
-            _sentinel_node: "fac_ctrl_ext_marker",
-          },
-          {
-            // External factor WITH prohibited data fields — triggers EXTERNAL_HAS_DATA
-            id: "fac_ext",
-            kind: "factor",
-            label: "Competitor pricing",
-            category: "external",
-            data: {
-              value: 0.6,
-              factor_type: "price",
-              uncertainty_drivers: ["Market uncertainty"],
-              _sentinel_data: "fac_ext_data_marker",
-            },
-            _sentinel_node: "fac_ext_ext_marker",
-          },
-          {
-            id: "outcome_1",
-            kind: "outcome",
-            label: "Revenue impact",
-            _sentinel_node: "outcome_1_ext_marker",
-          },
-        ],
-        edges: [
-          {
-            id: "e_dec_opt",
-            from: "dec_1",
-            to: "opt_1",
-            strength_mean: 1.0,
-            strength_std: 0.01,
-            belief_exists: 1.0,
-            effect_direction: "positive",
-            _sentinel_edge: "e_dec_opt_ext_marker",
-          },
-          {
-            id: "e_opt_fac",
-            from: "opt_1",
-            to: "fac_ctrl",
-            strength_mean: 0.8,
-            strength_std: 0.1,
-            belief_exists: 0.9,
-            effect_direction: "positive",
-            _sentinel_edge: "e_opt_fac_ext_marker",
-          },
-          {
-            id: "e_fac_out",
-            from: "fac_ctrl",
-            to: "outcome_1",
-            strength_mean: 0.7,
-            strength_std: 0.12,
-            belief_exists: 0.8,
-            effect_direction: "positive",
-            _sentinel_edge: "e_fac_out_ext_marker",
-          },
-          {
-            id: "e_ext_out",
-            from: "fac_ext",
-            to: "outcome_1",
-            strength_mean: -0.4,
-            strength_std: 0.15,
-            belief_exists: 0.7,
-            effect_direction: "negative",
-            _sentinel_edge: "e_ext_out_ext_marker",
-          },
-          {
-            id: "e_out_goal",
-            from: "outcome_1",
-            to: "goal_1",
-            strength_mean: 0.8,
-            strength_std: 0.1,
-            belief_exists: 0.9,
-            effect_direction: "positive",
-            _sentinel_edge: "e_out_goal_ext_marker",
-          },
-        ],
-        meta: {
-          roots: ["dec_1"],
-          leaves: ["goal_1"],
-          suggested_positions: {},
-          source: "assistant",
-        },
-      };
-    }
-
     it("strips prohibited data fields from external factor (contract-declared drop)", async () => {
       const graph = buildExternalDataGraph();
       const ctx = makeCtx(graph);
@@ -773,6 +760,180 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
           `edges[${baselineEdge.id}]._sentinel_edge`,
         );
       }
+    });
+  });
+
+  // ── Preservation guarantees (via shared harness) ──────────────────────────
+
+  describe("preservationGuarantees (harness)", () => {
+    it("all preservation-guaranteed fields survive unchanged", async () => {
+      const ctx = makeCtx();
+      const baseline = structuredClone(ctx.graph);
+      await runStageRepair(ctx);
+
+      const violations = assertPreservationGuarantees(
+        STAGE_CONTRACT as unknown as StageContract,
+        baseline,
+        ctx.graph,
+      );
+      expect(violations).toEqual([]);
+    });
+
+    it("version and default_seed are always preserved", async () => {
+      const ctx = makeCtx();
+      await runStageRepair(ctx);
+
+      expect((ctx.graph as any).version).toBe("1");
+      expect((ctx.graph as any).default_seed).toBe(17);
+    });
+  });
+
+  // ── Full contract compliance via harness ──────────────────────────────────
+
+  describe("full contract compliance (harness)", () => {
+    it("representative fixture passes full contract validation", async () => {
+      const ctx = makeCtx();
+      const baseline = structuredClone(ctx.graph);
+      await runStageRepair(ctx);
+
+      // External factors may have data cleared — identify them for skip
+      const externalNodeIds = baseline.nodes
+        .filter((n: any) => n.category === "external")
+        .map((n: any) => n.id);
+
+      const violations = validateContractCompliance(
+        STAGE_CONTRACT as unknown as StageContract,
+        baseline,
+        ctx.graph,
+        { skipDataForNodeIds: externalNodeIds },
+      );
+      expect(violations).toEqual([]);
+    });
+
+    it("EXTERNAL_HAS_DATA fixture passes full contract validation", async () => {
+      const graph = buildExternalDataGraph();
+      const baseline = structuredClone(graph);
+      const ctx = makeCtx(graph);
+      await runStageRepair(ctx);
+
+      // External factor fac_ext has data cleared entirely — skip per-field data checks
+      const violations = validateContractCompliance(
+        STAGE_CONTRACT as unknown as StageContract,
+        baseline,
+        ctx.graph,
+        { skipDataForNodeIds: ["fac_ext"] },
+      );
+      expect(violations).toEqual([]);
+    });
+  });
+
+  // ── Mutation-occurs proof (prove stage ran) ───────────────────────────────
+
+  describe("mutation-occurs proof", () => {
+    it("deterministic sweep fixes NaN strength_mean (allowedModifications.edge)", async () => {
+      const graph = buildSentinelGraph();
+      // Inject NaN strength_mean — deterministic sweep should fix to 0.5
+      const nanEdge = graph.edges.find((e: any) => e.id === "e_opt_fac");
+      if (nanEdge) (nanEdge as any).strength_mean = NaN;
+
+      const ctx = makeCtx(graph);
+      await runStageRepair(ctx);
+
+      const outputEdge = (ctx.graph as any).edges.find(
+        (e: any) => e.from === "opt_1" && e.to === "fac_cost",
+      );
+      expect(outputEdge).toBeDefined();
+      // NaN must have been replaced with a valid number
+      expect(Number.isNaN(outputEdge.strength_mean)).toBe(false);
+      expect(typeof outputEdge.strength_mean).toBe("number");
+    });
+
+    it("edge stabilisation assigns deterministic IDs (allowedModifications.edge includes id)", async () => {
+      const ctx = makeCtx();
+      const baselineIds = ctx.graph.edges.map((e: any) => e.id);
+      await runStageRepair(ctx);
+
+      // Edge IDs are stabilised to from::to::index format
+      const outputIds = (ctx.graph as any).edges.map((e: any) => e.id);
+      // At least one edge should have a deterministic from::to format
+      const hasDeterministicId = outputIds.some(
+        (id: string) => id.includes("::"),
+      );
+      expect(hasDeterministicId).toBe(true);
+    });
+  });
+
+  // ── Drop path coverage ────────────────────────────────────────────────────
+
+  describe("drop path coverage", () => {
+    it("EXTERNAL_HAS_DATA strips value/factor_type/uncertainty_drivers from external factor", async () => {
+      const graph = buildExternalDataGraph();
+      const ctx = makeCtx(graph);
+      await runStageRepair(ctx);
+
+      const extFactor = (ctx.graph as any).nodes.find(
+        (n: any) => n.id === "fac_ext",
+      );
+      expect(extFactor).toBeDefined();
+      // After stripping prohibited fields and clearing data per allowedDataClear:
+      // data.value, data.factor_type, data.uncertainty_drivers are all in allowedDrops.nodeData
+      expect(extFactor.data).toBeUndefined();
+    });
+  });
+
+  // ── Harness sanity (wrong contract → violations detected) ─────────────────
+
+  describe("harness sanity", () => {
+    it("detects violations when contract is too strict (no modifications allowed)", async () => {
+      const graph = buildSentinelGraph();
+      // Inject NaN to guarantee a mutation occurs
+      const nanEdge = graph.edges.find((e: any) => e.id === "e_opt_fac");
+      if (nanEdge) (nanEdge as any).strength_mean = NaN;
+
+      const ctx = makeCtx(graph);
+      const baseline = structuredClone(ctx.graph);
+      await runStageRepair(ctx);
+
+      // Use a deliberately wrong contract: no edge modifications allowed
+      const wrongContract: StageContract = {
+        name: "repair-wrong",
+        allowedDrops: {
+          topLevel: [],
+          node: [],
+          edge: [],
+          option: [],
+          nodeData: [],
+        },
+        allowedModifications: {
+          topLevel: [],
+          node: [],
+          edge: [],      // id and strength_mean NOT declared → should catch deterministic sweep + stabilisation
+          option: [],
+          nodeData: [],
+        },
+        preservationGuarantees: {
+          topLevel: [],
+          node: [],
+          edge: [],
+          option: [],
+          nodeData: [],
+        },
+        allowedRemovals: { nodes: false, edges: true },
+      };
+
+      const violations = validateContractCompliance(
+        wrongContract,
+        baseline,
+        ctx.graph,
+      );
+      // Wrong contract should detect at least one violation
+      // (edge IDs were stabilised + NaN was fixed → undeclared modifications)
+      expect(violations.length).toBeGreaterThan(0);
+      // Should have an edge modification violation (strength_mean or id)
+      const edgeViolation = violations.find(
+        (v) => v.path.includes("edges[") && v.type === "unexpected_modification",
+      );
+      expect(edgeViolation).toBeDefined();
     });
   });
 });

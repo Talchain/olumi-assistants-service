@@ -33,10 +33,56 @@ export const STAGE_CONTRACT = {
    */
   allowedModifications: {
     topLevel: [] as string[],
-    node: ["category"] as string[],
-    edge: ["strength_mean", "effect_direction"] as string[],
+    node: [
+      /** WHY: STRP Rule 1 (structural-reconciliation.ts:164) reclassifies factor category based on graph structure */
+      "category",
+    ] as string[],
+    edge: [
+      /** WHY: normaliseRiskCoefficients (risk-normalisation.ts:45) flips positive risk→goal/outcome edges to negative */
+      "strength_mean",
+      /** WHY: STRP Rule 4 (structural-reconciliation.ts:676) and Rule 2 (structural-reconciliation.ts:338) reconcile direction with sign */
+      "effect_direction",
+    ] as string[],
     option: [] as string[],
-    nodeData: ["factor_type", "extractionType", "uncertainty_drivers"] as string[],
+    nodeData: [
+      /** WHY: STRP Rule 1 (structural-reconciliation.ts:178) fills factor_type when reclassifying TO controllable */
+      /** WHY: STRP Rule 2 (structural-reconciliation.ts:283) corrects invalid factor_type enum values */
+      "factor_type",
+      /** WHY: STRP Rule 2 (structural-reconciliation.ts:298) corrects invalid extractionType enum values */
+      /** WHY: STRP Rule 5 (structural-reconciliation.ts:236) fills missing extractionType on controllable factors */
+      "extractionType",
+      /** WHY: STRP Rule 1 (structural-reconciliation.ts:181) fills uncertainty_drivers when reclassifying TO controllable */
+      /** WHY: STRP Rule 5 (structural-reconciliation.ts:251) fills missing uncertainty_drivers on controllable factors */
+      "uncertainty_drivers",
+    ] as string[],
+  },
+
+  /**
+   * Critical invariants — cannot be changed or dropped.
+   * A violation of any field here is always a contract error regardless of
+   * allowedDrops/allowedModifications.
+   */
+  preservationGuarantees: {
+    topLevel: [
+      /** graph version and seed are identity fields — normalise must not touch them */
+      "version",
+      "default_seed",
+    ] as string[],
+    node: [
+      /** WHY: node identity — STRP only changes category, never id/kind/label */
+      "id",
+      "kind",
+      "label",
+    ] as string[],
+    edge: [
+      /** WHY: normalise never rewires edges — only strength_mean and effect_direction are modified */
+      "from",
+      "to",
+      "strength_std",
+      "belief_exists",
+    ] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
   },
 
   /**

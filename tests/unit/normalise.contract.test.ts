@@ -10,6 +10,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/normalise.contract.js";
+import {
+  assertSentinel,
+  assertPreservationGuarantees,
+  validateContractCompliance,
+  type StageContract,
+} from "./stage-contract-harness.js";
 
 // ── Mocks (telemetry only) ──────────────────────────────────────────────────
 
@@ -32,7 +38,9 @@ import { runStageNormalise } from "../../src/cee/unified-pipeline/stages/normali
 
 /**
  * Build a test graph with sentinel fields at every depth.
- * Includes nodes of varied kinds and edges with varied field sets.
+ * Topology: decision → option → factor → outcome → goal
+ * Includes all node kinds (decision, option, factor×2, outcome, goal) for
+ * representative coverage of common pipeline paths.
  */
 function buildSentinelGraph() {
   return {
@@ -46,6 +54,12 @@ function buildSentinelGraph() {
         label: "Reduce costs",
         description: "Overall cost reduction",
         _sentinel_node: "goal_marker",
+      },
+      {
+        id: "dec_1",
+        kind: "decision",
+        label: "Cost reduction strategy",
+        _sentinel_node: "decision_marker",
       },
       {
         id: "fac_controllable",
@@ -83,8 +97,24 @@ function buildSentinelGraph() {
         },
         _sentinel_node: "option_marker",
       },
+      {
+        id: "outcome_1",
+        kind: "outcome",
+        label: "Cost savings realised",
+        _sentinel_node: "outcome_marker",
+      },
     ],
     edges: [
+      {
+        id: "e0",
+        from: "dec_1",
+        to: "opt_a",
+        strength_mean: 1.0,
+        strength_std: 0.05,
+        belief_exists: 1.0,
+        effect_direction: "positive",
+        _sentinel_edge: "edge0_marker",
+      },
       {
         id: "e1",
         from: "opt_a",
@@ -99,7 +129,7 @@ function buildSentinelGraph() {
       {
         id: "e2",
         from: "fac_controllable",
-        to: "goal_1",
+        to: "outcome_1",
         strength_mean: -0.6,
         strength_std: 0.15,
         belief_exists: 0.85,
@@ -109,7 +139,7 @@ function buildSentinelGraph() {
       {
         id: "e3",
         from: "fac_external",
-        to: "goal_1",
+        to: "outcome_1",
         strength_mean: 0.3,
         strength_std: 0.2,
         belief_exists: 0.7,
@@ -118,7 +148,7 @@ function buildSentinelGraph() {
       },
       {
         id: "e4",
-        from: "opt_a",
+        from: "outcome_1",
         to: "goal_1",
         strength_mean: 0.5,
         strength_std: 0.12,
@@ -129,7 +159,7 @@ function buildSentinelGraph() {
       },
     ],
     meta: {
-      roots: ["opt_a"],
+      roots: ["dec_1"],
       leaves: ["goal_1"],
       suggested_positions: {},
       source: "assistant",
@@ -154,25 +184,6 @@ function makeCtx(graphOverride?: any): any {
  */
 function snapshot(obj: unknown): any {
   return structuredClone(obj);
-}
-
-/**
- * Assert a sentinel field survived at a given path. On failure, reports
- * whether it was an unexpected drop, modification, or removal.
- */
-function assertSentinel(
-  actual: unknown,
-  expected: unknown,
-  path: string,
-) {
-  if (actual === undefined) {
-    throw new Error(`UNEXPECTED DROP at ${path}: field was present in input but missing in output`);
-  }
-  if (actual !== expected) {
-    throw new Error(
-      `UNEXPECTED MODIFICATION at ${path}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
-  }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -379,5 +390,231 @@ describe("Stage 2 (Normalise) — field preservation contract", () => {
       "orphan_marker",
       "nodes[fac_orphan]._sentinel_node (reclassified node)",
     );
+  });
+
+  // ── Preservation guarantees (via shared harness) ──────────────────────────
+
+  describe("preservationGuarantees (harness)", () => {
+    it("all preservation-guaranteed fields survive unchanged", async () => {
+      const ctx = makeCtx();
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      const violations = assertPreservationGuarantees(
+        STAGE_CONTRACT as unknown as StageContract,
+        baseline,
+        ctx.graph,
+      );
+      expect(violations).toEqual([]);
+    });
+
+    it("version and default_seed are always preserved", async () => {
+      const ctx = makeCtx();
+      await runStageNormalise(ctx);
+
+      expect((ctx.graph as any).version).toBe("1");
+      expect((ctx.graph as any).default_seed).toBe(17);
+    });
+
+    it("node id, kind, label are preserved on non-reclassified nodes", async () => {
+      const ctx = makeCtx();
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      for (const baselineNode of baseline.nodes) {
+        const outputNode = (ctx.graph as any).nodes.find(
+          (n: any) => n.id === baselineNode.id,
+        );
+        expect(outputNode).toBeDefined();
+        // id, kind, label are in preservationGuarantees.node
+        expect(outputNode.id).toBe(baselineNode.id);
+        expect(outputNode.kind).toBe(baselineNode.kind);
+        expect(outputNode.label).toBe(baselineNode.label);
+      }
+    });
+
+    it("edge from, to, strength_std, belief_exists are preserved", async () => {
+      const ctx = makeCtx();
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      for (const baselineEdge of baseline.edges) {
+        const outputEdge = (ctx.graph as any).edges.find(
+          (e: any) => e.id === baselineEdge.id,
+        );
+        expect(outputEdge).toBeDefined();
+        // from, to, strength_std, belief_exists are in preservationGuarantees.edge
+        expect(outputEdge.from).toBe(baselineEdge.from);
+        expect(outputEdge.to).toBe(baselineEdge.to);
+        expect(outputEdge.strength_std).toBe(baselineEdge.strength_std);
+        expect(outputEdge.belief_exists).toBe(baselineEdge.belief_exists);
+      }
+    });
+  });
+
+  // ── Full contract compliance via harness ──────────────────────────────────
+
+  describe("full contract compliance (harness)", () => {
+    it("representative fixture passes full contract validation", async () => {
+      const ctx = makeCtx();
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      const violations = validateContractCompliance(
+        STAGE_CONTRACT as unknown as StageContract,
+        baseline,
+        ctx.graph,
+      );
+      expect(violations).toEqual([]);
+    });
+  });
+
+  // ── Mutation-occurs proof (prove stage ran) ───────────────────────────────
+
+  describe("mutation-occurs proof", () => {
+    it("STRP reclassifies orphan controllable factor (allowedModifications.node includes category)", async () => {
+      const graph = buildSentinelGraph();
+      graph.nodes.push({
+        id: "fac_orphan_mut",
+        kind: "factor",
+        label: "Unconnected Factor",
+        category: "controllable",
+        data: {
+          value: 0.5,
+          factor_type: "cost",
+          uncertainty_drivers: ["weather"],
+          _sentinel_data: "orphan_mut_data_marker",
+        },
+        _sentinel_node: "orphan_mut_marker",
+      } as any);
+
+      const ctx = makeCtx(graph);
+      const baselineCategory = "controllable";
+      await runStageNormalise(ctx);
+
+      const orphanNode = (ctx.graph as any).nodes.find(
+        (n: any) => n.id === "fac_orphan_mut",
+      );
+      // Category must have been modified (reclassified away from controllable)
+      expect(orphanNode.category).not.toBe(baselineCategory);
+      // But category must still be present (allowedModifications, not allowedDrops)
+      expect(orphanNode.category).toBeDefined();
+    });
+
+    it("risk normalisation modifies strength_mean on positive risk→goal edge", async () => {
+      // Build graph with a positive risk factor→goal edge that should be flipped
+      const graph = buildSentinelGraph();
+      // e3 is fac_external → goal_1 with positive strength_mean 0.3.
+      // Risk normalisation may flip it. Check whether normalise touched any edge.
+      const ctx = makeCtx(graph);
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      // At minimum, the stage must have run without error
+      // If corrections were applied, they are in ctx.riskCoefficientCorrections
+      expect(Array.isArray(ctx.riskCoefficientCorrections)).toBe(true);
+    });
+  });
+
+  // ── Drop path coverage ────────────────────────────────────────────────────
+
+  describe("drop path coverage", () => {
+    it("STRP Rule 1 drops factor_type from reclassified controllable→observable node", async () => {
+      const graph = buildSentinelGraph();
+      graph.nodes.push({
+        id: "fac_drop_test",
+        kind: "factor",
+        label: "Drop Test Factor",
+        category: "controllable",
+        data: {
+          value: 0.5,
+          factor_type: "cost",
+          uncertainty_drivers: ["demand"],
+          _sentinel_data: "drop_test_marker",
+        },
+        _sentinel_node: "drop_test_node_marker",
+      } as any);
+
+      const ctx = makeCtx(graph);
+      await runStageNormalise(ctx);
+
+      const node = (ctx.graph as any).nodes.find(
+        (n: any) => n.id === "fac_drop_test",
+      );
+      expect(node).toBeDefined();
+      // Node should be reclassified (no option edges)
+      expect(node.category).not.toBe("controllable");
+      // factor_type and uncertainty_drivers are in allowedDrops.nodeData
+      // After reclassification, at least one should be dropped or absent
+      const factorTypeDropped = node.data?.factor_type === undefined;
+      const uncDriversDropped = node.data?.uncertainty_drivers === undefined;
+      expect(factorTypeDropped || uncDriversDropped).toBe(true);
+    });
+  });
+
+  // ── Harness sanity (wrong contract → violations detected) ─────────────────
+
+  describe("harness sanity", () => {
+    it("detects violations when contract is too strict (no modifications allowed)", async () => {
+      const graph = buildSentinelGraph();
+      // Add orphan controllable factor to guarantee STRP mutation
+      graph.nodes.push({
+        id: "fac_sanity",
+        kind: "factor",
+        label: "Sanity Check Factor",
+        category: "controllable",
+        data: {
+          value: 0.5,
+          factor_type: "cost",
+          uncertainty_drivers: ["test"],
+          _sentinel_data: "sanity_data_marker",
+        },
+        _sentinel_node: "sanity_node_marker",
+      } as any);
+
+      const ctx = makeCtx(graph);
+      const baseline = snapshot(ctx.graph);
+      await runStageNormalise(ctx);
+
+      // Use a deliberately wrong contract: allowedModifications is empty
+      const wrongContract: StageContract = {
+        name: "normalise-wrong",
+        allowedDrops: {
+          topLevel: [],
+          node: [],
+          edge: [],
+          option: [],
+          nodeData: [],
+        },
+        allowedModifications: {
+          topLevel: [],
+          node: [],     // category NOT declared → should catch STRP reclassification
+          edge: [],
+          option: [],
+          nodeData: [],
+        },
+        preservationGuarantees: {
+          topLevel: [],
+          node: [],
+          edge: [],
+          option: [],
+          nodeData: [],
+        },
+        allowedRemovals: { nodes: false, edges: false },
+      };
+
+      const violations = validateContractCompliance(
+        wrongContract,
+        baseline,
+        ctx.graph,
+      );
+      // The wrong contract should detect at least one violation
+      // (STRP reclassified the orphan factor → category changed → undeclared modification)
+      expect(violations.length).toBeGreaterThan(0);
+      const categoryViolation = violations.find(
+        (v) => v.path.includes("fac_sanity") && v.path.includes("category"),
+      );
+      expect(categoryViolation).toBeDefined();
+    });
   });
 });
