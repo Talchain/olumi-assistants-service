@@ -1,16 +1,17 @@
 /**
  * Unified Pipeline Orchestrator (CIL Phase 3B)
  *
- * Replaces the Pipeline A + Pipeline B nesting with a single 6-stage pipeline.
+ * Replaces the Pipeline A + Pipeline B nesting with a single 7-stage pipeline.
  * Each stage calls existing functions from their current locations — no logic rewrite.
  *
  * Stages:
- *  1. Parse     — LLM draft + adapter normalisation
- *  2. Normalise — STRP + risk coefficients (field transforms only)
- *  3. Enrich    — Factor enrichment (ONCE)
- *  4. Repair    — Validation + repair + goal merge + connectivity + clarifier
- *  5. Package   — Caps + warnings + quality + trace assembly
- *  6. Boundary  — V3 transform + analysis_ready + model_adjustments
+ *  1.  Parse           — LLM draft + adapter normalisation
+ *  2.  Normalise       — STRP + risk coefficients (field transforms only)
+ *  3.  Enrich          — Factor enrichment (ONCE)
+ *  4.  Repair          — Validation + repair + goal merge + connectivity + clarifier
+ *  4b. Threshold Sweep — Deterministic goal threshold hygiene (non-critical, try/catch wrapped)
+ *  5.  Package         — Caps + warnings + quality + trace assembly
+ *  6.  Boundary        — V3 transform + analysis_ready + model_adjustments
  *
  * Feature flag: CEE_UNIFIED_PIPELINE_ENABLED (default false)
  */
