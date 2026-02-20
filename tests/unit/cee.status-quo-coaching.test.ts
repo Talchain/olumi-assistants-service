@@ -327,3 +327,42 @@ describe("STATUS_QUO_ABSENT coaching injection", () => {
     expect(sqItem).toBeUndefined();
   });
 });
+
+// ── Threshold sweep trace surfaces in pipelineTrace (Finding 5) ──────────
+
+describe("pipelineTrace.threshold_sweep via runStagePackage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupMocks();
+  });
+
+  it("includes threshold_sweep in pipelineTrace when ctx.thresholdSweepTrace is populated", async () => {
+    const ctx = makeCtx();
+    ctx.thresholdSweepTrace = {
+      ran: true,
+      duration_ms: 3,
+      goals_checked: 1,
+      strips_applied: 1,
+      warnings_emitted: 0,
+      codes: ["GOAL_THRESHOLD_STRIPPED_NO_RAW"],
+    };
+
+    await runStagePackage(ctx);
+
+    expect(ctx.pipelineTrace).toBeDefined();
+    expect(ctx.pipelineTrace.threshold_sweep).toBeDefined();
+    expect(ctx.pipelineTrace.threshold_sweep.ran).toBe(true);
+    expect(ctx.pipelineTrace.threshold_sweep.strips_applied).toBe(1);
+    expect(ctx.pipelineTrace.threshold_sweep.codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_RAW");
+  });
+
+  it("omits threshold_sweep from pipelineTrace when ctx.thresholdSweepTrace is undefined", async () => {
+    const ctx = makeCtx();
+    // thresholdSweepTrace not set — simulates pipeline skip
+
+    await runStagePackage(ctx);
+
+    expect(ctx.pipelineTrace).toBeDefined();
+    expect(ctx.pipelineTrace.threshold_sweep).toBeUndefined();
+  });
+});
