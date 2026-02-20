@@ -76,7 +76,7 @@ describe("Request budget configuration", () => {
 
     // CEE LLM call (105s) < CEE request budget (120s) < route timeout (135s)
     expect(DRAFT_LLM_TIMEOUT_MS).toBeLessThan(DRAFT_REQUEST_BUDGET_MS);
-    expect(DRAFT_REQUEST_BUDGET_MS).toBeLessThanOrEqual(ROUTE_TIMEOUT_MS);
+    expect(DRAFT_REQUEST_BUDGET_MS).toBeLessThan(ROUTE_TIMEOUT_MS);
     expect(DRAFT_LLM_TIMEOUT_MS).toBe(DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS);
 
     // No warnings about budget exceeding route timeout
