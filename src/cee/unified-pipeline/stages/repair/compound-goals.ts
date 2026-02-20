@@ -14,6 +14,7 @@ import type { StageContext } from "../../types.js";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  normaliseConstraintUnits,
   remapConstraintTargets,
 } from "../../../compound-goal/index.js";
 import { log } from "../../../../utils/telemetry.js";
@@ -60,7 +61,8 @@ export function runCompoundGoals(ctx: StageContext): void {
     return;
   }
 
-  ctx.goalConstraints = toGoalConstraints(validConstraints);
+  const normalised = normaliseConstraintUnits(validConstraints);
+  ctx.goalConstraints = toGoalConstraints(normalised);
 
   log.info({
     event: "cee.compound_goal.integrated",

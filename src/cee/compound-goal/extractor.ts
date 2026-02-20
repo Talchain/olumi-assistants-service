@@ -923,6 +923,31 @@ export function extractCompoundGoals(
 }
 
 /**
+ * Normalise percentage-unit constraints to prevent double-encoding.
+ *
+ * The LLM extractor converts "4%" to value: 0.04, unit: "%".
+ * If a consumer interprets unit: "%" as "value is percentage points",
+ * 0.04% ≠ 4%.  This normaliser detects the fractional case and relabels
+ * the unit to "fraction" so the convention is unambiguous.
+ *
+ * Rule: if unit === "%" and 0 < value < 1 → already fractional → unit = "fraction".
+ */
+export function normaliseConstraintUnits(
+  constraints: ExtractedGoalConstraint[],
+): ExtractedGoalConstraint[] {
+  return constraints.map((c) => {
+    if (c.unit === "%" && c.value > 0 && c.value < 1) {
+      return {
+        ...c,
+        unit: "fraction",
+        provenance_unit_normalised: "percent_to_fraction" as any,
+      };
+    }
+    return c;
+  });
+}
+
+/**
  * Convert extracted constraints to GoalConstraintT array for output.
  */
 export function toGoalConstraints(
@@ -939,5 +964,8 @@ export function toGoalConstraints(
     confidence: c.confidence,
     provenance: c.provenance,
     deadline_metadata: c.deadlineMetadata,
+    ...((c as any).provenance_unit_normalised
+      ? { provenance_unit_normalised: (c as any).provenance_unit_normalised }
+      : {}),
   }));
 }

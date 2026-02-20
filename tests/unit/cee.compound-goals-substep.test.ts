@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../../src/cee/compound-goal/index.js", () => ({
   extractCompoundGoals: vi.fn(),
   toGoalConstraints: vi.fn(),
+  normaliseConstraintUnits: vi.fn((c: any[]) => c),
   remapConstraintTargets: vi.fn(),
 }));
 
