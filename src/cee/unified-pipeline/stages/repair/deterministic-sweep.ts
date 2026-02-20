@@ -807,32 +807,11 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }
   }
 
-  // Step 4b: Goal threshold validation — ALWAYS run regardless of violations.
-  // The LLM sometimes invents a normalised threshold without grounding it in a raw number
-  // from the brief. Strip all four threshold fields when goal_threshold_raw is absent.
-  const goalThresholdRepairs = fixGoalThresholdNoRaw(graph);
-  allRepairs.push(...goalThresholdRepairs);
-
-  if (goalThresholdRepairs.length > 0) {
-    log.warn({
-      event: "cee.deterministic_sweep.goal_threshold_stripped",
-      request_id: ctx.requestId,
-      goal_ids: goalThresholdRepairs.map((r) => r.path),
-    }, "Goal threshold stripped: no raw target value extracted from brief");
-  }
-
-  // Step 4b-ii: Goal threshold inference heuristic — warn (don't strip) when the
-  // LLM fabricates both goal_threshold and goal_threshold_raw on qualitative goals.
-  const goalThresholdWarnings = warnGoalThresholdPossiblyInferred(graph);
-  allRepairs.push(...goalThresholdWarnings);
-
-  if (goalThresholdWarnings.length > 0) {
-    log.warn({
-      event: "cee.deterministic_sweep.goal_threshold_possibly_inferred",
-      request_id: ctx.requestId,
-      goal_ids: goalThresholdWarnings.map((r) => r.path),
-    }, "Goal threshold may be LLM-inferred (round number, no digits in label)");
-  }
+  // Step 4b: Goal threshold hygiene — MOVED to standalone Stage 4b (threshold-sweep.ts).
+  // Functions fixGoalThresholdNoRaw and warnGoalThresholdPossiblyInferred remain exported
+  // for backward-compatible unit test imports but are no longer called from the sweep.
+  const goalThresholdRepairs: Repair[] = [];
+  const goalThresholdWarnings: Repair[] = [];
 
   // Step 4c: Factor→goal topology repair — ALWAYS run regardless of violations.
   // The LLM may short-circuit the causal chain under cost-reduction / minimisation framing,

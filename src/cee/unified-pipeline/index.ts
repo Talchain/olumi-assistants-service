@@ -30,6 +30,7 @@ import { runStageEnrich } from "./stages/enrich.js";
 import { runStageRepair } from "./stages/repair/index.js";
 import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
+import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 
 function buildInitialContext(
   input: DraftInputWithCeeExtras,
@@ -186,6 +187,9 @@ export async function runUnifiedPipeline(
     await runStageRepair(ctx);
     if (ctx.earlyReturn) return ctx.earlyReturn;
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
+
+    // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene
+    await runStageThresholdSweep(ctx);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     await runStagePackage(ctx);

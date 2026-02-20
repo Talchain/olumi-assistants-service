@@ -256,7 +256,7 @@ describe("LLM repair gating — bucket-specific scenarios", () => {
     expect(sweepTrace.bucket_summary.c).toBeGreaterThan(0);
   });
 
-  it("goal threshold stripped via Step 4b when goal_threshold_raw absent", async () => {
+  it("goal threshold fields pass through deterministic sweep (stripping moved to Stage 4b)", async () => {
     mockValidateGraph.mockReturnValue(validResult());
 
     const graph = makeGraph();
@@ -269,20 +269,22 @@ describe("LLM repair gating — bucket-specific scenarios", () => {
     const ctx = makeCtx(graph);
     await runDeterministicSweep(ctx);
 
-    // Fields stripped from graph
+    // Deterministic sweep no longer strips threshold fields — that's Stage 4b's job.
+    // Fields should pass through unchanged.
     const outputGoal = ctx.graph.nodes.find((n: any) => n.kind === "goal");
-    expect(outputGoal.goal_threshold).toBeUndefined();
-    expect(outputGoal.goal_threshold_raw).toBeUndefined();
-    expect(outputGoal.goal_threshold_unit).toBeUndefined();
-    expect(outputGoal.goal_threshold_cap).toBeUndefined();
+    expect(outputGoal.goal_threshold).toBe(0.7);
+    expect(outputGoal.goal_threshold_unit).toBe("%");
+    expect(outputGoal.goal_threshold_cap).toBe(100);
 
-    // Repair record
-    expect(ctx.deterministicRepairs).toBeDefined();
-    expect(ctx.deterministicRepairs.some((r: any) => r.code === "GOAL_THRESHOLD_STRIPPED_NO_RAW")).toBe(true);
+    // No threshold repair emitted by deterministic sweep
+    const thresholdRepairs = (ctx.deterministicRepairs ?? []).filter(
+      (r: any) => r.code === "GOAL_THRESHOLD_STRIPPED_NO_RAW",
+    );
+    expect(thresholdRepairs).toHaveLength(0);
 
-    // Observability trace
+    // Trace count stays at zero
     const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
-    expect(sweepTrace.goal_threshold_stripped).toBe(1);
+    expect(sweepTrace.goal_threshold_stripped).toBe(0);
   });
 
   it("goal threshold preserved via Step 4b when goal_threshold_raw present", async () => {

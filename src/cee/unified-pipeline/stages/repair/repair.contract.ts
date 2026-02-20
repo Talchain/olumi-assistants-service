@@ -17,14 +17,7 @@ export const STAGE_CONTRACT = {
   allowedDrops: {
     topLevel: [] as string[],
     node: [
-      /** WHY: fixGoalThresholdNoRaw (deterministic-sweep.ts) strips goal_threshold when goal_threshold_raw is absent */
-      "goal_threshold",
-      /** WHY: fixGoalThresholdNoRaw (deterministic-sweep.ts) strips goal_threshold_raw alongside goal_threshold */
-      "goal_threshold_raw",
-      /** WHY: fixGoalThresholdNoRaw (deterministic-sweep.ts) strips goal_threshold_unit alongside goal_threshold */
-      "goal_threshold_unit",
-      /** WHY: fixGoalThresholdNoRaw (deterministic-sweep.ts) strips goal_threshold_cap alongside goal_threshold */
-      "goal_threshold_cap",
+      // Goal threshold drops moved to Stage 4b (threshold-sweep.contract.ts)
     ] as string[],
     edge: [] as string[],
     option: [] as string[],
