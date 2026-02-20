@@ -44,13 +44,15 @@ const THRESHOLD_FIELDS = [
  */
 export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
   if (!ctx.graph) return;
+  const nodes = (ctx.graph as any).nodes;
+  if (!Array.isArray(nodes)) return;
 
   const start = Date.now();
   const repairs: Repair[] = [];
-  const nodes = (ctx.graph as any).nodes as Array<{ id: string; kind: string; label?: string; [k: string]: unknown }>;
 
   for (const node of nodes) {
-    // Only operate on goal nodes
+    // Skip malformed entries and non-goal nodes
+    if (!node || typeof node !== "object") continue;
     if (node.kind !== "goal") continue;
 
     const gt = node.goal_threshold;
@@ -108,7 +110,8 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
       repairs.filter((r) => r.code === "GOAL_THRESHOLD_POSSIBLY_INFERRED").length;
   }
 
-  // ── Telemetry (always emitted so no-op runs are visible) ────────────────
+  // ── Telemetry (emitted when stage reaches execution body; early returns
+  //    for missing graph/nodes skip this — those are caught by orchestrator) ──
   const durationMs = Date.now() - start;
   log.info({
     event: "cee.threshold_sweep.completed",

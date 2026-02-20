@@ -189,7 +189,17 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
     // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene
-    await runStageThresholdSweep(ctx);
+    // Non-critical: failing to strip thresholds must not crash the pipeline.
+    try {
+      await runStageThresholdSweep(ctx);
+    } catch (sweepErr: any) {
+      log.warn({
+        event: "cee.threshold_sweep.failed",
+        request_id: ctx.requestId,
+        error: sweepErr?.message,
+        stack: sweepErr?.stack,
+      }, "Stage 4b (threshold sweep) failed — continuing without threshold stripping");
+    }
 
     // Stage 5: Package — Quality + warnings + caps + trace
     await runStagePackage(ctx);

@@ -337,4 +337,83 @@ describe("runStageThresholdSweep", () => {
       expect(ctx.deterministicRepairs).toHaveLength(0);
     });
   });
+
+  // ── Malformed input resilience (B6 regression) ────────────────────────
+  describe("malformed input resilience", () => {
+    it("is a no-op when ctx.graph has no nodes array", async () => {
+      const ctx = makeCtx();
+      ctx.graph = { version: "1.0" }; // no nodes property
+
+      await runStageThresholdSweep(ctx);
+
+      expect(ctx.deterministicRepairs).toHaveLength(0);
+    });
+
+    it("is a no-op when ctx.graph.nodes is a string", async () => {
+      const ctx = makeCtx();
+      (ctx.graph as any).nodes = "not an array";
+
+      await runStageThresholdSweep(ctx);
+
+      expect(ctx.deterministicRepairs).toHaveLength(0);
+    });
+
+    it("strips when goal_threshold is a string (truthy non-nullish enters strip path)", async () => {
+      const ctx = makeCtx({
+        goal_threshold: "high",
+        goal_threshold_raw: 70,
+      });
+
+      await runStageThresholdSweep(ctx);
+
+      // "high" is truthy (not null/undefined), raw 70 is finite + round,
+      // label "Improve UX Quality" has no digits → inferred-strip fires.
+      // Stripping a string-typed threshold is correct — it would fail
+      // downstream validation anyway.
+      const goalNode = (ctx.graph as any).nodes.find((n: any) => n.id === "goal_1");
+      expect(goalNode.goal_threshold).toBeUndefined();
+      expect(goalNode.goal_threshold_raw).toBeUndefined();
+
+      const codes = ctx.deterministicRepairs.map((r: any) => r.code);
+      expect(codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_DIGITS");
+    });
+
+    it("skips gracefully when label is undefined", async () => {
+      const ctx = makeCtx({
+        label: undefined,
+        goal_threshold: 0.7,
+        goal_threshold_raw: 70,
+        goal_threshold_unit: "%",
+        goal_threshold_cap: 100,
+      });
+
+      await runStageThresholdSweep(ctx);
+
+      // label ?? "" fallback prevents crash; undefined label → no digits → strip fires
+      const codes = ctx.deterministicRepairs.map((r: any) => r.code);
+      expect(codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_DIGITS");
+    });
+
+    it("skips gracefully when goal_threshold_raw is a nested object", async () => {
+      const ctx = makeCtx({
+        goal_threshold: 0.7,
+        goal_threshold_raw: { nested: "object" },
+      });
+
+      await runStageThresholdSweep(ctx);
+
+      // typeof raw !== "number" → finite guard skips, raw is not null → 4b skips
+      expect(ctx.deterministicRepairs).toHaveLength(0);
+    });
+
+    it("skips null entries in nodes array without crashing", async () => {
+      const ctx = makeCtx();
+      (ctx.graph as any).nodes.push(null, undefined, 42, "string");
+
+      await runStageThresholdSweep(ctx);
+
+      // Should process valid nodes and skip junk entries
+      expect(ctx.deterministicRepairs).toHaveLength(0);
+    });
+  });
 });
