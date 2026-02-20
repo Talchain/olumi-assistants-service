@@ -16,6 +16,7 @@ import {
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
+  detectZeroExternalFactors,
   checkGoalConnectivity,
   computeModelQualityFactors,
 } from "../../src/cee/structure/index.js";
@@ -303,6 +304,116 @@ describe("CEE Quality Detection Functions", () => {
       expect(result.detected).toBe(false);
       expect(result.goalHasValue).toBe(true);
       expect(result.goalNodeId).toBe("mygoal");
+    });
+  });
+
+  describe("detectZeroExternalFactors", () => {
+    it("should return detected=false for empty graph", () => {
+      const result = detectZeroExternalFactors(undefined);
+      expect(result.detected).toBe(false);
+      expect(result.factorCount).toBe(0);
+      expect(result.externalCount).toBe(0);
+    });
+
+    it("should emit warning when all factor categories are defined and none are external", () => {
+      const graph = {
+        nodes: [
+          { id: "f1", kind: "factor", category: "controllable" },
+          { id: "f2", kind: "factor", category: "controllable" },
+          { id: "f3", kind: "factor", category: "observable" },
+          { id: "f4", kind: "factor", category: "observable" },
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(true);
+      expect(result.factorCount).toBe(4);
+      expect(result.externalCount).toBe(0);
+      expect(result.warning).toBeDefined();
+      expect(result.warning?.id).toBe("zero_external_factors");
+      expect(result.warning?.severity).toBe("medium");
+      expect(result.warning?.node_ids).toEqual(["f1", "f2", "f3", "f4"]);
+      expect(result.warning?.explanation).toContain("No external (uncontrollable) factors detected");
+    });
+
+    it("should not emit warning when one or more external factors exist", () => {
+      const graph = {
+        nodes: [
+          { id: "f1", kind: "factor", category: "controllable" },
+          { id: "f2", kind: "factor", category: "observable" },
+          { id: "f3", kind: "factor", category: "external" },
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(false);
+      expect(result.factorCount).toBe(3);
+      expect(result.externalCount).toBe(1);
+      expect(result.warning).toBeUndefined();
+    });
+
+    it("should emit warning when graph has no factor nodes at all", () => {
+      const graph = {
+        nodes: [
+          { id: "d1", kind: "decision" },
+          { id: "o1", kind: "option" },
+          { id: "g1", kind: "goal" },
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(true);
+      expect(result.factorCount).toBe(0);
+      expect(result.externalCount).toBe(0);
+      expect(result.warning).toBeDefined();
+      expect(result.warning?.id).toBe("zero_external_factors");
+    });
+
+    it("should skip silently when any factor has undefined category", () => {
+      const graph = {
+        nodes: [
+          { id: "f1", kind: "factor", category: "controllable" },
+          { id: "f2", kind: "factor", category: "controllable" },
+          { id: "f3", kind: "factor" }, // category undefined
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(false);
+      expect(result.factorCount).toBe(3);
+      expect(result.warning).toBeUndefined();
+    });
+
+    it("should not emit warning when all factors are external", () => {
+      const graph = {
+        nodes: [
+          { id: "f1", kind: "factor", category: "external" },
+          { id: "f2", kind: "factor", category: "external" },
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(false);
+      expect(result.factorCount).toBe(2);
+      expect(result.externalCount).toBe(2);
+      expect(result.warning).toBeUndefined();
+    });
+
+    it("should ignore non-factor nodes when counting", () => {
+      const graph = {
+        nodes: [
+          { id: "d1", kind: "decision" },
+          { id: "o1", kind: "option" },
+          { id: "f1", kind: "factor", category: "controllable" },
+          { id: "out1", kind: "outcome" },
+          { id: "g1", kind: "goal" },
+        ],
+        edges: [],
+      };
+      const result = detectZeroExternalFactors(graph as any);
+      expect(result.detected).toBe(true);
+      expect(result.factorCount).toBe(1);
+      expect(result.warning?.node_ids).toEqual(["f1"]);
     });
   });
 

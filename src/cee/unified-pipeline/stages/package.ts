@@ -24,6 +24,7 @@ import {
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
+  detectZeroExternalFactors,
   checkGoalConnectivity,
   computeModelQualityFactors,
 } from "../../structure/index.js";
@@ -133,7 +134,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
         coaching.strengthen_items.push({
           id: "str_status_quo",
           label: "Add baseline option",
-          detail: "No status quo option detected — add one to measure improvement",
+          detail: "No status quo option detected — add one to measure improvement. If one of your existing options is the baseline (e.g. 'Continue as-is', 'Maintain current approach'), rename it to make the baseline intent explicit.",
           action_type: "add_option",
           bias_category: "framing",
         });
@@ -217,6 +218,12 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   if (goalNoValue.detected && (goalNoValue as any).warning) {
     if (!draftWarnings) draftWarnings = [];
     draftWarnings.push((goalNoValue as any).warning);
+  }
+
+  const zeroExternal = detectZeroExternalFactors(ctx.graph as any);
+  if (zeroExternal.detected && zeroExternal.warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push(zeroExternal.warning);
   }
 
   const goalConn = checkGoalConnectivity(ctx.graph as any);
@@ -448,6 +455,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // Zod's intersection parse in Step 13 may strip unknown keys from the trace.
   // The V3 transform reads from trace.pipeline.repair_summary.
   pipelineTrace.repair_summary = trace.repair_summary;
+
+  // Threshold sweep trace (from Stage 4b)
+  if (ctx.thresholdSweepTrace) {
+    pipelineTrace.threshold_sweep = ctx.thresholdSweepTrace;
+  }
 
   // Stage snapshots (goal_threshold field tracking across pipeline stages)
   if (ctx.stageSnapshots) {

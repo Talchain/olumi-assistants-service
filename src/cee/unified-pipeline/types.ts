@@ -120,6 +120,16 @@ export interface StageContext {
   llmRepairBriefIncluded?: boolean;
   detectedEdgeFormat?: EdgeFormat;
 
+  // ── Stage 4b (Threshold Sweep) outputs ──────────────────────────────
+  thresholdSweepTrace?: {
+    ran: boolean;
+    duration_ms: number;
+    goals_checked: number;
+    strips_applied: number;
+    warnings_emitted: number;
+    codes: string[];
+  };
+
   // ── Stage 5 (Package) outputs ──────────────────────────────────────────
   quality: CEEQualityMeta | undefined;
   archetype: any;

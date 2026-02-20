@@ -94,6 +94,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   hasGoalNode: vi.fn().mockReturnValue(false),
   wireOutcomesToGoal: vi.fn().mockImplementation((g: any) => g),
   normaliseDecisionBranchBeliefs: vi.fn().mockImplementation((g: any) => g),
+  detectZeroExternalFactors: vi.fn().mockReturnValue({ detected: false, factorCount: 0, externalCount: 0 }),
 }));
 
 vi.mock("../../src/cee/compound-goal/index.js", () => ({

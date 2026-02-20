@@ -1396,6 +1396,88 @@ export function detectGoalNoBaselineValue(graph: GraphV1 | undefined): GoalNoBas
 }
 
 /**
+ * Result of zero external factors detection.
+ */
+export interface ZeroExternalFactorsResult {
+  detected: boolean;
+  factorCount: number;
+  externalCount: number;
+  warning?: CEEStructuralWarningV1;
+}
+
+/**
+ * Detect when a graph has factor nodes but none with category === 'external'.
+ *
+ * Most real decisions are influenced by forces outside the decision-maker's
+ * control. A graph with zero external factors likely omits important context.
+ *
+ * Skips the check silently when any factor node has an undefined/missing
+ * category — we cannot reliably determine completeness in that case.
+ */
+export function detectZeroExternalFactors(graph: GraphV1 | undefined): ZeroExternalFactorsResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, factorCount: 0, externalCount: 0 };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const factorNodes = nodes.filter((n) => n?.kind === "factor");
+
+  if (factorNodes.length === 0) {
+    // No factors at all — emit warning (graph is likely malformed)
+    return {
+      detected: true,
+      factorCount: 0,
+      externalCount: 0,
+      warning: {
+        id: "zero_external_factors",
+        severity: "medium",
+        node_ids: [],
+        edge_ids: [],
+        affected_node_ids: [],
+        affected_edge_ids: [],
+        explanation:
+          "No external (uncontrollable) factors detected. Most decisions are influenced by forces outside your control. Consider whether any outside events or actors could materially affect outcomes.",
+      } as CEEStructuralWarningV1,
+    };
+  }
+
+  // If any factor has an undefined category, skip silently
+  const hasUndefinedCategory = factorNodes.some(
+    (n) => n.category === undefined || n.category === null,
+  );
+  if (hasUndefinedCategory) {
+    return { detected: false, factorCount: factorNodes.length, externalCount: 0 };
+  }
+
+  const externalCount = factorNodes.filter((n) => n.category === "external").length;
+
+  if (externalCount > 0) {
+    return { detected: false, factorCount: factorNodes.length, externalCount };
+  }
+
+  const factorIds = factorNodes
+    .map((n) => n.id)
+    .filter((id): id is string => typeof id === "string")
+    .slice(0, 20);
+
+  return {
+    detected: true,
+    factorCount: factorNodes.length,
+    externalCount: 0,
+    warning: {
+      id: "zero_external_factors",
+      severity: "medium",
+      node_ids: factorIds,
+      edge_ids: [],
+      affected_node_ids: factorIds,
+      affected_edge_ids: [],
+      explanation:
+        "No external (uncontrollable) factors detected. Most decisions are influenced by forces outside your control. Consider whether any outside events or actors could materially affect outcomes.",
+    } as CEEStructuralWarningV1,
+  };
+}
+
+/**
  * Result of goal connectivity check.
  */
 export interface GoalConnectivityResult {

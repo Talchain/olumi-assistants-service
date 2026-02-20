@@ -43,9 +43,11 @@ const THRESHOLD_FIELDS = [
  * takes StageContext, returns Promise<void>, mutates in-place.
  */
 export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
-  if (!ctx.graph) return;
+  const noopTrace = { ran: false, duration_ms: 0, goals_checked: 0, strips_applied: 0, warnings_emitted: 0, codes: [] as string[] };
+
+  if (!ctx.graph) { ctx.thresholdSweepTrace = noopTrace; return; }
   const nodes = (ctx.graph as any).nodes;
-  if (!Array.isArray(nodes)) return;
+  if (!Array.isArray(nodes)) { ctx.thresholdSweepTrace = noopTrace; return; }
 
   const start = Date.now();
   const repairs: Repair[] = [];
@@ -110,14 +112,27 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
       repairs.filter((r) => r.code === "GOAL_THRESHOLD_POSSIBLY_INFERRED").length;
   }
 
-  // ── Telemetry (emitted when stage reaches execution body; early returns
-  //    for missing graph/nodes skip this — those are caught by orchestrator) ──
+  // ── Trace summary for pipelineTrace.threshold_sweep ────────────────────
   const durationMs = Date.now() - start;
+  const goalNodes = nodes.filter((n: any) => n && typeof n === "object" && n.kind === "goal");
+  const codes = repairs.length > 0 ? [...new Set(repairs.map((r) => r.code))] : [];
+  ctx.thresholdSweepTrace = {
+    ran: true,
+    duration_ms: durationMs,
+    goals_checked: goalNodes.length,
+    strips_applied: repairs.filter((r) =>
+      r.code === "GOAL_THRESHOLD_STRIPPED_NO_RAW" || r.code === "GOAL_THRESHOLD_STRIPPED_NO_DIGITS",
+    ).length,
+    warnings_emitted: repairs.filter((r) => r.code === "GOAL_THRESHOLD_POSSIBLY_INFERRED").length,
+    codes,
+  };
+
+  // ── Telemetry ────────────────────────────────────────────────────────
   log.info({
     event: "cee.threshold_sweep.completed",
     request_id: ctx.requestId,
     duration_ms: durationMs,
     repair_count: repairs.length,
-    codes: repairs.length > 0 ? [...new Set(repairs.map((r) => r.code))] : [],
+    codes,
   }, `Threshold sweep: ${repairs.length} repair(s) in ${durationMs}ms`);
 }

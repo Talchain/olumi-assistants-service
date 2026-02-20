@@ -3835,7 +3835,7 @@ components:
         id:
           type: string
           description: Stable identifier for this warning type
-          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred, strength_clustering, same_lever_options, missing_baseline, goal_no_baseline_value, normalisation_input_insufficient, range_degenerate, goal_disconnected, goal_connectivity_none, edge_origin_defaulted]
+          enum: [no_outcome_node, orphan_node, cycle_detected, decision_after_outcome, uniform_edge_strengths, goal_inferred, strength_clustering, same_lever_options, missing_baseline, goal_no_baseline_value, normalisation_input_insufficient, range_degenerate, goal_disconnected, goal_connectivity_none, edge_origin_defaulted, zero_external_factors]
         severity:
           type: string
           enum: [low, medium, high, blocker]

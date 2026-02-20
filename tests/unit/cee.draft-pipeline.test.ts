@@ -107,6 +107,11 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     goalNodeId: undefined,
     warning: undefined,
   }),
+  detectZeroExternalFactors: () => ({
+    detected: false,
+    factorCount: 0,
+    externalCount: 0,
+  }),
   checkGoalConnectivity: () => ({
     status: "full" as const,
     disconnectedOptions: [],

@@ -55,6 +55,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectSameLeverOptions: vi.fn(),
   detectMissingBaseline: vi.fn(),
   detectGoalNoBaselineValue: vi.fn(),
+  detectZeroExternalFactors: vi.fn(),
   checkGoalConnectivity: vi.fn(),
   computeModelQualityFactors: vi.fn(),
 }));
@@ -99,6 +100,7 @@ import {
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
+  detectZeroExternalFactors,
   checkGoalConnectivity,
   computeModelQualityFactors,
 } from "../../src/cee/structure/index.js";
@@ -191,6 +193,7 @@ function setupMocks() {
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });
+  (detectZeroExternalFactors as any).mockReturnValue({ detected: false, factorCount: 0, externalCount: 0 });
   (checkGoalConnectivity as any).mockReturnValue({ status: "connected", disconnectedOptions: [], weakPaths: [] });
   (computeModelQualityFactors as any).mockReturnValue({});
   (verificationPipeline.verify as any).mockImplementation((resp: any) => ({ response: { ...resp } }));
@@ -288,6 +291,25 @@ describe("STATUS_QUO_ABSENT coaching injection", () => {
     const items = ctx.coaching?.strengthen_items ?? [];
     const sqItem = items.find((i: any) => i.id === "str_status_quo");
     expect(sqItem).toBeUndefined();
+  });
+
+  it("coaching detail includes rename guidance for existing baseline options", async () => {
+    const ctx = makeCtx(
+      makeGraph([
+        { id: "opt_a", kind: "option", label: "Invest in Marketing" },
+        { id: "opt_b", kind: "option", label: "Launch New Product" },
+      ]),
+    );
+
+    await runStagePackage(ctx);
+
+    const items = ctx.coaching.strengthen_items;
+    const sqItem = items.find((i: any) => i.id === "str_status_quo");
+    expect(sqItem).toBeDefined();
+    // Must include rename hint (Task C requirement)
+    expect(sqItem.detail).toContain("rename it to make the baseline intent explicit");
+    // Must still include original guidance
+    expect(sqItem.detail).toContain("No status quo option detected");
   });
 
   it("does not inject when option has data.is_status_quo = true", async () => {

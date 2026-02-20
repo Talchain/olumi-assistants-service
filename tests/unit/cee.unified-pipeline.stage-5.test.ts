@@ -61,6 +61,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectSameLeverOptions: vi.fn(),
   detectMissingBaseline: vi.fn(),
   detectGoalNoBaselineValue: vi.fn(),
+  detectZeroExternalFactors: vi.fn(),
   checkGoalConnectivity: vi.fn(),
   computeModelQualityFactors: vi.fn(),
 }));
@@ -113,6 +114,7 @@ import {
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
+  detectZeroExternalFactors,
   checkGoalConnectivity,
   computeModelQualityFactors,
 } from "../../src/cee/structure/index.js";
@@ -214,6 +216,7 @@ function setupDefaultMocks() {
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });
+  (detectZeroExternalFactors as any).mockReturnValue({ detected: false, factorCount: 0, externalCount: 0 });
   (checkGoalConnectivity as any).mockReturnValue({ status: "connected", disconnectedOptions: [], weakPaths: [] });
   (computeModelQualityFactors as any).mockReturnValue({});
 
@@ -373,6 +376,35 @@ describe("runStagePackage", () => {
     await runStagePackage(ctx);
 
     expect(ctx.draftWarnings).toContainEqual(expect.objectContaining({ code: "UNIFORM_STRENGTH" }));
+  });
+
+  it("adds zero_external_factors warning when detected", async () => {
+    (detectZeroExternalFactors as any).mockReturnValue({
+      detected: true,
+      factorCount: 3,
+      externalCount: 0,
+      warning: { id: "zero_external_factors", severity: "medium", explanation: "No external factors" },
+    });
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(ctx.draftWarnings).toContainEqual(
+      expect.objectContaining({ id: "zero_external_factors", severity: "medium" }),
+    );
+  });
+
+  it("does not add zero_external_factors warning when not detected", async () => {
+    (detectZeroExternalFactors as any).mockReturnValue({
+      detected: false,
+      factorCount: 3,
+      externalCount: 1,
+    });
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(ctx.draftWarnings).not.toContainEqual(
+      expect.objectContaining({ id: "zero_external_factors" }),
+    );
   });
 
   // ── V1 response assembly ────────────────────────────────────────────────

@@ -52,6 +52,7 @@ vi.mock("../../src/cee/structure/index.js", async (importOriginal) => {
       },
       warnings: [],
     }),
+    detectZeroExternalFactors: () => ({ detected: false, factorCount: 0, externalCount: 0 }),
   };
 });
 

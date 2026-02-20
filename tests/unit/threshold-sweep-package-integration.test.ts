@@ -68,6 +68,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectSameLeverOptions: vi.fn().mockReturnValue({ detected: false }),
   detectMissingBaseline: vi.fn().mockReturnValue({ detected: false }),
   detectGoalNoBaselineValue: vi.fn().mockReturnValue({ detected: false }),
+  detectZeroExternalFactors: vi.fn().mockReturnValue({ detected: false, factorCount: 0, externalCount: 0 }),
   checkGoalConnectivity: vi.fn().mockReturnValue({ status: "connected", disconnectedOptions: [], weakPaths: [] }),
   computeModelQualityFactors: vi.fn().mockReturnValue({}),
 }));

@@ -28,6 +28,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectSameLeverOptions: () => ({ detected: false, maxOverlapPercentage: 0, overlappingOptionPairs: [] }),
   detectMissingBaseline: () => ({ detected: false, hasBaseline: false }),
   detectGoalNoBaselineValue: () => ({ detected: false, goalHasValue: false }),
+  detectZeroExternalFactors: () => ({ detected: false, factorCount: 0, externalCount: 0 }),
   checkGoalConnectivity: () => ({ status: "full", disconnectedOptions: [], weakPaths: [] }),
   computeModelQualityFactors: () => ({ estimate_confidence: 0.5, strength_variation: 0, range_confidence_coverage: 0, has_baseline_option: false }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
