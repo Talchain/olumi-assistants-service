@@ -185,13 +185,13 @@ export const Node = z.object({
    * See prompt v14 lines 150-162 for extraction rules.
    */
   /** Normalised threshold in model units (0-1), computed as goal_threshold_raw / goal_threshold_cap */
-  goal_threshold: z.number().optional(),
+  goal_threshold: z.number().nullable().optional(),
   /** Raw threshold value from brief for UI display (e.g., 800 for "target 800 customers") */
-  goal_threshold_raw: z.number().optional(),
+  goal_threshold_raw: z.number().nullable().optional(),
   /** Unit of measurement for display (e.g., "customers", "%", "£") */
-  goal_threshold_unit: z.string().optional(),
+  goal_threshold_unit: z.string().nullable().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
-  goal_threshold_cap: z.number().optional(),
+  goal_threshold_cap: z.number().nullable().optional(),
 }).passthrough();
 
 // Structured provenance for production trust and traceability
@@ -209,6 +209,15 @@ export const StructuredProvenance = z.object({
  * - "negative": Increasing source decreases target (e.g., Price → Demand)
  */
 export const EffectDirection = z.enum(["positive", "negative"]);
+
+/**
+ * Edge type classification (Phase 3A-trust).
+ * - "directed": Standard causal edge A→B (default, backward compatible)
+ * - "bidirected": A↔B — indicates an unmeasured common cause (Pearl's ADMG notation).
+ *   Does NOT mean A causes B and B causes A. Used for identifiability checking
+ *   and trust warnings only. ISL never sees bidirected edges.
+ */
+export const EdgeType = z.enum(["directed", "bidirected"]);
 
 /**
  * Edge origin classification for tracking creation source.
@@ -257,7 +266,9 @@ const EdgeInput = z.object({
   // Effect direction: LLM outputs directly, fallback to heuristic inference if missing
   effect_direction: EffectDirection.optional(),
   // Edge origin: tracks whether edge was created by user, AI, or system defaults
-  origin: EdgeOrigin.optional()
+  origin: EdgeOrigin.optional(),
+  // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
+  edge_type: EdgeType.optional()
 }).passthrough().refine(
   (edge) => (edge.from && edge.to) || (edge.source && edge.target),
   { message: "Edge must have either from/to or source/target fields" }
@@ -306,6 +317,23 @@ export type EffectDirectionT = z.infer<typeof EffectDirection>;
 export type EdgeOriginT = z.infer<typeof EdgeOrigin>;
 export type FactorTypeT = z.infer<typeof FactorType>;
 export type FactorCategoryT = z.infer<typeof FactorCategory>;
+export type EdgeTypeT = z.infer<typeof EdgeType>;
+
+/**
+ * Check if an edge is directed (not bidirected).
+ * Treats absent edge_type as 'directed' for backward compatibility.
+ */
+export function isDirectedEdge(edge: EdgeT): boolean {
+  return edge.edge_type !== "bidirected";
+}
+
+/**
+ * Filter a graph's edges to only directed edges.
+ * Returns a new array; does not mutate the input.
+ */
+export function filterDirectedEdges(edges: EdgeT[]): EdgeT[] {
+  return edges.filter(isDirectedEdge);
+}
 
 /**
  * Check if a graph contains any legacy string provenance (for deprecation tracking)

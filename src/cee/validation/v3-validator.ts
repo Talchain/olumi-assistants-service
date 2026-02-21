@@ -544,8 +544,9 @@ function validateGraphStructure(response: CEEGraphResponseV3T): ValidationWarnin
 
   // Cycle detection using DFS from graphGuards
   // Adapt V3 response to format expected by detectCycles
+  // Preserve edge_type so detectCycles can skip bidirected edges
   const nodes = response.nodes.map((n) => ({ id: n.id, kind: n.kind as any }));
-  const edges = response.edges.map((e) => ({ from: e.from, to: e.to }));
+  const edges = response.edges.map((e) => ({ from: e.from, to: e.to, edge_type: (e as any).edge_type }));
 
   const cycles = detectCycles(nodes, edges);
   for (const cycle of cycles) {

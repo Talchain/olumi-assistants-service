@@ -145,6 +145,8 @@ export const EdgeV3 = z.object({
   provenance: EdgeProvenanceV3.optional(),
   /** Edge creation source: ai, user, repair, enrichment, default */
   origin: z.string().optional(),
+  /** Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust. */
+  edge_type: z.enum(["directed", "bidirected"]).optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type EdgeV3T = z.infer<typeof EdgeV3>;
 

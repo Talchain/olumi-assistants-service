@@ -71,6 +71,8 @@ export const LLMEdge = z.object({
   strength_std: z.number().optional(),
   belief_exists: z.number().optional(),
   effect_direction: z.enum(["positive", "negative"]).optional(),
+  // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
+  edge_type: z.enum(["directed", "bidirected"]).optional(),
   // Legacy format (deprecated, for backwards compatibility during transition)
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),

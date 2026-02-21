@@ -119,6 +119,8 @@ export interface V1Edge {
   belief_exists?: number;
   // Edge origin: set by graph-orchestrator (default 'ai'), survives to V3 response
   origin?: string;
+  // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
+  edge_type?: "directed" | "bidirected";
 }
 
 export interface V1Graph {

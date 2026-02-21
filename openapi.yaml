@@ -2826,6 +2826,15 @@ components:
           type: string
           enum: [document, metric, hypothesis, engine]
           description: Type of provenance source
+        edge_type:
+          type: string
+          enum: [directed, bidirected]
+          default: directed
+          description: |
+            Edge type classification (Phase 3A-trust).
+            - directed: Standard causal edge A→B (default)
+            - bidirected: A↔B — unmeasured common cause (Pearl's ADMG notation).
+              Does NOT mean bidirectional causation. Used for trust signalling only.
 
     StructuredProvenance:
       type: object

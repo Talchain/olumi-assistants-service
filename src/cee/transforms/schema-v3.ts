@@ -316,6 +316,8 @@ export function transformEdgeToV3(
     provenance,
     // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
     origin: edge.origin ?? "ai",
+    // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
+    ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
   };
 }
 

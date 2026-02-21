@@ -10,6 +10,7 @@
 
 import { log } from "../utils/telemetry.js";
 import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/graph.js";
+import { isDirectedEdge } from "../schemas/graph.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -56,6 +57,10 @@ function buildAdjacencyLists(edges: EdgeT[]): AdjacencyLists {
   const reverse = new Map<string, string[]>();
 
   for (const edge of edges) {
+    // Bidirected edges represent unmeasured confounders, not directed paths.
+    // Exclude them from adjacency so they don't affect reachability or semantic checks.
+    if (!isDirectedEdge(edge)) continue;
+
     const fwdList = forward.get(edge.from) ?? [];
     fwdList.push(edge.to);
     forward.set(edge.from, fwdList);
@@ -86,9 +91,10 @@ function inferFactorCategories(
     (nodeMap.byKind.get("option") ?? []).map((n) => n.id)
   );
 
-  // Find factor IDs with incoming edges from options
+  // Find factor IDs with incoming directed edges from options
   const factorsWithOptionEdge = new Set<string>();
   for (const edge of edges) {
+    if (!isDirectedEdge(edge)) continue; // Bidirected edges don't indicate controllability
     if (optionIds.has(edge.from)) {
       factorsWithOptionEdge.add(edge.to);
     }
@@ -194,8 +200,10 @@ function hasCycle(nodes: NodeT[], edges: EdgeT[]): boolean {
     adjacency.set(node.id, []);
   }
 
-  // Build adjacency and count in-degrees
+  // Build adjacency and count in-degrees — only directed edges can form cycles.
+  // Bidirected edges represent unmeasured confounders, not directed paths.
   for (const edge of edges) {
+    if (!isDirectedEdge(edge)) continue; // Skip bidirected edges
     const list = adjacency.get(edge.from);
     if (list) list.push(edge.to);
     inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
@@ -467,8 +475,12 @@ function validateTopology(
   }
 
   // INVALID_EDGE_TYPE: Edge violates allowed matrix
+  // Bidirected edges are trust annotations (unmeasured confounders) — they don't
+  // follow directed topology rules. Skip them in edge-type validation.
   for (let i = 0; i < graph.edges.length; i++) {
     const edge = graph.edges[i];
+    if (!isDirectedEdge(edge)) continue; // Skip bidirected edges
+
     const fromNode = nodeMap.byId.get(edge.from);
     const toNode = nodeMap.byId.get(edge.to);
 
