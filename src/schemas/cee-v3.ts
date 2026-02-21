@@ -399,7 +399,7 @@ export const CEEGraphResponseV3 = z.object({
     overall: z.number().min(1).max(10),
     structure: z.number().min(1).max(10).optional(),
     coverage: z.number().min(1).max(10).optional(),
-    causality: z.number().min(1).max(10).optional(),
+    structural_proxy: z.number().min(1).max(10).optional(),
     safety: z.number().min(1).max(10).optional(),
   }).optional(),
   /** Trace information */

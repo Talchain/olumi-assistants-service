@@ -67,7 +67,7 @@ function makeSimpleV1Response(): V1DraftGraphResponse {
       ],
       meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
     },
-    quality: { overall: 7, structure: 8, coverage: 7, causality: 7 },
+    quality: { overall: 7, structure: 8, coverage: 7, structural_proxy: 7 },
     trace: {
       request_id: "test-simple-001",
       correlation_id: "test-simple-001",
@@ -125,7 +125,7 @@ function makeComplexV1Response(): V1DraftGraphResponse {
       ],
       meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
     },
-    quality: { overall: 8, structure: 8, coverage: 8, causality: 8 },
+    quality: { overall: 8, structure: 8, coverage: 8, structural_proxy: 8 },
     trace: {
       request_id: "test-complex-001",
       correlation_id: "test-complex-001",

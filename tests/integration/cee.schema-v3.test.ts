@@ -45,7 +45,7 @@ describe("CEE Schema V3 Integration", () => {
       overall: 8,
       structure: 9,
       coverage: 8,
-      causality: 8,
+      structural_proxy: 8,
     },
     trace: {
       request_id: "test-req-123",
@@ -186,7 +186,7 @@ describe("CEE Schema V3 Integration", () => {
       for (const overall of [1, 5, 7, 10]) {
         const withQuality = {
           ...v3Response,
-          quality: { overall, structure: 8, coverage: 6, causality: 8, safety: 9 },
+          quality: { overall, structure: 8, coverage: 6, structural_proxy: 8, safety: 9 },
         };
         const result = CEEGraphResponseV3.safeParse(withQuality);
         expect(result.success).toBe(true);

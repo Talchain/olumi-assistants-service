@@ -53,7 +53,7 @@ export interface V3DraftGraphResponse extends CEEGraphResponseV3T {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
   draft_warnings?: Array<{
@@ -136,11 +136,13 @@ export function transformNodeToV3(
     description: node.body,
     // Preserve category field (V12.4+) for factor nodes
     category: node.category,
-    // Preserve goal threshold fields (V14+) for goal nodes
-    ...(node.goal_threshold !== undefined && { goal_threshold: node.goal_threshold }),
-    ...(node.goal_threshold_raw !== undefined && { goal_threshold_raw: node.goal_threshold_raw }),
-    ...(node.goal_threshold_unit !== undefined && { goal_threshold_unit: node.goal_threshold_unit }),
-    ...(node.goal_threshold_cap !== undefined && { goal_threshold_cap: node.goal_threshold_cap }),
+    // Preserve goal threshold fields (V14+) for goal nodes.
+    // Use != null (not !== undefined) to exclude both null and undefined —
+    // internal schema accepts nullable values from LLM, but V3 output must not contain nulls.
+    ...(node.goal_threshold != null && { goal_threshold: node.goal_threshold }),
+    ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
+    ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
+    ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
   };
 
   // Transform data to observed_state (only if it's FactorData with value defined)

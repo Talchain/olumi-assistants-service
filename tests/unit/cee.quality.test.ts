@@ -13,7 +13,7 @@ function makeGraph(nodes: Array<{ id: string; kind: string; label?: string }>, e
 }
 
 describe("CEE quality helper - computeQuality", () => {
-  it("derives overall from confidence and populates structure/coverage/safety/causality", () => {
+  it("derives overall from confidence and populates structure/coverage/safety/structural_proxy", () => {
     const graph = makeGraph(
       [
         { id: "goal", kind: "goal", label: "Increase revenue" },
@@ -42,7 +42,7 @@ describe("CEE quality helper - computeQuality", () => {
     expect(quality.coverage).toBeLessThanOrEqual(10);
     expect(quality.safety).toBeGreaterThanOrEqual(1);
     expect(quality.safety).toBeLessThanOrEqual(10);
-    expect(quality.causality).toBe(quality.structure);
+    expect(quality.structural_proxy).toBe(quality.structure);
 
     expect(quality.details).toBeDefined();
     expect(quality.details?.node_count).toBe(4);
@@ -93,7 +93,7 @@ describe("CEE quality helper - computeQuality", () => {
     expect(quality.structure).toBeGreaterThanOrEqual(1);
     expect(quality.coverage).toBeGreaterThanOrEqual(1);
     expect(quality.safety).toBeGreaterThanOrEqual(1);
-    expect(quality.causality).toBe(quality.structure);
+    expect(quality.structural_proxy).toBe(quality.structure);
   });
 
   it("maps overall scores into deterministic quality bands", () => {

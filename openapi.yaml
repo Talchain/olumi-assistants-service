@@ -3156,7 +3156,7 @@ components:
           type: integer
           minimum: 1
           maximum: 10
-        causality:
+        structural_proxy:
           type: integer
           minimum: 1
           maximum: 10

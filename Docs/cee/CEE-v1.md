@@ -252,8 +252,8 @@ engine/graph data into a richer `CEEQualityMeta`:
   - Rewards multiple options and the presence of risks/outcomes.
 - `safety` (1–10)
   - Starts high and subtracts up to 3 points based on CEE validation issues.
-- `causality` (1–10)
-  - Currently mirrors `structure` as a coarse proxy for cause/effect richness.
+- `structural_proxy` (1–10)
+  - Mirrors `structure` as a coarse proxy for structural completeness.
 
 All scores are cheap, deterministic, and based purely on graph shape and
 validation metadata; **no extra LLM calls** are made for quality.

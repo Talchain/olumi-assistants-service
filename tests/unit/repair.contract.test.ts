@@ -146,7 +146,7 @@ vi.mock("../../src/cee/transforms/graph-normalisation.js", () => ({
 }));
 
 vi.mock("../../src/cee/quality/index.js", () => ({
-  computeQuality: vi.fn().mockReturnValue({ overall: 7, structure: 7, coverage: 7, safety: 7, causality: 7 }),
+  computeQuality: vi.fn().mockReturnValue({ overall: 7, structure: 7, coverage: 7, safety: 7, structural_proxy: 7 }),
 }));
 
 vi.mock("../../src/schemas/assist.js", () => ({

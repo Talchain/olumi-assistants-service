@@ -142,7 +142,7 @@ export interface V1DraftGraphResponse {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
   trace?: {
@@ -251,7 +251,7 @@ export interface V2DraftGraphResponse {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
   trace?: {

@@ -416,4 +416,92 @@ describe("runStageThresholdSweep", () => {
       expect(ctx.deterministicRepairs).toHaveLength(0);
     });
   });
+
+  // ── B2-4 regression: Zod-passthrough null path ──────────────────────────
+  describe("B2-4: goal_threshold_raw explicit null (Zod passthrough)", () => {
+    it("strips all four threshold fields when goal_threshold_raw is null", async () => {
+      // Simulates LLM outputting JSON `"goal_threshold_raw": null` which now
+      // passes Zod validation (nullable().optional()) and reaches the sweep.
+      const ctx = makeCtx({
+        goal_threshold: 0.6,
+        goal_threshold_raw: null,
+        goal_threshold_unit: "%",
+        goal_threshold_cap: 100,
+      });
+
+      await runStageThresholdSweep(ctx);
+
+      const goalNode = (ctx.graph as any).nodes.find((n: any) => n.id === "goal_1");
+      expect(goalNode.goal_threshold).toBeUndefined();
+      expect(goalNode.goal_threshold_raw).toBeUndefined();
+      expect(goalNode.goal_threshold_unit).toBeUndefined();
+      expect(goalNode.goal_threshold_cap).toBeUndefined();
+
+      expect(ctx.deterministicRepairs).toHaveLength(1);
+      expect(ctx.deterministicRepairs[0].code).toBe("GOAL_THRESHOLD_STRIPPED_NO_RAW");
+
+      // Trace reflects the strip
+      expect(ctx.thresholdSweepTrace.strips_applied).toBe(1);
+      expect(ctx.thresholdSweepTrace.codes).toEqual(["GOAL_THRESHOLD_STRIPPED_NO_RAW"]);
+    });
+
+    it("strips when only goal_threshold and null raw are present (no unit/cap)", async () => {
+      const ctx = makeCtx({
+        goal_threshold: 0.6,
+        goal_threshold_raw: null,
+      });
+
+      await runStageThresholdSweep(ctx);
+
+      const goalNode = (ctx.graph as any).nodes.find((n: any) => n.id === "goal_1");
+      expect(goalNode.goal_threshold).toBeUndefined();
+      expect(goalNode.goal_threshold_raw).toBeUndefined();
+
+      expect(ctx.deterministicRepairs).toHaveLength(1);
+      expect(ctx.deterministicRepairs[0].code).toBe("GOAL_THRESHOLD_STRIPPED_NO_RAW");
+    });
+
+    it("Zod Node schema accepts null for all four goal_threshold fields (B2-4 fix)", async () => {
+      // Verifies that the Zod schema now accepts null so the value reaches
+      // the sweep instead of causing a Zod validation failure + repair cycle.
+      const { Node } = await import("../../src/schemas/graph.js");
+      const result = Node.safeParse({
+        id: "goal_1",
+        kind: "goal",
+        label: "Improve User Experience",
+        goal_threshold: null,
+        goal_threshold_raw: null,
+        goal_threshold_unit: null,
+        goal_threshold_cap: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.goal_threshold).toBeNull();
+        expect(result.data.goal_threshold_raw).toBeNull();
+        expect(result.data.goal_threshold_unit).toBeNull();
+        expect(result.data.goal_threshold_cap).toBeNull();
+      }
+    });
+
+    it("V3 transform excludes null threshold fields (boundary coercion)", async () => {
+      const { transformNodeToV3 } = await import("../../src/cee/transforms/schema-v3.js");
+      const v1Node = {
+        id: "goal_1",
+        kind: "goal",
+        label: "Improve User Experience",
+        goal_threshold: null,
+        goal_threshold_raw: null,
+        goal_threshold_unit: null,
+        goal_threshold_cap: null,
+      } as any;
+
+      const v3Node = transformNodeToV3(v1Node);
+
+      expect(v3Node.goal_threshold).toBeUndefined();
+      expect(v3Node.goal_threshold_raw).toBeUndefined();
+      expect(v3Node.goal_threshold_unit).toBeUndefined();
+      expect(v3Node.goal_threshold_cap).toBeUndefined();
+    });
+  });
 });

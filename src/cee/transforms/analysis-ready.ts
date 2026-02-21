@@ -432,7 +432,7 @@ export function buildAnalysisReadyPayload(
     options: analysisOptions,
     goal_node_id: goalNodeId,
     status: payloadStatus,
-    ...(goalNode?.goal_threshold !== undefined && { goal_threshold: goalNode.goal_threshold }),
+    ...(goalNode?.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
   };
 
   // Add user_questions when status is needs_user_mapping

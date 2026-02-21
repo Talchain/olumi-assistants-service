@@ -98,6 +98,7 @@ const EXPECTED_STAGE_SNAPSHOT_KEYS = [
   "stage_1_parse",
   "stage_3_enrich",
   "stage_4_repair",
+  "stage_4b_threshold_sweep",
   "stage_5_package",
 ] as const;
 
@@ -172,9 +173,9 @@ describe("Pipeline shape assertions", () => {
     await runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts);
 
     expect(capturedSnapshots).toBeDefined();
-    // Before Package runs, keys for stages 1, 3, 4 exist
+    // Before Package runs, keys for stages 1, 3, 4, 4b exist
     const prePackageKeys = Object.keys(capturedSnapshots!).sort();
-    expect(prePackageKeys).toEqual(["stage_1_parse", "stage_3_enrich", "stage_4_repair"]);
+    expect(prePackageKeys).toEqual(["stage_1_parse", "stage_3_enrich", "stage_4_repair", "stage_4b_threshold_sweep"]);
   });
 
   it("stageSnapshots includes stage_5_package after Package completes", async () => {
@@ -228,6 +229,51 @@ describe("Pipeline shape assertions", () => {
     }
   });
 
+  // ── Snapshot sentinel: null vs "absent" ─────────────────────────────────
+
+  it("snapshot uses 'absent' for undefined fields and null for explicit null", async () => {
+    const callOrder: string[] = [];
+    wireSuccessfulRun(callOrder);
+
+    // Inject a goal node with goal_threshold_raw: null (explicit) and no goal_threshold_cap (absent)
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      callOrder.push("parse");
+      ctx.graph = {
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Strategy" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          {
+            id: "goal_1",
+            kind: "goal",
+            label: "Improve UX",
+            goal_threshold: 0.6,
+            goal_threshold_raw: null,
+            // goal_threshold_unit: intentionally absent
+            // goal_threshold_cap: intentionally absent
+          },
+        ],
+        edges: [],
+      };
+    });
+
+    let capturedSnapshots: Record<string, any> | undefined;
+    (runStageBoundary as any).mockImplementation(async (ctx: any) => {
+      callOrder.push("boundary");
+      capturedSnapshots = ctx.stageSnapshots ? structuredClone(ctx.stageSnapshots) : undefined;
+      ctx.finalResponse = { graph: { nodes: [], edges: [] } };
+    });
+
+    await runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts);
+
+    expect(capturedSnapshots).toBeDefined();
+    // stage_1_parse captures the raw LLM output before sweep
+    const parseSnap = capturedSnapshots!.stage_1_parse;
+    expect(parseSnap.goal_threshold).toBe(0.6);
+    expect(parseSnap.goal_threshold_raw).toBeNull(); // explicit null preserved
+    expect(parseSnap.goal_threshold_unit).toBe("absent"); // missing → "absent"
+    expect(parseSnap.goal_threshold_cap).toBe("absent"); // missing → "absent"
+  });
+
   // ── Threshold sweep try/catch wrapper ───────────────────────────────────
 
   it("threshold sweep failure does not prevent downstream stages", async () => {
@@ -253,8 +299,8 @@ describe("Pipeline shape assertions", () => {
     expect(EXPECTED_STAGE_ORDER).toHaveLength(7);
   });
 
-  it("EXPECTED_STAGE_SNAPSHOT_KEYS has exactly 4 entries", () => {
-    expect(EXPECTED_STAGE_SNAPSHOT_KEYS).toHaveLength(4);
+  it("EXPECTED_STAGE_SNAPSHOT_KEYS has exactly 5 entries", () => {
+    expect(EXPECTED_STAGE_SNAPSHOT_KEYS).toHaveLength(5);
   });
 
   // ── pipeline_checkpoints ──────────────────────────────────────────────

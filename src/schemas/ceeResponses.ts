@@ -280,7 +280,7 @@ export const CEEQualityMetaSchema = z.object({
   overall: z.number(),
   structure: z.number().optional(),
   coverage: z.number().optional(),
-  causality: z.number().optional(),
+  structural_proxy: z.number().optional(),
   safety: z.number().optional(),
   details: z.record(z.any()).optional(),
 });

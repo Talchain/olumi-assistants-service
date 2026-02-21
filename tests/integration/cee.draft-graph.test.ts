@@ -194,9 +194,9 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     expect(typeof body.quality.coverage).toBe("number");
     expect(body.quality.coverage).toBeGreaterThanOrEqual(1);
     expect(body.quality.coverage).toBeLessThanOrEqual(10);
-    expect(typeof body.quality.causality).toBe("number");
-    expect(body.quality.causality).toBeGreaterThanOrEqual(1);
-    expect(body.quality.causality).toBeLessThanOrEqual(10);
+    expect(typeof body.quality.structural_proxy).toBe("number");
+    expect(body.quality.structural_proxy).toBeGreaterThanOrEqual(1);
+    expect(body.quality.structural_proxy).toBeLessThanOrEqual(10);
     expect(typeof body.quality.safety).toBe("number");
     expect(body.quality.safety).toBeGreaterThanOrEqual(1);
     expect(body.quality.safety).toBeLessThanOrEqual(10);

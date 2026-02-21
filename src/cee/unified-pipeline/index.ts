@@ -107,12 +107,22 @@ function buildInitialContext(
 function captureStageSnapshot(ctx: StageContext): StageSnapshot {
   const nodes = (ctx.graph as any)?.nodes as Array<{ id: string; kind: string; [k: string]: unknown }> | undefined;
   const goalNode = nodes?.find((n) => n.kind === "goal");
+
+  // Distinguish null (LLM explicitly set null) from undefined (field absent).
+  // Previous `?? null` collapsed both to null, making forensic diagnosis ambiguous.
+  const snap = (field: string): number | string | null | "absent" => {
+    if (!goalNode) return "absent";
+    if (!(field in goalNode)) return "absent";
+    const v = goalNode[field];
+    return v === undefined ? "absent" : (v as number | string | null);
+  };
+
   return {
     goal_node_id: goalNode?.id ?? null,
-    goal_threshold: (goalNode?.goal_threshold as number) ?? null,
-    goal_threshold_raw: (goalNode?.goal_threshold_raw as number) ?? null,
-    goal_threshold_unit: (goalNode?.goal_threshold_unit as string) ?? null,
-    goal_threshold_cap: (goalNode?.goal_threshold_cap as number) ?? null,
+    goal_threshold: snap("goal_threshold") as number | null | "absent",
+    goal_threshold_raw: snap("goal_threshold_raw") as number | null | "absent",
+    goal_threshold_unit: snap("goal_threshold_unit") as string | null | "absent",
+    goal_threshold_cap: snap("goal_threshold_cap") as number | null | "absent",
     goal_constraints_count: Array.isArray(ctx.goalConstraints) ? ctx.goalConstraints.length : 0,
   };
 }
@@ -201,6 +211,7 @@ export async function runUnifiedPipeline(
         stack: sweepErr?.stack,
       }, "Stage 4b (threshold sweep) failed — continuing without threshold stripping");
     }
+    ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     await runStagePackage(ctx);

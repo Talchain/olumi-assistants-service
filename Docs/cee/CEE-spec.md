@@ -382,11 +382,11 @@ interface Graph {
 
 ```typescript
 interface CEEQualityMeta {
-  overall: number;    // 1-10, from engine confidence
+  overall: number;    // 1-10, confidence-derived
   structure: number;  // 1-10, graph complexity
   coverage: number;   // 1-10, options and risks
   safety: number;     // 1-10, minus validation issues
-  causality: number;  // 1-10, cause/effect richness
+  structural_proxy: number;  // 1-10, structural completeness proxy
 }
 ```
 

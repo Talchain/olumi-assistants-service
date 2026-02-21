@@ -150,12 +150,18 @@ export interface StageContext {
   stageSnapshots?: Record<string, StageSnapshot>;
 }
 
-/** Lightweight snapshot of goal node state at a pipeline stage boundary. */
+/**
+ * Lightweight snapshot of goal node state at a pipeline stage boundary.
+ *
+ * Sentinel values:
+ *  - `null`     → field is explicitly `null` on the node (LLM output JSON null)
+ *  - `"absent"` → field is `undefined` / not present on the node
+ */
 export interface StageSnapshot {
   goal_node_id: string | null;
-  goal_threshold: number | null;
-  goal_threshold_raw: number | null;
-  goal_threshold_unit: string | null;
-  goal_threshold_cap: number | null;
+  goal_threshold: number | null | "absent";
+  goal_threshold_raw: number | null | "absent";
+  goal_threshold_unit: string | null | "absent";
+  goal_threshold_cap: number | null | "absent";
   goal_constraints_count: number;
 }

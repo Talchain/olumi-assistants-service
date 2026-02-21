@@ -245,7 +245,7 @@ export interface DraftGraphResponseWithAnalysisReady {
     overall: number;
     structure?: number;
     coverage?: number;
-    causality?: number;
+    structural_proxy?: number;
     safety?: number;
   };
 

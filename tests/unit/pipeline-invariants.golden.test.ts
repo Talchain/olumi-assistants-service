@@ -200,7 +200,7 @@ vi.mock("../../src/cee/transforms/graph-normalisation.js", () => ({
 // -- Stage 4 deps: quality
 vi.mock("../../src/cee/quality/index.js", () => ({
   computeQuality: vi.fn().mockReturnValue({
-    overall: 7, structure: 7, coverage: 7, safety: 8, causality: 6,
+    overall: 7, structure: 7, coverage: 7, safety: 8, structural_proxy: 6,
   }),
 }));
 

@@ -16,7 +16,7 @@ describe("computeDecisionQuality", () => {
   const baseQuality = {
     overall: 7,
     structure: 7,
-    causality: 7,
+    structural_proxy: 7,
     coverage: 7,
     safety: 8,
     issues_by_severity: { error: 0, warning: 0, info: 0 },

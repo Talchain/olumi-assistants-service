@@ -46,7 +46,7 @@ function countNodesByKind(graph: GraphV1 | undefined, kind: string): number {
  * - structure: favours graphs with enough nodes and edges (connected, non-trivial).
  * - coverage: favours graphs with multiple options and some risks/outcomes.
  * - safety: penalises the presence of CEE validation issues (up to -3 points).
- * - causality: currently mirrors structure as a coarse proxy for cause/effect richness.
+ * - structural_proxy: currently mirrors structure as a coarse proxy for cause/effect richness.
  */
 export function computeQuality(inputs: QualityInputs): CEEQualityMeta {
   const { graph, confidence, engineIssueCount, ceeIssues } = inputs;
@@ -98,13 +98,13 @@ export function computeQuality(inputs: QualityInputs): CEEQualityMeta {
   const safetyBase = 8 - Math.min(3, ceeIssueCount);
   const safety = clampScore(safetyBase);
 
-  // Causality: for v1, reuse structure as a simple proxy for cause/effect richness.
-  const causality = structure;
+  // Renamed from 'causality' — this score measures structural completeness, not causal validity. A genuine causality score requires scientific definition (see roadmap B5.28b).
+  const structural_proxy = structure;
 
   return {
     overall,
     structure,
-    causality,
+    structural_proxy,
     coverage,
     safety,
     issues_by_severity: {
