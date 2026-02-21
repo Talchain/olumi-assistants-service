@@ -42,6 +42,11 @@
     "openapi:validate": "swagger-cli validate openapi.yaml",
     "openapi:generate": "openapi-typescript openapi.yaml -o src/generated/openapi.d.ts",
     "openapi:check": "pnpm openapi:validate && pnpm openapi:generate && echo 'OpenAPI validation passed'",
+    "benchmark:stability": "vitest run --config tests/benchmarks/vitest.benchmark.config.ts tests/benchmarks/edge-stability.bench.test.ts",
+    "benchmark:stability:nightly": "BENCHMARK_MODE=nightly vitest run --config tests/benchmarks/vitest.benchmark.config.ts tests/benchmarks/edge-stability.bench.test.ts",
+    "benchmark:stability:unit": "vitest run --config tests/benchmarks/vitest.benchmark.config.ts tests/benchmarks/*.unit.test.ts",
+    "benchmark:stability:cli": "tsx tests/benchmarks/run-benchmark.ts",
+    "benchmark:stability:cli:nightly": "tsx tests/benchmarks/run-benchmark.ts --nightly",
     "demo:client": "cd examples/react-sse-client && pnpm dev",
     "demo:build": "cd examples/react-sse-client && pnpm build"
   },

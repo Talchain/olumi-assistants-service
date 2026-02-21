@@ -19,6 +19,8 @@ export default defineConfig({
       // Exclude live LLM tests (require LIVE_LLM=1 and API key)
       "tests/integration/adversarial.test.ts",
       "tests/validation/golden-briefs-runner.test.ts",
+      // Exclude benchmark tests (run with pnpm benchmark:stability)
+      "tests/benchmarks/**",
     ],
     coverage: {
       provider: "v8",

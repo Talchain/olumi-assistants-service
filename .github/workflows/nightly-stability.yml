@@ -1,0 +1,88 @@
+name: nightly-stability
+
+on:
+  schedule:
+    - cron: "30 3 * * *"   # Daily 03:30 UTC (gated by STABILITY_SCHEDULE_ENABLED)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Benchmark mode"
+        required: false
+        default: "nightly"
+        type: choice
+        options:
+          - nightly
+          - on-demand
+
+# Prevent overlapping benchmark runs
+concurrency:
+  group: nightly-stability
+  cancel-in-progress: false
+
+jobs:
+  stability-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Gate scheduled runs — manual dispatch always executes
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.STABILITY_SCHEDULE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run stability benchmark
+        id: benchmark
+        env:
+          BENCHMARK_MODE: ${{ github.event.inputs.mode || 'nightly' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: ${{ secrets.ANTHROPIC_API_KEY && 'anthropic' || 'fixtures' }}
+        run: pnpm benchmark:stability:nightly 2>&1 | tee stability-benchmark.log
+
+      - name: Generate job summary
+        if: always()
+        run: |
+          echo "# Stability Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode**: ${{ github.event.inputs.mode || 'nightly' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract summary lines from log
+          if grep -q "=== Summary ===" stability-benchmark.log; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            sed -n '/=== Summary ===/,/^$/p' stability-benchmark.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check for dropped briefs
+          if grep -q "\[DROPPED\]" stability-benchmark.log; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Dropped Briefs" >> $GITHUB_STEP_SUMMARY
+            grep "\[DROPPED\]" stability-benchmark.log >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check for alerts
+          if grep -q "ALERTS=" stability-benchmark.log; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Alerts" >> $GITHUB_STEP_SUMMARY
+            grep "ALERTS=" stability-benchmark.log >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stability-report-${{ github.sha }}
+          path: |
+            tests/benchmarks/reports/*.json
+            stability-benchmark.log
+          retention-days: 90
