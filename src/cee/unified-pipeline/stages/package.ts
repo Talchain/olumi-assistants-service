@@ -143,7 +143,30 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     }
   }
 
-  // ── Step 3: Build payload + sort bias findings ───────────────────────────
+  // ── Step 3: Validate causal claims against post-STRP graph (Phase 2B) ────
+  // Claims are validated here (not earlier) because node ID validation must
+  // run against the post-repair graph — STRP may remove nodes.
+  let validatedCausalClaims: import("../../../schemas/causal-claims.js").CausalClaim[] | undefined;
+  const causalClaimsWarnings: any[] = [];
+
+  if (ctx.causalClaims !== undefined) {
+    const graphNodeIds = new Set(
+      Array.isArray((ctx.graph as any)?.nodes)
+        ? (ctx.graph as any).nodes.map((n: any) => n.id as string)
+        : [],
+    );
+    const { validateCausalClaims } = await import("../../transforms/causal-claims-validation.js");
+    const result = validateCausalClaims(ctx.causalClaims, graphNodeIds);
+    if (result.claims.length > 0) {
+      validatedCausalClaims = result.claims;
+    }
+    causalClaimsWarnings.push(...result.warnings);
+  }
+  if (causalClaimsWarnings.length > 0) {
+    validationIssues.push(...causalClaimsWarnings);
+  }
+
+  // ── Step 3b: Build payload + sort bias findings ─────────────────────────
   const payload: Record<string, unknown> = {
     graph: ctx.graph,
     rationales: ctx.rationales,
@@ -151,6 +174,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     goal_constraints: ctx.goalConstraints,
     // Coaching passthrough from LLM output (undefined if not present)
     ...(ctx.coaching ? { coaching: ctx.coaching } : {}),
+    // Causal claims passthrough (Phase 2B) — omit field entirely if LLM didn't emit
+    ...(validatedCausalClaims ? { causal_claims: validatedCausalClaims } : {}),
   };
 
   if (Array.isArray((payload as any).bias_findings)) {

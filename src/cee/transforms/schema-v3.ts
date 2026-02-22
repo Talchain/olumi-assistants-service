@@ -659,6 +659,13 @@ export function transformResponseToV3(
     v3Response.coaching = v1Coaching;
   }
 
+  // Phase 2B: Carry validated causal_claims from V1 pipeline into V3 response.
+  // Claims are the LLM's stated reasoning, validated against post-STRP graph.
+  const v1CausalClaims = (v1Response as any).causal_claims;
+  if (Array.isArray(v1CausalClaims) && v1CausalClaims.length > 0) {
+    (v3Response as any).causal_claims = v1CausalClaims;
+  }
+
   // CIL Phase 1: Strength default detection (production-enabled, not debug-gated)
   // Run unconditionally so user-facing warning appears in all responses
   const strengthDefaults = detectStrengthDefaults(

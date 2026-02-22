@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import { GoalConstraintSchema } from "./assist.js";
+import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
 
 // ============================================================================
@@ -392,6 +393,8 @@ export const CEEGraphResponseV3 = z.object({
       bias_category: z.string().optional(),
     }).passthrough()),
   }).passthrough().optional(),
+  /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
+  causal_claims: CausalClaimsArraySchema,
   /** Graph metadata */
   meta: GraphMetaV3.optional(),
   /** Quality metrics (1–10 integer scale; see computeQuality / openapi.yaml CEEQualityMeta) */

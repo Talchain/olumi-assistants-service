@@ -263,6 +263,8 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   ctx.llmMeta = llmMeta;
   // Coaching passthrough: stash LLM coaching for V3 output assembly
   ctx.coaching = (draftResult as any).coaching;
+  // Causal claims passthrough (Phase 2B): stash raw for post-STRP validation
+  ctx.causalClaims = (draftResult as any).causal_claims;
 
   // Graph shape assertion — must come before createEdgeFieldStash()
   if (!Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {

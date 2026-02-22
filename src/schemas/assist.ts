@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
+import { CausalClaimsArraySchema } from "./causal-claims.js";
 
 export const DraftGraphInput = z.object({
   brief: z.string().min(30).max(5000),
@@ -164,6 +165,8 @@ export const DraftGraphOutput = z.object({
       bias_category: z.string().optional(),
     }).passthrough()),
   }).passthrough().optional(),
+  /** LLM causal claims — stated reasoning about effects, mediations, confounders (Phase 2B) */
+  causal_claims: CausalClaimsArraySchema,
   // Graph corrections tracking + pipeline repair observability
   trace: z.object({
     // Pipeline repair tracking fields

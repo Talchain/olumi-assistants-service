@@ -81,6 +81,8 @@ export interface StageContext {
   draftDurationMs: number;
   /** LLM coaching output — preserved via .passthrough() from draft adapter */
   coaching?: unknown;
+  /** LLM causal claims — validated and passed through to response (Phase 2B) */
+  causalClaims?: unknown;
 
   // ── Stage 2 (Normalise) outputs ────────────────────────────────────────
   strpResult: any;
