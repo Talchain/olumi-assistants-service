@@ -146,10 +146,14 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // ── Step 3: Validate causal claims against post-STRP graph (Phase 2B) ────
   // Claims are validated here (not earlier) because node ID validation must
   // run against the post-repair graph — STRP may remove nodes.
-  let validatedCausalClaims: import("../../../schemas/causal-claims.js").CausalClaim[] | undefined;
+  // Track whether the LLM emitted causal_claims at all (for provenance).
+  // undefined = LLM didn't emit → omit from response.
+  // CausalClaim[] (possibly empty) = LLM emitted → include in response.
+  const llmEmittedCausalClaims = ctx.causalClaims !== undefined;
+  let validatedCausalClaims: import("../../../schemas/causal-claims.js").CausalClaim[] = [];
   const causalClaimsWarnings: any[] = [];
 
-  if (ctx.causalClaims !== undefined) {
+  if (llmEmittedCausalClaims) {
     const graphNodeIds = new Set(
       Array.isArray((ctx.graph as any)?.nodes)
         ? (ctx.graph as any).nodes.map((n: any) => n.id as string)
@@ -157,9 +161,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     );
     const { validateCausalClaims } = await import("../../transforms/causal-claims-validation.js");
     const result = validateCausalClaims(ctx.causalClaims, graphNodeIds);
-    if (result.claims.length > 0) {
-      validatedCausalClaims = result.claims;
-    }
+    validatedCausalClaims = result.claims;
     causalClaimsWarnings.push(...result.warnings);
   }
   if (causalClaimsWarnings.length > 0) {
@@ -174,8 +176,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     goal_constraints: ctx.goalConstraints,
     // Coaching passthrough from LLM output (undefined if not present)
     ...(ctx.coaching ? { coaching: ctx.coaching } : {}),
-    // Causal claims passthrough (Phase 2B) — omit field entirely if LLM didn't emit
-    ...(validatedCausalClaims ? { causal_claims: validatedCausalClaims } : {}),
+    // Causal claims passthrough (Phase 2B):
+    //   LLM didn't emit → omit field (absent provenance)
+    //   LLM emitted but all dropped → causal_claims: [] (emptied provenance)
+    //   LLM emitted valid claims → causal_claims: [...] (normal)
+    ...(llmEmittedCausalClaims ? { causal_claims: validatedCausalClaims } : {}),
   };
 
   if (Array.isArray((payload as any).bias_findings)) {

@@ -16,6 +16,7 @@ import { z } from "zod";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
+import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 
 // ============================================================================
 // Node Types
@@ -304,6 +305,11 @@ export const ValidationWarningCode = z.enum([
   CIL_WARNING_CODES.STRENGTH_MEAN_DEFAULT_DOMINANT,
   CIL_WARNING_CODES.EDGE_STRENGTH_LOW,
   CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
+  // Causal claims validation warning codes (Phase 2B)
+  CAUSAL_CLAIMS_WARNING_CODES.MALFORMED,
+  CAUSAL_CLAIMS_WARNING_CODES.DROPPED,
+  CAUSAL_CLAIMS_WARNING_CODES.INVALID_REF,
+  CAUSAL_CLAIMS_WARNING_CODES.TRUNCATED,
 ]);
 export type ValidationWarningCodeT = z.infer<typeof ValidationWarningCode>;
 

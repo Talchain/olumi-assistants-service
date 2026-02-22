@@ -16,29 +16,32 @@ import { z } from "zod";
 // Individual Claim Schemas (discriminated union on `type`)
 // ---------------------------------------------------------------------------
 
+/** Non-empty node ID string — rejects blank/whitespace-only IDs early. */
+const nodeIdString = z.string().min(1);
+
 export const DirectEffectClaimSchema = z.object({
   type: z.literal("direct_effect"),
-  from: z.string(),
-  to: z.string(),
+  from: nodeIdString,
+  to: nodeIdString,
   stated_strength: z.enum(["strong", "moderate", "weak"]),
 });
 
 export const MediationOnlyClaimSchema = z.object({
   type: z.literal("mediation_only"),
-  from: z.string(),
-  via: z.string(),
-  to: z.string(),
+  from: nodeIdString,
+  via: nodeIdString,
+  to: nodeIdString,
 });
 
 export const NoDirectEffectClaimSchema = z.object({
   type: z.literal("no_direct_effect"),
-  from: z.string(),
-  to: z.string(),
+  from: nodeIdString,
+  to: nodeIdString,
 });
 
 export const UnmeasuredConfounderClaimSchema = z.object({
   type: z.literal("unmeasured_confounder"),
-  between: z.array(z.string()).length(2),
+  between: z.array(nodeIdString).length(2),
   stated_source: z.string().optional(),
 });
 

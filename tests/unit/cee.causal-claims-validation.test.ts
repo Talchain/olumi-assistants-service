@@ -153,6 +153,21 @@ describe("validateCausalClaims", () => {
     expect(result.warnings.find((w) => w.code === CAUSAL_CLAIMS_WARNING_CODES.DROPPED)).toBeDefined();
   });
 
+  // Test: blank/empty string IDs are rejected early (min(1) constraint)
+  it("drops claims with blank or empty string node IDs", () => {
+    const raw = [
+      { type: "direct_effect", from: "", to: "out_1", stated_strength: "strong" },
+      { type: "no_direct_effect", from: "fac_1", to: "" },
+      { type: "mediation_only", from: "fac_1", via: "", to: "out_1" },
+      { type: "unmeasured_confounder", between: ["fac_1", ""] },
+    ];
+
+    const result = validateCausalClaims(raw, GRAPH_NODE_IDS);
+    expect(result.claims).toHaveLength(0);
+    expect(result.warnings.find((w) => w.code === CAUSAL_CLAIMS_WARNING_CODES.DROPPED)).toBeDefined();
+    expect((result.warnings[0].details as any).count).toBe(4);
+  });
+
   // Test: multiple validation stages accumulate warnings correctly
   it("accumulates warnings from multiple validation stages", () => {
     const raw = [

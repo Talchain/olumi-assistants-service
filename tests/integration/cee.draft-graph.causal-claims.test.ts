@@ -12,6 +12,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { CAUSAL_CLAIMS_WARNING_CODES } from "../../src/schemas/causal-claims.js";
 
 // ── Test data ────────────────────────────────────────────────────────────────
 
@@ -179,7 +180,7 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     expect(body.causal_claims).toBeUndefined();
   });
 
-  // Test 6: Empty claims array passes through
+  // Test 6: Empty claims array passes through (provenance preservation)
   it("empty causal_claims array passes through as empty (not omitted)", async () => {
     mockDraftGraph.mockResolvedValueOnce({
       graph: TEST_GRAPH,
@@ -192,13 +193,13 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const res = await inject("An empty claims scenario for testing the pricing decision process.");
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
-    // Empty array from LLM means LLM did emit it. Validation produces no claims.
-    // Since 0 validated claims → omit from response (preserves provenance).
-    expect(body.causal_claims).toBeUndefined();
+    // LLM emitted causal_claims (empty array) → preserve as [] for provenance.
+    // Distinguishes "LLM said nothing" (absent) from "LLM emitted empty".
+    expect(body.causal_claims).toEqual([]);
   });
 
-  // Test 2: Malformed claim dropped
-  it("drops malformed claims and emits CAUSAL_CLAIM_DROPPED warning", async () => {
+  // Test 2: Malformed claim dropped + warning surfaced in V3
+  it("drops malformed claims and surfaces CAUSAL_CLAIM_DROPPED in validation_warnings", async () => {
     mockDraftGraph.mockResolvedValueOnce({
       graph: TEST_GRAPH,
       rationales: [],
@@ -215,10 +216,17 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const body = res.json() as any;
     expect(body.causal_claims).toHaveLength(1);
     expect(body.causal_claims[0].type).toBe("direct_effect");
+
+    // Warning must be surfaced in V3 validation_warnings
+    const dropWarning = (body.validation_warnings ?? []).find(
+      (w: any) => w.code === CAUSAL_CLAIMS_WARNING_CODES.DROPPED,
+    );
+    expect(dropWarning).toBeDefined();
+    expect(dropWarning.severity).toBe("warn");
   });
 
-  // Test 3: Invalid node reference dropped
-  it("drops claims referencing non-existent node IDs", async () => {
+  // Test 3: Invalid node reference dropped + warning surfaced
+  it("drops claims referencing non-existent node IDs and surfaces INVALID_REF warning", async () => {
     mockDraftGraph.mockResolvedValueOnce({
       graph: TEST_GRAPH,
       rationales: [],
@@ -235,10 +243,17 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const body = res.json() as any;
     expect(body.causal_claims).toHaveLength(1);
     expect(body.causal_claims[0].from).toBe("fac_1");
+
+    // Warning must be surfaced in V3 validation_warnings
+    const refWarning = (body.validation_warnings ?? []).find(
+      (w: any) => w.code === CAUSAL_CLAIMS_WARNING_CODES.INVALID_REF,
+    );
+    expect(refWarning).toBeDefined();
+    expect((refWarning.details as any).missing_ids).toContain("fac_nonexistent");
   });
 
-  // Test 4: Truncation at 20
-  it("truncates claims array to 20 entries", async () => {
+  // Test 4: Truncation at 20 + warning surfaced
+  it("truncates claims array to 20 entries and surfaces TRUNCATED warning", async () => {
     const claims25 = Array.from({ length: 25 }, () => ({
       type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "moderate",
     }));
@@ -255,6 +270,14 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
     expect(body.causal_claims).toHaveLength(20);
+
+    // Warning must be surfaced in V3 validation_warnings
+    const truncWarning = (body.validation_warnings ?? []).find(
+      (w: any) => w.code === CAUSAL_CLAIMS_WARNING_CODES.TRUNCATED,
+    );
+    expect(truncWarning).toBeDefined();
+    expect(truncWarning.severity).toBe("info");
+    expect((truncWarning.details as any).original_count).toBe(25);
   });
 
   // Test 7: Claims must use canonical IDs
@@ -272,8 +295,14 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const res = await inject("Testing canonical ID enforcement in claims for pricing revenue decisions.");
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
-    // All claims dropped (non-canonical IDs) — field omitted
-    expect(body.causal_claims).toBeUndefined();
+    // LLM emitted claims but all dropped (non-canonical IDs) → empty array for provenance
+    expect(body.causal_claims).toEqual([]);
+
+    // INVALID_REF warning surfaced in V3
+    const refWarning = (body.validation_warnings ?? []).find(
+      (w: any) => w.code === CAUSAL_CLAIMS_WARNING_CODES.INVALID_REF,
+    );
+    expect(refWarning).toBeDefined();
   });
 
   // Test 8: Claims survive STRP — claims array is unchanged by repair
@@ -304,7 +333,14 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const res = await inject("Testing non-array causal claims for the pricing strategy decision analysis.");
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
-    // Malformed → empty array → field omitted
-    expect(body.causal_claims).toBeUndefined();
+    // LLM emitted causal_claims (malformed) → empty array for provenance
+    expect(body.causal_claims).toEqual([]);
+
+    // MALFORMED warning surfaced in V3
+    const malformedWarning = (body.validation_warnings ?? []).find(
+      (w: any) => w.code === CAUSAL_CLAIMS_WARNING_CODES.MALFORMED,
+    );
+    expect(malformedWarning).toBeDefined();
+    expect(malformedWarning.severity).toBe("warn");
   });
 });

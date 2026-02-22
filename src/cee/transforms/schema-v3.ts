@@ -661,8 +661,10 @@ export function transformResponseToV3(
 
   // Phase 2B: Carry validated causal_claims from V1 pipeline into V3 response.
   // Claims are the LLM's stated reasoning, validated against post-STRP graph.
+  // Provenance-aware: undefined = LLM didn't emit (omit), [] = LLM emitted but
+  // all dropped by validation (preserve empty array for analytics distinction).
   const v1CausalClaims = (v1Response as any).causal_claims;
-  if (Array.isArray(v1CausalClaims) && v1CausalClaims.length > 0) {
+  if (Array.isArray(v1CausalClaims)) {
     (v3Response as any).causal_claims = v1CausalClaims;
   }
 
@@ -712,6 +714,14 @@ export function transformResponseToV3(
         mean_defaulted_edge_ids: strengthMeanDominant.mean_defaulted_edge_ids,
       },
     });
+  }
+
+  // Merge V1 pipeline validation_issues (e.g. causal-claim warnings) into V3 validation_warnings.
+  // Stage 5 (package) accumulates warnings into validation_issues on the V1 envelope;
+  // the V3 transform must surface them so V3 consumers see them.
+  const v1ValidationIssues = (v1Response as any).validation_issues;
+  if (Array.isArray(v1ValidationIssues)) {
+    validationWarnings.push(...v1ValidationIssues);
   }
 
   // Add validation warnings if any
