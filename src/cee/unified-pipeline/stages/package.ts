@@ -154,7 +154,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   const causalClaimsWarnings: any[] = [];
 
   if (llmEmittedCausalClaims) {
-    const graphNodeIds = new Set(
+    const graphNodeIds = new Set<string>(
       Array.isArray((ctx.graph as any)?.nodes)
         ? (ctx.graph as any).nodes.map((n: any) => n.id as string)
         : [],
