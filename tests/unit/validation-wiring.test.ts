@@ -78,6 +78,7 @@ describe("Validation Wiring", () => {
       // Minimal valid graph structure
       const minimalGraph: GraphT = {
         version: "1",
+        default_seed: 42,
         nodes: [
           { id: "decision_1", kind: "decision", label: "Test decision" },
           { id: "opt_a", kind: "option", label: "Option A" },
@@ -87,11 +88,11 @@ describe("Validation Wiring", () => {
           { id: "goal_1", kind: "goal", label: "Test goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-          { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-          { from: "fac_1", to: "outcome_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
-          { from: "outcome_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
+          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
+          { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
+          { from: "fac_1", to: "outcome_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, edge_type: "directed" },
+          { from: "outcome_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 1, edge_type: "directed" },
         ],
         meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
       };
@@ -111,16 +112,17 @@ describe("Validation Wiring", () => {
     it("detects missing goal node", () => {
       const graphWithoutGoal: GraphT = {
         version: "1",
+        default_seed: 42,
         nodes: [
           { id: "decision_1", kind: "decision", label: "Test decision" },
           { id: "opt_a", kind: "option", label: "Option A" },
           { id: "opt_b", kind: "option", label: "Option B" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
+          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
         ],
-        meta: {},
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = validateGraph({ graph: graphWithoutGoal });
@@ -133,6 +135,7 @@ describe("Validation Wiring", () => {
     it("detects invalid edge references", () => {
       const graphWithBadEdge: GraphT = {
         version: "1",
+        default_seed: 42,
         nodes: [
           { id: "decision_1", kind: "decision", label: "Test decision" },
           { id: "opt_a", kind: "option", label: "Option A" },
@@ -140,12 +143,12 @@ describe("Validation Wiring", () => {
           { id: "goal_1", kind: "goal", label: "Test goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
-          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
+          { from: "decision_1", to: "opt_b", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
           // Edge to non-existent node
-          { from: "opt_a", to: "nonexistent_node", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+          { from: "opt_a", to: "nonexistent_node", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, edge_type: "directed" },
         ],
-        meta: {},
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = validateGraph({ graph: graphWithBadEdge });
@@ -158,15 +161,16 @@ describe("Validation Wiring", () => {
     it("detects insufficient options", () => {
       const graphWithOneOption: GraphT = {
         version: "1",
+        default_seed: 42,
         nodes: [
           { id: "decision_1", kind: "decision", label: "Test decision" },
           { id: "opt_a", kind: "option", label: "Option A" },
           { id: "goal_1", kind: "goal", label: "Test goal" },
         ],
         edges: [
-          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+          { from: "decision_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, edge_type: "directed" },
         ],
-        meta: {},
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = validateGraph({ graph: graphWithOneOption });

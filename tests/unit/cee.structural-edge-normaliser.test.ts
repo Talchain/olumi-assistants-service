@@ -45,8 +45,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.1, // Drifted from 0.01
             belief_exists: 0.9, // Drifted from 1.0
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -75,8 +77,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.01,
             belief_exists: 1.0,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -104,9 +108,11 @@ describe("normaliseStructuralEdges", () => {
             strength_mean: 1.0,
             strength_std: 0.01,
             belief_exists: 1.0,
+            edge_type: "directed",
             // effect_direction missing
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -134,8 +140,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.15,
             belief_exists: 0.85,
             effect_direction: "negative",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -164,8 +172,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.2,
             belief_exists: 0.75,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -190,8 +200,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -216,8 +228,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.05,
             belief_exists: 0.8,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -248,6 +262,7 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.08,
             belief_exists: 0.92,
             effect_direction: "positive",
+            edge_type: "directed",
           },
           // Causal edge - should NOT be normalised
           {
@@ -257,6 +272,7 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.15,
             belief_exists: 0.85,
             effect_direction: "positive",
+            edge_type: "directed",
           },
           // Structural edge 2 - should be normalised
           {
@@ -266,6 +282,7 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.12,
             belief_exists: 0.95,
             effect_direction: "positive",
+            edge_type: "directed",
           },
           // Another causal edge - should NOT be normalised
           {
@@ -275,8 +292,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.2,
             belief_exists: 0.7,
             effect_direction: "negative",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -321,8 +340,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.1,
             belief_exists: 0.9,
             effect_direction: "negative", // Wrong direction
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -360,8 +381,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.05,
             belief_exists: 0.95,
             effect_direction: "positive",
+            edge_type: "directed",
           } as any,
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -386,8 +409,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.05,
             belief_exists: 0.95,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -403,6 +428,7 @@ describe("normaliseStructuralEdges", () => {
         default_seed: 42,
         nodes: [{ id: "goal_1", kind: "goal", label: "Test Goal" }],
         edges: [],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -424,8 +450,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.1,
             belief_exists: 0.8,
             effect_direction: "positive",
+            edge_type: "directed",
           },
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -452,8 +480,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.05,
             belief_exists: 0.95,
             effect_direction: "positive",
+            edge_type: "directed",
           } as any,
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);
@@ -479,8 +509,10 @@ describe("normaliseStructuralEdges", () => {
             strength_std: 0.05,
             belief: 0.85, // Legacy field
             effect_direction: "positive",
+            edge_type: "directed",
           } as any,
         ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
       };
 
       const result = normaliseStructuralEdges(graph);

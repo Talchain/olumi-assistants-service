@@ -227,12 +227,14 @@ describe('enrichGraphWithFactorsAsync', () => {
         (n) => n.kind === 'factor' && n.label?.toLowerCase().includes('revenue')
       );
 
-      if (revenueFactor && revenueFactor.data) {
+      if (revenueFactor && revenueFactor.data && 'value' in revenueFactor.data) {
         // factor_type should be inferred
         expect(revenueFactor.data.factor_type).toBeDefined();
         // uncertainty_drivers should be set
         expect(revenueFactor.data.uncertainty_drivers).toBeDefined();
-        expect(revenueFactor.data.uncertainty_drivers?.length).toBeGreaterThan(0);
+        if (revenueFactor.data.uncertainty_drivers) {
+          expect(revenueFactor.data.uncertainty_drivers.length).toBeGreaterThan(0);
+        }
       }
     });
 

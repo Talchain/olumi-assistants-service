@@ -492,7 +492,7 @@ export function buildDecisionStorySummary(args: {
 
   if (allIssues.length > 0) {
     const errorCount = allIssues.filter((i) => i.severity === "error").length;
-    const warningCount = allIssues.filter((i) => i.severity === "warning").length;
+    const warningCount = allIssues.filter((i) => i.severity === "warn").length;
     const infoCount = allIssues.length - errorCount - warningCount;
 
     const parts: string[] = [];

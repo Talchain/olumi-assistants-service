@@ -40,7 +40,7 @@ describe("toCanonicalSeverity", () => {
   });
 
   it("handles CeeSeverity type correctly", () => {
-    const severities: CeeSeverity[] = ["error", "warning", "info"];
+    const severities: CeeSeverity[] = ["error", "warn", "info"];
     const expected: CanonicalSeverity[] = ["blocker", "medium", "low"];
 
     severities.forEach((sev, i) => {
@@ -113,10 +113,10 @@ describe("classifyIssueSeverity", () => {
     expect(classifyIssueSeverity("GRAPH_CONTAINS_CYCLE")).toBe("error");
   });
 
-  it("classifies warning codes as 'warning'", () => {
-    expect(classifyIssueSeverity("MISSING_EVIDENCE")).toBe("warning");
-    expect(classifyIssueSeverity("STRENGTH_CLUSTERING")).toBe("warning");
-    expect(classifyIssueSeverity("SAME_LEVER_OPTIONS")).toBe("warning");
+  it("classifies warning codes as 'warn'", () => {
+    expect(classifyIssueSeverity("MISSING_EVIDENCE")).toBe("warn");
+    expect(classifyIssueSeverity("STRENGTH_CLUSTERING")).toBe("warn");
+    expect(classifyIssueSeverity("SAME_LEVER_OPTIONS")).toBe("warn");
   });
 
   it("classifies info codes as 'info'", () => {
@@ -125,9 +125,9 @@ describe("classifyIssueSeverity", () => {
     expect(classifyIssueSeverity("COULD_ADD_FACTOR")).toBe("info");
   });
 
-  it("defaults unknown codes to 'warning'", () => {
-    expect(classifyIssueSeverity("UNKNOWN_CODE")).toBe("warning");
-    expect(classifyIssueSeverity("")).toBe("warning");
+  it("defaults unknown codes to 'warn'", () => {
+    expect(classifyIssueSeverity("UNKNOWN_CODE")).toBe("warn");
+    expect(classifyIssueSeverity("")).toBe("warn");
   });
 
   it("is case-insensitive", () => {
@@ -136,8 +136,8 @@ describe("classifyIssueSeverity", () => {
   });
 
   it("handles null/undefined gracefully", () => {
-    expect(classifyIssueSeverity(null)).toBe("warning");
-    expect(classifyIssueSeverity(undefined)).toBe("warning");
+    expect(classifyIssueSeverity(null)).toBe("warn");
+    expect(classifyIssueSeverity(undefined)).toBe("warn");
   });
 });
 
@@ -148,11 +148,11 @@ describe("classifyIssueSeverity", () => {
 describe("Severity translation integration", () => {
   it("v3-validator severities translate to consistent canonical values", () => {
     // This tests the full translation chain
-    const v3Severities: CeeSeverity[] = ["error", "warning", "info"];
+    const v3Severities: CeeSeverity[] = ["error", "warn", "info"];
     const canonicalResults = v3Severities.map(toCanonicalSeverity);
 
     // Ensure all results are valid canonical severities
-    // Note: warning maps to medium (consistent with draft_warnings patterns)
+    // Note: warn maps to medium (consistent with draft_warnings patterns)
     expect(canonicalResults).toEqual(["blocker", "medium", "low"]);
 
     // Ensure ordering is preserved (blocker > medium > low)
