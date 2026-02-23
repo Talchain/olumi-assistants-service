@@ -12,9 +12,11 @@ import { transformResponseToV2 } from "../../transforms/schema-v2.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../transforms/analysis-ready.js";
 import { CEEGraphResponseV3 } from "../../../schemas/cee-v3.js";
 import { extractZodIssues } from "../../../schemas/llmExtraction.js";
-import { log } from "../../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { isAdminAuthorized } from "../../validation/pipeline.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../constants/versions.js";
+import { config } from "../../../config/index.js";
+import { getRuntimeEnv } from "../../../config/env-resolver.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
@@ -94,60 +96,137 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
-    // Strict mode validation (match route handler lines 531-549)
+    // Strict mode validation (Stream F: return blocked response instead of 422)
     if (ctx.opts.strictMode) {
       try {
         validateStrictModeV3(v3Body);
       } catch (err) {
-        log.warn({
+        log.error({
+          event: "cee.boundary.strict_mode_failed",
           request_id: ctx.requestId,
           error: (err as Error).message,
         }, "V3 strict mode validation failed");
 
-        // Sweep trace for 422 debugging — use CEETraceMeta shape (request_id + details)
-        const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
-        const traceDetails: Record<string, unknown> = {
-          deterministic_sweep_ran: sweepTrace?.sweep_ran ?? false,
-          deterministic_sweep_version: sweepTrace?.sweep_version ?? DETERMINISTIC_SWEEP_VERSION,
-          last_phase: "boundary_strict_mode",
-          llm_repair_called: ctx.orchestratorRepairUsed ?? false,
-          llm_repair_timeout_ms: ctx.repairTimeoutMs,
-        };
+        // Emit telemetry event
+        emit(TelemetryEvents.CeeBoundaryBlocked, {
+          request_id: ctx.requestId,
+          error_code: "CEE_V3_STRICT_MODE_FAILED",
+          error_message: (err as Error).message,
+          validation_issues: [],
+          graph_hash: (v3Body as any)?.meta?.graph_hash,
+        });
 
-        // Full repair_summary behind admin key
-        if (ctx.request && isAdminAuthorized(ctx.request)) {
-          traceDetails.repair_summary = ctx.repairTrace;
-        }
+        /**
+         * TRACE PRESERVATION CONTRACT:
+         * - When upstream response includes trace fields → preserve them in blocked response
+         * - When upstream response omits trace → pipeline may add minimal trace for observability
+         * - Custom fields (correlation_id, etc.) are passed through unchanged
+         */
 
-        ctx.earlyReturn = {
-          statusCode: 422,
-          body: {
-            error: {
-              code: "CEE_V3_VALIDATION_FAILED",
-              message: (err as Error).message,
-              validation_warnings: (v3Body as any).validation_warnings,
-              trace: {
-                request_id: ctx.requestId,
-                correlation_id: ctx.requestId,
-                details: traceDetails,
+        // Return backward-compatible blocked response
+        // CONTRACT: Blocked responses ALWAYS return graph: null (never omitted).
+        // Schema allows omission for legacy compatibility, but production code
+        // must use explicit null for consistent downstream consumption.
+        const blockedResponse: any = {
+          ...v3Body,
+          meta: (ctx.ceeResponse as any)?.meta || v3Body.meta,
+          trace: (ctx.ceeResponse as any)?.trace || v3Body.trace,
+          graph: null, // CANONICAL: always explicit null, never omitted
+          nodes: [],
+          edges: [],
+          analysis_ready: {
+            options: [],
+            goal_node_id: (v3Body as any)?.goal_node_id || "",
+            status: "blocked",
+            blockers: [
+              {
+                code: "strict_mode_validation_failure",
+                severity: "error",
+                message: (err as Error).message,
+                details: {
+                  deterministic_sweep_ran: (ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined)?.sweep_ran ?? false,
+                  deterministic_sweep_version: DETERMINISTIC_SWEEP_VERSION,
+                  llm_repair_called: ctx.orchestratorRepairUsed ?? false,
+                },
               },
-            },
+            ],
           },
         };
+
+        ctx.finalResponse = blockedResponse;
         return;
       }
     }
 
     // Belt-and-suspenders: validate V3 output before returning.
-    // Logs diagnostic details before the opaque downstream structural_parse error.
+    // Stream F: V3 validation failures return blocked status (no invalid graph)
     const parseResult = CEEGraphResponseV3.safeParse(v3Body);
     if (!parseResult.success) {
+      const runtimeEnv = getRuntimeEnv();
+      const allowInvalid = config.cee.boundaryAllowInvalid;
+
+      // Dev escape hatch: allow invalid graphs in local/test if explicitly enabled
+      // (Config-level enforcement already prevents this flag from being true in staging/prod)
+      if (allowInvalid) {
+        log.warn({
+          event: "cee.boundary.output_validation_failed",
+          error_count: parseResult.error.issues.length,
+          first_issues: extractZodIssues(parseResult.error, 3),
+          request_id: ctx.requestId,
+          dev_override_active: true,
+          runtime_env: runtimeEnv,
+        }, "V3 output failed schema validation (bypassed via CEE_BOUNDARY_ALLOW_INVALID)");
+        ctx.finalResponse = v3Body;
+        return;
+      }
+
+      // Default behavior: return blocked status with validation errors
       log.error({
         event: "cee.boundary.output_validation_failed",
         error_count: parseResult.error.issues.length,
         first_issues: extractZodIssues(parseResult.error, 3),
         request_id: ctx.requestId,
-      }, "V3 output failed CEEGraphResponseV3 schema validation (non-blocking)");
+      }, "V3 output failed CEEGraphResponseV3 schema validation");
+
+      // Emit telemetry event
+      const validationIssues = extractZodIssues(parseResult.error, 5);
+      emit(TelemetryEvents.CeeBoundaryBlocked, {
+        request_id: ctx.requestId,
+        error_code: "CEE_V3_VALIDATION_FAILED",
+        error_message: `V3 schema validation failed: ${parseResult.error.issues.length} issues`,
+        validation_issues: validationIssues,
+        graph_hash: (v3Body as any)?.meta?.graph_hash,
+      });
+
+      // Return backward-compatible blocked response
+      // Preserve existing envelope (including meta, trace from original response), set analysis_ready.status to blocked
+      // CONTRACT: Blocked responses ALWAYS return graph: null (never omitted).
+      // Schema allows omission for legacy compatibility, but production code
+      // must use explicit null for consistent downstream consumption.
+      const blockedResponse: any = {
+        ...v3Body,
+        meta: (ctx.ceeResponse as any)?.meta || v3Body.meta, // Preserve meta from original response
+        trace: (ctx.ceeResponse as any)?.trace || v3Body.trace, // Preserve trace from original response
+        graph: null, // CANONICAL: always explicit null, never omitted
+        nodes: [], // Empty nodes array (V3 format)
+        edges: [], // Empty edges array (V3 format)
+        analysis_ready: {
+          options: [],
+          goal_node_id: (v3Body as any)?.goal_node_id || "",
+          status: "blocked",
+          blockers: [
+            {
+              code: "validation_failure",
+              severity: "error",
+              message: `V3 schema validation failed: ${parseResult.error.issues.length} issues`,
+              details: validationIssues,
+            },
+          ],
+        },
+      };
+
+      ctx.finalResponse = blockedResponse;
+      return;
     }
 
     ctx.finalResponse = v3Body;

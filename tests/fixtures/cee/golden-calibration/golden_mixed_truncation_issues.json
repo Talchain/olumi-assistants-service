@@ -19,7 +19,7 @@
         "roots": ["goal_1"],
         "leaves": ["opt_1", "opt_2"],
         "suggested_positions": {},
-        "source": "fixtures"
+        "source": "imported"
       }
     },
     "confidence": 0.6,

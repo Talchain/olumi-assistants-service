@@ -13,6 +13,20 @@
  */
 
 import { z } from "zod";
+import { getRuntimeEnv } from "./env-resolver.js";
+
+/**
+ * Config override events to be emitted after telemetry is available
+ */
+interface ConfigOverrideEvent {
+  settingName: string;
+  requestedValue: boolean;
+  actualValue: boolean;
+  env: string;
+  reason: string;
+}
+
+const configOverrideEvents: ConfigOverrideEvent[] = [];
 
 /**
  * Custom boolean coercion that handles string "false" and "true"
@@ -30,6 +44,94 @@ const booleanString = z
     }
     return Boolean(val);
   });
+
+/**
+ * Environment-enforced boolean for security-sensitive flags (Stream F).
+ *
+ * Enforces environment-specific security policies:
+ * - prod: always false, logs security warning if override attempted
+ * - staging: behavior controlled by allowStaging parameter
+ *   - if allowStaging=true: default false, allows explicit true with audit warning
+ *   - if allowStaging=false: always false (same as prod)
+ * - local/test: allows true
+ *
+ * @param defaultValue - Default value for staging/local/test environments
+ * @param settingName - Name of the setting for logging
+ * @param allowStaging - Whether to allow true in staging environment (default: true)
+ */
+function createEnvEnforcedBoolean(
+  defaultValue: boolean,
+  settingName: string,
+  allowStaging: boolean = true
+) {
+  return z
+    .union([z.boolean(), z.string(), z.number(), z.undefined()])
+    .transform((val) => {
+      const env = getRuntimeEnv();
+
+      // Parse the requested value using booleanString logic
+      let requestedValue = defaultValue;
+      if (val !== undefined) {
+        if (typeof val === "boolean") requestedValue = val;
+        else if (typeof val === "number") requestedValue = val !== 0;
+        else if (typeof val === "string") {
+          const lower = val.toLowerCase().trim();
+          if (lower === "false" || lower === "0" || lower === "") requestedValue = false;
+          else if (lower === "true" || lower === "1") requestedValue = true;
+          else requestedValue = Boolean(val);
+        }
+      }
+
+      // Prod: always false, warn if override attempted
+      if (env === "prod") {
+        if (requestedValue === true) {
+          console.warn(`[SECURITY] ${settingName} cannot be enabled in production (forced to false)`);
+          configOverrideEvents.push({
+            settingName,
+            requestedValue: true,
+            actualValue: false,
+            env,
+            reason: "production_lockdown",
+          });
+        }
+        return false;
+      }
+
+      // Staging: behavior depends on allowStaging parameter
+      if (env === "staging") {
+        if (!allowStaging) {
+          // Dev-only flag: force false in staging (same as prod)
+          if (requestedValue === true) {
+            console.warn(`[SECURITY] ${settingName} cannot be enabled in staging (forced to false)`);
+            configOverrideEvents.push({
+              settingName,
+              requestedValue: true,
+              actualValue: false,
+              env,
+              reason: "staging_lockdown",
+            });
+          }
+          return false;
+        } else {
+          // Staging-allowed flag: allow with audit warning
+          if (requestedValue === true && val !== undefined) {
+            console.warn(`[AUDIT] ${settingName} enabled in staging environment`);
+            configOverrideEvents.push({
+              settingName,
+              requestedValue: true,
+              actualValue: true,
+              env,
+              reason: "staging_override_allowed",
+            });
+          }
+          return requestedValue;
+        }
+      }
+
+      // Local/test: allow requested value
+      return requestedValue;
+    });
+}
 
 /**
  * Optional URL string that treats empty/undefined as undefined
@@ -289,7 +391,7 @@ const ConfigSchema = z.object({
     }).default({}),
     // Observability settings (debug panel visibility)
     observabilityEnabled: booleanString.default(false), // If true, include _observability in CEE responses
-    observabilityRawIO: booleanString.default(false), // If true, include raw prompts/responses (security: disable in prod)
+    observabilityRawIO: createEnvEnforcedBoolean(false, "CEE_OBSERVABILITY_RAW_IO"), // If true, include raw prompts/responses (security: locked in prod)
     // Repair loop settings
     maxRepairRetries: z.coerce.number().int().min(0).max(5).default(1), // Max repair retries in graph orchestrator
     // Debug logging settings
@@ -300,6 +402,8 @@ const ConfigSchema = z.object({
     // Unified pipeline (CIL Phase 3B)
     unifiedPipelineEnabled: booleanString.default(false), // If true, use unified 6-stage pipeline instead of Pipeline A+B
     legacyPipelineEnabled: booleanString.default(false), // If true, allow legacy Pipeline B; if false, throw on entry
+    // Boundary security (Stream F)
+    boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -551,6 +655,7 @@ function parseConfig(): Config {
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
       legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
+      boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
@@ -691,6 +796,34 @@ export function getConfig(): Config {
  */
 export function _resetConfigCache(): void {
   _cachedConfig = null;
+  configOverrideEvents.length = 0; // Clear override events
+}
+
+/**
+ * Emit telemetry events for config overrides (Stream F)
+ *
+ * Call this after telemetry is initialized to emit any security/audit events
+ * that were recorded during config parsing.
+ *
+ * This is separated from config initialization to avoid circular dependencies
+ * with telemetry setup.
+ */
+export async function emitConfigOverrideTelemetry(): Promise<void> {
+  // Lazy import to avoid circular dependency
+  const { emit, TelemetryEvents } = await import("../utils/telemetry.js");
+
+  for (const event of configOverrideEvents) {
+    emit(TelemetryEvents.CeeConfigRawIoOverridden, {
+      setting_name: event.settingName,
+      requested_value: event.requestedValue,
+      actual_value: event.actualValue,
+      env: event.env,
+      reason: event.reason,
+    });
+  }
+
+  // Clear events after emission to avoid duplicate emissions
+  configOverrideEvents.length = 0;
 }
 
 /**

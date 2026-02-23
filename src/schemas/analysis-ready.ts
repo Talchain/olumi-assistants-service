@@ -172,12 +172,14 @@ export type ModelAdjustmentT = z.infer<typeof ModelAdjustment>;
  * - needs_user_mapping: Missing factor matches or values
  * - needs_encoding: Has raw values (categorical/boolean) awaiting numeric encoding
  * - needs_user_input: Blockers exist — user must provide missing factor values
+ * - blocked: Validation failure prevents analysis (invalid graph structure)
  */
 export const AnalysisReadyStatus = z.enum([
   "ready",
   "needs_user_mapping",
   "needs_encoding",
   "needs_user_input",
+  "blocked",
 ]);
 export type AnalysisReadyStatusT = z.infer<typeof AnalysisReadyStatus>;
 

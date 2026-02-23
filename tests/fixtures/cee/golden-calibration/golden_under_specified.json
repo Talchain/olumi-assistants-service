@@ -14,7 +14,7 @@
         "roots": ["goal_1"],
         "leaves": ["goal_1"],
         "suggested_positions": {},
-        "source": "fixtures"
+        "source": "imported"
       }
     },
     "confidence": 0.35,

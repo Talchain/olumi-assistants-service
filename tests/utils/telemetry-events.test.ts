@@ -366,6 +366,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Boundary logging events (Observability v1)
         BoundaryRequest: "boundary.request",
         BoundaryResponse: "boundary.response",
+        CeeBoundaryBlocked: "cee.boundary.blocked",
+
+        // Config security events (Stream F)
+        CeeConfigRawIoOverridden: "cee.config.raw_io_overridden",
 
         // Performance timing events (Observability v2)
         LlmCall: "llm.call",
@@ -401,7 +405,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -811,6 +815,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Boundary logging events (observability, no Datadog counters initially)
         TelemetryEvents.BoundaryRequest,
         TelemetryEvents.BoundaryResponse,
+        TelemetryEvents.CeeBoundaryBlocked,
+        // Config security events (Stream F - diagnostic only, logged locally)
+        TelemetryEvents.CeeConfigRawIoOverridden,
         // Analysis-Ready Output events (P0 - diagnostic only)
         TelemetryEvents.AnalysisReadyBuilt,
         TelemetryEvents.AnalysisReadyValidationFailed,
@@ -1160,6 +1167,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Boundary logging events (Observability v1)
         "boundary.request",
         "boundary.response",
+        "cee.boundary.blocked",
+
+        // Config security events (Stream F)
+        "cee.config.raw_io_overridden",
 
         // Performance timing events (Observability v2)
         "llm.call",

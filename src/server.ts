@@ -68,7 +68,7 @@ import { adminTestRoutes } from "./routes/admin.testing.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
-import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars } from "./config/index.js";
+import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -126,6 +126,9 @@ export async function build() {
   // Fail-fast: Validate all configuration at startup
   // This ensures misconfiguration is caught immediately rather than lazily
   validateConfig();
+
+  // Emit telemetry for any config override events (Stream F)
+  await emitConfigOverrideTelemetry();
 
   // Check for deprecated environment variables and log warnings
   const deprecationWarnings = checkDeprecatedEnvVars();

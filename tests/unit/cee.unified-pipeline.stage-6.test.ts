@@ -27,12 +27,24 @@ vi.mock("../../src/cee/transforms/analysis-ready.js", () => ({
 // Mock telemetry
 vi.mock("../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  TelemetryEvents: {
+    CeeBoundaryBlocked: "cee.boundary.blocked",
+  },
+}));
+
+// Mock CEE V3 schema to bypass validation in unit tests
+vi.mock("../../src/schemas/cee-v3.js", () => ({
+  CEEGraphResponseV3: {
+    safeParse: vi.fn(() => ({ success: true })),
+  },
 }));
 
 import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";
 import { transformResponseToV3, validateStrictModeV3 } from "../../src/cee/transforms/schema-v3.js";
 import { transformResponseToV2 } from "../../src/cee/transforms/schema-v2.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../src/cee/transforms/analysis-ready.js";
+import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,24 +190,33 @@ describe("runStageBoundary", () => {
     expect(ctx.earlyReturn).toBeUndefined();
   });
 
-  it("sets earlyReturn 422 when strict mode validation fails", async () => {
+  it("returns blocked response when strict mode validation fails (Stream F)", async () => {
     (validateStrictModeV3 as any).mockImplementation(() => {
       throw new Error("Missing required field: edges");
     });
     const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
     await runStageBoundary(ctx);
 
-    expect(ctx.earlyReturn).toBeDefined();
-    expect(ctx.earlyReturn!.statusCode).toBe(422);
-    expect(ctx.earlyReturn!.body).toEqual(
+    // Should return blocked response, not 422 earlyReturn
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.finalResponse).toBeDefined();
+    expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
+    expect((ctx.finalResponse as any).graph).toBeNull();
+    expect((ctx.finalResponse as any).analysis_ready?.blockers).toBeDefined();
+
+    const blocker = (ctx.finalResponse as any).analysis_ready?.blockers?.[0];
+    expect(blocker?.code).toBe("strict_mode_validation_failure");
+    expect(blocker?.severity).toBe("error");
+    expect(blocker?.message).toContain("Missing required field: edges");
+
+    // Should emit telemetry event
+    expect(emit).toHaveBeenCalledWith(
+      TelemetryEvents.CeeBoundaryBlocked,
       expect.objectContaining({
-        error: expect.objectContaining({
-          code: "CEE_V3_VALIDATION_FAILED",
-          message: "Missing required field: edges",
-        }),
-      }),
+        error_code: "CEE_V3_STRICT_MODE_FAILED",
+        error_message: "Missing required field: edges",
+      })
     );
-    expect(ctx.finalResponse).toBeUndefined();
   });
 
   it("does not call validateStrictModeV3 when strictMode is false", async () => {

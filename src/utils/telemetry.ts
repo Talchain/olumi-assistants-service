@@ -396,6 +396,10 @@ export const TelemetryEvents = {
   // Boundary logging events (observability v1)
   BoundaryRequest: "boundary.request",
   BoundaryResponse: "boundary.response",
+  CeeBoundaryBlocked: "cee.boundary.blocked",
+
+  // Config security events (Stream F)
+  CeeConfigRawIoOverridden: "cee.config.raw_io_overridden",
 
   // Performance timing events (observability v2)
   LlmCall: "llm.call",

@@ -721,7 +721,7 @@ export interface AnalysisReadySummary {
   optionCount: number;
   totalInterventions: number;
   averageInterventionsPerOption: number;
-  status: "ready" | "needs_user_mapping" | "needs_encoding" | "needs_user_input";
+  status: "ready" | "needs_user_mapping" | "needs_encoding" | "needs_user_input" | "blocked";
   userQuestionCount: number;
   readyOptions: number;
   incompleteOptions: number;
