@@ -3,7 +3,7 @@
  *
  * Verifies that the plan annotation checkpoint is captured correctly
  * after Stage 3 (Enrich), contains valid plan_id, plan_hash, rationales,
- * confidence, and context_hash, and does NOT trigger additional enrichment.
+ * confidence, and context_hash_v0, and does NOT trigger additional enrichment.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -240,12 +240,12 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(ctx.planAnnotation.confidence.parameters).toBe(0);
   });
 
-  it("context_hash is deterministic for same input", async () => {
+  it("context_hash_v0 is deterministic for same input", async () => {
     const ctx1 = await runPipelineAndCapture();
     const ctx2 = await runPipelineAndCapture();
-    expect(ctx1.planAnnotation.context_hash).toBe(ctx2.planAnnotation.context_hash);
-    expect(typeof ctx1.planAnnotation.context_hash).toBe("string");
-    expect(ctx1.planAnnotation.context_hash.length).toBeGreaterThan(0);
+    expect(ctx1.planAnnotation.context_hash_v0).toBe(ctx2.planAnnotation.context_hash_v0);
+    expect(typeof ctx1.planAnnotation.context_hash_v0).toBe("string");
+    expect(ctx1.planAnnotation.context_hash_v0.length).toBeGreaterThan(0);
   });
 
   it("model_id captured from llmMeta.model", async () => {
@@ -362,7 +362,7 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     // Required string fields
     expect(typeof pa.plan_id).toBe("string");
     expect(typeof pa.plan_hash).toBe("string");
-    expect(typeof pa.context_hash).toBe("string");
+    expect(typeof pa.context_hash_v0).toBe("string");
     expect(typeof pa.model_id).toBe("string");
     expect(typeof pa.prompt_version).toBe("string");
 

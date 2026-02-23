@@ -38,6 +38,7 @@ import {
 } from "../../pipeline-checkpoints.js";
 import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
+import { assembleContextPack } from "../../../context/context-pack.js";
 
 /**
  * Derive a single status_quo_action enum from the sweep trace.
@@ -527,14 +528,67 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     };
   }
 
-  // Provenance
+  // ── ContextPack v1 assembly (Stream C) ────────────────────────────────
+  const resolvedModel = ctx.llmMeta?.model ?? ctx.draftAdapter?.model ?? "unknown";
+  const promptHash = ctx.llmMeta?.prompt_hash as string | undefined;
+  const promptVersion = ctx.llmMeta?.prompt_version as string | undefined;
+
+  // Normalise seed: DraftInputWithCeeExtras declares seed as string|undefined,
+  // but it may arrive as number from some callers. Coerce to number for ContextPack.
+  const rawSeed = (ctx.input as any).seed;
+  const normalizedSeed = typeof rawSeed === "number"
+    ? rawSeed
+    : typeof rawSeed === "string" && rawSeed !== ""
+      ? Number(rawSeed)
+      : undefined;
+
+  const contextPack = assembleContextPack({
+    capability: "draft_graph",
+    brief: ctx.effectiveBrief,
+    seedGraph: (ctx.input as any).previous_graph,
+    resolvedModel: {
+      route: (ctx.input as any).model ? "client_override" : "default",
+      id: resolvedModel,
+    },
+    promptVersion: promptVersion ?? "unknown",
+    promptContent: "unused", // Fallback — overridden by promptHashPrecomputed
+    // Pass adapter's pre-computed content hash directly to avoid hash-of-hash.
+    // The adapter already hashes actual prompt text via getSystemPromptMeta().
+    promptHashPrecomputed: promptHash,
+    seed: Number.isFinite(normalizedSeed) ? normalizedSeed : undefined,
+    config: {
+      maxTokens: {
+        draft: config.cee.maxTokens?.draft,
+        repair: config.cee.maxTokens?.repair,
+      },
+      enforceSingleGoal: config.cee.enforceSingleGoal,
+      draftArchetypesEnabled: config.cee.draftArchetypesEnabled,
+      clarificationEnforced: config.cee.clarificationEnforced,
+      clarifierEnabled: config.cee.clarifierEnabled,
+    },
+    clarificationRound: (ctx.input as any).clarification_rounds_completed,
+    clarificationAnswers: (ctx.input as any).conversation_history?.map(
+      (h: { question_id: string; answer: string }) => ({
+        question_id: h.question_id,
+        answer: h.answer,
+      }),
+    ),
+  });
+  ctx.contextPack = contextPack;
+
+  // Provenance (with ContextPack v1 lineage)
   pipelineTrace.cee_provenance = assembleCeeProvenance({
     pipelinePath: "unified",
-    model: ctx.llmMeta?.model ?? ctx.draftAdapter?.model ?? "unknown",
-    promptVersion: ctx.llmMeta?.prompt_version,
+    model: resolvedModel,
+    promptVersion,
     promptSource: ctx.llmMeta?.prompt_source,
     promptStoreVersion: ctx.llmMeta?.prompt_store_version,
     modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
+    // ContextPack v1 lineage (Stream C)
+    contextHash: contextPack.context_hash,
+    promptHash: contextPack.prompt_hash,
+    modelId: contextPack.model_id,
+    capability: contextPack.capability,
   });
 
   // LLM raw trace

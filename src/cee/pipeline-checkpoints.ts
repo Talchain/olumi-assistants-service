@@ -10,6 +10,7 @@
  */
 
 import { SERVICE_VERSION, GIT_COMMIT_SHORT, BUILD_TIMESTAMP } from '../version.js';
+import type { Capability } from '../context/context-pack.js';
 
 // =============================================================================
 // Types
@@ -61,6 +62,16 @@ export interface CEEProvenance {
   engine_base_url_configured: boolean;
   model_override_active: boolean;
   prompt_store_version: number | null;
+
+  // ── ContextPack v1 lineage (Stream C) ──────────────────────────────────
+  /** Deterministic hash of entire ContextPack (all inputs that affect output) */
+  context_hash?: string;
+  /** Hash of actual prompt content (not just version) */
+  prompt_hash?: string;
+  /** Resolved model ID (provider + model, not alias) */
+  model_id?: string;
+  /** Capability / endpoint that produced this response */
+  capability?: Capability;
 }
 
 // =============================================================================
@@ -216,6 +227,11 @@ export interface ProvenanceInput {
   promptSource?: 'store' | 'default';
   promptStoreVersion?: number | null;
   modelOverrideActive?: boolean;
+  /** ContextPack v1 lineage fields (Stream C) */
+  contextHash?: string;
+  promptHash?: string;
+  modelId?: string;
+  capability?: Capability;
 }
 
 export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
@@ -238,6 +254,11 @@ export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
     engine_base_url_configured: Boolean(process.env.ENGINE_BASE_URL),
     model_override_active: input.modelOverrideActive ?? false,
     prompt_store_version: input.promptStoreVersion ?? null,
+    // ContextPack v1 lineage (Stream C)
+    context_hash: input.contextHash,
+    prompt_hash: input.promptHash,
+    model_id: input.modelId,
+    capability: input.capability,
   };
 }
 

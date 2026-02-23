@@ -170,7 +170,9 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   const edgesWithStrength = edges.filter((e: any) => typeof e.strength_mean === "number").length;
   const parameters = edges.length > 0 ? edgesWithStrength / edges.length : 0;
 
-  // Context hash: deterministic hash of input context
+  // DEPRECATED: Remove after Stream D Review Pass ships.
+  // Use context_hash from ContextPackV1 (provenance.context_hash) instead.
+  // This v0 hash only covers brief + seed — ContextPackV1 covers all inputs.
   const contextHash = computeResponseHash({
     brief: ctx.input.brief,
     seed: (ctx.input as any).seed,
@@ -190,7 +192,7 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
       parameters: Math.round(parameters * 1000) / 1000,
     },
     open_questions: [],
-    context_hash: contextHash,
+    context_hash_v0: contextHash,
     model_id: modelId,
     prompt_version: promptVersion,
   };
