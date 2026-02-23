@@ -441,6 +441,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       ? {
           model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
           prompt_version: ctx.llmMeta.prompt_version,
+          prompt_text_version: ctx.llmMeta.prompt_text_version,
           prompt_hash: ctx.llmMeta.prompt_hash,
           duration_ms: ctx.llmMeta.provider_latency_ms,
           finish_reason: ctx.llmMeta.finish_reason,

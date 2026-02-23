@@ -13,6 +13,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
 import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';
 import { getDraftGraphPromptV15, DRAFT_GRAPH_PROMPT_V15 } from './defaults-v15.js';
+import { getDraftGraphPromptV19, DRAFT_GRAPH_PROMPT_V19 } from './defaults-v19.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
 import { log } from '../utils/telemetry.js';
@@ -23,19 +24,20 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v15' (default) or legacy versions.
+ * Use PROMPT_VERSION env var to select: 'v19' (default) or legacy versions.
  *
  * Examples:
- *   PROMPT_VERSION=v15 -> Use v15 (production: external priors, goal thresholds, coaching)
+ *   PROMPT_VERSION=v19 -> Use v19 (production: bidirected edges, goal constraints, causal claims)
+ *   PROMPT_VERSION=v15 -> Use v15 (deprecated: superseded by v19)
  *   PROMPT_VERSION=v12 -> Use v12 (deprecated: superseded by v15)
  *   PROMPT_VERSION=v22 -> Use v22 (deprecated: was misnumbering of v12 development)
  *   PROMPT_VERSION=v8  -> Use v8.2 (deprecated: superseded by v12)
  *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
-export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v22';
+export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v19' | 'v22';
 
-const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v22']);
-const DEFAULT_VERSION: PromptVersion = 'v15';
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v19', 'v22']);
+const DEFAULT_VERSION: PromptVersion = 'v19';
 
 /**
  * Get the configured prompt version from environment.
@@ -1610,7 +1612,8 @@ Respond ONLY with valid JSON.`;
  * Called during server initialization to populate the fallback registry.
  *
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
- * - v15 (default): Production prompt with external priors, goal thresholds, coaching
+ * - v19 (default): Production prompt with bidirected edges, goal constraints, causal claims
+ * - v15 (deprecated): External priors, goal thresholds, coaching (superseded by v19)
  * - v12 (deprecated): Factor metadata, scale discipline (superseded by v15)
  * - v22 (deprecated): Was misnumbering during v12 development
  * - v8 (deprecated): Concise v8.2, superseded by v12
@@ -1621,11 +1624,17 @@ export function registerAllDefaultPrompts(): void {
   const { version, explicit } = getPromptVersion();
 
   let draftPromptWithCaps: string;
-  if (version === 'v15') {
+  if (version === 'v19') {
+    draftPromptWithCaps = getDraftGraphPromptV19();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v19 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v15') {
     draftPromptWithCaps = getDraftGraphPromptV15();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v15 (${explicit ? 'explicitly configured' : 'default'})`
+      `Using draft_graph prompt v15 [DEPRECATED - use v19] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else if (version === 'v12') {
     draftPromptWithCaps = getDraftGraphPromptV12();
@@ -1680,7 +1689,8 @@ export function registerAllDefaultPrompts(): void {
  * Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT_V15,
+  draft_graph: DRAFT_GRAPH_PROMPT_V19,
+  draft_graph_v19: DRAFT_GRAPH_PROMPT_V19,
   draft_graph_v15: DRAFT_GRAPH_PROMPT_V15,
   draft_graph_v12: DRAFT_GRAPH_PROMPT_V12, // deprecated - superseded by v15
   draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
@@ -1702,6 +1712,9 @@ export const PROMPT_TEMPLATES = {
  * Useful for A/B testing or explicit version selection in tests.
  */
 export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v19') {
+    return getDraftGraphPromptV19();
+  }
   if (version === 'v15') {
     return getDraftGraphPromptV15();
   }

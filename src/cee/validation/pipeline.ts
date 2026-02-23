@@ -2051,6 +2051,7 @@ export async function finaliseCeeDraftResponse(
       llm_metadata: llmMeta ? {
         model: llmMeta.model ?? model,
         prompt_version: llmMeta.prompt_version,
+        prompt_text_version: llmMeta.prompt_text_version,
         prompt_hash: llmMeta.prompt_hash,
         duration_ms: llmMeta.provider_latency_ms,
         finish_reason: llmMeta.finish_reason,
@@ -2614,6 +2615,7 @@ export async function finaliseCeeDraftResponse(
       llm_metadata: llmMeta ? {
         model: llmMeta.model ?? model,
         prompt_version: llmMeta.prompt_version,
+        prompt_text_version: llmMeta.prompt_text_version,
         prompt_hash: llmMeta.prompt_hash,
         duration_ms: llmMeta.provider_latency_ms,
         finish_reason: llmMeta.finish_reason,

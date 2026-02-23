@@ -51,6 +51,7 @@ export interface DraftGraphResult {
     // Safe
     model: string;
     prompt_version?: string;
+    prompt_text_version?: string;
     prompt_hash?: string;
     temperature?: number;
     max_tokens?: number;

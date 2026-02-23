@@ -404,6 +404,8 @@ const ConfigSchema = z.object({
     legacyPipelineEnabled: booleanString.default(false), // If true, allow legacy Pipeline B; if false, throw on entry
     // Boundary security (Stream F)
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
+    // Prompt text version tracking (informational only — never used for logic branching)
+    promptTextVersion: z.string().default("unknown"), // e.g. "v19" — set via CEE_PROMPT_TEXT_VERSION env var
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -656,6 +658,7 @@ function parseConfig(): Config {
       unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
       legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
+      promptTextVersion: env.CEE_PROMPT_TEXT_VERSION,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
