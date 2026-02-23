@@ -106,6 +106,11 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   }, "Pipeline stage: Post-enrichment simpleRepair complete");
 
   // ── Step 7: Build enrichmentTrace (change 4: use extractionMode directly) ──
+  // INVARIANT: Each stage runs exactly once per request.
+  // Parity tests verify: enrich.called_count === 1
+  // The plan annotation checkpoint (captured by the orchestrator after this
+  // stage returns) is pure data extraction — it does NOT re-invoke enrichment.
+  // Extend this pattern for new stage-level behaviours.
   ctx.enrichmentTrace = {
     called_count: 1,
     extraction_mode: enrichmentResult.extractionMode,
