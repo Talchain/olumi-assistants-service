@@ -61,6 +61,8 @@ export interface CEEProvenance {
   engine_base_url_configured: boolean;
   model_override_active: boolean;
   prompt_store_version: number | null;
+  plan_id?: string;
+  plan_hash?: string;
 }
 
 // =============================================================================
@@ -216,6 +218,8 @@ export interface ProvenanceInput {
   promptSource?: 'store' | 'default';
   promptStoreVersion?: number | null;
   modelOverrideActive?: boolean;
+  planId?: string;
+  planHash?: string;
 }
 
 export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
@@ -238,6 +242,8 @@ export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
     engine_base_url_configured: Boolean(process.env.ENGINE_BASE_URL),
     model_override_active: input.modelOverrideActive ?? false,
     prompt_store_version: input.promptStoreVersion ?? null,
+    ...(input.planId ? { plan_id: input.planId } : {}),
+    ...(input.planHash ? { plan_hash: input.planHash } : {}),
   };
 }
 

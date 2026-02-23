@@ -159,12 +159,13 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   // Structure confidence: proportion of nodes connected by at least one edge
   const nodes = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes : [];
   const edges = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges : [];
+  const nodeIds = new Set<string>(nodes.map((n: any) => n?.id).filter(Boolean));
   const connectedIds = new Set<string>();
   for (const e of edges) {
-    if (e.from) connectedIds.add(e.from);
-    if (e.to) connectedIds.add(e.to);
+    if (e.from && nodeIds.has(e.from)) connectedIds.add(e.from);
+    if (e.to && nodeIds.has(e.to)) connectedIds.add(e.to);
   }
-  const structure = nodes.length > 0 ? connectedIds.size / nodes.length : 0;
+  const structure = nodes.length > 0 ? Math.min(connectedIds.size / nodes.length, 1) : 0;
 
   // Parameters confidence: proportion of edges with defined strength_mean
   const edgesWithStrength = edges.filter((e: any) => typeof e.strength_mean === "number").length;
@@ -262,7 +263,9 @@ export async function runUnifiedPipeline(
     // Stage 3: Enrich — Factor enrichment (ONCE)
     await runStageEnrich(ctx);
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
-    ctx.planAnnotation = capturePlanAnnotation(ctx);
+    if (ctx.graph) {
+      ctx.planAnnotation = capturePlanAnnotation(ctx);
+    }
 
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
     await runStageRepair(ctx);

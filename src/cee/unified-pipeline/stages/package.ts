@@ -535,6 +535,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     promptSource: ctx.llmMeta?.prompt_source,
     promptStoreVersion: ctx.llmMeta?.prompt_store_version,
     modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
+    planId: ctx.planAnnotation?.plan_id,
+    planHash: ctx.planAnnotation?.plan_hash,
   });
 
   // LLM raw trace

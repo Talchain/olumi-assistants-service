@@ -375,4 +375,82 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(Array.isArray(pa.stage3_rationales)).toBe(true);
     expect(Array.isArray(pa.open_questions)).toBe(true);
   });
+
+  // ── Stage 3 no-graph path (graph cleared after Stage 1) ──────────────────
+
+  it("planAnnotation not set when Stage 3 clears ctx.graph (no crash)", async () => {
+    let capturedCtx: any;
+
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = structuredClone(testGraph);
+      ctx.rationales = [];
+      ctx.confidence = 0.5;
+      ctx.llmMeta = { model: "test", prompt_version: "v1" };
+    });
+    (runStageNormalise as any).mockImplementation(async () => {});
+    (runStageEnrich as any).mockImplementation(async (ctx: any) => {
+      // Stage 3 clears the graph (simulating no-graph path in enrich)
+      ctx.graph = undefined;
+    });
+    (runStageRepair as any).mockImplementation(async () => {});
+    (runStagePackage as any).mockImplementation(async (ctx: any) => {
+      capturedCtx = ctx;
+    });
+    (runStageBoundary as any).mockImplementation(async (ctx: any) => {
+      ctx.finalResponse = { test: true };
+    });
+
+    // Must not throw — previously this would crash in computeResponseHash(undefined)
+    await expect(
+      runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts),
+    ).resolves.not.toThrow();
+
+    expect(capturedCtx.planAnnotation).toBeUndefined();
+  });
+
+  // ── Dangling edge confidence clamping ─────────────────────────────────────
+
+  it("confidence.structure clamped to 1.0 when edges reference non-existent nodes", async () => {
+    const graphWithDanglingEdges = {
+      nodes: [
+        { id: "n1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        // e1 connects n1 (exists) to n2 (does NOT exist in nodes)
+        { id: "e1", from: "n1", to: "n2", strength_mean: 0.5 },
+        // e2 connects two non-existent nodes
+        { id: "e2", from: "n3", to: "n4", strength_mean: 0.5 },
+      ],
+      version: "1.2",
+    };
+
+    const ctx = await runPipelineAndCapture({ graph: graphWithDanglingEdges });
+
+    // Only n1 is a real node and is connected → 1/1 = 1.0 (not 4/1 = 4.0)
+    expect(ctx.planAnnotation.confidence.structure).toBeLessThanOrEqual(1);
+    expect(ctx.planAnnotation.confidence.structure).toBeGreaterThanOrEqual(0);
+    expect(ctx.planAnnotation.confidence.structure).toBe(1);
+  });
+
+  it("confidence.structure excludes dangling endpoints from calculation", async () => {
+    const graphWithPartialDangling = {
+      nodes: [
+        { id: "n1", kind: "goal", label: "Goal" },
+        { id: "n2", kind: "option", label: "Option A" },
+        { id: "n3", kind: "option", label: "Option B" },
+      ],
+      edges: [
+        // Only connects n1 and n2; n3 is disconnected; n4 doesn't exist
+        { id: "e1", from: "n1", to: "n2", strength_mean: 0.5 },
+        { id: "e2", from: "n4", to: "n1", strength_mean: 0.3 },
+      ],
+      version: "1.2",
+    };
+
+    const ctx = await runPipelineAndCapture({ graph: graphWithPartialDangling });
+
+    // n1 and n2 connected (from real edges), n3 disconnected, n4 ignored (dangling)
+    // structure = 2/3 ≈ 0.667
+    expect(ctx.planAnnotation.confidence.structure).toBeCloseTo(2 / 3, 3);
+  });
 });
