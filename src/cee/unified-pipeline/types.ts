@@ -195,7 +195,12 @@ export interface PlanAnnotationCheckpoint {
    * Use for caching, deduplication, and replay verification.
    */
   plan_hash: string;
-  /** Rationales captured during Parse (Stage 1), snapshotted at Stage 3 */
+  /**
+   * Rationales captured during Parse (Stage 1), snapshotted at Stage 3.
+   *
+   * Bounded to prevent trace bloat: max 50 entries, each rationale
+   * truncated to 500 characters.
+   */
   stage3_rationales: {
     node_id: string;
     rationale: string;

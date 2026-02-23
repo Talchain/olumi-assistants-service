@@ -522,6 +522,41 @@ describe("runStagePackage", () => {
     );
   });
 
+  it("passes planId and planHash to assembleCeeProvenance when planAnnotation present", async () => {
+    const ctx = makeCtx({
+      planAnnotation: {
+        plan_id: "plan-test-abc",
+        plan_hash: "hash-test-def",
+        stage3_rationales: [],
+        confidence: { overall: 0.8, structure: 1, parameters: 1 },
+        open_questions: [],
+        context_hash: "ctx-hash",
+        model_id: "gpt-4o",
+        prompt_version: "v42",
+      },
+    });
+    await runStagePackage(ctx);
+
+    expect(assembleCeeProvenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: "plan-test-abc",
+        planHash: "hash-test-def",
+      }),
+    );
+  });
+
+  it("passes undefined planId/planHash when planAnnotation absent", async () => {
+    const ctx = makeCtx({ planAnnotation: undefined });
+    await runStagePackage(ctx);
+
+    expect(assembleCeeProvenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: undefined,
+        planHash: undefined,
+      }),
+    );
+  });
+
   // ── Graph frozen invariant ──────────────────────────────────────────────
 
   it("does not mutate ctx.graph during Stage 5", async () => {
