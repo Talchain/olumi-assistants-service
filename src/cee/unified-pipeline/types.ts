@@ -198,10 +198,13 @@ export interface PlanAnnotationCheckpoint {
    * Deterministic hash of plan content at Stage 3 checkpoint.
    * STABLE: same inputs → same plan_hash.
    *
-   * CANONICAL PAYLOAD (hashed in this order):
-   * 1. GraphT snapshot at Stage 3: canonicalised nodes + edges
-   * 2. Truncated rationales (post-truncation, max 50 × 500 chars)
-   * 3. Confidence scores (overall, structure, parameters)
+   * CANONICAL PAYLOAD (hashed as a single object):
+   * 1. graph — Stage 3 snapshot (nodes + edges in array order as received)
+   * 2. rationales — post-truncation (max 50 × 500 chars), array order preserved
+   * 3. confidence — { overall, structure, parameters } rounded to 3 decimal places
+   *
+   * Canonicalization: object keys are sorted alphabetically; array element
+   * order is preserved as-is. See computeResponseHash / canonicalizeJson.
    *
    * Does NOT include: plan_id (random), timestamps, model_id, prompt_version
    * (these vary per execution but don't change the "plan content")

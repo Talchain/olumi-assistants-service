@@ -1,10 +1,15 @@
 /**
- * Cross-service contract test: CEE plan provenance preservation
+ * CEE plan provenance preservation contract test
  *
- * Verifies that plan_id and plan_hash flow correctly from:
+ * Verifies that plan_id and plan_hash flow correctly through CEE's
+ * internal hops:
  * 1. PlanAnnotationCheckpoint (captured after Stage 3)
  * 2. assembleCeeProvenance (surfaced in response provenance)
- * 3. pipelineTrace.cee_provenance (final response trace)
+ * 3. pipelineTrace.cee_provenance (assembled trace object)
+ *
+ * NOTE: PLoT consumption is out of scope for this repo. This test covers
+ * the CEE-side contract only. PLoT integration should be verified in the
+ * PLoT repo using this fixture as a shared contract.
  *
  * Values must be preserved exactly — no transformation or truncation.
  */
@@ -24,7 +29,7 @@ const fixture = JSON.parse(
   ),
 );
 
-describe("Cross-service plan provenance", () => {
+describe("CEE plan provenance preservation", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -34,7 +39,7 @@ describe("Cross-service plan provenance", () => {
     vi.stubEnv("ENGINE_BASE_URL", "");
   }
 
-  // ── 1. PlanAnnotationCheckpoint contains plan_id and plan_hash ──────────
+  // ── 1. Fixture shape ──────────────────────────────────────────────────────
 
   it("fixture cee_checkpoint contains plan_id and plan_hash", () => {
     const cp = fixture.cee_checkpoint;
@@ -48,7 +53,7 @@ describe("Cross-service plan provenance", () => {
     expect(fixture.cee_checkpoint.plan_annotation_version).toBe("1");
   });
 
-  // ── 2. assembleCeeProvenance includes plan_id/plan_hash in output ──────
+  // ── 2. assembleCeeProvenance preserves values ─────────────────────────────
 
   it("assembleCeeProvenance preserves plan_id and plan_hash from checkpoint", () => {
     stubCleanEnv();
@@ -64,12 +69,11 @@ describe("Cross-service plan provenance", () => {
       planHash: cp.plan_hash,
     });
 
-    // Values must be preserved exactly
     expect(prov.plan_id).toBe(cp.plan_id);
     expect(prov.plan_hash).toBe(cp.plan_hash);
   });
 
-  // ── 3. plan_id/plan_hash in provenance match checkpoint exactly ────────
+  // ── 3. Provenance matches fixture exactly ─────────────────────────────────
 
   it("provenance plan fields match fixture cee_provenance exactly", () => {
     stubCleanEnv();
@@ -90,9 +94,40 @@ describe("Cross-service plan provenance", () => {
     expect(prov.plan_hash).toBe(expected.plan_hash);
   });
 
-  // ── 4. Values are preserved exactly (no transformation) ────────────────
+  // ── 4. Trace-object hop: provenance lands on pipelineTrace ────────────────
 
-  it("plan_id is not transformed between checkpoint and provenance", () => {
+  it("plan fields survive into a constructed pipelineTrace.cee_provenance", () => {
+    stubCleanEnv();
+    const cp = fixture.cee_checkpoint;
+
+    // Simulate what package.ts does: build provenance, attach to trace
+    const prov = assembleCeeProvenance({
+      pipelinePath: "unified",
+      model: cp.model_id,
+      promptVersion: cp.prompt_version,
+      promptSource: "store",
+      promptStoreVersion: 1,
+      planId: cp.plan_id,
+      planHash: cp.plan_hash,
+    });
+
+    const pipelineTrace: Record<string, unknown> = {
+      status: "success",
+      total_duration_ms: 100,
+      llm_call_count: 1,
+      stages: [],
+      cee_provenance: prov,
+    };
+
+    // Assert plan fields are accessible on the final trace structure
+    const traceProv = pipelineTrace.cee_provenance as CEEProvenance;
+    expect(traceProv.plan_id).toBe(cp.plan_id);
+    expect(traceProv.plan_hash).toBe(cp.plan_hash);
+  });
+
+  // ── 5. No transformation ──────────────────────────────────────────────────
+
+  it("values are not transformed between checkpoint and trace", () => {
     stubCleanEnv();
     const prov = assembleCeeProvenance({
       pipelinePath: "unified",
@@ -101,21 +136,18 @@ describe("Cross-service plan provenance", () => {
       planHash: fixture.cee_checkpoint.plan_hash,
     });
 
-    // Exact string equality — no lowercasing, trimming, or hashing
+    // Exact string equality — no lowercasing, trimming, or re-hashing
     expect(prov.plan_id).toStrictEqual(fixture.cee_checkpoint.plan_id);
     expect(prov.plan_hash).toStrictEqual(fixture.cee_checkpoint.plan_hash);
   });
 
-  // ── 5. Fixture assertions are consistent ───────────────────────────────
+  // ── 6. Fixture self-consistency ───────────────────────────────────────────
 
   it("fixture assertions match fixture data", () => {
     const cp = fixture.cee_checkpoint;
     const provExpected = fixture.cee_provenance;
 
-    // plan_id_preserved: checkpoint.plan_id === provenance.plan_id
     expect(cp.plan_id).toBe(provExpected.plan_id);
-
-    // plan_hash_preserved: checkpoint.plan_hash === provenance.plan_hash
     expect(cp.plan_hash).toBe(provExpected.plan_hash);
   });
 });

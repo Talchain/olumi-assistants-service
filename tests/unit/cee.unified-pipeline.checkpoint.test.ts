@@ -72,6 +72,7 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
 }));
 
 // ── Imports ─────────────────────────────────────────────────────────────────
+import { computeResponseHash } from "../../src/utils/response-hash.js";
 import { runUnifiedPipeline } from "../../src/cee/unified-pipeline/index.js";
 import { runStageParse } from "../../src/cee/unified-pipeline/stages/parse.js";
 import { runStageNormalise } from "../../src/cee/unified-pipeline/stages/normalise.js";
@@ -272,8 +273,19 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     const ctx1 = await runPipelineAndCapture({ rationales: oversizedRationales });
     const ctx2 = await runPipelineAndCapture({ rationales: preTruncatedRationales });
 
-    // Same graph + same truncated rationales + same confidence → same hash
+    // Positive: same graph + same truncated rationales + same confidence → same hash
     expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+
+    // Negative control: hash of untruncated payload would differ
+    const untruncatedHash = computeResponseHash({
+      graph: structuredClone(testGraph),
+      rationales: oversizedRationales.map(r => ({
+        node_id: r.node_id,
+        rationale: r.rationale,
+      })),
+      confidence: ctx1.planAnnotation.confidence,
+    });
+    expect(ctx1.planAnnotation.plan_hash).not.toBe(untruncatedHash);
   });
 
   it("plan_hash changes when rationales change", async () => {
