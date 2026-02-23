@@ -37,7 +37,7 @@ const CEEProvenanceSchema = z.object({
   prompt_store_version: z.number().nullable(),
   plan_id: z.string().optional(),
   plan_hash: z.string().optional(),
-});
+}).strict();
 
 describe("CEEProvenance plan fields contract", () => {
   afterEach(() => {

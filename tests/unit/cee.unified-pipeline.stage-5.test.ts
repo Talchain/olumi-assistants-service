@@ -523,6 +523,13 @@ describe("runStagePackage", () => {
   });
 
   it("passes planId and planHash to assembleCeeProvenance when planAnnotation present", async () => {
+    // Make the mock return plan fields so we can verify they land on the trace
+    (assembleCeeProvenance as any).mockReturnValue({
+      pipelinePath: "unified",
+      plan_id: "plan-test-abc",
+      plan_hash: "hash-test-def",
+    });
+
     const ctx = makeCtx({
       planAnnotation: {
         plan_id: "plan-test-abc",
@@ -537,12 +544,17 @@ describe("runStagePackage", () => {
     });
     await runStagePackage(ctx);
 
+    // Verify call args
     expect(assembleCeeProvenance).toHaveBeenCalledWith(
       expect.objectContaining({
         planId: "plan-test-abc",
         planHash: "hash-test-def",
       }),
     );
+
+    // Verify plan fields survive into the assembled trace
+    expect(ctx.pipelineTrace.cee_provenance.plan_id).toBe("plan-test-abc");
+    expect(ctx.pipelineTrace.cee_provenance.plan_hash).toBe("hash-test-def");
   });
 
   it("passes undefined planId/planHash when planAnnotation absent", async () => {
@@ -555,6 +567,10 @@ describe("runStagePackage", () => {
         planHash: undefined,
       }),
     );
+
+    // Verify plan fields are NOT on the trace when absent
+    expect(ctx.pipelineTrace.cee_provenance).not.toHaveProperty("plan_id");
+    expect(ctx.pipelineTrace.cee_provenance).not.toHaveProperty("plan_hash");
   });
 
   // ── Graph frozen invariant ──────────────────────────────────────────────
