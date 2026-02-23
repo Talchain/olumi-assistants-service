@@ -129,10 +129,20 @@ function captureStageSnapshot(ctx: StageContext): StageSnapshot {
 }
 
 /**
+ * Bytewise string comparator for deterministic sorting (locale-independent).
+ */
+function cmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * Computes deterministic hash for plan annotation checkpoint.
  *
  * CANONICAL PAYLOAD:
- * - Graph: nodes sorted by id, edges sorted by (from, to)
+ * - Graph: only { nodes, edges } — other graph fields (version, meta, etc.)
+ *   are excluded as they represent schema/execution metadata, not plan content
+ * - Nodes: sorted by id
+ * - Edges: sorted by (from, to, id) for full determinism with parallel edges
  * - Rationales: truncated (max 50 × 500 chars), array order preserved
  * - Confidence: { overall, structure, parameters }
  *
@@ -151,10 +161,12 @@ function computePlanHash(
   const edges = Array.isArray(g?.edges) ? g!.edges : [];
 
   const sortedGraph = {
-    nodes: [...nodes].sort((a, b) => String(a?.id ?? "").localeCompare(String(b?.id ?? ""))),
+    nodes: [...nodes].sort((a, b) => cmp(String(a?.id ?? ""), String(b?.id ?? ""))),
     edges: [...edges].sort((a, b) => {
-      const fromCmp = String(a?.from ?? "").localeCompare(String(b?.from ?? ""));
-      return fromCmp !== 0 ? fromCmp : String(a?.to ?? "").localeCompare(String(b?.to ?? ""));
+      const fromCmp = cmp(String(a?.from ?? ""), String(b?.from ?? ""));
+      if (fromCmp !== 0) return fromCmp;
+      const toCmp = cmp(String(a?.to ?? ""), String(b?.to ?? ""));
+      return toCmp !== 0 ? toCmp : cmp(String(a?.id ?? ""), String(b?.id ?? ""));
     }),
   };
 

@@ -199,11 +199,14 @@ export interface PlanAnnotationCheckpoint {
    * STABLE: same inputs → same plan_hash.
    *
    * CANONICAL PAYLOAD (hashed as a single object):
-   * 1. graph — Stage 3 snapshot, nodes sorted by id, edges sorted by (from, to)
+   * 1. graph — only { nodes, edges } from Stage 3 snapshot; other graph fields
+   *    (version, meta, default_seed) are excluded as schema/execution metadata.
+   *    Nodes sorted by id, edges sorted by (from, to, id) for full determinism
+   *    including parallel edges between the same endpoints.
    * 2. rationales — post-truncation (max 50 × 500 chars), array order preserved
    * 3. confidence — { overall, structure, parameters } rounded to 3 decimal places
    *
-   * Graph sorting ensures hash stability regardless of upstream node/edge ordering.
+   * Sorting uses bytewise string comparison (locale-independent).
    * Object keys are sorted alphabetically by computeResponseHash / canonicalizeJson.
    *
    * Does NOT include: plan_id (random), timestamps, model_id, prompt_version

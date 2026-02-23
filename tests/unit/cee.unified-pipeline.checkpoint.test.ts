@@ -322,6 +322,51 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
   });
 
+  it("plan_hash is order-invariant for parallel edges with same (from, to)", async () => {
+    const graphA = {
+      nodes: [
+        { id: "n1", kind: "goal", label: "G" },
+        { id: "n2", kind: "option", label: "O" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", strength_mean: 0.5 },
+        { id: "e2", from: "n1", to: "n2", strength_mean: 0.9 },
+      ],
+      version: "1.2",
+    };
+
+    // Same edges, reversed order
+    const graphB = structuredClone(graphA);
+    graphB.edges = [...graphB.edges].reverse();
+
+    const ctx1 = await runPipelineAndCapture({ graph: graphA });
+    const ctx2 = await runPipelineAndCapture({ graph: graphB });
+
+    // Parallel edges sorted by (from, to, id) → deterministic regardless of input order
+    expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+  });
+
+  it("plan_hash excludes non-node/edge graph fields (version, meta)", async () => {
+    const graphWithVersion = {
+      nodes: [{ id: "n1", kind: "goal", label: "G" }],
+      edges: [],
+      version: "1.2",
+    };
+
+    const graphWithDifferentVersion = {
+      nodes: [{ id: "n1", kind: "goal", label: "G" }],
+      edges: [],
+      version: "2.0",
+      meta: { some: "data" },
+    };
+
+    const ctx1 = await runPipelineAndCapture({ graph: graphWithVersion });
+    const ctx2 = await runPipelineAndCapture({ graph: graphWithDifferentVersion });
+
+    // Only nodes/edges matter for hash; version/meta excluded
+    expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+  });
+
   it("confidence.overall reflects ctx.confidence", async () => {
     const ctx = await runPipelineAndCapture({ confidence: 0.92 });
     expect(ctx.planAnnotation.confidence.overall).toBe(0.92);
