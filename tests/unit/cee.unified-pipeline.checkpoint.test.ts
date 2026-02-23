@@ -60,9 +60,10 @@ vi.mock("../../src/cee/corrections.js", () => ({
 }));
 
 // ── Mock request-id (stable plan_id for assertions) ─────────────────────────
+const mockGenerateRequestId = vi.fn(() => "plan-id-1234-5678-abcdef000000");
 vi.mock("../../src/utils/request-id.js", () => ({
   getRequestId: () => "test-request-id",
-  generateRequestId: () => "plan-id-1234-5678-abcdef000000",
+  generateRequestId: (...args: any[]) => mockGenerateRequestId(...args),
 }));
 
 // ── Mock error response builder ─────────────────────────────────────────────
@@ -182,6 +183,24 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(ctx1.planAnnotation.plan_hash.length).toBeGreaterThan(0);
   });
 
+  it("plan_id differs across identical runs (UUID non-determinism)", async () => {
+    // Override mock to return unique IDs per call
+    mockGenerateRequestId
+      .mockReturnValueOnce("plan-id-run-1-aaa")
+      .mockReturnValueOnce("plan-id-run-2-bbb");
+
+    const ctx1 = await runPipelineAndCapture();
+    const ctx2 = await runPipelineAndCapture();
+
+    // plan_id: unique per execution (UUID behaviour)
+    expect(ctx1.planAnnotation.plan_id).toBe("plan-id-run-1-aaa");
+    expect(ctx2.planAnnotation.plan_id).toBe("plan-id-run-2-bbb");
+    expect(ctx1.planAnnotation.plan_id).not.toBe(ctx2.planAnnotation.plan_id);
+
+    // plan_hash: deterministic (same graph → same hash)
+    expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+  });
+
   it("plan_hash changes when graph changes", async () => {
     const ctx1 = await runPipelineAndCapture({ graph: structuredClone(testGraph) });
 
@@ -212,6 +231,29 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
   it("handles empty rationales gracefully", async () => {
     const ctx = await runPipelineAndCapture({ rationales: [] });
     expect(ctx.planAnnotation.stage3_rationales).toEqual([]);
+  });
+
+  it("truncates rationales exceeding max count (50)", async () => {
+    const oversizedRationales = Array.from({ length: 80 }, (_, i) => ({
+      node_id: `n${i}`,
+      rationale: `Rationale ${i}`,
+    }));
+
+    const ctx = await runPipelineAndCapture({ rationales: oversizedRationales });
+
+    expect(ctx.planAnnotation.stage3_rationales).toHaveLength(50);
+    expect(ctx.planAnnotation.stage3_rationales[0].node_id).toBe("n0");
+    expect(ctx.planAnnotation.stage3_rationales[49].node_id).toBe("n49");
+  });
+
+  it("truncates individual rationale text exceeding 500 chars", async () => {
+    const longText = "x".repeat(1000);
+    const rationales = [{ node_id: "n1", rationale: longText }];
+
+    const ctx = await runPipelineAndCapture({ rationales });
+
+    expect(ctx.planAnnotation.stage3_rationales[0].rationale).toHaveLength(500);
+    expect(ctx.planAnnotation.stage3_rationales[0].rationale).toBe("x".repeat(500));
   });
 
   it("confidence.overall reflects ctx.confidence", async () => {

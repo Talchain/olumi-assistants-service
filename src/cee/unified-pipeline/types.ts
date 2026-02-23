@@ -184,9 +184,16 @@ export interface StageSnapshot {
  * whole-graph plan state.
  */
 export interface PlanAnnotationCheckpoint {
-  /** UUID v4 generated once at checkpoint — stable for the request */
+  /**
+   * Unique identifier for this execution. NOT stable across identical runs.
+   * Use for request lineage tracking and log correlation.
+   */
   plan_id: string;
-  /** Deterministic hash of graph state at Stage 3 (same graph → same hash) */
+  /**
+   * Deterministic hash of plan content (graph state at Stage 3).
+   * STABLE: same graph state → same plan_hash.
+   * Use for caching, deduplication, and replay verification.
+   */
   plan_hash: string;
   /** Rationales captured during Parse (Stage 1), snapshotted at Stage 3 */
   stage3_rationales: {
@@ -201,7 +208,13 @@ export interface PlanAnnotationCheckpoint {
   };
   /** Clarifications not yet resolved at Stage 3 */
   open_questions: string[];
-  /** Deterministic hash of input context (brief + seed) */
+  /**
+   * Deterministic hash of input context (brief + seed only).
+   *
+   * PROVISIONAL: Will be replaced by full ContextPack hash (Stream C)
+   * which includes prompt_version, model_id, selection, and other
+   * context blocks. Do not build long-lived caching on this field.
+   */
   context_hash: string;
   /** Model used for Parse/Enrich */
   model_id: string;

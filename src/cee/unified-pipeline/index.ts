@@ -145,11 +145,14 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   // plan_hash: deterministic hash of graph state at Stage 3
   const planHash = computeResponseHash(ctx.graph);
 
-  // Extract rationales from Stage 1 (Parse) — already populated on ctx
+  // Extract rationales from Stage 1 (Parse) — already populated on ctx.
+  // Bounded to prevent trace bloat: max 50 rationales, max 500 chars each.
+  const MAX_RATIONALES = 50;
+  const MAX_RATIONALE_LENGTH = 500;
   const stage3Rationales: PlanAnnotationCheckpoint["stage3_rationales"] = Array.isArray(ctx.rationales)
-    ? ctx.rationales.map((r: any) => ({
+    ? ctx.rationales.slice(0, MAX_RATIONALES).map((r: any) => ({
         node_id: typeof r?.node_id === "string" ? r.node_id : (typeof r?.id === "string" ? r.id : "unknown"),
-        rationale: typeof r?.rationale === "string" ? r.rationale : (typeof r?.text === "string" ? r.text : String(r ?? "")),
+        rationale: (typeof r?.rationale === "string" ? r.rationale : (typeof r?.text === "string" ? r.text : String(r ?? ""))).slice(0, MAX_RATIONALE_LENGTH),
       }))
     : [];
 
@@ -171,7 +174,9 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   const edgesWithStrength = edges.filter((e: any) => typeof e.strength_mean === "number").length;
   const parameters = edges.length > 0 ? edgesWithStrength / edges.length : 0;
 
-  // Context hash: deterministic hash of input context
+  // PROVISIONAL: context_hash covers brief + seed only.
+  // Will be replaced by full ContextPack hash (Stream C) which includes
+  // prompt_version, model_id, selection, and other context blocks.
   const contextHash = computeResponseHash({
     brief: ctx.input.brief,
     seed: (ctx.input as any).seed,
