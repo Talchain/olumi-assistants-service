@@ -160,6 +160,7 @@ function computePlanHash(
   const nodes = Array.isArray(g?.nodes) ? g!.nodes : [];
   const edges = Array.isArray(g?.edges) ? g!.edges : [];
 
+  // Assumes node.id and edge.id are unique (enforced by graph schema validation).
   const sortedGraph = {
     nodes: [...nodes].sort((a, b) => cmp(String(a?.id ?? ""), String(b?.id ?? ""))),
     edges: [...edges].sort((a, b) => {
