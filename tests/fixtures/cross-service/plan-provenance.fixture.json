@@ -1,5 +1,5 @@
 {
-  "description": "Plan provenance flows from CEE checkpoint through PLoT response. plan_id and plan_hash must be preserved exactly — no transformation, no truncation.",
+  "description": "CEE plan provenance preservation: plan_id and plan_hash flow from checkpoint → assembleCeeProvenance → pipelineTrace.cee_provenance. Values must be preserved exactly — no transformation, no truncation. PLoT consumption should be verified in the PLoT repo using this fixture as a shared contract.",
   "cee_checkpoint": {
     "plan_annotation_version": "1",
     "plan_id": "plan-abc-123",

@@ -146,8 +146,17 @@ describe("CEE plan provenance preservation", () => {
   it("fixture assertions match fixture data", () => {
     const cp = fixture.cee_checkpoint;
     const provExpected = fixture.cee_provenance;
+    const assertions = fixture.assertions;
 
+    // plan_id_preserved
+    expect(assertions.plan_id_preserved).toBe(true);
     expect(cp.plan_id).toBe(provExpected.plan_id);
+
+    // plan_hash_preserved
+    expect(assertions.plan_hash_preserved).toBe(true);
     expect(cp.plan_hash).toBe(provExpected.plan_hash);
+
+    // provenance_in_trace: verified by the trace-hop test above
+    expect(assertions.provenance_in_trace).toBe(true);
   });
 });
