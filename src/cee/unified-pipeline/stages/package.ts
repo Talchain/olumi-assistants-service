@@ -496,6 +496,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     pipelineTrace.stage_snapshots = ctx.stageSnapshots;
   }
 
+  // Plan annotation checkpoint (captured after Stage 3 — Enrich)
+  if (ctx.planAnnotation) {
+    pipelineTrace.plan_annotation = ctx.planAnnotation;
+  }
+
   // Final graph summary
   const nodeCount = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0;
   const edgeCount = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0;

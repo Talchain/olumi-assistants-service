@@ -150,6 +150,9 @@ export interface StageContext {
 
   // ── Stage snapshots (observability — goal_threshold field tracking) ──
   stageSnapshots?: Record<string, StageSnapshot>;
+
+  // ── Plan annotation checkpoint (captured after Stage 3 — Enrich) ──
+  planAnnotation?: PlanAnnotationCheckpoint;
 }
 
 /**
@@ -166,4 +169,42 @@ export interface StageSnapshot {
   goal_threshold_unit: string | null | "absent";
   goal_threshold_cap: number | null | "absent";
   goal_constraints_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Plan Annotation Checkpoint (captured after Stage 3 — Enrich)
+// ---------------------------------------------------------------------------
+
+/**
+ * Plan annotation checkpoint captured after Stage 3 (Enrich) completes.
+ *
+ * Provides lineage for Review Pass and enables future two-phase flows.
+ * Stored as a sibling to StageSnapshot on the context — not inside it —
+ * because StageSnapshot tracks goal node fields while this captures
+ * whole-graph plan state.
+ */
+export interface PlanAnnotationCheckpoint {
+  /** UUID v4 generated once at checkpoint — stable for the request */
+  plan_id: string;
+  /** Deterministic hash of graph state at Stage 3 (same graph → same hash) */
+  plan_hash: string;
+  /** Rationales captured during Parse (Stage 1), snapshotted at Stage 3 */
+  stage3_rationales: {
+    node_id: string;
+    rationale: string;
+  }[];
+  /** Confidence breakdown at Stage 3 boundary */
+  confidence: {
+    overall: number;
+    structure: number;
+    parameters: number;
+  };
+  /** Clarifications not yet resolved at Stage 3 */
+  open_questions: string[];
+  /** Deterministic hash of input context (brief + seed) */
+  context_hash: string;
+  /** Model used for Parse/Enrich */
+  model_id: string;
+  /** Prompt version from config */
+  prompt_version: string;
 }

@@ -17,8 +17,9 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { StageContext, StageSnapshot, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras } from "./types.js";
-import { getRequestId } from "../../utils/request-id.js";
+import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras } from "./types.js";
+import { getRequestId, generateRequestId } from "../../utils/request-id.js";
+import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
 import { log } from "../../utils/telemetry.js";
@@ -127,6 +128,74 @@ function captureStageSnapshot(ctx: StageContext): StageSnapshot {
   };
 }
 
+/**
+ * Capture plan annotation checkpoint after Stage 3 (Enrich).
+ *
+ * Extracts graph state, rationales, confidence, and context into a
+ * deterministic snapshot for lineage tracking and future two-phase flows.
+ *
+ * INVARIANT: Each stage runs exactly once per request.
+ * Parity tests verify: enrich.called_count === 1
+ * This function is pure data extraction — it does NOT re-invoke any stage.
+ */
+function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
+  // plan_id: generated once, stable for the request
+  const planId = generateRequestId();
+
+  // plan_hash: deterministic hash of graph state at Stage 3
+  const planHash = computeResponseHash(ctx.graph);
+
+  // Extract rationales from Stage 1 (Parse) — already populated on ctx
+  const stage3Rationales: PlanAnnotationCheckpoint["stage3_rationales"] = Array.isArray(ctx.rationales)
+    ? ctx.rationales.map((r: any) => ({
+        node_id: typeof r?.node_id === "string" ? r.node_id : (typeof r?.id === "string" ? r.id : "unknown"),
+        rationale: typeof r?.rationale === "string" ? r.rationale : (typeof r?.text === "string" ? r.text : String(r ?? "")),
+      }))
+    : [];
+
+  // Confidence breakdown from existing context
+  const overall = typeof ctx.confidence === "number" ? ctx.confidence : 0;
+
+  // Structure confidence: proportion of nodes connected by at least one edge
+  const nodes = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes : [];
+  const edges = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges : [];
+  const connectedIds = new Set<string>();
+  for (const e of edges) {
+    if (e.from) connectedIds.add(e.from);
+    if (e.to) connectedIds.add(e.to);
+  }
+  const structure = nodes.length > 0 ? connectedIds.size / nodes.length : 0;
+
+  // Parameters confidence: proportion of edges with defined strength_mean
+  const edgesWithStrength = edges.filter((e: any) => typeof e.strength_mean === "number").length;
+  const parameters = edges.length > 0 ? edgesWithStrength / edges.length : 0;
+
+  // Context hash: deterministic hash of input context
+  const contextHash = computeResponseHash({
+    brief: ctx.input.brief,
+    seed: (ctx.input as any).seed,
+  });
+
+  // Model and prompt version from LLM metadata (populated by Stage 1)
+  const modelId = ctx.llmMeta?.model ?? ctx.draftAdapter?.model ?? "unknown";
+  const promptVersion = ctx.llmMeta?.prompt_version ?? "unknown";
+
+  return {
+    plan_id: planId,
+    plan_hash: planHash,
+    stage3_rationales: stage3Rationales,
+    confidence: {
+      overall: Math.round(overall * 1000) / 1000,
+      structure: Math.round(structure * 1000) / 1000,
+      parameters: Math.round(parameters * 1000) / 1000,
+    },
+    open_questions: [],
+    context_hash: contextHash,
+    model_id: modelId,
+    prompt_version: promptVersion,
+  };
+}
+
 function buildRawOutputResponse(ctx: StageContext): UnifiedPipelineResult {
   return {
     statusCode: 200,
@@ -193,6 +262,7 @@ export async function runUnifiedPipeline(
     // Stage 3: Enrich — Factor enrichment (ONCE)
     await runStageEnrich(ctx);
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
+    ctx.planAnnotation = capturePlanAnnotation(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
     await runStageRepair(ctx);
