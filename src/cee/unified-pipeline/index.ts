@@ -129,6 +129,39 @@ function captureStageSnapshot(ctx: StageContext): StageSnapshot {
 }
 
 /**
+ * Computes deterministic hash for plan annotation checkpoint.
+ *
+ * CANONICAL PAYLOAD:
+ * - Graph: nodes sorted by id, edges sorted by (from, to)
+ * - Rationales: truncated (max 50 × 500 chars), array order preserved
+ * - Confidence: { overall, structure, parameters }
+ *
+ * @param graph - Graph at Stage 3 (sorted internally before hashing)
+ * @param rationales - Truncated rationales array
+ * @param confidence - Confidence scores object
+ * @returns 12-char SHA-256 hash prefix of canonical payload
+ */
+function computePlanHash(
+  graph: unknown,
+  rationales: { node_id: string; rationale: string }[],
+  confidence: { overall: number; structure: number; parameters: number },
+): string {
+  const g = graph as { nodes?: any[]; edges?: any[] } | null | undefined;
+  const nodes = Array.isArray(g?.nodes) ? g!.nodes : [];
+  const edges = Array.isArray(g?.edges) ? g!.edges : [];
+
+  const sortedGraph = {
+    nodes: [...nodes].sort((a, b) => String(a?.id ?? "").localeCompare(String(b?.id ?? ""))),
+    edges: [...edges].sort((a, b) => {
+      const fromCmp = String(a?.from ?? "").localeCompare(String(b?.from ?? ""));
+      return fromCmp !== 0 ? fromCmp : String(a?.to ?? "").localeCompare(String(b?.to ?? ""));
+    }),
+  };
+
+  return computeResponseHash({ graph: sortedGraph, rationales, confidence });
+}
+
+/**
  * Capture plan annotation checkpoint after Stage 3 (Enrich).
  *
  * Extracts graph state, rationales, confidence, and context into a
@@ -177,13 +210,9 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   };
 
   // ── Step 3: Compute plan_hash from canonical payload ───────────────────
-  // Canonical payload: graph + truncated rationales + confidence
+  // Canonical payload: sorted graph + truncated rationales + confidence
   // Does NOT include: plan_id, timestamps, model_id, prompt_version
-  const planHash = computeResponseHash({
-    graph: ctx.graph,
-    rationales: stage3Rationales,
-    confidence,
-  });
+  const planHash = computePlanHash(ctx.graph, stage3Rationales, confidence);
 
   // PROVISIONAL: context_hash covers brief + seed only.
   // Will be replaced by full ContextPack hash (Stream C) which includes

@@ -306,6 +306,22 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(ctx1.planAnnotation.plan_hash).not.toBe(ctx2.planAnnotation.plan_hash);
   });
 
+  it("plan_hash is order-invariant: shuffled nodes/edges produce the same hash", async () => {
+    // Original order: nodes [g1, o1, o2, f1], edges [e1, e2, e3]
+    const graphOriginal = structuredClone(testGraph);
+
+    // Shuffled order: nodes reversed, edges reversed
+    const graphShuffled = structuredClone(testGraph);
+    graphShuffled.nodes = [...graphShuffled.nodes].reverse();
+    graphShuffled.edges = [...graphShuffled.edges].reverse();
+
+    const ctx1 = await runPipelineAndCapture({ graph: graphOriginal });
+    const ctx2 = await runPipelineAndCapture({ graph: graphShuffled });
+
+    // Same content, different order → same plan_hash (sorted before hashing)
+    expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+  });
+
   it("confidence.overall reflects ctx.confidence", async () => {
     const ctx = await runPipelineAndCapture({ confidence: 0.92 });
     expect(ctx.planAnnotation.confidence.overall).toBe(0.92);
