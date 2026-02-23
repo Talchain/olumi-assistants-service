@@ -185,14 +185,28 @@ export interface StageSnapshot {
  */
 export interface PlanAnnotationCheckpoint {
   /**
+   * Schema version for migration compatibility.
+   * Increment when adding/removing/renaming fields.
+   */
+  plan_annotation_version: "1";
+  /**
    * Unique identifier for this execution. NOT stable across identical runs.
    * Use for request lineage tracking and log correlation.
    */
   plan_id: string;
   /**
-   * Deterministic hash of plan content (graph state at Stage 3).
-   * STABLE: same graph state → same plan_hash.
-   * Use for caching, deduplication, and replay verification.
+   * Deterministic hash of plan content at Stage 3 checkpoint.
+   * STABLE: same inputs → same plan_hash.
+   *
+   * CANONICAL PAYLOAD (hashed in this order):
+   * 1. GraphT snapshot at Stage 3: canonicalised nodes + edges
+   * 2. Truncated rationales (post-truncation, max 50 × 500 chars)
+   * 3. Confidence scores (overall, structure, parameters)
+   *
+   * Does NOT include: plan_id (random), timestamps, model_id, prompt_version
+   * (these vary per execution but don't change the "plan content")
+   *
+   * Use for: caching, deduplication, replay verification.
    */
   plan_hash: string;
   /**

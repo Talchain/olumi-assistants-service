@@ -1,0 +1,29 @@
+{
+  "description": "Plan provenance flows from CEE checkpoint through PLoT response. plan_id and plan_hash must be preserved exactly — no transformation, no truncation.",
+  "cee_checkpoint": {
+    "plan_annotation_version": "1",
+    "plan_id": "plan-abc-123",
+    "plan_hash": "a1b2c3d4e5f6",
+    "context_hash": "f6e5d4c3b2a1",
+    "stage3_rationales": [
+      { "node_id": "o1", "rationale": "Lower cost option" }
+    ],
+    "confidence": {
+      "overall": 0.85,
+      "structure": 1,
+      "parameters": 1
+    },
+    "open_questions": [],
+    "model_id": "gpt-4o-mini",
+    "prompt_version": "v2.3.1"
+  },
+  "cee_provenance": {
+    "plan_id": "plan-abc-123",
+    "plan_hash": "a1b2c3d4e5f6"
+  },
+  "assertions": {
+    "plan_id_preserved": true,
+    "plan_hash_preserved": true,
+    "provenance_in_trace": true
+  }
+}

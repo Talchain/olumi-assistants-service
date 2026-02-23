@@ -532,6 +532,7 @@ describe("runStagePackage", () => {
 
     const ctx = makeCtx({
       planAnnotation: {
+        plan_annotation_version: "1" as const,
         plan_id: "plan-test-abc",
         plan_hash: "hash-test-def",
         stage3_rationales: [],

@@ -256,6 +256,44 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(ctx.planAnnotation.stage3_rationales[0].rationale).toBe("x".repeat(500));
   });
 
+  it("plan_hash is computed from truncated rationales, not originals", async () => {
+    // 60 rationales with 1000-char text (exceeds both count and length bounds)
+    const oversizedRationales = Array.from({ length: 60 }, (_, i) => ({
+      node_id: `n${i}`,
+      rationale: `R${i}-${"a".repeat(997)}`,
+    }));
+
+    // Pre-truncated equivalent: first 50, each sliced to 500 chars
+    const preTruncatedRationales = oversizedRationales.slice(0, 50).map(r => ({
+      node_id: r.node_id,
+      rationale: r.rationale.slice(0, 500),
+    }));
+
+    const ctx1 = await runPipelineAndCapture({ rationales: oversizedRationales });
+    const ctx2 = await runPipelineAndCapture({ rationales: preTruncatedRationales });
+
+    // Same graph + same truncated rationales + same confidence → same hash
+    expect(ctx1.planAnnotation.plan_hash).toBe(ctx2.planAnnotation.plan_hash);
+  });
+
+  it("plan_hash changes when rationales change", async () => {
+    const ctx1 = await runPipelineAndCapture({
+      rationales: [{ node_id: "n1", rationale: "Option A is cheaper" }],
+    });
+    const ctx2 = await runPipelineAndCapture({
+      rationales: [{ node_id: "n1", rationale: "Option A is faster" }],
+    });
+
+    expect(ctx1.planAnnotation.plan_hash).not.toBe(ctx2.planAnnotation.plan_hash);
+  });
+
+  it("plan_hash changes when confidence changes", async () => {
+    const ctx1 = await runPipelineAndCapture({ confidence: 0.9 });
+    const ctx2 = await runPipelineAndCapture({ confidence: 0.5 });
+
+    expect(ctx1.planAnnotation.plan_hash).not.toBe(ctx2.planAnnotation.plan_hash);
+  });
+
   it("confidence.overall reflects ctx.confidence", async () => {
     const ctx = await runPipelineAndCapture({ confidence: 0.92 });
     expect(ctx.planAnnotation.confidence.overall).toBe(0.92);
@@ -397,9 +435,17 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
     expect(result.statusCode).toBe(400);
   });
 
+  it("plan_annotation_version is '1'", async () => {
+    const ctx = await runPipelineAndCapture();
+    expect(ctx.planAnnotation.plan_annotation_version).toBe("1");
+  });
+
   it("all PlanAnnotationCheckpoint fields are present and typed correctly", async () => {
     const ctx = await runPipelineAndCapture();
     const pa = ctx.planAnnotation;
+
+    // Version
+    expect(pa.plan_annotation_version).toBe("1");
 
     // Required string fields
     expect(typeof pa.plan_id).toBe("string");

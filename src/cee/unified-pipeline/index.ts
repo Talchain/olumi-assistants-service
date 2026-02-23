@@ -142,11 +142,7 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   // plan_id: generated once, stable for the request
   const planId = generateRequestId();
 
-  // plan_hash: deterministic hash of graph state at Stage 3
-  const planHash = computeResponseHash(ctx.graph);
-
-  // Extract rationales from Stage 1 (Parse) — already populated on ctx.
-  // Bounded to prevent trace bloat: max 50 rationales, max 500 chars each.
+  // ── Step 1: Truncate rationales FIRST (before hashing) ─────────────────
   const MAX_RATIONALES = 50;
   const MAX_RATIONALE_LENGTH = 500;
   const stage3Rationales: PlanAnnotationCheckpoint["stage3_rationales"] = Array.isArray(ctx.rationales)
@@ -156,7 +152,7 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
       }))
     : [];
 
-  // Confidence breakdown from existing context
+  // ── Step 2: Compute confidence ─────────────────────────────────────────
   const overall = typeof ctx.confidence === "number" ? ctx.confidence : 0;
 
   // Structure confidence: proportion of nodes connected by at least one edge
@@ -174,6 +170,21 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   const edgesWithStrength = edges.filter((e: any) => typeof e.strength_mean === "number").length;
   const parameters = edges.length > 0 ? edgesWithStrength / edges.length : 0;
 
+  const confidence = {
+    overall: Math.round(overall * 1000) / 1000,
+    structure: Math.round(structure * 1000) / 1000,
+    parameters: Math.round(parameters * 1000) / 1000,
+  };
+
+  // ── Step 3: Compute plan_hash from canonical payload ───────────────────
+  // Canonical payload: graph + truncated rationales + confidence
+  // Does NOT include: plan_id, timestamps, model_id, prompt_version
+  const planHash = computeResponseHash({
+    graph: ctx.graph,
+    rationales: stage3Rationales,
+    confidence,
+  });
+
   // PROVISIONAL: context_hash covers brief + seed only.
   // Will be replaced by full ContextPack hash (Stream C) which includes
   // prompt_version, model_id, selection, and other context blocks.
@@ -187,14 +198,11 @@ function capturePlanAnnotation(ctx: StageContext): PlanAnnotationCheckpoint {
   const promptVersion = ctx.llmMeta?.prompt_version ?? "unknown";
 
   return {
+    plan_annotation_version: "1",
     plan_id: planId,
     plan_hash: planHash,
     stage3_rationales: stage3Rationales,
-    confidence: {
-      overall: Math.round(overall * 1000) / 1000,
-      structure: Math.round(structure * 1000) / 1000,
-      parameters: Math.round(parameters * 1000) / 1000,
-    },
+    confidence,
     open_questions: [],
     context_hash: contextHash,
     model_id: modelId,
