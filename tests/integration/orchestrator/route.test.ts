@@ -202,10 +202,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
 
-    expect(body.stage_indicator).toEqual({
-      stage: "evaluate",
-      label: "Evaluating options",
-    });
+    expect(body.stage_indicator).toBe("evaluate");
+    expect(body.stage_label).toBe("Evaluating options");
   });
 
   // ---------------------------------------------------

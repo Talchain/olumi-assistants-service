@@ -24,7 +24,6 @@ import type {
   BlockProvenance,
   BlockAction,
   GraphPatchBlockData,
-  PatchOperation,
   FactBlockData,
   CommentaryBlockData,
   SupportingRef,
@@ -101,7 +100,7 @@ function makeProvenance(trigger: string, turnId: string): BlockProvenance {
 export function createGraphPatchBlock(
   data: GraphPatchBlockData,
   turnId: string,
-  relatedElements?: string[],
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
   actions?: BlockAction[],
 ): ConversationBlock {
   // Hash input: patch_type + operations (sorted keys, preserved order) + graph hash
@@ -139,7 +138,7 @@ export function createFactBlock(
   turnId: string,
   responseHash?: string,
   seed?: number,
-  relatedElements?: string[],
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
 ): ConversationBlock {
   const blockId = deterministicId(
     'fact',
@@ -216,18 +215,15 @@ export function createBriefBlock(
  * Ephemeral ID (commentary is context-dependent, not deterministic).
  */
 export function createCommentaryBlock(
-  text: string,
+  narrative: string,
   turnId: string,
   trigger: string,
-  supportingRefs?: SupportingRef[],
-  relatedElements?: string[],
+  supportingRefs: SupportingRef[] = [],
+  relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
 ): ConversationBlock {
   const blockId = ephemeralId('commentary');
 
-  const data: CommentaryBlockData = { text };
-  if (supportingRefs && supportingRefs.length > 0) {
-    data.supporting_refs = supportingRefs;
-  }
+  const data: CommentaryBlockData = { narrative, supporting_refs: supportingRefs };
 
   return {
     block_id: blockId,

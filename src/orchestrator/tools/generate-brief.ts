@@ -31,17 +31,17 @@ const BRIEF_ACTIONS: BlockAction[] = [
   {
     action_id: 'brief_share',
     label: 'Share',
-    action_type: 'navigate',
+    action_type: 'share',
   },
   {
     action_id: 'brief_edit',
     label: 'Edit',
-    action_type: 'prompt',
+    action_type: 'edit',
   },
   {
     action_id: 'brief_regenerate',
     label: 'Regenerate',
-    action_type: 'prompt',
+    action_type: 'rerun',
   },
 ];
 

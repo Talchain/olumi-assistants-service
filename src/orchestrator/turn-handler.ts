@@ -164,6 +164,10 @@ async function handleSystemEvent(
 
   switch (event.type) {
     case 'patch_accepted':
+      // TODO(post-PoC): Wire PLoT /v1/validate-patch call here.
+      // Full flow: UI sends patch_accepted → CEE calls PLoT validate-patch →
+      // CEE returns validated graph_hash in envelope.
+      // For PoC: UI calls PLoT validate-patch directly. CEE ack-only.
     case 'patch_dismissed':
     case 'feedback_submitted': {
       // No LLM call — log + return empty

@@ -299,7 +299,7 @@ function buildSupportingRefs(response: V2RunResponseEnvelope): SupportingRef[] {
         refs.push({
           ref_type: 'fact',
           ref_id: f.fact_id as string,
-          label: f.fact_type as string,
+          claim: String(f.fact_type),
         });
       }
     }

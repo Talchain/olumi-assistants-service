@@ -84,10 +84,8 @@ describe("Envelope Assembly", () => {
       context: makeContext({ framing: { stage: "evaluate" } }),
     });
 
-    expect(envelope.stage_indicator).toEqual({
-      stage: "evaluate",
-      label: "Evaluating options",
-    });
+    expect(envelope.stage_indicator).toBe("evaluate");
+    expect(envelope.stage_label).toBe("Evaluating options");
   });
 
   it("omits stage indicator when framing absent", () => {

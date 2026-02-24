@@ -13,7 +13,6 @@ import type {
   SuggestedAction,
   ResponseLineage,
   TurnPlan,
-  StageIndicator,
   OrchestratorError,
   ConversationContext,
   V2RunResponseEnvelope,
@@ -51,7 +50,7 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   const turnId = input.turnId ?? randomUUID();
 
   const lineage = buildLineage(input.context, input.analysisResponse);
-  const stageIndicator = buildStageIndicator(input.context);
+  const stage = resolveStage(input.context);
 
   const envelope: OrchestratorResponseEnvelope = {
     turn_id: turnId,
@@ -72,8 +71,9 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
     envelope.turn_plan = input.turnPlan;
   }
 
-  if (stageIndicator) {
-    envelope.stage_indicator = stageIndicator;
+  if (stage) {
+    envelope.stage_indicator = stage;
+    envelope.stage_label = STAGE_LABELS[stage] ?? stage;
   }
 
   if (input.error) {
@@ -133,15 +133,12 @@ const STAGE_LABELS: Record<DecisionStage, string> = {
   optimise: 'Optimising the plan',
 };
 
-function buildStageIndicator(context: ConversationContext): StageIndicator | undefined {
+function resolveStage(context: ConversationContext): DecisionStage | undefined {
   if (!context.framing?.stage) {
     return undefined;
   }
 
-  return {
-    stage: context.framing.stage,
-    label: STAGE_LABELS[context.framing.stage] ?? context.framing.stage,
-  };
+  return context.framing.stage;
 }
 
 // ============================================================================

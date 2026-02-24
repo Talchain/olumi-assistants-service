@@ -47,7 +47,7 @@ export interface OrchestratorTurnRequest {
 export interface SuggestedAction {
   label: string;
   prompt: string;
-  role: 'primary' | 'secondary';
+  role: 'facilitator' | 'challenger';
 }
 
 export interface OrchestratorError {
@@ -65,10 +65,6 @@ export interface TurnPlan {
   tool_latency_ms?: number;
 }
 
-export interface StageIndicator {
-  stage: DecisionStage;
-  label: string;
-}
 
 export interface ResponseLineage {
   context_hash: string;
@@ -86,7 +82,9 @@ export interface OrchestratorResponseEnvelope {
   analysis_response?: unknown;
   lineage: ResponseLineage;
   turn_plan?: TurnPlan;
-  stage_indicator?: StageIndicator;
+  stage_indicator?: DecisionStage;
+  /** Debug aid — not part of INT-3 contract */
+  stage_label?: string;
   error?: OrchestratorError;
 }
 
@@ -146,7 +144,7 @@ export interface BlockProvenance {
 export interface BlockAction {
   action_id: string;
   label: string;
-  action_type: 'prompt' | 'navigate' | 'dismiss';
+  action_type: 'accept' | 'edit' | 'dismiss' | 'attach' | 'share' | 'rerun' | 'undo';
 }
 
 export interface ConversationBlock {
@@ -155,7 +153,7 @@ export interface ConversationBlock {
   data: GraphPatchBlockData | FactBlockData | CommentaryBlockData | BriefBlockData | ReviewCardBlockData | FramingBlockData;
   actions?: BlockAction[];
   provenance: BlockProvenance;
-  related_elements?: string[];
+  related_elements?: { node_ids?: string[]; edge_ids?: string[] };
 }
 
 // ---- Graph Patch Block ----
@@ -190,14 +188,15 @@ export interface FactBlockData {
 // ---- Commentary Block ----
 
 export interface SupportingRef {
-  ref_type: 'fact' | 'review_card' | 'graph_node' | 'graph_edge';
+  ref_type: 'fact' | 'review_card' | 'evidence';
   ref_id: string;
-  label?: string;
+  claim: string;
+  ui_anchor?: { block_id?: string; section_id?: string };
 }
 
 export interface CommentaryBlockData {
-  text: string;
-  supporting_refs?: SupportingRef[];
+  narrative: string;
+  supporting_refs: SupportingRef[];
 }
 
 // ---- Brief Block ----
