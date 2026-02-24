@@ -782,7 +782,9 @@ export class OpenAIAdapter implements LLMAdapter {
         meta: {
           model: this.model,
           prompt_version: promptMeta.prompt_version,
-          prompt_text_version: config.cee.promptTextVersion,
+          prompt_text_version: promptMeta.source === 'store' && promptMeta.version
+            ? `v${promptMeta.version}`
+            : 'fallback-v19',
           prompt_hash: promptMeta.prompt_hash,
           // Diagnostic fields for prompt cache debugging
           instance_id: promptMeta.instance_id,

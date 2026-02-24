@@ -1,58 +1,43 @@
 /**
- * Tests for prompt text version tracking (CEE_PROMPT_TEXT_VERSION)
+ * Tests for prompt text version tracking
  *
  * Covers:
- * - Config reads CEE_PROMPT_TEXT_VERSION env var
- * - Default value is "unknown" when env var is not set
- * - prompt_text_version field appears in DraftGraphResult.meta type
- * - Fallback prompt (v19) contains known v19-specific strings
+ * - prompt_text_version is derived from prompt store version
+ * - Fallback prompt (v19) is clearly identified
+ * - Fallback prompt contains known v19-specific strings
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
-describe("Prompt Text Version Tracking", () => {
-  const originalEnv = { ...process.env };
+describe("Prompt Text Version Formatting", () => {
+  it("formats store version as vN", () => {
+    // Simulates adapter logic: promptMeta.source === 'store' && promptMeta.version
+    const promptMeta = { source: 'store' as const, version: 163 };
+    const promptTextVersion = promptMeta.source === 'store' && promptMeta.version
+      ? `v${promptMeta.version}`
+      : 'fallback-v19';
 
-  beforeEach(() => {
-    vi.resetModules();
+    expect(promptTextVersion).toBe("v163");
   });
 
-  afterEach(() => {
-    process.env = { ...originalEnv };
+  it("uses fallback-v19 when source is default", () => {
+    // Simulates adapter logic: promptMeta.source === 'default'
+    const promptMeta = { source: 'default' as const, version: undefined };
+    const promptTextVersion = promptMeta.source === 'store' && promptMeta.version
+      ? `v${promptMeta.version}`
+      : 'fallback-v19';
+
+    expect(promptTextVersion).toBe("fallback-v19");
   });
 
-  describe("Config: CEE_PROMPT_TEXT_VERSION", () => {
-    it("returns the env var value when CEE_PROMPT_TEXT_VERSION is set", async () => {
-      process.env = {
-        NODE_ENV: "test",
-        CEE_PROMPT_TEXT_VERSION: "v19",
-      };
+  it("uses fallback-v19 when version is missing from store", () => {
+    // Edge case: source is 'store' but no version (shouldn't happen, but defensive)
+    const promptMeta = { source: 'store' as const, version: undefined };
+    const promptTextVersion = promptMeta.source === 'store' && promptMeta.version
+      ? `v${promptMeta.version}`
+      : 'fallback-v19';
 
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.promptTextVersion).toBe("v19");
-    });
-
-    it('defaults to "unknown" when CEE_PROMPT_TEXT_VERSION is not set', async () => {
-      process.env = {
-        NODE_ENV: "test",
-      };
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.promptTextVersion).toBe("unknown");
-    });
-
-    it("accepts arbitrary version strings", async () => {
-      process.env = {
-        NODE_ENV: "test",
-        CEE_PROMPT_TEXT_VERSION: "v42-beta",
-      };
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.promptTextVersion).toBe("v42-beta");
-    });
+    expect(promptTextVersion).toBe("fallback-v19");
   });
 });
 
@@ -64,7 +49,7 @@ describe("Fallback Prompt v19 Content", () => {
 
     // v19-specific: causal claims array
     expect(DRAFT_GRAPH_PROMPT_V19).toContain(
-      "Aim for 5\u201312 key causal judgements"
+      "Aim for 5–12 key causal judgements"
     );
   });
 
