@@ -8,7 +8,7 @@
  * - Options include interventions mapping to factor nodes
  * - Options have status: 'ready' | 'needs_user_mapping'
  * - goal_node_id is required at top level
- * - Edge strength uses strength_mean (unconstrained) instead of weight (0-1)
+ * - Edge strength uses nested strength: { mean, std } + exists_probability (canonical v2.2)
  */
 
 import type {
@@ -311,9 +311,8 @@ export function transformEdgeToV3(
   return {
     from: edge.from,
     to: edge.to,
-    strength_mean: strengthMean,
-    strength_std: strengthStd,
-    belief_exists: beliefExists,
+    strength: { mean: strengthMean, std: strengthStd },
+    exists_probability: beliefExists,
     effect_direction: effectDirection,
     provenance,
     // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
@@ -904,39 +903,39 @@ function generateValidationWarnings(
 
   // P1-CEE-3: Check for negligible and low strength edges
   for (const edge of graph.edges) {
-    const absMean = Math.abs(edge.strength_mean);
+    const absMean = Math.abs(edge.strength.mean);
 
     if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {
       // Low strength edge (|mean| < 0.05, v2.7 schema)
       warnings.push({
         code: CIL_WARNING_CODES.EDGE_STRENGTH_LOW,
         severity: "info",
-        message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength_mean.toFixed(3)})`,
+        message: `Edge from "${edge.from}" to "${edge.to}" has low strength (${edge.strength.mean.toFixed(3)})`,
         affected_node_id: edge.from,
         suggestion: "Review the strength of this relationship",
         details: {
           edge_id: `${edge.from}->${edge.to}`,
-          mean: edge.strength_mean,
+          mean: edge.strength.mean,
         },
       });
       emit(TelemetryEvents.EdgeStrengthLow ?? "cee.edge.strength_low", {
         edgeFrom: edge.from,
         edgeTo: edge.to,
-        strengthMean: edge.strength_mean,
+        strengthMean: edge.strength.mean,
       });
     } else if (absMean < EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD) {
       // Negligible edge (0.05 ≤ |mean| < 0.1)
       warnings.push({
         code: CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
         severity: "info",
-        message: `Edge from "${edge.from}" to "${edge.to}" has negligible strength (${edge.strength_mean.toFixed(3)})`,
+        message: `Edge from "${edge.from}" to "${edge.to}" has negligible strength (${edge.strength.mean.toFixed(3)})`,
         affected_node_id: edge.from,
         suggestion: "Consider removing this edge or increasing its strength if the relationship is meaningful",
       });
       emit(TelemetryEvents.EdgeStrengthNegligible ?? "cee.edge.strength_negligible", {
         edgeFrom: edge.from,
         edgeTo: edge.to,
-        strengthMean: edge.strength_mean,
+        strengthMean: edge.strength.mean,
       });
     }
   }

@@ -470,9 +470,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -505,9 +505,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.3 },
-        { from: "factor_b", to: "goal", strength_mean: 0.7 },
-        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.3 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.7 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.9 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -533,11 +533,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "goal", strength_mean: 0.8, strength_std: 0.2 }, // One varied edge
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.8, std: 0.2 } }, // One varied edge
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -563,11 +563,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_a", to: "goal", strength_mean: 0.7, strength_std: 0.2 },
-        { from: "factor_b", to: "goal", strength_mean: 0.8, strength_std: 0.25 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.7, std: 0.2 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.8, std: 0.25 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -582,8 +582,8 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       const rawNodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Nodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -609,12 +609,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Structural edges (excluded)
-        { from: "decision", to: "option_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "option_a", to: "factor_price", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "decision", to: "option_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "option_a", to: "factor_price", strength: { mean: 0.5, std: 0.125 } },
         // Causal edges (included)
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -635,9 +635,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.3 },
-        { from: "factor_a", to: "goal", strength_mean: 0.7 },
-        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+        { from: "factor_a", to: "goal", strength: { mean: 0.3 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.7 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.9 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -672,9 +672,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         // Note: factor_b is missing but referenced in edges
       ];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 }, // Missing from node
-        { from: "factor_a", to: "factor_missing", strength_mean: 0.5, strength_std: 0.125 }, // Missing to node
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.125 } }, // Missing from node
+        { from: "factor_a", to: "factor_missing", strength: { mean: 0.5, std: 0.125 } }, // Missing to node
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -710,17 +710,17 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Option-outgoing edges with 0.5 (excluded from analysis)
-        { from: "option_a", to: "factor_x", strength_mean: 0.5 },
-        { from: "option_a", to: "factor_y", strength_mean: 0.5 },
-        { from: "option_b", to: "factor_x", strength_mean: 0.5 },
-        { from: "option_b", to: "outcome", strength_mean: 0.5 },
+        { from: "option_a", to: "factor_x", strength: { mean: 0.5 } },
+        { from: "option_a", to: "factor_y", strength: { mean: 0.5 } },
+        { from: "option_b", to: "factor_x", strength: { mean: 0.5 } },
+        { from: "option_b", to: "outcome", strength: { mean: 0.5 } },
         // Decision→option edges (excluded)
-        { from: "decision", to: "option_a", strength_mean: 0.5 },
-        { from: "decision", to: "option_b", strength_mean: 0.5 },
+        { from: "decision", to: "option_a", strength: { mean: 0.5 } },
+        { from: "decision", to: "option_b", strength: { mean: 0.5 } },
         // Causal edges with varied strengths (included)
-        { from: "factor_x", to: "outcome", strength_mean: 0.3 },
-        { from: "factor_y", to: "outcome", strength_mean: 0.7 },
-        { from: "outcome", to: "goal", strength_mean: 0.9 },
+        { from: "factor_x", to: "outcome", strength: { mean: 0.3 } },
+        { from: "factor_y", to: "outcome", strength: { mean: 0.7 } },
+        { from: "outcome", to: "goal", strength: { mean: 0.9 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -748,10 +748,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Negative defaults (sign-adjusted from 0.5 → -0.5), std still 0.125
-        { from: "risk_a", to: "goal", strength_mean: -0.5, strength_std: 0.125, effect_direction: "negative" },
-        { from: "risk_b", to: "goal", strength_mean: -0.5, strength_std: 0.125, effect_direction: "negative" },
+        { from: "risk_a", to: "goal", strength: { mean: -0.5, std: 0.125 }, effect_direction: "negative" },
+        { from: "risk_b", to: "goal", strength: { mean: -0.5, std: 0.125 }, effect_direction: "negative" },
         // Positive default
-        { from: "risk_a", to: "risk_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "risk_a", to: "risk_b", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -781,9 +781,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5000000001, strength_std: 0.2 },
-        { from: "factor_b", to: "goal", strength_mean: 0.4999999999, strength_std: 0.18 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5000000001, std: 0.2 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.4999999999, std: 0.18 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.25 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -815,17 +815,17 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // 7 edges with mean = 0.5 but varying std (mean-dominant case)
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.18 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
-        { from: "factor_a", to: "factor_c", strength_mean: 0.5, strength_std: 0.12 },
-        { from: "factor_c", to: "factor_a", strength_mean: 0.5, strength_std: 0.19 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.2 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.5, std: 0.18 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.5, std: 0.15 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.22 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.25 } },
+        { from: "factor_a", to: "factor_c", strength: { mean: 0.5, std: 0.12 } },
+        { from: "factor_c", to: "factor_a", strength: { mean: 0.5, std: 0.19 } },
         // 3 edges with varied mean (not defaults)
-        { from: "factor_a", to: "factor_b", strength_mean: 0.3, strength_std: 0.1 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.7, strength_std: 0.2 },
-        { from: "factor_c", to: "goal", strength_mean: 0.9, strength_std: 0.15 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.3, std: 0.1 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.7, std: 0.2 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.9, std: 0.15 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -852,17 +852,17 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // 6 edges with mean = 0.5
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.5, strength_std: 0.18 },
-        { from: "factor_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
-        { from: "factor_a", to: "factor_c", strength_mean: 0.5, strength_std: 0.12 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.2 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.5, std: 0.18 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.5, std: 0.15 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.22 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.25 } },
+        { from: "factor_a", to: "factor_c", strength: { mean: 0.5, std: 0.12 } },
         // 4 edges with varied mean
-        { from: "factor_c", to: "factor_a", strength_mean: 0.3, strength_std: 0.19 },
-        { from: "factor_a", to: "factor_b", strength_mean: 0.7, strength_std: 0.1 },
-        { from: "factor_b", to: "factor_c", strength_mean: 0.9, strength_std: 0.2 },
-        { from: "factor_c", to: "goal", strength_mean: 0.8, strength_std: 0.15 },
+        { from: "factor_c", to: "factor_a", strength: { mean: 0.3, std: 0.19 } },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.7, std: 0.1 } },
+        { from: "factor_b", to: "factor_c", strength: { mean: 0.9, std: 0.2 } },
+        { from: "factor_c", to: "goal", strength: { mean: 0.8, std: 0.15 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -887,9 +887,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.125 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -914,9 +914,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "factor_b", to: "goal", strength_mean: 0.5, strength_std: 0.18 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.2 } },
+        { from: "factor_b", to: "goal", strength: { mean: 0.5, std: 0.18 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.25 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -943,10 +943,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Negative mean (sign-adjusted from 0.5 → -0.5), varied std
-        { from: "risk_a", to: "goal", strength_mean: -0.5, strength_std: 0.2 },
-        { from: "risk_b", to: "goal", strength_mean: -0.5, strength_std: 0.18 },
+        { from: "risk_a", to: "goal", strength: { mean: -0.5, std: 0.2 } },
+        { from: "risk_b", to: "goal", strength: { mean: -0.5, std: 0.18 } },
         // Positive mean, varied std
-        { from: "risk_a", to: "risk_b", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "risk_a", to: "risk_b", strength: { mean: 0.5, std: 0.25 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -973,12 +973,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Structural edges with mean=0.5 (excluded from analysis)
-        { from: "decision", to: "option_a", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "option_a", to: "factor_price", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "decision", to: "option_a", strength: { mean: 0.5, std: 0.2 } },
+        { from: "option_a", to: "factor_price", strength: { mean: 0.5, std: 0.18 } },
         // Causal edges with mean=0.5 (included)
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
-        { from: "factor_price", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.15 } },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.22 } },
+        { from: "factor_price", to: "goal", strength: { mean: 0.5, std: 0.25 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -993,8 +993,8 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       const rawNodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Nodes = [{ id: "factor_a", kind: "factor" }, { id: "goal", kind: "goal" }];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "factor_a", to: "goal", strength_mean: 0.5, strength_std: 0.18 },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.2 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.5, std: 0.18 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -1015,9 +1015,9 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { id: "goal", kind: "goal" },
       ];
       const v3Edges = [
-        { from: "factor_a", to: "goal", strength_mean: 0.3 },
-        { from: "factor_a", to: "goal", strength_mean: 0.7 },
-        { from: "factor_a", to: "goal", strength_mean: 0.9 },
+        { from: "factor_a", to: "goal", strength: { mean: 0.3 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.7 } },
+        { from: "factor_a", to: "goal", strength: { mean: 0.9 } },
       ];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
@@ -1048,12 +1048,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("decision→option edges excluded from default count (both warnings)", () => {
       const v3Edges = [
         // Structural: decision→option (excluded)
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "dec", to: "opt_b", strength: { mean: 0.5, std: 0.125 } },
         // Causal edges (included) — all defaulted
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1072,12 +1072,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("option→factor edges excluded from default count (both warnings)", () => {
       const v3Edges = [
         // Structural: option→factor (excluded)
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_b", to: "fac_demand", strength: { mean: 0.5, std: 0.125 } },
         // Causal edges (included) — all defaulted
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1096,10 +1096,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // Causal edges with varied strengths
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.7, strength_std: 0.2 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.3, strength_std: 0.1 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.8, strength_std: 0.15 },
-        { from: "risk_inflation", to: "goal_profit", strength_mean: -0.4, strength_std: 0.18 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.7, std: 0.2 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.3, std: 0.1 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.8, std: 0.15 } },
+        { from: "risk_inflation", to: "goal_profit", strength: { mean: -0.4, std: 0.18 } },
       ];
 
       const defaults = detectStrengthDefaults(nodes, v3Edges);
@@ -1113,14 +1113,14 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("total_edges in details reflects causal-only count", () => {
       const v3Edges = [
         // 4 structural edges
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "dec", to: "opt_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_b", to: "fac_demand", strength: { mean: 0.5, std: 0.125 } },
         // 3 causal edges
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1134,14 +1134,14 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("structural_edges_excluded is present and correct in both results", () => {
       const v3Edges = [
         // 4 structural
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "dec", to: "opt_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_b", to: "fac_demand", strength: { mean: 0.5, std: 0.125 } },
         // 3 causal
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1153,10 +1153,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
     it("graph with ONLY structural edges → no warning fires (no division by zero)", () => {
       const v3Edges = [
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "dec", to: "opt_b", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "dec", to: "opt_b", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_b", to: "fac_demand", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1176,14 +1176,14 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("mixed structural + causal edges → correct counts", () => {
       const v3Edges = [
         // 3 structural
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_b", to: "fac_demand", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_b", to: "fac_demand", strength: { mean: 0.5, std: 0.125 } },
         // 4 causal — 3 defaulted, 1 varied
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_price", to: "goal_profit", strength_mean: 0.8, strength_std: 0.2 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_price", to: "goal_profit", strength: { mean: 0.8, std: 0.2 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1203,11 +1203,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("edge from factor→option is NOT excluded (only from-node kind matters)", () => {
       const v3Edges = [
         // factor→option edge: NOT structural (from-node is factor, not decision/option)
-        { from: "fac_price", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
         // Normal causal edges
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1221,12 +1221,12 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
     it("existing STRENGTH_DEFAULT_APPLIED threshold unchanged (fires at ≥80%)", () => {
       const v3Edges = [
         // 4 of 5 causal edges defaulted = 80%
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_price", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_price", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
         // 1 varied
-        { from: "fac_demand", to: "goal_profit", strength_mean: 0.8, strength_std: 0.2 },
+        { from: "fac_demand", to: "goal_profit", strength: { mean: 0.8, std: 0.2 } },
       ];
 
       const defaults = detectStrengthDefaults(structuralNodes, v3Edges);
@@ -1244,17 +1244,17 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       ];
       const v3Edges = [
         // 7 of 10 edges with mean=0.5 (varied std) = 70%
-        { from: "fac_a", to: "fac_b", strength_mean: 0.5, strength_std: 0.2 },
-        { from: "fac_b", to: "fac_c", strength_mean: 0.5, strength_std: 0.18 },
-        { from: "fac_c", to: "goal", strength_mean: 0.5, strength_std: 0.15 },
-        { from: "fac_a", to: "goal", strength_mean: 0.5, strength_std: 0.22 },
-        { from: "fac_b", to: "goal", strength_mean: 0.5, strength_std: 0.25 },
-        { from: "fac_a", to: "fac_c", strength_mean: 0.5, strength_std: 0.12 },
-        { from: "fac_c", to: "fac_a", strength_mean: 0.5, strength_std: 0.19 },
+        { from: "fac_a", to: "fac_b", strength: { mean: 0.5, std: 0.2 } },
+        { from: "fac_b", to: "fac_c", strength: { mean: 0.5, std: 0.18 } },
+        { from: "fac_c", to: "goal", strength: { mean: 0.5, std: 0.15 } },
+        { from: "fac_a", to: "goal", strength: { mean: 0.5, std: 0.22 } },
+        { from: "fac_b", to: "goal", strength: { mean: 0.5, std: 0.25 } },
+        { from: "fac_a", to: "fac_c", strength: { mean: 0.5, std: 0.12 } },
+        { from: "fac_c", to: "fac_a", strength: { mean: 0.5, std: 0.19 } },
         // 3 varied
-        { from: "fac_a", to: "fac_b", strength_mean: 0.3, strength_std: 0.1 },
-        { from: "fac_b", to: "fac_c", strength_mean: 0.7, strength_std: 0.2 },
-        { from: "fac_c", to: "goal", strength_mean: 0.9, strength_std: 0.15 },
+        { from: "fac_a", to: "fac_b", strength: { mean: 0.3, std: 0.1 } },
+        { from: "fac_b", to: "fac_c", strength: { mean: 0.7, std: 0.2 } },
+        { from: "fac_c", to: "goal", strength: { mean: 0.9, std: 0.15 } },
       ];
 
       const dominant = detectStrengthMeanDominant(nodes, v3Edges);
@@ -1265,11 +1265,11 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
     it("structural_edges_excluded propagates to runIntegrityChecks output", () => {
       const v3Edges = [
-        { from: "dec", to: "opt_a", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "opt_a", to: "fac_price", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.125 },
-        { from: "out_revenue", to: "goal_profit", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "dec", to: "opt_a", strength: { mean: 0.5, std: 0.125 } },
+        { from: "opt_a", to: "fac_price", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "out_revenue", to: "goal_profit", strength: { mean: 0.5, std: 0.125 } },
       ];
 
       const result = runIntegrityChecks(structuralNodes, structuralNodes, [], [], v3Edges);

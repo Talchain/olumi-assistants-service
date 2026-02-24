@@ -81,7 +81,7 @@ describe("CEE Status Consistency", () => {
         edges: draftResult.edges.map((e: any) => ({
           from: e.from,
           to: e.to,
-          weight: Math.abs(e.strength_mean) || 0.5,
+          weight: Math.abs(e.strength?.mean) || 0.5,
         })),
         meta: draftResult.meta || {},
       };

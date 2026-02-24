@@ -498,7 +498,7 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
       }
       if (defaultBody.edges.length > 0) {
         expect(defaultBody.edges[0]).toHaveProperty("effect_direction");
-        expect(defaultBody.edges[0]).toHaveProperty("strength_std");
+        expect(defaultBody.edges[0]).toHaveProperty("strength.std");
       }
     });
   });

@@ -325,7 +325,7 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
 
     // Skip structural edges for strength variation analysis
     if (!structuralEdgeTypes.has(edgeType)) {
-      causalStrengths.push(edge.strength_mean);
+      causalStrengths.push(edge.strength.mean);
     }
   }
 
@@ -421,48 +421,48 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       }
     }
 
-    // Check effect_direction matches strength_mean sign
-    const expectedDirection = edge.strength_mean >= 0 ? "positive" : "negative";
+    // Check effect_direction matches strength.mean sign
+    const expectedDirection = edge.strength.mean >= 0 ? "positive" : "negative";
     if (edge.effect_direction !== expectedDirection) {
       warnings.push({
         code: "EFFECT_DIRECTION_MISMATCH",
         severity: "warn",
-        message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength_mean=${edge.strength_mean} suggests "${expectedDirection}"`,
+        message: `Edge ${edge.from} → ${edge.to}: effect_direction="${edge.effect_direction}" but strength.mean=${edge.strength.mean} suggests "${expectedDirection}"`,
         affected_edge_id: edgeId,
-        suggestion: "Ensure effect_direction matches the sign of strength_mean",
+        suggestion: "Ensure effect_direction matches the sign of strength.mean",
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check strength_std is positive
-    if (edge.strength_std <= 0) {
+    // Check strength.std is positive
+    if (edge.strength.std <= 0) {
       warnings.push({
         code: "INVALID_STRENGTH_STD",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: strength_std must be positive, got ${edge.strength_std}`,
+        message: `Edge ${edge.from} → ${edge.to}: strength.std must be positive, got ${edge.strength.std}`,
         affected_edge_id: edgeId,
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check belief_exists is in [0, 1]
-    if (edge.belief_exists < 0 || edge.belief_exists > 1) {
+    // Check exists_probability is in [0, 1]
+    if (edge.exists_probability < 0 || edge.exists_probability > 1) {
       warnings.push({
         code: "INVALID_BELIEF_EXISTS",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: belief_exists must be in [0, 1], got ${edge.belief_exists}`,
+        message: `Edge ${edge.from} → ${edge.to}: exists_probability must be in [0, 1], got ${edge.exists_probability}`,
         affected_edge_id: edgeId,
         stage: "coefficient_normalisation",
       });
     }
 
-    // Check strength_mean is in canonical [-1, +1] range (P1-CEE-2)
-    if (edge.strength_mean < MIN_STRENGTH || edge.strength_mean > MAX_STRENGTH) {
+    // Check strength.mean is in canonical [-1, +1] range (P1-CEE-2)
+    if (edge.strength.mean < MIN_STRENGTH || edge.strength.mean > MAX_STRENGTH) {
       // Always ERROR per spec - out of range values must block execution
       warnings.push({
         code: "STRENGTH_OUT_OF_RANGE",
         severity: "error",
-        message: `Edge ${edge.from} → ${edge.to}: strength_mean ${edge.strength_mean.toFixed(2)} outside canonical range [-1, +1]`,
+        message: `Edge ${edge.from} → ${edge.to}: strength.mean ${edge.strength.mean.toFixed(2)} outside canonical range [-1, +1]`,
         affected_edge_id: edgeId,
         suggestion: "Clamp value to [-1, +1] range",
         stage: "coefficient_normalisation",
@@ -476,11 +476,11 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       (fromKindCheck === "decision" && toKindCheck === "option") ||
       (fromKindCheck === "option" && toKindCheck === "factor");
 
-    if (!isStructuralEdge && Math.abs(edge.strength_mean) < NEGLIGIBLE_THRESHOLD) {
+    if (!isStructuralEdge && Math.abs(edge.strength.mean) < NEGLIGIBLE_THRESHOLD) {
       warnings.push({
         code: "NEGLIGIBLE_STRENGTH",
         severity: "info",
-        message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength_mean.toFixed(2)}). Consider removing.`,
+        message: `Edge ${edge.from} → ${edge.to}: negligible effect (${edge.strength.mean.toFixed(2)}). Consider removing.`,
         affected_edge_id: edgeId,
         suggestion: "Edges with |strength| < 0.05 have minimal impact on outcomes.",
         stage: "coefficient_normalisation",

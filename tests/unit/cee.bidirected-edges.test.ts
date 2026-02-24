@@ -129,8 +129,8 @@ describe("3A-trust: directed edges unaffected", () => {
 
     expect(v3Edge.from).toBe("fac_a");
     expect(v3Edge.to).toBe("out_1");
-    expect(v3Edge.strength_mean).toBeCloseTo(0.6);
-    expect(v3Edge.belief_exists).toBeCloseTo(0.85);
+    expect(v3Edge.strength.mean).toBeCloseTo(0.6);
+    expect(v3Edge.exists_probability).toBeCloseTo(0.85);
     expect(v3Edge.effect_direction).toBe("positive");
     expect(v3Edge.edge_type).toBe("directed");
   });
@@ -152,9 +152,9 @@ describe("3A-trust: directed edges unaffected", () => {
     const v3Without = transformEdgeToV3(withoutType, 0, v1Nodes);
 
     // Core fields identical
-    expect(v3With.strength_mean).toBe(v3Without.strength_mean);
-    expect(v3With.strength_std).toBe(v3Without.strength_std);
-    expect(v3With.belief_exists).toBe(v3Without.belief_exists);
+    expect(v3With.strength.mean).toBe(v3Without.strength.mean);
+    expect(v3With.strength.std).toBe(v3Without.strength.std);
+    expect(v3With.exists_probability).toBe(v3Without.exists_probability);
     expect(v3With.effect_direction).toBe(v3Without.effect_direction);
 
     // edge_type: "directed" present on explicit, absent on omitted
@@ -214,9 +214,8 @@ describe("3A-trust: schema validation", () => {
     const result = EdgeV3.safeParse({
       from: "fac_a",
       to: "fac_b",
-      strength_mean: 0,
-      strength_std: 0.001,
-      belief_exists: 1.0,
+      strength: { mean: 0, std: 0.001 },
+      exists_probability: 1.0,
       effect_direction: "positive",
       edge_type: "bidirected",
     });
@@ -509,15 +508,15 @@ describe("3A-trust regression: v3-validator remap preserves edge_type", () => {
         { id: "outcome_1", kind: "outcome", label: "Outcome" },
       ],
       edges: [
-        { from: "decision_1", to: "option_1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
-        { from: "option_1", to: "factor_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+        { from: "decision_1", to: "option_1", strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: "positive" },
+        { from: "option_1", to: "factor_a", strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: "positive" },
         // Directed: factor_a → factor_b
-        { from: "factor_a", to: "factor_b", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.85, effect_direction: "positive" },
+        { from: "factor_a", to: "factor_b", strength: { mean: 0.5, std: 0.15 }, exists_probability: 0.85, effect_direction: "positive" },
         // Bidirected: factor_b ↔ factor_a (stored as from=factor_b, to=factor_a)
         // Without H2 fix, this + the directed edge above would look like a cycle
-        { from: "factor_b", to: "factor_a", strength_mean: 0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive", edge_type: "bidirected" },
-        { from: "factor_b", to: "outcome_1", strength_mean: 0.6, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" },
-        { from: "outcome_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+        { from: "factor_b", to: "factor_a", strength: { mean: 0, std: 0.01 }, exists_probability: 1.0, effect_direction: "positive", edge_type: "bidirected" },
+        { from: "factor_b", to: "outcome_1", strength: { mean: 0.6, std: 0.15 }, exists_probability: 0.9, effect_direction: "positive" },
+        { from: "outcome_1", to: "goal_1", strength: { mean: 0.8, std: 0.1 }, exists_probability: 0.95, effect_direction: "positive" },
       ],
       options: [
         { id: "option_1", label: "Option A", status: "ready", interventions: {} },

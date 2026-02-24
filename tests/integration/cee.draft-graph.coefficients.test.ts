@@ -213,9 +213,9 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coefficient variation", () => {
 
     expect(causalEdges.length).toBeGreaterThanOrEqual(5);
 
-    const strengthMeans = new Set(causalEdges.map((edge) => edge.strength_mean.toFixed(2)));
-    const strengthStds = new Set(causalEdges.map((edge) => edge.strength_std.toFixed(2)));
-    const beliefExists = new Set(causalEdges.map((edge) => edge.belief_exists.toFixed(2)));
+    const strengthMeans = new Set(causalEdges.map((edge) => edge.strength.mean.toFixed(2)));
+    const strengthStds = new Set(causalEdges.map((edge) => edge.strength.std.toFixed(2)));
+    const beliefExists = new Set(causalEdges.map((edge) => edge.exists_probability.toFixed(2)));
 
     expect(strengthMeans.size).toBeGreaterThanOrEqual(3);
     expect(strengthStds.size).toBeGreaterThanOrEqual(2);
@@ -225,6 +225,6 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coefficient variation", () => {
       (edge) => kindById.get(edge.from) === "risk" && kindById.get(edge.to) === "goal"
     );
     expect(riskToGoal).toBeDefined();
-    expect(riskToGoal.strength_mean).toBeLessThan(0);
+    expect(riskToGoal.strength.mean).toBeLessThan(0);
   });
 });

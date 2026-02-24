@@ -17,9 +17,8 @@ function makeEdge(sm: number, ss: number, be: number): EdgeV3T {
   return {
     from: "f1",
     to: "g1",
-    strength_mean: sm,
-    strength_std: ss,
-    belief_exists: be,
+    strength: { mean: sm, std: ss },
+    exists_probability: be,
     effect_direction: sm >= 0 ? "positive" : "negative",
   } as EdgeV3T;
 }

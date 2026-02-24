@@ -46,9 +46,8 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     const input = {
       from: "a",
       to: "b",
-      strength_mean: 0.5,
-      strength_std: 0.1,
-      belief_exists: 0.8,
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.8,
       effect_direction: "positive" as const,
       edge_metadata: { source: "experiment" },
     };
@@ -233,7 +232,7 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
   it("EdgeV3 still rejects missing required fields", () => {
     const input = {
       from: "a",
-      // missing: to, strength_mean, strength_std, belief_exists, effect_direction
+      // missing: to, strength, exists_probability, effect_direction
     };
     const result = EdgeV3.safeParse(input);
     expect(result.success).toBe(false);

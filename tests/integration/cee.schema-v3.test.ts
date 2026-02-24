@@ -106,13 +106,14 @@ describe("CEE Schema V3 Integration", () => {
       expect(v3Response.options[0]?.id).toBe("Opt_Premium_Tier");
     });
 
-    it("transforms edges to V3 format with strength_mean", () => {
+    it("transforms edges to V3 format with nested strength", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
       for (const edge of v3Response.edges) {
-        expect(edge).toHaveProperty("strength_mean");
-        expect(edge).toHaveProperty("strength_std");
-        expect(edge).toHaveProperty("belief_exists");
+        expect(edge).toHaveProperty("strength");
+        expect(edge.strength).toHaveProperty("mean");
+        expect(edge.strength).toHaveProperty("std");
+        expect(edge).toHaveProperty("exists_probability");
         expect(edge).toHaveProperty("effect_direction");
         expect(["positive", "negative"]).toContain(edge.effect_direction);
       }
@@ -323,11 +324,11 @@ describe("CEE Schema V3 Integration", () => {
   });
 
   describe("Edge Effect Direction", () => {
-    it("derives effect_direction from strength_mean sign", () => {
+    it("derives effect_direction from strength.mean sign", () => {
       const v3Response = transformResponseToV3(sampleV1Response);
 
       for (const edge of v3Response.edges) {
-        if (edge.strength_mean >= 0) {
+        if (edge.strength.mean >= 0) {
           expect(edge.effect_direction).toBe("positive");
         } else {
           expect(edge.effect_direction).toBe("negative");
@@ -355,7 +356,7 @@ describe("CEE Schema V3 Integration", () => {
 
       expect(negativeEdge).toBeDefined();
       expect(negativeEdge?.effect_direction).toBe("negative");
-      expect(negativeEdge?.strength_mean).toBeLessThan(0);
+      expect(negativeEdge?.strength.mean).toBeLessThan(0);
     });
   });
 
@@ -400,18 +401,18 @@ describe("CEE Schema V3 Integration", () => {
       expect(outcomeToGoal).toBeDefined();
 
       // Risk → Goal MUST have negative coefficient
-      expect(riskToGoal?.strength_mean).toBeLessThan(0);
+      expect(riskToGoal?.strength.mean).toBeLessThan(0);
       expect(riskToGoal?.effect_direction).toBe("negative");
 
       // Outcome → Goal should have positive coefficient
-      expect(outcomeToGoal?.strength_mean).toBeGreaterThan(0);
+      expect(outcomeToGoal?.strength.mean).toBeGreaterThan(0);
       expect(outcomeToGoal?.effect_direction).toBe("positive");
     });
 
-    it("handles edges with flat strength_mean fields (post-goal-repair format)", () => {
-      // After goal repair, edges use flat field names (strength_mean, strength_std, belief_exists)
-      // instead of nested (strength.mean, exists_probability). This test verifies
-      // that such edges are correctly handled.
+    it("handles V1 edges with flat strength_mean fields (post-goal-repair format)", () => {
+      // After goal repair, V1 edges use flat field names (strength_mean, strength_std, belief_exists).
+      // This test verifies that such V1 edges are correctly transformed to the V3 nested format
+      // (strength.mean, strength.std, exists_probability).
       const responseWithFlatFields: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -435,11 +436,11 @@ describe("CEE Schema V3 Integration", () => {
 
       // Verify edges are transformed correctly
       expect(riskEdge).toBeDefined();
-      expect(riskEdge?.strength_mean).toBeLessThan(0);
+      expect(riskEdge?.strength.mean).toBeLessThan(0);
       expect(riskEdge?.effect_direction).toBe("negative");
 
       expect(outcomeEdge).toBeDefined();
-      expect(outcomeEdge?.strength_mean).toBeGreaterThan(0);
+      expect(outcomeEdge?.strength.mean).toBeGreaterThan(0);
       expect(outcomeEdge?.effect_direction).toBe("positive");
     });
   });

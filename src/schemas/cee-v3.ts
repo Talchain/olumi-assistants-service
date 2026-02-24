@@ -128,20 +128,30 @@ export const EdgeProvenanceV3 = z.object({
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
 /**
+ * V3 edge strength — nested { mean, std } format (canonical Schema v2.2).
+ */
+export const EdgeStrengthV3 = z.object({
+  /** Signed linear coefficient [-1, +1] */
+  mean: z.number(),
+  /** Parametric uncertainty, must be > 0 */
+  std: z.number().positive(),
+});
+export type EdgeStrengthV3T = z.infer<typeof EdgeStrengthV3>;
+
+/**
  * V3 edge schema with strength coefficients.
+ * Canonical Schema v2.2: nested strength + exists_probability.
  */
 export const EdgeV3 = z.object({
   /** Source node ID */
   from: z.string(),
   /** Target node ID */
   to: z.string(),
-  /** Signed linear coefficient (NOT constrained to 0-1) */
-  strength_mean: z.number(),
-  /** Parametric uncertainty, must be > 0 */
-  strength_std: z.number().positive(),
+  /** Strength coefficient: { mean, std } (canonical nested format) */
+  strength: EdgeStrengthV3,
   /** Existence probability [0, 1] */
-  belief_exists: z.number().min(0).max(1),
-  /** Effect direction (derived from strength_mean sign) */
+  exists_probability: z.number().min(0).max(1),
+  /** Effect direction (derived from strength.mean sign) */
   effect_direction: z.enum(["positive", "negative"]),
   /** Provenance */
   provenance: EdgeProvenanceV3.optional(),

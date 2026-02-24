@@ -7,7 +7,7 @@
  * Structural equivalence definition:
  *  1. Same node IDs, same node kinds, same node count
  *  2. Same edge pairs (from, to) with 9-field equality:
- *     strength_mean, strength_std, belief_exists, effect_direction,
+ *     strength.mean, strength.std, exists_probability, effect_direction,
  *     provenance, provenance_source, id (plus from, to as sort key)
  *  3. Same analysis_ready.status
  *  4. Same blocker[].factor_id set (order-independent)
@@ -201,9 +201,9 @@ function edgeSignatures(body: any): Record<string, unknown>[] {
     .map((e: any) => ({
       from: e.from,
       to: e.to,
-      strength_mean: e.strength_mean,
-      strength_std: e.strength_std,
-      belief_exists: e.belief_exists,
+      strength_mean: e.strength?.mean,
+      strength_std: e.strength?.std,
+      exists_probability: e.exists_probability,
       effect_direction: e.effect_direction,
       provenance: e.provenance,
       provenance_source: e.provenance_source,
@@ -392,7 +392,7 @@ describe("Unified Pipeline Parity (CIL Phase 3B)", () => {
           const from = String(e.from ?? "");
           const to = String(e.to ?? "");
           if (from.startsWith("opt_") && to.startsWith("fac_")) {
-            return { ...e, strength_mean: 1, strength_std: 0.01, belief_exists: 1 };
+            return { ...e, strength_mean: 1, strength_std: 0.01, exists_probability: 1 };
           }
           return e;
         });

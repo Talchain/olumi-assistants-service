@@ -192,7 +192,7 @@ describe("P1 CEE Verification", () => {
   // Task 5: Verify Strength Clamping
   // ==========================================================================
   describe("Task 5: Strength Clamping", () => {
-    it("clamps strength_mean to [-3, +3] range", () => {
+    it("clamps strength.mean to [-3, +3] range", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -210,12 +210,12 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        expect(edge.strength_mean).toBeGreaterThanOrEqual(-3);
-        expect(edge.strength_mean).toBeLessThanOrEqual(3);
+        expect(edge.strength.mean).toBeGreaterThanOrEqual(-3);
+        expect(edge.strength.mean).toBeLessThanOrEqual(3);
       }
     });
 
-    it("ensures strength_std is > 0", () => {
+    it("ensures strength.std is > 0", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -232,11 +232,11 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        expect(edge.strength_std).toBeGreaterThan(0);
+        expect(edge.strength.std).toBeGreaterThan(0);
       }
     });
 
-    it("caps strength_std at max(0.5, 2×|mean|)", () => {
+    it("caps strength.std at max(0.5, 2×|mean|)", () => {
       const response: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -253,8 +253,8 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
 
       for (const edge of v3Response.edges) {
-        const cap = Math.max(0.5, 2 * Math.abs(edge.strength_mean));
-        expect(edge.strength_std).toBeLessThanOrEqual(cap);
+        const cap = Math.max(0.5, 2 * Math.abs(edge.strength.mean));
+        expect(edge.strength.std).toBeLessThanOrEqual(cap);
       }
     });
   });

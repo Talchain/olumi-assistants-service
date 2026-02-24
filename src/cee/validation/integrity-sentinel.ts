@@ -499,9 +499,9 @@ export function detectStrengthDefaults(
   let defaultedCount = 0;
   const defaultedEdgeIds: string[] = [];
   for (const edge of causalEdges) {
-    const edgeData = edge as { from: string; to: string; strength_mean?: number; strength_std?: number; [key: string]: unknown };
-    const strengthMean = edgeData.strength_mean;
-    const strengthStd = edgeData.strength_std;
+    const edgeData = edge as { from: string; to: string; strength?: { mean?: number; std?: number }; [key: string]: unknown };
+    const strengthMean = edgeData.strength?.mean;
+    const strengthStd = edgeData.strength?.std;
 
     // Match default signature: |mean| ≈ 0.5 (epsilon) AND std ≈ 0.125 (epsilon)
     const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;
@@ -624,8 +624,8 @@ export function detectStrengthMeanDominant(
   let meanDefaultCount = 0;
   const meanDefaultedEdgeIds: string[] = [];
   for (const edge of causalEdges) {
-    const edgeData = edge as { from: string; to: string; strength_mean?: number; [key: string]: unknown };
-    const strengthMean = edgeData.strength_mean;
+    const edgeData = edge as { from: string; to: string; strength?: { mean?: number }; [key: string]: unknown };
+    const strengthMean = edgeData.strength?.mean;
 
     // Match mean default: |mean| ≈ 0.5 (epsilon comparison)
     const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;

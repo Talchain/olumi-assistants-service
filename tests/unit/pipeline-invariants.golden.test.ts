@@ -638,8 +638,9 @@ describe("Golden pipeline invariants (stages 2–6)", () => {
     for (const edge of response.edges) {
       expect(typeof edge.from).toBe("string");
       expect(typeof edge.to).toBe("string");
-      expect(typeof edge.strength_mean).toBe("number");
-      expect(typeof edge.strength_std).toBe("number");
+      expect(typeof edge.strength.mean).toBe("number");
+      expect(typeof edge.strength.std).toBe("number");
+      expect(typeof edge.exists_probability).toBe("number");
       expect(typeof edge.effect_direction).toBe("string");
     }
 

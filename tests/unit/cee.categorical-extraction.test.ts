@@ -119,10 +119,9 @@ describe("Categorical Extraction", () => {
       {
         from: "factor_region",
         to: "goal_growth",
-        strength_mean: 2.0,
-        strength_std: 0.5,
+        strength: { mean: 2.0, std: 0.5 },
         effect_direction: "positive",
-        belief_exists: 0.8,
+        exists_probability: 0.8,
       },
     ];
 
@@ -305,10 +304,9 @@ describe("Categorical Extraction", () => {
         {
           from: "factor_region",
           to: "goal",
-          strength_mean: 1.0,
-          strength_std: 0.1,
+          strength: { mean: 1.0, std: 0.1 },
           effect_direction: "positive",
-          belief_exists: 0.9,
+          exists_probability: 0.9,
         },
       ];
 
@@ -365,18 +363,16 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     {
       from: "factor_region",
       to: "goal",
-      strength_mean: 1.5,
-      strength_std: 0.3,
+      strength: { mean: 1.5, std: 0.3 },
       effect_direction: "positive",
-      belief_exists: 0.85,
+      exists_probability: 0.85,
     },
     {
       from: "factor_price",
       to: "goal",
-      strength_mean: 2.0,
-      strength_std: 0.4,
+      strength: { mean: 2.0, std: 0.4 },
       effect_direction: "positive",
-      belief_exists: 0.9,
+      exists_probability: 0.9,
     },
   ];
 

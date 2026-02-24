@@ -85,9 +85,8 @@ function createV3Graph(
     edges: edges.map((e) => ({
       from: e.from,
       to: e.to,
-      strength_mean: 0.5,
-      strength_std: 0.2,
-      belief_exists: 0.8,
+      strength: { mean: 0.5, std: 0.2 },
+      exists_probability: 0.8,
       effect_direction: "positive" as const,
     })),
   };
