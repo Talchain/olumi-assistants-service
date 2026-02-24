@@ -380,6 +380,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Options interventions defaulting (CEE)
         InterventionsMissingDefaulted: "cee.option.interventions_missing_defaulted",
+
+        // Orchestrator events (Track C)
+        OrchestratorTurnStarted: "orchestrator.turn.started",
+        OrchestratorTurnCompleted: "orchestrator.turn.completed",
+        OrchestratorTurnFailed: "orchestrator.turn.failed",
+        OrchestratorIntentResolved: "orchestrator.intent.resolved",
+        OrchestratorToolInvoked: "orchestrator.tool.invoked",
+        OrchestratorToolCompleted: "orchestrator.tool.completed",
+        OrchestratorToolFailed: "orchestrator.tool.failed",
+        OrchestratorPlotRunRequested: "orchestrator.plot.run_requested",
+        OrchestratorPlotRunCompleted: "orchestrator.plot.run_completed",
+        OrchestratorPlotRunFailed: "orchestrator.plot.run_failed",
+        OrchestratorPlotValidateRequested: "orchestrator.plot.validate_requested",
+        OrchestratorPlotValidateCompleted: "orchestrator.plot.validate_completed",
+        OrchestratorIdempotencyHit: "orchestrator.idempotency.hit",
+        OrchestratorIdempotencyCached: "orchestrator.idempotency.cached",
+        OrchestratorNumericFreehandStripped: "orchestrator.commentary.numeric_freehand_stripped",
+        OrchestratorSystemEvent: "orchestrator.system_event",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -405,7 +423,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.intervention_extraction$|cee\.goal_generation$|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -829,6 +847,23 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.InterventionsMissingDefaulted,
         // Repair prompt truncation (diagnostic only - large graph handling)
         TelemetryEvents.RepairPromptTruncated,
+        // Orchestrator events (Track C - diagnostic only during PoC)
+        TelemetryEvents.OrchestratorTurnStarted,
+        TelemetryEvents.OrchestratorTurnCompleted,
+        TelemetryEvents.OrchestratorTurnFailed,
+        TelemetryEvents.OrchestratorIntentResolved,
+        TelemetryEvents.OrchestratorToolInvoked,
+        TelemetryEvents.OrchestratorToolCompleted,
+        TelemetryEvents.OrchestratorToolFailed,
+        TelemetryEvents.OrchestratorPlotRunRequested,
+        TelemetryEvents.OrchestratorPlotRunCompleted,
+        TelemetryEvents.OrchestratorPlotRunFailed,
+        TelemetryEvents.OrchestratorPlotValidateRequested,
+        TelemetryEvents.OrchestratorPlotValidateCompleted,
+        TelemetryEvents.OrchestratorIdempotencyHit,
+        TelemetryEvents.OrchestratorIdempotencyCached,
+        TelemetryEvents.OrchestratorNumericFreehandStripped,
+        TelemetryEvents.OrchestratorSystemEvent,
       ];
 
       for (const event of allEvents) {
@@ -1181,6 +1216,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Options interventions defaulting (CEE)
         "cee.option.interventions_missing_defaulted",
+
+        // Orchestrator events (Track C)
+        "orchestrator.turn.started",
+        "orchestrator.turn.completed",
+        "orchestrator.turn.failed",
+        "orchestrator.intent.resolved",
+        "orchestrator.tool.invoked",
+        "orchestrator.tool.completed",
+        "orchestrator.tool.failed",
+        "orchestrator.plot.run_requested",
+        "orchestrator.plot.run_completed",
+        "orchestrator.plot.run_failed",
+        "orchestrator.plot.validate_requested",
+        "orchestrator.plot.validate_completed",
+        "orchestrator.idempotency.hit",
+        "orchestrator.idempotency.cached",
+        "orchestrator.commentary.numeric_freehand_stripped",
+        "orchestrator.system_event",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

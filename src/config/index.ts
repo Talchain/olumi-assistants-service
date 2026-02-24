@@ -253,6 +253,7 @@ const ConfigSchema = z.object({
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
     strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
+    orchestrator: booleanString.default(false), // Track C: CEE Orchestrator — multi-turn conversational decision modelling
   }),
 
   // Prompt Cache Configuration
@@ -416,6 +417,11 @@ const ConfigSchema = z.object({
     maxRetries: z.string().optional(), // Validated by parseMaxRetries()
   }),
 
+  // PLoT (Plot Lite) Service Configuration
+  plot: z.object({
+    baseUrl: optionalUrl,
+  }).default({}),
+
   // Graph Limits
   graph: z.object({
     maxNodes: z.coerce.number().int().positive().default(100),
@@ -522,6 +528,7 @@ function parseConfig(): Config {
       piiGuard: env.PII_GUARD_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
+      orchestrator: env.ENABLE_ORCHESTRATOR,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -662,6 +669,9 @@ function parseConfig(): Config {
       apiKey: env.ISL_API_KEY,
       timeoutMs: env.ISL_TIMEOUT_MS,
       maxRetries: env.ISL_MAX_RETRIES,
+    },
+    plot: {
+      baseUrl: env.PLOT_BASE_URL,
     },
     graph: {
       maxNodes: env.GRAPH_MAX_NODES,

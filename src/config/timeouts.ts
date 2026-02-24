@@ -133,6 +133,21 @@ export const ORCHESTRATOR_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("ORCHESTRATOR_TIMEOUT_MS", 30_000),
 );
 
+/** Orchestrator turn budget — total time for a single /orchestrate/v1/turn request (default: 60s, clamped 5s–5m) */
+export const ORCHESTRATOR_TURN_BUDGET_MS = clampTimeout(
+  parseTimeoutEnv("ORCHESTRATOR_TURN_BUDGET_MS", 60_000),
+);
+
+/** PLoT /v2/run call timeout (default: 30s, clamped 5s–5m) */
+export const PLOT_RUN_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("PLOT_RUN_TIMEOUT_MS", 30_000),
+);
+
+/** PLoT /v1/validate-patch call timeout (default: 5s, clamped 5s–5m) */
+export const PLOT_VALIDATE_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("PLOT_VALIDATE_TIMEOUT_MS", 5_000),
+);
+
 /** Extraction utility default LLM call timeout (default: 30s, clamped 5s–5m) */
 export const EXTRACTION_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("EXTRACTION_TIMEOUT_MS", 30_000),
@@ -227,6 +242,9 @@ export const ADMIN_REASONING_HIGH_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("ADMIN_REASONING_HIGH_TIMEOUT_MS", 300_000),
 );
 
+/** Admin UI toast notification duration (default: 4s) */
+export const ADMIN_TOAST_DURATION_MS = parseDelayEnv("ADMIN_TOAST_DURATION_MS", 4_000);
+
 // ---------------------------------------------------------------------------
 // Startup diagnostics — call from server.ts to log all resolved values
 // ---------------------------------------------------------------------------
@@ -280,6 +298,13 @@ export function validateTimeoutRelationships(): string[] {
     );
   }
 
+  if (ORCHESTRATOR_TIMEOUT_MS >= ORCHESTRATOR_TURN_BUDGET_MS) {
+    warnings.push(
+      `ORCHESTRATOR_TIMEOUT_MS (${ORCHESTRATOR_TIMEOUT_MS}ms) >= ORCHESTRATOR_TURN_BUDGET_MS (${ORCHESTRATOR_TURN_BUDGET_MS}ms) — ` +
+      `LLM call timeout must be less than turn budget to leave room for tool execution`,
+    );
+  }
+
   return warnings;
 }
 
@@ -301,6 +326,9 @@ export function getResolvedTimeouts(): Record<string, number> {
     CLARIFIER_QUESTION_TIMEOUT_MS,
     CLARIFIER_ANSWER_TIMEOUT_MS,
     ORCHESTRATOR_TIMEOUT_MS,
+    ORCHESTRATOR_TURN_BUDGET_MS,
+    PLOT_RUN_TIMEOUT_MS,
+    PLOT_VALIDATE_TIMEOUT_MS,
     EXTRACTION_TIMEOUT_MS,
     PROMPT_STORE_FETCH_TIMEOUT_MS,
     SSE_WRITE_TIMEOUT_MS,
@@ -317,5 +345,6 @@ export function getResolvedTimeouts(): Record<string, number> {
     ADMIN_LLM_TIMEOUT_MS,
     ADMIN_REASONING_TIMEOUT_MS,
     ADMIN_REASONING_HIGH_TIMEOUT_MS,
+    ADMIN_TOAST_DURATION_MS,
   };
 }

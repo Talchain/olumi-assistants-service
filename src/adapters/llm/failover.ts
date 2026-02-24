@@ -33,9 +33,12 @@ import type {
   CritiqueGraphResult,
   ChatArgs,
   ChatResult,
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
+import { UnsupportedOperationError } from "./errors.js";
 
 /**
  * Failover adapter that tries multiple providers in sequence
@@ -229,5 +232,25 @@ export class FailoverAdapter implements LLMAdapter {
     }
 
     yield* primary.streamDraftGraph(args, opts);
+  }
+
+  /**
+   * Native tool calling - delegates to primary adapter only
+   * (Failover not supported for tool calling — orchestrator needs consistent tool state)
+   */
+  async chatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts
+  ): Promise<ChatWithToolsResult> {
+    const primary = this.adapters[0];
+    if (!primary.chatWithTools) {
+      throw new UnsupportedOperationError(
+        `Primary adapter ${primary.name} does not support chatWithTools`,
+        primary.name,
+        "chatWithTools"
+      );
+    }
+
+    return primary.chatWithTools(args, opts);
   }
 }

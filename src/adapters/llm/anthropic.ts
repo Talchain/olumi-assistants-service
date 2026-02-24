@@ -7,7 +7,7 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -1976,6 +1976,214 @@ export async function chatWithAnthropic(
   }
 }
 
+// ============================================================================
+// Native Tool Calling
+// ============================================================================
+
+interface ChatWithToolsAnthropicArgs {
+  system: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string | ToolResponseBlock[] }>;
+  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+  tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  requestId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Native tool calling with Anthropic.
+ * Uses Anthropic's native tool_use content blocks for multi-turn orchestration.
+ * Follows the same infrastructure as chatWithAnthropic: retry, timeout, telemetry.
+ */
+export async function chatWithToolsAnthropic(
+  args: ChatWithToolsAnthropicArgs
+): Promise<ChatWithToolsResult> {
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = args.maxTokens ?? 4096;
+  const temperature = args.temperature ?? 0;
+  const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
+
+  const idempotencyKey = args.requestId || makeIdempotencyKey();
+  const startTime = Date.now();
+
+  log.info(
+    {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system_chars: args.system.length,
+      message_count: args.messages.length,
+      tool_count: args.tools.length,
+      tool_names: args.tools.map(t => t.name),
+      idempotency_key: idempotencyKey,
+    },
+    "calling Anthropic for chat with tools"
+  );
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+  try {
+    const apiClient = getClient();
+
+    // Convert messages to Anthropic SDK format
+    const anthropicMessages: Anthropic.MessageParam[] = args.messages.map((msg) => {
+      if (typeof msg.content === 'string') {
+        return { role: msg.role, content: msg.content };
+      }
+      // Array of content blocks — map to Anthropic SDK types
+      const blocks: Anthropic.ContentBlockParam[] = msg.content.map((block) => {
+        if (block.type === 'text') {
+          return { type: 'text' as const, text: block.text };
+        }
+        // tool_use blocks in assistant messages
+        if (block.type === 'tool_use') {
+          return {
+            type: 'tool_use' as const,
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          };
+        }
+        return block as Anthropic.ContentBlockParam;
+      });
+      return { role: msg.role, content: blocks };
+    });
+
+    // Convert tools to Anthropic SDK format
+    const anthropicTools: Anthropic.Tool[] = args.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.input_schema as Anthropic.Tool.InputSchema,
+    }));
+
+    // Build tool_choice parameter
+    let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
+    if (args.tool_choice) {
+      if (args.tool_choice.type === 'tool' && args.tool_choice.name) {
+        toolChoice = { type: 'tool', name: args.tool_choice.name };
+      } else if (args.tool_choice.type === 'any') {
+        toolChoice = { type: 'any' };
+      } else {
+        toolChoice = { type: 'auto' };
+      }
+    }
+
+    const createParams: Anthropic.MessageCreateParams = {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: args.system,
+      messages: anthropicMessages,
+      tools: anthropicTools,
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
+    };
+
+    const response = await withRetry(
+      async () =>
+        apiClient.messages.create(createParams, {
+          signal: abortController.signal,
+          headers: { "Idempotency-Key": idempotencyKey },
+        }),
+      {
+        adapter: "anthropic",
+        model,
+        operation: "chat_with_tools",
+      }
+    );
+
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    // Map Anthropic content blocks to our ToolResponseBlock type
+    const content: ToolResponseBlock[] = response.content.map((block) => {
+      if (block.type === 'text') {
+        return { type: 'text' as const, text: block.text };
+      }
+      if (block.type === 'tool_use') {
+        return {
+          type: 'tool_use' as const,
+          id: block.id,
+          name: block.name,
+          input: block.input as Record<string, unknown>,
+        };
+      }
+      // Unexpected block type — preserve as text for debugging
+      log.warn({ block_type: (block as any).type }, "unexpected content block type in tool response");
+      return { type: 'text' as const, text: JSON.stringify(block) };
+    });
+
+    // Map stop_reason
+    const stopReason = response.stop_reason as 'end_turn' | 'tool_use' | 'max_tokens';
+
+    log.info(
+      {
+        model,
+        latency_ms: latencyMs,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        content_blocks: content.length,
+        tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
+        stop_reason: stopReason,
+      },
+      "Anthropic chat with tools successful"
+    );
+
+    return {
+      content,
+      stop_reason: stopReason,
+      model,
+      latencyMs,
+      usage: {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, "Anthropic chat_with_tools call timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic chat_with_tools timed out",
+          "anthropic",
+          "chat_with_tools",
+          "body",
+          elapsedMs,
+          error
+        );
+      }
+
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+          "Anthropic API returned non-2xx status"
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic chat_with_tools failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error
+        );
+      }
+    }
+
+    log.error({ error }, "Anthropic chat_with_tools call failed");
+    throw error;
+  }
+}
+
 /**
  * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
  * This wraps the existing functions to provide a consistent interface for the router.
@@ -2100,6 +2308,20 @@ export class AnthropicAdapter implements LLMAdapter {
     return chatWithAnthropic({
       system: args.system,
       userMessage: args.userMessage,
+      model: this.model,
+      temperature: args.temperature,
+      maxTokens: args.maxTokens,
+      requestId: opts.requestId,
+      timeoutMs: opts.timeoutMs,
+    });
+  }
+
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    return chatWithToolsAnthropic({
+      system: args.system,
+      messages: args.messages,
+      tools: args.tools,
+      tool_choice: args.tool_choice,
       model: this.model,
       temperature: args.temperature,
       maxTokens: args.maxTokens,

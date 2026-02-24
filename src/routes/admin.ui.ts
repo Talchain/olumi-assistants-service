@@ -17,6 +17,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
 import { verifyIPAllowed } from '../middleware/admin-auth.js';
+import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
 
 /**
  * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
@@ -2098,7 +2099,7 @@ function generateAdminUI(): string {
         },
 
         // Toast notification system
-        showToast(message, type = 'info', duration = 4000) {
+        showToast(message, type = 'info', duration = ${ADMIN_TOAST_DURATION_MS}) {
           const id = ++this.toastId;
           this.toasts.push({ id, message, type });
           setTimeout(() => {
@@ -2111,7 +2112,8 @@ function generateAdminUI(): string {
           const json = JSON.stringify(issue, null, 2);
           navigator.clipboard.writeText(json).then(() => {
             this.showToast('Copied issue to clipboard', 'success', 2000);
-          }).catch(() => {
+          }).catch((e) => {
+            console.error('copy_to_clipboard failed:', e);
             this.showToast('Failed to copy', 'error');
           });
         },
@@ -2157,6 +2159,7 @@ function generateAdminUI(): string {
               this.error = data.message || 'Authentication failed';
             }
           } catch (e) {
+            console.error('authenticate failed:', e);
             this.error = 'Failed to connect to server';
           }
         },
@@ -2190,6 +2193,7 @@ function generateAdminUI(): string {
               this.error = data.message || 'Failed to load prompts';
             }
           } catch (e) {
+            console.error('load_prompts failed:', e);
             this.error = 'Failed to load prompts';
           }
           this.loading = false;
@@ -2216,6 +2220,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to create prompt', 'error');
             }
           } catch (e) {
+            console.error('create_prompt failed:', e);
             this.showToast('Failed to create prompt', 'error');
           }
         },
@@ -2316,6 +2321,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to approve version', 'error');
             }
           } catch (e) {
+            console.error('approve_version failed:', e);
             this.showToast('Failed to approve version', 'error');
           }
         },
@@ -2353,6 +2359,7 @@ function generateAdminUI(): string {
               }
             }
           } catch (e) {
+            console.error('update_status failed:', e);
             this.showToast('Failed to update status', 'error');
           }
         },
@@ -2376,6 +2383,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to update design version', 'error');
             }
           } catch (e) {
+            console.error('update_design_version failed:', e);
             this.showToast('Failed to update design version', 'error');
           }
         },
@@ -2411,6 +2419,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to update model config', 'error');
             }
           } catch (e) {
+            console.error('update_model_config failed:', e);
             this.showToast('Failed to update model config', 'error');
           }
         },
@@ -2448,6 +2457,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to approve version', 'error');
             }
           } catch (e) {
+            console.error('approve_and_promote failed:', e);
             this.showToast('Failed to approve version', 'error');
           }
         },
@@ -2484,6 +2494,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to create version', 'error');
             }
           } catch (e) {
+            console.error('create_version failed:', e);
             this.showToast('Failed to create version', 'error');
           }
         },
@@ -2513,6 +2524,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to set staging version', 'error');
             }
           } catch (e) {
+            console.error('set_staging_version failed:', e);
             this.showToast('Failed to set staging version', 'error');
           }
         },
@@ -2560,6 +2572,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to promote to production', 'error');
             }
           } catch (e) {
+            console.error('promote_to_production failed:', e);
             this.showToast('Failed to promote to production', 'error');
           }
         },
@@ -2596,6 +2609,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to rollback', 'error');
             }
           } catch (e) {
+            console.error('rollback failed:', e);
             this.showToast('Failed to rollback', 'error');
           }
         },
@@ -2635,6 +2649,7 @@ function generateAdminUI(): string {
               this.showToast('Failed to load prompt', 'error');
             }
           } catch (e) {
+            console.error('refresh_prompt failed:', e);
             this.showToast('Failed to load prompt', 'error');
           }
         },
@@ -2680,6 +2695,7 @@ function generateAdminUI(): string {
           try {
             variables = JSON.parse(this.testCaseForm.variablesJson || '{}');
           } catch (e) {
+            console.error('parse_test_variables failed:', e);
             this.showToast('Invalid JSON for variables', 'error');
             return;
           }
@@ -2732,6 +2748,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to save test case', 'error');
             }
           } catch (e) {
+            console.error('save_test_case failed:', e);
             this.showToast('Failed to save test case', 'error');
           }
         },
@@ -2761,6 +2778,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Failed to delete test case', 'error');
             }
           } catch (e) {
+            console.error('delete_test_case failed:', e);
             this.showToast('Failed to delete test case', 'error');
           }
         },
@@ -2810,6 +2828,7 @@ function generateAdminUI(): string {
               this.showToast(data.message || 'Test failed', 'error');
             }
           } catch (e) {
+            console.error('run_test_case failed:', e);
             tc.lastResult = 'fail';
             tc.lastOutput = { error: 'Network or server error', timestamp: new Date().toISOString() };
             this.showToast('Test execution failed', 'error');
@@ -3132,6 +3151,7 @@ function generateAdminUI(): string {
               });
             }
           } catch (e) {
+            console.error('run_llm_test failed:', e);
             clearTimeout(timeoutId);
             const isTimeout = e.name === 'AbortError';
             tc.llmResult = {
@@ -3326,6 +3346,7 @@ function generateAdminUI(): string {
                 };
               }
             } catch (e) {
+              console.error('run_comparison_test failed:', e);
               clearTimeout(timeoutId);
               const isTimeout = e.name === 'AbortError';
               return {
@@ -3382,6 +3403,7 @@ function generateAdminUI(): string {
             const stored = localStorage.getItem('cee_test_history_' + this.selectedTestPromptId);
             this.testHistory = stored ? JSON.parse(stored) : [];
           } catch (e) {
+            console.error('load_test_history failed:', e);
             this.testHistory = [];
           }
         },
@@ -3392,7 +3414,9 @@ function generateAdminUI(): string {
             let history = [];
             try {
               history = JSON.parse(localStorage.getItem(key) || '[]');
-            } catch (e) {}
+            } catch (e) {
+              console.error('persist_test_history failed:', e);
+            }
 
             history.push(item);
 
@@ -3445,6 +3469,7 @@ function generateAdminUI(): string {
               this.comparisonData = null;
             }
           } catch (e) {
+            console.error('load_comparison failed:', e);
             this.showToast('Failed to load comparison', 'error');
             this.comparisonData = null;
           }

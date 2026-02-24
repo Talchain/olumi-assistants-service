@@ -388,6 +388,72 @@ export interface LLMAdapter {
    * @throws UpstreamHTTPError on API errors
    */
   chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult>;
+
+  /**
+   * Native tool calling for multi-turn orchestration.
+   *
+   * Uses Anthropic native tool_use content blocks rather than structured JSON output.
+   * Optional — only implemented by adapters that support native tool calling.
+   *
+   * @param args - System prompt, messages, tool definitions, optional tool_choice/temperature/maxTokens
+   * @param opts - Request ID, timeout, abort signal
+   * @returns Content blocks (text + tool_use), stop reason, usage metrics
+   * @throws UpstreamTimeoutError on timeout
+   * @throws UpstreamHTTPError on API errors
+   * @throws UnsupportedOperationError if adapter does not support tool calling
+   */
+  chatWithTools?(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult>;
+}
+
+/**
+ * Tool definition for native tool calling (Anthropic format).
+ * input_schema follows JSON Schema structure.
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * A content block in a tool-calling response.
+ */
+export type ToolResponseBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
+
+/**
+ * Arguments for chat with native tool calling.
+ */
+export interface ChatWithToolsArgs {
+  /** System prompt for the conversation */
+  system: string;
+  /** Full message history (multi-turn) */
+  messages: Array<{ role: 'user' | 'assistant'; content: string | ToolResponseBlock[] }>;
+  /** Tool definitions available to the model */
+  tools: ToolDefinition[];
+  /** Tool choice strategy */
+  tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
+  /** Temperature for response generation (0-1, default: 0 for determinism) */
+  temperature?: number;
+  /** Maximum tokens to generate (default: 4096) */
+  maxTokens?: number;
+}
+
+/**
+ * Result from chat with native tool calling.
+ */
+export interface ChatWithToolsResult {
+  /** Array of text and/or tool_use content blocks */
+  content: ToolResponseBlock[];
+  /** Why the model stopped generating */
+  stop_reason: 'end_turn' | 'tool_use' | 'max_tokens';
+  /** Token usage metrics for cost tracking */
+  usage: UsageMetrics;
+  /** Model that was used */
+  model: string;
+  /** Provider-side latency in milliseconds */
+  latencyMs: number;
 }
 
 /**

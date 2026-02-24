@@ -404,6 +404,24 @@ export const TelemetryEvents = {
   // Performance timing events (observability v2)
   LlmCall: "llm.call",
   DownstreamCall: "downstream.call",
+
+  // Orchestrator events (Track C)
+  OrchestratorTurnStarted: "orchestrator.turn.started",
+  OrchestratorTurnCompleted: "orchestrator.turn.completed",
+  OrchestratorTurnFailed: "orchestrator.turn.failed",
+  OrchestratorIntentResolved: "orchestrator.intent.resolved",
+  OrchestratorToolInvoked: "orchestrator.tool.invoked",
+  OrchestratorToolCompleted: "orchestrator.tool.completed",
+  OrchestratorToolFailed: "orchestrator.tool.failed",
+  OrchestratorPlotRunRequested: "orchestrator.plot.run_requested",
+  OrchestratorPlotRunCompleted: "orchestrator.plot.run_completed",
+  OrchestratorPlotRunFailed: "orchestrator.plot.run_failed",
+  OrchestratorPlotValidateRequested: "orchestrator.plot.validate_requested",
+  OrchestratorPlotValidateCompleted: "orchestrator.plot.validate_completed",
+  OrchestratorIdempotencyHit: "orchestrator.idempotency.hit",
+  OrchestratorIdempotencyCached: "orchestrator.idempotency.cached",
+  OrchestratorNumericFreehandStripped: "orchestrator.commentary.numeric_freehand_stripped",
+  OrchestratorSystemEvent: "orchestrator.system_event",
 } as const;
 
 /**

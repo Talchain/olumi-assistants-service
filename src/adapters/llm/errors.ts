@@ -145,3 +145,22 @@ export class ClientDisconnectError extends Error {
     }
   }
 }
+
+/**
+ * Unsupported operation error — thrown when an adapter does not support
+ * an optional method (e.g., chatWithTools on a provider that lacks native tool calling).
+ */
+export class UnsupportedOperationError extends Error {
+  readonly name = "UnsupportedOperationError";
+
+  constructor(
+    message: string,
+    public readonly provider: string,
+    public readonly operation: string,
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, UnsupportedOperationError);
+    }
+  }
+}

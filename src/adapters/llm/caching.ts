@@ -39,6 +39,8 @@ import type {
   CritiqueGraphResult,
   ChatArgs,
   ChatResult,
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
@@ -366,6 +368,16 @@ export class CachingAdapter implements LLMAdapter {
   async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
     // Chat responses are typically unique and context-dependent, so we bypass cache
     return this.adapter.chat(args, opts);
+  }
+
+  /**
+   * Native tool calling - bypasses cache, delegates to underlying adapter
+   */
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools`);
+    }
+    return this.adapter.chatWithTools(args, opts);
   }
 }
 

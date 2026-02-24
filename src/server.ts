@@ -59,6 +59,8 @@ import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
+import { ceeOrchestratorRouteV1 } from "./orchestrator/route.js";
+import ceeEditGraphRouteV1 from "./routes/assist.v1.edit-graph.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { publicPromptRoutes } from "./routes/v1.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
@@ -791,6 +793,13 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeDecisionReviewRouteV1(app);
   if (env.CEE_DECISION_REVIEW_EXAMPLE_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
+  }
+
+  // Orchestrator routes (feature-gated)
+  if (config.features.orchestrator) {
+    await ceeOrchestratorRouteV1(app);
+    await ceeEditGraphRouteV1(app);
+    app.log.info({}, 'Orchestrator routes registered (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)');
   }
 
   // Public prompt routes (cache warming and status)
