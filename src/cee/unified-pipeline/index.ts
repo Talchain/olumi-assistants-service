@@ -7,7 +7,7 @@
  * Stages:
  *  1.  Parse           — LLM draft + adapter normalisation
  *  2.  Normalise       — STRP + risk coefficients (field transforms only)
- *  3.  Enrich          — Factor enrichment (ONCE)
+ *  3.  Enrich          — Factor enrichment (ONCE, try/catch wrapped for degenerate graphs)
  *  4.  Repair          — Validation + repair + goal merge + connectivity + clarifier
  *  4b. Threshold Sweep — Deterministic goal threshold hygiene (non-critical, try/catch wrapped)
  *  5.  Package         — Caps + warnings + quality + trace assembly
@@ -23,7 +23,7 @@ import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
 import { log } from "../../utils/telemetry.js";
-import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../../adapters/llm/errors.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 
 import { runStageParse } from "./stages/parse.js";
@@ -236,6 +236,64 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     };
   }
 
+  // Upstream non-JSON: LLM returned unparseable content (e.g. nonsensical brief → garbage output)
+  if (err instanceof UpstreamNonJsonError) {
+    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM returned non-JSON response");
+    return {
+      statusCode: 400,
+      body: buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM response could not be parsed — the brief may be too vague or nonsensical", {
+        requestId: ctx.requestId,
+        reason: "llm_non_json",
+        recovery: {
+          suggestion: "Provide a clearer, more specific decision brief.",
+          hints: [
+            "State the specific decision you are trying to make",
+            "List 2-3 concrete options you are considering",
+            "Describe what success looks like",
+          ],
+        },
+      }),
+    };
+  }
+
+  // Upstream HTTP error: LLM provider returned non-2xx
+  if (err instanceof UpstreamHTTPError) {
+    log.error({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM upstream HTTP error");
+    return {
+      statusCode: 502,
+      body: buildCeeErrorResponse("CEE_LLM_UPSTREAM_ERROR", "LLM provider returned an error", {
+        requestId: ctx.requestId,
+        retryable: true,
+      }),
+    };
+  }
+
+  // LLM schema validation failure or empty response: commonly happens with
+  // nonsensical/incoherent briefs that produce degenerate or empty LLM output
+  if (
+    err.message?.startsWith("openai_response_invalid_schema") ||
+    err.message?.startsWith("anthropic_response_invalid_schema") ||
+    err.message === "openai_empty_response" ||
+    err.message === "draft_graph_missing_result"
+  ) {
+    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM response failed schema validation");
+    return {
+      statusCode: 400,
+      body: buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM produced a response that does not match the expected graph schema", {
+        requestId: ctx.requestId,
+        reason: "llm_schema_invalid",
+        recovery: {
+          suggestion: "Provide a clearer, more specific decision brief.",
+          hints: [
+            "State the specific decision you are trying to make",
+            "List 2-3 concrete options you are considering",
+            "Describe what success looks like",
+          ],
+        },
+      }),
+    };
+  }
+
   log.error({ error: err, requestId: ctx.requestId }, "Unified pipeline: unexpected error");
   return {
     statusCode: 500,
@@ -262,7 +320,38 @@ export async function runUnifiedPipeline(
     await runStageNormalise(ctx);
 
     // Stage 3: Enrich — Factor enrichment (ONCE)
-    await runStageEnrich(ctx);
+    // Defensive: degenerate graphs (empty nodes/edges from nonsensical briefs)
+    // can crash enrichment. Catch and return structured error instead of 500.
+    try {
+      await runStageEnrich(ctx);
+    } catch (enrichErr: any) {
+      const nodeCount = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0;
+      const edgeCount = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0;
+      log.warn({
+        event: "cee.enrich.crashed",
+        request_id: ctx.requestId,
+        error: enrichErr?.message,
+        node_count: nodeCount,
+        edge_count: edgeCount,
+      }, "Stage 3 (Enrich) crashed — returning structured error");
+      return {
+        statusCode: 400,
+        body: buildCeeErrorResponse("CEE_GRAPH_INVALID", "Unable to construct a valid decision model from this brief", {
+          requestId: ctx.requestId,
+          reason: "enrichment_failed",
+          nodeCount,
+          edgeCount,
+          recovery: {
+            suggestion: "Add more detail to your decision brief before drafting a model.",
+            hints: [
+              "State the specific decision you are trying to make",
+              "List 2-3 concrete options you are considering",
+              "Describe what success looks like",
+            ],
+          },
+        }),
+      };
+    }
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
 
