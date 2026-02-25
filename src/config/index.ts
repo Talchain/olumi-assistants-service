@@ -254,6 +254,7 @@ const ConfigSchema = z.object({
     enableLegacySSE: booleanString.default(false),
     strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
     orchestrator: booleanString.default(false), // Track C: CEE Orchestrator — multi-turn conversational decision modelling
+    contextFabric: booleanString.default(false), // Context Fabric: 3-zone cache-aware context assembly pipeline
   }),
 
   // Prompt Cache Configuration
@@ -529,6 +530,7 @@ function parseConfig(): Config {
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
       orchestrator: env.ENABLE_ORCHESTRATOR,
+      contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
