@@ -1,0 +1,27 @@
+{
+  "turn_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "assistant_text": "Churn matters because it directly affects the sustainability of your growth. In your model, customer churn feeds back into revenue through two reinforcing loops: higher churn reduces the active customer base, which lowers recurring revenue, which in turn constrains your ability to invest in retention. The sensitivity analysis from your last run showed churn rate as the second-highest driver of outcome variance — small changes in churn assumptions shifted the win probabilities meaningfully across your options. That's why the model is paying so much attention to it.",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "label": "Explore retention levers",
+      "prompt": "What interventions could reduce churn in Option A?",
+      "role": "facilitator"
+    },
+    {
+      "label": "Challenge the assumption",
+      "prompt": "Is the churn rate assumption realistic given our historical data?",
+      "role": "challenger"
+    }
+  ],
+  "lineage": {
+    "context_hash": "a3f1b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+  },
+  "turn_plan": {
+    "selected_tool": null,
+    "routing": "llm",
+    "long_running": false
+  },
+  "stage_indicator": "evaluate",
+  "stage_label": "Evaluating options"
+}

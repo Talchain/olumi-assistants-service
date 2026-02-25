@@ -1,0 +1,272 @@
+{
+  "turn_id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+  "assistant_text": null,
+  "blocks": [
+    {
+      "block_id": "blk_review_card_d4e5f6a7b8c9d0e1",
+      "block_type": "review_card",
+      "data": {
+        "card": {
+          "card_type": "evidence_priority",
+          "title": "Evidence Priority",
+          "priority_band": "high",
+          "summary": "The model's conclusions are highly sensitive to 2 edges. Strengthening evidence on these edges would most improve decision confidence.",
+          "sensitive_edges": [
+            {
+              "from": "node_churn",
+              "to": "node_customers",
+              "elasticity": 0.42,
+              "direction": "negative",
+              "current_strength": {
+                "mean": -0.6,
+                "std": 0.15
+              }
+            },
+            {
+              "from": "node_price",
+              "to": "node_revenue",
+              "elasticity": 0.31,
+              "direction": "positive",
+              "current_strength": {
+                "mean": 0.7,
+                "std": 0.1
+              }
+            }
+          ],
+          "recommendation": "Gather data on the churn → customers relationship. This edge has the highest elasticity and wide uncertainty."
+        }
+      },
+      "provenance": {
+        "trigger": "tool:run_analysis",
+        "turn_id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+        "timestamp": "2025-02-25T14:35:42.891Z"
+      }
+    }
+  ],
+  "suggested_actions": [
+    {
+      "label": "Explain the results",
+      "prompt": "Explain what the analysis means for my decision",
+      "role": "facilitator"
+    },
+    {
+      "label": "Challenge robustness",
+      "prompt": "The robustness is very low — what would need to change to improve it?",
+      "role": "challenger"
+    }
+  ],
+  "analysis_response": {
+    "analysis_status": "complete",
+    "response_hash": "2bbad37ddbc7adf8",
+    "option_comparison": [
+      {
+        "option_id": "opt_aggressive",
+        "option_label": "Aggressive pricing",
+        "win_probability": 0.52,
+        "expected_value": 1240000,
+        "probability_of_joint_goal": null
+      },
+      {
+        "option_id": "opt_moderate",
+        "option_label": "Moderate pricing",
+        "win_probability": 0.35,
+        "expected_value": 980000,
+        "probability_of_joint_goal": null
+      },
+      {
+        "option_id": "opt_conservative",
+        "option_label": "Conservative pricing",
+        "win_probability": 0.13,
+        "expected_value": 620000,
+        "probability_of_joint_goal": null
+      }
+    ],
+    "factor_sensitivity": [
+      {
+        "label": "Customer churn rate",
+        "elasticity": 0.42,
+        "direction": "negative",
+        "node_id": "node_churn"
+      },
+      {
+        "label": "Price per seat",
+        "elasticity": 0.31,
+        "direction": "positive",
+        "node_id": "node_price"
+      },
+      {
+        "label": "Active customers",
+        "elasticity": 0.18,
+        "direction": "positive",
+        "node_id": "node_customers"
+      }
+    ],
+    "robustness": {
+      "level": "very_low",
+      "fragile_edges": [
+        {
+          "from": "node_churn",
+          "to": "node_customers",
+          "sensitivity": 0.42
+        }
+      ],
+      "summary": "The ranking between options is sensitive to small changes in 1 edge."
+    },
+    "review_cards": [
+      {
+        "card_type": "evidence_priority",
+        "title": "Evidence Priority",
+        "priority_band": "high",
+        "summary": "The model's conclusions are highly sensitive to 2 edges. Strengthening evidence on these edges would most improve decision confidence.",
+        "sensitive_edges": [
+          {
+            "from": "node_churn",
+            "to": "node_customers",
+            "elasticity": 0.42,
+            "direction": "negative",
+            "current_strength": {
+              "mean": -0.6,
+              "std": 0.15
+            }
+          },
+          {
+            "from": "node_price",
+            "to": "node_revenue",
+            "elasticity": 0.31,
+            "direction": "positive",
+            "current_strength": {
+              "mean": 0.7,
+              "std": 0.1
+            }
+          }
+        ],
+        "recommendation": "Gather data on the churn → customers relationship. This edge has the highest elasticity and wide uncertainty."
+      }
+    ],
+    "decision_brief": {
+      "brief_id": "brief_c3d4e5f6",
+      "version": "1.0",
+      "graph_hash": "e7f8a9b0c1d2e3f4",
+      "seed": 182005,
+      "created_at": "2025-02-25T14:35:42.891Z",
+      "headline": "Aggressive pricing wins but the margin is thin and fragile",
+      "options": [
+        {
+          "option_id": "opt_aggressive",
+          "label": "Aggressive pricing",
+          "win_probability": 0.52,
+          "expected_value": 1240000
+        },
+        {
+          "option_id": "opt_moderate",
+          "label": "Moderate pricing",
+          "win_probability": 0.35,
+          "expected_value": 980000
+        },
+        {
+          "option_id": "opt_conservative",
+          "label": "Conservative pricing",
+          "win_probability": 0.13,
+          "expected_value": 620000
+        }
+      ],
+      "top_drivers": [
+        {
+          "label": "Customer churn rate",
+          "elasticity": 0.42,
+          "direction": "negative"
+        },
+        {
+          "label": "Price per seat",
+          "elasticity": 0.31,
+          "direction": "positive"
+        }
+      ],
+      "key_assumptions": [
+        "Churn rate remains below 8% annually under aggressive pricing",
+        "Market size does not contract in response to higher prices"
+      ],
+      "what_would_change": [
+        "If churn exceeds 10%, Moderate pricing overtakes Aggressive",
+        "If customer acquisition cost drops 20%, Aggressive wins decisively"
+      ],
+      "robustness": {
+        "level": "very_low",
+        "summary": "The ranking between options is sensitive to small changes in 1 edge."
+      },
+      "warnings": [
+        "Very low robustness — consider gathering more evidence before committing"
+      ],
+      "lineage": {
+        "response_hash": "2bbad37ddbc7adf8",
+        "seed_used": 182005,
+        "n_samples": 10000
+      }
+    },
+    "m1_coaching": {
+      "message": "Your model captures the core pricing dynamics well. Consider whether there are competitive response effects that could feed back into your churn assumptions.",
+      "suggestions": [
+        "Add a node for competitor pricing response",
+        "Consider whether churn rate should depend on relative price, not absolute price"
+      ]
+    },
+    "constraint_results": null,
+    "edge_sensitivity": [
+      {
+        "from": "node_churn",
+        "to": "node_customers",
+        "elasticity": 0.42,
+        "rank": 1
+      },
+      {
+        "from": "node_price",
+        "to": "node_revenue",
+        "elasticity": 0.31,
+        "rank": 2
+      },
+      {
+        "from": "node_customers",
+        "to": "node_revenue",
+        "elasticity": 0.18,
+        "rank": 3
+      }
+    ],
+    "critiques": [],
+    "insights": [
+      {
+        "insight_type": "sensitivity",
+        "message": "The churn rate → active customers edge drives most of the outcome variance. Small changes here flip the winner."
+      }
+    ],
+    "improvement_guidance": [
+      {
+        "priority": "high",
+        "action": "Strengthen evidence on the churn → customers edge",
+        "rationale": "Highest elasticity edge with wide uncertainty band"
+      }
+    ],
+    "processing_time_ms": 25830,
+    "request_id": "req_f6a7b8c9d0e1f2a3",
+    "meta": {
+      "seed_used": "182005",
+      "n_samples": 10000,
+      "model_version": "plot-lite-1.4.0",
+      "engine": "monte_carlo"
+    }
+  },
+  "lineage": {
+    "context_hash": "d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6",
+    "plan_hash": "e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
+    "response_hash": "2bbad37ddbc7adf8",
+    "seed_used": 182005,
+    "n_samples": 10000
+  },
+  "turn_plan": {
+    "selected_tool": "run_analysis",
+    "routing": "deterministic",
+    "long_running": true,
+    "tool_latency_ms": 25830
+  },
+  "stage_indicator": "evaluate",
+  "stage_label": "Evaluating options"
+}

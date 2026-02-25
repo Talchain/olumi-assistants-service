@@ -298,3 +298,7 @@ export function getHttpStatusForError(error: OrchestratorError): number {
 // ============================================================================
 
 export type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T };
+
+/** INT-3 convenience aliases */
+export type ToolDefinition = OrchestratorToolDefinition;
+export type V2RunResponse = V2RunResponseEnvelope;

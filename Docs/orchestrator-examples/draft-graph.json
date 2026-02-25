@@ -1,0 +1,132 @@
+{
+  "turn_id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+  "assistant_text": "I've drafted a causal model with 4 nodes and 3 edges. The graph captures the core pricing → revenue → retention dynamics you described. Review the proposed structure and accept, edit, or dismiss it.",
+  "blocks": [
+    {
+      "block_id": "blk_graph_patch_a1b2c3d4e5f6a7b8",
+      "block_type": "graph_patch",
+      "data": {
+        "patch_type": "full_draft",
+        "operations": [
+          {
+            "op": "add_node",
+            "path": "/nodes/node_price",
+            "value": {
+              "id": "node_price",
+              "label": "Price per seat",
+              "kind": "decision",
+              "unit": "USD"
+            }
+          },
+          {
+            "op": "add_node",
+            "path": "/nodes/node_revenue",
+            "value": {
+              "id": "node_revenue",
+              "label": "Monthly recurring revenue",
+              "kind": "outcome",
+              "unit": "USD"
+            }
+          },
+          {
+            "op": "add_node",
+            "path": "/nodes/node_churn",
+            "value": {
+              "id": "node_churn",
+              "label": "Customer churn rate",
+              "kind": "intermediate",
+              "unit": "percent"
+            }
+          },
+          {
+            "op": "add_node",
+            "path": "/nodes/node_customers",
+            "value": {
+              "id": "node_customers",
+              "label": "Active customers",
+              "kind": "intermediate",
+              "unit": "count"
+            }
+          },
+          {
+            "op": "add_edge",
+            "path": "/edges/node_price->node_revenue",
+            "value": {
+              "from": "node_price",
+              "to": "node_revenue",
+              "strength": {
+                "mean": 0.7,
+                "std": 0.1
+              },
+              "exists_probability": 0.95
+            }
+          },
+          {
+            "op": "add_edge",
+            "path": "/edges/node_customers->node_revenue",
+            "value": {
+              "from": "node_customers",
+              "to": "node_revenue",
+              "strength": {
+                "mean": 0.85,
+                "std": 0.08
+              },
+              "exists_probability": 0.98
+            }
+          },
+          {
+            "op": "add_edge",
+            "path": "/edges/node_churn->node_customers",
+            "value": {
+              "from": "node_churn",
+              "to": "node_customers",
+              "strength": {
+                "mean": -0.6,
+                "std": 0.15
+              },
+              "exists_probability": 0.92
+            }
+          }
+        ],
+        "status": "proposed"
+      },
+      "actions": [
+        {
+          "action_id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+          "label": "Accept",
+          "action_type": "accept"
+        },
+        {
+          "action_id": "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a",
+          "label": "Edit",
+          "action_type": "edit"
+        },
+        {
+          "action_id": "e5f6a7b8-c9d0-4e1f-2a3b-4c5d6e7f8a9b",
+          "label": "Dismiss",
+          "action_type": "dismiss"
+        }
+      ],
+      "provenance": {
+        "trigger": "tool:draft_graph",
+        "turn_id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+        "timestamp": "2025-02-25T14:32:18.045Z"
+      },
+      "related_elements": {
+        "node_ids": ["node_price", "node_revenue", "node_churn", "node_customers"]
+      }
+    }
+  ],
+  "lineage": {
+    "context_hash": "b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5",
+    "plan_hash": "c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+  },
+  "turn_plan": {
+    "selected_tool": "draft_graph",
+    "routing": "deterministic",
+    "long_running": true,
+    "tool_latency_ms": 32050
+  },
+  "stage_indicator": "ideate",
+  "stage_label": "Exploring options"
+}
