@@ -405,7 +405,7 @@ describe("handleEditGraph", () => {
     expect(result.assistantText).toContain("PLoT applied 1 repair");
   });
 
-  it("proceeds without PLoT when plotClient is null", async () => {
+  it("proceeds without PLoT when plotClient is null and adds PLOT_VALIDATION_SKIPPED warning", async () => {
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
 
     const result = await handleEditGraph(
@@ -419,6 +419,8 @@ describe("handleEditGraph", () => {
 
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("proposed");
+    expect(data.validation_warnings).toBeDefined();
+    expect(data.validation_warnings!.some(w => w.includes("PLOT_VALIDATION_SKIPPED"))).toBe(true);
   });
 
   it("rejects patch when PLoT is configured but call throws (hard reject)", async () => {
@@ -646,5 +648,195 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("proposed");
     expect(chatMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ------------------------------------------------------------------
+  // Addendum: old_value → previous mapping for PLoT
+  // ------------------------------------------------------------------
+
+  it("maps old_value to previous in PLoT payload", async () => {
+    const opWithOldValue = {
+      op: "update_node",
+      path: "factor_1",
+      value: { label: "New Label" },
+      old_value: { label: "Old Label" },
+    };
+    const adapter = makeAdapter([opWithOldValue]);
+    const plotClient = makePlotClient();
+
+    await handleEditGraph(
+      makeContext(),
+      "Update label",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const [payload] = (plotClient.validatePatch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const plotOp = payload.operations[0];
+    expect(plotOp.previous).toEqual({ label: "Old Label" });
+    expect(plotOp.old_value).toBeUndefined();
+  });
+
+  it("omits previous from PLoT payload when old_value is not set", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient();
+
+    await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const [payload] = (plotClient.validatePatch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const plotOp = payload.operations[0];
+    expect(plotOp.previous).toBeUndefined();
+  });
+
+  // ------------------------------------------------------------------
+  // Addendum: PLoT graph_hash consumed
+  // ------------------------------------------------------------------
+
+  it("uses PLoT graph_hash when returned instead of local computation", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      applied_graph: { nodes: [], edges: [] },
+      graph_hash: "plot_canonical_hash",
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph_hash).toBe("plot_canonical_hash");
+  });
+
+  it("falls back to local hash when PLoT omits graph_hash", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const appliedGraph = { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] };
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      applied_graph: appliedGraph,
+      // No graph_hash field
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph_hash).toBeDefined();
+    expect(data.applied_graph_hash!.length).toBe(16); // SHA-256 hex truncated to 16
+  });
+
+  // ------------------------------------------------------------------
+  // Addendum: PLoT warnings surfaced
+  // ------------------------------------------------------------------
+
+  it("surfaces PLoT warnings in validation_warnings", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      warnings: [
+        { code: "STRENGTH_CLAMPED", message: "Clamped strength_mean to [-1,1]", field_path: "edges[0].strength_mean" },
+      ],
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.validation_warnings).toBeDefined();
+    expect(data.validation_warnings!.some(w => w.includes("Clamped strength_mean"))).toBe(true);
+  });
+
+  it("handles PLoT string warnings", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      warnings: ["Edge has low confidence"],
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.validation_warnings).toContain("Edge has low confidence");
+  });
+
+  // ------------------------------------------------------------------
+  // Addendum: MAX_PATCH_OPERATIONS cap
+  // ------------------------------------------------------------------
+
+  it("rejects patch with more than 15 operations", async () => {
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapter,
+      "req-1",
+      "turn-1",
+      { maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.reason).toContain("max 15");
+  });
+
+  it("accepts patch with exactly 15 operations", async () => {
+    // 15 update_node ops targeting factor_1 (all valid against the graph)
+    const ops = Array.from({ length: 15 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Batch edit",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    expect(data.operations).toHaveLength(15);
   });
 });

@@ -66,6 +66,13 @@ export interface EditGraphOpts {
 }
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/** Maximum number of operations per patch. Prevents unbounded LLM output. */
+const MAX_PATCH_OPERATIONS = 15;
+
+// ============================================================================
 // Legacy Field Detection
 // ============================================================================
 
@@ -106,6 +113,26 @@ function sanitiseOperations(operations: PatchOperation[]): PatchOperation[] {
   }
 
   return cleaned;
+}
+
+// ============================================================================
+// PLoT Field Mapping
+// ============================================================================
+
+/**
+ * Map CEE PatchOperation[] to PLoT's expected field names.
+ * CEE uses `old_value`; PLoT uses `previous`.
+ */
+function mapOpsForPlot(ops: PatchOperation[]): Record<string, unknown>[] {
+  return ops.map(op => {
+    const mapped: Record<string, unknown> = {
+      op: op.op,
+      path: op.path,
+    };
+    if (op.value !== undefined) mapped.value = op.value;
+    if (op.old_value !== undefined) mapped.previous = op.old_value;
+    return mapped;
+  });
 }
 
 // ============================================================================
@@ -285,6 +312,20 @@ export async function handleEditGraph(
 
     lastRawOps = rawOps;
 
+    // Guard: reject oversized operation arrays before expensive validation
+    if (rawOps.length > MAX_PATCH_OPERATIONS) {
+      const msg = `Patch contains ${rawOps.length} operations (max ${MAX_PATCH_OPERATIONS}). Reduce the scope of the edit.`;
+      log.warn(
+        { request_id: requestId, attempt, operations_count: rawOps.length, max: MAX_PATCH_OPERATIONS },
+        "edit_graph rejected — too many operations",
+      );
+      if (attempt === totalAttempts) {
+        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime);
+      }
+      lastValidationResult = { valid: false, operations: [], referentialErrors: [{ index: 0, op: 'batch', path: '', message: msg }] };
+      continue;
+    }
+
     // Step 1: Zod schema validation + referential integrity
     const graph = context.graph as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string }> };
     const validationResult = validatePatchOperations(rawOps, graph);
@@ -321,12 +362,13 @@ export async function handleEditGraph(
     let repairsApplied: RepairEntry[] | undefined;
     let appliedGraph: GraphV3T | undefined;
     let appliedGraphHash: string | undefined;
+    let plotWarnings: string[] | undefined;
 
     if (plotClient) {
       try {
         const plotPayload: Record<string, unknown> = {
           graph: context.graph,
-          operations,
+          operations: mapOpsForPlot(operations),
           scenario_id: context.scenario_id,
           base_graph_hash: baseGraphHash,
         };
@@ -371,10 +413,20 @@ export async function handleEditGraph(
         // Capture applied_graph and its hash from PLoT response
         if (plotResponse.applied_graph && typeof plotResponse.applied_graph === 'object') {
           appliedGraph = plotResponse.applied_graph as GraphV3T;
-          appliedGraphHash = computeGraphHash(appliedGraph);
+          // Prefer PLoT's canonical hash; fall back to local computation
+          appliedGraphHash = typeof plotResponse.graph_hash === 'string'
+            ? plotResponse.graph_hash
+            : computeGraphHash(appliedGraph);
           log.info(
-            { request_id: requestId, applied_graph_hash: appliedGraphHash },
+            { request_id: requestId, applied_graph_hash: appliedGraphHash, hash_source: typeof plotResponse.graph_hash === 'string' ? 'plot' : 'local' },
             "edit_graph PLoT returned applied graph",
+          );
+        }
+
+        // Surface PLoT warnings in block data
+        if (plotResponse.warnings && Array.isArray(plotResponse.warnings) && plotResponse.warnings.length > 0) {
+          plotWarnings = plotResponse.warnings.map((w: unknown) =>
+            typeof w === 'string' ? w : typeof w === 'object' && w !== null && 'message' in w ? String((w as { message: unknown }).message) : JSON.stringify(w),
           );
         }
       } catch (plotError) {
@@ -409,6 +461,12 @@ export async function handleEditGraph(
     // ---- Success: build block ----
     const latencyMs = Date.now() - startTime;
 
+    // Collect validation warnings: PLoT warnings + skip notice
+    const allWarnings: string[] = [...(plotWarnings ?? [])];
+    if (!plotClient) {
+      allWarnings.push('PLOT_VALIDATION_SKIPPED: PLoT was unavailable — this patch has not been canonically validated');
+    }
+
     const patchData: GraphPatchBlockData = {
       patch_type: 'edit',
       operations,
@@ -417,6 +475,7 @@ export async function handleEditGraph(
       ...(appliedGraph && { applied_graph: appliedGraph }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
+      ...(allWarnings.length > 0 && { validation_warnings: allWarnings }),
     };
 
     const block = createGraphPatchBlock(patchData, turnId);
