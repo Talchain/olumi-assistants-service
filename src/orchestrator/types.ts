@@ -159,7 +159,7 @@ export interface ConversationBlock {
 // ---- Graph Patch Block ----
 
 export type PatchType = 'full_draft' | 'edit' | 'repair';
-export type PatchStatus = 'proposed' | 'accepted' | 'dismissed';
+export type PatchStatus = 'proposed' | 'accepted' | 'dismissed' | 'rejected';
 
 export interface PatchOperation {
   op: 'add_node' | 'remove_node' | 'update_node' | 'add_edge' | 'remove_edge' | 'update_edge';
@@ -168,11 +168,25 @@ export interface PatchOperation {
   old_value?: unknown;
 }
 
+export interface RepairEntry {
+  code: string;
+  message: string;
+  field?: string;
+  old_value?: unknown;
+  new_value?: unknown;
+}
+
 export interface GraphPatchBlockData {
   patch_type: PatchType;
   operations: PatchOperation[];
   status: PatchStatus;
   applied_graph_hash?: string;
+  /** Canonical graph state after PLoT applies the patch */
+  applied_graph?: GraphV3T;
+  /** Hash of the graph the patch was generated against (optimistic concurrency audit trail) */
+  base_graph_hash?: string;
+  /** Semantic repairs applied by PLoT (surfaced as-is, never rewritten into operations) */
+  repairs_applied?: RepairEntry[];
   summary?: string;
   rejection?: { reason: string; message?: string };
   validation_warnings?: string[];

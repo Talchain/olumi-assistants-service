@@ -51,6 +51,32 @@ export interface AnalysisResponseSummary {
 }
 
 // ============================================================================
+// Edit Compact Graph (for edit_graph LLM prompt — more fields than CompactGraph)
+// ============================================================================
+
+export interface EditCompactNode {
+  id: string;
+  label: string;
+  kind: string;
+  category?: string;
+}
+
+export interface EditCompactEdge {
+  from: string;
+  to: string;
+  label?: string;
+  strength_mean: number;
+  strength_std: number;
+  exists_probability: number;
+  effect_direction: string;
+}
+
+export interface EditCompactGraph {
+  nodes: EditCompactNode[];
+  edges: EditCompactEdge[];
+}
+
+// ============================================================================
 // Token Budget
 // ============================================================================
 

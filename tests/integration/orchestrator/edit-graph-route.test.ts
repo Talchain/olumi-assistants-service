@@ -15,6 +15,16 @@ vi.mock("../../../src/adapters/llm/router.js", () => ({
   }),
 }));
 
+// Mock prompt loader
+vi.mock("../../../src/adapters/llm/prompt-loader.js", () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue("You are editing a graph."),
+}));
+
+// Mock PLoT client (no PLOT_BASE_URL in tests)
+vi.mock("../../../src/orchestrator/plot-client.js", () => ({
+  createPLoTClient: vi.fn().mockReturnValue(null),
+}));
+
 // Mock config
 vi.mock("../../../src/config/index.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../../src/config/index.js")>();
@@ -126,10 +136,13 @@ describe("POST /assist/v1/edit-graph — integration", () => {
   });
 
   it("returns 502 for LLM call failures (mapped to TOOL_EXECUTION_FAILED by handler)", async () => {
-    // Make adapter.chat throw a timeout error
-    // handleEditGraph catches and re-wraps as TOOL_EXECUTION_FAILED
-    const adapter = getAdapter("orchestrator") as { chat: ReturnType<typeof vi.fn> };
-    adapter.chat.mockRejectedValueOnce(new Error("Request timed out"));
+    // Make adapter.chat throw on ALL calls (default mock + mockRejectedValue)
+    // to ensure retry loop exhausts all attempts
+    const adapter = getAdapter("orchestrator") as unknown as { chat: ReturnType<typeof vi.fn> };
+    const originalImpl = adapter.chat.getMockImplementation();
+
+    // Override: always reject for this test
+    adapter.chat.mockRejectedValue(new Error("Request timed out"));
 
     const response = await app.inject({
       method: "POST",
@@ -144,5 +157,16 @@ describe("POST /assist/v1/edit-graph — integration", () => {
     const body = JSON.parse(response.body);
     expect(body.error.code).toBe("TOOL_EXECUTION_FAILED");
     expect(body.error.recoverable).toBe(true);
+
+    // Restore default mock for subsequent tests
+    if (originalImpl) {
+      adapter.chat.mockImplementation(originalImpl);
+    } else {
+      adapter.chat.mockResolvedValue({
+        content: JSON.stringify([
+          { op: "add_node", path: "nodes/new_factor", value: { id: "new_factor", kind: "factor", label: "New Factor" } },
+        ]),
+      });
+    }
   });
 });

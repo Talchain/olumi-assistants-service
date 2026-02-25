@@ -1604,6 +1604,62 @@ Explain critical thresholds:
 Respond ONLY with valid JSON.`;
 
 // ============================================================================
+// Edit Graph Prompt
+// ============================================================================
+
+/**
+ * System prompt for the edit_graph tool.
+ *
+ * Extracted from the inline buildEditPrompt() in src/orchestrator/tools/edit-graph.ts.
+ * The graph JSON is injected at call time — this is the static instruction portion.
+ *
+ * NOTE: Flagged for Paul's review. Current wording is the original inline version.
+ * Consider adding: examples, edge format rules, strength range constraints,
+ * topology rules (no factor→goal edges, DAG enforcement).
+ */
+export const EDIT_GRAPH_PROMPT = `You are editing a causal decision graph.
+
+Based on the user's edit request, produce a JSON array of patch operations.
+Each operation has: { "op": "<operation>", "path": "<path>", "value": <value>, "old_value": <old_value> }
+
+Valid operations: add_node, remove_node, update_node, add_edge, remove_edge, update_edge
+
+Rules:
+- Use the canonical edge format with strength_mean, strength_std, exists_probability, effect_direction.
+- Do NOT use legacy fields: belief, belief_exists, confidence.
+- Paths should reference node IDs and edge from→to pairs.
+- For updates, include old_value for the field being changed.
+- For add_node, include all required fields: id, kind, label.
+- For add_edge, include all required fields: from, to, strength_mean, strength_std, exists_probability, effect_direction.
+- Preserve existing node IDs exactly as they appear in the graph.
+
+Respond ONLY with a JSON array of operations. No explanation.`;
+
+/**
+ * Repair prompt for the edit_graph tool retry loop.
+ *
+ * Used when the initial LLM response fails structural validation or PLoT rejects.
+ * Injected with: original graph, edit description, failed operations, and validation errors.
+ *
+ * NOTE: Placeholder — flagged for Paul to provide final wording.
+ */
+export const REPAIR_EDIT_GRAPH_PROMPT = `You are repairing a failed graph edit.
+
+The previous attempt to edit a causal decision graph produced invalid patch operations.
+Review the validation errors below and produce a corrected JSON array of patch operations.
+
+Rules:
+- Use the canonical edge format with strength_mean, strength_std, exists_probability, effect_direction.
+- Do NOT use legacy fields: belief, belief_exists, confidence.
+- Paths should reference node IDs and edge from→to pairs.
+- For updates, include old_value for the field being changed.
+- For add_node, include all required fields: id, kind, label.
+- For add_edge, include all required fields: from, to, strength_mean, strength_std, exists_probability, effect_direction.
+- Fix ALL reported validation errors.
+
+Respond ONLY with a corrected JSON array of operations. No explanation.`;
+
+// ============================================================================
 // Registration Function
 // ============================================================================
 
@@ -1674,6 +1730,8 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
   registerDefaultPrompt('enrich_factors', getEnrichFactorsPrompt());
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
+  registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
+  registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
 
   // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
   // - isl_synthesis: Uses template-based narrative generation (no LLM)
@@ -1704,6 +1762,8 @@ export const PROMPT_TEMPLATES = {
   bias_check: BIAS_CHECK_PROMPT,
   enrich_factors: ENRICH_FACTORS_PROMPT,
   decision_review: DECISION_REVIEW_PROMPT,
+  edit_graph: EDIT_GRAPH_PROMPT,
+  repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 

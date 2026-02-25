@@ -14,6 +14,7 @@ import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { handleEditGraph } from "../orchestrator/tools/edit-graph.js";
+import { createPLoTClient } from "../orchestrator/plot-client.js";
 import type { ConversationContext, OrchestratorError } from "../orchestrator/types.js";
 import { getHttpStatusForError } from "../orchestrator/types.js";
 
@@ -32,6 +33,9 @@ const EditGraphRequestSchema = z.object({
 // ============================================================================
 
 export default async function route(app: FastifyInstance): Promise<void> {
+  // Create PLoT client once at route registration (null if PLOT_BASE_URL not set)
+  const plotClient = createPLoTClient();
+
   app.post("/assist/v1/edit-graph", async (req, reply) => {
     const startTime = Date.now();
     const requestId = getOrGenerateRequestId(req);
@@ -74,6 +78,7 @@ export default async function route(app: FastifyInstance): Promise<void> {
         adapter,
         requestId,
         turnId,
+        { plotClient },
       );
 
       log.info(
