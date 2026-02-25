@@ -208,6 +208,24 @@ describe("@regression B6: graceful degradation for nonsensical briefs", () => {
     expect((result.body as any).code).toBe("CEE_LLM_VALIDATION_FAILED");
   });
 
+  it("anthropic_empty_response → NOT 500 (regex resilience)", async () => {
+    // Verifies the regex pattern catches Anthropic empty responses too
+    (runStageParse as any).mockImplementation(async () => {
+      throw new Error("anthropic_empty_response");
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "asdfjkl" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    expect(result.statusCode).not.toBe(500);
+    expect(result.statusCode).toBe(400);
+    expect((result.body as any).code).toBe("CEE_LLM_VALIDATION_FAILED");
+  });
+
   it("draft_graph_missing_result → NOT 500", async () => {
     // Regression: B6 smoke test — graceful degradation for nonsensical briefs. Previously fixed in 3fdd8ab, regressed in f77d56f.
     (runStageParse as any).mockImplementation(async () => {
@@ -303,6 +321,55 @@ describe("@regression B6: graceful degradation for nonsensical briefs", () => {
 
     expect(result.statusCode).toBe(400);
     expect((result.body as any).code).toBe("CEE_GRAPH_INVALID");
+  });
+
+  it("healthy graph crash in Stage 3 → 400 but logs at error level (possible internal defect)", async () => {
+    // Finding 2: healthy graphs that crash enrichment should still return 400
+    // for user experience, but log at error-level with stack for investigation.
+    const { log } = await import("../../src/utils/telemetry.js");
+
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Maximize revenue" },
+          { id: "dec_1", kind: "decision", label: "Pricing strategy" },
+          { id: "opt_1", kind: "option", label: "Raise prices" },
+          { id: "opt_2", kind: "option", label: "Lower prices" },
+          { id: "out_1", kind: "outcome", label: "Revenue increase" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_1" },
+          { from: "dec_1", to: "opt_2" },
+          { from: "opt_1", to: "out_1" },
+        ],
+        version: "1.2",
+      };
+    });
+    (runStageNormalise as any).mockImplementation(async () => {});
+    (runStageEnrich as any).mockImplementation(async () => {
+      throw new Error("unexpected enricher bug on healthy graph");
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "Should I raise or lower prices?" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    // Still returns 400 for user experience
+    expect(result.statusCode).toBe(400);
+    expect((result.body as any).code).toBe("CEE_GRAPH_INVALID");
+
+    // But logged at error level (not warn) since graph was healthy
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "cee.enrich.crashed",
+        likely_degenerate: false,
+        stack: expect.any(String),
+      }),
+      expect.stringContaining("possible internal defect"),
+    );
   });
 
   // ─── Response shape validation ────────────────────────────────────────

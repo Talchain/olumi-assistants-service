@@ -269,13 +269,17 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
   }
 
   // LLM schema validation failure or empty response: commonly happens with
-  // nonsensical/incoherent briefs that produce degenerate or empty LLM output
-  if (
-    err.message?.startsWith("openai_response_invalid_schema") ||
-    err.message?.startsWith("anthropic_response_invalid_schema") ||
-    err.message === "openai_empty_response" ||
-    err.message === "draft_graph_missing_result"
-  ) {
+  // nonsensical/incoherent briefs that produce degenerate or empty LLM output.
+  //
+  // COUPLING: Adapter error messages follow the convention "{provider}_{operation}_{failure}"
+  // (e.g. "openai_response_invalid_schema", "anthropic_response_invalid_schema",
+  // "openai_empty_response"). If adapter error messages change, update this pattern.
+  // See: src/adapters/llm/openai.ts, src/adapters/llm/anthropic.ts
+  const isLlmSchemaOrEmptyError =
+    /^(?:openai|anthropic)_(?:response_invalid_schema|empty_response)/.test(err.message ?? "") ||
+    err.message === "draft_graph_missing_result";
+
+  if (isLlmSchemaOrEmptyError) {
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM response failed schema validation");
     return {
       statusCode: 400,
@@ -327,13 +331,22 @@ export async function runUnifiedPipeline(
     } catch (enrichErr: any) {
       const nodeCount = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0;
       const edgeCount = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0;
-      log.warn({
+
+      // Distinguish degenerate-graph crashes (user input problem → 400) from
+      // genuine internal defects (server bug → still user-facing 400 for UX,
+      // but logged at error-level with full stack for investigation).
+      const isLikelyDegenerateGraph = nodeCount <= 2 || edgeCount === 0;
+      const logLevel = isLikelyDegenerateGraph ? "warn" : "error";
+      log[logLevel]({
         event: "cee.enrich.crashed",
         request_id: ctx.requestId,
         error: enrichErr?.message,
+        stack: isLikelyDegenerateGraph ? undefined : enrichErr?.stack,
         node_count: nodeCount,
         edge_count: edgeCount,
-      }, "Stage 3 (Enrich) crashed — returning structured error");
+        likely_degenerate: isLikelyDegenerateGraph,
+      }, `Stage 3 (Enrich) crashed — ${isLikelyDegenerateGraph ? "degenerate graph" : "possible internal defect"}`);
+
       return {
         statusCode: 400,
         body: buildCeeErrorResponse("CEE_GRAPH_INVALID", "Unable to construct a valid decision model from this brief", {
