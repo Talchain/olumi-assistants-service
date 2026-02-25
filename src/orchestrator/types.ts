@@ -188,7 +188,7 @@ export interface GraphPatchBlockData {
   /** Semantic repairs applied by PLoT (surfaced as-is, never rewritten into operations) */
   repairs_applied?: RepairEntry[];
   summary?: string;
-  rejection?: { reason: string; message?: string };
+  rejection?: { reason: string; message?: string; code?: string };
   validation_warnings?: string[];
 }
 

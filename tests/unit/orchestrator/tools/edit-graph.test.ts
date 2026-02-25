@@ -241,6 +241,7 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection).toBeDefined();
+    expect(data.rejection?.code).toBe("STRUCTURAL_VALIDATION_FAILED");
     expect(result.assistantText).toContain("wasn't able");
   });
 
@@ -260,6 +261,7 @@ describe("handleEditGraph", () => {
 
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
+    expect(data.rejection?.code).toBe("STRUCTURAL_VALIDATION_FAILED");
   });
 
   // ------------------------------------------------------------------
@@ -351,6 +353,7 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection?.reason).toContain("Semantic error");
+    expect(data.rejection?.code).toBe("PLOT_SEMANTIC_REJECTED");
   });
 
   it("retries on PLoT rejection and succeeds on second attempt", async () => {
@@ -443,6 +446,7 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection?.reason).toContain("PLoT semantic validation unavailable");
+    expect(data.rejection?.code).toBe("PLOT_UNAVAILABLE");
   });
 
   // ------------------------------------------------------------------
@@ -816,6 +820,7 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection?.reason).toContain("max 15");
+    expect(data.rejection?.code).toBe("MAX_OPERATIONS_EXCEEDED");
   });
 
   it("accepts patch with exactly 15 operations", async () => {

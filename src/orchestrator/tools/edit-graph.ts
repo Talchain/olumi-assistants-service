@@ -320,7 +320,7 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
-        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime);
+        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED');
       }
       lastValidationResult = { valid: false, operations: [], referentialErrors: [{ index: 0, op: 'batch', path: '', message: msg }] };
       continue;
@@ -350,6 +350,7 @@ export async function handleEditGraph(
           baseGraphHash,
           turnId,
           startTime,
+          'STRUCTURAL_VALIDATION_FAILED',
         );
       }
       continue;
@@ -393,6 +394,7 @@ export async function handleEditGraph(
               baseGraphHash,
               turnId,
               startTime,
+              'PLOT_SEMANTIC_REJECTED',
             );
           }
 
@@ -449,6 +451,7 @@ export async function handleEditGraph(
             baseGraphHash,
             turnId,
             startTime,
+            'PLOT_UNAVAILABLE',
           );
         }
 
@@ -536,13 +539,14 @@ function buildRejectionResult(
   baseGraphHash: string,
   turnId: string,
   startTime: number,
+  code?: string,
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
     operations,
     status: 'rejected',
     base_graph_hash: baseGraphHash,
-    rejection: { reason },
+    rejection: { reason, ...(code && { code }) },
   };
 
   const block = createGraphPatchBlock(patchData, turnId);
