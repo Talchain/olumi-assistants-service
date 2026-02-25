@@ -381,9 +381,11 @@ export async function handleEditGraph(
 
         if (verdict === 'rejected') {
           const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
+          const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
+          const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
 
           log.warn(
-            { request_id: requestId, attempt, verdict, reason },
+            { request_id: requestId, attempt, verdict, reason, plot_code: plotCode },
             "edit_graph PLoT rejected patch",
           );
 
@@ -395,6 +397,7 @@ export async function handleEditGraph(
               turnId,
               startTime,
               'PLOT_SEMANTIC_REJECTED',
+              { plot_code: plotCode, plot_violations: plotViolations },
             );
           }
 
@@ -540,13 +543,19 @@ function buildRejectionResult(
   turnId: string,
   startTime: number,
   code?: string,
+  plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
     operations,
     status: 'rejected',
     base_graph_hash: baseGraphHash,
-    rejection: { reason, ...(code && { code }) },
+    rejection: {
+      reason,
+      ...(code && { code }),
+      ...(plotDetails?.plot_code && { plot_code: plotDetails.plot_code }),
+      ...(plotDetails?.plot_violations && plotDetails.plot_violations.length > 0 && { plot_violations: plotDetails.plot_violations }),
+    },
   };
 
   const block = createGraphPatchBlock(patchData, turnId);

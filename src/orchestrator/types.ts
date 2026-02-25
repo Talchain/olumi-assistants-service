@@ -188,7 +188,15 @@ export interface GraphPatchBlockData {
   /** Semantic repairs applied by PLoT (surfaced as-is, never rewritten into operations) */
   repairs_applied?: RepairEntry[];
   summary?: string;
-  rejection?: { reason: string; message?: string; code?: string };
+  rejection?: {
+    reason: string;
+    message?: string;
+    code?: string;
+    /** PLoT's specific rejection code (e.g. CYCLE_DETECTED). Only set when PLoT is the rejector. */
+    plot_code?: string;
+    /** PLoT's violation details (opaque — forwarded as-is). Only set when PLoT is the rejector. */
+    plot_violations?: unknown[];
+  };
   validation_warnings?: string[];
 }
 

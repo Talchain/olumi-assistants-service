@@ -356,6 +356,52 @@ describe("handleEditGraph", () => {
     expect(data.rejection?.code).toBe("PLOT_SEMANTIC_REJECTED");
   });
 
+  it("passes through PLoT rejection code and violations", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "rejected",
+      reason: "Cycle detected between nodes",
+      code: "CYCLE_DETECTED",
+      violations: [
+        { code: "CYCLE", path: "factor_1::goal_1", message: "Creates cycle" },
+      ],
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.rejection?.code).toBe("PLOT_SEMANTIC_REJECTED");
+    expect(data.rejection?.plot_code).toBe("CYCLE_DETECTED");
+    expect(data.rejection?.plot_violations).toHaveLength(1);
+    expect((data.rejection!.plot_violations![0] as Record<string, unknown>).code).toBe("CYCLE");
+  });
+
+  it("omits plot_code and plot_violations when PLoT rejects without them", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({ verdict: "rejected", reason: "Bad patch" });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.rejection?.code).toBe("PLOT_SEMANTIC_REJECTED");
+    expect(data.rejection?.plot_code).toBeUndefined();
+    expect(data.rejection?.plot_violations).toBeUndefined();
+  });
+
   it("retries on PLoT rejection and succeeds on second attempt", async () => {
     const adapter = makeAdapter([]);
     const chatMock = adapter.chat as ReturnType<typeof vi.fn>;
