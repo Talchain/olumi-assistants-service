@@ -421,7 +421,7 @@ describe("handleEditGraph", () => {
     expect(data.status).toBe("proposed");
   });
 
-  it("proceeds with CEE-validated ops when PLoT call throws", async () => {
+  it("rejects patch when PLoT is configured but call throws (hard reject)", async () => {
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
     const plotClient: PLoTClient = {
       run: vi.fn(),
@@ -434,12 +434,13 @@ describe("handleEditGraph", () => {
       adapter,
       "req-1",
       "turn-1",
-      { plotClient },
+      { plotClient, maxRetries: 0 },
     );
 
-    // Should still succeed — PLoT failure is non-fatal
+    // PLoT configured but failed — must hard reject, not silently pass through
     const data = result.blocks[0].data as GraphPatchBlockData;
-    expect(data.status).toBe("proposed");
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.reason).toContain("PLoT semantic validation unavailable");
   });
 
   // ------------------------------------------------------------------
@@ -523,5 +524,127 @@ describe("handleEditGraph", () => {
     expect(chatMock).toHaveBeenCalledTimes(2);
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("proposed");
+  });
+
+  // ------------------------------------------------------------------
+  // Acceptance criteria: canonical convergence fields
+  // ------------------------------------------------------------------
+
+  it("populates applied_graph and applied_graph_hash from PLoT response", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const appliedGraph = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+        { id: "new_factor", kind: "factor", label: "Cost" },
+      ],
+      edges: [
+        { from: "factor_1", to: "goal_1", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: "positive" },
+      ],
+    };
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      applied_graph: appliedGraph,
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph).toEqual(appliedGraph);
+    expect(data.applied_graph_hash).toBeDefined();
+    expect(data.applied_graph_hash!.length).toBe(16);
+  });
+
+  // ------------------------------------------------------------------
+  // Acceptance criteria: base_graph_hash in PLoT payload
+  // ------------------------------------------------------------------
+
+  it("sends base_graph_hash in PLoT validate-patch payload", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient();
+
+    await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const [payload] = (plotClient.validatePatch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(payload.base_graph_hash).toBeDefined();
+    expect(payload.base_graph_hash.length).toBe(16);
+  });
+
+  // ------------------------------------------------------------------
+  // Acceptance criteria: no silent operation rewrite
+  // ------------------------------------------------------------------
+
+  it("does NOT rewrite operations from PLoT response (no silent semantics)", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const differentOps = [{ op: "update_node", path: "factor_1", value: { label: "PLoT-modified" } }];
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      // PLoT returns different operations — these must NOT overwrite the original
+      operations: differentOps,
+      repairs_applied: [{ code: "LABEL_FIXED", message: "Fixed label" }],
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    // Operations should be the original CEE-validated ones, not PLoT's rewritten version
+    expect(data.operations[0].op).toBe("add_node");
+    expect(data.operations[0].path).toBe("nodes/new_factor");
+    // Repairs should be surfaced as repairs_applied, not merged into operations
+    expect(data.repairs_applied).toHaveLength(1);
+    expect(data.repairs_applied![0].code).toBe("LABEL_FIXED");
+  });
+
+  // ------------------------------------------------------------------
+  // Acceptance criteria: PLoT failure retries before hard reject
+  // ------------------------------------------------------------------
+
+  it("retries on PLoT failure and succeeds when PLoT recovers", async () => {
+    const adapter = makeAdapter([]);
+    const chatMock = adapter.chat as ReturnType<typeof vi.fn>;
+    chatMock
+      .mockResolvedValueOnce({ content: JSON.stringify([VALID_ADD_NODE_OP]) })
+      .mockResolvedValueOnce({ content: JSON.stringify([VALID_UPDATE_OP]) });
+
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn()
+        .mockRejectedValueOnce(new Error("PLoT transient failure"))
+        .mockResolvedValueOnce({ verdict: "accepted" }),
+    };
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Edit",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 1 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    expect(chatMock).toHaveBeenCalledTimes(2);
   });
 });

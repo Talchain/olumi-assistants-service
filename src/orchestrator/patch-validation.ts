@@ -39,16 +39,18 @@ const AddNodeValue = z.object({
 }).passthrough();
 
 /**
- * Edge value for add_edge — requires from, to, and strength fields.
+ * Edge value for add_edge — requires full canonical edge payload.
+ * All four strength/probability/direction fields are required because the
+ * LLM prompt explicitly asks for them and PLoT expects canonical format.
  * .passthrough() allows additional fields (provenance, origin, etc.)
  */
 const AddEdgeValue = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
   strength_mean: z.number(),
-  strength_std: z.number().optional(),
-  exists_probability: z.number().optional(),
-  effect_direction: z.enum(["positive", "negative"]).optional(),
+  strength_std: z.number(),
+  exists_probability: z.number().min(0).max(1),
+  effect_direction: z.enum(["positive", "negative"]),
 }).passthrough();
 
 /** Partial node update value — at least one field required */

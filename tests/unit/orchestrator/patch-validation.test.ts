@@ -65,18 +65,38 @@ describe("PatchOperationSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("validates add_edge with required fields", () => {
+  it("validates add_edge with full canonical fields", () => {
+    const op = {
+      op: "add_edge",
+      path: "edges/new",
+      value: { from: "factor_1", to: "factor_2", strength_mean: 0.5, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" },
+    };
+    const result = PatchOperationSchema.safeParse(op);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects add_edge missing strength_std (canonical fields required)", () => {
     const op = {
       op: "add_edge",
       path: "edges/new",
       value: { from: "factor_1", to: "factor_2", strength_mean: 0.5 },
     };
     const result = PatchOperationSchema.safeParse(op);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects add_edge with invalid exists_probability", () => {
+    const op = {
+      op: "add_edge",
+      path: "edges/new",
+      value: { from: "factor_1", to: "factor_2", strength_mean: 0.5, strength_std: 0.1, exists_probability: 1.5, effect_direction: "positive" },
+    };
+    const result = PatchOperationSchema.safeParse(op);
+    expect(result.success).toBe(false);
   });
 
   it("rejects add_edge missing from", () => {
-    const op = { op: "add_edge", path: "edges/new", value: { to: "factor_2", strength_mean: 0.5 } };
+    const op = { op: "add_edge", path: "edges/new", value: { to: "factor_2", strength_mean: 0.5, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" } };
     const result = PatchOperationSchema.safeParse(op);
     expect(result.success).toBe(false);
   });
@@ -162,7 +182,7 @@ describe("checkReferentialIntegrity", () => {
 
   it("allows add_edge when both nodes exist", () => {
     const ops: ValidatedPatchOperation[] = [
-      { op: "add_edge", path: "edges/new", value: { from: "factor_1", to: "factor_2", strength_mean: 0.3 } },
+      { op: "add_edge", path: "edges/new", value: { from: "factor_1", to: "factor_2", strength_mean: 0.3, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" as const } },
     ];
     const errors = checkReferentialIntegrity(ops, GRAPH);
     expect(errors).toHaveLength(0);
@@ -170,7 +190,7 @@ describe("checkReferentialIntegrity", () => {
 
   it("reports error for add_edge with non-existent source node", () => {
     const ops: ValidatedPatchOperation[] = [
-      { op: "add_edge", path: "edges/new", value: { from: "missing", to: "goal_1", strength_mean: 0.3 } },
+      { op: "add_edge", path: "edges/new", value: { from: "missing", to: "goal_1", strength_mean: 0.3, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" as const } },
     ];
     const errors = checkReferentialIntegrity(ops, GRAPH);
     expect(errors.length).toBeGreaterThanOrEqual(1);
@@ -180,7 +200,7 @@ describe("checkReferentialIntegrity", () => {
   it("allows cross-reference to node added in same batch", () => {
     const ops: ValidatedPatchOperation[] = [
       { op: "add_node", path: "nodes/new_factor", value: { id: "new_factor", kind: "factor", label: "New" } },
-      { op: "add_edge", path: "edges/new", value: { from: "new_factor", to: "goal_1", strength_mean: 0.5 } },
+      { op: "add_edge", path: "edges/new", value: { from: "new_factor", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" as const } },
     ];
     const errors = checkReferentialIntegrity(ops, GRAPH);
     expect(errors).toHaveLength(0);
@@ -189,7 +209,7 @@ describe("checkReferentialIntegrity", () => {
   it("detects add_edge to node being removed in same batch", () => {
     const ops: ValidatedPatchOperation[] = [
       { op: "remove_node", path: "factor_1" },
-      { op: "add_edge", path: "edges/bad", value: { from: "factor_1", to: "goal_1", strength_mean: 0.5 } },
+      { op: "add_edge", path: "edges/bad", value: { from: "factor_1", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" as const } },
     ];
     const errors = checkReferentialIntegrity(ops, GRAPH);
     expect(errors.length).toBeGreaterThanOrEqual(1);

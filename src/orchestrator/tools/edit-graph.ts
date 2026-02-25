@@ -13,18 +13,28 @@
  * CEE is the structural gatekeeper (Zod schema + referential integrity).
  * PLoT is the semantic judge (validate-patch endpoint).
  * CEE never normalises values — no STRP, no strength clamping.
+ *
+ * PLoT failure policy:
+ * - When PLoT is configured (plotClient !== null): PLoT failure is a hard reject.
+ *   CEE must not propose semantically unvalidated patches.
+ * - When PLoT is not configured (plotClient === null): skip semantic gate entirely.
+ *   This is the dev/test path only.
+ *
+ * "No silent semantics": PLoT repairs are surfaced as repairs_applied on the block,
+ * never silently rewritten into the operations array.
  */
 
 import { createHash } from "node:crypto";
 import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
-import { getSystemPrompt } from "../../adapters/llm/prompt-loader.js";
+import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type {
   ConversationBlock,
   ConversationContext,
   GraphPatchBlockData,
+  GraphV3T,
   PatchOperation,
   OrchestratorError,
   RepairEntry,
@@ -49,7 +59,7 @@ export interface EditGraphResult {
 }
 
 export interface EditGraphOpts {
-  /** PLoT client for semantic validation. If null, PLoT gate is skipped. */
+  /** PLoT client for semantic validation. If null, PLoT gate is skipped (dev/test only). */
   plotClient?: PLoTClient | null;
   /** Max repair retries on structural/PLoT failure. Defaults to config.cee.maxRepairRetries. */
   maxRetries?: number;
@@ -152,6 +162,27 @@ export async function handleEditGraph(
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
   const systemPrompt = await getSystemPrompt('edit_graph');
+
+  // Capture prompt metadata for telemetry/debugging
+  let promptMeta: ReturnType<typeof getSystemPromptMeta> | undefined;
+  try {
+    promptMeta = getSystemPromptMeta('edit_graph');
+  } catch {
+    // Non-fatal — metadata is for observability only
+  }
+
+  if (promptMeta) {
+    log.info(
+      {
+        request_id: requestId,
+        prompt_source: promptMeta.source,
+        prompt_version: promptMeta.prompt_version,
+        prompt_hash: promptMeta.prompt_hash,
+        cache_status: promptMeta.cache_status,
+      },
+      "edit_graph prompt loaded",
+    );
+  }
 
   // Build context section for LLM (edit compact graph + framing + analysis + selected elements)
   const contextSection = serialiseEditContextForLLM(context);
@@ -284,17 +315,20 @@ export async function handleEditGraph(
     }
 
     // Sanitise: remove legacy fields
-    let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+    const operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
 
     // Step 2: PLoT semantic validation (if client configured)
     let repairsApplied: RepairEntry[] | undefined;
+    let appliedGraph: GraphV3T | undefined;
+    let appliedGraphHash: string | undefined;
 
     if (plotClient) {
       try {
-        const plotPayload = {
+        const plotPayload: Record<string, unknown> = {
           graph: context.graph,
           operations,
           scenario_id: context.scenario_id,
+          base_graph_hash: baseGraphHash,
         };
 
         const plotResponse = await plotClient.validatePatch(plotPayload, requestId) as Record<string, unknown>;
@@ -325,7 +359,7 @@ export async function handleEditGraph(
           continue;
         }
 
-        // Check for PLoT repairs
+        // Capture PLoT repairs (surfaced as-is, never rewritten into operations)
         if (plotResponse.repairs_applied && Array.isArray(plotResponse.repairs_applied) && plotResponse.repairs_applied.length > 0) {
           repairsApplied = plotResponse.repairs_applied as RepairEntry[];
           log.info(
@@ -334,30 +368,41 @@ export async function handleEditGraph(
           );
         }
 
-        // If PLoT returned repaired operations, use those instead
-        if (plotResponse.operations && Array.isArray(plotResponse.operations)) {
-          operations = sanitiseOperations(plotResponse.operations as PatchOperation[]);
-        }
-
-        // If PLoT returned applied_graph, capture the hash
-        if (plotResponse.applied_graph) {
-          // PLoT has the canonical applied_graph — store hash for audit trail
-          const appliedHash = computeGraphHash(plotResponse.applied_graph);
+        // Capture applied_graph and its hash from PLoT response
+        if (plotResponse.applied_graph && typeof plotResponse.applied_graph === 'object') {
+          appliedGraph = plotResponse.applied_graph as GraphV3T;
+          appliedGraphHash = computeGraphHash(appliedGraph);
           log.info(
-            { request_id: requestId, applied_graph_hash: appliedHash },
+            { request_id: requestId, applied_graph_hash: appliedGraphHash },
             "edit_graph PLoT returned applied graph",
           );
         }
       } catch (plotError) {
-        // PLoT failure is non-fatal — proceed with CEE-validated operations
-        log.warn(
+        // PLoT configured but failed — hard reject (CEE must not propose semantically unvalidated patches)
+        const errorMessage = plotError instanceof Error ? plotError.message : String(plotError);
+
+        log.error(
           {
             request_id: requestId,
             attempt,
-            error: plotError instanceof Error ? plotError.message : String(plotError),
+            error: errorMessage,
           },
-          "edit_graph PLoT validation failed, proceeding with CEE-validated operations",
+          "edit_graph PLoT validation failed — rejecting patch (semantic gate required)",
         );
+
+        if (attempt === totalAttempts) {
+          return buildRejectionResult(
+            `PLoT semantic validation unavailable: ${errorMessage}`,
+            operations,
+            baseGraphHash,
+            turnId,
+            startTime,
+          );
+        }
+
+        lastPlotErrors = `PLoT unavailable: ${errorMessage}`;
+        lastValidationResult = { valid: false, operations: validationResult.operations, referentialErrors: [{ index: 0, op: 'plot', path: '', message: `PLoT unavailable: ${errorMessage}` }] };
+        continue;
       }
     }
 
@@ -369,6 +414,8 @@ export async function handleEditGraph(
       operations,
       status: 'proposed',
       base_graph_hash: baseGraphHash,
+      ...(appliedGraph && { applied_graph: appliedGraph }),
+      ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
     };
 
@@ -381,6 +428,11 @@ export async function handleEditGraph(
         attempts: attempt,
         plot_validated: !!plotClient,
         repairs_applied: repairsApplied?.length ?? 0,
+        applied_graph_hash: appliedGraphHash,
+        ...(promptMeta && {
+          prompt_source: promptMeta.source,
+          prompt_version: promptMeta.prompt_version,
+        }),
       },
       "edit_graph completed",
     );
