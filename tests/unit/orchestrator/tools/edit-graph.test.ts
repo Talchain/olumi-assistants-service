@@ -890,4 +890,46 @@ describe("handleEditGraph", () => {
     expect(data.status).toBe("proposed");
     expect(data.operations).toHaveLength(15);
   });
+
+  // ------------------------------------------------------------------
+  // Addendum: rejection.attempts field
+  // ------------------------------------------------------------------
+
+  it("includes attempts=1 on first-pass rejection (no retry)", async () => {
+    const adapter = makeAdapter([{ op: "bad_op", path: "x" }]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Do something",
+      adapter,
+      "req-1",
+      "turn-1",
+      { maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.attempts).toBe(1);
+  });
+
+  it("includes attempts=2 when repair loop exhausts both attempts", async () => {
+    const adapter = makeAdapter([]);
+    const chatMock = adapter.chat as ReturnType<typeof vi.fn>;
+    chatMock
+      .mockResolvedValueOnce({ content: JSON.stringify([{ op: "bad_op", path: "x" }]) })
+      .mockResolvedValueOnce({ content: JSON.stringify([{ op: "bad_op", path: "x" }]) });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Do something",
+      adapter,
+      "req-1",
+      "turn-1",
+      { maxRetries: 1 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.attempts).toBe(2);
+  });
 });

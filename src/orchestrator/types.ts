@@ -196,6 +196,8 @@ export interface GraphPatchBlockData {
     plot_code?: string;
     /** PLoT's violation details (opaque — forwarded as-is). Only set when PLoT is the rejector. */
     plot_violations?: unknown[];
+    /** Total LLM attempts before rejection (1 = no retry, 2 = one retry, etc.) */
+    attempts?: number;
   };
   validation_warnings?: string[];
 }

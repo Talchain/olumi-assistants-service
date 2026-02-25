@@ -320,7 +320,7 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
-        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED');
+        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED', undefined, attempt);
       }
       lastValidationResult = { valid: false, operations: [], referentialErrors: [{ index: 0, op: 'batch', path: '', message: msg }] };
       continue;
@@ -351,6 +351,8 @@ export async function handleEditGraph(
           turnId,
           startTime,
           'STRUCTURAL_VALIDATION_FAILED',
+          undefined,
+          attempt,
         );
       }
       continue;
@@ -398,6 +400,7 @@ export async function handleEditGraph(
               startTime,
               'PLOT_SEMANTIC_REJECTED',
               { plot_code: plotCode, plot_violations: plotViolations },
+              attempt,
             );
           }
 
@@ -455,6 +458,8 @@ export async function handleEditGraph(
             turnId,
             startTime,
             'PLOT_UNAVAILABLE',
+            undefined,
+            attempt,
           );
         }
 
@@ -544,6 +549,7 @@ function buildRejectionResult(
   startTime: number,
   code?: string,
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
+  attempts?: number,
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
@@ -555,6 +561,7 @@ function buildRejectionResult(
       ...(code && { code }),
       ...(plotDetails?.plot_code && { plot_code: plotDetails.plot_code }),
       ...(plotDetails?.plot_violations && plotDetails.plot_violations.length > 0 && { plot_violations: plotDetails.plot_violations }),
+      ...(attempts != null && { attempts }),
     },
   };
 
