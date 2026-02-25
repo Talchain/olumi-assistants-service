@@ -66,11 +66,16 @@ reads `analysis_response` directly for the Results Panel.
 5. **`constraint_results` and `probability_of_joint_goal` may be null.** When no
    constraints are defined, both fields are null in the PLoT response.
 
-6. **`analysis_response` is the full PLoT response.** The UI reads this directly
+6. **`probability_of_goal` may be absent.** On `option_comparison` entries,
+   `probability_of_goal` may be missing entirely (field absent) rather than
+   explicitly `null`. Defensive code should use optional chaining or nullish
+   coalescing — do not assume the field exists with a null value.
+
+7. **`analysis_response` is the full PLoT response.** The UI reads this directly
    for the Results Panel. CEE does not filter or transform it. The shape matches
    the PLoT `/v2/run` response exactly.
 
-7. **Block IDs are format-correct illustrations.** The `block_id` values in these
+8. **Block IDs are format-correct illustrations.** The `block_id` values in these
    examples follow the `blk_<type>_<16-char-hex>` format but are not deterministically
    computed from the hash algorithm used in production. Do not use them as test
    fixtures for ID equality checks.
