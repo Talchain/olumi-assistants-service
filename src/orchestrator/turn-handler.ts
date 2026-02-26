@@ -38,7 +38,7 @@ import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, regis
 import { classifyIntent } from "./intent-gate.js";
 import type { ToolName } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
-import type { PLoTClient } from "./plot-client.js";
+import type { PLoTClient, ValidatePatchResult } from "./plot-client.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
 import { parseLLMResponse, getFirstToolInvocation } from "./response-parser.js";
 import type { ExtractedBlock } from "./response-parser.js";
@@ -75,6 +75,11 @@ function getPlotClient(): PLoTClient | null {
     plotClient = createPLoTClient();
   }
   return plotClient;
+}
+
+/** Test-only: reset singleton so next getPlotClient() re-reads createPLoTClient(). */
+export function _resetPlotClient(): void {
+  plotClient = undefined;
 }
 
 /** Prompt version identifier for Context Fabric. Bumped on prompt changes. */
@@ -251,11 +256,9 @@ async function handleSystemEvent(
   log.info({ event_type: event.type, request_id: requestId }, "Handling system event");
 
   switch (event.type) {
-    case 'patch_accepted':
-      // TODO(post-PoC): Wire PLoT /v1/validate-patch call here.
-      // Full flow: UI sends patch_accepted → CEE calls PLoT validate-patch →
-      // CEE returns validated graph_hash in envelope.
-      // For PoC: UI calls PLoT validate-patch directly. CEE ack-only.
+    case 'patch_accepted': {
+      return handlePatchAccepted(turnRequest, turnId, requestId);
+    }
     case 'patch_dismissed':
     case 'feedback_submitted': {
       // No LLM call — log + return empty
@@ -309,6 +312,80 @@ async function handleSystemEvent(
       return { envelope, httpStatus: 200 };
     }
   }
+}
+
+// ============================================================================
+// patch_accepted → PLoT validate-patch
+// ============================================================================
+
+async function handlePatchAccepted(
+  turnRequest: OrchestratorTurnRequest,
+  turnId: string,
+  requestId: string,
+): Promise<TurnResult> {
+  const event = turnRequest.system_event!;
+  const payload = event.payload;
+  const warnings: string[] = [];
+  let graphHash: string | undefined;
+
+  const client = getPlotClient();
+
+  if (client && turnRequest.context.graph) {
+    try {
+      // Build validate-patch payload: full graph + operations (if available in event payload)
+      const plotPayload: Record<string, unknown> = {
+        graph: turnRequest.context.graph,
+        operations: Array.isArray(payload.operations) ? payload.operations : [],
+        scenario_id: turnRequest.scenario_id,
+      };
+
+      const result: ValidatePatchResult = await client.validatePatch(plotPayload, requestId);
+
+      if (result.kind === 'success') {
+        graphHash = typeof result.data.graph_hash === 'string' ? result.data.graph_hash : undefined;
+        log.info(
+          { request_id: requestId, graph_hash: graphHash },
+          "patch_accepted: PLoT validate-patch succeeded",
+        );
+      } else if (result.kind === 'feature_disabled') {
+        warnings.push('PLoT validate-patch not available — graph_hash not computed');
+        log.info({ request_id: requestId }, "patch_accepted: PLoT validate-patch FEATURE_DISABLED");
+      } else {
+        // Rejection — should not happen for patch_accepted but handle gracefully
+        warnings.push(`PLoT validate-patch rejected: ${result.message ?? 'unknown reason'}`);
+        log.warn(
+          { request_id: requestId, code: result.code, message: result.message },
+          "patch_accepted: PLoT validate-patch rejected (unexpected)",
+        );
+      }
+    } catch (err) {
+      // PLoT error — do not block the user
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`PLoT validate-patch failed: ${msg}`);
+      log.warn(
+        { request_id: requestId, error: msg },
+        "patch_accepted: PLoT validate-patch error — proceeding with ack",
+      );
+    }
+  } else if (!client) {
+    warnings.push('PLoT client not configured — graph_hash not computed');
+  }
+
+  const envelope = assembleEnvelope({
+    turnId,
+    assistantText: null,
+    blocks: [],
+    context: turnRequest.context,
+    turnPlan: buildTurnPlan(null, 'deterministic', false),
+    graphHash,
+  });
+
+  // Surface warnings in the envelope's parse_warnings field (debug aid)
+  if (warnings.length > 0) {
+    envelope.parse_warnings = warnings;
+  }
+
+  return { envelope, httpStatus: 200 };
 }
 
 // ============================================================================

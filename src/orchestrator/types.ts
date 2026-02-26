@@ -72,6 +72,8 @@ export interface ResponseLineage {
   response_hash?: string;
   seed_used?: number;
   n_samples?: number;
+  /** PLoT graph hash from validate-patch. Only set on patch_accepted acks. */
+  graph_hash?: string;
 }
 
 export interface OrchestratorResponseEnvelope {

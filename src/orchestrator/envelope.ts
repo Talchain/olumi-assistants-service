@@ -49,6 +49,8 @@ export interface EnvelopeInput {
   includeDebug?: boolean;
   /** Override context_hash (e.g. from Context Fabric). Falls back to hashContext() if not provided. */
   contextHash?: string;
+  /** PLoT graph hash from validate-patch (patch_accepted only). */
+  graphHash?: string;
 }
 
 /**
@@ -57,7 +59,7 @@ export interface EnvelopeInput {
 export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnvelope {
   const turnId = input.turnId ?? randomUUID();
 
-  const lineage = buildLineage(input.context, input.analysisResponse, input.contextHash);
+  const lineage = buildLineage(input.context, input.analysisResponse, input.contextHash, input.graphHash);
   const stage = resolveStage(input.context);
 
   const envelope: OrchestratorResponseEnvelope = {
@@ -117,6 +119,7 @@ function buildLineage(
   context: ConversationContext,
   analysisResponse?: V2RunResponseEnvelope,
   contextHashOverride?: string,
+  graphHash?: string,
 ): ResponseLineage {
   const contextHash = contextHashOverride ?? hashContext(context);
 
@@ -132,6 +135,10 @@ function buildLineage(
     lineage.seed_used = Number(analysisResponse.meta.seed_used);
 
     lineage.n_samples = analysisResponse.meta.n_samples;
+  }
+
+  if (graphHash) {
+    lineage.graph_hash = graphHash;
   }
 
   return lineage;

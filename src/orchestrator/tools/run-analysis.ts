@@ -93,7 +93,10 @@ export async function handleRunAnalysis(
     response = await plotClient.run(payload, requestId);
   } catch (error) {
     if (error instanceof PLoTError || error instanceof PLoTTimeoutError) {
-      throw Object.assign(error, { orchestratorError: error.toOrchestratorError() });
+      // Prefer PLoT's retryable override (set from error.v1 envelope) over status-code heuristic
+      const orchErr = (error as unknown as Record<string, unknown>)._overriddenOrchestratorError as import("../types.js").OrchestratorError
+        ?? error.toOrchestratorError();
+      throw Object.assign(error, { orchestratorError: orchErr });
     }
     throw error;
   }

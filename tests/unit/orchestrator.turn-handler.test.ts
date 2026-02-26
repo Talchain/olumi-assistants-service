@@ -83,10 +83,12 @@ vi.mock('../../src/cee/unified-pipeline/index.js', () => ({
 // Imports — after mocks
 // ============================================================================
 
-import { handleTurn } from '../../src/orchestrator/turn-handler.js';
+import { handleTurn, _resetPlotClient } from '../../src/orchestrator/turn-handler.js';
 import { _clearIdempotencyCache } from '../../src/orchestrator/idempotency.js';
+import { createPLoTClient } from '../../src/orchestrator/plot-client.js';
 import { isProduction } from '../../src/config/index.js';
 import type { OrchestratorTurnRequest, ConversationContext } from '../../src/orchestrator/types.js';
+import type { PLoTClient } from '../../src/orchestrator/plot-client.js';
 import type { FastifyRequest } from 'fastify';
 
 // ============================================================================
@@ -652,6 +654,130 @@ describe('handleTurn — intent gate integration', () => {
 
     expect(result.envelope.turn_plan!.routing).toBe('deterministic');
     expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// patch_accepted System Event Tests
+// ============================================================================
+
+describe('handleTurn — patch_accepted system event', () => {
+  beforeEach(() => {
+    _clearIdempotencyCache();
+    _resetPlotClient();
+    mockChatWithTools.mockReset();
+    mockChat.mockReset();
+    mockLogWarn.mockReset();
+    vi.mocked(isProduction).mockReturnValue(false);
+  });
+
+  function makePatchAcceptedRequest(overrides?: Partial<OrchestratorTurnRequest>): OrchestratorTurnRequest {
+    turnCounter++;
+    return {
+      message: '',
+      context: {
+        graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test' }], edges: [] },
+        analysis_response: null,
+        framing: { stage: 'frame' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+      scenario_id: 'test-scenario',
+      client_turn_id: `patch-test-${turnCounter}-${Date.now()}`,
+      system_event: {
+        type: 'patch_accepted' as const,
+        payload: {
+          operations: [{ op: 'add_node', node: { id: 'fac_1', kind: 'factor', label: 'Cost' } }],
+        },
+      },
+      ...overrides,
+    };
+  }
+
+  it('calls PLoT validate-patch and returns graph_hash in lineage when PLoT succeeds', async () => {
+    const mockValidatePatch = vi.fn().mockResolvedValue({
+      kind: 'success',
+      data: { graph_hash: 'abc123def456', verdict: 'accepted' },
+    });
+    const mockClient: PLoTClient = {
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: mockValidatePatch,
+    };
+    vi.mocked(createPLoTClient).mockReturnValue(mockClient);
+
+    const req = makePatchAcceptedRequest();
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-001');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    // graph_hash lives in its own field, not context_hash
+    expect(result.envelope.lineage.graph_hash).toBe('abc123def456');
+    // context_hash should be a real SHA-256 hash (32-char hex), not the graph hash
+    expect(result.envelope.lineage.context_hash).toMatch(/^[0-9a-f]{32}$/);
+    expect(mockValidatePatch).toHaveBeenCalledOnce();
+    expect(mockValidatePatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        graph: req.context.graph,
+        operations: req.system_event!.payload.operations,
+        scenario_id: 'test-scenario',
+      }),
+      'req-patch-001',
+    );
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('returns ack with warning when PLoT returns FEATURE_DISABLED', async () => {
+    const mockValidatePatch = vi.fn().mockResolvedValue({
+      kind: 'feature_disabled',
+    });
+    vi.mocked(createPLoTClient).mockReturnValue({
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: mockValidatePatch,
+    });
+
+    const req = makePatchAcceptedRequest();
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-002');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.parse_warnings).toContain(
+      'PLoT validate-patch not available — graph_hash not computed',
+    );
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('returns ack with warning when PLoT client is not configured', async () => {
+    // Default mock returns null (PLoT not configured)
+    vi.mocked(createPLoTClient).mockReturnValue(null);
+
+    const req = makePatchAcceptedRequest();
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-003');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.parse_warnings).toContain(
+      'PLoT client not configured — graph_hash not computed',
+    );
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('returns ack with warning when PLoT throws an error', async () => {
+    const mockValidatePatch = vi.fn().mockRejectedValue(new Error('Connection refused'));
+    vi.mocked(createPLoTClient).mockReturnValue({
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: mockValidatePatch,
+    });
+
+    const req = makePatchAcceptedRequest();
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-004');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.parse_warnings).toContain(
+      'PLoT validate-patch failed: Connection refused',
+    );
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ request_id: 'req-patch-004', error: 'Connection refused' }),
+      expect.stringContaining('patch_accepted'),
+    );
     expect(mockChatWithTools).not.toHaveBeenCalled();
   });
 });
