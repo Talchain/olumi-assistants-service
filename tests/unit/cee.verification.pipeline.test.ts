@@ -81,7 +81,7 @@ describe("VerificationPipeline", () => {
 
     const branchStage = results.find((r) => r.stage === "branch_probabilities");
     expect(branchStage).toBeDefined();
-    expect(branchStage?.severity).toBe("warning");
+    expect(branchStage?.severity).toBe("warn");
     expect(branchStage?.code).toBe("BRANCH_PROBABILITIES_UNNORMALIZED");
 
     const verification = (response as any).trace?.verification;
@@ -93,7 +93,7 @@ describe("VerificationPipeline", () => {
         expect.objectContaining({
           stage: "branch_probabilities",
           code: "BRANCH_PROBABILITIES_UNNORMALIZED",
-          severity: "warning",
+          severity: "warn",
         }),
       ]),
     );

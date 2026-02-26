@@ -284,7 +284,6 @@ describe('reconcileStructuralTruth', () => {
         id: 'fac_ext',
         kind: 'factor',
         label: 'External Factor',
-        data: { value: 1.0, extractionType: 'inferred' },
       });
       graph.edges.push(
         { from: 'fac_ext', to: 'outcome_1', strength_mean: 0.4, belief_exists: 0.7 },

@@ -62,6 +62,7 @@ vi.mock("../../src/cee/corrections.js", () => ({
 // Mock request-id
 vi.mock("../../src/utils/request-id.js", () => ({
   getRequestId: () => "test-signal-req",
+  generateRequestId: () => "test-plan-id",
 }));
 
 // Mock error response builder

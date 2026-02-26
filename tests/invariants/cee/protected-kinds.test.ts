@@ -18,16 +18,17 @@ import type { GraphT, NodeT, EdgeT } from "../../../src/schemas/graph.js";
  * The canonical list of protected kinds.
  * These are structurally required for a valid decision graph.
  */
-const REQUIRED_PROTECTED_KINDS = ["goal", "decision", "option", "outcome", "risk"] as const;
+const REQUIRED_PROTECTED_KINDS = ["goal", "decision", "option", "outcome", "risk", "factor"] as const;
 
 describe("CEE Protected Kinds Invariant", () => {
   describe("PROTECTED_KINDS consistency", () => {
     it("simpleRepair protects all required kinds", () => {
       // Create a graph where protected kinds are at the END (worst case for slice)
+      // Use "action" kind which is NOT in PROTECTED_KINDS
       const unprotectedNodes: NodeT[] = Array.from({ length: 60 }, (_, i) => ({
-        id: `fac_${i.toString().padStart(3, "0")}`,
-        kind: "factor" as const,
-        label: `Factor ${i}`,
+        id: `act_${i.toString().padStart(3, "0")}`,
+        kind: "action" as const,
+        label: `Action ${i}`,
       }));
 
       const protectedNodes: NodeT[] = REQUIRED_PROTECTED_KINDS.map((kind, _i) => ({
@@ -41,8 +42,8 @@ describe("CEE Protected Kinds Invariant", () => {
 
       const edges: EdgeT[] = [
         { from: "decision_1", to: "option_1" },
-        { from: "option_1", to: "fac_000" },
-        { from: "fac_000", to: "outcome_1" },
+        { from: "option_1", to: "act_000" },
+        { from: "act_000", to: "outcome_1" },
         { from: "outcome_1", to: "goal_1" },
       ];
 
@@ -74,11 +75,11 @@ describe("CEE Protected Kinds Invariant", () => {
         label: `Isolated ${kind}`,
       }));
 
-      // Add one non-protected isolated node
+      // Add one non-protected isolated node (action is NOT in PROTECTED_KINDS)
       nodes.push({
-        id: "isolated_factor",
-        kind: "factor" as const,
-        label: "Isolated factor",
+        id: "isolated_action",
+        kind: "action" as const,
+        label: "Isolated action",
       });
 
       // No edges - all nodes are isolated
@@ -93,7 +94,7 @@ describe("CEE Protected Kinds Invariant", () => {
       }
 
       // Non-protected isolated node should be pruned
-      expect(result.some((n) => n.id === "isolated_factor")).toBe(false);
+      expect(result.some((n) => n.id === "isolated_action")).toBe(false);
     });
 
     it("enforceGraphCompliance protects all required kinds", () => {
@@ -104,9 +105,9 @@ describe("CEE Protected Kinds Invariant", () => {
           kind: kind as any,
           label: `${kind} node`,
         })),
-        // Add some factors
+        // Add a factor (protected) and an action (unprotected)
         { id: "factor_1", kind: "factor" as const, label: "Factor 1" },
-        { id: "factor_2", kind: "factor" as const, label: "Factor 2" },
+        { id: "action_1", kind: "action" as const, label: "Action 1" },
       ];
 
       // Edges that connect some but not all nodes
@@ -115,7 +116,7 @@ describe("CEE Protected Kinds Invariant", () => {
         { from: "option_1", to: "factor_1" },
         { from: "factor_1", to: "outcome_1" },
         { from: "outcome_1", to: "goal_1" },
-        // risk_1 and factor_2 are isolated
+        // risk_1 and action_1 are isolated
       ];
 
       const graph: GraphT = {
@@ -134,8 +135,8 @@ describe("CEE Protected Kinds Invariant", () => {
         expect(hasKind, `Protected kind "${kind}" must survive enforceGraphCompliance`).toBe(true);
       }
 
-      // Non-protected isolated node (factor_2) should be pruned
-      expect(result.nodes.some((n) => n.id === "factor_2")).toBe(false);
+      // Non-protected isolated node (action_1) should be pruned
+      expect(result.nodes.some((n) => n.id === "action_1")).toBe(false);
     });
   });
 

@@ -35,8 +35,8 @@ describe("POST /assist/v1/review Results Panel content", () => {
       { id: "goal_1", kind: "goal", label: "Maximize Revenue" },
       { id: "opt_1", kind: "option", label: "Premium Plan" },
       { id: "opt_2", kind: "option", label: "Basic Plan" },
-      { id: "fac_1", kind: "factor", label: "Price Elasticity", observed_state: { value: 0.8 } },
-      { id: "fac_2", kind: "factor", label: "Market Size", observed_state: { value: 1000000 } },
+      { id: "fac_1", kind: "factor", label: "Price Elasticity", data: { value: 0.8 } },
+      { id: "fac_2", kind: "factor", label: "Market Size", data: { value: 1000000 } },
       { id: "out_1", kind: "outcome", label: "Revenue Growth" },
     ],
     edges: [

@@ -285,7 +285,7 @@ describe("LLM Router", () => {
       expect(adapter.model).toBe("gpt-4o"); // Updated default (best performance in testing)
     });
 
-    it("uses gpt-5-mini for clarification when no CEE_MODEL_CLARIFICATION override", () => {
+    it("uses gpt-4.1 for clarification when no CEE_MODEL_CLARIFICATION override", () => {
       delete process.env.CEE_MODEL_CLARIFICATION;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "openai";
@@ -293,7 +293,7 @@ describe("LLM Router", () => {
       const adapter = getAdapter("clarification");
 
       expect(adapter.name).toBe("openai");
-      expect(adapter.model).toBe("gpt-5-mini");
+      expect(adapter.model).toBe("gpt-4.1-2025-04-14");
     });
 
     it("uses claude-sonnet-4 for bias_check when no CEE_MODEL_* override", () => {

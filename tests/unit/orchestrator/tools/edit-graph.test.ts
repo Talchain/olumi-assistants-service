@@ -31,7 +31,7 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
 import { handleEditGraph, type EditGraphResult } from "../../../../src/orchestrator/tools/edit-graph.js";
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
-import type { PLoTClient } from "../../../../src/orchestrator/plot-client.js";
+import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
 
 // ============================================================================
 // Helpers
@@ -78,14 +78,19 @@ function makeAdapter(responseJson: unknown): LLMAdapter {
   } as unknown as LLMAdapter;
 }
 
-function makePlotClient(overrides?: Partial<Record<string, unknown>>): PLoTClient {
+function makePlotClientSuccess(data?: Record<string, unknown>): PLoTClient {
+  const result: ValidatePatchResult = {
+    kind: 'success',
+    data: { verdict: 'accepted', ...data },
+  };
   return {
     run: vi.fn().mockResolvedValue({}),
-    validatePatch: vi.fn().mockResolvedValue({
-      verdict: "accepted",
-      ...overrides,
-    }),
+    validatePatch: vi.fn().mockResolvedValue(result),
   };
+}
+
+function makePlotClient(overrides?: Partial<Record<string, unknown>>): PLoTClient {
+  return makePlotClientSuccess(overrides);
 }
 
 const VALID_ADD_NODE_OP = {
@@ -339,7 +344,11 @@ describe("handleEditGraph", () => {
 
   it("returns rejection when PLoT rejects and no retries left", async () => {
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
-    const plotClient = makePlotClient({ verdict: "rejected", reason: "Semantic error: self-loop" });
+    const rejection: ValidatePatchResult = { kind: 'rejection', status: 'rejected', message: 'Semantic error: self-loop' };
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn().mockResolvedValue(rejection),
+    };
 
     const result = await handleEditGraph(
       makeContext(),
@@ -358,14 +367,19 @@ describe("handleEditGraph", () => {
 
   it("passes through PLoT rejection code and violations", async () => {
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
-    const plotClient = makePlotClient({
-      verdict: "rejected",
-      reason: "Cycle detected between nodes",
-      code: "CYCLE_DETECTED",
+    const rejection: ValidatePatchResult = {
+      kind: 'rejection',
+      status: 'rejected',
+      message: 'Cycle detected between nodes',
+      code: 'CYCLE_DETECTED',
       violations: [
         { code: "CYCLE", path: "factor_1::goal_1", message: "Creates cycle" },
       ],
-    });
+    };
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn().mockResolvedValue(rejection),
+    };
 
     const result = await handleEditGraph(
       makeContext(),
@@ -385,7 +399,11 @@ describe("handleEditGraph", () => {
 
   it("omits plot_code and plot_violations when PLoT rejects without them", async () => {
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
-    const plotClient = makePlotClient({ verdict: "rejected", reason: "Bad patch" });
+    const rejection: ValidatePatchResult = { kind: 'rejection', status: 'rejected', message: 'Bad patch' };
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn().mockResolvedValue(rejection),
+    };
 
     const result = await handleEditGraph(
       makeContext(),
@@ -412,8 +430,8 @@ describe("handleEditGraph", () => {
     const plotClient = makePlotClient();
     const validateMock = plotClient.validatePatch as ReturnType<typeof vi.fn>;
     validateMock
-      .mockResolvedValueOnce({ verdict: "rejected", reason: "Bad" })
-      .mockResolvedValueOnce({ verdict: "accepted" });
+      .mockResolvedValueOnce({ kind: 'rejection', status: 'rejected', message: 'Bad' } as ValidatePatchResult)
+      .mockResolvedValueOnce({ kind: 'success', data: { verdict: 'accepted' } } as ValidatePatchResult);
 
     const result = await handleEditGraph(
       makeContext(),
@@ -452,6 +470,30 @@ describe("handleEditGraph", () => {
     expect(data.repairs_applied![0].code).toBe("STRENGTH_CLAMPED");
     // Should narrate repairs in assistant text
     expect(result.assistantText).toContain("PLoT applied 1 repair");
+  });
+
+  it("skips validation with warning when PLoT returns FEATURE_DISABLED (501)", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const featureDisabled: ValidatePatchResult = { kind: 'feature_disabled' };
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn().mockResolvedValue(featureDisabled),
+    };
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    expect(data.validation_warnings).toBeDefined();
+    expect(data.validation_warnings!.some(w => w.includes("PLOT_VALIDATION_SKIPPED"))).toBe(true);
+    expect(data.validation_warnings!.some(w => w.includes("not available"))).toBe(true);
   });
 
   it("proceeds without PLoT when plotClient is null and adds PLOT_VALIDATION_SKIPPED warning", async () => {
@@ -683,7 +725,7 @@ describe("handleEditGraph", () => {
       run: vi.fn(),
       validatePatch: vi.fn()
         .mockRejectedValueOnce(new Error("PLoT transient failure"))
-        .mockResolvedValueOnce({ verdict: "accepted" }),
+        .mockResolvedValueOnce({ kind: 'success', data: { verdict: 'accepted' } } as ValidatePatchResult),
     };
 
     const result = await handleEditGraph(
@@ -931,5 +973,129 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.status).toBe("rejected");
     expect(data.rejection?.attempts).toBe(2);
+  });
+
+  // ------------------------------------------------------------------
+  // old_value population for undo data
+  // ------------------------------------------------------------------
+
+  it("populates old_value on update_node from graph context", async () => {
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Rename price factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    const updateOp = data.operations.find(o => o.op === "update_node");
+    expect(updateOp).toBeDefined();
+    expect(updateOp!.old_value).toEqual({ label: "Price" });
+  });
+
+  it("populates old_value on remove_node with full node object", async () => {
+    const adapter = makeAdapter([{
+      op: "remove_node",
+      path: "factor_1",
+    }]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove price factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    const removeOp = data.operations.find(o => o.op === "remove_node");
+    expect(removeOp).toBeDefined();
+    expect(removeOp!.old_value).toEqual(
+      expect.objectContaining({ id: "factor_1", kind: "factor", label: "Price" }),
+    );
+  });
+
+  it("populates old_value on update_edge from graph context", async () => {
+    const adapter = makeAdapter([{
+      op: "update_edge",
+      path: "factor_1::goal_1",
+      value: { strength_mean: 0.8, strength_std: 0.05 },
+    }]);
+
+    // Use a context where edge has the canonical fields at top level
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "factor_1", kind: "factor", label: "Price" },
+        ],
+        edges: [
+          {
+            from: "factor_1",
+            to: "goal_1",
+            strength_mean: 0.5,
+            strength_std: 0.1,
+            exists_probability: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    const result = await handleEditGraph(
+      ctx,
+      "Strengthen edge",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    const updateOp = data.operations.find(o => o.op === "update_edge");
+    expect(updateOp).toBeDefined();
+    expect(updateOp!.old_value).toEqual({ strength_mean: 0.5, strength_std: 0.1 });
+  });
+
+  it("does not overwrite old_value when LLM already provides it", async () => {
+    const adapter = makeAdapter([{
+      op: "update_node",
+      path: "factor_1",
+      value: { label: "New Label" },
+      old_value: { label: "LLM-provided" },
+    }]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Rename factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    const updateOp = data.operations.find(o => o.op === "update_node");
+    expect(updateOp!.old_value).toEqual({ label: "LLM-provided" });
+  });
+
+  it("does not set old_value on add_node ops", async () => {
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add a factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    const addOp = data.operations.find(o => o.op === "add_node");
+    expect(addOp!.old_value).toBeUndefined();
   });
 });

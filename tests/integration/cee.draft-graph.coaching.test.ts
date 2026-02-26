@@ -67,7 +67,7 @@ const TEST_GRAPH = {
     roots: ["dec_1"],
     leaves: ["goal_1"],
     suggested_positions: {},
-    source: "fixtures",
+    source: "assistant",
   },
 };
 
@@ -239,7 +239,8 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coaching passthrough", () => {
     // coaching must be present at the top level of the V3 response
     expect(body.coaching).toBeDefined();
     expect(body.coaching.summary).toBe(TEST_COACHING.summary);
-    expect(body.coaching.strengthen_items).toHaveLength(2);
+    // 2 from LLM + 1 auto-injected status_quo coaching item (no baseline option in graph)
+    expect(body.coaching.strengthen_items).toHaveLength(3);
 
     // Verify individual strengthen_items survive intact
     const items = body.coaching.strengthen_items;
@@ -253,6 +254,12 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coaching passthrough", () => {
       label: "Demand Elasticity",
       action_type: "structural_improvement",
       bias_category: "anchoring_bias",
+    });
+    // Auto-injected by STATUS_QUO_ABSENT coaching injection
+    expect(items[2]).toMatchObject({
+      id: "str_status_quo",
+      label: "Add baseline option",
+      action_type: "add_option",
     });
   });
 
@@ -286,7 +293,9 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coaching passthrough", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
 
-    // coaching should be absent when adapter doesn't include it
-    expect(body.coaching).toBeUndefined();
+    // coaching is auto-injected by STATUS_QUO_ABSENT even when adapter doesn't include it
+    // (no status quo option in graph → pipeline adds str_status_quo item)
+    expect(body.coaching).toBeDefined();
+    expect(body.coaching.strengthen_items.some((i: any) => i.id === "str_status_quo")).toBe(true);
   });
 });

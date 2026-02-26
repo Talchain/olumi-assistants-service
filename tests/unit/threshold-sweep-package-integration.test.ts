@@ -97,6 +97,13 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
   buildLLMRawTrace: vi.fn().mockReturnValue({ stored: true }),
 }));
 
+vi.mock("../../src/context/context-pack.js", () => ({
+  assembleContextPack: vi.fn().mockReturnValue({
+    pipelinePath: "unified",
+    context_hash: "test-hash",
+  }),
+}));
+
 vi.mock("../../src/version.js", () => ({
   SERVICE_VERSION: "1.0.0-test",
 }));

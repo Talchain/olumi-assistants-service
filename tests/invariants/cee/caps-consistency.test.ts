@@ -17,11 +17,11 @@ import type { GraphT, NodeT, EdgeT } from "../../../src/schemas/graph.js";
 describe("CEE Caps Consistency Invariant", () => {
   describe("node cap enforcement", () => {
     it("simpleRepair respects GRAPH_MAX_NODES", () => {
-      // Create graph with more nodes than the cap
+      // Create graph with more nodes than the cap using unprotected kind
       const nodes: NodeT[] = Array.from({ length: GRAPH_MAX_NODES + 20 }, (_, i) => ({
-        id: `fac_${i.toString().padStart(3, "0")}`,
-        kind: "factor" as const,
-        label: `Factor ${i}`,
+        id: `act_${i.toString().padStart(3, "0")}`,
+        kind: "action" as const,
+        label: `Action ${i}`,
       }));
 
       const edges: EdgeT[] = [];

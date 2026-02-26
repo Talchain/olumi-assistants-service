@@ -14,12 +14,19 @@ When modifying any field that crosses a service boundary (CEE → PLoT → ISL) 
 2. **Check all intermediate schemas.** A value valid in the producer's type may be invalid in the consumer's Zod schema.
 3. **Run the relevant test suite** after any change to a shared type or default value.
 
-### Post-implementation verification
-After completing any task that modifies node data, edge data, or constraint structures:
+---
 
-1. Run the **graph-validator** test suite.
-2. Run the **graph-orchestrator** test suite.
-3. If the change involves fields consumed by PLoT or ISL, verify the Zod schemas in the response assembly path accept the new values.
+## Pre-commit protocol
+
+Before every commit, run and verify:
+
+```bash
+git status && git diff --staged
+```
+
+- Only intended changes should be staged. Never commit all uncommitted changes without explicit user approval.
+- Never bundle unrelated uncommitted changes into a commit.
+- Flag unexpected uncommitted changes or stash entries and get user approval before including them.
 
 ---
 
@@ -27,26 +34,8 @@ After completing any task that modifies node data, edge data, or constraint stru
 
 - Always push to `staging`. Never push to `main` without explicit user confirmation.
 - After making commits, always execute `git push` and verify it succeeded. Do not just summarise commands — run them.
-- Run `git status` and `git diff --staged` before every commit to verify only intended changes are staged.
-
-### Deployment verification protocol
-
-When asked to deploy or merge to staging:
-
-1. Confirm the target branch is `staging` — never push to `main` without explicit user confirmation
-2. Before committing, run `git status` and `git diff --staged` to verify ONLY intended changes are staged
-3. If there are uncommitted changes from previous sessions, flag them and get user approval before including
-4. Actually execute every git command — do not present commands as a summary without running them
-5. After push, verify it succeeded by checking the output
-
-Never bundle unrelated uncommitted changes into a deployment commit.
-
----
-
-## Git workflow
-
-- Before committing, run `git status` and `git diff --staged` to verify only intended changes are staged. Never commit all uncommitted changes without explicit user approval.
-- No simultaneous Claude Code sessions on this repository. If you detect unexpected uncommitted changes or stash entries at session start, flag them before proceeding.
+- Follow the [Pre-commit protocol](#pre-commit-protocol) before every commit.
+- No simultaneous Claude Code sessions on this repository.
 
 ---
 
@@ -55,13 +44,13 @@ Never bundle unrelated uncommitted changes into a deployment commit.
 At the start of every session, before any other work:
 
 ```bash
-# 1. Branch and recent history
+# 1. Branch, recent history, and working tree state
 git branch --show-current && git log --oneline -5 && git status
 
 # 2. Check for stale .js files shadowing .ts sources
 find src -name '*.js' -exec sh -c 'test -f "${1%.js}.ts" && echo "STALE: $1"' _ {} \;
 
-# 3. Check for uncommitted changes or stash entries
+# 3. Check for stash entries
 git stash list
 ```
 
@@ -71,20 +60,9 @@ Confirm the branch is correct for the task before starting any work.
 
 ---
 
-## Testing
+## Testing & task completion
 
-- After any code changes, run the full test suite and typecheck before committing:
-  ```bash
-  pnpm test
-  pnpm exec tsc --noEmit
-  ```
-- Report the exact number of passing/failing tests.
-
----
-
-## Task completion checklist
-
-Before reporting ANY task as complete, run and show the output of all five checks:
+After any code changes, and before reporting ANY task as complete, run:
 
 ```bash
 # 1. Correct branch?
@@ -103,7 +81,8 @@ pnpm test
 pnpm exec tsc --noEmit
 ```
 
-If any check fails, fix it before reporting completion. Do not report "done" with failing tests or uncommitted changes unless explicitly discussed with the user.
+- Report the exact number of passing/failing tests.
+- If any check fails, fix it before reporting completion. Do not report "done" with failing tests or uncommitted changes unless explicitly discussed with the user.
 
 ---
 
@@ -123,7 +102,7 @@ Before implementing any bug fix or feature that touches data flowing between ser
 
 Only after the trace is documented, implement fixes at ALL affected layers. Do not fix one layer and assume others are correct.
 
-Common multi-layer patterns in this codebase:
+Common multi-layer patterns:
 - CEE response → PLoT adapter → ISL request (field name translations like `from` → `from_`)
 - ISL response → PLoT V2/V3 adapter → UI store (two adapter shapes)
 - Error responses: direct shape AND PLoT-wrapped shape must both be handled
@@ -150,11 +129,11 @@ When asked to address code review feedback:
 
 Run this audit before major deployments or when requested. Check for:
 
-1. **Stale .js files:** `find src -name '*.js' -exec sh -c 'test -f "${1%.js}.ts" && echo "STALE: $1"' _ {} \;`
-2. **Hardcoded timeouts:** Grep for magic numbers (setTimeout, ms values) that should reference centralised config
-3. **Error shape gaps:** In catch blocks and error handlers, verify both direct AND wrapped error formats are handled
-4. **Schema drift:** If OpenAPI spec generation exists, regenerate and diff against committed spec
-5. **Nullable field mismatches:** Check Zod schemas against actual API response shapes for optional/nullable alignment
-6. **Uncommitted files:** `git status` — flag anything that could accidentally be bundled into the next commit
+1. **Hardcoded timeouts:** Grep for magic numbers (setTimeout, ms values) that should reference centralised config
+2. **Error shape gaps:** In catch blocks and error handlers, verify both direct AND wrapped error formats are handled
+3. **Schema drift:** If OpenAPI spec generation exists, regenerate and diff against committed spec
+4. **Nullable field mismatches:** Check Zod schemas against actual API response shapes for optional/nullable alignment
 
 Categorise findings as critical/warning/info with production impact assessment.
+
+_(Stale .js files and uncommitted changes are already checked by the [Session preamble](#session-preamble).)_

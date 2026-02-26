@@ -64,13 +64,19 @@ describe("CEE Status Consistency", () => {
 
       // Step 2: Call graph-readiness with a V1-style graph + analysis_ready
       // For V3 mode, graph-readiness reads options from analysis_ready
-      // Build V1-compatible graph (add fake nodes if needed for option validation)
-      // V3: nodes and edges are at root level now
+      // Build V1-compatible graph — strip V3-only fields (observed_state on factors
+      // uses a different shape than the V1 ConstraintObservedState schema expects)
       const v1Graph = {
         version: "1",
         default_seed: 17,
         nodes: [
-          ...draftResult.nodes,
+          ...draftResult.nodes.map((n: any) => ({
+            id: n.id,
+            kind: n.kind,
+            label: n.label,
+            ...(n.data ? { data: n.data } : {}),
+            ...(n.category ? { category: n.category } : {}),
+          })),
           // Add option nodes back (graph-readiness checks them against analysis_ready)
           ...analysisReady.options.map((o: any) => ({
             id: o.id,

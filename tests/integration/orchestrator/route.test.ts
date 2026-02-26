@@ -264,14 +264,24 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   });
 
   it("routes 'generate brief' deterministically", async () => {
-    // No analysis_response → recoverable error
+    // Provide graph + analysis_response so both prerequisites pass,
+    // but analysis_response has no decision_brief → tool execution fails
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
-      payload: makeValidRequest({ message: "generate brief" }),
+      payload: makeValidRequest({
+        message: "generate brief",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
+          analysis_response: { summary: "no brief here" },
+          framing: { stage: "frame" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
     });
 
-    // generate_brief with no analysis_response throws recoverable error → 502
+    // generate_brief with no decision_brief in analysis_response throws error → 502
     const body = JSON.parse(response.body);
     expect(body.error).toBeDefined();
     expect(body.turn_plan?.selected_tool).toBe("generate_brief");
@@ -310,15 +320,25 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // ---------------------------------------------------
 
   it("returns 502 for run_analysis without PLoT client", async () => {
+    // Provide graph so prerequisite passes — triggers run_analysis deterministically
+    // PLoT client is null (mock), so tool execution fails
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
-      payload: makeValidRequest({ message: "run analysis" }),
+      payload: makeValidRequest({
+        message: "run analysis",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
+          analysis_response: null,
+          framing: { stage: "evaluate" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
     });
 
     const body = JSON.parse(response.body);
-    // run_analysis needs graph + analysis_inputs, or PLoT client —
-    // either way it should return an error, not crash
+    // run_analysis fails because PLoT client is null
     expect(body.error).toBeDefined();
     expect(body.error.code).toBe("TOOL_EXECUTION_FAILED");
   });

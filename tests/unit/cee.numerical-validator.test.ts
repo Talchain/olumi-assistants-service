@@ -37,7 +37,7 @@ describe("NumericalValidator", () => {
     });
 
     expect(result.valid).toBe(true);
-    expect(result.severity).toBe("warning");
+    expect(result.severity).toBe("warn");
     expect(result.code).toBe("NUMERICAL_UNGROUNDED");
     expect(result.details?.hallucination_score).toBeGreaterThan(0);
   });

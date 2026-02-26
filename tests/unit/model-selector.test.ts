@@ -83,10 +83,10 @@ const envOverrideConfig: ModelSelectionConfig = {
 
 describe("selectModel", () => {
   describe("default selection", () => {
-    it("returns fast tier for clarification task", () => {
+    it("returns quality tier for clarification task (gpt-4.1)", () => {
       const result = selectModel({ task: "clarification" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5-mini");
-      expect(result.tier).toBe("fast");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
@@ -104,31 +104,31 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns fast tier for evidence_helper task", () => {
+    it("returns quality tier for evidence_helper task (gpt-4.1)", () => {
       const result = selectModel({ task: "evidence_helper" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5-mini");
-      expect(result.tier).toBe("fast");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
-    it("returns fast tier for explainer task", () => {
+    it("returns quality tier for explainer task (gpt-4.1)", () => {
       const result = selectModel({ task: "explainer" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5-mini");
-      expect(result.tier).toBe("fast");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
-    it("returns fast tier for preflight task", () => {
+    it("returns quality tier for preflight task (gpt-4.1)", () => {
       const result = selectModel({ task: "preflight" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5-mini");
-      expect(result.tier).toBe("fast");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
-    it("returns fast tier for sensitivity_coach task", () => {
+    it("returns quality tier for sensitivity_coach task (gpt-4.1)", () => {
       const result = selectModel({ task: "sensitivity_coach" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5-mini");
-      expect(result.tier).toBe("fast");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
 
@@ -178,7 +178,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "gpt-5-turbo" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-5-mini"); // Falls back to default
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14"); // Falls back to default
       expect(result.warnings).toContainEqual(
         expect.stringContaining("Unknown model")
       );
@@ -189,7 +189,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "test-disabled-model" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-5-mini"); // Falls back to default
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14"); // Falls back to default
       expect(result.source).toBe("default");
       expect(result.warnings.length).toBeGreaterThan(0);
     });
@@ -199,7 +199,7 @@ describe("selectModel", () => {
         { task: "clarification", override: "gpt-4o" },
         noOverrideConfig
       );
-      expect(result.modelId).toBe("gpt-5-mini"); // Uses default
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14"); // Uses default
       expect(result.source).toBe("default");
       expect(result.warnings).toContainEqual(
         expect.stringContaining("override is disabled")
@@ -238,8 +238,9 @@ describe("selectModel", () => {
         enabledConfig
       );
       // Quality gates removed - _fast is allowed for all tasks
-      expect(result.modelId).toBe("gpt-4o-mini");
-      expect(result.tier).toBe("fast");
+      // gpt-4.1-2025-04-14 is quality tier in registry (upgraded from gpt-5-mini/fast)
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("override");
     });
 
@@ -268,7 +269,7 @@ describe("selectModel", () => {
         { task: "evidence_helper", override: "_fast" },
         enabledConfig
       );
-      expect(result.modelId).toBe("gpt-4o-mini");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
       expect(result.source).toBe("override");
     });
 
@@ -287,7 +288,7 @@ describe("selectModel", () => {
         enabledConfig
       );
       expect(result.source).toBe("default");
-      expect(result.modelId).toBe("gpt-5-mini");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
     });
 
     it("_fast allowed for draft_graph (quality gates removed)", () => {
@@ -296,8 +297,9 @@ describe("selectModel", () => {
         enabledConfig
       );
       // Quality gates removed - _fast is allowed for all tasks
-      expect(result.modelId).toBe("gpt-4o-mini");
-      expect(result.tier).toBe("fast");
+      // gpt-4.1-2025-04-14 is quality tier in registry (upgraded from gpt-5-mini/fast)
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("override");
     });
   });

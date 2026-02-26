@@ -70,7 +70,7 @@ describe("BranchProbabilityValidator", () => {
 
     expect(result.valid).toBe(true);
     expect(result.stage).toBe("branch_probabilities");
-    expect(result.severity).toBe("warning");
+    expect(result.severity).toBe("warn");
     expect(result.code).toBe("BRANCH_PROBABILITIES_UNNORMALIZED");
     expect(result.message).toMatch(/do not sum to 1.0/i);
     expect(result.details).toBeDefined();

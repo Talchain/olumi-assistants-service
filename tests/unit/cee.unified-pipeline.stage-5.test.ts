@@ -95,6 +95,14 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
   buildLLMRawTrace: vi.fn(),
 }));
 
+// Mock context pack (assembleContextPack computes hashes over pipeline state)
+vi.mock("../../src/context/context-pack.js", () => ({
+  assembleContextPack: vi.fn().mockReturnValue({
+    pipelinePath: "unified",
+    context_hash: "test-hash",
+  }),
+}));
+
 // Mock version
 vi.mock("../../src/version.js", () => ({
   SERVICE_VERSION: "1.0.0-test",

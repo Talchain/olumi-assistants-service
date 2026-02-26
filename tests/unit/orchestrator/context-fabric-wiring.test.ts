@@ -93,7 +93,7 @@ vi.mock('../../../src/orchestrator/context-fabric/index.js', async (importOrigin
 // Imports — after mocks
 // ============================================================================
 
-import { handleTurn } from '../../../src/orchestrator/turn-handler.js';
+import { handleTurn, _resetPlotClient } from '../../../src/orchestrator/turn-handler.js';
 import { _clearIdempotencyCache } from '../../../src/orchestrator/idempotency.js';
 import type { OrchestratorTurnRequest, ConversationContext } from '../../../src/orchestrator/types.js';
 import type { FastifyRequest } from 'fastify';
@@ -149,6 +149,7 @@ function stubLLMResponse(text: string = 'Test response.') {
 describe('Context Fabric wiring in turn handler', () => {
   beforeEach(() => {
     _clearIdempotencyCache();
+    _resetPlotClient();
     mockChatWithTools.mockReset();
     mockChat.mockReset();
     mockLogWarn.mockReset();
@@ -445,10 +446,20 @@ describe('Context Fabric wiring in turn handler', () => {
   it('deterministic run_analysis does not invoke Context Fabric', async () => {
     process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = 'true';
 
-    // "run the analysis" routes deterministically to run_analysis
+    // "run the analysis" routes deterministically to run_analysis.
+    // Needs graph so prerequisite passes (graph != null).
     // PLoT client is null (mock), so it will return an error envelope — that's fine,
     // the assertion is that assembleContext was never called.
-    const req = makeRequest({ message: 'run the analysis' });
+    const req = makeRequest({
+      message: 'run the analysis',
+      context: {
+        graph: { nodes: [{ id: 'g1', kind: 'goal', label: 'G' }], edges: [] } as any,
+        analysis_response: null,
+        framing: { stage: 'evaluate' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
     const result = await handleTurn(req, mockFastifyRequest, 'req-run-analysis');
 
     // run_analysis fails because PLoT client is null — expected

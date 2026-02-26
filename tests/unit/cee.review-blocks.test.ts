@@ -276,7 +276,7 @@ describe("CEE Review Block Builders", () => {
           (w: { type: string }) => w.type === "orphan_nodes"
         );
         expect(orphanWarning).toBeDefined();
-        expect(orphanWarning?.severity).toBe("warning");
+        expect(orphanWarning?.severity).toBe("warn");
       }
     });
 

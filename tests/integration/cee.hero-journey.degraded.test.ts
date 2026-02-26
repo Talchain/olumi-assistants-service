@@ -73,7 +73,7 @@ describe("CEE hero journey: engine degraded mode", () => {
       ? (draftBody.validation_issues as any[])
       : [];
 
-    expect(issues.some((i) => i.code === "ENGINE_DEGRADED" && i.severity === "warning")).toBe(
+    expect(issues.some((i) => i.code === "ENGINE_DEGRADED" && i.severity === "warn")).toBe(
       true,
     );
 

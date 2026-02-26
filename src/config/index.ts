@@ -421,6 +421,7 @@ const ConfigSchema = z.object({
   // PLoT (Plot Lite) Service Configuration
   plot: z.object({
     baseUrl: optionalUrl,
+    authToken: z.string().optional(),
   }).default({}),
 
   // Graph Limits
@@ -675,6 +676,7 @@ function parseConfig(): Config {
     },
     plot: {
       baseUrl: env.PLOT_BASE_URL,
+      authToken: env.PLOT_AUTH_TOKEN,
     },
     graph: {
       maxNodes: env.GRAPH_MAX_NODES,

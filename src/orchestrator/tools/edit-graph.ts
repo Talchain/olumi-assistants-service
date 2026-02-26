@@ -39,7 +39,7 @@ import type {
   OrchestratorError,
   RepairEntry,
 } from "../types.js";
-import type { PLoTClient } from "../plot-client.js";
+import type { PLoTClient, ValidatePatchResult } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { serialiseEditContextForLLM } from "../context/serialise.js";
 import {
@@ -113,6 +113,77 @@ function sanitiseOperations(operations: PatchOperation[]): PatchOperation[] {
   }
 
   return cleaned;
+}
+
+// ============================================================================
+// Populate old_value for undo data capture
+// ============================================================================
+
+/**
+ * Populate `old_value` on update/remove operations by looking up the current
+ * state from the graph. Enables undo and audit trail.
+ *
+ * - remove_node: old_value = full node object
+ * - update_node: old_value = { fields being changed with current values }
+ * - remove_edge: old_value = full edge object
+ * - update_edge: old_value = { fields being changed with current values }
+ *
+ * Does NOT overwrite old_value if the LLM already provided it.
+ */
+function populateOldValues(
+  operations: PatchOperation[],
+  graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> },
+): PatchOperation[] {
+  const nodeMap = new Map(
+    graph.nodes.map((n) => [n.id as string, n]),
+  );
+  const edgeMap = new Map(
+    graph.edges.map((e) => [`${e.from}::${e.to}`, e]),
+  );
+
+  return operations.map((op) => {
+    // Skip if old_value is already set
+    if (op.old_value !== undefined) return op;
+
+    switch (op.op) {
+      case 'remove_node': {
+        const node = nodeMap.get(op.path);
+        if (node) return { ...op, old_value: node };
+        break;
+      }
+      case 'update_node': {
+        const node = nodeMap.get(op.path);
+        if (node && op.value && typeof op.value === 'object') {
+          const prev: Record<string, unknown> = {};
+          for (const key of Object.keys(op.value as Record<string, unknown>)) {
+            if (key in node) prev[key] = node[key];
+          }
+          if (Object.keys(prev).length > 0) return { ...op, old_value: prev };
+        }
+        break;
+      }
+      case 'remove_edge': {
+        const edge = edgeMap.get(op.path);
+        if (edge) return { ...op, old_value: edge };
+        break;
+      }
+      case 'update_edge': {
+        const edge = edgeMap.get(op.path);
+        if (edge && op.value && typeof op.value === 'object') {
+          const prev: Record<string, unknown> = {};
+          for (const key of Object.keys(op.value as Record<string, unknown>)) {
+            if (key in edge) prev[key] = edge[key];
+          }
+          if (Object.keys(prev).length > 0) return { ...op, old_value: prev };
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    return op;
+  });
 }
 
 // ============================================================================
@@ -359,13 +430,20 @@ export async function handleEditGraph(
     }
 
     // Sanitise: remove legacy fields
-    const operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+    let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+
+    // Populate old_value for undo data capture (before PLoT submission)
+    operations = populateOldValues(
+      operations,
+      context.graph as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> },
+    );
 
     // Step 2: PLoT semantic validation (if client configured)
     let repairsApplied: RepairEntry[] | undefined;
     let appliedGraph: GraphV3T | undefined;
     let appliedGraphHash: string | undefined;
     let plotWarnings: string[] | undefined;
+    const allWarnings: string[] = [];
 
     if (plotClient) {
       try {
@@ -376,18 +454,24 @@ export async function handleEditGraph(
           base_graph_hash: baseGraphHash,
         };
 
-        const plotResponse = await plotClient.validatePatch(plotPayload, requestId) as Record<string, unknown>;
+        const plotResult: ValidatePatchResult = await plotClient.validatePatch(plotPayload, requestId);
 
-        // Check PLoT verdict
-        const verdict = plotResponse.verdict as string | undefined;
-
-        if (verdict === 'rejected') {
-          const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
-          const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
-          const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
+        // FEATURE_DISABLED (501) → skip semantic validation with warning (same as PLoT not configured)
+        if (plotResult.kind === 'feature_disabled') {
+          log.info(
+            { request_id: requestId, attempt },
+            "edit_graph PLoT validate-patch FEATURE_DISABLED — skipping semantic validation",
+          );
+          allWarnings.push('PLOT_VALIDATION_SKIPPED: PLoT validate-patch not available — semantic validation skipped');
+          // Fall through to success path (no semantic gate)
+        } else if (plotResult.kind === 'rejection') {
+          // 422 structured rejection — patch is semantically invalid
+          const reason = plotResult.message ?? 'Semantic validation rejected by PLoT';
+          const plotCode = plotResult.code;
+          const plotViolations = plotResult.violations;
 
           log.warn(
-            { request_id: requestId, attempt, verdict, reason, plot_code: plotCode },
+            { request_id: requestId, attempt, reason, plot_code: plotCode },
             "edit_graph PLoT rejected patch",
           );
 
@@ -407,35 +491,68 @@ export async function handleEditGraph(
           lastPlotErrors = reason;
           lastValidationResult = { valid: false, operations: validationResult.operations, referentialErrors: [{ index: 0, op: 'plot', path: '', message: reason }] };
           continue;
-        }
+        } else {
+          // Success — extract response fields
+          const plotResponse = plotResult.data;
 
-        // Capture PLoT repairs (surfaced as-is, never rewritten into operations)
-        if (plotResponse.repairs_applied && Array.isArray(plotResponse.repairs_applied) && plotResponse.repairs_applied.length > 0) {
-          repairsApplied = plotResponse.repairs_applied as RepairEntry[];
-          log.info(
-            { request_id: requestId, repairs_count: repairsApplied.length },
-            "edit_graph PLoT applied repairs",
-          );
-        }
+          // Check verdict field for backwards compatibility with older PLoT versions
+          const verdict = plotResponse.verdict as string | undefined;
+          if (verdict === 'rejected') {
+            const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
+            const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
+            const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
 
-        // Capture applied_graph and its hash from PLoT response
-        if (plotResponse.applied_graph && typeof plotResponse.applied_graph === 'object') {
-          appliedGraph = plotResponse.applied_graph as GraphV3T;
-          // Prefer PLoT's canonical hash; fall back to local computation
-          appliedGraphHash = typeof plotResponse.graph_hash === 'string'
-            ? plotResponse.graph_hash
-            : computeGraphHash(appliedGraph);
-          log.info(
-            { request_id: requestId, applied_graph_hash: appliedGraphHash, hash_source: typeof plotResponse.graph_hash === 'string' ? 'plot' : 'local' },
-            "edit_graph PLoT returned applied graph",
-          );
-        }
+            log.warn(
+              { request_id: requestId, attempt, verdict, reason, plot_code: plotCode },
+              "edit_graph PLoT rejected patch (verdict field)",
+            );
 
-        // Surface PLoT warnings in block data
-        if (plotResponse.warnings && Array.isArray(plotResponse.warnings) && plotResponse.warnings.length > 0) {
-          plotWarnings = plotResponse.warnings.map((w: unknown) =>
-            typeof w === 'string' ? w : typeof w === 'object' && w !== null && 'message' in w ? String((w as { message: unknown }).message) : JSON.stringify(w),
-          );
+            if (attempt === totalAttempts) {
+              return buildRejectionResult(
+                reason,
+                operations,
+                baseGraphHash,
+                turnId,
+                startTime,
+                'PLOT_SEMANTIC_REJECTED',
+                { plot_code: plotCode, plot_violations: plotViolations },
+                attempt,
+              );
+            }
+
+            lastPlotErrors = reason;
+            lastValidationResult = { valid: false, operations: validationResult.operations, referentialErrors: [{ index: 0, op: 'plot', path: '', message: reason }] };
+            continue;
+          }
+
+          // Capture PLoT repairs (surfaced as-is, never rewritten into operations)
+          if (plotResponse.repairs_applied && Array.isArray(plotResponse.repairs_applied) && plotResponse.repairs_applied.length > 0) {
+            repairsApplied = plotResponse.repairs_applied as RepairEntry[];
+            log.info(
+              { request_id: requestId, repairs_count: repairsApplied.length },
+              "edit_graph PLoT applied repairs",
+            );
+          }
+
+          // Capture applied_graph and its hash from PLoT response
+          if (plotResponse.applied_graph && typeof plotResponse.applied_graph === 'object') {
+            appliedGraph = plotResponse.applied_graph as GraphV3T;
+            // Prefer PLoT's canonical hash; fall back to local computation
+            appliedGraphHash = typeof plotResponse.graph_hash === 'string'
+              ? plotResponse.graph_hash
+              : computeGraphHash(appliedGraph);
+            log.info(
+              { request_id: requestId, applied_graph_hash: appliedGraphHash, hash_source: typeof plotResponse.graph_hash === 'string' ? 'plot' : 'local' },
+              "edit_graph PLoT returned applied graph",
+            );
+          }
+
+          // Surface PLoT warnings in block data
+          if (plotResponse.warnings && Array.isArray(plotResponse.warnings) && plotResponse.warnings.length > 0) {
+            plotWarnings = plotResponse.warnings.map((w: unknown) =>
+              typeof w === 'string' ? w : typeof w === 'object' && w !== null && 'message' in w ? String((w as { message: unknown }).message) : JSON.stringify(w),
+            );
+          }
         }
       } catch (plotError) {
         // PLoT configured but failed — hard reject (CEE must not propose semantically unvalidated patches)
@@ -473,7 +590,9 @@ export async function handleEditGraph(
     const latencyMs = Date.now() - startTime;
 
     // Collect validation warnings: PLoT warnings + skip notice
-    const allWarnings: string[] = [...(plotWarnings ?? [])];
+    if (plotWarnings) {
+      allWarnings.push(...plotWarnings);
+    }
     if (!plotClient) {
       allWarnings.push('PLOT_VALIDATION_SKIPPED: PLoT was unavailable — this patch has not been canonically validated');
     }

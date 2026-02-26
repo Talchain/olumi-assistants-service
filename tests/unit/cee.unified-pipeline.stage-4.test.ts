@@ -101,6 +101,7 @@ vi.mock("../../src/cee/compound-goal/index.js", () => ({
   extractCompoundGoals: vi.fn().mockReturnValue({ constraints: [], isCompound: false }),
   toGoalConstraints: vi.fn().mockReturnValue([]),
   remapConstraintTargets: vi.fn().mockReturnValue({ constraints: [], remapped: 0, rejected_junk: 0, rejected_no_match: 0 }),
+  normaliseConstraintUnits: vi.fn().mockImplementation((c: unknown[]) => c),
 }));
 
 vi.mock("../../src/validators/structural-reconciliation.js", () => ({

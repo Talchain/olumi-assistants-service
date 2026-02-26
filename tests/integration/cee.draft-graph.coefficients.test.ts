@@ -15,6 +15,22 @@ vi.mock("../../src/services/validateClient.js", () => ({
   validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
 }));
 
+// Skip V1 schema verification — this test validates coefficient preservation, not schema compliance
+vi.mock("../../src/cee/verification/index.js", () => ({
+  verificationPipeline: {
+    verify: vi.fn().mockImplementation((resp: any) => ({ response: { ...resp }, results: [] })),
+  },
+}));
+
+// Mock enrichment to pass through — avoids adding partial data objects that fail schema
+vi.mock("../../src/cee/factor-extraction/enricher.js", () => ({
+  enrichGraphWithFactorsAsync: vi.fn().mockImplementation((graph: any) => ({
+    graph,
+    enriched: false,
+    trace: { factors_added: 0 },
+  })),
+}));
+
 // Avoid structural warnings or automatic fixes interfering with coefficients
 vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({
@@ -98,10 +114,10 @@ vi.mock("../../src/utils/fixtures.js", () => ({
     nodes: [
       { id: "goal_mrr", kind: "goal", label: "Increase MRR" },
       { id: "dec_pricing", kind: "decision", label: "Pricing strategy" },
-      { id: "opt_increase", kind: "option", label: "Increase price" },
-      { id: "opt_maintain", kind: "option", label: "Maintain price" },
+      { id: "opt_increase", kind: "option", label: "Increase price", data: { interventions: { fac_price: 120 } } },
+      { id: "opt_maintain", kind: "option", label: "Maintain price", data: { interventions: { fac_price: 100 } } },
       { id: "fac_price", kind: "factor", label: "Price", data: { value: 100, extractionType: "explicit" } },
-      { id: "fac_demand", kind: "factor", label: "Demand" },
+      { id: "fac_demand", kind: "factor", label: "Demand", data: { value: 500, extractionType: "inferred" } },
       { id: "out_revenue", kind: "outcome", label: "Revenue" },
       { id: "risk_churn", kind: "risk", label: "Churn" },
     ],
@@ -158,7 +174,7 @@ vi.mock("../../src/utils/fixtures.js", () => ({
       roots: ["dec_pricing"],
       leaves: ["goal_mrr"],
       suggested_positions: {},
-      source: "fixtures",
+      source: "assistant",
     },
   },
 }));

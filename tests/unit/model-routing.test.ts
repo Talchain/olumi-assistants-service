@@ -185,12 +185,12 @@ describe("Task-to-Model Routing", () => {
       expect(TASK_MODEL_DEFAULTS.explainer).toBeDefined();
     });
 
-    it("assigns fast tier (gpt-5-mini) to simple tasks", () => {
-      expect(TASK_MODEL_DEFAULTS.clarification).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.preflight).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.explainer).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.evidence_helper).toBe("gpt-5-mini");
-      expect(TASK_MODEL_DEFAULTS.sensitivity_coach).toBe("gpt-5-mini");
+    it("assigns fast tier (gpt-4.1) to simple tasks", () => {
+      expect(TASK_MODEL_DEFAULTS.clarification).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.preflight).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.explainer).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.evidence_helper).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.sensitivity_coach).toBe("gpt-4.1-2025-04-14");
     });
 
     it("assigns optimized models to complex reasoning tasks", () => {
@@ -235,7 +235,7 @@ describe("Task-to-Model Routing", () => {
 
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
-      expect(getDefaultModelForTask("clarification")).toBe("gpt-5-mini");
+      expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
       expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4o");
       expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
