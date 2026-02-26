@@ -29,6 +29,13 @@ import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 export class PLoTError extends Error {
   readonly name = "PLoTError";
 
+  /**
+   * Optional override for the OrchestratorError returned by toOrchestratorError().
+   * Set when the upstream error.v1 envelope provides an explicit `retryable` field
+   * that should take precedence over the status-code heuristic.
+   */
+  orchestratorErrorOverride?: OrchestratorError;
+
   constructor(
     message: string,
     public readonly status: number,
@@ -43,10 +50,13 @@ export class PLoTError extends Error {
   }
 
   toOrchestratorError(): OrchestratorError {
+    if (this.orchestratorErrorOverride) {
+      return this.orchestratorErrorOverride;
+    }
     return {
       code: 'TOOL_EXECUTION_FAILED',
       message: this.message,
-      tool: 'run_analysis',
+      tool: this.operation,
       recoverable: this.status >= 500,
       suggested_retry: this.status >= 500 ? 'Try running the analysis again.' : undefined,
     };
@@ -72,7 +82,7 @@ export class PLoTTimeoutError extends Error {
     return {
       code: 'TOOL_EXECUTION_FAILED',
       message: `PLoT ${this.operation} timed out after ${this.elapsedMs}ms`,
-      tool: 'run_analysis',
+      tool: this.operation,
       recoverable: true,
       suggested_retry: 'Try running the analysis again.',
     };
@@ -195,7 +205,7 @@ class PLoTClientImpl implements PLoTClient {
       if (typeof errV1?.retryable === 'boolean') {
         const orchErr = plotErr.toOrchestratorError();
         orchErr.recoverable = errV1.retryable;
-        Object.assign(plotErr, { _overriddenOrchestratorError: orchErr });
+        plotErr.orchestratorErrorOverride = orchErr;
       }
       throw plotErr;
     } catch (error) {

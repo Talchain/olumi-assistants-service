@@ -13,6 +13,7 @@ import type { ContextPackV1 } from "../../context/context-pack.js";
 import type { EdgeFieldStash } from "./edge-identity.js";
 import type { RiskCoefficientCorrection } from "../transforms/risk-normalisation.js";
 import type { EdgeFormat } from "./utils/edge-format.js";
+import type { FieldDeletionEvent } from "./utils/field-deletion-audit.js";
 import type { components } from "../../generated/openapi.d.ts";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
@@ -154,6 +155,10 @@ export interface StageContext {
 
   // ── Plan annotation checkpoint (captured after Stage 3 — Enrich) ──
   planAnnotation?: PlanAnnotationCheckpoint;
+
+  // ── Field deletion audit telemetry ──────────────────────────────────────
+  /** Per-field deletion events collected across repair stages. Emitted in trace.field_deletions. */
+  fieldDeletions?: FieldDeletionEvent[];
 
   // ── ContextPack v1 (Stream C — assembled in Stage 5 Package) ──
   contextPack?: ContextPackV1;

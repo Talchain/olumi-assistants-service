@@ -28,6 +28,34 @@ describe("PLoT Error Types", () => {
       expect(orchErr.recoverable).toBe(false);
       expect(orchErr.suggested_retry).toBeUndefined();
     });
+
+    it("uses dynamic tool name from operation field", () => {
+      const runErr = new PLoTError("fail", 500, "run", 100);
+      expect(runErr.toOrchestratorError().tool).toBe("run");
+
+      const vpErr = new PLoTError("fail", 500, "validate_patch", 100);
+      expect(vpErr.toOrchestratorError().tool).toBe("validate_patch");
+    });
+
+    it("returns orchestratorErrorOverride when set", () => {
+      const error = new PLoTError("Server error", 500, "run", 1000);
+      const override = {
+        code: "TOOL_EXECUTION_FAILED" as const,
+        message: "overridden",
+        tool: "run",
+        recoverable: false,
+      };
+      error.orchestratorErrorOverride = override;
+      expect(error.toOrchestratorError()).toBe(override);
+    });
+
+    it("returns default conversion when orchestratorErrorOverride is not set", () => {
+      const error = new PLoTError("Server error", 500, "run", 1000);
+      expect(error.orchestratorErrorOverride).toBeUndefined();
+      const orchErr = error.toOrchestratorError();
+      expect(orchErr.recoverable).toBe(true);
+      expect(orchErr.tool).toBe("run");
+    });
   });
 
   describe("PLoTTimeoutError", () => {
@@ -45,6 +73,14 @@ describe("PLoT Error Types", () => {
       expect(orchErr.code).toBe("TOOL_EXECUTION_FAILED");
       expect(orchErr.recoverable).toBe(true);
       expect(orchErr.suggested_retry).toBeDefined();
+    });
+
+    it("uses dynamic tool name from operation field", () => {
+      const runErr = new PLoTTimeoutError("timed out", "run", 30000, 30100);
+      expect(runErr.toOrchestratorError().tool).toBe("run");
+
+      const vpErr = new PLoTTimeoutError("timed out", "validate_patch", 5000, 5100);
+      expect(vpErr.toOrchestratorError().tool).toBe("validate_patch");
     });
   });
 });

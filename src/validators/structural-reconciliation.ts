@@ -17,6 +17,7 @@
  */
 
 import { log } from "../utils/telemetry.js";
+import { fieldDeletion, type FieldDeletionEvent } from "../cee/unified-pipeline/utils/field-deletion-audit.js";
 import type { GraphT, NodeT, EdgeT, FactorDataT } from "../schemas/graph.js";
 import {
   FactorType,
@@ -54,6 +55,8 @@ export interface STRPResult {
   mutations: STRPMutation[];
   /** Normalised constraints (only populated when goalConstraints provided) */
   goalConstraints?: Array<{ node_id: string; [key: string]: unknown }>;
+  /** Per-field deletion events from STRP rules (e.g. category override stripping controllable-only fields) */
+  fieldDeletions: FieldDeletionEvent[];
 }
 
 // =============================================================================
@@ -146,8 +149,9 @@ function categoryOverrideRule(
   graph: GraphT,
   nodeMap: NodeMap,
   factorCategories: Map<string, FactorCategoryInfo>
-): STRPMutation[] {
+): { mutations: STRPMutation[]; fieldDeletions: FieldDeletionEvent[] } {
   const mutations: STRPMutation[] = [];
+  const deletions: FieldDeletionEvent[] = [];
   const factors = nodeMap.byKind.get("factor") ?? [];
 
   for (const node of factors) {
@@ -186,9 +190,11 @@ function categoryOverrideRule(
       } else {
         // Reclassified FROM controllable to observable/external — strip extra fields
         if (data.factor_type !== undefined) {
+          deletions.push(fieldDeletion('structural-reconciliation', node.id, 'data.factor_type', 'CATEGORY_OVERRIDE_STRIP'));
           delete data.factor_type;
         }
         if (data.uncertainty_drivers !== undefined) {
+          deletions.push(fieldDeletion('structural-reconciliation', node.id, 'data.uncertainty_drivers', 'CATEGORY_OVERRIDE_STRIP'));
           delete data.uncertainty_drivers;
         }
       }
@@ -206,7 +212,7 @@ function categoryOverrideRule(
     });
   }
 
-  return mutations;
+  return { mutations, fieldDeletions: deletions };
 }
 
 // =============================================================================
@@ -729,7 +735,9 @@ export function reconcileStructuralTruth(
   const factorCategories = inferFactorCategories(graph.nodes, graph.edges, nodeMap);
 
   // Rule 1: Category override
-  mutations.push(...categoryOverrideRule(graph, nodeMap, factorCategories));
+  const categoryResult = categoryOverrideRule(graph, nodeMap, factorCategories);
+  mutations.push(...categoryResult.mutations);
+  const allFieldDeletions: FieldDeletionEvent[] = [...categoryResult.fieldDeletions];
 
   // Rule 2: Enum validation
   mutations.push(...enumValidationRule(graph));
@@ -779,5 +787,6 @@ export function reconcileStructuralTruth(
     graph,
     mutations,
     goalConstraints: normalisedConstraints,
+    fieldDeletions: allFieldDeletions,
   };
 }

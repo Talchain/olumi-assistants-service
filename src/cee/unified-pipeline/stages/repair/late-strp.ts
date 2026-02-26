@@ -29,6 +29,12 @@ export function runLateStrp(ctx: StageContext): void {
   // constraintStrpResult holds the Stage 4 late STRP result (Rules 3,5)
   ctx.constraintStrpResult = result;
 
+  // Collect field deletion events from late STRP
+  if (result.fieldDeletions?.length > 0) {
+    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
+    ctx.fieldDeletions.push(...result.fieldDeletions);
+  }
+
   if (result.goalConstraints) {
     ctx.goalConstraints = result.goalConstraints;
   }

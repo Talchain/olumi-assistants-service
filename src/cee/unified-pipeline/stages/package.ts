@@ -493,6 +493,16 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     pipelineTrace.threshold_sweep = ctx.thresholdSweepTrace;
   }
 
+  // Field deletion audit telemetry (aggregated across all repair stages)
+  if (ctx.fieldDeletions && ctx.fieldDeletions.length > 0) {
+    pipelineTrace.field_deletions = {
+      count: ctx.fieldDeletions.length,
+      stages: [...new Set(ctx.fieldDeletions.map((d: any) => d.stage))],
+      reasons: [...new Set(ctx.fieldDeletions.map((d: any) => d.reason))],
+      events: ctx.fieldDeletions,
+    };
+  }
+
   // Stage snapshots (goal_threshold field tracking across pipeline stages)
   if (ctx.stageSnapshots) {
     pipelineTrace.stage_snapshots = ctx.stageSnapshots;

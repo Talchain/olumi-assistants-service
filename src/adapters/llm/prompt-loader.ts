@@ -13,6 +13,25 @@
  * This module caches loaded prompts to avoid repeated file system access
  * while still allowing dynamic updates when prompts change.
  *
+ * ## MULTI-INSTANCE NOTE
+ *
+ * KNOWN_LIMITATION: No distributed cache invalidation.
+ *
+ * Cache behaviour: 5-min TTL, stale-while-revalidate with 10-min grace period,
+ * proactive background refresh at 80% TTL to prevent thundering herd.
+ *
+ * Multi-instance gap: Each server instance maintains an independent in-memory
+ * prompt cache. When a prompt is updated (via admin API or store), other
+ * instances may serve stale prompts for up to 10 minutes (grace period).
+ *
+ * Current mitigations:
+ * - Admin `invalidatePromptCache()` route available for manual per-instance flush
+ * - Proactive refresh at 80% TTL reduces the effective stale window
+ * - Single-instance PoC deployment eliminates the issue entirely
+ *
+ * Future: If multi-instance deployment is needed, implement Redis pub/sub or
+ * similar distributed invalidation to broadcast prompt updates across instances.
+ *
  * ## Provider Prompt Strategy
  *
  * **Anthropic adapter** (`src/adapters/llm/anthropic.ts`):

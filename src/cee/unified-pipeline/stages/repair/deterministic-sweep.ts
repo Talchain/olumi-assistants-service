@@ -21,6 +21,7 @@ import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
+import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 
 // ---------------------------------------------------------------------------
 // Bucket classification (SSOT)
@@ -429,10 +430,11 @@ function fixObservableMissingData(
 function fixObservableExtraData(
   graph: GraphT,
   violations: ValidationIssue[],
-): Repair[] {
+): { repairs: Repair[]; fieldDeletions: FieldDeletionEvent[] } {
   const repairs: Repair[] = [];
+  const deletions: FieldDeletionEvent[] = [];
   const dataViolations = violations.filter((v) => v.code === "OBSERVABLE_EXTRA_DATA");
-  if (dataViolations.length === 0) return repairs;
+  if (dataViolations.length === 0) return { repairs, fieldDeletions: deletions };
 
   const nodes = (graph as any).nodes as NodeT[];
 
@@ -445,10 +447,12 @@ function fixObservableExtraData(
 
     let changed = false;
     if (data.factor_type !== undefined) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.factor_type', 'OBSERVABLE_EXTRA_DATA'));
       delete data.factor_type;
       changed = true;
     }
     if (data.uncertainty_drivers !== undefined) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.uncertainty_drivers', 'OBSERVABLE_EXTRA_DATA'));
       delete data.uncertainty_drivers;
       changed = true;
     }
@@ -462,16 +466,17 @@ function fixObservableExtraData(
     }
   }
 
-  return repairs;
+  return { repairs, fieldDeletions: deletions };
 }
 
 function fixExternalHasData(
   graph: GraphT,
   violations: ValidationIssue[],
-): Repair[] {
+): { repairs: Repair[]; fieldDeletions: FieldDeletionEvent[] } {
   const repairs: Repair[] = [];
+  const deletions: FieldDeletionEvent[] = [];
   const dataViolations = violations.filter((v) => v.code === "EXTERNAL_HAS_DATA");
-  if (dataViolations.length === 0) return repairs;
+  if (dataViolations.length === 0) return { repairs, fieldDeletions: deletions };
 
   const nodes = (graph as any).nodes as NodeT[];
 
@@ -484,20 +489,24 @@ function fixExternalHasData(
 
     let changed = false;
     if (data.value !== undefined) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.value', 'EXTERNAL_HAS_DATA'));
       delete data.value;
       changed = true;
     }
     if (data.factor_type !== undefined) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.factor_type', 'EXTERNAL_HAS_DATA'));
       delete data.factor_type;
       changed = true;
     }
     if (data.uncertainty_drivers !== undefined) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.uncertainty_drivers', 'EXTERNAL_HAS_DATA'));
       delete data.uncertainty_drivers;
       changed = true;
     }
     // After stripping, if `data` can't satisfy any NodeData union branch,
     // remove it entirely — Node.data is optional in the schema.
     if (changed && !("interventions" in data) && !("operator" in data) && !("value" in data)) {
+      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data', 'EXTERNAL_HAS_DATA'));
       delete (node as any).data;
     }
 
@@ -510,7 +519,7 @@ function fixExternalHasData(
     }
   }
 
-  return repairs;
+  return { repairs, fieldDeletions: deletions };
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +747,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   }, "Deterministic sweep started");
 
   const allRepairs: Repair[] = [];
+  const allDeletions: FieldDeletionEvent[] = [];
 
   // Hoist bucket counts so they are available for repairTrace regardless of violations
   let bucketACount = 0;
@@ -800,10 +810,14 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       allRepairs.push(...fixObservableMissingData(graph, bucketB));
     }
     if (citedBCodes.has("OBSERVABLE_EXTRA_DATA")) {
-      allRepairs.push(...fixObservableExtraData(graph, bucketB));
+      const obsResult = fixObservableExtraData(graph, bucketB);
+      allRepairs.push(...obsResult.repairs);
+      allDeletions.push(...obsResult.fieldDeletions);
     }
     if (citedBCodes.has("EXTERNAL_HAS_DATA")) {
-      allRepairs.push(...fixExternalHasData(graph, bucketB));
+      const extResult = fixExternalHasData(graph, bucketB);
+      allRepairs.push(...extResult.repairs);
+      allDeletions.push(...extResult.fieldDeletions);
     }
   }
 
@@ -839,6 +853,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   // The sweep must detect and reclassify them so model_adjustments gets populated.
   const unreachableResult = handleUnreachableFactors(graph, format);
   allRepairs.push(...unreachableResult.repairs);
+  allDeletions.push(...unreachableResult.fieldDeletions);
 
   // Step 6: Status quo / disconnected option fix — ALWAYS run.
   // Uses proactive reachability check (BFS from each option to goal).
@@ -884,6 +899,12 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const remainingBucketC = remainingErrors.filter((v) => BUCKET_C_CODES.has(v.code));
   const externalValidationNeeded = !revalidation.valid || proactiveDisconnected;
   const llmRepairNeeded = remainingBucketC.length > 0 && externalValidationNeeded;
+
+  // Step 8b: Push field deletion audit events to ctx
+  if (allDeletions.length > 0) {
+    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
+    ctx.fieldDeletions.push(...allDeletions);
+  }
 
   // Step 9: Write to ctx
   ctx.deterministicRepairs = allRepairs;

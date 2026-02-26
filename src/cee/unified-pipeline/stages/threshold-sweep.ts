@@ -24,6 +24,7 @@
 
 import type { StageContext } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
+import { fieldDeletion, type FieldDeletionEvent } from "../utils/field-deletion-audit.js";
 
 interface Repair {
   code: string;
@@ -51,6 +52,7 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
 
   const start = Date.now();
   const repairs: Repair[] = [];
+  const deletions: FieldDeletionEvent[] = [];
 
   for (const node of nodes) {
     // Skip malformed entries and non-goal nodes
@@ -65,7 +67,12 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
 
     // ── Step 4b: raw absent → strip ─────────────────────────────────────
     if (gtRaw === undefined || gtRaw === null) {
-      for (const field of THRESHOLD_FIELDS) delete node[field];
+      for (const field of THRESHOLD_FIELDS) {
+        if (node[field] !== undefined) {
+          deletions.push(fieldDeletion('threshold-sweep', node.id, field, 'THRESHOLD_STRIPPED_NO_RAW'));
+        }
+        delete node[field];
+      }
       repairs.push({
         code: "GOAL_THRESHOLD_STRIPPED_NO_RAW",
         path: `nodes[${node.id}].goal_threshold`,
@@ -90,7 +97,12 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
       });
 
       // Step 4b-iii: strip
-      for (const field of THRESHOLD_FIELDS) delete node[field];
+      for (const field of THRESHOLD_FIELDS) {
+        if (node[field] !== undefined) {
+          deletions.push(fieldDeletion('threshold-sweep', node.id, field, 'THRESHOLD_STRIPPED_NO_DIGITS'));
+        }
+        delete node[field];
+      }
       repairs.push({
         code: "GOAL_THRESHOLD_STRIPPED_NO_DIGITS",
         path: `nodes[${node.id}].goal_threshold`,
@@ -126,6 +138,12 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
     warnings_emitted: repairs.filter((r) => r.code === "GOAL_THRESHOLD_POSSIBLY_INFERRED").length,
     codes,
   };
+
+  // ── Field deletion audit ──────────────────────────────────────────────
+  if (deletions.length > 0) {
+    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
+    ctx.fieldDeletions.push(...deletions);
+  }
 
   // ── Telemetry ────────────────────────────────────────────────────────
   log.info({

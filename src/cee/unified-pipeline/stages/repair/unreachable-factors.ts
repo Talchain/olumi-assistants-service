@@ -12,6 +12,7 @@ import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge } from "../../utils/edge-format.js";
 import { log } from "../../../../utils/telemetry.js";
+import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +33,7 @@ export interface UnreachableFactorResult {
   markedDroppable: string[];
   repairs: UnreachableFactorRepair[];
   edgesAdded: EdgeT[];
+  fieldDeletions: FieldDeletionEvent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +191,7 @@ export function handleUnreachableFactors(
   const markedDroppable: string[] = [];
   const repairs: UnreachableFactorRepair[] = [];
   const edgesAdded: EdgeT[] = [];
+  const deletions: FieldDeletionEvent[] = [];
 
   // Also consider factors reachable via factor→factor chains from option-connected factors
   const transitivelyReachable = new Set<string>(reachableFactors);
@@ -237,12 +240,16 @@ export function handleUnreachableFactors(
     // (OptionData needs `interventions`, ConstraintNodeData needs `operator`,
     // FactorData needs `value`), remove `data` entirely — Node.data is optional.
     if (data) {
+      if (data.value !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.value', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
       delete data.value;
+      if (data.factor_type !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.factor_type', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
       delete data.factor_type;
+      if (data.uncertainty_drivers !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.uncertainty_drivers', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
       delete data.uncertainty_drivers;
       // If remaining data has no union-required key, remove the property
       // so DraftGraphOutput.parse() doesn't fail on a partial object.
       if (!("interventions" in data) && !("operator" in data) && !("value" in data)) {
+        deletions.push(fieldDeletion('unreachable-factors', node.id, 'data', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
         delete (node as any).data;
       }
     }
@@ -331,5 +338,5 @@ export function handleUnreachableFactors(
     });
   }
 
-  return { reclassified, markedDroppable, repairs, edgesAdded };
+  return { reclassified, markedDroppable, repairs, edgesAdded, fieldDeletions: deletions };
 }

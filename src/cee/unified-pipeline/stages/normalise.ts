@@ -30,6 +30,12 @@ export async function runStageNormalise(ctx: StageContext): Promise<void> {
   ctx.graph = strpResult.graph as any;
   ctx.strpResult = strpResult;
 
+  // Collect field deletion events from STRP
+  if (strpResult.fieldDeletions?.length > 0) {
+    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
+    ctx.fieldDeletions.push(...strpResult.fieldDeletions);
+  }
+
   if (strpResult.mutations.length > 0) {
     log.info({
       requestId: ctx.requestId,
