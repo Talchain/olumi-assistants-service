@@ -19,6 +19,7 @@ import {
   registerDefaultPrompt,
   loadPromptSync,
 } from '../../src/prompts/loader.js';
+import { getSystemPrompt } from '../../src/adapters/llm/prompt-loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../../src/config/graphCaps.js';
 
 // Reset loader state between tests
@@ -170,12 +171,15 @@ describe('Prompt Content Quality', () => {
     registerAllDefaultPrompts();
   });
 
-  it('all prompts end with JSON-related instruction', () => {
+  it('all task prompts (except orchestrator) contain JSON-related instruction', () => {
     const defaults = getDefaultPrompts();
 
-    for (const [_task, prompt] of Object.entries(defaults)) {
-      if (!prompt) continue;
-      // All prompts should end with JSON output guidance
+    // orchestrator uses XML envelope output, not JSON
+    const JSON_EXEMPT_TASKS = new Set(['orchestrator']);
+
+    for (const [task, prompt] of Object.entries(defaults)) {
+      if (!prompt || JSON_EXEMPT_TASKS.has(task)) continue;
+      // Task prompts should contain JSON output guidance
       expect(prompt.toLowerCase()).toContain('json');
     }
   });
@@ -350,5 +354,60 @@ describe('Decision Review Fallback Prompt (v9)', () => {
 
     expect(prompt).toContain('Return ONLY a JSON object');
     expect(prompt).toContain('No markdown fences');
+  });
+});
+
+describe('Orchestrator Prompt (cf-v4.0.5)', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('orchestrator prompt is registered', () => {
+    const defaults = getDefaultPrompts();
+    expect(defaults).toHaveProperty('orchestrator');
+    expect(defaults.orchestrator).toBeDefined();
+    expect(typeof defaults.orchestrator).toBe('string');
+  });
+
+  it('orchestrator prompt can be loaded with loadPromptSync', () => {
+    const prompt = loadPromptSync('orchestrator');
+    expect(typeof prompt).toBe('string');
+    expect(prompt.length).toBeGreaterThan(0);
+  });
+
+  it('orchestrator prompt contains required structural sections', () => {
+    const prompt = loadPromptSync('orchestrator');
+
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('</ROLE>');
+    expect(prompt).toContain('<CORE_RULES>');
+    expect(prompt).toContain('</CORE_RULES>');
+    expect(prompt).toContain('<TOOLS>');
+    expect(prompt).toContain('</TOOLS>');
+    expect(prompt).toContain('<OUTPUT_FORMAT>');
+    expect(prompt).toContain('</OUTPUT_FORMAT>');
+    expect(prompt).toContain('<DIAGNOSTICS>');
+    expect(prompt).toContain('</DIAGNOSTICS>');
+    expect(prompt).toContain('<RULES_REMINDER>');
+    expect(prompt).toContain('</RULES_REMINDER>');
+  });
+
+  it('orchestrator prompt has no unresolved template variables', () => {
+    const prompt = loadPromptSync('orchestrator');
+    expect(prompt).not.toContain('{{');
+  });
+
+  it('orchestrator prompt is within expected length range', () => {
+    const prompt = loadPromptSync('orchestrator');
+    // ~262 lines, ~1,700 tokens → roughly 6,000–10,000 chars
+    expect(prompt.length).toBeGreaterThan(6000);
+    expect(prompt.length).toBeLessThan(10000);
+  });
+
+  it('orchestrator prompt is retrievable via getSystemPrompt (async store-aware path)', async () => {
+    const prompt = await getSystemPrompt('orchestrator');
+    expect(typeof prompt).toBe('string');
+    expect(prompt).toContain('<ROLE>');
+    expect(prompt).toContain('<RULES_REMINDER>');
   });
 });

@@ -30,14 +30,16 @@ import type {
   TurnPlan,
 } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
-import { getIdempotentResponse, setIdempotentResponse } from "./idempotency.js";
+import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, registerInflightRequest } from "./idempotency.js";
 import { resolveIntent } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
 import type { PLoTClient } from "./plot-client.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
 import { parseLLMResponse, getFirstToolInvocation } from "./response-parser.js";
+import type { ExtractedBlock } from "./response-parser.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
 import { getToolDefinitions } from "./tools/registry.js";
+import { createCommentaryBlock, createReviewCardBlock } from "./blocks/factory.js";
 import { handleRunAnalysis } from "./tools/run-analysis.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import { handleGenerateBrief } from "./tools/generate-brief.js";
@@ -77,7 +79,7 @@ export async function handleTurn(
 ): Promise<TurnResult> {
   const turnId = randomUUID();
 
-  // 1. Idempotency check
+  // 1. Idempotency check — completed responses
   const cached = getIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id);
   if (cached) {
     log.info({ request_id: requestId, client_turn_id: turnRequest.client_turn_id }, "Idempotency cache hit");
@@ -85,15 +87,34 @@ export async function handleTurn(
     return { envelope: cached, httpStatus: status };
   }
 
+  // 1b. Concurrent dedup — in-flight requests
+  const inflight = getInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id);
+  if (inflight) {
+    log.info({ request_id: requestId, client_turn_id: turnRequest.client_turn_id }, "Idempotency inflight hit");
+    const envelope = await inflight;
+    const status = envelope.error ? getHttpStatusForError(envelope.error) : 200;
+    return { envelope, httpStatus: status };
+  }
+
   // 2. Turn budget timeout
   const budgetController = new AbortController();
   const budgetTimeout = setTimeout(() => budgetController.abort(), ORCHESTRATOR_TURN_BUDGET_MS);
+
+  // Register this request as in-flight for concurrent dedup
+  let resolveInflight!: (value: OrchestratorResponseEnvelope) => void;
+  let rejectInflight!: (reason: unknown) => void;
+  const inflightPromise = new Promise<OrchestratorResponseEnvelope>((resolve, reject) => {
+    resolveInflight = resolve;
+    rejectInflight = reject;
+  });
+  registerInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id, inflightPromise);
 
   try {
     // 3. Check system event
     if (turnRequest.system_event) {
       const result = await handleSystemEvent(turnRequest, turnId, request, requestId);
       setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
+      resolveInflight(result.envelope);
       return result;
     }
 
@@ -124,6 +145,7 @@ export async function handleTurn(
 
     // 7. Cache response
     setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, envelope);
+    resolveInflight(envelope);
 
     const status = envelope.error ? getHttpStatusForError(envelope.error) : 200;
     return { envelope, httpStatus: status };
@@ -140,6 +162,7 @@ export async function handleTurn(
     });
 
     setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, envelope);
+    resolveInflight(envelope);
 
     const status = getHttpStatusForError(orchestratorError);
     return { envelope, httpStatus: status };
@@ -256,7 +279,7 @@ async function dispatchViaLLM(
     log.warn({ request_id: requestId }, "Adapter does not support chatWithTools, using plain chat");
     const result = await adapter.chat(
       {
-        system: assembleSystemPrompt(turnRequest.context),
+        system: await assembleSystemPrompt(turnRequest.context),
         userMessage: turnRequest.message,
       },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
@@ -272,7 +295,7 @@ async function dispatchViaLLM(
   }
 
   // Full tool-calling flow
-  const systemPrompt = assembleSystemPrompt(turnRequest.context);
+  const systemPrompt = await assembleSystemPrompt(turnRequest.context);
   const messages = assembleMessages(turnRequest.context, turnRequest.message);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());
 
@@ -289,12 +312,17 @@ async function dispatchViaLLM(
   const parsed = parseLLMResponse(llmResult);
   const toolInvocation = getFirstToolInvocation(parsed);
 
+  // Convert AI-authored XML blocks into ConversationBlock[]
+  const xmlBlocks = convertExtractedBlocks(parsed.extracted_blocks, turnId);
+  const suggestedActions = parsed.suggested_actions.length > 0 ? parsed.suggested_actions : undefined;
+
   if (!toolInvocation) {
     // Pure conversation — no tool call
     return assembleEnvelope({
       turnId,
       assistantText: parsed.assistant_text,
-      blocks: [],
+      blocks: xmlBlocks,
+      suggestedActions,
       context: turnRequest.context,
       turnPlan: buildTurnPlan(null, 'llm', false),
     });
@@ -314,6 +342,14 @@ async function dispatchViaLLM(
   // Merge LLM text with tool result
   if (parsed.assistant_text && !toolResult.envelope.assistant_text) {
     toolResult.envelope.assistant_text = parsed.assistant_text;
+  }
+
+  // Merge XML-extracted blocks and suggested actions with tool result
+  if (xmlBlocks.length > 0) {
+    toolResult.envelope.blocks = [...toolResult.envelope.blocks, ...xmlBlocks];
+  }
+  if (suggestedActions && !toolResult.envelope.suggested_actions) {
+    toolResult.envelope.suggested_actions = suggestedActions;
   }
 
   return toolResult.envelope;
@@ -445,6 +481,36 @@ async function dispatchTool(
     const status = getHttpStatusForError(orchestratorError);
     return { envelope, httpStatus: status };
   }
+}
+
+// ============================================================================
+// XML Block Conversion
+// ============================================================================
+
+/**
+ * Convert ExtractedBlock[] from the XML parser into ConversationBlock[].
+ * Only commentary and review_card are allowed — other types are already
+ * filtered by the parser.
+ */
+function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): ConversationBlock[] {
+  return blocks.map((block) => {
+    if (block.type === 'commentary') {
+      return createCommentaryBlock(
+        block.content,
+        turnId,
+        'llm:xml',
+      );
+    }
+    // review_card
+    return createReviewCardBlock(
+      {
+        tone: block.tone ?? 'facilitator',
+        title: block.title ?? '',
+        content: block.content,
+      },
+      turnId,
+    );
+  });
 }
 
 // ============================================================================

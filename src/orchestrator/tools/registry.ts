@@ -3,7 +3,8 @@
  *
  * Returns the 5 LLM-visible tool definitions for the orchestrator.
  * undo_patch exists as a tool handler but is NOT in the LLM tool registry
- * (it's routed deterministically by the intent gate).
+ * and is NOT routed deterministically (removed in v2). Handler kept for
+ * graceful fallback.
  *
  * Max one long-running tool per turn (draft_graph, run_analysis)
  * + optional lightweight follow-up (explain_results).

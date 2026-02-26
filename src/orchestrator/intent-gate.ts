@@ -9,17 +9,15 @@
  * | Pattern                                            | Tool           | Match style              |
  * |----------------------------------------------------|----------------|--------------------------|
  * | run / analyse / analyze / run the analysis / etc.  | run_analysis   | Full-message or start    |
- * | undo / undo that / undo last change                | undo_patch     | Full-message             |
  * | generate brief / write the brief / create brief    | generate_brief | Full-message or start    |
  * | draft / build the model / create a model / etc.    | draft_graph    | Full-message or start    |
- *
- * undo_patch is deterministic-only — NOT in LLM tool definitions.
  *
  * Required negative tests (must NOT match deterministically):
  * - "I want to run a marathon" → LLM
  * - "can you analyze why my draft failed" → LLM
  * - "undo my understanding of X" → LLM
  * - "can you run through the results?" → LLM
+ * - "undo" → LLM (no deterministic undo — removed in v2)
  */
 
 import { log } from "../utils/telemetry.js";
@@ -67,12 +65,6 @@ const EXACT_MATCHES: ReadonlyMap<string, string> = new Map([
   ['analyse it', 'run_analysis'],
   ['analyze it', 'run_analysis'],
   ['run it', 'run_analysis'],
-
-  // undo_patch (deterministic-only — NOT in LLM tool registry)
-  ['undo', 'undo_patch'],
-  ['undo that', 'undo_patch'],
-  ['undo last change', 'undo_patch'],
-  ['undo the last change', 'undo_patch'],
 
   // generate_brief
   ['generate brief', 'generate_brief'],

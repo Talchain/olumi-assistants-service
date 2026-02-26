@@ -31,6 +31,9 @@ export const PROMPT_TASKS = [
   'preflight',
   'enrich_factors',
   'decision_review',
+  'edit_graph',
+  'repair_edit_graph',
+  'orchestrator',
 ] as const;
 
 export type PromptTask = typeof PROMPT_TASKS[number];
@@ -51,6 +54,9 @@ export const PROMPT_TASK_LABELS: Record<PromptTask, string> = {
   preflight: 'Preflight',
   enrich_factors: 'Enrich Factors',
   decision_review: 'Decision Review',
+  edit_graph: 'Edit Graph',
+  repair_edit_graph: 'Repair Edit Graph',
+  orchestrator: 'Orchestrator',
 };
 
 /**

@@ -36,6 +36,7 @@ export const CeeTaskIdSchema = z.enum([
   'decision_review',
   'edit_graph',
   'repair_edit_graph',
+  'orchestrator',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

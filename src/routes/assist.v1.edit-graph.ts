@@ -2,7 +2,7 @@
  * POST /assist/v1/edit-graph
  *
  * HTTP endpoint for graph editing via LLM.
- * Feature-gated behind ENABLE_ORCHESTRATOR.
+ * Feature-gated behind CEE_ORCHESTRATOR_ENABLED.
  *
  * Accepts a graph + natural language edit description, produces PatchOperation[].
  * Also callable as a function from the orchestrator turn handler.

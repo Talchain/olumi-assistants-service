@@ -1,14 +1,18 @@
 /**
  * Prompt Assembly for Orchestrator
  *
- * Infrastructure shell for building LLM prompts and tool definitions.
- * Paul writes the actual prompt text; this module provides the calling
- * infrastructure for assembleSystemPrompt, assembleToolDefinitions,
- * and assembleMessages.
+ * Assembles the system prompt from the prompt management system (Zone 1)
+ * and dynamic conversation context (Zone 2). Also provides tool definition
+ * and message assembly for Anthropic native tool calling.
  *
- * Uses Anthropic native tool calling via chatWithTools() on the LLM adapter.
+ * Zone 1: Static orchestrator prompt loaded via getSystemPrompt('orchestrator').
+ *         Managed by the prompt store — supports A/B testing, rollback, versioning.
+ *         Warmed at startup, served from cache on subsequent calls.
+ *
+ * Zone 2: Dynamic context (decision stage, goal) appended per-turn.
  */
 
+import { getSystemPrompt } from "../adapters/llm/prompt-loader.js";
 import type { ToolDefinition, ToolResponseBlock } from "../adapters/llm/types.js";
 import type { ConversationContext, ConversationMessage } from "./types.js";
 
@@ -20,32 +24,30 @@ import type { ConversationContext, ConversationMessage } from "./types.js";
  * Assemble the system prompt for the orchestrator LLM call.
  *
  * Structure:
- * 1. Role and capabilities description
- * 2. Decision stage context
- * 3. Tool usage instructions
- * 4. Output format constraints
+ * - Zone 1: Static orchestrator prompt from prompt management system
+ * - Zone 2: Dynamic context (stage, goal) appended per-turn
  *
- * --- CONTENT SLOT: Paul writes the actual prompt text ---
+ * Zone 1 is byte-identical on every call (cache-stable).
+ * Zone 2 varies with conversation state.
  */
-export function assembleSystemPrompt(context: ConversationContext): string {
+export async function assembleSystemPrompt(context: ConversationContext): Promise<string> {
+  // Zone 1: Static orchestrator prompt (from prompt store / cache / defaults)
+  const zone1 = await getSystemPrompt('orchestrator');
+
+  // Zone 2: Dynamic conversation context
+  const zone2Sections: string[] = [];
+
   const stage = context.framing?.stage ?? 'frame';
+  zone2Sections.push(`Current stage: ${stage}`);
+
   const goal = context.framing?.goal ?? '';
-
-  // Placeholder structure — Paul fills in actual prompt content
-  const sections: string[] = [
-    `You are a decision modelling assistant helping the user through the "${stage}" stage of their decision process.`,
-  ];
-
   if (goal) {
-    sections.push(`The user's decision goal: ${goal}`);
+    zone2Sections.push(`Decision goal: ${goal}`);
   }
 
-  sections.push(
-    'Use tools when appropriate. Only call one long-running tool (draft_graph, run_analysis) per turn.',
-    'When explaining results, cite specific facts rather than generating numbers from memory.',
-  );
+  const zone2 = zone2Sections.join('\n');
 
-  return sections.join('\n\n');
+  return `${zone1}\n\n${zone2}`;
 }
 
 // ============================================================================

@@ -250,7 +250,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // Deterministic Routing
   // ---------------------------------------------------
 
-  it("routes 'undo' deterministically", async () => {
+  it("routes 'undo' to LLM (no deterministic match — removed in v2)", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
@@ -259,9 +259,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
-    expect(body.assistant_text).toContain("Undo is not yet available");
-    expect(body.turn_plan?.selected_tool).toBe("undo_patch");
-    expect(body.turn_plan?.routing).toBe("deterministic");
+    expect(body.turn_plan?.routing).toBe("llm");
+    expect(body.turn_plan?.selected_tool).toBeNull();
   });
 
   it("routes 'generate brief' deterministically", async () => {

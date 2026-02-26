@@ -2,7 +2,7 @@
  * POST /orchestrate/v1/turn
  *
  * Fastify route for the CEE conversational orchestrator.
- * Feature-gated behind ENABLE_ORCHESTRATOR.
+ * Feature-gated behind CEE_ORCHESTRATOR_ENABLED.
  *
  * Validates request with Zod, extracts requestId, calls handleTurn(),
  * and returns the envelope with correct HTTP status.

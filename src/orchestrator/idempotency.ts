@@ -3,6 +3,10 @@
  *
  * In-memory Map keyed by `${scenario_id}:${client_turn_id}`.
  *
+ * Two-layer dedup:
+ * 1. Completed responses — cached with TTL rules.
+ * 2. In-flight promises — concurrent identical requests await the first.
+ *
  * TTL rules:
  * - Successful response: 60s
  * - Transient error (recoverable: true): 3s
@@ -35,10 +39,14 @@ interface CacheEntry {
 }
 
 // ============================================================================
-// Cache Store
+// Cache Stores
 // ============================================================================
 
+/** Completed responses with TTL. */
 const cache = new Map<string, CacheEntry>();
+
+/** In-flight promises for concurrent dedup. */
+const inflight = new Map<string, Promise<OrchestratorResponseEnvelope>>();
 
 function makeKey(scenarioId: string, clientTurnId: string): string {
   return `${scenarioId}:${clientTurnId}`;
@@ -117,6 +125,41 @@ export function getIdempotentResponse(
 }
 
 /**
+ * Check if there is an in-flight promise for the given scenario + turn.
+ * If so, returns the promise that the caller should await.
+ * Returns null if no in-flight request exists.
+ */
+export function getInflightRequest(
+  scenarioId: string,
+  clientTurnId: string,
+): Promise<OrchestratorResponseEnvelope> | null {
+  const key = makeKey(scenarioId, clientTurnId);
+  return inflight.get(key) ?? null;
+}
+
+/**
+ * Register an in-flight promise for concurrent dedup.
+ * The caller provides a promise that resolves with the response.
+ * Concurrent requests with the same key will await this promise.
+ *
+ * The promise is automatically removed from the inflight map when it
+ * settles (resolve or reject).
+ */
+export function registerInflightRequest(
+  scenarioId: string,
+  clientTurnId: string,
+  promise: Promise<OrchestratorResponseEnvelope>,
+): void {
+  const key = makeKey(scenarioId, clientTurnId);
+  inflight.set(key, promise);
+
+  // Auto-cleanup on settle
+  promise.finally(() => {
+    inflight.delete(key);
+  });
+}
+
+/**
  * Cache a response for the given scenario + turn.
  * Applies TTL rules per response type. Skips caching for INVALID_REQUEST.
  */
@@ -156,6 +199,7 @@ export function setIdempotentResponse(
  */
 export function _clearIdempotencyCache(): void {
   cache.clear();
+  inflight.clear();
 }
 
 /**

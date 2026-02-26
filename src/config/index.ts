@@ -253,7 +253,7 @@ const ConfigSchema = z.object({
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
     strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
-    orchestrator: booleanString.default(false), // Track C: CEE Orchestrator — multi-turn conversational decision modelling
+    orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     contextFabric: booleanString.default(false), // Context Fabric: 3-zone cache-aware context assembly pipeline
   }),
 
@@ -529,7 +529,8 @@ function parseConfig(): Config {
       piiGuard: env.PII_GUARD_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
-      orchestrator: env.ENABLE_ORCHESTRATOR,
+      // CEE_ORCHESTRATOR_ENABLED preferred; falls back to ENABLE_ORCHESTRATOR
+      orchestrator: env.CEE_ORCHESTRATOR_ENABLED ?? env.ENABLE_ORCHESTRATOR,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
     },
     promptCache: {

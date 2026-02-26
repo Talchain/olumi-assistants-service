@@ -29,24 +29,6 @@ describe("Intent Gate", () => {
   });
 
   // =========================================================================
-  // undo_patch — deterministic
-  // =========================================================================
-  describe("undo_patch routing", () => {
-    it.each([
-      "undo",
-      "Undo",
-      "undo that",
-      "undo last change",
-      "undo the last change",
-      "UNDO!",
-    ])("routes %j to undo_patch (deterministic)", (message) => {
-      const result = resolveIntent(message);
-      expect(result.tool).toBe("undo_patch");
-      expect(result.routing).toBe("deterministic");
-    });
-  });
-
-  // =========================================================================
   // generate_brief — deterministic
   // =========================================================================
   describe("generate_brief routing", () => {
@@ -98,6 +80,11 @@ describe("Intent Gate", () => {
       "can you analyze why my draft failed",
       "undo my understanding of X",
       "can you run through the results?",
+      "undo",
+      "Undo",
+      "undo that",
+      "undo last change",
+      "UNDO!",
       "what do you think about running",
       "help me understand the analysis",
       "I drafted a proposal yesterday",
@@ -126,12 +113,12 @@ describe("Intent Gate", () => {
 
     it("trims whitespace", () => {
       expect(resolveIntent("  run  ").tool).toBe("run_analysis");
-      expect(resolveIntent("\tundo\n").tool).toBe("undo_patch");
+      expect(resolveIntent("\tundo\n").tool).toBeNull();
     });
 
     it("is case insensitive", () => {
       expect(resolveIntent("RUN ANALYSIS").tool).toBe("run_analysis");
-      expect(resolveIntent("UNDO").tool).toBe("undo_patch");
+      expect(resolveIntent("UNDO").tool).toBeNull();
       expect(resolveIntent("Generate Brief").tool).toBe("generate_brief");
     });
   });
