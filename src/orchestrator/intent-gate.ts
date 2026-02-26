@@ -62,7 +62,7 @@ function normalise(message: string): string {
  * Exported for testing and audit. Each tuple maps a normalised message
  * to exactly one ToolName. Strict whole-message equality only.
  */
-const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze([
+const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   // run_analysis
   ['run it', 'run_analysis'],
   ['run the analysis', 'run_analysis'],
@@ -114,7 +114,7 @@ const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze([
   ['change', 'edit_graph'],
   ['update the model', 'edit_graph'],
   ['update model', 'edit_graph'],
-] as const);
+] as const).map(t => Object.freeze(t)));
 
 /** Exported for testing — the frozen tuple array of [pattern, tool] pairs. */
 export const INTENT_PATTERN_ENTRIES: readonly (readonly [string, ToolName])[] = _patterns;

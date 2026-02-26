@@ -458,6 +458,7 @@ describe('handleTurn — intent gate integration', () => {
 
     expect(result.httpStatus).toBe(200);
     expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).toBeNull();
     expect(mockChatWithTools).toHaveBeenCalled();
   });
 
@@ -506,6 +507,7 @@ describe('handleTurn — intent gate integration', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-gate-004');
 
     expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).toBeNull();
     expect(mockChatWithTools).toHaveBeenCalled();
   });
 
@@ -533,6 +535,7 @@ describe('handleTurn — intent gate integration', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-gate-005');
 
     expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).toBeNull();
     expect(mockChatWithTools).toHaveBeenCalled();
   });
 
@@ -560,6 +563,7 @@ describe('handleTurn — intent gate integration', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-gate-006');
 
     expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).toBeNull();
     expect(mockChatWithTools).toHaveBeenCalled();
   });
 
@@ -588,6 +592,64 @@ describe('handleTurn — intent gate integration', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-gate-007');
 
     expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('"draft" with framing.brief_text → deterministic dispatch', async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [{ id: 'goal_1', kind: 'goal', label: 'Expand team' }],
+          edges: [],
+        },
+      },
+    });
+
+    const req = makeRequest({
+      message: 'draft',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame', brief_text: 'Should I hire two more engineers?' } as ConversationContext['framing'],
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-008');
+
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('"draft" with framing.options → deterministic dispatch', async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [{ id: 'goal_1', kind: 'goal', label: 'Choose CRM' }],
+          edges: [],
+        },
+      },
+    });
+
+    const req = makeRequest({
+      message: 'draft',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame', options: ['Salesforce', 'HubSpot'] } as ConversationContext['framing'],
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-009');
+
     expect(result.envelope.turn_plan!.routing).toBe('deterministic');
     expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
     expect(mockChatWithTools).not.toHaveBeenCalled();
