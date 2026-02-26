@@ -29,12 +29,17 @@ describe("PLoT Error Types", () => {
       expect(orchErr.suggested_retry).toBeUndefined();
     });
 
-    it("uses dynamic tool name from operation field", () => {
+    it("maps operation to orchestrator tool name", () => {
       const runErr = new PLoTError("fail", 500, "run", 100);
-      expect(runErr.toOrchestratorError().tool).toBe("run");
+      expect(runErr.toOrchestratorError().tool).toBe("run_analysis");
 
       const vpErr = new PLoTError("fail", 500, "validate_patch", 100);
-      expect(vpErr.toOrchestratorError().tool).toBe("validate_patch");
+      expect(vpErr.toOrchestratorError().tool).toBe("edit_graph");
+    });
+
+    it("falls back to raw operation for unknown operations", () => {
+      const err = new PLoTError("fail", 500, "unknown_op", 100);
+      expect(err.toOrchestratorError().tool).toBe("unknown_op");
     });
 
     it("returns orchestratorErrorOverride when set", () => {
@@ -42,7 +47,7 @@ describe("PLoT Error Types", () => {
       const override = {
         code: "TOOL_EXECUTION_FAILED" as const,
         message: "overridden",
-        tool: "run",
+        tool: "run_analysis",
         recoverable: false,
       };
       error.orchestratorErrorOverride = override;
@@ -54,7 +59,7 @@ describe("PLoT Error Types", () => {
       expect(error.orchestratorErrorOverride).toBeUndefined();
       const orchErr = error.toOrchestratorError();
       expect(orchErr.recoverable).toBe(true);
-      expect(orchErr.tool).toBe("run");
+      expect(orchErr.tool).toBe("run_analysis");
     });
   });
 
@@ -75,12 +80,12 @@ describe("PLoT Error Types", () => {
       expect(orchErr.suggested_retry).toBeDefined();
     });
 
-    it("uses dynamic tool name from operation field", () => {
+    it("maps operation to orchestrator tool name", () => {
       const runErr = new PLoTTimeoutError("timed out", "run", 30000, 30100);
-      expect(runErr.toOrchestratorError().tool).toBe("run");
+      expect(runErr.toOrchestratorError().tool).toBe("run_analysis");
 
       const vpErr = new PLoTTimeoutError("timed out", "validate_patch", 5000, 5100);
-      expect(vpErr.toOrchestratorError().tool).toBe("validate_patch");
+      expect(vpErr.toOrchestratorError().tool).toBe("edit_graph");
     });
   });
 });

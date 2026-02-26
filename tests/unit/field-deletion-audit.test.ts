@@ -5,9 +5,11 @@
  * per-field audit events with correct stage, node_id, field, and reason.
  */
 import { describe, it, expect } from "vitest";
-import { fieldDeletion, type FieldDeletionEvent, type FieldDeletionReason } from "../../src/cee/unified-pipeline/utils/field-deletion-audit.js";
+import { fieldDeletion } from "../../src/cee/unified-pipeline/utils/field-deletion-audit.js";
 import { handleUnreachableFactors } from "../../src/cee/unified-pipeline/stages/repair/unreachable-factors.js";
 import { reconcileStructuralTruth } from "../../src/validators/structural-reconciliation.js";
+import { runStageThresholdSweep } from "../../src/cee/unified-pipeline/stages/threshold-sweep.js";
+import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
 
 // =============================================================================
 // Shared utility tests
@@ -98,6 +100,87 @@ describe("unreachable-factors field deletion audit", () => {
     const result = handleUnreachableFactors(graph as any, "V1_FLAT");
     // Node gets reclassified but has no data to delete
     expect(result.fieldDeletions.length).toBe(0);
+  });
+});
+
+// =============================================================================
+// threshold-sweep: field deletion events
+// =============================================================================
+
+/**
+ * Helper to build a minimal StageContext for threshold-sweep tests.
+ * Only populates fields that threshold-sweep reads.
+ */
+function makeThresholdSweepCtx(nodes: any[]): Partial<StageContext> {
+  return {
+    requestId: "test-ts",
+    graph: { nodes, edges: [] } as any,
+    deterministicRepairs: [],
+    repairTrace: { deterministic_sweep: {} } as any,
+  };
+}
+
+describe("threshold-sweep field deletion audit", () => {
+  it("produces THRESHOLD_STRIPPED_NO_RAW events when goal_threshold_raw is absent", async () => {
+    const ctx = makeThresholdSweepCtx([
+      {
+        id: "goal_1",
+        kind: "goal",
+        label: "Maximise outcome",
+        goal_threshold: 0.8,
+        // goal_threshold_raw absent → strip
+      },
+    ]) as StageContext;
+
+    await runStageThresholdSweep(ctx);
+
+    expect(ctx.fieldDeletions).toBeDefined();
+    expect(ctx.fieldDeletions!.length).toBeGreaterThan(0);
+
+    const reasons = ctx.fieldDeletions!.map((d) => d.reason);
+    expect(reasons).toContain("THRESHOLD_STRIPPED_NO_RAW");
+
+    for (const d of ctx.fieldDeletions!) {
+      expect(d.stage).toBe("threshold-sweep");
+      expect(d.node_id).toBe("goal_1");
+    }
+  });
+
+  it("produces THRESHOLD_STRIPPED_NO_DIGITS events when round raw + no digits in label", async () => {
+    const ctx = makeThresholdSweepCtx([
+      {
+        id: "goal_1",
+        kind: "goal",
+        label: "Maximise revenue", // no digits
+        goal_threshold: 0.8,
+        goal_threshold_raw: 100, // round number
+      },
+    ]) as StageContext;
+
+    await runStageThresholdSweep(ctx);
+
+    expect(ctx.fieldDeletions).toBeDefined();
+    expect(ctx.fieldDeletions!.length).toBeGreaterThan(0);
+
+    const reasons = ctx.fieldDeletions!.map((d) => d.reason);
+    expect(reasons).toContain("THRESHOLD_STRIPPED_NO_DIGITS");
+  });
+
+  it("produces no deletion events when goal has digits in label (safe threshold)", async () => {
+    const ctx = makeThresholdSweepCtx([
+      {
+        id: "goal_1",
+        kind: "goal",
+        label: "Target 800 customers", // has digits → safe
+        goal_threshold: 0.8,
+        goal_threshold_raw: 800,
+      },
+    ]) as StageContext;
+
+    await runStageThresholdSweep(ctx);
+
+    // No deletions — threshold preserved
+    expect(ctx.fieldDeletions ?? []).toHaveLength(0);
   });
 });
 

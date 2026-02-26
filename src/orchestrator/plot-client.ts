@@ -26,6 +26,17 @@ import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 // Error Types
 // ============================================================================
 
+/**
+ * Maps PLoT HTTP operation names to orchestrator tool names.
+ * PLoT operations are endpoint-scoped ('run', 'validate_patch'),
+ * but OrchestratorError.tool should use the orchestrator tool name
+ * that the consumer sees ('run_analysis', 'edit_graph').
+ */
+const OPERATION_TO_TOOL: Record<string, string> = {
+  run: 'run_analysis',
+  validate_patch: 'edit_graph',
+};
+
 export class PLoTError extends Error {
   readonly name = "PLoTError";
 
@@ -56,7 +67,7 @@ export class PLoTError extends Error {
     return {
       code: 'TOOL_EXECUTION_FAILED',
       message: this.message,
-      tool: this.operation,
+      tool: OPERATION_TO_TOOL[this.operation] ?? this.operation,
       recoverable: this.status >= 500,
       suggested_retry: this.status >= 500 ? 'Try running the analysis again.' : undefined,
     };
@@ -82,7 +93,7 @@ export class PLoTTimeoutError extends Error {
     return {
       code: 'TOOL_EXECUTION_FAILED',
       message: `PLoT ${this.operation} timed out after ${this.elapsedMs}ms`,
-      tool: this.operation,
+      tool: OPERATION_TO_TOOL[this.operation] ?? this.operation,
       recoverable: true,
       suggested_retry: 'Try running the analysis again.',
     };

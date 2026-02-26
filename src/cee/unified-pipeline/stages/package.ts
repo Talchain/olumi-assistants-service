@@ -497,8 +497,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   if (ctx.fieldDeletions && ctx.fieldDeletions.length > 0) {
     pipelineTrace.field_deletions = {
       count: ctx.fieldDeletions.length,
-      stages: [...new Set(ctx.fieldDeletions.map((d: any) => d.stage))],
-      reasons: [...new Set(ctx.fieldDeletions.map((d: any) => d.reason))],
+      stages: [...new Set(ctx.fieldDeletions.map((d) => d.stage))],
+      reasons: [...new Set(ctx.fieldDeletions.map((d) => d.reason))],
       events: ctx.fieldDeletions,
     };
   }

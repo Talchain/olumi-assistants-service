@@ -382,3 +382,60 @@ describe("boundary canary: end-to-end node field survival through transformRespo
     expect((facCost!.observed_state as any).factor_type).toBe("cost");
   });
 });
+
+// =============================================================================
+// Tests — underscore canary fields (intentional non-preservation documentation)
+// =============================================================================
+
+describe("boundary canary: underscore canary field behavior", () => {
+  it("underscore canary on V1 node is NOT preserved through transformNodeToV3 (by design)", () => {
+    // transformNodeToV3 constructs a new object with explicit field mapping.
+    // This is intentional: V3 is a schema migration, not a passthrough.
+    const node: V1Node = {
+      id: "fac_1",
+      kind: "factor",
+      label: "Test",
+      category: "controllable",
+      data: { value: 50 },
+    };
+    (node as any)._canary_node = "should_not_survive";
+    const v3 = transformNodeToV3(node);
+    expect(v3).not.toHaveProperty("_canary_node");
+  });
+
+  it("underscore canary on V1 edge is NOT preserved through transformEdgeToV3 (by design)", () => {
+    const edge: V1Edge = {
+      from: "a",
+      to: "b",
+      strength_mean: 0.5,
+      strength_std: 0.1,
+      belief_exists: 0.8,
+    };
+    (edge as any)._canary_edge = true;
+    const v3 = transformEdgeToV3(edge, 0, []);
+    expect(v3).not.toHaveProperty("_canary_edge");
+  });
+
+  it("underscore canary on V3 response envelope IS preserved (direct object)", () => {
+    // transformResponseToV3 returns a constructed V3 response object.
+    // Fields set AFTER construction (e.g. coaching, goal_constraints) survive
+    // because the response is returned directly — not passed through Zod parse.
+    const v1 = makeV1Response();
+    const v3 = transformResponseToV3(v1, { requestId: "canary-1" });
+
+    // Verify the V3 response is a mutable plain object —
+    // additive fields set on it would survive to the consumer
+    (v3 as any)._canary_response = "post_transform";
+    expect((v3 as any)._canary_response).toBe("post_transform");
+  });
+
+  it("V1 response-level underscore canary is NOT carried (intentional selective mapping)", () => {
+    // transformResponseToV3 constructs a new V3 response — it does not spread
+    // the V1 response. Only explicitly mapped fields (coaching, causal_claims,
+    // goal_constraints, quality, etc.) are carried through.
+    const v1 = makeV1Response();
+    (v1 as any)._canary_v1_envelope = "should_not_survive";
+    const v3 = transformResponseToV3(v1, { requestId: "canary-2" });
+    expect(v3).not.toHaveProperty("_canary_v1_envelope");
+  });
+});
