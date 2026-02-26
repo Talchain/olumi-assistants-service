@@ -4,7 +4,7 @@
  * Verifies the full parse → assemble pipeline through handleTurn():
  * - LLM XML envelope → parseLLMResponse → assembleEnvelope → OrchestratorResponseEnvelope
  * - Parser and assembler run for real; only the LLM adapter is stubbed
- * - Covers: text-only, tool+text, tool-only, and parse warning logging paths
+ * - Covers: text-only responses, parse warning logging, and debug field suppression
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -13,9 +13,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mocks — vi.hoisted() ensures these are available to hoisted vi.mock factories
 // ============================================================================
 
-const { mockChatWithTools, mockChat } = vi.hoisted(() => ({
+const { mockChatWithTools, mockChat, mockLogWarn } = vi.hoisted(() => ({
   mockChatWithTools: vi.fn(),
   mockChat: vi.fn(),
+  mockLogWarn: vi.fn(),
 }));
 
 vi.mock('../../src/adapters/llm/router.js', () => ({
@@ -32,6 +33,20 @@ vi.mock('../../src/orchestrator/plot-client.js', async (importOriginal) => {
   return {
     ...original,
     createPLoTClient: vi.fn().mockReturnValue(null),
+  };
+});
+
+vi.mock('../../src/utils/telemetry.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/utils/telemetry.js')>();
+  return {
+    ...original,
+    log: {
+      ...original.log,
+      warn: mockLogWarn,
+      info: vi.fn(),
+      debug: vi.fn(),
+      error: vi.fn(),
+    },
   };
 });
 
@@ -65,6 +80,7 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 
 import { handleTurn } from '../../src/orchestrator/turn-handler.js';
 import { _clearIdempotencyCache } from '../../src/orchestrator/idempotency.js';
+import { isProduction } from '../../src/config/index.js';
 import type { OrchestratorTurnRequest, ConversationContext } from '../../src/orchestrator/types.js';
 import type { FastifyRequest } from 'fastify';
 
@@ -125,6 +141,8 @@ describe('handleTurn — parse → assemble integration', () => {
     _clearIdempotencyCache();
     mockChatWithTools.mockReset();
     mockChat.mockReset();
+    mockLogWarn.mockReset();
+    vi.mocked(isProduction).mockReturnValue(false);
   });
 
   it('returns a valid OrchestratorResponseEnvelope for a text-only LLM response', async () => {
@@ -316,5 +334,53 @@ describe('handleTurn — parse → assemble integration', () => {
 
     expect(result.envelope.stage_indicator).toBe('evaluate');
     expect(result.envelope.stage_label).toBe('Evaluating options');
+  });
+
+  it('calls log.warn with parse warnings when XML envelope is missing', async () => {
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'Plain text without XML.' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    await handleTurn(makeRequest(), mockFastifyRequest, 'req-test-008');
+
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request_id: 'req-test-008',
+        parse_warnings: expect.arrayContaining([
+          'No <response> envelope found — treating as plain text',
+        ]),
+      }),
+      'XML envelope parse warnings',
+    );
+  });
+
+  it('suppresses debug fields when isProduction() returns true', async () => {
+    vi.mocked(isProduction).mockReturnValue(true);
+
+    const xmlResponse = makeXmlEnvelope({
+      diagnostics: 'Route: conversational.',
+      assistantText: 'Production response.',
+    });
+
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const result = await handleTurn(makeRequest(), mockFastifyRequest, 'req-test-009');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.assistant_text).toBe('Production response.');
+
+    // Debug fields must NOT be present in production
+    expect(result.envelope.diagnostics).toBeUndefined();
+    expect(result.envelope.parse_warnings).toBeUndefined();
   });
 });
