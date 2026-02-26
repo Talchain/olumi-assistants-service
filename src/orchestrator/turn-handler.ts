@@ -35,7 +35,8 @@ import type {
 } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, registerInflightRequest } from "./idempotency.js";
-import { resolveIntent } from "./intent-gate.js";
+import { classifyIntent } from "./intent-gate.js";
+import type { ToolName } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
 import type { PLoTClient } from "./plot-client.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
@@ -78,6 +79,28 @@ function getPlotClient(): PLoTClient | null {
 
 /** Prompt version identifier for Context Fabric. Bumped on prompt changes. */
 const PROMPT_VERSION = 'v0.1.0-cee-fabric';
+
+// ============================================================================
+// Deterministic Routing Prerequisites
+// ============================================================================
+
+/**
+ * Prerequisites for deterministic tool dispatch.
+ * When a gate match occurs but prerequisites are not met, the turn
+ * falls through to LLM so it can explain what's missing conversationally.
+ */
+const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationContext) => boolean>> = {
+  run_analysis: (ctx) => ctx.graph != null,
+  explain_results: (ctx) => ctx.analysis_response != null,
+  edit_graph: (ctx) => ctx.graph != null,
+  generate_brief: (ctx) => ctx.graph != null && ctx.analysis_response != null,
+  draft_graph: (ctx) => {
+    const f = ctx.framing;
+    if (!f) return false;
+    const fr = f as Record<string, unknown>;
+    return Boolean(f.goal || fr.brief_text || (Array.isArray(fr.options) && (fr.options as unknown[]).length > 0));
+  },
+};
 
 // ============================================================================
 // Turn Handler
@@ -138,12 +161,34 @@ export async function handleTurn(
     }
 
     // 4. Intent gate
-    const intent = resolveIntent(turnRequest.message);
+    const intent = classifyIntent(turnRequest.message);
+
+    let prerequisitesMet = true;
+    if (intent.routing === 'deterministic' && intent.tool) {
+      const checkPrereq = DETERMINISTIC_PREREQUISITES[intent.tool];
+      if (checkPrereq) {
+        prerequisitesMet = checkPrereq(turnRequest.context);
+      }
+    }
+
+    const actualRouting = (intent.routing === 'deterministic' && prerequisitesMet) ? 'deterministic' : 'llm';
+
+    log.info(
+      {
+        request_id: requestId,
+        normalised_message: intent.normalised_message,
+        matched_pattern: intent.matched_pattern ?? null,
+        routing: actualRouting,
+        gate_routing: intent.routing,
+        prerequisites_met: prerequisitesMet,
+      },
+      "Intent gate decision",
+    );
 
     let envelope: OrchestratorResponseEnvelope;
 
-    if (intent.routing === 'deterministic' && intent.tool) {
-      // Deterministic routing — skip LLM
+    if (actualRouting === 'deterministic' && intent.tool) {
+      // Deterministic routing — skip LLM tool selection
       envelope = await dispatchDeterministic(
         intent.tool,
         turnRequest,
@@ -153,6 +198,7 @@ export async function handleTurn(
       );
     } else {
       // LLM routing — use chatWithTools
+      // (includes case where gate matched but prerequisites not met)
       envelope = await dispatchViaLLM(
         turnRequest,
         turnId,

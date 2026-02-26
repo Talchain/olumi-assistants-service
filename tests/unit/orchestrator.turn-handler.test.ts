@@ -13,10 +13,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mocks — vi.hoisted() ensures these are available to hoisted vi.mock factories
 // ============================================================================
 
-const { mockChatWithTools, mockChat, mockLogWarn } = vi.hoisted(() => ({
+const { mockChatWithTools, mockChat, mockLogWarn, mockRunUnifiedPipeline } = vi.hoisted(() => ({
   mockChatWithTools: vi.fn(),
   mockChat: vi.fn(),
   mockLogWarn: vi.fn(),
+  mockRunUnifiedPipeline: vi.fn(),
 }));
 
 vi.mock('../../src/adapters/llm/router.js', () => ({
@@ -73,6 +74,10 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
     }),
   };
 });
+
+vi.mock('../../src/cee/unified-pipeline/index.js', () => ({
+  runUnifiedPipeline: mockRunUnifiedPipeline,
+}));
 
 // ============================================================================
 // Imports — after mocks
@@ -382,5 +387,209 @@ describe('handleTurn — parse → assemble integration', () => {
     // Debug fields must NOT be present in production
     expect(result.envelope.diagnostics).toBeUndefined();
     expect(result.envelope.parse_warnings).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Intent Gate Integration Tests
+// ============================================================================
+
+describe('handleTurn — intent gate integration', () => {
+  beforeEach(() => {
+    _clearIdempotencyCache();
+    mockChatWithTools.mockReset();
+    mockChat.mockReset();
+    mockLogWarn.mockReset();
+    mockRunUnifiedPipeline.mockReset();
+    vi.mocked(isProduction).mockReturnValue(false);
+  });
+
+  it('"brief" with prerequisites met → deterministic routing, chatWithTools NOT called', async () => {
+    const req = makeRequest({
+      message: 'brief',
+      context: {
+        graph: { nodes: [], edges: [] },
+        analysis_response: {
+          decision_brief: { headline: 'Test brief summary' },
+          meta: { seed_used: 42, n_samples: 1000, response_hash: 'abc123' },
+          results: [],
+        },
+        framing: { stage: 'evaluate' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-001');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan).toBeDefined();
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    expect(result.envelope.turn_plan!.selected_tool).toBe('generate_brief');
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+
+    // Brief block produced by handleGenerateBrief
+    expect(result.envelope.blocks).toHaveLength(1);
+    expect(result.envelope.blocks[0].block_type).toBe('brief');
+  });
+
+  it('"edit" with graph: null → prerequisites not met, falls to LLM', async () => {
+    const xmlResponse = makeXmlEnvelope({ assistantText: 'You need a model first.' });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const req = makeRequest({
+      message: 'edit',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-002');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(mockChatWithTools).toHaveBeenCalled();
+  });
+
+  it('conversational message → LLM routing', async () => {
+    const xmlResponse = makeXmlEnvelope({ assistantText: 'Let me help you decide.' });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const req = makeRequest({
+      message: 'What do you think about this decision?',
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-003');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(mockChatWithTools).toHaveBeenCalled();
+  });
+
+  it('"brief" with graph: null → prerequisites not met, falls to LLM', async () => {
+    const xmlResponse = makeXmlEnvelope({ assistantText: 'Build a model first.' });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const req = makeRequest({
+      message: 'brief',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-004');
+
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(mockChatWithTools).toHaveBeenCalled();
+  });
+
+  it('"brief" with graph but analysis_response: null → prerequisites not met', async () => {
+    const xmlResponse = makeXmlEnvelope({ assistantText: 'Run analysis first.' });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const req = makeRequest({
+      message: 'brief',
+      context: {
+        graph: { nodes: [], edges: [] },
+        analysis_response: null,
+        framing: { stage: 'evaluate' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-005');
+
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(mockChatWithTools).toHaveBeenCalled();
+  });
+
+  it('"draft" with empty framing → prerequisites not met, falls to LLM', async () => {
+    const xmlResponse = makeXmlEnvelope({ assistantText: 'Tell me about your decision.' });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 50, output_tokens: 25 },
+      model: 'test-model',
+      latencyMs: 100,
+    });
+
+    const req = makeRequest({
+      message: 'draft',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-006');
+
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(mockChatWithTools).toHaveBeenCalled();
+  });
+
+  it('"draft" with framing.goal → deterministic dispatch', async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [{ id: 'goal_1', kind: 'goal', label: 'Buy a car' }],
+          edges: [],
+        },
+      },
+    });
+
+    const req = makeRequest({
+      message: 'draft',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame', goal: 'Decide which car to buy' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-gate-007');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
+    expect(mockChatWithTools).not.toHaveBeenCalled();
   });
 });

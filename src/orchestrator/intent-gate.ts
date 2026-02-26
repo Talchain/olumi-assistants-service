@@ -1,34 +1,34 @@
 /**
  * Intent Gate — Deterministic Routing with LLM Fallback
  *
- * High-precision deterministic routing for common commands.
- * Everything that doesn't match a deterministic pattern falls through to LLM.
+ * Strict whole-message equality matching against a frozen pattern table.
+ * No prefix matching, no substring matching, no word-count guards.
+ * Pure function — no side effects, no logging, no async, no dependencies.
  *
- * Patterns (normalised: lowercase, trimmed, stripped trailing punctuation):
+ * | Tool             | Example patterns (after normalisation)                              |
+ * |------------------|---------------------------------------------------------------------|
+ * | run_analysis     | run it, analyse, analyze, run the analysis, simulate, ...           |
+ * | draft_graph      | draft, draft a model, build the model, start over, new model, ...  |
+ * | generate_brief   | brief, summary, generate brief, write the brief, write report, ... |
+ * | explain_results  | explain, why, break it down, explain the results, ...              |
+ * | edit_graph       | edit, modify, change, update the model, edit model, ...            |
  *
- * | Pattern                                            | Tool           | Match style              |
- * |----------------------------------------------------|----------------|--------------------------|
- * | run / analyse / analyze / run the analysis / etc.  | run_analysis   | Full-message or start    |
- * | generate brief / write the brief / create brief    | generate_brief | Full-message or start    |
- * | draft / build the model / create a model / etc.    | draft_graph    | Full-message or start    |
- *
- * Required negative tests (must NOT match deterministically):
- * - "I want to run a marathon" → LLM
- * - "can you analyze why my draft failed" → LLM
- * - "undo my understanding of X" → LLM
- * - "can you run through the results?" → LLM
- * - "undo" → LLM (no deterministic undo — removed in v2)
+ * Excluded (too ambiguous without context — fall through to LLM):
+ * go, let's go, do it, run (solo), why did, what happened
  */
-
-import { log } from "../utils/telemetry.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface IntentResult {
-  tool: string | null;
+export type ToolName = 'draft_graph' | 'edit_graph' | 'run_analysis' | 'explain_results' | 'generate_brief';
+
+export interface IntentGateResult {
+  tool: ToolName | null;
   routing: 'deterministic' | 'llm';
+  confidence: 'exact' | 'none';
+  normalised_message: string;
+  matched_pattern?: string;
 }
 
 // ============================================================================
@@ -37,128 +37,121 @@ export interface IntentResult {
 
 /**
  * Normalise user message for pattern matching.
- * Lowercase, trim, strip trailing punctuation (. ! ? ,).
+ * - Lowercase
+ * - Trim leading/trailing whitespace
+ * - Replace curly apostrophes with ASCII
+ * - Strip all trailing punctuation (. ! ? , ; : …)
+ * - Collapse multiple spaces to single space
  */
 function normalise(message: string): string {
   return message
     .toLowerCase()
     .trim()
-    .replace(/[.!?,]+$/, '')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[.!?,;:\u2026]+$/, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 // ============================================================================
-// Pattern Definitions
+// Pattern Table
 // ============================================================================
 
 /**
- * Full-message exact matches (after normalisation).
- * These are short, unambiguous commands.
+ * Frozen pattern tuples — the source of truth for deterministic routing.
+ * Exported for testing and audit. Each tuple maps a normalised message
+ * to exactly one ToolName. Strict whole-message equality only.
  */
-const EXACT_MATCHES: ReadonlyMap<string, string> = new Map([
+const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze([
   // run_analysis
-  ['run', 'run_analysis'],
-  ['run analysis', 'run_analysis'],
+  ['run it', 'run_analysis'],
   ['run the analysis', 'run_analysis'],
+  ['run analysis', 'run_analysis'],
   ['analyse', 'run_analysis'],
   ['analyze', 'run_analysis'],
   ['analyse it', 'run_analysis'],
   ['analyze it', 'run_analysis'],
-  ['run it', 'run_analysis'],
-
-  // generate_brief
-  ['generate brief', 'generate_brief'],
-  ['generate the brief', 'generate_brief'],
-  ['write the brief', 'generate_brief'],
-  ['write a brief', 'generate_brief'],
-  ['create brief', 'generate_brief'],
-  ['create the brief', 'generate_brief'],
-  ['create a brief', 'generate_brief'],
+  ['run the model', 'run_analysis'],
+  ['run simulation', 'run_analysis'],
+  ['simulate', 'run_analysis'],
+  ['evaluate options', 'run_analysis'],
 
   // draft_graph
   ['draft', 'draft_graph'],
-  ['draft the graph', 'draft_graph'],
-  ['draft the model', 'draft_graph'],
   ['draft a model', 'draft_graph'],
   ['build the model', 'draft_graph'],
   ['build a model', 'draft_graph'],
   ['create a model', 'draft_graph'],
-  ['create the model', 'draft_graph'],
-]);
+  ['start over', 'draft_graph'],
+  ['new model', 'draft_graph'],
+  ['redraft', 'draft_graph'],
+  ['draft it', 'draft_graph'],
 
-/**
- * Start-of-message prefix patterns.
- * Must be followed by end-of-string or whitespace that doesn't form
- * a longer phrase that changes meaning.
- *
- * Kept conservative to avoid false positives like "run a marathon".
- */
-const PREFIX_PATTERNS: ReadonlyArray<{ prefix: string; tool: string; requireEndOrPreposition: boolean }> = [
-  // "run analysis with..." / "run the analysis for..."
-  { prefix: 'run analysis', tool: 'run_analysis', requireEndOrPreposition: true },
-  { prefix: 'run the analysis', tool: 'run_analysis', requireEndOrPreposition: true },
+  // generate_brief
+  ['generate brief', 'generate_brief'],
+  ['generate a brief', 'generate_brief'],
+  ['write the brief', 'generate_brief'],
+  ['create brief', 'generate_brief'],
+  ['brief', 'generate_brief'],
+  ['summary', 'generate_brief'],
+  ['write a summary', 'generate_brief'],
+  ['generate report', 'generate_brief'],
+  ['write report', 'generate_brief'],
 
-  // "generate brief for..." / "generate the brief with..."
-  { prefix: 'generate brief', tool: 'generate_brief', requireEndOrPreposition: true },
-  { prefix: 'generate the brief', tool: 'generate_brief', requireEndOrPreposition: true },
-  { prefix: 'generate a brief', tool: 'generate_brief', requireEndOrPreposition: true },
+  // explain_results
+  ['explain', 'explain_results'],
+  ['explain the results', 'explain_results'],
+  ['explain results', 'explain_results'],
+  ['why', 'explain_results'],
+  ['break it down', 'explain_results'],
+  ['explain it', 'explain_results'],
 
-  // "draft the graph for..." / "draft a model of..."
-  { prefix: 'draft the graph', tool: 'draft_graph', requireEndOrPreposition: true },
-  { prefix: 'draft a model', tool: 'draft_graph', requireEndOrPreposition: true },
-  { prefix: 'draft the model', tool: 'draft_graph', requireEndOrPreposition: true },
-];
+  // edit_graph
+  ['edit', 'edit_graph'],
+  ['edit the model', 'edit_graph'],
+  ['edit model', 'edit_graph'],
+  ['modify', 'edit_graph'],
+  ['change', 'edit_graph'],
+  ['update the model', 'edit_graph'],
+  ['update model', 'edit_graph'],
+] as const);
 
-/**
- * Prepositions that indicate the rest of the message parameterises the command.
- * e.g. "run analysis with 1000 samples" → still run_analysis
- */
-const COMMAND_PREPOSITIONS = new Set([
-  'with', 'for', 'using', 'on', 'again', 'now', 'please',
-]);
+/** Exported for testing — the frozen tuple array of [pattern, tool] pairs. */
+export const INTENT_PATTERN_ENTRIES: readonly (readonly [string, ToolName])[] = _patterns;
+
+/** Internal lookup map built from frozen pattern tuples. */
+const INTENT_PATTERNS: ReadonlyMap<string, ToolName> = new Map(_patterns);
 
 // ============================================================================
 // Gate Logic
 // ============================================================================
 
 /**
- * Resolve user intent via deterministic pattern matching.
+ * Classify user intent via strict whole-message equality matching.
  *
- * Returns { tool, routing: 'deterministic' } if a pattern matches,
- * or { tool: null, routing: 'llm' } for LLM fallback.
+ * Pure function — no side effects, no async, no external dependencies.
+ * Returns { tool, routing: 'deterministic', confidence: 'exact' } on match,
+ * or { tool: null, routing: 'llm', confidence: 'none' } for LLM fallback.
  */
-export function resolveIntent(message: string): IntentResult {
+export function classifyIntent(message: string): IntentGateResult {
   const normalised = normalise(message);
 
-  // 1. Try exact match first (highest precision)
-  const exactTool = EXACT_MATCHES.get(normalised);
-  if (exactTool) {
-    log.debug({ normalised, tool: exactTool }, "Intent gate: exact match");
-    return { tool: exactTool, routing: 'deterministic' };
+  const tool = INTENT_PATTERNS.get(normalised) ?? null;
+
+  if (tool) {
+    return {
+      tool,
+      routing: 'deterministic',
+      confidence: 'exact',
+      normalised_message: normalised,
+      matched_pattern: normalised,
+    };
   }
 
-  // 2. Try prefix patterns
-  for (const { prefix, tool, requireEndOrPreposition } of PREFIX_PATTERNS) {
-    if (!normalised.startsWith(prefix)) continue;
-
-    const remainder = normalised.slice(prefix.length).trim();
-
-    // Exact prefix match (nothing after)
-    if (remainder === '') {
-      log.debug({ normalised, tool, prefix }, "Intent gate: prefix match (exact)");
-      return { tool, routing: 'deterministic' };
-    }
-
-    // Prefix followed by preposition → still the command
-    if (requireEndOrPreposition) {
-      const firstWord = remainder.split(/\s+/)[0];
-      if (COMMAND_PREPOSITIONS.has(firstWord)) {
-        log.debug({ normalised, tool, prefix, remainder }, "Intent gate: prefix match (preposition)");
-        return { tool, routing: 'deterministic' };
-      }
-    }
-  }
-
-  // 3. No match → LLM fallback
-  return { tool: null, routing: 'llm' };
+  return {
+    tool: null,
+    routing: 'llm',
+    confidence: 'none',
+    normalised_message: normalised,
+  };
 }
