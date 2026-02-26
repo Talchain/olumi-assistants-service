@@ -47,6 +47,8 @@ export interface EnvelopeInput {
   parseWarnings?: string[];
   /** Include debug fields (diagnostics, parse_warnings) in the envelope */
   includeDebug?: boolean;
+  /** Override context_hash (e.g. from Context Fabric). Falls back to hashContext() if not provided. */
+  contextHash?: string;
 }
 
 /**
@@ -55,7 +57,7 @@ export interface EnvelopeInput {
 export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnvelope {
   const turnId = input.turnId ?? randomUUID();
 
-  const lineage = buildLineage(input.context, input.analysisResponse);
+  const lineage = buildLineage(input.context, input.analysisResponse, input.contextHash);
   const stage = resolveStage(input.context);
 
   const envelope: OrchestratorResponseEnvelope = {
@@ -114,8 +116,9 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
 function buildLineage(
   context: ConversationContext,
   analysisResponse?: V2RunResponseEnvelope,
+  contextHashOverride?: string,
 ): ResponseLineage {
-  const contextHash = hashContext(context);
+  const contextHash = contextHashOverride ?? hashContext(context);
 
   const lineage: ResponseLineage = {
     context_hash: contextHash,

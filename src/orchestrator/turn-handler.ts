@@ -28,6 +28,10 @@ import type {
   ConversationBlock,
   OrchestratorError,
   TurnPlan,
+  ConversationContext,
+  ConversationMessage,
+  V2RunResponseEnvelope,
+  GraphV3T,
 } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, registerInflightRequest } from "./idempotency.js";
@@ -47,6 +51,17 @@ import { handleEditGraph } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
 import { handleUndoPatch } from "./tools/undo-patch.js";
 import { isProduction } from "../config/index.js";
+import { assembleContext } from "./context-fabric/index.js";
+import type {
+  ContextFabricRoute as FabricRoute,
+  DecisionStage as FabricDecisionStage,
+  DecisionState,
+  GraphSummary,
+  AnalysisSummary,
+  DriverSummary as FabricDriverSummary,
+  ConversationTurn,
+  AssembledContext,
+} from "./context-fabric/types.js";
 
 // ============================================================================
 // Singleton PLoT client (created on first use)
@@ -60,6 +75,9 @@ function getPlotClient(): PLoTClient | null {
   }
   return plotClient;
 }
+
+/** Prompt version identifier for Context Fabric. Bumped on prompt changes. */
+const PROMPT_VERSION = 'v0.1.0-cee-fabric';
 
 // ============================================================================
 // Turn Handler
@@ -275,14 +293,57 @@ async function dispatchViaLLM(
 ): Promise<OrchestratorResponseEnvelope> {
   const adapter = getAdapter('orchestrator');
 
+  // ── Context Fabric (feature-flagged) ─────────────────────────────────────
+  let fabricContext: AssembledContext | null = null;
+  let contextHash: string | undefined;
+
+  const fabricEnabled = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === 'true'
+    || process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === '1';
+
+  if (fabricEnabled) {
+    try {
+      const state = extractDecisionState(turnRequest.context);
+      const stage = toFabricStage(turnRequest.context.framing?.stage);
+      const turns = toConversationTurns(turnRequest.context.messages);
+
+      const assembled = assembleContext(
+        PROMPT_VERSION,
+        'CHAT' as FabricRoute,
+        stage,
+        state,
+        turns,
+        turnRequest.message,
+        turnRequest.context.selected_elements,
+      );
+
+      if (assembled.full_context) {
+        fabricContext = assembled;
+        contextHash = assembled.context_hash;
+        log.info(
+          {
+            request_id: requestId,
+            profile: assembled.profile_used,
+            estimated_tokens: assembled.estimated_tokens,
+            within_budget: assembled.within_budget,
+            truncation_applied: assembled.truncation_applied,
+          },
+          "Context Fabric assembled",
+        );
+      }
+    } catch (err) {
+      log.warn(
+        { request_id: requestId, error: err instanceof Error ? err.message : String(err) },
+        "Context Fabric assembly failed, falling back to simple prompt",
+      );
+    }
+  }
+
   if (!adapter.chatWithTools) {
     // Fallback: use plain chat if adapter doesn't support tools
     log.warn({ request_id: requestId }, "Adapter does not support chatWithTools, using plain chat");
+    const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
     const result = await adapter.chat(
-      {
-        system: await assembleSystemPrompt(turnRequest.context),
-        userMessage: turnRequest.message,
-      },
+      { system: systemPrompt, userMessage: turnRequest.message },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
     );
 
@@ -292,12 +353,15 @@ async function dispatchViaLLM(
       blocks: [],
       context: turnRequest.context,
       turnPlan: buildTurnPlan(null, 'llm', false),
+      contextHash,
     });
   }
 
   // Full tool-calling flow
-  const systemPrompt = await assembleSystemPrompt(turnRequest.context);
-  const messages = assembleMessages(turnRequest.context, turnRequest.message);
+  const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
+  const messages = fabricContext
+    ? [{ role: 'user' as const, content: turnRequest.message }]
+    : assembleMessages(turnRequest.context, turnRequest.message);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());
 
   const llmResult = await adapter.chatWithTools(
@@ -339,6 +403,7 @@ async function dispatchViaLLM(
       diagnostics: parsed.diagnostics,
       parseWarnings: parsed.parse_warnings,
       includeDebug,
+      contextHash,
     });
   }
 
@@ -351,6 +416,7 @@ async function dispatchViaLLM(
     request,
     requestId,
     'llm',
+    contextHash,
   );
 
   // Merge LLM text with tool result (null = no text, '' = empty text from parser fallback)
@@ -391,6 +457,7 @@ async function dispatchTool(
   request: FastifyRequest,
   requestId: string,
   routing: 'deterministic' | 'llm' = 'llm',
+  contextHash?: string,
 ): Promise<TurnResult> {
   const startTime = Date.now();
   const isLongRunning = toolName === 'run_analysis' || toolName === 'draft_graph';
@@ -482,6 +549,7 @@ async function dispatchTool(
       context: turnRequest.context,
       analysisResponse,
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning, toolLatencyMs),
+      contextHash,
     });
 
     log.info(
@@ -500,6 +568,7 @@ async function dispatchTool(
       context: turnRequest.context,
       error: orchestratorError,
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning),
+      contextHash,
     });
 
     const status = getHttpStatusForError(orchestratorError);
@@ -535,6 +604,133 @@ function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): Conve
       turnId,
     );
   });
+}
+
+// ============================================================================
+// Context Fabric Helpers
+// ============================================================================
+
+/**
+ * Map orchestrator 5-stage DecisionStage to Context Fabric 6-stage.
+ * 'evaluate' → 'evaluate_pre' (pre-analysis default).
+ */
+function toFabricStage(stage?: string): FabricDecisionStage {
+  switch (stage) {
+    case 'frame':
+    case 'ideate':
+    case 'decide':
+    case 'optimise':
+      return stage;
+    case 'evaluate':
+      return 'evaluate_pre';
+    case 'evaluate_pre':
+    case 'evaluate_post':
+      return stage as FabricDecisionStage;
+    default:
+      return 'frame';
+  }
+}
+
+/**
+ * Extract GraphSummary from a V3 graph for Context Fabric.
+ */
+function extractGraphSummary(graph: GraphV3T): GraphSummary {
+  const goalNode = graph.nodes.find(n => n.kind === 'goal');
+  const optionNodes = graph.nodes.filter(n => n.kind === 'option');
+  const edgeParts = graph.edges.map(e =>
+    `${e.from} -> ${e.to} (${e.strength.mean.toFixed(2)})`,
+  );
+
+  return {
+    node_count: graph.nodes.length,
+    edge_count: graph.edges.length,
+    goal_node_id: goalNode?.id ?? null,
+    option_node_ids: optionNodes.map(n => n.id),
+    compact_edges: edgeParts.join(', '),
+  };
+}
+
+/**
+ * Extract AnalysisSummary from a V2RunResponseEnvelope for Context Fabric.
+ * Returns null if no valid results are available.
+ */
+function extractAnalysisSummary(response: V2RunResponseEnvelope): AnalysisSummary | null {
+  const results = (response.results ?? []) as Array<Record<string, unknown>>;
+  const sorted = results
+    .filter(r => typeof r.win_probability === 'number')
+    .sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
+
+  if (sorted.length === 0) return null;
+
+  const winner = sorted[0];
+  const winnerId = String(winner.option_id ?? winner.option_label ?? 'unknown');
+  const winnerProb = winner.win_probability as number;
+  const runnerUpProb = sorted.length > 1 ? (sorted[1].win_probability as number) : 0;
+
+  const robustnessLevel = response.robustness?.level ?? 'unknown';
+
+  const fragileEdges = (response.robustness?.fragile_edges ?? []) as Array<Record<string, unknown>>;
+  const fragileEdgeIds = fragileEdges
+    .map(e => typeof e === 'string' ? e : String(e.edge_id ?? ''))
+    .filter(Boolean);
+
+  const factors = (response.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
+  const topDrivers: FabricDriverSummary[] = factors.slice(0, 5).map(f => ({
+    node_id: String(f.node_id ?? f.factor_id ?? f.label ?? 'unknown'),
+    sensitivity: typeof f.elasticity === 'number' ? f.elasticity : 0,
+    confidence: typeof f.confidence === 'string' ? f.confidence : 'medium',
+  }));
+
+  return {
+    winner_id: winnerId,
+    winner_probability: winnerProb,
+    winning_margin: winnerProb - runnerUpProb,
+    robustness_level: robustnessLevel,
+    top_drivers: topDrivers,
+    fragile_edge_ids: fragileEdgeIds,
+  };
+}
+
+/**
+ * Convert ConversationMessage[] to ConversationTurn[] for Context Fabric.
+ */
+function toConversationTurns(messages: ConversationMessage[]): ConversationTurn[] {
+  return messages.map(msg => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+}
+
+/**
+ * Build a DecisionState from ConversationContext for Context Fabric.
+ */
+function extractDecisionState(context: ConversationContext): DecisionState {
+  const graphSummary = context.graph
+    ? extractGraphSummary(context.graph as GraphV3T)
+    : null;
+
+  const analysisSummary = context.analysis_response
+    ? extractAnalysisSummary(context.analysis_response as V2RunResponseEnvelope)
+    : null;
+
+  const stage = toFabricStage(context.framing?.stage);
+
+  return {
+    graph_summary: graphSummary,
+    analysis_summary: analysisSummary,
+    event_summary: context.event_log_summary ?? '',
+    framing: context.framing
+      ? {
+          goal: context.framing.goal,
+          constraints: Array.isArray(context.framing.constraints)
+            ? context.framing.constraints.filter((c): c is string => typeof c === 'string')
+            : undefined,
+          stage,
+        }
+      : null,
+    user_causal_claims: [],
+    unresolved_questions: [],
+  };
 }
 
 // ============================================================================

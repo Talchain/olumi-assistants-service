@@ -65,6 +65,11 @@ vi.mock("../../src/cee/corrections.js", () => ({
 
 vi.mock("../../src/utils/request-id.js", () => ({
   getRequestId: () => "shape-test-req",
+  generateRequestId: () => "test-plan-id",
+}));
+
+vi.mock("../../src/utils/response-hash.js", () => ({
+  computeResponseHash: () => "test-hash-abc123",
 }));
 
 vi.mock("../../src/cee/validation/pipeline.js", () => ({
