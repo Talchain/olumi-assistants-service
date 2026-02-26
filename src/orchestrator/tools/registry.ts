@@ -97,7 +97,7 @@ const TOOL_DEFINITIONS: OrchestratorToolDefinition[] = [
 
 /**
  * Get all LLM-visible tool definitions.
- * undo_patch is intentionally excluded — it's deterministic-only.
+ * undo_patch is intentionally excluded — it has a separate handler (latent stub).
  */
 export function getToolDefinitions(): OrchestratorToolDefinition[] {
   return TOOL_DEFINITIONS;
@@ -105,7 +105,7 @@ export function getToolDefinitions(): OrchestratorToolDefinition[] {
 
 /**
  * Get a specific tool definition by name.
- * Returns undefined if not found (including undo_patch).
+ * Returns undefined if not found (undo_patch has a separate handler).
  */
 export function getToolDefinition(name: string): OrchestratorToolDefinition | undefined {
   return TOOL_DEFINITIONS.find((t) => t.name === name);

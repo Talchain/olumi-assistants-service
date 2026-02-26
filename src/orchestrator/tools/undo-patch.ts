@@ -1,11 +1,12 @@
 /**
  * undo_patch Tool Handler
  *
- * Deterministic stub — NOT in LLM tool registry.
- * Intent gate routes "undo" phrases here.
+ * Latent stub — NOT in LLM tool registry.
+ * NOT routed deterministically (removed in v2). Kept as fallback
+ * handler if LLM selects undo_patch via tool_use.
  *
  * Returns: assistant_text explaining undo is coming soon, blocks: [].
- * turn_plan: { selected_tool: 'undo_patch', routing: 'deterministic', long_running: false }
+ * turn_plan: { selected_tool: 'undo_patch', routing: 'llm', long_running: false }
  *
  * Does NOT throw error or return error envelope.
  */
