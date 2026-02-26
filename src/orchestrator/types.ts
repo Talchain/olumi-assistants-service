@@ -86,6 +86,10 @@ export interface OrchestratorResponseEnvelope {
   /** Debug aid — not part of INT-3 contract */
   stage_label?: string;
   error?: OrchestratorError;
+  /** Diagnostics content from LLM <diagnostics> tag. Only in non-production. */
+  diagnostics?: string;
+  /** Parse warnings from XML envelope extraction. Only in non-production. */
+  parse_warnings?: string[];
 }
 
 // ============================================================================

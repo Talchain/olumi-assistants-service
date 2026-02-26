@@ -41,6 +41,12 @@ export interface EnvelopeInput {
   turnPlan?: TurnPlan;
   /** Error, if the turn failed */
   error?: OrchestratorError;
+  /** Diagnostics content from LLM <diagnostics> tag */
+  diagnostics?: string | null;
+  /** Parse warnings from XML envelope extraction */
+  parseWarnings?: string[];
+  /** Include debug fields (diagnostics, parse_warnings) in the envelope */
+  includeDebug?: boolean;
 }
 
 /**
@@ -78,6 +84,16 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
 
   if (input.error) {
     envelope.error = input.error;
+  }
+
+  // Debug-only fields: diagnostics and parse_warnings
+  if (input.includeDebug) {
+    if (input.diagnostics) {
+      envelope.diagnostics = input.diagnostics;
+    }
+    if (input.parseWarnings && input.parseWarnings.length > 0) {
+      envelope.parse_warnings = input.parseWarnings;
+    }
   }
 
   return envelope;

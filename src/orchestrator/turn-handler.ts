@@ -46,6 +46,7 @@ import { handleGenerateBrief } from "./tools/generate-brief.js";
 import { handleEditGraph } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
 import { handleUndoPatch } from "./tools/undo-patch.js";
+import { isProduction } from "../config/index.js";
 
 // ============================================================================
 // Singleton PLoT client (created on first use)
@@ -312,6 +313,16 @@ async function dispatchViaLLM(
   const parsed = parseLLMResponse(llmResult);
   const toolInvocation = getFirstToolInvocation(parsed);
 
+  // Log parse warnings for telemetry (parser is pure — logging happens here)
+  if (parsed.parse_warnings.length > 0) {
+    log.warn(
+      { request_id: requestId, parse_warnings: parsed.parse_warnings },
+      "XML envelope parse warnings",
+    );
+  }
+
+  const includeDebug = !isProduction();
+
   // Convert AI-authored XML blocks into ConversationBlock[]
   const xmlBlocks = convertExtractedBlocks(parsed.extracted_blocks, turnId);
   const suggestedActions = parsed.suggested_actions.length > 0 ? parsed.suggested_actions : undefined;
@@ -325,6 +336,9 @@ async function dispatchViaLLM(
       suggestedActions,
       context: turnRequest.context,
       turnPlan: buildTurnPlan(null, 'llm', false),
+      diagnostics: parsed.diagnostics,
+      parseWarnings: parsed.parse_warnings,
+      includeDebug,
     });
   }
 
@@ -344,12 +358,22 @@ async function dispatchViaLLM(
     toolResult.envelope.assistant_text = parsed.assistant_text;
   }
 
-  // Merge XML-extracted blocks and suggested actions with tool result
+  // Merge XML-extracted blocks (server blocks first, then AI blocks) and suggested actions
   if (xmlBlocks.length > 0) {
     toolResult.envelope.blocks = [...toolResult.envelope.blocks, ...xmlBlocks];
   }
   if (suggestedActions && !toolResult.envelope.suggested_actions) {
     toolResult.envelope.suggested_actions = suggestedActions;
+  }
+
+  // Add debug fields to tool result envelope if applicable
+  if (includeDebug) {
+    if (parsed.diagnostics) {
+      toolResult.envelope.diagnostics = parsed.diagnostics;
+    }
+    if (parsed.parse_warnings.length > 0) {
+      toolResult.envelope.parse_warnings = parsed.parse_warnings;
+    }
   }
 
   return toolResult.envelope;
