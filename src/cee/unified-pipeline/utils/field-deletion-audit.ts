@@ -103,7 +103,17 @@ export function recordFieldDeletions(
   if (alreadyCapped) return;
 
   const remaining = MAX_FIELD_DELETIONS_PER_STAGE - existingForStage;
-  if (remaining <= 0) return;
+  if (remaining <= 0) {
+    // Prior calls filled the cap exactly — emit the summary now
+    ctx.fieldDeletions.push({
+      stage,
+      node_id: '__truncated__',
+      field: '*',
+      reason: 'TELEMETRY_CAP_REACHED',
+      meta: { total: existingForStage + events.length, captured: MAX_FIELD_DELETIONS_PER_STAGE },
+    });
+    return;
+  }
 
   if (events.length <= remaining) {
     ctx.fieldDeletions.push(...events);

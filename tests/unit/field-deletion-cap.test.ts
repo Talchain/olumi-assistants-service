@@ -56,9 +56,8 @@ describe("recordFieldDeletions cap enforcement", () => {
     expect(last.meta).toEqual({ total: 60, captured: MAX_FIELD_DELETIONS_PER_STAGE });
   });
 
-  it("records exactly MAX + 1 entries when input is exactly at cap boundary", () => {
+  it("records exactly MAX entries with no truncation when input equals cap", () => {
     const ctx = makeCtx();
-    // Exactly at cap → no truncation
     const events = makeEvents(MAX_FIELD_DELETIONS_PER_STAGE, "threshold-sweep");
     recordFieldDeletions(ctx, "threshold-sweep", events);
 
@@ -80,6 +79,24 @@ describe("recordFieldDeletions cap enforcement", () => {
     const capEvent = ctx.fieldDeletions!.find((e) => e.reason === "TELEMETRY_CAP_REACHED");
     expect(capEvent).toBeDefined();
     expect(capEvent!.meta).toEqual({ total: 60, captured: MAX_FIELD_DELETIONS_PER_STAGE });
+  });
+
+  it("emits cap summary when prior calls fill exactly to MAX and a new call arrives", () => {
+    const ctx = makeCtx();
+
+    // Fill exactly to cap across two calls: 30 + 20 = 50
+    recordFieldDeletions(ctx, "structural-reconciliation", makeEvents(30, "structural-reconciliation"));
+    recordFieldDeletions(ctx, "structural-reconciliation", makeEvents(20, "structural-reconciliation"));
+    expect(ctx.fieldDeletions).toHaveLength(MAX_FIELD_DELETIONS_PER_STAGE);
+    expect(ctx.fieldDeletions!.every((e) => e.reason !== "TELEMETRY_CAP_REACHED")).toBe(true);
+
+    // Next call: 1 event → should emit cap summary (not silently drop)
+    recordFieldDeletions(ctx, "structural-reconciliation", makeEvents(1, "structural-reconciliation"));
+    expect(ctx.fieldDeletions).toHaveLength(MAX_FIELD_DELETIONS_PER_STAGE + 1);
+
+    const capEvent = ctx.fieldDeletions![ctx.fieldDeletions!.length - 1];
+    expect(capEvent.reason).toBe("TELEMETRY_CAP_REACHED");
+    expect(capEvent.meta).toEqual({ total: 51, captured: MAX_FIELD_DELETIONS_PER_STAGE });
   });
 
   it("ignores further calls for a stage after cap has been reached", () => {
