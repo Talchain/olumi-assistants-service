@@ -13,6 +13,13 @@
  */
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+/** Maximum field deletion events recorded per stage before truncation. */
+export const MAX_FIELD_DELETIONS_PER_STAGE = 50;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -25,6 +32,8 @@ export interface FieldDeletionEvent {
   field: string;
   /** Centralised reason code — see FIELD_DELETION_REASONS */
   reason: FieldDeletionReason;
+  /** Optional metadata (used by TELEMETRY_CAP_REACHED summary events) */
+  meta?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -37,7 +46,8 @@ export type FieldDeletionReason =
   | 'UNREACHABLE_FACTOR_RECLASSIFIED'
   | 'EXTERNAL_HAS_DATA'
   | 'OBSERVABLE_EXTRA_DATA'
-  | 'CATEGORY_OVERRIDE_STRIP';
+  | 'CATEGORY_OVERRIDE_STRIP'
+  | 'TELEMETRY_CAP_REACHED';
 
 /**
  * Human-readable descriptions for each reason code.
@@ -50,10 +60,11 @@ export const FIELD_DELETION_REASON_DESCRIPTIONS: Record<FieldDeletionReason, str
   EXTERNAL_HAS_DATA: 'Prohibited field removed from external factor',
   OBSERVABLE_EXTRA_DATA: 'Extra controllable-only field removed from observable factor',
   CATEGORY_OVERRIDE_STRIP: 'Controllable-only field stripped during STRP category override',
+  TELEMETRY_CAP_REACHED: 'Per-stage field deletion telemetry cap reached; remaining events truncated',
 };
 
 // =============================================================================
-// Helper
+// Helpers
 // =============================================================================
 
 /**
@@ -66,4 +77,44 @@ export function fieldDeletion(
   reason: FieldDeletionReason,
 ): FieldDeletionEvent {
   return { stage, node_id: nodeId, field, reason };
+}
+
+/**
+ * Record a batch of field deletion events onto ctx.fieldDeletions, enforcing
+ * a per-stage cap of MAX_FIELD_DELETIONS_PER_STAGE. When the cap is reached,
+ * a single TELEMETRY_CAP_REACHED summary event is appended and no further
+ * events for that stage are recorded.
+ */
+export function recordFieldDeletions(
+  ctx: { fieldDeletions?: FieldDeletionEvent[] },
+  stage: string,
+  events: FieldDeletionEvent[],
+): void {
+  if (events.length === 0) return;
+  if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
+
+  // Count existing events for this stage (may be called more than once per stage)
+  const existingForStage = ctx.fieldDeletions.filter((e) => e.stage === stage).length;
+
+  // Already capped from a previous call?
+  const alreadyCapped = ctx.fieldDeletions.some(
+    (e) => e.stage === stage && e.reason === 'TELEMETRY_CAP_REACHED',
+  );
+  if (alreadyCapped) return;
+
+  const remaining = MAX_FIELD_DELETIONS_PER_STAGE - existingForStage;
+  if (remaining <= 0) return;
+
+  if (events.length <= remaining) {
+    ctx.fieldDeletions.push(...events);
+  } else {
+    ctx.fieldDeletions.push(...events.slice(0, remaining));
+    ctx.fieldDeletions.push({
+      stage,
+      node_id: '__truncated__',
+      field: '*',
+      reason: 'TELEMETRY_CAP_REACHED',
+      meta: { total: existingForStage + events.length, captured: MAX_FIELD_DELETIONS_PER_STAGE },
+    });
+  }
 }

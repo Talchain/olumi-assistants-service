@@ -21,7 +21,7 @@ import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
-import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
+import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 
 // ---------------------------------------------------------------------------
 // Bucket classification (SSOT)
@@ -901,10 +901,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const llmRepairNeeded = remainingBucketC.length > 0 && externalValidationNeeded;
 
   // Step 8b: Push field deletion audit events to ctx
-  if (allDeletions.length > 0) {
-    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
-    ctx.fieldDeletions.push(...allDeletions);
-  }
+  recordFieldDeletions(ctx, 'deterministic-sweep', allDeletions);
 
   // Step 9: Write to ctx
   ctx.deterministicRepairs = allRepairs;

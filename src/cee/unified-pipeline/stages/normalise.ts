@@ -9,6 +9,7 @@ import type { StageContext } from "../types.js";
 import { reconcileStructuralTruth } from "../../../validators/structural-reconciliation.js";
 import { normaliseRiskCoefficients } from "../../transforms/risk-normalisation.js";
 import { log, emit } from "../../../utils/telemetry.js";
+import { recordFieldDeletions } from "../utils/field-deletion-audit.js";
 
 /**
  * Stage 2: Apply deterministic field transforms.
@@ -32,8 +33,7 @@ export async function runStageNormalise(ctx: StageContext): Promise<void> {
 
   // Collect field deletion events from STRP
   if (strpResult.fieldDeletions?.length > 0) {
-    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
-    ctx.fieldDeletions.push(...strpResult.fieldDeletions);
+    recordFieldDeletions(ctx, 'structural-reconciliation', strpResult.fieldDeletions);
   }
 
   if (strpResult.mutations.length > 0) {

@@ -24,7 +24,7 @@
 
 import type { StageContext } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
-import { fieldDeletion, type FieldDeletionEvent } from "../utils/field-deletion-audit.js";
+import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../utils/field-deletion-audit.js";
 
 interface Repair {
   code: string;
@@ -140,10 +140,7 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
   };
 
   // ── Field deletion audit ──────────────────────────────────────────────
-  if (deletions.length > 0) {
-    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
-    ctx.fieldDeletions.push(...deletions);
-  }
+  recordFieldDeletions(ctx, 'threshold-sweep', deletions);
 
   // ── Telemetry ────────────────────────────────────────────────────────
   log.info({

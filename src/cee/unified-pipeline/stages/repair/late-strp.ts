@@ -8,6 +8,7 @@
 
 import type { StageContext } from "../../types.js";
 import { reconcileStructuralTruth } from "../../../../validators/structural-reconciliation.js";
+import { recordFieldDeletions } from "../../utils/field-deletion-audit.js";
 
 export function runLateStrp(ctx: StageContext): void {
   if (!ctx.graph) return;
@@ -31,8 +32,7 @@ export function runLateStrp(ctx: StageContext): void {
 
   // Collect field deletion events from late STRP
   if (result.fieldDeletions?.length > 0) {
-    if (!ctx.fieldDeletions) ctx.fieldDeletions = [];
-    ctx.fieldDeletions.push(...result.fieldDeletions);
+    recordFieldDeletions(ctx, 'structural-reconciliation', result.fieldDeletions);
   }
 
   if (result.goalConstraints) {
