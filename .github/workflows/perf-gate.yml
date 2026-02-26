@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: '0 3 * * *'
 
+permissions:
+  contents: read
+  packages: read
+
 concurrency:
   group: perf-gate-${{ github.ref }}
   cancel-in-progress: true

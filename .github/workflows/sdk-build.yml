@@ -9,6 +9,10 @@ on:
     paths:
       - 'sdk/typescript/**'
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   build-sdk:
     name: Build SDK (ESM + CJS)

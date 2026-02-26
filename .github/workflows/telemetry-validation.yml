@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, staging]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   validate-event-names:
     runs-on: ubuntu-latest

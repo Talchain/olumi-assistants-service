@@ -11,6 +11,10 @@ on:
   # schedule:
   #   - cron: "0 3 * * *"
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   perf-baseline:
     name: Run Artillery baseline against target

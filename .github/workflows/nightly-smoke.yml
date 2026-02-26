@@ -4,6 +4,10 @@ on:
     - cron: "0 2 * * 0"   # Sundays 02:00 UTC (gated by SMOKE_SCHEDULE_ENABLED)
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 # V04: Prevent overlapping smoke test runs
 concurrency:
   group: nightly-smoke

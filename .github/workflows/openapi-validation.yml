@@ -13,6 +13,10 @@ on:
       - '.github/workflows/openapi-validation.yml'
   workflow_dispatch:  # Allow manual triggering for required status checks
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   validate:
     name: Validate OpenAPI Spec

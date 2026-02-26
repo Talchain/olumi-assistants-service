@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, staging]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   # Job A: Required checks (no secrets needed)
   unit-tests:

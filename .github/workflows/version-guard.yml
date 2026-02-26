@@ -11,6 +11,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   version-guard:
     runs-on: ubuntu-latest
