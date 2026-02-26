@@ -243,7 +243,13 @@ function parseSuggestedActionsWithWarnings(
       continue;
     }
 
-    const validRole = (role === 'facilitator' || role === 'challenger') ? role : 'facilitator';
+    let validRole: 'facilitator' | 'challenger';
+    if (role === 'facilitator' || role === 'challenger') {
+      validRole = role;
+    } else {
+      validRole = 'facilitator';
+      warnings.push(`Action role "${role ?? '(missing)'}" invalid — defaulted to facilitator`);
+    }
 
     results.push({
       label: unescapeXmlEntities(label),
@@ -351,7 +357,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
 // ============================================================================
 
 interface XmlEnvelopeResult {
-  assistantText: string | null;
+  assistantText: string;
   extractedBlocks: ExtractedBlock[];
   suggestedActions: SuggestedAction[];
   diagnostics: string | null;
@@ -384,7 +390,8 @@ function parseXmlEnvelope(rawText: string): XmlEnvelopeResult {
   }));
 
   return {
-    assistantText: parsed.assistant_text || null,
+    // Preserve empty string from parser fallback (don't coerce to null)
+    assistantText: parsed.assistant_text,
     extractedBlocks,
     suggestedActions,
     diagnostics: parsed.diagnostics,
@@ -427,6 +434,8 @@ export function parseLLMResponse(result: ChatWithToolsResult): ParsedLLMResponse
   if (rawText) {
     const envelope = parseXmlEnvelope(rawText);
     return {
+      // Preserve empty string from parser fallback (e.g., <response> without <assistant_text>).
+      // null only comes from the "no text content at all" path below (Layer 1).
       assistant_text: envelope.assistantText,
       tool_invocations: toolInvocations,
       extracted_blocks: envelope.extractedBlocks,

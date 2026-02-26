@@ -273,6 +273,32 @@ describe('parseOrchestratorResponse', () => {
     expect(result.parse_warnings).toContain('Block of type "commentary" missing <content> — dropped');
   });
 
+  it('defaults invalid action role to facilitator with a warning', () => {
+    const actions = `
+      <action><role>narrator</role><label>Test</label><message>Test message</message></action>
+    `;
+    const raw = makeXmlResponse({ suggestedActions: actions });
+
+    const result = parseOrchestratorResponse(raw);
+
+    expect(result.suggested_actions).toHaveLength(1);
+    expect(result.suggested_actions[0].role).toBe('facilitator');
+    expect(result.parse_warnings).toContain('Action role "narrator" invalid — defaulted to facilitator');
+  });
+
+  it('defaults missing action role to facilitator with a warning', () => {
+    const actions = `
+      <action><label>No Role</label><message>Test message</message></action>
+    `;
+    const raw = makeXmlResponse({ suggestedActions: actions });
+
+    const result = parseOrchestratorResponse(raw);
+
+    expect(result.suggested_actions).toHaveLength(1);
+    expect(result.suggested_actions[0].role).toBe('facilitator');
+    expect(result.parse_warnings).toContain('Action role "(missing)" invalid — defaulted to facilitator');
+  });
+
   it('drops action missing required field with a warning', () => {
     const actions = `
       <action><role>facilitator</role><label>Valid</label><message>Valid message</message></action>
@@ -536,6 +562,32 @@ describe('parseLLMResponse', () => {
     const parsed = parseLLMResponse(llmResult);
 
     expect(parsed.diagnostics).toBe('Route: draft_graph');
+  });
+
+  it('preserves empty string assistant_text from fallback 2 (not coerced to null)', () => {
+    // Fallback 2: <response> present but <assistant_text> missing
+    const raw = `<response>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+    const llmResult = makeLLMResult({ text: raw });
+
+    const parsed = parseLLMResponse(llmResult);
+
+    // Empty string preserved (not coerced to null)
+    // null in ParsedLLMResponse means "no text content at all" (Layer 1)
+    expect(parsed.assistant_text).toBe('');
+    expect(parsed.parse_warnings).toContain('<response> present but <assistant_text> missing');
+  });
+
+  it('returns null assistant_text only when no text blocks at all', () => {
+    const llmResult = makeLLMResult({
+      toolCalls: [{ id: 'toolu_1', name: 'draft_graph', input: {} }],
+    });
+
+    const parsed = parseLLMResponse(llmResult);
+
+    expect(parsed.assistant_text).toBeNull();
   });
 });
 

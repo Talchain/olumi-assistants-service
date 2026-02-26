@@ -353,8 +353,8 @@ async function dispatchViaLLM(
     'llm',
   );
 
-  // Merge LLM text with tool result
-  if (parsed.assistant_text && !toolResult.envelope.assistant_text) {
+  // Merge LLM text with tool result (null = no text, '' = empty text from parser fallback)
+  if (parsed.assistant_text != null && toolResult.envelope.assistant_text == null) {
     toolResult.envelope.assistant_text = parsed.assistant_text;
   }
 
