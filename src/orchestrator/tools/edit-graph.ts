@@ -39,7 +39,7 @@ import type {
   OrchestratorError,
   RepairEntry,
 } from "../types.js";
-import type { PLoTClient, ValidatePatchResult } from "../plot-client.js";
+import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { serialiseEditContextForLLM } from "../context/serialise.js";
 import {
@@ -63,14 +63,18 @@ export interface EditGraphOpts {
   plotClient?: PLoTClient | null;
   /** Max repair retries on structural/PLoT failure. Defaults to config.cee.maxRepairRetries. */
   maxRetries?: number;
+  /** Turn budget opts forwarded to PLoT client for budget-aware retry. */
+  plotOpts?: PLoTClientRunOpts;
 }
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Maximum number of operations per patch. Prevents unbounded LLM output. */
-const MAX_PATCH_OPERATIONS = 15;
+/** Maximum number of operations per patch. Configurable via MAX_PATCH_OPERATIONS env var, default 15. */
+function getMaxPatchOperations(): number {
+  return config.cee.maxPatchOperations;
+}
 
 // ============================================================================
 // Legacy Field Detection
@@ -384,10 +388,11 @@ export async function handleEditGraph(
     lastRawOps = rawOps;
 
     // Guard: reject oversized operation arrays before expensive validation
-    if (rawOps.length > MAX_PATCH_OPERATIONS) {
-      const msg = `Patch contains ${rawOps.length} operations (max ${MAX_PATCH_OPERATIONS}). Reduce the scope of the edit.`;
+    const maxOps = getMaxPatchOperations();
+    if (rawOps.length > maxOps) {
+      const msg = `Patch contains ${rawOps.length} operations (max ${maxOps}). Reduce the scope of the edit.`;
       log.warn(
-        { request_id: requestId, attempt, operations_count: rawOps.length, max: MAX_PATCH_OPERATIONS },
+        { request_id: requestId, attempt, operations_count: rawOps.length, max: maxOps },
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
@@ -454,7 +459,7 @@ export async function handleEditGraph(
           base_graph_hash: baseGraphHash,
         };
 
-        const plotResult: ValidatePatchResult = await plotClient.validatePatch(plotPayload, requestId);
+        const plotResult: ValidatePatchResult = await plotClient.validatePatch(plotPayload, requestId, opts?.plotOpts);
 
         // FEATURE_DISABLED (501) → skip semantic validation with warning (same as PLoT not configured)
         if (plotResult.kind === 'feature_disabled') {

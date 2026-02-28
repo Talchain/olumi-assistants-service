@@ -51,9 +51,18 @@ const AnalysisInputsSchema = z.object({
   n_samples: z.number().optional(),
 }).passthrough().nullable().optional();
 
+const GraphSchema = z.object({
+  nodes: z.array(z.object({ id: z.string(), kind: z.string() }).passthrough()),
+  edges: z.array(z.object({ from: z.string(), to: z.string() }).passthrough()),
+}).passthrough().nullable();
+
+const AnalysisResponseSchema = z.object({
+  analysis_status: z.string(),
+}).passthrough().nullable();
+
 const ConversationContextSchema = z.object({
-  graph: z.unknown().nullable(),
-  analysis_response: z.unknown().nullable(),
+  graph: GraphSchema,
+  analysis_response: AnalysisResponseSchema,
   framing: FramingSchema,
   messages: z.array(ConversationMessageSchema),
   event_log_summary: z.string().optional(),

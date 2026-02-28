@@ -723,6 +723,10 @@ describe('handleTurn — patch_accepted system event', () => {
         scenario_id: 'test-scenario',
       }),
       'req-patch-001',
+      expect.objectContaining({
+        turnBudgetMs: expect.any(Number),
+        turnStartedAt: expect.any(Number),
+      }),
     );
     expect(mockChatWithTools).not.toHaveBeenCalled();
   });

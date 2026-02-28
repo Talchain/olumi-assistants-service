@@ -395,6 +395,7 @@ const ConfigSchema = z.object({
     observabilityEnabled: booleanString.default(false), // If true, include _observability in CEE responses
     observabilityRawIO: createEnvEnforcedBoolean(false, "CEE_OBSERVABILITY_RAW_IO"), // If true, include raw prompts/responses (security: locked in prod)
     // Repair loop settings
+    maxPatchOperations: z.coerce.number().int().min(1).max(100).default(15), // Max operations per edit_graph patch
     maxRepairRetries: z.coerce.number().int().min(0).max(5).default(1), // Max repair retries in graph orchestrator
     // Debug logging settings
     debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
@@ -659,6 +660,7 @@ function parseConfig(): Config {
       observabilityEnabled: env.CEE_OBSERVABILITY_ENABLED,
       observabilityRawIO: env.CEE_OBSERVABILITY_RAW_IO,
       // Repair loop settings
+      maxPatchOperations: env.MAX_PATCH_OPERATIONS,
       maxRepairRetries: env.CEE_MAX_REPAIR_RETRIES,
       // Debug logging settings
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,

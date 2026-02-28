@@ -162,6 +162,82 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   });
 
   // ---------------------------------------------------
+  // C.1: Route-Boundary Shape Validation (real schema)
+  // ---------------------------------------------------
+
+  it("returns 400 when graph.nodes is a string (C.1)", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        context: {
+          graph: { nodes: "not-an-array", edges: [] },
+          analysis_response: null,
+          framing: { stage: "frame" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 400 when graph node lacks id (C.1)", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        context: {
+          graph: { nodes: [{ kind: "factor" }], edges: [] },
+          analysis_response: null,
+          framing: { stage: "frame" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 400 when analysis_response missing analysis_status (C.1)", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        context: {
+          graph: null,
+          analysis_response: { results: [] },
+          framing: { stage: "frame" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("accepts graph with extra passthrough fields (C.1)", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        context: {
+          graph: {
+            nodes: [{ id: "g1", kind: "goal", label: "Revenue", custom_field: true }],
+            edges: [],
+            version: "v3",
+          },
+          analysis_response: null,
+          framing: { stage: "frame" },
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+      }),
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  // ---------------------------------------------------
   // Successful Turns
   // ---------------------------------------------------
 
@@ -273,7 +349,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
         message: "generate brief",
         context: {
           graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
-          analysis_response: { summary: "no brief here" },
+          analysis_response: { analysis_status: "completed", summary: "no brief here" },
           framing: { stage: "frame" },
           messages: [],
           scenario_id: "test-scenario",

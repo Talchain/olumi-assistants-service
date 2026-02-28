@@ -19,7 +19,7 @@
 
 import type { FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { ORCHESTRATOR_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
+import { ORCHESTRATOR_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import type {
@@ -38,7 +38,7 @@ import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, regis
 import { classifyIntent } from "./intent-gate.js";
 import type { ToolName } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
-import type { PLoTClient, ValidatePatchResult } from "./plot-client.js";
+import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "./plot-client.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
 import { parseLLMResponse, getFirstToolInvocation } from "./response-parser.js";
 import type { ExtractedBlock } from "./response-parser.js";
@@ -144,8 +144,14 @@ export async function handleTurn(
   }
 
   // 2. Turn budget timeout
+  const turnStartedAt = Date.now();
   const budgetController = new AbortController();
   const budgetTimeout = setTimeout(() => budgetController.abort(), ORCHESTRATOR_TURN_BUDGET_MS);
+  const plotOpts: PLoTClientRunOpts = {
+    turnSignal: budgetController.signal,
+    turnStartedAt,
+    turnBudgetMs: ORCHESTRATOR_TURN_BUDGET_MS,
+  };
 
   // Register this request as in-flight for concurrent dedup
   let resolveInflight!: (value: OrchestratorResponseEnvelope) => void;
@@ -159,7 +165,7 @@ export async function handleTurn(
   try {
     // 3. Check system event
     if (turnRequest.system_event) {
-      const result = await handleSystemEvent(turnRequest, turnId, request, requestId);
+      const result = await handleSystemEvent(turnRequest, turnId, request, requestId, plotOpts);
       setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
       resolveInflight(result.envelope);
       return result;
@@ -200,6 +206,7 @@ export async function handleTurn(
         turnId,
         request,
         requestId,
+        plotOpts,
       );
     } else {
       // LLM routing — use chatWithTools
@@ -210,6 +217,7 @@ export async function handleTurn(
         request,
         requestId,
         budgetController.signal,
+        plotOpts,
       );
     }
 
@@ -250,6 +258,7 @@ async function handleSystemEvent(
   turnId: string,
   request: FastifyRequest,
   requestId: string,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<TurnResult> {
   const event = turnRequest.system_event!;
 
@@ -257,7 +266,7 @@ async function handleSystemEvent(
 
   switch (event.type) {
     case 'patch_accepted': {
-      return handlePatchAccepted(turnRequest, turnId, requestId);
+      return handlePatchAccepted(turnRequest, turnId, requestId, plotOpts);
     }
     case 'patch_dismissed':
     case 'feedback_submitted': {
@@ -273,17 +282,17 @@ async function handleSystemEvent(
     }
 
     case 'direct_graph_edit': {
-      // Lightweight LLM acknowledgement
+      // Lightweight LLM acknowledgement — uses shorter ack timeout
       const adapter = getAdapter('orchestrator');
       let text = 'Model updated.';
       try {
         const result = await adapter.chat(
           { system: 'Briefly acknowledge a graph edit made by the user.', userMessage: 'The user edited the graph directly.' },
-          { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
+          { requestId, timeoutMs: ORCHESTRATOR_ACK_TIMEOUT_MS },
         );
         text = result.content || text;
       } catch {
-        // Fallback text is fine
+        // Fallback text is fine — ack timeout is short by design
       }
 
       const envelope = assembleEnvelope({
@@ -298,7 +307,7 @@ async function handleSystemEvent(
 
     case 'direct_analysis_run': {
       // Route to run_analysis
-      return dispatchTool('run_analysis', {}, turnRequest, turnId, request, requestId, 'deterministic');
+      return dispatchTool('run_analysis', {}, turnRequest, turnId, request, requestId, 'deterministic', undefined, plotOpts);
     }
 
     default: {
@@ -322,6 +331,7 @@ async function handlePatchAccepted(
   turnRequest: OrchestratorTurnRequest,
   turnId: string,
   requestId: string,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<TurnResult> {
   const event = turnRequest.system_event!;
   const payload = event.payload;
@@ -339,7 +349,7 @@ async function handlePatchAccepted(
         scenario_id: turnRequest.scenario_id,
       };
 
-      const result: ValidatePatchResult = await client.validatePatch(plotPayload, requestId);
+      const result: ValidatePatchResult = await client.validatePatch(plotPayload, requestId, plotOpts);
 
       if (result.kind === 'success') {
         graphHash = typeof result.data.graph_hash === 'string' ? result.data.graph_hash : undefined;
@@ -398,8 +408,9 @@ async function dispatchDeterministic(
   turnId: string,
   request: FastifyRequest,
   requestId: string,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<OrchestratorResponseEnvelope> {
-  const result = await dispatchTool(tool, {}, turnRequest, turnId, request, requestId, 'deterministic');
+  const result = await dispatchTool(tool, {}, turnRequest, turnId, request, requestId, 'deterministic', undefined, plotOpts);
   return result.envelope;
 }
 
@@ -413,6 +424,7 @@ async function dispatchViaLLM(
   request: FastifyRequest,
   requestId: string,
   _abortSignal: AbortSignal,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<OrchestratorResponseEnvelope> {
   const adapter = getAdapter('orchestrator');
 
@@ -540,6 +552,7 @@ async function dispatchViaLLM(
     requestId,
     'llm',
     contextHash,
+    plotOpts,
   );
 
   // Merge LLM text with tool result (null = no text, '' = empty text from parser fallback)
@@ -581,6 +594,7 @@ async function dispatchTool(
   requestId: string,
   routing: 'deterministic' | 'llm' = 'llm',
   contextHash?: string,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<TurnResult> {
   const startTime = Date.now();
   const isLongRunning = toolName === 'run_analysis' || toolName === 'draft_graph';
@@ -604,7 +618,7 @@ async function dispatchTool(
             },
           });
         }
-        const result = await handleRunAnalysis(turnRequest.context, client, requestId, turnId);
+        const result = await handleRunAnalysis(turnRequest.context, client, requestId, turnId, plotOpts);
         blocks = result.blocks;
         analysisResponse = result.analysisResponse;
         toolLatencyMs = result.latencyMs;
@@ -630,7 +644,7 @@ async function dispatchTool(
       case 'edit_graph': {
         const editDesc = (toolInput.edit_description as string) || turnRequest.message;
         const adapter = getAdapter('orchestrator');
-        const result = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId);
+        const result = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId, { plotOpts });
         blocks = result.blocks;
         assistantText = result.assistantText;
         toolLatencyMs = result.latencyMs;

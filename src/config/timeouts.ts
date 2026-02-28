@@ -133,6 +133,11 @@ export const ORCHESTRATOR_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("ORCHESTRATOR_TIMEOUT_MS", 30_000),
 );
 
+/** Ack-only LLM call timeout for system events (default: 5s, clamped 5s–5m) */
+export const ORCHESTRATOR_ACK_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("ORCHESTRATOR_ACK_TIMEOUT_MS", 5_000),
+);
+
 /** Orchestrator turn budget — total time for a single /orchestrate/v1/turn request (default: 60s, clamped 5s–5m) */
 export const ORCHESTRATOR_TURN_BUDGET_MS = clampTimeout(
   parseTimeoutEnv("ORCHESTRATOR_TURN_BUDGET_MS", 60_000),
@@ -326,6 +331,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     CLARIFIER_QUESTION_TIMEOUT_MS,
     CLARIFIER_ANSWER_TIMEOUT_MS,
     ORCHESTRATOR_TIMEOUT_MS,
+    ORCHESTRATOR_ACK_TIMEOUT_MS,
     ORCHESTRATOR_TURN_BUDGET_MS,
     PLOT_RUN_TIMEOUT_MS,
     PLOT_VALIDATE_TIMEOUT_MS,

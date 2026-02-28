@@ -22,7 +22,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import type { ConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError } from "../types.js";
-import type { PLoTClient } from "../plot-client.js";
+import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
 
@@ -58,6 +58,7 @@ export async function handleRunAnalysis(
   plotClient: PLoTClient,
   requestId: string,
   turnId: string,
+  plotOpts?: PLoTClientRunOpts,
 ): Promise<RunAnalysisResult> {
   // Validate prerequisites
   if (!context.graph) {
@@ -90,7 +91,7 @@ export async function handleRunAnalysis(
 
   let response: V2RunResponseEnvelope;
   try {
-    response = await plotClient.run(payload, requestId);
+    response = await plotClient.run(payload, requestId, plotOpts);
   } catch (error) {
     if (error instanceof PLoTError || error instanceof PLoTTimeoutError) {
       // toOrchestratorError() returns the override (if set from error.v1 envelope) or the default

@@ -51,7 +51,7 @@ export interface SuggestedAction {
 }
 
 export interface OrchestratorError {
-  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'UNKNOWN';
+  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'INTERNAL_PAYLOAD_ERROR' | 'UNKNOWN';
   message: string;
   tool?: string;
   recoverable: boolean;
@@ -318,6 +318,7 @@ export function getHttpStatusForError(error: OrchestratorError): number {
     case 'VALIDATION_REJECTED': return 422;
     case 'CONTEXT_TOO_LARGE': return 413;
     case 'INVALID_REQUEST': return 400;
+    case 'INTERNAL_PAYLOAD_ERROR': return 500;
     case 'UNKNOWN':
     default: return 500;
   }

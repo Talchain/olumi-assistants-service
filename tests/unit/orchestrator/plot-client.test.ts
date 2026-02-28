@@ -114,6 +114,12 @@ vi.mock("../../../src/config/index.js", async (importOriginal) => {
 
 const { createPLoTClient } = await import("../../../src/orchestrator/plot-client.js");
 
+/** Valid run payload for tests — passes outbound structural validation (H.5) */
+const VALID_RUN_PAYLOAD = { graph: { nodes: [], edges: [] }, options: [{ option_id: "opt_1" }], goal_node_id: "goal_1" };
+
+/** Valid validate-patch payload for tests — passes outbound structural validation (H.5) */
+const VALID_PATCH_PAYLOAD = { graph: { nodes: [], edges: [] }, operations: [{ op: "add_node" }] };
+
 describe("PLoTClient", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -136,7 +142,7 @@ describe("PLoTClient", () => {
       const client = createPLoTClient()!;
       expect(client).not.toBeNull();
 
-      await client.run({ graph: {} }, "req-1");
+      await client.run(VALID_RUN_PAYLOAD, "req-1");
 
       const [, opts] = fetchSpy.mock.calls[0];
       expect(opts.headers.Authorization).toBe("Bearer test-token-secret");
@@ -149,7 +155,7 @@ describe("PLoTClient", () => {
       });
 
       const client = createPLoTClient()!;
-      await client.run({ graph: {} }, "req-1");
+      await client.run(VALID_RUN_PAYLOAD, "req-1");
 
       // Auth token should not appear in the request payload or logged URL
       const [url] = fetchSpy.mock.calls[0];
@@ -171,10 +177,10 @@ describe("PLoTClient", () => {
 
       const client = createPLoTClient()!;
 
-      await expect(client.run({ graph: {} }, "req-1")).rejects.toThrow(PLoTError);
+      await expect(client.run(VALID_RUN_PAYLOAD, "req-1")).rejects.toThrow(PLoTError);
 
       try {
-        await client.run({ graph: {} }, "req-2");
+        await client.run(VALID_RUN_PAYLOAD, "req-2");
       } catch (e) {
         const err = e as PLoTError;
         expect(err.status).toBe(422);
@@ -196,7 +202,7 @@ describe("PLoTClient", () => {
       const client = createPLoTClient()!;
 
       try {
-        await client.run({ graph: {} }, "req-1");
+        await client.run(VALID_RUN_PAYLOAD, "req-1");
       } catch (e) {
         const err = e as PLoTError;
         expect(err.message).toContain("Insufficient data");
@@ -222,7 +228,7 @@ describe("PLoTClient", () => {
       const client = createPLoTClient()!;
 
       try {
-        await client.run({ graph: {} }, "req-1");
+        await client.run(VALID_RUN_PAYLOAD, "req-1");
       } catch (e) {
         const err = e as PLoTError;
         expect(err.status).toBe(500);
@@ -240,7 +246,7 @@ describe("PLoTClient", () => {
       const client = createPLoTClient()!;
 
       try {
-        await client.run({ graph: {} }, "req-1");
+        await client.run(VALID_RUN_PAYLOAD, "req-1");
       } catch (e) {
         const err = e as PLoTError;
         expect(err.status).toBe(500);
@@ -259,7 +265,7 @@ describe("PLoTClient", () => {
       });
 
       const client = createPLoTClient()!;
-      const result = await client.validatePatch({ graph: {} }, "req-1");
+      const result = await client.validatePatch(VALID_PATCH_PAYLOAD, "req-1");
 
       expect(result.kind).toBe("success");
       if (result.kind === "success") {
@@ -280,7 +286,7 @@ describe("PLoTClient", () => {
       });
 
       const client = createPLoTClient()!;
-      const result = await client.validatePatch({ graph: {} }, "req-1");
+      const result = await client.validatePatch(VALID_PATCH_PAYLOAD, "req-1");
 
       expect(result.kind).toBe("rejection");
       if (result.kind === "rejection") {
@@ -298,7 +304,7 @@ describe("PLoTClient", () => {
       });
 
       const client = createPLoTClient()!;
-      const result = await client.validatePatch({ graph: {} }, "req-1");
+      const result = await client.validatePatch(VALID_PATCH_PAYLOAD, "req-1");
 
       expect(result.kind).toBe("feature_disabled");
     });
@@ -312,7 +318,7 @@ describe("PLoTClient", () => {
 
       const client = createPLoTClient()!;
 
-      await expect(client.validatePatch({ graph: {} }, "req-1")).rejects.toThrow(PLoTError);
+      await expect(client.validatePatch(VALID_PATCH_PAYLOAD, "req-1")).rejects.toThrow(PLoTError);
     });
   });
 });

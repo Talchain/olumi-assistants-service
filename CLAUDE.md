@@ -60,29 +60,63 @@ Confirm the branch is correct for the task before starting any work.
 
 ---
 
-## Testing & task completion
+## Testing — Three-Tier Process
 
-After any code changes, and before reporting ANY task as complete, run:
+Testing uses a tiered approach to avoid heavy resource usage on the local machine.
+The full suite runs in CI — not after every code change.
+
+### Tier 1: Smoke (after every code change)
+
+Run **only** after making changes, before reporting the task as done.
+Targets changed files and their direct dependents — fast and light.
 
 ```bash
-# 1. Correct branch?
-git branch --show-current
-
-# 2. Clean state? (no accidental uncommitted changes)
-git status
-
-# 3. Recent commits match the work just done?
-git log --oneline -5
-
-# 4. All tests pass?
-pnpm test
-
-# 5. TypeScript compiles cleanly?
-pnpm exec tsc --noEmit
+pnpm exec tsc --noEmit                                # ~60-90s, catches type errors
+pnpm exec vitest run --changed --bail=1                # only tests affected by changes
 ```
 
-- Report the exact number of passing/failing tests.
-- If any check fails, fix it before reporting completion. Do not report "done" with failing tests or uncommitted changes unless explicitly discussed with the user.
+If `--changed` finds no related tests, skip the vitest step — typecheck alone is sufficient.
+Report: "Typecheck passed. N related tests passed." (or "No related tests for this change.")
+
+### Tier 2: Pre-commit validation
+
+Run before committing. Still lightweight — no full test suite.
+
+```bash
+pnpm exec tsc --noEmit
+pnpm lint
+```
+
+### Tier 3: Full gate (before pushing to staging only)
+
+Run **only** when the user explicitly says to push to staging.
+
+```bash
+pnpm test                  # full suite
+git push origin staging
+```
+
+### Important rules
+
+- **Never run `pnpm test` (full suite) after every code change** — it wastes time and resources.
+- CI is the authoritative gate — local testing is a fast feedback loop, not a replacement.
+
+---
+
+## Task completion checklist
+
+Before reporting ANY task as complete, run the **Tier 1 smoke checks** (not the full suite):
+
+```bash
+git branch --show-current                              # Correct branch?
+git status                                             # Clean state?
+pnpm exec tsc --noEmit                                 # TypeScript compiles?
+pnpm exec vitest run --changed --bail=1                # Related tests pass?
+```
+
+If typecheck or related tests fail, fix before reporting completion.
+Do NOT run `pnpm test` (full suite) here — that runs when the user decides to push,
+and again in CI. See "Testing — Three-Tier Process" above.
 
 ---
 
