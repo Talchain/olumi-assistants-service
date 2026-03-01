@@ -16,6 +16,19 @@ import type {
   TokenUsage,
 } from "./types.js";
 
+// Configure HTTP proxy for Node.js native fetch (undici).
+// Node's native fetch does not read HTTPS_PROXY automatically; we must wire it
+// up via undici's global dispatcher so the OpenAI SDK goes through the proxy.
+const _proxyUrl =
+  process.env["HTTPS_PROXY"] ??
+  process.env["https_proxy"] ??
+  process.env["HTTP_PROXY"] ??
+  process.env["http_proxy"];
+if (_proxyUrl) {
+  const { ProxyAgent, setGlobalDispatcher } = await import("undici");
+  setGlobalDispatcher(new ProxyAgent(_proxyUrl));
+}
+
 // =============================================================================
 // Retry configuration
 // =============================================================================
