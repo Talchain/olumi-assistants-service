@@ -1,0 +1,16 @@
+{
+  "id": "gpt-5-mini",
+  "display_name": "GPT-5 Mini",
+  "provider": "openai",
+  "model": "gpt-5-mini",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "normal",
+  "pricing": {
+    "input_per_1m": 1.10,
+    "output_per_1m": 4.40,
+    "source": "openai_api_docs_2026-03"
+  }
+}

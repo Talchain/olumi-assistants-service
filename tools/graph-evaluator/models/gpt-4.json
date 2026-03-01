@@ -1,0 +1,16 @@
+{
+  "id": "gpt-4",
+  "display_name": "GPT-4",
+  "provider": "openai",
+  "model": "gpt-4",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "baseline",
+  "pricing": {
+    "input_per_1m": 30.00,
+    "output_per_1m": 60.00,
+    "source": "openai_api_docs_2026-03"
+  }
+}

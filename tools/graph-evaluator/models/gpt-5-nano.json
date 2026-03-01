@@ -1,0 +1,16 @@
+{
+  "id": "gpt-5-nano",
+  "display_name": "GPT-5 Nano",
+  "provider": "openai",
+  "model": "gpt-5-nano",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "fast",
+  "pricing": {
+    "input_per_1m": 0.15,
+    "output_per_1m": 0.60,
+    "source": "openai_api_docs_2026-03"
+  }
+}

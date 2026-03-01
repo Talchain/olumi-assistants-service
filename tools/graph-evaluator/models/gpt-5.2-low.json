@@ -1,0 +1,17 @@
+{
+  "id": "gpt-5.2-low",
+  "display_name": "GPT-5.2 (reasoning: low)",
+  "provider": "openai",
+  "model": "gpt-5.2",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "reasoning_effort": "low",
+    "temperature": 0
+  },
+  "target_mode": "normal",
+  "pricing": {
+    "input_per_1m": 1.75,
+    "output_per_1m": 14.00,
+    "source": "openai_api_docs_2026-03"
+  }
+}

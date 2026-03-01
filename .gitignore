@@ -24,3 +24,7 @@ test-results/
 # Editor/IDE
 .idea/
 .vscode/
+
+# Graph evaluator results (keep .gitkeep)
+tools/graph-evaluator/results/*
+!tools/graph-evaluator/results/.gitkeep
