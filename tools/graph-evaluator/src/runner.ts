@@ -36,8 +36,9 @@ if (_proxyUrl) {
 /** Exponential backoff delays in ms (max 3 attempts after initial). */
 const RETRY_DELAYS_MS = [2_000, 8_000, 32_000];
 
-/** Request timeout in milliseconds. */
-const REQUEST_TIMEOUT_MS = 30_000;
+/** Default request timeout in milliseconds (reasoning models use a longer timeout). */
+const DEFAULT_TIMEOUT_MS = 30_000;
+const REASONING_TIMEOUT_MS = 90_000;
 
 /** Failure codes that are eligible for retry. */
 const RETRYABLE_CODES: FailureCode[] = ["rate_limited", "server_error"];
@@ -135,11 +136,17 @@ async function callOpenAI(
 
   const startTime = Date.now();
 
+  // Dynamic timeout: reasoning models need longer (90s), others use 30s
+  const timeoutMs =
+    model.params.reasoning_effort !== undefined
+      ? REASONING_TIMEOUT_MS
+      : DEFAULT_TIMEOUT_MS;
+
   // Make the API call with a timeout signal
   const controller = new AbortController();
   const timeoutHandle = setTimeout(
     () => controller.abort("timeout"),
-    REQUEST_TIMEOUT_MS
+    timeoutMs
   );
 
   try {
@@ -238,16 +245,19 @@ function classifyError(
     pricing_source: "model_config" as const,
   };
 
-  // AbortError = timeout
+  // AbortError = timeout. The OpenAI SDK throws APIConnectionError with message
+  // "Request was aborted." when AbortController fires — catch that too.
   if (
     err instanceof Error &&
-    (err.name === "AbortError" || String(err.message).includes("timeout"))
+    (err.name === "AbortError" ||
+      String(err.message).includes("timeout") ||
+      String(err.message).toLowerCase().includes("aborted"))
   ) {
     return {
       ...base,
       status: "timeout_failed",
       failure_code: "timeout_failed",
-      error_message: "Request timed out after 30s",
+      error_message: "Request timed out",
     };
   }
 

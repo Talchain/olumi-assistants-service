@@ -4,9 +4,7 @@
   "provider": "openai",
   "model": "gpt-5-mini",
   "api_key_env": "OPENAI_API_KEY",
-  "params": {
-    "temperature": 0
-  },
+  "params": {},
   "target_mode": "normal",
   "pricing": {
     "input_per_1m": 1.10,
