@@ -1,0 +1,728 @@
+{
+  "version": "0.1.0",
+  "generated_at": "2026-03-01T01:22:08.183Z",
+  "dsk_version_hash": "02b02a0fede3d51293f5e8d5525c48221cd469b642554b06eedf8bcdba97bb5e",
+  "objects": [
+    {
+      "id": "DSK-B001",
+      "type": "claim",
+      "title": "Anchoring bias",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B002",
+      "type": "claim",
+      "title": "Confirmation bias",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B003",
+      "type": "claim",
+      "title": "Sunk cost fallacy",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B004",
+      "type": "claim",
+      "title": "Overconfidence",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B005",
+      "type": "claim",
+      "title": "Availability heuristic",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B006",
+      "type": "claim",
+      "title": "Status quo bias",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B007",
+      "type": "claim",
+      "title": "Narrow framing",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-B008",
+      "type": "claim",
+      "title": "Planning fallacy",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "claim_category": "empirical",
+      "scope": {
+        "decision_contexts": [
+          "general"
+        ],
+        "stages": [
+          "evaluate"
+        ],
+        "populations": [
+          "PLACEHOLDER — needs review"
+        ],
+        "exclusions": [
+          "PLACEHOLDER — needs review"
+        ]
+      },
+      "permitted_phrasing_band": "medium",
+      "evidence_pack": {
+        "key_findings": "PLACEHOLDER — needs review",
+        "effect_direction": "negative",
+        "boundary_conditions": "PLACEHOLDER — needs review",
+        "known_limitations": "PLACEHOLDER — needs review"
+      }
+    },
+    {
+      "id": "DSK-T001",
+      "type": "protocol",
+      "title": "Pre-mortem",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-T002",
+      "type": "protocol",
+      "title": "Disconfirmation",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-T003",
+      "type": "protocol",
+      "title": "Outside view / base rates",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-T004",
+      "type": "protocol",
+      "title": "10-10-10",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-T005",
+      "type": "protocol",
+      "title": "Devils advocate",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-T006",
+      "type": "protocol",
+      "title": "Evidence typing",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "steps": [
+        "PLACEHOLDER — needs review"
+      ],
+      "required_inputs": [
+        "PLACEHOLDER — needs review"
+      ],
+      "expected_outputs": [
+        "PLACEHOLDER — needs review"
+      ]
+    },
+    {
+      "id": "DSK-TR001",
+      "type": "trigger",
+      "title": "Binary framing detected",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "observable_signal": "PLACEHOLDER — needs review",
+      "recommended_behaviour": "PLACEHOLDER — needs review",
+      "negative_conditions": [
+        "PLACEHOLDER — needs review"
+      ],
+      "linked_claim_ids": [],
+      "linked_protocol_ids": []
+    },
+    {
+      "id": "DSK-TR002",
+      "type": "trigger",
+      "title": "Certainty language detected",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "observable_signal": "PLACEHOLDER — needs review",
+      "recommended_behaviour": "PLACEHOLDER — needs review",
+      "negative_conditions": [
+        "PLACEHOLDER — needs review"
+      ],
+      "linked_claim_ids": [],
+      "linked_protocol_ids": []
+    },
+    {
+      "id": "DSK-TR003",
+      "type": "trigger",
+      "title": "Sunk cost language detected",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "observable_signal": "PLACEHOLDER — needs review",
+      "recommended_behaviour": "PLACEHOLDER — needs review",
+      "negative_conditions": [
+        "PLACEHOLDER — needs review"
+      ],
+      "linked_claim_ids": [],
+      "linked_protocol_ids": []
+    },
+    {
+      "id": "DSK-TR004",
+      "type": "trigger",
+      "title": "Defaulted confidence cluster",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "observable_signal": "PLACEHOLDER — needs review",
+      "recommended_behaviour": "PLACEHOLDER — needs review",
+      "negative_conditions": [
+        "PLACEHOLDER — needs review"
+      ],
+      "linked_claim_ids": [],
+      "linked_protocol_ids": []
+    },
+    {
+      "id": "DSK-TR005",
+      "type": "trigger",
+      "title": "Single dominant factor",
+      "evidence_strength": "medium",
+      "contraindications": [
+        "PLACEHOLDER — needs review"
+      ],
+      "stage_applicability": [
+        "evaluate"
+      ],
+      "context_tags": [
+        "general"
+      ],
+      "version": "0.1.0",
+      "last_reviewed_at": "2026-03-01",
+      "source_citations": [
+        {
+          "doi_or_isbn": "PLACEHOLDER — needs review",
+          "page_or_section": "PLACEHOLDER — needs review"
+        }
+      ],
+      "deprecated": false,
+      "observable_signal": "PLACEHOLDER — needs review",
+      "recommended_behaviour": "PLACEHOLDER — needs review",
+      "negative_conditions": [
+        "PLACEHOLDER — needs review"
+      ],
+      "linked_claim_ids": [],
+      "linked_protocol_ids": []
+    }
+  ]
+}

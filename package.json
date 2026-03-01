@@ -48,7 +48,10 @@
     "benchmark:stability:cli": "tsx tests/benchmarks/run-benchmark.ts",
     "benchmark:stability:cli:nightly": "tsx tests/benchmarks/run-benchmark.ts --nightly",
     "demo:client": "cd examples/react-sse-client && pnpm dev",
-    "demo:build": "cd examples/react-sse-client && pnpm build"
+    "demo:build": "cd examples/react-sse-client && pnpm build",
+    "dsk:lint": "tsx scripts/dsk-lint.ts",
+    "dsk:init": "tsx scripts/dsk-init-registry.ts",
+    "dsk:hash": "tsx scripts/dsk-hash.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
