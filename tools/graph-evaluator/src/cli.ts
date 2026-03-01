@@ -75,6 +75,7 @@ async function main(): Promise<void> {
       false
     )
     .option("--dry-run", "List combinations without calling APIs", false)
+    .option("--run-id <id>", "Resume a specific run ID instead of generating a new one")
     .parse(process.argv);
 
   const opts = program.opts<{
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
     force: boolean;
     resume: boolean;
     dryRun: boolean;
+    runId?: string;
   }>();
 
   // ── Resolve paths ──────────────────────────────────────────────────────────
@@ -138,7 +140,7 @@ async function main(): Promise<void> {
   }
 
   // ── Build run configuration ────────────────────────────────────────────────
-  const runId = buildRunId(opts.prompt);
+  const runId = opts.runId ?? buildRunId(opts.prompt);
   const timestamp = new Date().toISOString();
   const promptHash = hashContent(promptContent);
   const promptFilename = opts.prompt.split(/[/\\]/).pop() ?? opts.prompt;
