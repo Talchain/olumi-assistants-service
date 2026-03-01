@@ -1,0 +1,16 @@
+{
+  "id": "model-id",
+  "display_name": "Model Display Name",
+  "provider": "openai",
+  "model": "model-api-id",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "normal",
+  "pricing": {
+    "input_per_1m": 0.00,
+    "output_per_1m": 0.00,
+    "source": "openai_api_docs_2026-03"
+  }
+}

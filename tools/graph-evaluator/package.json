@@ -1,0 +1,25 @@
+{
+  "name": "graph-evaluator",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "csv-stringify": "^6.4.0",
+    "dotenv": "^16.4.0",
+    "gray-matter": "^4.0.3",
+    "openai": "^6.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5",
+    "vitest": "^4.0.0"
+  }
+}
