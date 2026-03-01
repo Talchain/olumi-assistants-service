@@ -37,8 +37,8 @@ if (_proxyUrl) {
 const RETRY_DELAYS_MS = [2_000, 8_000, 32_000];
 
 /** Default request timeout in milliseconds (reasoning models use a longer timeout). */
-const DEFAULT_TIMEOUT_MS = 30_000;
-const REASONING_TIMEOUT_MS = 90_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const REASONING_TIMEOUT_MS = 120_000;
 
 /** Failure codes that are eligible for retry. */
 const RETRYABLE_CODES: FailureCode[] = ["rate_limited", "server_error"];
