@@ -27,11 +27,28 @@ import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
 // ============================================================================
 
 // F.4: Replace with Supabase read/write of scenarios.last_turn_nonce.
+const NONCE_MAP_MAX_ENTRIES = 1000;
 const nonceMap = new Map<string, number>();
 
 /** Test-only: clear nonce state. */
 export function _clearNonceMap(): void {
   nonceMap.clear();
+}
+
+/**
+ * Set a nonce entry with bounded capacity.
+ * When at capacity, evict the oldest entry (Map iteration order = insertion order).
+ */
+function setNonce(scenarioId: string, nonce: number): void {
+  if (nonceMap.size >= NONCE_MAP_MAX_ENTRIES && !nonceMap.has(scenarioId)) {
+    const firstKey = nonceMap.keys().next().value!;
+    nonceMap.delete(firstKey);
+    log.warn(
+      { scenario_id: scenarioId, evicted_key: firstKey },
+      'idempotency cache at capacity — evicting oldest entry',
+    );
+  }
+  nonceMap.set(scenarioId, nonce);
 }
 
 // ============================================================================
@@ -138,7 +155,7 @@ export async function handleTurnV2(
 
     // 6. Update nonce counter
     if (turnNonce !== undefined) {
-      nonceMap.set(turnRequest.scenario_id, turnNonce);
+      setNonce(turnRequest.scenario_id, turnNonce);
     }
 
     // 7. Cache response for idempotency

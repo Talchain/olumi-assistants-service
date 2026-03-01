@@ -51,7 +51,7 @@ export function phase5Validate(
   void extractClaims();
 
   // 4. Observation write (stub — logs only)
-  writeObservation(enrichedContext.turn_id);
+  writeObservation(enrichedContext.turn_id, enrichedContext.scenario_id);
 
   // 5. Assemble envelope
   return assembleV2Envelope({

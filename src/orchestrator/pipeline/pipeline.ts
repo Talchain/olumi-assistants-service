@@ -27,6 +27,8 @@ import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
  * Error handling: if any phase throws, the pipeline catches and returns an error
  * envelope with all new fields populated with defaults.
  */
+// Phase inputs are treated as immutable — do not mutate enrichedContext or other phase outputs.
+// Each phase receives typed inputs and returns new typed outputs. No shared mutable state.
 export async function executePipeline(
   request: OrchestratorTurnRequest,
   requestId: string,

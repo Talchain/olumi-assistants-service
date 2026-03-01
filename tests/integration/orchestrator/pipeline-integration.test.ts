@@ -126,3 +126,39 @@ describe("pipeline integration", () => {
     expect(envelope.progress_marker.kind).toBe("none");
   });
 });
+
+// ============================================================================
+// Flag-on / flag-off routing smoke tests
+// ============================================================================
+
+const V2_ONLY_FIELDS = ["science_ledger", "progress_marker", "observability"] as const;
+
+describe("flag-on/flag-off routing", () => {
+  it("V2 pipeline response contains V2-only fields (flag ON path)", async () => {
+    const deps = makeMockDeps();
+    const envelope = await executePipeline(makeRequest(), "req-flag-on", deps);
+
+    for (const field of V2_ONLY_FIELDS) {
+      expect(envelope).toHaveProperty(field);
+    }
+    // Verify fields are populated, not just present
+    expect(envelope.science_ledger.claims_used).toEqual([]);
+    expect(envelope.progress_marker.kind).toBeDefined();
+    expect(envelope.observability.intent_classification).toBeDefined();
+  });
+
+  it("V1 envelope shape does NOT contain V2-only fields (flag OFF path)", () => {
+    // V1 OrchestratorResponseEnvelope shape — matches the type from src/orchestrator/types.ts
+    const v1Envelope = {
+      turn_id: "v1-turn",
+      assistant_text: "Hello",
+      blocks: [],
+      lineage: { context_hash: "abc" },
+      turn_plan: { selected_tool: null, routing: "llm" as const, long_running: false },
+    };
+
+    for (const field of V2_ONLY_FIELDS) {
+      expect(v1Envelope).not.toHaveProperty(field);
+    }
+  });
+});

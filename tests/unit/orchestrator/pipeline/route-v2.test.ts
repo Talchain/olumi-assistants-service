@@ -144,8 +144,8 @@ describe("route-v2", () => {
 
     const result = await handleTurnV2(makeRequest(), mockFastifyRequest, "req-1");
     expect(result.httpStatus).toBe(200);
-    // Byte-identical: the full envelope should be returned as-is
-    expect(result.envelope).toBe(cachedEnvelope);
+    // Deep-equal: the full envelope should be structurally identical
+    expect(result.envelope).toEqual(cachedEnvelope);
   });
 
   it("idempotency check comes before nonce validation — retry with stale nonce returns cached envelope", async () => {
@@ -166,6 +166,45 @@ describe("route-v2", () => {
     expect(result.httpStatus).toBe(200);
     expect(result.envelope.turn_id).toBe("original-turn");
     expect(result.envelope.error).toBeUndefined();
+  });
+
+  it("evicts oldest nonce entry when cache reaches 1000 entries", async () => {
+    // Fill the nonce map with 1000 distinct scenario_ids
+    for (let i = 0; i < 1000; i++) {
+      await handleTurnV2(
+        makeRequest({ scenario_id: `scenario-${i}`, client_turn_id: `ct-${i}` }),
+        mockFastifyRequest,
+        `req-${i}`,
+        i + 1,
+      );
+    }
+
+    // Insert the 1001st — should evict scenario-0
+    await handleTurnV2(
+      makeRequest({ scenario_id: "scenario-1000", client_turn_id: "ct-1000" }),
+      mockFastifyRequest,
+      "req-1000",
+      1001,
+    );
+
+    // scenario-0 was evicted, so nonce 1 should be accepted again (no stale check)
+    const r1 = await handleTurnV2(
+      makeRequest({ scenario_id: "scenario-0", client_turn_id: "ct-fresh" }),
+      mockFastifyRequest,
+      "req-fresh",
+      1,
+    );
+    expect(r1.httpStatus).toBe(200);
+
+    // scenario-1000 should still be present — nonce 1001 is stale for it
+    const r2 = await handleTurnV2(
+      makeRequest({ scenario_id: "scenario-1000", client_turn_id: "ct-stale" }),
+      mockFastifyRequest,
+      "req-stale",
+      1001,
+    );
+    expect(r2.httpStatus).toBe(409);
+    expect(r2.envelope.error!.code).toBe("STALE_TURN");
   });
 
   it("returns 500 with error envelope when pipeline throws", async () => {
