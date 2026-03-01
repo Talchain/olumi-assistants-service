@@ -15,6 +15,8 @@ import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
 import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
+import { config } from "../config/index.js";
+import { handleTurnV2 } from "./pipeline/route-v2.js";
 
 // ============================================================================
 // Request Validation Schema
@@ -77,6 +79,7 @@ const TurnRequestSchema = z.object({
   scenario_id: z.string().min(1).max(200),
   system_event: SystemEventSchema.optional(),
   client_turn_id: z.string().min(1).max(64),
+  turn_nonce: z.number().int().min(0).optional(),
 });
 
 // ============================================================================
@@ -123,6 +126,28 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     };
 
     try {
+      // V2 pipeline (feature-flagged)
+      if (config.features.orchestratorV2) {
+        const turnNonce = parsed.data.turn_nonce;
+        const v2Result = await handleTurnV2(turnRequest, req, requestId, turnNonce);
+
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: turnRequest.scenario_id,
+            elapsed_ms: Date.now() - startTime,
+            http_status: v2Result.httpStatus,
+            has_error: Boolean(v2Result.envelope.error),
+            pipeline: 'v2',
+          },
+          "Orchestrator V2 turn completed",
+        );
+
+        reply.code(v2Result.httpStatus);
+        return reply.send(v2Result.envelope);
+      }
+
+      // V1 pipeline (existing)
       const result = await handleTurn(turnRequest, req, requestId);
 
       log.info(
