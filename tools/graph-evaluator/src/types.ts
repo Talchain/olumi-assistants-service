@@ -103,7 +103,7 @@ export interface ModelPricing {
 export interface ModelConfig {
   id: string;
   display_name: string;
-  provider: "openai";
+  provider: "openai" | "anthropic";
   model: string;
   api_key_env: string;
   params: Record<string, unknown>;

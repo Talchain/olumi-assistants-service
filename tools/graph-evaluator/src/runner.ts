@@ -7,6 +7,7 @@
  */
 
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { extractJSON } from "./json-extractor.js";
 import type {
   ModelConfig,
@@ -228,6 +229,99 @@ async function callOpenAI(
 }
 
 // =============================================================================
+// Anthropic Messages API call
+// =============================================================================
+
+async function callAnthropic(
+  model: ModelConfig,
+  promptContent: string,
+  briefBody: string
+): Promise<LLMResponse> {
+  const apiKey = process.env[model.api_key_env];
+  if (!apiKey) {
+    throw new Error(
+      `API key not set. Expected environment variable: ${model.api_key_env}`
+    );
+  }
+
+  const client = new Anthropic({ apiKey });
+
+  const maxTokens = typeof model.params.max_tokens === "number"
+    ? model.params.max_tokens
+    : 8192;
+
+  const startTime = Date.now();
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(
+    () => controller.abort("timeout"),
+    DEFAULT_TIMEOUT_MS
+  );
+
+  try {
+    const response = await client.messages.create(
+      {
+        model: model.model,
+        max_tokens: maxTokens,
+        system: promptContent,
+        messages: [{ role: "user", content: briefBody }],
+      },
+      { signal: controller.signal }
+    );
+    clearTimeout(timeoutHandle);
+
+    const latencyMs = Date.now() - startTime;
+
+    const rawText =
+      response.content[0]?.type === "text" ? response.content[0].text : "";
+
+    const usage: TokenUsage = {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+    };
+
+    const { cost, source } = calculateCost(usage, model.pricing);
+
+    const extraction = extractJSON(rawText);
+
+    if (extraction.parsed === null) {
+      return {
+        model_id: model.id,
+        brief_id: "",
+        status: "parse_failed",
+        failure_code: "parse_failed",
+        raw_text: rawText,
+        extraction_attempted: extraction.extraction_attempted,
+        latency_ms: latencyMs,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        est_cost_usd: cost,
+        pricing_source: source,
+        error_message: "No extractable JSON found in response",
+      };
+    }
+
+    return {
+      model_id: model.id,
+      brief_id: "",
+      status: "success",
+      raw_text: rawText,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parsed_graph: extraction.parsed as any,
+      extraction_attempted: extraction.extraction_attempted,
+      latency_ms: latencyMs,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      est_cost_usd: cost,
+      pricing_source: source,
+    };
+  } catch (err) {
+    clearTimeout(timeoutHandle);
+    const latencyMs = Date.now() - startTime;
+    return classifyError(err, model.id, latencyMs, model.pricing);
+  }
+}
+
+// =============================================================================
 // Error classification
 // =============================================================================
 
@@ -366,7 +460,10 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
       // ── API call ──────────────────────────────────────────────────────────
       console.log(`  Running: ${model.id} × ${brief.id}...`);
 
-      const callFn = () => callOpenAI(model, promptContent, brief.body);
+      const callFn = () =>
+        model.provider === "anthropic"
+          ? callAnthropic(model, promptContent, brief.body)
+          : callOpenAI(model, promptContent, brief.body);
 
       let result = await withRetry(callFn);
 

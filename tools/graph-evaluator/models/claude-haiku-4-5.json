@@ -1,0 +1,16 @@
+{
+  "id": "claude-haiku-4-5",
+  "display_name": "Claude Haiku 4.5",
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5-20251001",
+  "api_key_env": "ANTHROPIC_API_KEY",
+  "params": {
+    "max_tokens": 8192
+  },
+  "target_mode": "fast",
+  "pricing": {
+    "input_per_1m": 1.00,
+    "output_per_1m": 5.00,
+    "source": "anthropic_api_docs_2026-03"
+  }
+}
