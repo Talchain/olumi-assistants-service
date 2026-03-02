@@ -139,6 +139,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Load user message reminder if present alongside prompts
+  let userMessageSuffix: string | undefined;
+  const reminderPath = join(TOOL_ROOT, "prompts", "user-message-reminder.txt");
+  try {
+    userMessageSuffix = (await readFile(reminderPath, "utf-8")).trim();
+    console.log(`Using user message reminder: ${reminderPath}`);
+  } catch {
+    // Reminder file is optional — silently skip if not found
+  }
+
   // ── Build run configuration ────────────────────────────────────────────────
   const runId = opts.runId ?? buildRunId(opts.prompt);
   const timestamp = new Date().toISOString();
@@ -225,6 +235,7 @@ async function main(): Promise<void> {
     force: opts.force,
     resume: opts.resume,
     dryRun: false,
+    userMessageSuffix,
     loadCached: async (modelId, briefId) =>
       loadResponse(resultsDir, runId, modelId, briefId),
     saveResult: async (modelId, briefId, result) =>

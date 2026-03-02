@@ -65,6 +65,8 @@ export interface RunInput {
   force: boolean;
   resume: boolean;
   dryRun: boolean;
+  /** Optional text appended to every brief's user message (separated by two newlines). */
+  userMessageSuffix?: string;
   /** Called after each response is received (for progress reporting). */
   onResult?: (result: LLMResponse) => void;
   /** Called to check if a cached response should be skipped. */
@@ -420,7 +422,7 @@ function sleep(ms: number): Promise<void> {
  * Does NOT write to disk directly — use the io.saveResult callback for that.
  */
 export async function run(input: RunInput): Promise<LLMResponse[]> {
-  const { models, briefs, promptContent, dryRun, onResult } = input;
+  const { models, briefs, promptContent, dryRun, onResult, userMessageSuffix } = input;
   const results: LLMResponse[] = [];
 
   for (const model of models) {
@@ -460,10 +462,14 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
       // ── API call ──────────────────────────────────────────────────────────
       console.log(`  Running: ${model.id} × ${brief.id}...`);
 
+      const briefBody = userMessageSuffix
+        ? `${brief.body}\n\n${userMessageSuffix}`
+        : brief.body;
+
       const callFn = () =>
         model.provider === "anthropic"
-          ? callAnthropic(model, promptContent, brief.body)
-          : callOpenAI(model, promptContent, brief.body);
+          ? callAnthropic(model, promptContent, briefBody)
+          : callOpenAI(model, promptContent, briefBody);
 
       let result = await withRetry(callFn);
 
