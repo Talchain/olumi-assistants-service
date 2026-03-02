@@ -24,7 +24,10 @@ export interface ClaimReference {
 
 /** Fields shared by every DSK object. */
 export interface DSKObjectBase {
-  /** Immutable, format: /^DSK-(B|T|TR)\d{3}$/ */
+  /**
+   * Immutable. Format: /^DSK-(B|T|F|G|P|TR)-\d{3}$/
+   * B=bias, T=technique, F=framework, G=group, P=protocol, TR=trigger
+   */
   id: string;
   type: "claim" | "protocol" | "trigger";
   /** Human-readable name, e.g. "Anchoring bias" */
@@ -32,18 +35,21 @@ export interface DSKObjectBase {
   evidence_strength: "strong" | "medium" | "weak" | "mixed";
   contraindications: string[];
   stage_applicability: DecisionStage[];
-  /** e.g. 'pricing', 'hiring', 'build_vs_buy' */
+  /** Validated against controlled vocabulary in data/dsk/context-tags.json */
   context_tags: string[];
   /** Semver, e.g. '1.0.0' */
   version: string;
   /** ISO 8601 date */
   last_reviewed_at: string;
-  /** At least one required */
+  /**
+   * At least one required. Ordered by evidential weight: meta-analyses first,
+   * then RCTs, then observational. Do NOT sort during canonicalisation.
+   */
   source_citations: Citation[];
   deprecated: boolean;
   deprecated_reason?: string;
-  /** Must reference a non-deprecated object of the same type */
-  replacement_id?: string;
+  /** Previous version ID — must reference a non-deprecated object of the same type */
+  supersedes?: string;
 }
 
 export interface DSKClaim extends DSKObjectBase {
@@ -74,9 +80,11 @@ export interface DSKClaim extends DSKObjectBase {
 
 export interface DSKProtocol extends DSKObjectBase {
   type: "protocol";
-  /** At least one required */
+  /** At least one required. Ordered — step sequence matters. Do NOT sort during canonicalisation. */
   steps: string[];
+  /** Ordered — do NOT sort during canonicalisation. */
   required_inputs: string[];
+  /** Ordered — do NOT sort during canonicalisation. */
   expected_outputs: string[];
 }
 
@@ -101,18 +109,6 @@ export interface DSKBundle {
   dsk_version_hash: string;
   objects: DSKObject[];
 }
-
-/** Controlled vocabulary for context_tags */
-export const CONTEXT_TAG_VOCABULARY = [
-  "pricing",
-  "hiring",
-  "build_vs_buy",
-  "market_entry",
-  "resource_allocation",
-  "general",
-] as const;
-
-export type ContextTag = (typeof CONTEXT_TAG_VOCABULARY)[number];
 
 /** Valid DecisionStage values */
 export const DECISION_STAGES: readonly DecisionStage[] = [
@@ -150,5 +146,8 @@ export const EFFECT_DIRECTIONS = [
 /** Valid DSK object type discriminants */
 export const DSK_OBJECT_TYPES = ["claim", "protocol", "trigger"] as const;
 
-/** Regex for valid DSK IDs */
-export const DSK_ID_REGEX = /^DSK-(B|T|TR)\d{3}$/;
+/**
+ * Regex for valid DSK IDs.
+ * B=bias, T=technique, F=framework, G=group, P=protocol, TR=trigger
+ */
+export const DSK_ID_REGEX = /^DSK-(B|T|F|G|P|TR)-\d{3}$/;

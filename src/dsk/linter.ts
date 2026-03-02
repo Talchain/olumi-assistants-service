@@ -14,7 +14,6 @@ import type {
 } from "./types.js";
 import {
   CLAIM_CATEGORIES,
-  CONTEXT_TAG_VOCABULARY,
   DECISION_STAGES,
   DSK_ID_REGEX,
   DSK_OBJECT_TYPES,
@@ -87,7 +86,6 @@ const ISO8601_RE =
 function isValidISO8601(v: string): boolean {
   if (!ISO8601_RE.test(v)) return false;
   // Calendar validity: reject impossible dates like 2025-02-31.
-  // Extract YYYY-MM-DD and verify Date round-trips correctly.
   const [yyyy, mm, dd] = v.slice(0, 10).split("-").map(Number) as [number, number, number];
   const d = new Date(Date.UTC(yyyy, mm - 1, dd));
   return (
@@ -144,6 +142,7 @@ function validateBase(
   diags: LintDiagnostic[],
   obj: DSKObject,
   idSet: Map<string, DSKObject>,
+  contextVocab: string[],
 ): void {
   const id = obj.id ?? "(missing)";
 
@@ -193,26 +192,26 @@ function validateBase(
     err(diags, id, "deprecated_reason", "Deprecated objects must have a deprecated_reason");
   }
 
-  // replacement_id
-  if (obj.replacement_id !== undefined && obj.replacement_id !== null) {
-    const target = idSet.get(obj.replacement_id);
+  // supersedes
+  if (obj.supersedes !== undefined && obj.supersedes !== null) {
+    const target = idSet.get(obj.supersedes);
     if (!target) {
-      err(diags, id, "replacement_id", `Replacement "${obj.replacement_id}" not found in bundle`);
+      err(diags, id, "supersedes", `Supersedes target "${obj.supersedes}" not found in bundle`);
     } else {
       if (target.type !== obj.type) {
         err(
           diags,
           id,
-          "replacement_id",
-          `Replacement "${obj.replacement_id}" is type "${target.type}" but this object is type "${obj.type}" — must be same type`,
+          "supersedes",
+          `Supersedes target "${obj.supersedes}" is type "${target.type}" but this object is type "${obj.type}" — must be same type`,
         );
       }
       if (target.deprecated) {
         err(
           diags,
           id,
-          "replacement_id",
-          `Replacement "${obj.replacement_id}" is itself deprecated`,
+          "supersedes",
+          `Supersedes target "${obj.supersedes}" is itself deprecated`,
         );
       }
     }
@@ -223,13 +222,21 @@ function validateBase(
     err(diags, id, "contraindications", "Must have at least one contraindication");
   }
 
-  // context_tags — required, non-empty, and vocabulary-checked
+  // context_tags — required, non-empty, vocabulary-checked, no duplicates
   if (!isNonEmptyArray(obj.context_tags)) {
     err(diags, id, "context_tags", "Must have at least one context tag");
   } else {
     for (const tag of obj.context_tags) {
-      if (!CONTEXT_TAG_VOCABULARY.includes(tag as (typeof CONTEXT_TAG_VOCABULARY)[number])) {
-        err(diags, id, "context_tags", `Invalid context tag: "${tag}" — must be one of: ${CONTEXT_TAG_VOCABULARY.join(", ")}`);
+      if (!contextVocab.includes(tag)) {
+        err(diags, id, "context_tags", `Invalid context tag: "${tag}" — must be one of: ${contextVocab.join(", ")}`);
+      }
+    }
+    // Duplicate check (sort a copy and look for consecutive equal elements)
+    const sorted = [...obj.context_tags].sort();
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === sorted[i - 1]) {
+        err(diags, id, "context_tags", `Duplicate context tag: "${sorted[i]}"`);
+        break; // report once per object
       }
     }
   }
@@ -253,7 +260,11 @@ function validateBase(
 // Claim validation
 // ---------------------------------------------------------------------------
 
-function validateClaim(diags: LintDiagnostic[], obj: DSKClaim): void {
+function validateClaim(
+  diags: LintDiagnostic[],
+  obj: DSKClaim,
+  contextVocab: string[],
+): void {
   const id = obj.id;
 
   // claim_category
@@ -270,9 +281,15 @@ function validateClaim(diags: LintDiagnostic[], obj: DSKClaim): void {
   if (!isNonEmptyArray(obj.scope.decision_contexts)) {
     err(diags, id, "scope.decision_contexts", "Must have at least one decision_context");
   } else {
-    for (const ctx of obj.scope.decision_contexts) {
-      if (!CONTEXT_TAG_VOCABULARY.includes(ctx as (typeof CONTEXT_TAG_VOCABULARY)[number])) {
-        err(diags, id, "scope.decision_contexts", `Invalid context: "${ctx}" — must be one of: ${CONTEXT_TAG_VOCABULARY.join(", ")}`);
+    // ['all'] is a special valid value — skip vocabulary check in that case
+    const isAll =
+      obj.scope.decision_contexts.length === 1 &&
+      obj.scope.decision_contexts[0] === "all";
+    if (!isAll) {
+      for (const ctx of obj.scope.decision_contexts) {
+        if (!contextVocab.includes(ctx)) {
+          err(diags, id, "scope.decision_contexts", `Invalid context: "${ctx}" — must be one of: ${contextVocab.join(", ")}`);
+        }
       }
     }
   }
@@ -300,20 +317,23 @@ function validateClaim(diags: LintDiagnostic[], obj: DSKClaim): void {
     );
   }
 
-  // permitted_phrasing_band consistency
-  const bandMap: Record<string, string> = {
-    strong: "strong",
-    medium: "medium",
-    weak: "weak",
-    mixed: "weak",
+  // permitted_phrasing_band directional validation
+  // strong evidence → strong or medium phrasing OK (conservative is allowed)
+  // medium evidence → medium or weak phrasing OK
+  // weak/mixed evidence → weak phrasing only
+  const maxAllowedBand: Record<string, string[]> = {
+    strong: ["strong", "medium"],
+    medium: ["medium", "weak"],
+    weak: ["weak"],
+    mixed: ["weak"],
   };
-  const expectedBand = bandMap[obj.evidence_strength];
-  if (expectedBand && obj.permitted_phrasing_band !== expectedBand) {
+  const allowed = maxAllowedBand[obj.evidence_strength];
+  if (allowed && !allowed.includes(obj.permitted_phrasing_band)) {
     err(
       diags,
       id,
       "permitted_phrasing_band",
-      `Inconsistent: evidence_strength="${obj.evidence_strength}" requires permitted_phrasing_band="${expectedBand}" but got "${obj.permitted_phrasing_band}"`,
+      `Phrasing band "${obj.permitted_phrasing_band}" exceeds evidence strength "${obj.evidence_strength}" — permitted: ${allowed.join(", ")}`,
     );
   }
 
@@ -430,53 +450,46 @@ function validateTrigger(
 }
 
 // ---------------------------------------------------------------------------
-// Circular replacement chain detection
+// Circular supersedes chain detection
 // ---------------------------------------------------------------------------
 
-function detectCircularReplacements(
+function detectCircularSupersedes(
   diags: LintDiagnostic[],
   objects: DSKObject[],
 ): void {
-  const replacementMap = new Map<string, string>();
+  const supersedesMap = new Map<string, string>();
   for (const obj of objects) {
-    if (obj.replacement_id) {
-      replacementMap.set(obj.id, obj.replacement_id);
+    if (obj.supersedes) {
+      supersedesMap.set(obj.id, obj.supersedes);
     }
   }
 
-  // Track nodes already reported as part of a cycle to avoid duplicates.
-  // When a walk reaches a node in `reported`, it means we've already
-  // reported that cycle from a different start — stop silently.
   const reported = new Set<string>();
 
-  for (const startId of replacementMap.keys()) {
+  for (const startId of supersedesMap.keys()) {
     if (reported.has(startId)) continue;
 
     const visited = new Set<string>();
     let current: string | undefined = startId;
     let hitReported = false;
-    while (current && replacementMap.has(current)) {
+    while (current && supersedesMap.has(current)) {
       if (reported.has(current)) {
-        // This node's cycle was already reported — stop without emitting.
         hitReported = true;
         break;
       }
       if (visited.has(current)) {
-        // Mark all cycle members as reported so we emit one diagnostic per cycle.
         for (const node of visited) reported.add(node);
         err(
           diags,
           startId,
-          "replacement_id",
-          `Circular replacement chain detected: ${[...visited, current].join(" → ")}`,
+          "supersedes",
+          `Circular supersedes chain detected: ${[...visited, current].join(" → ")}`,
         );
         break;
       }
       visited.add(current);
-      current = replacementMap.get(current);
+      current = supersedesMap.get(current);
     }
-    // If we hit a previously-reported cycle, mark feeder nodes too
-    // so other feeders into the same cycle are also silenced.
     if (hitReported) {
       for (const node of visited) reported.add(node);
     }
@@ -545,7 +558,14 @@ function sortDiagnostics(diags: LintDiagnostic[]): LintDiagnostic[] {
 // Public API
 // ---------------------------------------------------------------------------
 
-export function lintBundle(bundle: DSKBundle): LintResult {
+/**
+ * Lint a DSK bundle.
+ *
+ * @param bundle - The bundle to validate.
+ * @param contextVocab - The controlled vocabulary for context_tags, loaded
+ *   from data/dsk/context-tags.json (or custom path via --context-tags).
+ */
+export function lintBundle(bundle: DSKBundle, contextVocab: string[]): LintResult {
   const errors: LintDiagnostic[] = [];
   const warnings: LintDiagnostic[] = [];
 
@@ -588,11 +608,11 @@ export function lintBundle(bundle: DSKBundle): LintResult {
 
   // Validate each object
   for (const obj of bundle.objects) {
-    validateBase(errors, obj, idSet);
+    validateBase(errors, obj, idSet, contextVocab);
 
     switch (obj.type) {
       case "claim":
-        validateClaim(errors, obj as DSKClaim);
+        validateClaim(errors, obj as DSKClaim, contextVocab);
         break;
       case "protocol":
         validateProtocol(errors, obj as DSKProtocol);
@@ -604,7 +624,7 @@ export function lintBundle(bundle: DSKBundle): LintResult {
   }
 
   // Cross-bundle checks
-  detectCircularReplacements(errors, bundle.objects);
+  detectCircularSupersedes(errors, bundle.objects);
   checkHash(errors, bundle);
 
   // Ordering check (warning, not error)
