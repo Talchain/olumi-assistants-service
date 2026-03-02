@@ -11,7 +11,7 @@
 
 import { config as loadDotenv } from "dotenv";
 import { Command } from "commander";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 
@@ -76,6 +76,7 @@ async function main(): Promise<void> {
     )
     .option("--dry-run", "List combinations without calling APIs", false)
     .option("--run-id <id>", "Resume a specific run ID instead of generating a new one")
+    .option("--repeats <n>", "Number of times to repeat the full suite (saved in separate run directories)", "1")
     .parse(process.argv);
 
   const opts = program.opts<{
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
     resume: boolean;
     dryRun: boolean;
     runId?: string;
+    repeats: string;
   }>();
 
   // ── Resolve paths ──────────────────────────────────────────────────────────
@@ -139,43 +141,25 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // ── Build run configuration ────────────────────────────────────────────────
-  const runId = opts.runId ?? buildRunId(opts.prompt);
-  const timestamp = new Date().toISOString();
-  const promptHash = hashContent(promptContent);
-  const promptFilename = opts.prompt.split(/[/\\]/).pop() ?? opts.prompt;
-
-  const config: RunConfig = {
-    run_id: runId,
-    timestamp,
-    prompt_file: opts.prompt,
-    prompt_content: promptContent,
-    model_ids: models.map((m) => m.id),
-    brief_ids: briefs.map((b) => b.id),
-    force: opts.force,
-    resume: opts.resume,
-    dry_run: opts.dryRun,
-    results_dir: resultsDir,
-  };
-
-  // ── Dry run: list combinations and exit ───────────────────────────────────
-  if (opts.dryRun) {
-    console.log(`\n[Dry Run] Would execute ${models.length * briefs.length} combination(s):\n`);
-    for (const model of models) {
-      for (const brief of briefs) {
-        console.log(`  ${model.id.padEnd(20)} × ${brief.id} [${brief.meta.complexity}]`);
-      }
-    }
-    console.log(`\nPrompt: ${opts.prompt} (${promptHash})`);
-    console.log(`Run ID would be: ${runId}`);
-    return;
+  // ── Load optional user-message reminder ───────────────────────────────────
+  const promptDir = dirname(promptPath);
+  const reminderPath = join(promptDir, "user-message-reminder.txt");
+  let reminderContent: string | undefined;
+  try {
+    reminderContent = await readFile(reminderPath, "utf-8");
+    console.log(`Reminder file loaded: ${reminderPath}`);
+  } catch {
+    // Reminder file is optional — silently skip if absent
   }
 
-  // ── Create results directory ───────────────────────────────────────────────
-  await ensureDir(join(resultsDir, runId));
+  // ── Parse repeats ─────────────────────────────────────────────────────────
+  const totalRepeats = Math.max(1, parseInt(opts.repeats, 10) || 1);
 
-  // ── Write run manifest ─────────────────────────────────────────────────────
+  // ── Derived prompt metadata (shared across repeats) ───────────────────────
+  const promptHash = hashContent(promptContent);
+  const promptFilename = basename(opts.prompt, extname(opts.prompt) === "" ? "" : extname(opts.prompt));
   const gitSha = getGitSha();
+
   const modelHashes: Record<string, { config_hash: string }> = {};
   for (const model of models) {
     try {
@@ -196,95 +180,140 @@ async function main(): Promise<void> {
     }
   }
 
-  const manifest: RunManifest = {
-    run_id: runId,
-    timestamp,
-    git_sha: gitSha,
-    tool_version: TOOL_VERSION,
-    cli_args: process.argv.slice(2),
-    prompt: { filename: promptFilename, content_hash: promptHash },
-    models: modelHashes,
-    briefs: briefHashes,
-  };
+  // ── Build base run ID ─────────────────────────────────────────────────────
+  const baseRunId = opts.runId ?? buildRunId(opts.prompt);
 
-  await saveManifest(resultsDir, runId, manifest);
-
-  // ── Run LLM calls ──────────────────────────────────────────────────────────
-  console.log(`\nStarting run: ${runId}`);
-  console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
-  console.log(`Briefs: ${briefs.map((b) => b.id).join(", ")}`);
-  console.log();
-
-  const responses = await run({
-    models,
-    briefs,
-    promptContent,
-    promptFile: opts.prompt,
-    runId,
-    resultsDir,
-    force: opts.force,
-    resume: opts.resume,
-    dryRun: false,
-    loadCached: async (modelId, briefId) =>
-      loadResponse(resultsDir, runId, modelId, briefId),
-    saveResult: async (modelId, briefId, result) =>
-      saveResponse(resultsDir, runId, modelId, briefId, result),
-  });
-
-  if (responses.length === 0) {
-    console.log("No responses to score. Run complete.");
+  // ── Dry run: list combinations and exit ───────────────────────────────────
+  if (opts.dryRun) {
+    const promptHashShort = promptHash.slice(0, 16);
+    console.log(`\n[Dry Run] Would execute ${models.length * briefs.length} combination(s) × ${totalRepeats} repeat(s):\n`);
+    for (const model of models) {
+      for (const brief of briefs) {
+        console.log(`  ${model.id.padEnd(20)} × ${brief.id} [${brief.meta.complexity}]`);
+      }
+    }
+    console.log(`\nPrompt: ${opts.prompt} (${promptHashShort})`);
+    if (reminderContent) console.log(`Reminder: ${reminderPath}`);
+    console.log(`Base run ID: ${baseRunId}`);
     return;
   }
 
-  // ── Score all responses ────────────────────────────────────────────────────
-  console.log("\nScoring results...");
+  // ── Repeat loop ───────────────────────────────────────────────────────────
+  for (let repeatIdx = 1; repeatIdx <= totalRepeats; repeatIdx++) {
+    const runId = totalRepeats > 1 ? `${baseRunId}-run${repeatIdx}` : baseRunId;
+    const timestamp = new Date().toISOString();
 
-  const scored: ScoredResult[] = responses.map((response) => {
-    const brief = briefs.find((b) => b.id === response.brief_id)!;
-    const model = models.find((m) => m.id === response.model_id)!;
-    return {
-      response,
-      score: score(response, brief),
-      brief,
-      model,
+    console.log(`\n${"═".repeat(60)}`);
+    if (totalRepeats > 1) console.log(`Repeat ${repeatIdx} of ${totalRepeats}`);
+
+    // ── Create results directory ─────────────────────────────────────────────
+    await ensureDir(join(resultsDir, runId));
+
+    // ── Write run manifest ───────────────────────────────────────────────────
+    const manifest: RunManifest = {
+      run_id: runId,
+      timestamp,
+      git_sha: gitSha,
+      tool_version: TOOL_VERSION,
+      cli_args: process.argv.slice(2),
+      prompt: { filename: promptFilename, content_hash: promptHash },
+      models: modelHashes,
+      briefs: briefHashes,
     };
-  });
 
-  // ── Generate reports ───────────────────────────────────────────────────────
-  console.log("Generating reports...");
+    await saveManifest(resultsDir, runId, manifest);
 
-  const reports = generate({
-    results: scored,
-    config,
-    models,
-    briefs,
-    promptHash,
-  });
+    const config: RunConfig = {
+      run_id: runId,
+      timestamp,
+      prompt_file: opts.prompt,
+      prompt_content: promptContent,
+      model_ids: models.map((m) => m.id),
+      brief_ids: briefs.map((b) => b.id),
+      force: opts.force,
+      resume: opts.resume,
+      dry_run: false,
+      results_dir: resultsDir,
+    };
 
-  await saveReports(resultsDir, runId, reports);
+    // ── Run LLM calls ────────────────────────────────────────────────────────
+    console.log(`Starting run: ${runId}`);
+    console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
+    console.log(`Briefs: ${briefs.map((b) => b.id).join(", ")}`);
+    console.log();
 
-  // ── Print summary ──────────────────────────────────────────────────────────
-  const successCount = scored.filter((r) => r.score.overall_score != null).length;
-  const failCount = scored.filter((r) => r.response.failure_code).length;
-  const invalidCount = scored.filter(
-    (r) => !r.score.structural_valid && !r.response.failure_code
-  ).length;
+    const responses = await run({
+      models,
+      briefs,
+      promptContent,
+      promptFile: opts.prompt,
+      runId,
+      resultsDir,
+      force: opts.force,
+      resume: opts.resume,
+      dryRun: false,
+      reminderContent,
+      loadCached: async (modelId, briefId) =>
+        loadResponse(resultsDir, runId, modelId, briefId),
+      saveResult: async (modelId, briefId, result) =>
+        saveResponse(resultsDir, runId, modelId, briefId, result),
+    });
 
-  console.log(`\n✓ Run complete: ${runId}`);
-  console.log(`  ${successCount} scored | ${invalidCount} invalid | ${failCount} failed`);
-  console.log(`  Results: ${join(resultsDir, runId)}`);
+    if (responses.length === 0) {
+      console.log("No responses to score. Run complete.");
+      continue;
+    }
 
-  const topResults = scored
-    .filter((r) => r.score.overall_score != null)
-    .sort((a, b) => (b.score.overall_score ?? 0) - (a.score.overall_score ?? 0))
-    .slice(0, 3);
+    // ── Score all responses ──────────────────────────────────────────────────
+    console.log("\nScoring results...");
 
-  if (topResults.length > 0) {
-    console.log("\nTop results:");
-    for (const r of topResults) {
-      console.log(
-        `  ${r.model.id.padEnd(20)} × ${r.brief.id.padEnd(30)} — overall: ${r.score.overall_score!.toFixed(3)}`
-      );
+    const scored: ScoredResult[] = responses.map((response) => {
+      const brief = briefs.find((b) => b.id === response.brief_id)!;
+      const model = models.find((m) => m.id === response.model_id)!;
+      return {
+        response,
+        score: score(response, brief),
+        brief,
+        model,
+      };
+    });
+
+    // ── Generate reports ─────────────────────────────────────────────────────
+    console.log("Generating reports...");
+
+    const reports = generate({
+      results: scored,
+      config,
+      models,
+      briefs,
+      promptHash,
+    });
+
+    await saveReports(resultsDir, runId, reports);
+
+    // ── Print summary ────────────────────────────────────────────────────────
+    const successCount = scored.filter((r) => r.score.overall_score != null).length;
+    const failCount = scored.filter((r) => r.response.failure_code).length;
+    const invalidCount = scored.filter(
+      (r) => !r.score.structural_valid && !r.response.failure_code
+    ).length;
+
+    console.log(`\n✓ Run complete: ${runId}`);
+    console.log(`  ${successCount} scored | ${invalidCount} invalid | ${failCount} failed`);
+    console.log(`  Results: ${join(resultsDir, runId)}`);
+
+    const topResults = scored
+      .filter((r) => r.score.overall_score != null)
+      .sort((a, b) => (b.score.overall_score ?? 0) - (a.score.overall_score ?? 0))
+      .slice(0, 3);
+
+    if (topResults.length > 0) {
+      console.log("\nTop results:");
+      for (const r of topResults) {
+        console.log(
+          `  ${r.model.id.padEnd(20)} × ${r.brief.id.padEnd(30)} — overall: ${r.score.overall_score!.toFixed(3)}`
+        );
+      }
     }
   }
 }

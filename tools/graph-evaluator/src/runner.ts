@@ -64,6 +64,8 @@ export interface RunInput {
   force: boolean;
   resume: boolean;
   dryRun: boolean;
+  /** Optional text appended to each brief body (separated by two newlines). */
+  reminderContent?: string;
   /** Called after each response is received (for progress reporting). */
   onResult?: (result: LLMResponse) => void;
   /** Called to check if a cached response should be skipped. */
@@ -326,7 +328,7 @@ function sleep(ms: number): Promise<void> {
  * Does NOT write to disk directly — use the io.saveResult callback for that.
  */
 export async function run(input: RunInput): Promise<LLMResponse[]> {
-  const { models, briefs, promptContent, dryRun, onResult } = input;
+  const { models, briefs, promptContent, dryRun, onResult, reminderContent } = input;
   const results: LLMResponse[] = [];
 
   for (const model of models) {
@@ -366,7 +368,10 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
       // ── API call ──────────────────────────────────────────────────────────
       console.log(`  Running: ${model.id} × ${brief.id}...`);
 
-      const callFn = () => callOpenAI(model, promptContent, brief.body);
+      const userMessage = reminderContent
+        ? `${brief.body}\n\n${reminderContent}`
+        : brief.body;
+      const callFn = () => callOpenAI(model, promptContent, userMessage);
 
       let result = await withRetry(callFn);
 
