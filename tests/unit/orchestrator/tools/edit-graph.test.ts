@@ -1098,4 +1098,19 @@ describe("handleEditGraph", () => {
     const addOp = data.operations.find(o => o.op === "add_node");
     expect(addOp!.old_value).toBeUndefined();
   });
+
+  it("sets auto_apply: false on targeted edit GraphPatchBlock", async () => {
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Rename factor",
+      adapter,
+      "req-1",
+      "turn-auto-apply",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.auto_apply).toBe(false);
+  });
 });

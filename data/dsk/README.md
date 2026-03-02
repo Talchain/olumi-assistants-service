@@ -39,9 +39,11 @@ pnpm dsk:hash
 - **Protocols** (`type: "protocol"`) — structured step-by-step techniques (pre-mortem, disconfirmation, etc.).
 - **Triggers** (`type: "trigger"`) — signals in the conversation that indicate a specific bias or decision pattern is active.
 
-## ID scheme
+## Schema contract
 
-All IDs follow the format `DSK-{prefix}-{NNN}` where prefix is one of:
+### ID format
+
+All IDs follow the pattern `DSK-(B|T|F|G|P|TR)-\d{3}` — hyphen separator, three-digit zero-padded sequence number, six recognised prefixes. No other format is accepted. No prior format (e.g. without hyphens, with different prefixes) was ever in production.
 
 | Prefix | Category |
 |--------|----------|
@@ -53,6 +55,33 @@ All IDs follow the format `DSK-{prefix}-{NNN}` where prefix is one of:
 | `TR` | Triggers |
 
 Example: `DSK-B-001` (Anchoring bias), `DSK-P-001` (Pre-mortem protocol), `DSK-TR-001` (Binary framing trigger).
+
+### `supersedes` field
+
+References the ID of the object this one replaces. Three linter-enforced rules:
+
+1. **Same type** — prefix of `supersedes` target must match the superseding object's prefix.
+2. **Target must exist** — the referenced ID must be present in the bundle.
+3. **No circular chains** — A → B → A is rejected at lint time.
+
+### Context vocabulary
+
+`scope.decision_contexts` is validated against `data/dsk/context-tags.json` at lint time. To add a tag: edit `context-tags.json` and re-run `pnpm dsk:lint`. No code change required.
+
+`['all']` is accepted as a special bypass value, meaning the object applies to all contexts regardless of vocabulary.
+
+### Phrasing band
+
+`permitted_phrasing_band` is directional — it may not exceed the object's `evidence_strength`:
+
+| `evidence_strength` | Permitted `permitted_phrasing_band` values |
+|---------------------|---------------------------------------------|
+| `strong` | `strong`, `medium` |
+| `medium` | `medium`, `weak` |
+| `weak` | `weak` |
+| `mixed` | `weak` |
+
+Conservative phrasing (weaker than evidence) is always allowed. Strong phrasing with weak evidence is a lint error.
 
 ---
 

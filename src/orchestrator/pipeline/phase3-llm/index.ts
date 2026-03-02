@@ -98,14 +98,19 @@ export async function phase3Generate(
   // 2. LLM routing — full tool-calling flow
   const systemPrompt = await assembleV2SystemPrompt(enrichedContext);
   const context = buildConversationContext(enrichedContext);
-  const messages = assembleMessages(context, userMessage);
+
+  // Filter [system] sentinel: when a system_event is present, replace with event context.
+  // The '[system]' sentinel is sent by UI as a placeholder — it must never reach the LLM.
+  const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
+
+  const messages = assembleMessages(context, effectiveUserMessage);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());
 
   if (!llmClient.chatWithTools) {
     // Fallback: plain chat if adapter doesn't support tools
     log.warn({ request_id: requestId }, "V2 pipeline: LLM client does not support chatWithTools");
     const chatResult = await llmClient.chat(
-      { system: systemPrompt, userMessage },
+      { system: systemPrompt, userMessage: effectiveUserMessage },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
     );
 
@@ -139,14 +144,49 @@ export async function phase3Generate(
 
 /**
  * Build ConversationContext from EnrichedContext for reuse with existing modules.
+ *
+ * Filters '[system]' sentinel messages from conversation_history — these are
+ * UI placeholders that must never be forwarded to the LLM.
  */
 function buildConversationContext(enriched: EnrichedContext): ConversationContext {
+  const filteredHistory = enriched.conversation_history.filter(
+    (msg) => msg.content !== SYSTEM_EVENT_SENTINEL,
+  );
+
   return {
     graph: enriched.graph,
     analysis_response: enriched.analysis,
     framing: enriched.framing,
-    messages: enriched.conversation_history,
+    messages: filteredHistory,
     selected_elements: enriched.selected_elements,
     scenario_id: enriched.scenario_id,
   };
+}
+
+/** Sentinel value sent by UI when a system event occurs. Must never reach the LLM. */
+export const SYSTEM_EVENT_SENTINEL = '[system]';
+
+/**
+ * Resolve the effective user message for the LLM.
+ *
+ * When a system_event is present, the UI sends '[system]' as the message placeholder.
+ * This sentinel must never be forwarded to the LLM. Instead, we send a formatted
+ * description of the system event so the LLM can respond contextually.
+ *
+ * When no system_event is present, the original user message is returned unchanged.
+ */
+function buildEffectiveUserMessage(enriched: EnrichedContext, rawMessage: string): string {
+  const systemEvent = enriched.system_event;
+
+  if (!systemEvent) {
+    return rawMessage;
+  }
+
+  // System event present — discard any '[system]' sentinel (and any user text)
+  // and replace with a structured event description for the LLM
+  const payloadSummary = Object.keys(systemEvent.payload).length > 0
+    ? ` Payload: ${JSON.stringify(systemEvent.payload)}`
+    : '';
+
+  return `[System event: ${systemEvent.type}${payloadSummary}]`;
 }

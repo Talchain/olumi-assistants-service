@@ -34,6 +34,12 @@ export interface ToolDispatchResult {
 export interface ToolDispatchOpts {
   plotOpts?: PLoTClientRunOpts;
   request?: FastifyRequest;
+  /**
+   * User's intent classification from Phase 1.
+   * When run_analysis is dispatched and intent is 'explain' or 'recommend',
+   * explain_results is automatically chained after run_analysis completes.
+   */
+  intentClassification?: string;
 }
 
 // ============================================================================
@@ -88,9 +94,34 @@ export async function dispatchToolHandler(
         });
       }
       const result = await handleRunAnalysis(context, client, requestId, turnId, opts?.plotOpts);
+
+      const blocks = [...result.blocks];
+      let assistantText: string | null = null;
+
+      // Auto-chain explain_results when intent is 'explain' or 'recommend' (not pure 'act')
+      const intent = opts?.intentClassification;
+      if (intent === 'explain' || intent === 'recommend') {
+        const explainContext: ConversationContext = {
+          ...context,
+          analysis_response: result.analysisResponse,
+        };
+        const adapter = getAdapter('orchestrator');
+        try {
+          const explainResult = await handleExplainResults(
+            explainContext,
+            adapter,
+            requestId,
+            turnId,
+          );
+          blocks.push(...explainResult.blocks);
+        } catch {
+          // Non-fatal: if explanation fails, still return analysis results
+        }
+      }
+
       return {
-        blocks: result.blocks,
-        assistantText: null,
+        blocks,
+        assistantText,
         analysisResponse: result.analysisResponse,
         toolLatencyMs: result.latencyMs,
       };

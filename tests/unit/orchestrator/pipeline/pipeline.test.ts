@@ -139,4 +139,33 @@ describe("pipeline", () => {
     expect(envelope.stage_indicator.stage).toBe("frame");
     expect(envelope.stage_indicator.confidence).toBe("high");
   });
+
+  it("feedback_submitted returns silent empty envelope without calling LLM", async () => {
+    const deps = makeMockDeps();
+    const request = makeRequest({
+      system_event: { type: "feedback_submitted", payload: { rating: 5 } },
+    });
+
+    const envelope = await executePipeline(request, "req-1", deps);
+
+    // Must return silently — no assistant text, no blocks, no suggested actions
+    expect(envelope.assistant_text).toBeNull();
+    expect(envelope.blocks).toEqual([]);
+    expect(envelope.suggested_actions).toEqual([]);
+    // No error
+    expect(envelope.error).toBeUndefined();
+    // LLM must not have been called
+    expect(deps.llmClient.chatWithTools).not.toHaveBeenCalled();
+    expect(deps.llmClient.chat).not.toHaveBeenCalled();
+    // Tool dispatcher must not have been called
+    expect(deps.toolDispatcher.dispatch).not.toHaveBeenCalled();
+    // turn_plan reflects deterministic routing with no tool
+    expect(envelope.turn_plan.selected_tool).toBeNull();
+    expect(envelope.turn_plan.routing).toBe("deterministic");
+    // Standard envelope fields must still be present
+    expect(envelope.turn_id).toBeDefined();
+    expect(envelope.lineage.context_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(envelope.science_ledger).toBeDefined();
+    expect(envelope.progress_marker.kind).toBe("none");
+  });
 });

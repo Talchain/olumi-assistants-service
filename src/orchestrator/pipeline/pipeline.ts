@@ -16,7 +16,7 @@ import { phase2Route } from "./phase2-specialists/index.js";
 import { phase3Generate } from "./phase3-llm/index.js";
 import { phase4Execute } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
-import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
+import { buildErrorEnvelope, computeContextHash } from "./phase5-validation/envelope-assembler.js";
 
 /**
  * Execute the five-phase pipeline.
@@ -44,6 +44,15 @@ export async function executePipeline(
       request.scenario_id,
       request.system_event,
     );
+
+    // Early exit: feedback_submitted requires no LLM response (system prompt: "Do not respond.")
+    if (request.system_event?.type === 'feedback_submitted') {
+      log.info(
+        { request_id: requestId, turn_id: enrichedContext.turn_id },
+        'V2 pipeline: feedback_submitted — returning empty envelope',
+      );
+      return buildFeedbackAckEnvelope(enrichedContext);
+    }
 
     // Phase 2: Specialist Routing (stub)
     const specialistResult = phase2Route();
@@ -90,4 +99,63 @@ export async function executePipeline(
       enrichedContext,
     );
   }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+import type { EnrichedContext } from "./types.js";
+
+/**
+ * Build a silent acknowledgement envelope for feedback_submitted events.
+ *
+ * System prompt contract: "feedback_submitted → Do not respond."
+ * Returns a minimal envelope: null assistant_text, empty blocks, empty actions.
+ * No LLM call is made.
+ */
+function buildFeedbackAckEnvelope(enrichedContext: EnrichedContext): OrchestratorResponseEnvelopeV2 {
+  return {
+    turn_id: enrichedContext.turn_id,
+    assistant_text: null,
+    blocks: [],
+    suggested_actions: [],
+
+    lineage: {
+      context_hash: computeContextHash(enrichedContext),
+      dsk_version_hash: enrichedContext.dsk.version_hash,
+    },
+
+    stage_indicator: {
+      stage: enrichedContext.stage_indicator.stage,
+      confidence: enrichedContext.stage_indicator.confidence,
+      source: enrichedContext.stage_indicator.source,
+    },
+
+    science_ledger: {
+      claims_used: [],
+      techniques_used: [],
+      scope_violations: [],
+      phrasing_violations: [],
+      rewrite_applied: false,
+    },
+
+    progress_marker: {
+      kind: 'none',
+    },
+
+    observability: {
+      triggers_fired: [],
+      triggers_suppressed: [],
+      intent_classification: enrichedContext.intent_classification,
+      specialist_contributions: [],
+      specialist_disagreement: null,
+    },
+
+    turn_plan: {
+      selected_tool: null,
+      routing: 'deterministic',
+      long_running: false,
+    },
+  };
 }

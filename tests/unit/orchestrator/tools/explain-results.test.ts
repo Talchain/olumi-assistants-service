@@ -1,9 +1,39 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   stripUngroundedNumerics,
   detectConstraintTension,
+  handleExplainResults,
 } from "../../../../src/orchestrator/tools/explain-results.js";
-import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import type { V2RunResponseEnvelope, ConversationContext } from "../../../../src/orchestrator/types.js";
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeAnalysisResponse(overrides?: Partial<V2RunResponseEnvelope>): V2RunResponseEnvelope {
+  return {
+    meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
+    results: [{ option_label: "Option A", win_probability: 0.65 }],
+    ...overrides,
+  };
+}
+
+function makeContext(overrides?: Partial<ConversationContext>): ConversationContext {
+  return {
+    graph: null,
+    analysis_response: makeAnalysisResponse(),
+    framing: null,
+    messages: [],
+    scenario_id: "test-scenario",
+    ...overrides,
+  };
+}
+
+function makeAdapter(response = "Option A leads due to high elasticity.") {
+  return {
+    chat: vi.fn().mockResolvedValue({ content: response }),
+  };
+}
 
 describe("explain_results — numeric freehand stripping", () => {
   it("strips integers", () => {
@@ -110,5 +140,98 @@ describe("explain_results — constraint tension detection", () => {
     } as unknown as V2RunResponseEnvelope;
 
     expect(detectConstraintTension(response)).toBeNull();
+  });
+});
+
+// ============================================================================
+// Tests: handleExplainResults handler
+// ============================================================================
+
+describe("handleExplainResults handler", () => {
+  it("throws TOOL_EXECUTION_FAILED when analysis_response is null", async () => {
+    const context = makeContext({ analysis_response: null });
+    const adapter = makeAdapter();
+
+    await expect(
+      handleExplainResults(context, adapter as never, "req-1", "turn-1"),
+    ).rejects.toThrow("No analysis results to explain");
+  });
+
+  it("throws with orchestratorError.code TOOL_EXECUTION_FAILED when no analysis", async () => {
+    const context = makeContext({ analysis_response: null });
+    const adapter = makeAdapter();
+
+    try {
+      await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+    } catch (error) {
+      expect((error as { orchestratorError: { code: string } }).orchestratorError?.code)
+        .toBe("TOOL_EXECUTION_FAILED");
+    }
+  });
+
+  it("returns a commentary block on success", async () => {
+    const context = makeContext();
+    const adapter = makeAdapter("Option A is the clear winner.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+    expect(result.assistantText).toBeNull();
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("passes the user message with focus to the adapter", async () => {
+    const context = makeContext();
+    const adapter = makeAdapter("Sensitivity analysis shows...");
+
+    await handleExplainResults(context, adapter as never, "req-1", "turn-1", "sensitivity");
+
+    const calls = adapter.chat.mock.calls;
+    expect(calls).toHaveLength(1);
+    const userMsg = calls[0][0].userMessage as string;
+    expect(userMsg).toContain("sensitivity");
+  });
+
+  it("passes plain explain message when no focus", async () => {
+    const context = makeContext();
+    const adapter = makeAdapter("Here are the results.");
+
+    await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    const userMsg = adapter.chat.mock.calls[0][0].userMessage as string;
+    expect(userMsg).toContain("Explain the analysis results");
+    expect(userMsg).not.toContain("focusing on");
+  });
+
+  it("strips ungrounded numerics from LLM output", async () => {
+    const context = makeContext();
+    // Response contains a freehand numeric that should be stripped
+    const adapter = makeAdapter("Option A wins with 87% probability.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    const block = result.blocks[0];
+    const narrative = (block.data as { narrative: string }).narrative;
+    // 87% should be replaced with [value]
+    expect(narrative).not.toContain("87%");
+    expect(narrative).toContain("[value]");
+  });
+
+  it("propagates LLM errors with TOOL_EXECUTION_FAILED orchestratorError", async () => {
+    const context = makeContext();
+    const adapter = {
+      chat: vi.fn().mockRejectedValue(new Error("LLM timeout")),
+    };
+
+    try {
+      await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+      expect.fail("should have thrown");
+    } catch (error) {
+      const oe = (error as { orchestratorError?: { code: string; message: string } }).orchestratorError;
+      expect(oe?.code).toBe("TOOL_EXECUTION_FAILED");
+      expect(oe?.message).toContain("Failed to generate explanation");
+      expect(oe?.message).toContain("LLM timeout");
+    }
   });
 });

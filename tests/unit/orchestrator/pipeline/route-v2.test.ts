@@ -218,4 +218,43 @@ describe("route-v2", () => {
     expect(result.envelope.error).toBeDefined();
     expect(result.envelope.error!.code).toBe("PIPELINE_ERROR");
   });
+
+  it("feedback_submitted passes through route and returns silent envelope", async () => {
+    // The pipeline early-exit returns a null-text, empty-blocks envelope for feedback_submitted.
+    // This test asserts the route wires the request to executePipeline unchanged and
+    // surfaces the silent envelope correctly (200, no assistant_text, no blocks).
+    const silentEnvelope = {
+      turn_id: "fb-turn",
+      assistant_text: null,
+      blocks: [],
+      suggested_actions: [],
+      lineage: { context_hash: "fb-hash", dsk_version_hash: null },
+      stage_indicator: { stage: "frame" as const, confidence: "high" as const, source: "inferred" as const },
+      science_ledger: { claims_used: [], techniques_used: [], scope_violations: [], phrasing_violations: [], rewrite_applied: false },
+      progress_marker: { kind: "none" as const },
+      observability: { triggers_fired: [], triggers_suppressed: [], intent_classification: "conversational", specialist_contributions: [], specialist_disagreement: null },
+      turn_plan: { selected_tool: null, routing: "deterministic" as const, long_running: false },
+    };
+
+    const { executePipeline } = await import("../../../../src/orchestrator/pipeline/pipeline.js");
+    (executePipeline as ReturnType<typeof vi.fn>).mockResolvedValueOnce(silentEnvelope);
+
+    const request = makeRequest({
+      system_event: { type: "feedback_submitted", payload: { rating: 4 } },
+    });
+
+    const result = await handleTurnV2(request, mockFastifyRequest, "req-fb");
+
+    // Route must return 200 — feedback_submitted is not an error
+    expect(result.httpStatus).toBe(200);
+    // Silent envelope propagated unchanged
+    expect(result.envelope.assistant_text).toBeNull();
+    expect(result.envelope.blocks).toEqual([]);
+    expect(result.envelope.suggested_actions).toEqual([]);
+    expect(result.envelope.error).toBeUndefined();
+    expect(result.envelope.turn_plan.routing).toBe("deterministic");
+    // executePipeline was called with the system_event present in the request
+    const callArg = (executePipeline as ReturnType<typeof vi.fn>).mock.calls[0][0] as typeof request;
+    expect(callArg.system_event?.type).toBe("feedback_submitted");
+  });
 });

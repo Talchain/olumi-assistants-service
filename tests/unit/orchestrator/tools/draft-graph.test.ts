@@ -215,4 +215,45 @@ describe("handleDraftGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.validation_warnings).toContain("Unusual brief pattern");
   });
+
+  it("sets auto_apply: true on full_draft GraphPatchBlock", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({ nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] }),
+    );
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-auto");
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.auto_apply).toBe(true);
+  });
+
+  it("extracts coaching.summary into narrationHint", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        coaching: {
+          summary: "Strong model structure, add constraints for robustness.",
+          strengthen_items: ["Add a constraint node", "Define option interventions"],
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-coaching");
+
+    expect(result.narrationHint).toBeDefined();
+    expect(result.narrationHint).toContain("Strong model structure");
+    expect(result.narrationHint).toContain("Add a constraint node");
+    expect(result.narrationHint).toContain("Define option interventions");
+  });
+
+  it("narrationHint is undefined when no coaching data in response", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({ nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] }),
+    );
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-no-coaching");
+
+    expect(result.narrationHint).toBeUndefined();
+  });
 });

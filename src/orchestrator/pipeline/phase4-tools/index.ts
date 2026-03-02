@@ -56,6 +56,7 @@ export async function phase4Execute(
     context,
     enrichedContext.turn_id,
     requestId,
+    { intentClassification: enrichedContext.intent_classification },
   );
 
   return result;
@@ -73,8 +74,12 @@ export function createProductionToolDispatcher(
   request?: FastifyRequest,
 ): ToolDispatcher {
   return {
-    async dispatch(toolName, toolInput, context, turnId) {
-      const opts: ToolDispatchOpts = { plotOpts, request };
+    async dispatch(toolName, toolInput, context, turnId, _reqId, options) {
+      const opts: ToolDispatchOpts = {
+        plotOpts,
+        request,
+        intentClassification: options?.intentClassification,
+      };
       const result = await dispatchToolHandler(
         toolName,
         toolInput,

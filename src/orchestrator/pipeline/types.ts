@@ -265,7 +265,7 @@ export interface ToolDispatcher {
     context: ConversationContext,
     turnId: string,
     requestId: string,
-    options?: { plotOpts?: PLoTClientRunOpts; request?: FastifyRequest },
+    options?: { plotOpts?: PLoTClientRunOpts; request?: FastifyRequest; intentClassification?: string },
   ): Promise<ToolResult>;
 }
 

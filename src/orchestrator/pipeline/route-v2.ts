@@ -21,6 +21,14 @@ import { createProductionLLMClient } from "./llm-client.js";
 import { createProductionToolDispatcher } from "./phase4-tools/index.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
+import { getGateToolNames } from "../intent-gate.js";
+import { validateGatePatternsAgainstRegistry } from "../tools/registry.js";
+
+// ============================================================================
+// Startup: validate intent gate patterns against tool registry
+// Throws at startup if any gate patterns reference tools not in the registry.
+// ============================================================================
+validateGatePatternsAgainstRegistry(getGateToolNames());
 
 // ============================================================================
 // Turn Nonce Tracking (in-memory, best-effort)

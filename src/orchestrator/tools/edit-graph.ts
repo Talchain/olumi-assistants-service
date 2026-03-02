@@ -606,6 +606,7 @@ export async function handleEditGraph(
       patch_type: 'edit',
       operations,
       status: 'proposed',
+      auto_apply: false,
       base_graph_hash: baseGraphHash,
       ...(appliedGraph && { applied_graph: appliedGraph }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),

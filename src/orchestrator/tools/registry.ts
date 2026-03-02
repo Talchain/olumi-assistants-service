@@ -124,3 +124,27 @@ export function isLongRunningTool(name: string): boolean {
 export function getToolNames(): string[] {
   return TOOL_DEFINITIONS.map((t) => t.name);
 }
+
+/**
+ * Validate that all tool names referenced by the deterministic intent gate patterns
+ * exist in this registry. Called at startup to fail fast on rename drift.
+ *
+ * Throws if any gate pattern references a tool not in the registry.
+ */
+export function validateGatePatternsAgainstRegistry(gateToolNames: string[]): void {
+  const registryNames = new Set(getToolNames());
+  const missing: string[] = [];
+
+  for (const toolName of gateToolNames) {
+    if (!registryNames.has(toolName)) {
+      missing.push(toolName);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Intent gate startup validation failed: the following tool names are referenced by gate patterns but are not in the tool registry: ${missing.join(', ')}. ` +
+      `Update the registry or the gate patterns to resolve.`,
+    );
+  }
+}

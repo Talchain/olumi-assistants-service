@@ -23,6 +23,8 @@ export interface DraftGraphResult {
   blocks: ConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
+  /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */
+  narrationHint?: string;
 }
 
 // ============================================================================
@@ -96,20 +98,36 @@ export async function handleDraftGraph(
     patch_type: 'full_draft',
     operations,
     status: 'proposed',
+    auto_apply: true,
   };
+
+  // Extract coaching summary for narration hint (brief: include in assistantText)
+  const coachingSummary = extractCoachingSummary(body);
 
   // Extract validation warnings if present
   const warnings = extractWarnings(body);
-  let assistantText: string | null = null;
   if (warnings.length > 0) {
     patchData.validation_warnings = warnings;
+  }
+
+  // Build narration_hint from coaching data (for Phase 3 LLM context)
+  const narrationHint = coachingSummary ?? undefined;
+
+  // Build assistantText: warnings take priority; coaching summary used as narration hint only
+  let assistantText: string | null = null;
+  if (warnings.length > 0) {
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
   }
 
   const block = createGraphPatchBlock(patchData, turnId);
 
   log.info(
-    { elapsed_ms: latencyMs, operations_count: operations.length, warnings_count: warnings.length },
+    {
+      elapsed_ms: latencyMs,
+      operations_count: operations.length,
+      warnings_count: warnings.length,
+      has_coaching: coachingSummary !== null,
+    },
     "draft_graph completed",
   );
 
@@ -117,6 +135,7 @@ export async function handleDraftGraph(
     blocks: [block],
     assistantText,
     latencyMs,
+    narrationHint,
   };
 }
 
@@ -185,4 +204,32 @@ function extractWarnings(body: Record<string, unknown>): string[] {
   }
 
   return warnings;
+}
+
+/**
+ * Extract coaching summary and strengthen_items from pipeline response body.
+ * Returns a formatted narration hint string, or null if coaching data is absent.
+ */
+function extractCoachingSummary(body: Record<string, unknown>): string | null {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return null;
+
+  const parts: string[] = [];
+
+  const summary = coaching.summary;
+  if (typeof summary === 'string' && summary.length > 0) {
+    parts.push(summary);
+  }
+
+  const strengthen = coaching.strengthen_items;
+  if (Array.isArray(strengthen) && strengthen.length > 0) {
+    const items = strengthen
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => `- ${item}`);
+    if (items.length > 0) {
+      parts.push('Strengthen: ' + items.join(', '));
+    }
+  }
+
+  return parts.length > 0 ? parts.join('\n') : null;
 }

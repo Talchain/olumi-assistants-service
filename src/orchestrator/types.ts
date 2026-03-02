@@ -186,6 +186,11 @@ export interface GraphPatchBlockData {
   patch_type: PatchType;
   operations: PatchOperation[];
   status: PatchStatus;
+  /**
+   * When true, the UI applies the patch immediately without an Accept/Dismiss gate.
+   * Used for full_draft patches (draft_graph). Targeted edits (edit_graph) use false.
+   */
+  auto_apply?: boolean;
   applied_graph_hash?: string;
   /** Canonical graph state after PLoT applies the patch */
   applied_graph?: GraphV3T;

@@ -123,6 +123,18 @@ export const INTENT_PATTERN_ENTRIES: readonly (readonly [string, ToolName])[] = 
 const INTENT_PATTERNS: ReadonlyMap<string, ToolName> = new Map(_patterns);
 
 // ============================================================================
+// Startup Validation
+// ============================================================================
+
+/**
+ * Get all unique tool names referenced in the intent gate pattern table.
+ * Used by startup validation to check against the tool registry.
+ */
+export function getGateToolNames(): string[] {
+  return [...new Set(_patterns.map(([, tool]) => tool))];
+}
+
+// ============================================================================
 // Gate Logic
 // ============================================================================
 
