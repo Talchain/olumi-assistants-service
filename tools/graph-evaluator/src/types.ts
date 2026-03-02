@@ -86,6 +86,8 @@ export interface ParsedGraph {
   coaching?: CoachingData;
   goal_constraints?: GoalConstraint[];
   causal_claims?: CausalClaim[];
+  /** topology_plan is emitted by v21+ prompts as a planning aid — ignored during scoring. */
+  topology_plan?: string[];
 }
 
 // =============================================================================
