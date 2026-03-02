@@ -349,16 +349,13 @@ Common mistakes to avoid:
 ❌ BAD: Minimisation goal with wrong threshold direction
   Brief: "reduce churn below 4%"
   goal: { label: "Reduce Churn", goal_threshold: 0.04 }
-  // ISL computes P(churn >= 0.04) — WRONG, gives P(failure)
 ✅ GOOD: Model as maximisation metric
   goal: { label: "Achieve Retention Above 96%", goal_threshold: 0.96, goal_threshold_raw: 96, goal_threshold_unit: "%", goal_threshold_cap: 100 }
 ❌ BAD: goal_threshold on vague brief with no numeric target
   Brief: "We want to grow revenue significantly"
   goal: { label: "Revenue Growth", goal_threshold: 0.7, goal_threshold_raw: 70, goal_threshold_unit: "%", goal_threshold_cap: 100 }
-  // "significantly" is not a numeric target — do not invent one
 ✅ GOOD: Omit goal_threshold when no explicit number exists
   goal: { label: "Revenue Growth" }
-  // Only emit goal_threshold for explicit targets: "reach 800", "achieve £20k", "below 4%"
 </CONTRASTIVE_EXAMPLES>
 <ANNOTATED_EXAMPLE>
 This example is illustrative only. The same structure applies to personal, career, health, and non-business decisions.
@@ -424,29 +421,22 @@ Assumptions for normalisation:
      "goal_threshold": 0.8, "goal_threshold_raw": 800, "goal_threshold_unit": "customers", "goal_threshold_cap": 1000}
   ],
   "edges": [
-    // Structural: decision→options
     {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
-    // Structural: options→controllable factors
     {"from": "opt_expand", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_hold", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
     {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
-    // Causal: controllable→outcomes/risks (VARIED — Σ|mean| ≤ 1.0 per target)
     {"from": "fac_europe_entry", "to": "out_revenue", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "out_market_share", "strength": {"mean": 0.70, "std": 0.20}, "exists_probability": 0.85, "effect_direction": "positive"},
     {"from": "fac_europe_entry", "to": "risk_operational", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
     {"from": "fac_investment", "to": "out_revenue", "strength": {"mean": 0.20, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
     {"from": "fac_investment", "to": "risk_financial", "strength": {"mean": 0.65, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
-    // Causal: observable factors
     {"from": "fac_customer_base", "to": "out_revenue", "strength": {"mean": 0.25, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
     {"from": "fac_churn_rate", "to": "risk_financial", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
-    // Bidirected: unmeasured common cause (e.g., economic conditions affect both customer acquisition and churn)
     {"from": "fac_customer_base", "to": "fac_churn_rate", "strength": {"mean": 0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive", "edge_type": "bidirected"},
-    // Causal: external factors
     {"from": "fac_competition", "to": "out_market_share", "strength": {"mean": -0.30, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
     {"from": "fac_regulations", "to": "risk_operational", "strength": {"mean": 0.45, "std": 0.25}, "exists_probability": 0.70, "effect_direction": "positive"},
-    // Bridge→goal (Σ|mean| ≤ 1.0)
     {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.45, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
     {"from": "out_market_share", "to": "goal_growth", "strength": {"mean": 0.15, "std": 0.15}, "exists_probability": 0.80, "effect_direction": "positive"},
     {"from": "risk_operational", "to": "goal_growth", "strength": {"mean": -0.15, "std": 0.18}, "exists_probability": 0.85, "effect_direction": "negative"},
@@ -506,6 +496,7 @@ Build in this order:
    - Each outcome/risk bridge: "out_revenue → goal (primary success metric)"
    If any option has no complete path to goal, fix the plan before proceeding.
 7. EDGES — Emit edges following your topology plan. The plan is your contract.
+   After emitting edges, verify every arrow in your topology_plan exists as an edge (same from/to IDs). If not, add the missing edge.
 8. PARAMETERS — For each causal edge, state the mechanism in topology_plan before assigning numbers:
    "[source] → [target]: [strong/moderate/weak] [positive/negative] because [mechanism]"
    Then assign strength.mean, std, and exists_probability consistent with that statement.
@@ -548,10 +539,11 @@ REQUIRED INVARIANTS:
 - A factor is "controllable" only if ≥1 option→factor edge exists.
 - If any option→factor edge exists, that factor MUST be category: "controllable".
 - Every outcome/risk must be reachable from the decision via ≥1 controllable factor.
+- Every outcome/risk must have at least one inbound directed edge from a controllable factor (directly or via an observable mediator).
 - External factors must have no incoming directed edges (they are root causes sampled from priors).
 - Status quo must have at least one path through controllable factors to goal.
 - Every option must differ from every other on at least one controllable factor value.
 - No orphan nodes — every node must be reachable from the decision and have a path to goal.
-OUTPUT: Valid JSON only. All planning goes in the topology_plan field. No text outside the JSON object.
+OUTPUT: Valid JSON only. No `//` or `/* */` comments anywhere in the JSON. All planning goes in the topology_plan field. No text outside the JSON object.
 Required keys: "nodes", "edges", "causal_claims", "topology_plan". Optional keys: "goal_constraints", "coaching".
 </STRUCTURAL_RULES>
