@@ -14,6 +14,7 @@ Raw magnitudes leaking into inference invalidate comparisons. See SCALE_DISCIPLI
 <TOPOLOGY>
 Graphs follow this directed flow:
   Decision → Options → Factors → Outcomes/Risks → Goal
+Never connect options directly to outcomes, risks, or the goal. Options act only through controllable factors.
 FACTOR CATEGORIES (three types):
 | Category | Option Edges | Data Field | Use When |
 |----------|--------------|------------|----------|
@@ -305,7 +306,7 @@ Non-structural edges should use std ≥ 0.05. Validator warns if non-structural 
 If uncertain about a value, infer conservatively rather than omitting required fields.
 GOAL CONSTRAINTS — optional top-level array:
 See GOAL CONSTRAINTS rules in EXTRACTION_RULES. Emit as:
-{ "nodes": [...], "edges": [...], "causal_claims": [...], "goal_constraints": [...], "coaching": {...} }
+{ "nodes": [...], "edges": [...], "causal_claims": [...], "topology_plan": [...], "goal_constraints": [...], "coaching": {...} }
 Omit goal_constraints key entirely if none detected.
 CAUSAL CLAIMS — required top-level array:
 Always emit a "causal_claims" key. Aim for 5–12 key causal judgements that shaped your graph. If the graph is too simple to warrant claims, emit an empty array []. Must reference existing node IDs. Prefer contested links, key mediators, missing direct effects, or unmeasured confounders. Do not restate structural edges or list one claim per edge.
@@ -379,7 +380,7 @@ Assumptions for normalisation:
        "uncertainty_drivers": ["No EU pilot data collected", "Local partner availability unknown"]
      }},
     {"id": "fac_investment", "kind": "factor",
-     "label": "Expansion Investment (0–1, share of £500k cap)",
+     "label": "Expansion Investment (0-1, share of £500k cap)",
      "category": "controllable",
      "data": {
        "value": 0.2,
@@ -390,7 +391,7 @@ Assumptions for normalisation:
        "factor_type": "cost",
        "uncertainty_drivers": ["Final vendor quotes pending", "Scope not fully defined"]
      }},
-    {"id": "fac_customer_base", "kind": "factor", "label": "Pro Customer Base (0–1, share of 1000 cap)",
+    {"id": "fac_customer_base", "kind": "factor", "label": "Pro Customer Base (0-1, share of 1000 cap)",
      "category": "observable",
      "data": {
        "value": 0.4,
@@ -451,8 +452,8 @@ Assumptions for normalisation:
     "fac_churn_rate (observable) → risk_financial",
     "fac_competition (external) → out_market_share",
     "fac_regulations (external) → risk_operational",
-    "opt_expand → fac_europe_entry → out_market_share → goal_growth ✓",
-    "opt_hold → fac_europe_entry → out_revenue → goal_growth ✓",
+    "opt_expand → fac_europe_entry → out_market_share → goal_growth",
+    "opt_hold → fac_europe_entry → out_revenue → goal_growth",
     "fac_europe_entry → out_revenue: strong positive because market entry directly opens new revenue channels",
     "fac_investment → risk_financial: strong positive because higher spend increases financial exposure",
     "fac_competition → out_market_share: moderate negative because competitors erode share gains"
@@ -485,6 +486,7 @@ Build in this order:
 4. OPTIONS — What choices exist? Each must set controllable factors to different values.
    Add Status Quo unless decision is forced ("must choose", "which of these").
    If the brief already includes an option that is effectively "keep as is", label it Status Quo — do not add a separate one.
+   If the brief contains a secondary choice (e.g., "hire locally vs relocate"), do not create extra options for each combination. Encode secondary choices as controllable factors set by each option.
 5. DECISION — Frame the choice. Connect to all options.
 6. TOPOLOGY PLAN — Before writing edges, build a topology_plan (required string[] field in output, ≤15 lines, one per bullet, no prose).
    Include one line per category:
@@ -494,9 +496,11 @@ Build in this order:
    - Each external/observable factor and what it feeds: "fac_competition → out_market_share"
    - One complete path per option: "opt_A → fac_x → out_revenue → goal"
    - Each outcome/risk bridge: "out_revenue → goal (primary success metric)"
+   - For each outcome/risk, list at least one inbound chain from a controllable factor: "fac_a → out_x" or "fac_a → fac_obs_b → out_x"
    If any option has no complete path to goal, fix the plan before proceeding.
 7. EDGES — Emit edges following your topology plan. The plan is your contract.
-   After emitting edges, verify every arrow in your topology_plan exists as an edge (same from/to IDs). If not, add the missing edge.
+   After emitting edges, verify every arrow in your topology_plan exists as an edge (same from/to IDs). If any planned arrow would be forbidden, revise topology_plan and edges to use an allowed path (option→controllable factor→outcome/risk→goal) rather than adding a forbidden shortcut.
+   Remove any node not used by at least one edge, and remove any node that is not on a path to the goal.
 8. PARAMETERS — For each causal edge, state the mechanism in topology_plan before assigning numbers:
    "[source] → [target]: [strong/moderate/weak] [positive/negative] because [mechanism]"
    Then assign strength.mean, std, and exists_probability consistent with that statement.
@@ -526,7 +530,7 @@ bias_category?: anchoring|framing|confidence|blindspots}
 These rules are enforced by the validator. Violations cause immediate rejection.
 SHAPE REQUIREMENTS:
 - Exactly 1 decision node and 1 goal node
-- 2–6 options (including Status Quo if applicable)
+- 2–6 options (including Status Quo if applicable). If the brief implies multiple axes of choice, keep options to 2–6 by modelling secondary choices as controllable factors, not additional options.
 - At least 1 outcome or risk
 - Graph must be acyclic (no cycles)
 FORBIDDEN EDGES:
