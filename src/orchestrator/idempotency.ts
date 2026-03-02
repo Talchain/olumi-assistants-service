@@ -13,7 +13,8 @@
  * - Permanent error (recoverable: false): 60s
  * - INVALID_REQUEST errors: NOT cached
  *
- * Max entries: 10,000. Expired entries evicted on capacity pressure.
+ * Max entries: 1,000. Expired entries evicted on capacity pressure; oldest
+ * entry evicted when no expired entries exist.
  * _clearIdempotencyCache() exposed for tests.
  */
 
@@ -27,7 +28,7 @@ import type { OrchestratorResponseEnvelope } from "./types.js";
 const SUCCESS_TTL_MS = 60_000;
 const TRANSIENT_ERROR_TTL_MS = 3_000;
 const PERMANENT_ERROR_TTL_MS = 60_000;
-const MAX_ENTRIES = 10_000;
+const MAX_ENTRIES = 1_000;
 
 // ============================================================================
 // Cache Entry
@@ -178,13 +179,14 @@ export function setIdempotentResponse(
     evictExpired();
   }
 
-  // If still at capacity after eviction, skip caching (graceful degradation)
+  // If still at capacity after TTL eviction, evict oldest entry (insertion order)
   if (cache.size >= MAX_ENTRIES) {
+    const firstKey = cache.keys().next().value!;
+    cache.delete(firstKey);
     log.warn(
-      { size: cache.size, max: MAX_ENTRIES },
-      "Idempotency cache at capacity after eviction, skipping cache",
+      { evicted_key: firstKey, size: cache.size, max: MAX_ENTRIES },
+      "Idempotency cache at capacity — evicting oldest entry",
     );
-    return;
   }
 
   const key = makeKey(scenarioId, clientTurnId);

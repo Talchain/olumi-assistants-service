@@ -92,6 +92,31 @@ describe("Idempotency Cache", () => {
     expect(getIdempotentResponse("scenario-1", "turn-1")).toEqual(envelope);
   });
 
+  it("evicts oldest entry when cache reaches 1000 entries", () => {
+    // Fill the cache with 1000 entries
+    for (let i = 0; i < 1000; i++) {
+      setIdempotentResponse("scenario", `turn-${i}`, makeEnvelope({ turn_id: `turn-${i}` }));
+    }
+    expect(_getIdempotencyCacheSize()).toBe(1000);
+
+    // Insert the 1001st — should evict turn-0 (oldest)
+    setIdempotentResponse("scenario", "turn-1000", makeEnvelope({ turn_id: "turn-1000" }));
+    expect(_getIdempotencyCacheSize()).toBe(1000);
+
+    // Oldest entry (turn-0) should be evicted
+    expect(getIdempotentResponse("scenario", "turn-0")).toBeNull();
+
+    // Newest entry should be present
+    expect(getIdempotentResponse("scenario", "turn-1000")).toEqual(
+      expect.objectContaining({ turn_id: "turn-1000" }),
+    );
+
+    // A mid-range entry should still be present
+    expect(getIdempotentResponse("scenario", "turn-500")).toEqual(
+      expect.objectContaining({ turn_id: "turn-500" }),
+    );
+  });
+
   it("clear removes all entries", () => {
     setIdempotentResponse("s1", "t1", makeEnvelope());
     setIdempotentResponse("s1", "t2", makeEnvelope());

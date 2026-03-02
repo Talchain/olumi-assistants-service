@@ -45,7 +45,7 @@ function setNonce(scenarioId: string, nonce: number): void {
     nonceMap.delete(firstKey);
     log.warn(
       { scenario_id: scenarioId, evicted_key: firstKey },
-      'idempotency cache at capacity — evicting oldest entry',
+      'nonce map at capacity — evicting oldest entry',
     );
   }
   nonceMap.set(scenarioId, nonce);
