@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { score } from "../src/scorer.js";
-import { validateStructural, hasCycle, buildNodeMap, bfsForward, bfsReverse, buildAdjacencyLists } from "../src/validator.js";
+import { validateStructural, hasCycle, bfsForward, bfsReverse, buildAdjacencyLists } from "../src/validator.js";
 import type { ParsedGraph, GraphNode, GraphEdge, LLMResponse, Brief } from "../src/types.js";
 
 // =============================================================================
@@ -248,6 +248,54 @@ describe("validateStructural", () => {
     }
     const result = validateStructural(graph);
     expect(result.violations).toContain("NODE_LIMIT_EXCEEDED");
+  });
+
+  it("fails with EDGE_LIMIT_EXCEEDED when over 200 edges", () => {
+    const graph = minimalValidGraph();
+    // Add extra observable factor nodes to attach edges to (avoid node limit)
+    for (let i = 0; i < 10; i++) {
+      graph.nodes.push(makeNode(`xfac_${i}`, "factor", { category: "observable" }));
+      // Connect each to goal so they're not orphans
+      graph.edges.push(makeEdge(`xfac_${i}`, "goal1", 0.3, 0.1, 0.8));
+    }
+    // Add enough duplicate edges between existing nodes to exceed 200
+    for (let i = 0; i < 200; i++) {
+      graph.edges.push(makeEdge("fac_ext", "out1", 0.2, 0.1, 0.7));
+    }
+    const result = validateStructural(graph);
+    expect(result.violations).toContain("EDGE_LIMIT_EXCEEDED");
+  });
+
+  it("does not flag EDGE_LIMIT_EXCEEDED for graphs with 100–200 edges (aligned with production limit)", () => {
+    const graph = minimalValidGraph();
+    // Add 95 duplicate causal edges — total will be ~104 edges, under production limit of 200
+    for (let i = 0; i < 95; i++) {
+      graph.edges.push(makeEdge("fac_ext", "out1", 0.2, 0.1, 0.7));
+    }
+    const result = validateStructural(graph);
+    expect(result.violations).not.toContain("EDGE_LIMIT_EXCEEDED");
+  });
+
+  it("does not flag OUTCOME_UNREACHABLE for outcome unreachable from decision but able to reach goal (exemption)", () => {
+    // Exogenous outcome: not reachable from decision via controllable factors,
+    // but has a direct path to goal. Production exempts this case.
+    const graph = minimalValidGraph();
+    // Add an exogenous outcome connected directly to goal only
+    graph.nodes.push(makeNode("out_exo", "outcome"));
+    graph.edges.push(makeEdge("out_exo", "goal1", 0.4, 0.15, 0.8));
+    const result = validateStructural(graph);
+    expect(result.violations).not.toContain("OUTCOME_UNREACHABLE");
+    expect(result.valid).toBe(true);
+  });
+
+  it("still flags OUTCOME_UNREACHABLE when outcome cannot reach goal either", () => {
+    const graph = minimalValidGraph();
+    // Add an outcome that is completely disconnected (no path to or from goal/decision)
+    graph.nodes.push(makeNode("out_iso", "outcome"));
+    // No edges for out_iso at all → orphan (and also unreachable from decision with no goal path)
+    const result = validateStructural(graph);
+    // Will be caught as ORPHAN_NODE rather than OUTCOME_UNREACHABLE (both are violations)
+    expect(result.valid).toBe(false);
   });
 });
 

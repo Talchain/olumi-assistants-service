@@ -21,6 +21,44 @@ import { getAdapter } from "../../../../adapters/llm/router.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../../../orchestrator/index.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/telemetry.js";
 
+/**
+ * Coerce a raw violations array from the external PLoT engine into plain strings.
+ *
+ * The PLoT engine's /v1/validate endpoint is declared to return violations?: string[],
+ * but the actual runtime payload may contain structured objects
+ * { code, severity, level, at?, suggestion? }. Template literal interpolation of an
+ * object produces "[object Object]", making the repair prompt useless to the LLM.
+ * This function normalises both formats so the LLM always receives readable text.
+ */
+export function coerceViolations(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return ["unknown"];
+  }
+  return raw.map((v) => {
+    if (typeof v === "string") return v;
+    if (v !== null && typeof v === "object") {
+      const obj = v as Record<string, unknown>;
+      const code = typeof obj["code"] === "string" ? obj["code"] : "UNKNOWN";
+      const location =
+        obj["at"] !== undefined && obj["at"] !== null
+          ? typeof obj["at"] === "string"
+            ? ` at ${obj["at"]}`
+            : typeof obj["at"] === "object"
+            ? ` at ${JSON.stringify(obj["at"])}`
+            : ""
+          : "";
+      const detail =
+        typeof obj["suggestion"] === "string"
+          ? obj["suggestion"]
+          : typeof obj["message"] === "string"
+          ? obj["message"]
+          : code;
+      return `[${code}]${location}: ${detail}`;
+    }
+    return "unknown violation";
+  });
+}
+
 export async function runPlotValidation(ctx: StageContext): Promise<void> {
   if (!ctx.graph) return;
 
@@ -36,7 +74,7 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
     return;
   }
 
-  const issues = first.violations;
+  const issues = coerceViolations(first.violations);
 
   // Repair gating: if deterministic sweep determined LLM repair is not needed,
   // skip LLM repair but still run PLoT validation for normalization.
@@ -99,7 +137,16 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
 
   // LLM-guided repair
   try {
-    emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+    const violationSummary = issues.join("; ").slice(0, 500);
+    const violationCodes = issues.map((v) => {
+      const match = v.match(/^\[([^\]]+)\]/);
+      return match ? match[1] : "prose";
+    });
+    emit(TelemetryEvents.RepairStart, {
+      violation_count: issues.length,
+      violation_summary: violationSummary,
+      violation_codes: violationCodes,
+    });
 
     const modelOverride = (ctx.input as any).model as string | undefined;
     const repairAdapter = getAdapter("repair_graph", modelOverride);
@@ -107,7 +154,7 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
     const repairResult = await repairAdapter.repairGraph(
       {
         graph: candidate,
-        violations: issues || [],
+        violations: issues,
         brief: ctx.effectiveBrief || undefined,
         docs: (ctx.input as any).docs || undefined,
       },

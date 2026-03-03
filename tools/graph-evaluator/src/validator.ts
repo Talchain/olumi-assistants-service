@@ -18,7 +18,7 @@ import type { ParsedGraph, GraphNode, GraphEdge } from "./types.js";
 // =============================================================================
 
 export const NODE_LIMIT = 50;
-export const EDGE_LIMIT = 100;
+export const EDGE_LIMIT = 200;
 export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 6;
 
@@ -221,7 +221,7 @@ export interface ValidationResult {
  * 8.  Every outcome/risk is reachable from decision via controllable factor
  * 9.  Every option has a path through controllable factors to the goal
  * 10. No orphan nodes
- * 11. ≤50 nodes, ≤100 edges
+ * 11. ≤50 nodes, ≤200 edges
  * 12. All edge from/to IDs reference existing nodes
  */
 export function validateStructural(graph: ParsedGraph): ValidationResult {
@@ -307,6 +307,8 @@ export function validateStructural(graph: ParsedGraph): ValidationResult {
 
   // ── 8. Every outcome/risk reachable from decision via controllable factor ──
   // Path must go: decision → option → controllable factor → ... → outcome/risk
+  // Exception: an outcome/risk that is not reachable from decision is exempt if
+  // it can still reach the goal (matches production EXEMPT_UNREACHABLE_OUTCOME_RISK).
   const bridgeNodes = [...outcomes, ...risks];
   if (decisions.length === 1 && bridgeNodes.length > 0) {
     const decisionId = decisions[0].id;
@@ -330,9 +332,15 @@ export function validateStructural(graph: ParsedGraph): ValidationResult {
       }
     }
 
-    // Verify each bridge node is reachable
+    // Reverse BFS from goal to find nodes that can reach it
+    const canReachGoalSet =
+      goals.length === 1 ? bfsReverse([goals[0].id], adjacency) : new Set<string>();
+
+    // Verify each bridge node is reachable, with exemption for nodes that reach goal
     for (const bridge of bridgeNodes) {
       if (!reachableThroughControllable.has(bridge.id)) {
+        // Exempt: outcome/risk unreachable from decision but can still reach goal
+        if (canReachGoalSet.has(bridge.id)) continue;
         violations.push("OUTCOME_UNREACHABLE");
         break;
       }

@@ -8,6 +8,7 @@ import { type DocPreview } from "../services/docProcessing.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { validateGraph } from "../services/validateClientWithCache.js";
+import { coerceViolations } from "../cee/unified-pipeline/stages/repair/plot-validation.js";
 import { simpleRepair } from "../services/repair.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
 import { validateAndFixGraph } from "../cee/structure/index.js";
@@ -1341,7 +1342,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
 
   const first = await validateGraph(candidate);
   if (!first.ok) {
-    issues = first.violations;
+    issues = coerceViolations(first.violations);
 
     // If time budget exceeded, skip LLM repair and use simple repair directly
     if (skipRepairDueToBudget) {
@@ -1372,14 +1373,23 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
       // LLM-guided repair: use violations as hints
       repairLoopAttempts++;
       try {
-        emit(TelemetryEvents.RepairStart, { violation_count: issues?.length ?? 0 });
+        const violationSummary = (issues ?? []).join("; ").slice(0, 500);
+        const violationCodes = (issues ?? []).map((v) => {
+          const match = v.match(/^\[([^\]]+)\]/);
+          return match ? match[1] : "prose";
+        });
+        emit(TelemetryEvents.RepairStart, {
+          violation_count: issues?.length ?? 0,
+          violation_summary: violationSummary,
+          violation_codes: violationCodes,
+        });
 
         // Get repair adapter (may be different provider than draft)
         const repairAdapter = getAdapter('repair_graph', repairModelOverride ?? modelOverride);
         const repairResult = await repairAdapter.repairGraph(
           {
             graph: candidate,
-            violations: issues || [],
+            violations: issues ?? [],
           },
           { requestId: `repair_${Date.now()}`, timeoutMs: repairTimeoutMs }
         );

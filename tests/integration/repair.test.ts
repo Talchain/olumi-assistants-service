@@ -377,6 +377,86 @@ describe("Graph Repair Integration Tests", () => {
       expect(body.graph.nodes.length).toBeLessThanOrEqual(12);
     });
 
+    it("formats object-shaped violations from PLoT engine as readable strings for the LLM", async () => {
+      const { draftGraphWithAnthropic, repairGraphWithAnthropic } = await import(
+        "../../src/adapters/llm/anthropic.js"
+      );
+      const { validateGraph } = await import("../../src/services/validateClient.js");
+
+      const invalidGraph = {
+        version: "1",
+        default_seed: 17,
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A", data: { interventions: { fac_a: 0.8 } } },
+          { id: "opt_b", kind: "option", label: "Option B", data: { interventions: { fac_a: 0.3 } } },
+          { id: "fac_a", kind: "factor", label: "Factor A", data: { value: 0.5, extractionType: "inferred", factor_type: "other", uncertainty_drivers: ["demand"] } },
+          { id: "out_1", kind: "outcome", label: "Outcome" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "dec_1", to: "opt_b", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "opt_a", to: "fac_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "opt_b", to: "fac_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "fac_a", to: "out_1", strength_mean: 0.6, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" },
+          { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+        ],
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      };
+
+      vi.mocked(draftGraphWithAnthropic).mockResolvedValue({
+        graph: invalidGraph as any,
+        rationales: [],
+        usage: mockUsage,
+      });
+
+      // PLoT engine returns structured violation objects (not plain strings)
+      vi.mocked(validateGraph).mockResolvedValueOnce({
+        ok: false,
+        violations: [
+          { code: "CYCLE_DETECTED", severity: "error", at: { from: "fac_a", to: "fac_b" }, suggestion: "Remove weakest edge in cycle" },
+          { code: "MISSING_BRIDGE", severity: "error", suggestion: "Add outcome node connecting factors to goal" },
+        ] as any,
+        normalized: undefined,
+      });
+
+      const repairedGraph = { ...invalidGraph, nodes: [...invalidGraph.nodes], edges: [...invalidGraph.edges] };
+      vi.mocked(repairGraphWithAnthropic).mockResolvedValue({
+        graph: repairedGraph as any,
+        rationales: [],
+        usage: mockUsage,
+      });
+
+      // Re-validation succeeds
+      vi.mocked(validateGraph).mockResolvedValueOnce({
+        ok: true,
+        violations: [],
+        normalized: repairedGraph as any,
+      });
+
+      const app = Fastify();
+      await draftRoute(app);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/draft-graph",
+        payload: { brief: "Evaluate strategic alternatives for product growth" },
+      });
+
+      expect(res.statusCode).toBe(200);
+
+      // Verify the LLM received formatted strings, not [object Object]
+      expect(repairGraphWithAnthropic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          violations: [
+            "[CYCLE_DETECTED] at {\"from\":\"fac_a\",\"to\":\"fac_b\"}: Remove weakest edge in cycle",
+            "[MISSING_BRIDGE]: Add outcome node connecting factors to goal",
+          ],
+        })
+      );
+    });
+
     it("trims edges to max 24 and filters invalid references", async () => {
       const { draftGraphWithAnthropic, repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
       const { validateGraph } = await import("../../src/services/validateClient.js");
