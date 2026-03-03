@@ -56,6 +56,10 @@ export interface EditGraphResult {
   blocks: ConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
+  /** The applied graph from PLoT (post-edit), or null if rejected / PLoT not configured. */
+  appliedGraph: GraphV3T | null;
+  /** True if the edit was rejected (structural or semantic). */
+  wasRejected: boolean;
 }
 
 export interface EditGraphOpts {
@@ -645,6 +649,8 @@ export async function handleEditGraph(
       blocks: [block],
       assistantText,
       latencyMs,
+      appliedGraph: appliedGraph ?? null,
+      wasRejected: false,
     };
   }
 
@@ -702,6 +708,8 @@ function buildRejectionResult(
     blocks: [block],
     assistantText: `I wasn't able to produce valid graph edits. ${reason}`,
     latencyMs,
+    appliedGraph: null,
+    wasRejected: true,
   };
 }
 

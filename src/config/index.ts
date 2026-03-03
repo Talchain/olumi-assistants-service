@@ -256,6 +256,7 @@ const ConfigSchema = z.object({
     orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     contextFabric: booleanString.default(false), // Context Fabric: 3-zone cache-aware context assembly pipeline
+    dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
   }),
 
   // Prompt Cache Configuration
@@ -408,6 +409,8 @@ const ConfigSchema = z.object({
     legacyPipelineEnabled: booleanString.default(false), // If true, allow legacy Pipeline B; if false, throw on entry
     // Boundary security (Stream F)
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
+    // Draft compliance reminder (appended to user message for initial graph generation only)
+    draftComplianceReminderEnabled: booleanString.default(true), // CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -536,6 +539,7 @@ function parseConfig(): Config {
       orchestrator: env.CEE_ORCHESTRATOR_ENABLED ?? env.ENABLE_ORCHESTRATOR,
       orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
+      dskV0: env.ENABLE_DSK_V0,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -600,7 +604,28 @@ function parseConfig(): Config {
       // Pre-decision checklist and framing nudges
       preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
       // Multi-turn clarifier integration
-      clarifierEnabled: env.CEE_CLARIFIER_ENABLED,
+      // DEPRECATION: CLARIFIER_ENABLED is the legacy name for CEE_CLARIFIER_ENABLED.
+      // If CEE_CLARIFIER_ENABLED is not set but CLARIFIER_ENABLED is, forward the value.
+      // Remove CLARIFIER_ENABLED support in the next major version.
+      clarifierEnabled: (() => {
+        if (env.CEE_CLARIFIER_ENABLED !== undefined) {
+          if (env.CLARIFIER_ENABLED !== undefined && env.CLARIFIER_ENABLED !== env.CEE_CLARIFIER_ENABLED) {
+            console.warn(
+              "[DEPRECATION] Both CLARIFIER_ENABLED and CEE_CLARIFIER_ENABLED are set with different values. " +
+              "CEE_CLARIFIER_ENABLED takes precedence. Remove CLARIFIER_ENABLED."
+            );
+          }
+          return env.CEE_CLARIFIER_ENABLED;
+        }
+        if (env.CLARIFIER_ENABLED !== undefined) {
+          console.warn(
+            "[DEPRECATION] CLARIFIER_ENABLED is deprecated. Use CEE_CLARIFIER_ENABLED instead. " +
+            "Value has been forwarded."
+          );
+          return env.CLARIFIER_ENABLED;
+        }
+        return undefined; // schema default (false) applies
+      })(),
       clarifierMaxRoundsDefault: env.CEE_CLARIFIER_MAX_ROUNDS_DEFAULT,
       clarifierQualityThreshold: env.CEE_CLARIFIER_QUALITY_THRESHOLD,
       clarifierStabilityThreshold: env.CEE_CLARIFIER_STABILITY_THRESHOLD,
@@ -671,6 +696,7 @@ function parseConfig(): Config {
       unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
       legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
+      draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

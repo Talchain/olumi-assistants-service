@@ -50,6 +50,7 @@ function makeToolResult(overrides?: Partial<ToolResult>): ToolResult {
     blocks: [],
     side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
     assistant_text: null,
+    guidance_items: [],
     ...overrides,
   };
 }

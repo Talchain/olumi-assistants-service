@@ -12,16 +12,22 @@
  * | generate_brief   | brief, summary, generate brief, write the brief, write report, ... |
  * | explain_results  | explain, why, break it down, explain the results, ...              |
  * | edit_graph       | edit, modify, change, update the model, edit model, ...            |
+ * | run_exercise     | pre-mortem, devil's advocate, disconfirmation, ...                  |
  *
  * Excluded (too ambiguous without context — fall through to LLM):
  * go, let's go, do it, run (solo), why did, what happened
+ *
+ * Note: run_exercise is gate-only (not LLM-selectable). It is in the registry
+ * under GATE_ONLY_TOOL_NAMES but NOT in TOOL_DEFINITIONS (invisible to LLM).
  */
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type ToolName = 'draft_graph' | 'edit_graph' | 'run_analysis' | 'explain_results' | 'generate_brief';
+export type ToolName = 'draft_graph' | 'edit_graph' | 'run_analysis' | 'explain_results' | 'generate_brief' | 'run_exercise';
+
+export type ExerciseType = 'pre_mortem' | 'devil_advocate' | 'disconfirmation';
 
 export interface IntentGateResult {
   tool: ToolName | null;
@@ -29,6 +35,8 @@ export interface IntentGateResult {
   confidence: 'exact' | 'none';
   normalised_message: string;
   matched_pattern?: string;
+  /** Populated when tool === 'run_exercise' — the specific exercise type to run. */
+  exercise?: ExerciseType;
 }
 
 // ============================================================================
@@ -114,6 +122,26 @@ const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   ['change', 'edit_graph'],
   ['update the model', 'edit_graph'],
   ['update model', 'edit_graph'],
+
+  // run_exercise — gate-only (not in LLM tool registry)
+  // pre_mortem patterns
+  ['pre-mortem', 'run_exercise'],
+  ['pre mortem', 'run_exercise'],
+  ['premortem', 'run_exercise'],
+  ['what could go wrong', 'run_exercise'],
+  ['imagine this failed', 'run_exercise'],
+  // devil_advocate patterns
+  ["devil's advocate", 'run_exercise'],
+  ['devils advocate', 'run_exercise'],
+  ["play devil's advocate", 'run_exercise'],
+  ['argue against this recommendation', 'run_exercise'],
+  ['argue the other side', 'run_exercise'],
+  // disconfirmation patterns
+  ['disconfirmation', 'run_exercise'],
+  ['what would change this', 'run_exercise'],
+  ['what evidence would change this', 'run_exercise'],
+  ['what would flip this', 'run_exercise'],
+  ['prove me wrong', 'run_exercise'],
 ] as const).map(t => Object.freeze(t)));
 
 /** Exported for testing — the frozen tuple array of [pattern, tool] pairs. */
@@ -121,6 +149,28 @@ export const INTENT_PATTERN_ENTRIES: readonly (readonly [string, ToolName])[] = 
 
 /** Internal lookup map built from frozen pattern tuples. */
 const INTENT_PATTERNS: ReadonlyMap<string, ToolName> = new Map(_patterns);
+
+/**
+ * Map from run_exercise pattern to ExerciseType.
+ * Used by classifyIntent to populate IntentGateResult.exercise.
+ */
+export const PATTERN_TO_EXERCISE: ReadonlyMap<string, ExerciseType> = new Map([
+  ['pre-mortem', 'pre_mortem'],
+  ['pre mortem', 'pre_mortem'],
+  ['premortem', 'pre_mortem'],
+  ['what could go wrong', 'pre_mortem'],
+  ['imagine this failed', 'pre_mortem'],
+  ["devil's advocate", 'devil_advocate'],
+  ['devils advocate', 'devil_advocate'],
+  ["play devil's advocate", 'devil_advocate'],
+  ['argue against this recommendation', 'devil_advocate'],
+  ['argue the other side', 'devil_advocate'],
+  ['disconfirmation', 'disconfirmation'],
+  ['what would change this', 'disconfirmation'],
+  ['what evidence would change this', 'disconfirmation'],
+  ['what would flip this', 'disconfirmation'],
+  ['prove me wrong', 'disconfirmation'],
+]);
 
 // ============================================================================
 // Startup Validation
@@ -151,13 +201,17 @@ export function classifyIntent(message: string): IntentGateResult {
   const tool = INTENT_PATTERNS.get(normalised) ?? null;
 
   if (tool) {
-    return {
+    const result: IntentGateResult = {
       tool,
       routing: 'deterministic',
       confidence: 'exact',
       normalised_message: normalised,
       matched_pattern: normalised,
     };
+    if (tool === 'run_exercise') {
+      result.exercise = PATTERN_TO_EXERCISE.get(normalised);
+    }
+    return result;
   }
 
   return {

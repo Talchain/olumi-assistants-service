@@ -2,9 +2,10 @@
  * Tool Registry
  *
  * Returns the 5 LLM-visible tool definitions for the orchestrator.
- * undo_patch exists as a tool handler but is NOT in the LLM tool registry
- * and is NOT routed deterministically (removed in v2). Handler kept for
- * graceful fallback.
+ * Gate-only tools (undo_patch, run_exercise) are registered in GATE_ONLY_TOOL_NAMES
+ * but are NOT in TOOL_DEFINITIONS (invisible to LLM). This ensures:
+ * - validateGatePatternsAgainstRegistry() passes (gate names are known)
+ * - Prompt-registry alignment test passes (LLM only sees TOOL_DEFINITIONS)
  *
  * Max one long-running tool per turn (draft_graph, run_analysis)
  * + optional lightweight follow-up (explain_results).
@@ -126,8 +127,19 @@ export function getToolNames(): string[] {
 }
 
 /**
+ * Gate-only tool names — handled by the intent gate but NOT visible to the LLM.
+ * These tools have dispatch handlers but are not in TOOL_DEFINITIONS.
+ * validateGatePatternsAgainstRegistry accepts names from either set.
+ */
+export const GATE_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'undo_patch',
+  'run_exercise',
+]);
+
+/**
  * Validate that all tool names referenced by the deterministic intent gate patterns
- * exist in this registry. Called at startup to fail fast on rename drift.
+ * exist in this registry (TOOL_DEFINITIONS or GATE_ONLY_TOOL_NAMES).
+ * Called at startup to fail fast on rename drift.
  *
  * Throws if any gate pattern references a tool not in the registry.
  */
@@ -136,7 +148,7 @@ export function validateGatePatternsAgainstRegistry(gateToolNames: string[]): vo
   const missing: string[] = [];
 
   for (const toolName of gateToolNames) {
-    if (!registryNames.has(toolName)) {
+    if (!registryNames.has(toolName) && !GATE_ONLY_TOOL_NAMES.has(toolName)) {
       missing.push(toolName);
     }
   }

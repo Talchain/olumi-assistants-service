@@ -34,6 +34,7 @@ const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationCo
   explain_results: (ctx) => ctx.analysis_response != null,
   edit_graph: (ctx) => ctx.graph != null,
   generate_brief: (ctx) => ctx.graph != null && ctx.analysis_response != null,
+  run_exercise: (ctx) => ctx.analysis_response != null,
   draft_graph: (ctx) => {
     const f = ctx.framing;
     if (!f) return false;
@@ -80,7 +81,12 @@ export async function phase3Generate(
         "V2 pipeline: deterministic routing — skipping LLM",
       );
 
-      return buildDeterministicLLMResult(intentGate.tool, {});
+      // For run_exercise, pass the exercise type through as toolInput
+      const deterministicInput: Record<string, unknown> =
+        intentGate.tool === 'run_exercise' && intentGate.exercise
+          ? { exercise: intentGate.exercise }
+          : {};
+      return buildDeterministicLLMResult(intentGate.tool, deterministicInput);
     }
 
     // Prerequisites not met → fall through to LLM

@@ -10,7 +10,12 @@
  *
  * Intentional exceptions (documented below):
  * - `undo_patch`: has a handler in dispatch.ts but is NOT in the LLM registry or
- *   the system prompt — it is a latent stub excluded by design (see registry.ts:L9).
+ *   the system prompt — it is a latent stub excluded by design (see registry.ts).
+ * - `run_exercise`: gate-only virtual tool — invoked by the intent gate (pre-mortem,
+ *   devil's advocate, disconfirmation patterns) but NOT LLM-selectable. Excluded from
+ *   TOOL_DEFINITIONS and the system prompt <TOOLS> block by design (see registry.ts
+ *   GATE_ONLY_TOOL_NAMES). This test passes unchanged because run_exercise is absent
+ *   from both the registry LLM-visible list and the prompt.
  */
 
 import { describe, it, expect } from "vitest";

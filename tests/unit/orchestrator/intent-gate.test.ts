@@ -300,12 +300,15 @@ describe("Intent Gate — classifyIntent", () => {
 // ============================================================================
 
 describe("Intent Gate — structural integrity", () => {
+  // Note: run_exercise is gate-only (not LLM-selectable), but is a valid ToolName.
+  // It is intentionally excluded from TOOL_DEFINITIONS (prompt-registry alignment test passes).
   const VALID_TOOL_NAMES: ReadonlySet<ToolName> = new Set([
     "draft_graph",
     "edit_graph",
     "run_analysis",
     "explain_results",
     "generate_brief",
+    "run_exercise",
   ]);
 
   it("every registered pattern maps to a valid ToolName", () => {
@@ -314,7 +317,7 @@ describe("Intent Gate — structural integrity", () => {
     }
   });
 
-  it("all 5 tool names have at least one pattern", () => {
+  it("all 6 tool names have at least one pattern", () => {
     const toolsWithPatterns = new Set<ToolName>();
     for (const [, tool] of INTENT_PATTERN_ENTRIES) {
       toolsWithPatterns.add(tool);

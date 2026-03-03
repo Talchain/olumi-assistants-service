@@ -19,6 +19,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { stableStringify } from "../context/stable-stringify.js";
 import type {
   ConversationBlock,
   BlockProvenance,
@@ -32,30 +33,6 @@ import type {
   FramingBlockData,
   DecisionStage,
 } from "../types.js";
-
-// ============================================================================
-// Stable JSON for deterministic hashing
-// ============================================================================
-
-/**
- * Sorted JSON replacer for deterministic hashing.
- * Sorts object keys recursively, preserves array order.
- */
-function sortedReplacer(_key: string, value: unknown): unknown {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return Object.keys(value as Record<string, unknown>)
-      .sort()
-      .reduce((sorted: Record<string, unknown>, k) => {
-        sorted[k] = (value as Record<string, unknown>)[k];
-        return sorted;
-      }, {});
-  }
-  return value;
-}
-
-function stableStringify(data: unknown): string {
-  return JSON.stringify(data, sortedReplacer);
-}
 
 // ============================================================================
 // ID Generation

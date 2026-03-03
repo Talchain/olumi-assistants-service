@@ -15,7 +15,12 @@ import type {
 // Stub isProduction to return false for debug field tests
 vi.mock("../../../../src/config/index.js", () => ({
   isProduction: () => false,
-  config: { features: { orchestratorV2: false } },
+  config: { features: { orchestratorV2: false, dskV0: false } },
+}));
+
+// Stub dsk-loader so envelope assembler doesn't call getDskVersionHash() against the FS
+vi.mock("../../../../src/orchestrator/dsk-loader.js", () => ({
+  getDskVersionHash: () => null,
 }));
 
 function makeEnrichedContext(overrides?: Partial<EnrichedContext>): EnrichedContext {
@@ -56,6 +61,7 @@ function makeToolResult(overrides?: Partial<ToolResult>): ToolResult {
     blocks: [],
     side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
     assistant_text: null,
+    guidance_items: [],
     ...overrides,
   };
 }
@@ -237,7 +243,94 @@ describe("assembleV2Envelope", () => {
 
     expect(envelope.diagnostics).toBe("Debug info");
   });
-});
+
+  it("guidance_items survives JSON serialisation round-trip", () => {
+    const guidanceItem = {
+      item_id: 'gi_abc123',
+      signal_code: 'DEFAULT_EDGE_STRENGTH',
+      category: 'should_fix' as const,
+      source: 'structural' as const,
+      title: 'Default edge strength',
+      primary_action: { type: 'discuss' as const, prompt: 'Review edge strengths' },
+      priority: 70,
+    };
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult({ guidance_items: [guidanceItem] }),
+      progressKind: 'none',
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    const serialised = JSON.stringify(envelope);
+    const parsed = JSON.parse(serialised) as typeof envelope;
+    expect(parsed.guidance_items).toHaveLength(1);
+    expect(parsed.guidance_items[0].item_id).toBe('gi_abc123');
+    expect(parsed.guidance_items[0].signal_code).toBe('DEFAULT_EDGE_STRENGTH');
+  });
+
+  it("guidance_items defaults to empty array when not provided", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: 'none',
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.guidance_items).toEqual([]);
+  });
+
+  it("lineage.dsk_version_hash is null when ENABLE_DSK_V0 is OFF", () => {
+    // config mock already has dskV0: false and getDskVersionHash returns null
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext({ dsk: { claims: [], triggers: [], techniques: [], version_hash: null } }),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: 'none',
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.lineage.dsk_version_hash).toBeNull();
+  });
+
+  it("lineage.dsk_version_hash is populated from loaded bundle when ENABLE_DSK_V0 is ON", async () => {
+    // Re-mock config with dskV0: true and dsk-loader returning a bundle hash.
+    // We use vi.doMock + re-import for dynamic override within this test.
+    vi.doMock("../../../../src/config/index.js", () => ({
+      isProduction: () => false,
+      config: { features: { orchestratorV2: false, dskV0: true } },
+    }));
+    vi.doMock("../../../../src/orchestrator/dsk-loader.js", () => ({
+      getDskVersionHash: () => 'test-bundle-hash-abc123',
+    }));
+
+    const { assembleV2Envelope: assemble } = await import(
+      "../../../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js?dsk-on"
+    );
+
+    const envelope = assemble({
+      enrichedContext: makeEnrichedContext({ dsk: { claims: [], triggers: [], techniques: [], version_hash: null } }),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: 'none',
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.lineage.dsk_version_hash).toBe('test-bundle-hash-abc123');
+
+    vi.doUnmock("../../../../src/config/index.js");
+    vi.doUnmock("../../../../src/orchestrator/dsk-loader.js");
+  });
+}); // assembleV2Envelope
 
 describe("buildErrorEnvelope", () => {
   it("returns envelope with error field and safe defaults", () => {

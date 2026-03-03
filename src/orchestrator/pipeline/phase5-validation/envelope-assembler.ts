@@ -6,8 +6,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { isProduction } from "../../../config/index.js";
+import { isProduction, config } from "../../../config/index.js";
 import { isLongRunningTool } from "../../tools/registry.js";
+import { getDskVersionHash } from "../../dsk-loader.js";
 import type {
   EnrichedContext,
   SpecialistResult,
@@ -94,7 +95,9 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     scienceLedger,
   } = input;
 
-  const contextHash = computeContextHash(enrichedContext);
+  // Use pre-computed context hash from Phase 1 when available (canonical compact-context hash).
+  // Fall back to full EnrichedContext hash for backward compatibility.
+  const contextHash = enrichedContext.context_hash ?? computeContextHash(enrichedContext);
 
   // Determine tool name and build turn_plan
   const toolName = llmResult.tool_invocations.length > 0
@@ -146,10 +149,15 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     assistant_text: assistantText,
     blocks: toolResult.blocks,
     suggested_actions: suggestedActions,
+    guidance_items: toolResult.guidance_items,
 
     lineage: {
       context_hash: contextHash,
-      dsk_version_hash: enrichedContext.dsk.version_hash,
+      // When DSK v0 is active, prefer the loaded bundle hash over any in-context stub value.
+      // When DSK v0 is OFF, always emit null — no DSK presence regardless of context state.
+      dsk_version_hash: config.features.dskV0
+        ? (getDskVersionHash() ?? enrichedContext.dsk.version_hash)
+        : null,
     },
 
     stage_indicator: stageIndicator,
@@ -206,6 +214,7 @@ export function buildErrorEnvelope(
     assistant_text: 'I ran into a problem processing that. Could you try again?',
     blocks: [],
     suggested_actions: [],
+    guidance_items: [],
 
     lineage: {
       context_hash: enrichedContext ? computeContextHash(enrichedContext) : '',

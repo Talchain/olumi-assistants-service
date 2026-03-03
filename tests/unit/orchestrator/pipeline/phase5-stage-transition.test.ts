@@ -20,6 +20,7 @@ function makeToolResult(overrides?: Partial<ToolResult["side_effects"]>): ToolRe
       ...overrides,
     },
     assistant_text: null,
+    guidance_items: [],
   };
 }
 

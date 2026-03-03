@@ -74,6 +74,7 @@ import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
+import { loadDskBundle } from "./orchestrator/dsk-loader.js";
 
 export const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -198,6 +199,9 @@ export async function build() {
   // Register default prompts (fallbacks for prompt management system)
   // This must happen before routes are registered so prompts are available
   registerAllDefaultPrompts();
+
+  // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true
+  loadDskBundle();
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default

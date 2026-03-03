@@ -19,6 +19,11 @@ import { handleGenerateBrief } from "./generate-brief.js";
 import { handleEditGraph } from "./edit-graph.js";
 import { handleExplainResults } from "./explain-results.js";
 import { handleUndoPatch } from "./undo-patch.js";
+import { generatePostDraftGuidance } from "../guidance/post-draft.js";
+import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
+import type { GuidanceItem } from "../types/guidance-item.js";
+import type { ExerciseType } from "../types/guidance-item.js";
+import { handleRunExercise } from "./run-exercise.js";
 
 // ============================================================================
 // Types
@@ -29,6 +34,7 @@ export interface ToolDispatchResult {
   assistantText: string | null;
   analysisResponse?: V2RunResponseEnvelope;
   toolLatencyMs?: number;
+  guidanceItems: GuidanceItem[];
 }
 
 export interface ToolDispatchOpts {
@@ -119,11 +125,16 @@ export async function dispatchToolHandler(
         }
       }
 
+      const analysisGuidance = result.analysisResponse
+        ? generatePostAnalysisGuidance(result.analysisResponse, context.graph ?? null)
+        : [];
+
       return {
         blocks,
         assistantText,
         analysisResponse: result.analysisResponse,
         toolLatencyMs: result.latencyMs,
+        guidanceItems: analysisGuidance,
       };
     }
 
@@ -140,10 +151,14 @@ export async function dispatchToolHandler(
         });
       }
       const result = await handleDraftGraph(brief, opts.request, turnId);
+      const draftGuidance = result.graphOutput
+        ? generatePostDraftGuidance(result.graphOutput, result.draftWarnings, context.framing ?? null)
+        : [];
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
+        guidanceItems: draftGuidance,
       };
     }
 
@@ -152,6 +167,7 @@ export async function dispatchToolHandler(
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
+        guidanceItems: [],
       };
     }
 
@@ -166,10 +182,15 @@ export async function dispatchToolHandler(
         turnId,
         { plotOpts: opts?.plotOpts },
       );
+      // Run post-edit guidance only when edit succeeded (not rejected)
+      const editGuidance = (!result.wasRejected && result.appliedGraph)
+        ? generatePostDraftGuidance(result.appliedGraph, [], context.framing ?? null)
+        : [];
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
+        guidanceItems: editGuidance,
       };
     }
 
@@ -181,6 +202,7 @@ export async function dispatchToolHandler(
         blocks: result.blocks,
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
+        guidanceItems: [],
       };
     }
 
@@ -189,6 +211,28 @@ export async function dispatchToolHandler(
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
+        guidanceItems: [],
+      };
+    }
+
+    case 'run_exercise': {
+      const exercise = toolInput.exercise as ExerciseType | undefined;
+      if (!exercise) {
+        const err: OrchestratorError = {
+          code: 'TOOL_EXECUTION_FAILED',
+          message: 'run_exercise invoked without exercise type. This is an internal routing error.',
+          tool: 'run_exercise',
+          recoverable: false,
+        };
+        throw Object.assign(new Error(err.message), { orchestratorError: err });
+      }
+      const adapter = getAdapter('orchestrator');
+      const result = await handleRunExercise(exercise, context, adapter, requestId, turnId);
+      return {
+        blocks: result.blocks,
+        assistantText: result.assistantText,
+        toolLatencyMs: result.latencyMs,
+        guidanceItems: [],
       };
     }
 

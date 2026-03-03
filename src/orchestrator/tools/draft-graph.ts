@@ -12,12 +12,25 @@ import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
-import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError } from "../types.js";
+import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/** CEEStructuralWarningV1 shape (from generated OpenAPI) */
+export interface CEEDraftWarning {
+  id: string;
+  severity: 'low' | 'medium' | 'high' | 'blocker';
+  affected_node_ids?: string[];
+  affected_edge_ids?: string[];
+  explanation?: string;
+  fix_hint?: string;
+  /** Legacy fields */
+  node_ids?: string[];
+  edge_ids?: string[];
+}
 
 export interface DraftGraphResult {
   blocks: ConversationBlock[];
@@ -25,6 +38,10 @@ export interface DraftGraphResult {
   latencyMs: number;
   /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */
   narrationHint?: string;
+  /** Structured draft warnings from the pipeline (CEEStructuralWarningV1[]) */
+  draftWarnings: CEEDraftWarning[];
+  /** The drafted graph, for post-draft structural analysis */
+  graphOutput: GraphV3T | null;
 }
 
 // ============================================================================
@@ -104,11 +121,14 @@ export async function handleDraftGraph(
   // Extract coaching summary for narration hint (brief: include in assistantText)
   const coachingSummary = extractCoachingSummary(body);
 
-  // Extract validation warnings if present
+  // Extract validation warnings if present (plain strings for assistantText / validation_warnings)
   const warnings = extractWarnings(body);
   if (warnings.length > 0) {
     patchData.validation_warnings = warnings;
   }
+
+  // Extract structured draft warnings for guidance generation
+  const draftWarnings = extractStructuredWarnings(body);
 
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
@@ -119,6 +139,9 @@ export async function handleDraftGraph(
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
   }
 
+  // Extract the graph output for post-draft structural analysis
+  const graphOutput = isGraphV3(graph) ? graph as GraphV3T : null;
+
   const block = createGraphPatchBlock(patchData, turnId);
 
   log.info(
@@ -126,6 +149,7 @@ export async function handleDraftGraph(
       elapsed_ms: latencyMs,
       operations_count: operations.length,
       warnings_count: warnings.length,
+      structured_warnings_count: draftWarnings.length,
       has_coaching: coachingSummary !== null,
     },
     "draft_graph completed",
@@ -136,6 +160,8 @@ export async function handleDraftGraph(
     assistantText,
     latencyMs,
     narrationHint,
+    draftWarnings,
+    graphOutput,
   };
 }
 
@@ -179,6 +205,42 @@ function buildFullDraftOps(graph: unknown): PatchOperation[] {
   }
 
   return ops;
+}
+
+/**
+ * Check if an unknown value is a GraphV3T-compatible object (has nodes and edges arrays).
+ */
+function isGraphV3(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const g = value as Record<string, unknown>;
+  return Array.isArray(g.nodes) && Array.isArray(g.edges);
+}
+
+/**
+ * Extract structured draft warnings (CEEStructuralWarningV1[]) from pipeline response body.
+ * Reads body.draft_warnings — an array of typed warning objects.
+ */
+function extractStructuredWarnings(body: Record<string, unknown>): CEEDraftWarning[] {
+  const raw = body.draft_warnings;
+  if (!Array.isArray(raw)) return [];
+
+  const warnings: CEEDraftWarning[] = [];
+  for (const w of raw) {
+    if (!w || typeof w !== 'object') continue;
+    const obj = w as Record<string, unknown>;
+    if (typeof obj.id !== 'string' || typeof obj.severity !== 'string') continue;
+    warnings.push({
+      id: obj.id,
+      severity: obj.severity as CEEDraftWarning['severity'],
+      affected_node_ids: Array.isArray(obj.affected_node_ids) ? obj.affected_node_ids.filter((x): x is string => typeof x === 'string') : undefined,
+      affected_edge_ids: Array.isArray(obj.affected_edge_ids) ? obj.affected_edge_ids.filter((x): x is string => typeof x === 'string') : undefined,
+      explanation: typeof obj.explanation === 'string' ? obj.explanation : undefined,
+      fix_hint: typeof obj.fix_hint === 'string' ? obj.fix_hint : undefined,
+      node_ids: Array.isArray(obj.node_ids) ? obj.node_ids.filter((x): x is string => typeof x === 'string') : undefined,
+      edge_ids: Array.isArray(obj.edge_ids) ? obj.edge_ids.filter((x): x is string => typeof x === 'string') : undefined,
+    });
+  }
+  return warnings;
 }
 
 /**

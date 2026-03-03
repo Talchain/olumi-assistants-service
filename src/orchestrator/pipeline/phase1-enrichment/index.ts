@@ -23,11 +23,31 @@ import { trackProgress } from "./progress-tracker.js";
 import { detectStuck } from "./stuck-detector.js";
 import { loadDSK } from "./dsk-loader.js";
 import { loadUserProfile } from "./user-profile-loader.js";
+import { compactGraph } from "../../context/graph-compact.js";
+import { compactAnalysis } from "../../context/analysis-compact.js";
+import { buildEventLogSummary } from "../../context/event-log-summary.js";
+import { enforceContextBudget } from "../../context/budget.js";
+import type { BudgetEnforcementContext } from "../../context/budget.js";
+import { computeContextHash } from "../../context/context-hash.js";
+import type { GraphV3T } from "../../types.js";
+import { log } from "../../../utils/telemetry.js";
+
+/** Maximum conversation turns to keep in the enriched context */
+const MAX_CONVERSATION_TURNS = 5;
 
 /**
  * Phase 1 entry point: enrich the request context.
  *
- * All deterministic. No LLM calls. No I/O.
+ * Deterministic. No LLM calls. No I/O (except context management utilities).
+ *
+ * Context management steps (added in A.4):
+ * 1. compactGraph → graph_compact
+ * 2. compactAnalysis → analysis_response (compact summary)
+ * 3. Trim messages to last 5 turns
+ * 4. buildEventLogSummary → event_log_summary
+ *    (TODO: events will be populated when UI sends events or CEE reads from Supabase)
+ * 5. enforceContextBudget → trim within token allocation
+ * 6. computeContextHash → context_hash
  */
 export function phase1Enrich(
   message: string,
@@ -58,13 +78,53 @@ export function phase1Enrich(
   // User profile (stub)
   const userProfile = loadUserProfile();
 
-  return {
+  // ─── Context Management (A.4) ───────────────────────────────────────────
+
+  // 1. Compact graph
+  const graphCompact = context.graph
+    ? compactGraph(context.graph as GraphV3T)
+    : undefined;
+
+  // 2. Compact analysis (build node label map from compact graph for driver labels)
+  const nodeLabels = graphCompact
+    ? new Map(graphCompact.nodes.map((n) => [n.id, n.label]))
+    : undefined;
+  const analysisResponseCompact = context.analysis_response
+    ? compactAnalysis(context.analysis_response, nodeLabels)
+    : undefined;
+
+  // 3. Trim messages to last 5 turns
+  const trimmedMessages = context.messages.slice(-MAX_CONVERSATION_TURNS);
+
+  // 4. Event log summary
+  // events are not yet in ConversationContext — pass empty array until CEE reads from Supabase.
+  // buildEventLogSummary returns "" for empty input, so event_log_summary stays undefined when empty.
+  const eventLogSummaryRaw = buildEventLogSummary([]);
+  const eventLogSummary: string | undefined = eventLogSummaryRaw || undefined;
+
+  // 5. Normalise selected_elements → selected_node_ids / selected_edge_ids
+  // selected_elements is a flat string[] of opaque IDs. Without separate node/edge ID
+  // namespaces we treat all IDs as node IDs (matching normaliseSelectedElements convention).
+  const rawSelected = context.selected_elements ?? [];
+  const selectedNodeIds = [...rawSelected].sort();
+  const selectedEdgeIds: string[] = [];
+
+  // Assemble pre-budget context for enforcement
+  const preBudgetContext: EnrichedContext = {
     // Scenario state
     graph: context.graph,
     analysis: context.analysis_response,
     framing: context.framing,
     conversation_history: context.messages,
-    selected_elements: context.selected_elements ?? [],
+    selected_elements: rawSelected,
+
+    // Context management fields
+    graph_compact: graphCompact,
+    analysis_response: analysisResponseCompact ?? undefined,
+    messages: trimmedMessages,
+    event_log_summary: eventLogSummary,
+    selected_node_ids: selectedNodeIds,
+    selected_edge_ids: selectedEdgeIds,
 
     // Inferred state
     stage_indicator: stageIndicator,
@@ -84,4 +144,37 @@ export function phase1Enrich(
     turn_id: turnId,
     system_event: systemEvent,
   };
+
+  // 5. Enforce context budget (operates on graph_compact, analysis_response, messages)
+  const budgetedContext = enforceContextBudget(
+    preBudgetContext as unknown as BudgetEnforcementContext & EnrichedContext,
+  ) as EnrichedContext;
+
+  // 6. Compute context hash (after budget enforcement so hash reflects actual sent context)
+  const budgetedMessages = budgetedContext.messages ?? trimmedMessages;
+  const budgetedFraming = budgetedContext.framing as { stage: string; goal?: string; constraints?: unknown[]; options?: unknown[] } | null;
+  const contextHash = computeContextHash({
+    graph: budgetedContext.graph_compact,
+    analysis_response: budgetedContext.analysis_response,
+    framing: budgetedFraming
+      ? {
+          stage: budgetedFraming.stage,
+          goal: budgetedFraming.goal,
+          constraints: budgetedFraming.constraints,
+          options: budgetedFraming.options,
+        }
+      : null,
+    messages: budgetedMessages,
+    selected_elements: budgetedContext.selected_elements as string[],
+  });
+
+  log.debug(
+    { turn_id: turnId, scenario_id: scenarioId, context_hash: contextHash },
+    'phase1Enrich: context management complete',
+  );
+
+  return {
+    ...budgetedContext,
+    context_hash: contextHash,
+  } as EnrichedContext;
 }

@@ -516,4 +516,63 @@ describe("Configuration Module", () => {
       expect(config.server.port).toBe(10000);
     });
   });
+
+  describe("CLARIFIER_ENABLED deprecation forwarding", () => {
+    it("forwards CLARIFIER_ENABLED to cee.clarifierEnabled when CEE_CLARIFIER_ENABLED is unset", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+        CLARIFIER_ENABLED: "true",
+        // CEE_CLARIFIER_ENABLED intentionally absent
+      };
+      delete process.env.CEE_CLARIFIER_ENABLED;
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.clarifierEnabled).toBe(true);
+    });
+
+    it("CEE_CLARIFIER_ENABLED takes precedence when both are set with different values", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+        CLARIFIER_ENABLED: "false",
+        CEE_CLARIFIER_ENABLED: "true",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.clarifierEnabled).toBe(true);
+    });
+
+    it("CEE_CLARIFIER_ENABLED=false overrides CLARIFIER_ENABLED=true", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+        CLARIFIER_ENABLED: "true",
+        CEE_CLARIFIER_ENABLED: "false",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.clarifierEnabled).toBe(false);
+    });
+
+    it("cee.clarifierEnabled defaults to false when neither env var is set", async () => {
+      vi.resetModules();
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+      };
+      delete process.env.CLARIFIER_ENABLED;
+      delete process.env.CEE_CLARIFIER_ENABLED;
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.clarifierEnabled).toBe(false);
+    });
+  });
 });

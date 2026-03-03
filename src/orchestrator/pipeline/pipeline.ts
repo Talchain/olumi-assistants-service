@@ -157,5 +157,7 @@ function buildFeedbackAckEnvelope(enrichedContext: EnrichedContext): Orchestrato
       routing: 'deterministic',
       long_running: false,
     },
+
+    guidance_items: [],
   };
 }

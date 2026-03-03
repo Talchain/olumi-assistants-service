@@ -35,6 +35,7 @@ export async function phase4Execute(
       blocks: [],
       side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
       assistant_text: llmResult.assistant_text,
+      guidance_items: [],
     };
   }
 
@@ -102,6 +103,7 @@ export function createProductionToolDispatcher(
         assistant_text: result.assistantText,
         analysis_response: result.analysisResponse,
         tool_latency_ms: result.toolLatencyMs,
+        guidance_items: result.guidanceItems,
       };
     },
   };
