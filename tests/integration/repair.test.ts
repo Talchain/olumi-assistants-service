@@ -417,6 +417,7 @@ describe("Graph Repair Integration Tests", () => {
         violations: [
           { code: "CYCLE_DETECTED", severity: "error", at: { from: "fac_a", to: "fac_b" }, suggestion: "Remove weakest edge in cycle" },
           { code: "MISSING_BRIDGE", severity: "error", suggestion: "Add outcome node connecting factors to goal" },
+          { code: "FACTOR_HAS_INCOMING_EDGES", severity: "warning", at: { node_id: "fac_demand" }, suggestion: "Remove incoming edges or change node type" },
         ] as any,
         normalized: undefined,
       });
@@ -447,14 +448,18 @@ describe("Graph Repair Integration Tests", () => {
       expect(res.statusCode).toBe(200);
 
       // Verify the LLM received formatted strings, not [object Object]
-      expect(repairGraphWithAnthropic).toHaveBeenCalledWith(
-        expect.objectContaining({
-          violations: [
-            "[CYCLE_DETECTED] at {\"from\":\"fac_a\",\"to\":\"fac_b\"}: Remove weakest edge in cycle",
-            "[MISSING_BRIDGE]: Add outcome node connecting factors to goal",
-          ],
-        })
-      );
+      // Edge location uses "at edge from→to" format (priority 1).
+      // Node location uses "at node <id>" format (priority 2).
+      const callArg = vi.mocked(repairGraphWithAnthropic).mock.calls[0][0] as { violations: string[] };
+      const violations = callArg.violations;
+      expect(violations).not.toContain("[object Object]");
+      expect(violations.some((v) => v.includes("[CYCLE_DETECTED]"))).toBe(true);
+      expect(violations.some((v) => v.includes("[MISSING_BRIDGE]"))).toBe(true);
+      expect(violations.some((v) => v.includes("[FACTOR_HAS_INCOMING_EDGES]"))).toBe(true);
+      // Edge location branch
+      expect(violations.some((v) => v.includes("at edge fac_a→fac_b"))).toBe(true);
+      // Node location branch
+      expect(violations.some((v) => v.includes("at node fac_demand"))).toBe(true);
     });
 
     it("trims edges to max 24 and filters invalid references", async () => {

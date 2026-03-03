@@ -575,6 +575,47 @@ describe("Substep 2: PLoT validation", () => {
     expect(simpleRepair).toHaveBeenCalled();
   });
 
+  it("emits RepairStart with violation_summary and violation_codes strings/arrays", async () => {
+    const { emit } = await import("../../src/utils/telemetry.js");
+
+    const mockRepairAdapter = {
+      name: "openai",
+      model: "gpt-4o",
+      repairGraph: vi.fn().mockResolvedValue({
+        graph: { ...validGraph },
+        usage: { input_tokens: 100, output_tokens: 50 },
+      }),
+    };
+    (getAdapter as any).mockReturnValue(mockRepairAdapter);
+
+    // First call: validation fails with structured violations; second: revalidation passes
+    (validateGraph as any)
+      .mockResolvedValueOnce({
+        ok: false,
+        violations: [
+          { code: "CYCLE_DETECTED", severity: "error", suggestion: "Remove weakest edge" },
+          { code: "MISSING_BRIDGE", severity: "error", suggestion: "Add outcome node" },
+        ],
+      })
+      .mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
+
+    const ctx = makeCtx();
+    await runPlotValidation(ctx);
+
+    // Find the RepairStart emit call
+    const calls = (emit as any).mock.calls;
+    const repairStartCall = calls.find((c: any[]) => c[0] === "RepairStart");
+    expect(repairStartCall).toBeDefined();
+
+    const payload = repairStartCall[1];
+    expect(payload).toHaveProperty("violation_count", 2);
+    expect(typeof payload.violation_summary).toBe("string");
+    expect(payload.violation_summary.length).toBeGreaterThan(0);
+    expect(Array.isArray(payload.violation_codes)).toBe(true);
+    expect(payload.violation_codes).toContain("CYCLE_DETECTED");
+    expect(payload.violation_codes).toContain("MISSING_BRIDGE");
+  });
+
   it("sets repairFallbackReason='dag_transform_failed' when DAG stabilisation fails", async () => {
     const { stabiliseGraph } = await import("../../src/orchestrator/index.js");
     const { ensureDagAndPrune } = await import("../../src/orchestrator/index.js");

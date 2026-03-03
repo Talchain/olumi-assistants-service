@@ -29,6 +29,17 @@ import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/tel
  * { code, severity, level, at?, suggestion? }. Template literal interpolation of an
  * object produces "[object Object]", making the repair prompt useless to the LLM.
  * This function normalises both formats so the LLM always receives readable text.
+ *
+ * Output format: "[CODE] at <location>: <message>"
+ * This format is a soft contract with the repair prompt — do not change without
+ * updating the repair prompt's VIOLATION FORMAT section.
+ *
+ * Location priority order (deterministic, parseable):
+ *   1. at.from + at.to  → "at edge from→to"
+ *   2. at.node_id / at.node → "at node <id>"
+ *   3. at.path → "at <path>"
+ *   4. at is a string → "at <string>"
+ *   5. otherwise → omit location
  */
 export function coerceViolations(raw: unknown): string[] {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -39,14 +50,27 @@ export function coerceViolations(raw: unknown): string[] {
     if (v !== null && typeof v === "object") {
       const obj = v as Record<string, unknown>;
       const code = typeof obj["code"] === "string" ? obj["code"] : "UNKNOWN";
-      const location =
-        obj["at"] !== undefined && obj["at"] !== null
-          ? typeof obj["at"] === "string"
-            ? ` at ${obj["at"]}`
-            : typeof obj["at"] === "object"
-            ? ` at ${JSON.stringify(obj["at"])}`
-            : ""
-          : "";
+
+      // Build location string using strict priority order
+      let location = "";
+      const at = obj["at"];
+      if (at !== undefined && at !== null) {
+        if (typeof at === "string") {
+          location = ` at ${at}`;
+        } else if (typeof at === "object") {
+          const atObj = at as Record<string, unknown>;
+          if (typeof atObj["from"] === "string" && typeof atObj["to"] === "string") {
+            location = ` at edge ${atObj["from"]}→${atObj["to"]}`;
+          } else if (typeof atObj["node_id"] === "string") {
+            location = ` at node ${atObj["node_id"]}`;
+          } else if (typeof atObj["node"] === "string") {
+            location = ` at node ${atObj["node"]}`;
+          } else if (typeof atObj["path"] === "string") {
+            location = ` at ${atObj["path"]}`;
+          }
+        }
+      }
+
       const detail =
         typeof obj["suggestion"] === "string"
           ? obj["suggestion"]
@@ -55,7 +79,9 @@ export function coerceViolations(raw: unknown): string[] {
           : code;
       return `[${code}]${location}: ${detail}`;
     }
-    return "unknown violation";
+    // Non-string, non-object: safely stringify, bounded to 200 chars
+    const str = JSON.stringify(v);
+    return str !== undefined ? str.slice(0, 200) : "unknown violation";
   });
 }
 

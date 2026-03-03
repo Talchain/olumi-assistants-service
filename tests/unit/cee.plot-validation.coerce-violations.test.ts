@@ -28,15 +28,34 @@ describe("coerceViolations", () => {
     expect(coerceViolations(input)).toEqual(["[ORPHAN_NODE]: ORPHAN_NODE"]);
   });
 
-  it("formats at location when at is a string", () => {
+  it("formats at is string (priority 4)", () => {
     const input = [{ code: "CYCLE_DETECTED", severity: "error", at: "fac_a→fac_b", suggestion: "Remove cycle" }];
     expect(coerceViolations(input)).toEqual(["[CYCLE_DETECTED] at fac_a→fac_b: Remove cycle"]);
   });
 
-  it("formats at location when at is an object (edge reference)", () => {
-    const input = [{ code: "INVALID_EDGE_REF", severity: "error", at: { from: "fac_x", to: "out_y" }, suggestion: "Remove edge" }];
-    const result = coerceViolations(input);
-    expect(result[0]).toMatch(/^\[INVALID_EDGE_REF\] at \{.*\}: Remove edge$/);
+  it("formats at.from+at.to as 'at edge from→to' (priority 1)", () => {
+    const input = [{ code: "CYCLE_DETECTED", severity: "error", at: { from: "fac_a", to: "fac_b" }, suggestion: "Remove weakest edge in cycle" }];
+    expect(coerceViolations(input)).toEqual(["[CYCLE_DETECTED] at edge fac_a→fac_b: Remove weakest edge in cycle"]);
+  });
+
+  it("formats at.node_id as 'at node <id>' (priority 2)", () => {
+    const input = [{ code: "FACTOR_HAS_INCOMING_EDGES", severity: "warning", at: { node_id: "fac_demand" }, suggestion: "Remove incoming edges or change node type" }];
+    expect(coerceViolations(input)).toEqual(["[FACTOR_HAS_INCOMING_EDGES] at node fac_demand: Remove incoming edges or change node type"]);
+  });
+
+  it("formats at.node as 'at node <id>' (priority 2, alternate field)", () => {
+    const input = [{ code: "ORPHAN_NODE", severity: "error", at: { node: "fac_orphan" }, suggestion: "Connect to graph" }];
+    expect(coerceViolations(input)).toEqual(["[ORPHAN_NODE] at node fac_orphan: Connect to graph"]);
+  });
+
+  it("formats at.path as 'at <path>' (priority 3)", () => {
+    const input = [{ code: "SCHEMA_ERROR", severity: "error", at: { path: "nodes[2].data.value" }, suggestion: "Fix value field" }];
+    expect(coerceViolations(input)).toEqual(["[SCHEMA_ERROR] at nodes[2].data.value: Fix value field"]);
+  });
+
+  it("omits location when at object has no recognised fields", () => {
+    const input = [{ code: "UNKNOWN_ISSUE", severity: "error", at: { unknown_field: "x" }, suggestion: "Fix it" }];
+    expect(coerceViolations(input)).toEqual(["[UNKNOWN_ISSUE]: Fix it"]);
   });
 
   it("handles mixed array of strings and objects", () => {
@@ -61,13 +80,15 @@ describe("coerceViolations", () => {
     expect(coerceViolations(42)).toEqual(["unknown"]);
   });
 
-  it("converts non-string, non-object elements to 'unknown violation'", () => {
+  it("safely stringifies non-string, non-object elements (bounded 200 chars)", () => {
+    // null/undefined → "unknown violation" (JSON.stringify(undefined) returns undefined)
+    // numbers/booleans → JSON-stringified representation
     const input = [null, undefined, 42, true];
     expect(coerceViolations(input)).toEqual([
-      "unknown violation",
-      "unknown violation",
-      "unknown violation",
-      "unknown violation",
+      "null",           // JSON.stringify(null) === "null"
+      "unknown violation", // JSON.stringify(undefined) === undefined → fallback
+      "42",
+      "true",
     ]);
   });
 });

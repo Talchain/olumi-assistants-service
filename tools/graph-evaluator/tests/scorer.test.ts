@@ -290,11 +290,16 @@ describe("validateStructural", () => {
 
   it("still flags OUTCOME_UNREACHABLE when outcome cannot reach goal either", () => {
     const graph = minimalValidGraph();
-    // Add an outcome that is completely disconnected (no path to or from goal/decision)
-    graph.nodes.push(makeNode("out_iso", "outcome"));
-    // No edges for out_iso at all → orphan (and also unreachable from decision with no goal path)
+    // Add an outcome reachable from decision via a direct edge (not via any controllable factor),
+    // with no path to the goal. This satisfies the negative control for the exemption:
+    //   - Not in reachableThroughControllable → not exempt via controllable path
+    //   - Not in canReachGoalSet → not exempt via goal-reachability
+    //   - IS reachable from decision (bfsForward) → not an ORPHAN_NODE
+    // Therefore check 8 (OUTCOME_UNREACHABLE) fires, not check 10 (ORPHAN_NODE).
+    graph.nodes.push(makeNode("out_dead", "outcome"));
+    graph.edges.push(makeEdge("dec1", "out_dead", 0.5, 0.1, 0.8));
     const result = validateStructural(graph);
-    // Will be caught as ORPHAN_NODE rather than OUTCOME_UNREACHABLE (both are violations)
+    expect(result.violations).toContain("OUTCOME_UNREACHABLE");
     expect(result.valid).toBe(false);
   });
 });
