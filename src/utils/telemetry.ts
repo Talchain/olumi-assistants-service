@@ -177,6 +177,8 @@ export const TelemetryEvents = {
   PreflightValidationFailed: "cee.preflight.failed",
   PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
   PreflightRejected: "cee.preflight.rejected",
+  // Structured preflight outcome event with full calibration fields (v1.17)
+  PreflightCompleted: "cee.preflight.completed",
 
   // CEE verification events (v1.14)
   CeeVerificationSucceeded: "cee.verification.succeeded",

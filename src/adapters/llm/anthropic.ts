@@ -240,6 +240,16 @@ Draft a small decision graph with:
 
 Respond ONLY with valid JSON matching this structure.`;
 
+// Compliance reminder appended to the user message for initial draft generation only.
+// Reinforces critical structural rules at the point of generation (not in the system prompt).
+// Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
+const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+- Output valid JSON only (no comments, no text outside the JSON object)
+- Every outcome and risk needs an inbound path from a controllable factor
+- Every option needs a complete path to goal: option → controllable → outcome/risk → goal
+- 2–6 options maximum
+- topology_plan is required — plan before you build`;
+
 async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const docContext = args.docs.length
     ? `\n\n## Attached Documents\n${args.docs
@@ -250,7 +260,8 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
         .join("\n\n")}`
     : "";
 
-  const userContent = `## Brief\n${args.brief}${docContext}`;
+  const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
+  const userContent = `## Brief\n${args.brief}${docContext}${complianceReminder}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly

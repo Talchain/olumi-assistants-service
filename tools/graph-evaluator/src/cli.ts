@@ -13,7 +13,7 @@ import { config as loadDotenv } from "dotenv";
 import { Command } from "commander";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
 
 import { run } from "./runner.js";
 import { score } from "./scorer.js";
@@ -139,6 +139,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Load reminder file from the same directory as the prompt file, if present.
+  let reminderContent: string | undefined;
+  const reminderPath = join(dirname(promptPath), "user-message-reminder.txt");
+  try {
+    await access(reminderPath);
+    reminderContent = (await readFile(reminderPath, "utf-8")).trim();
+    console.log(`Reminder: ${reminderPath}`);
+  } catch {
+    // No reminder file — proceed without it
+  }
+
   // ── Build run configuration ────────────────────────────────────────────────
   const runId = opts.runId ?? buildRunId(opts.prompt);
   const timestamp = new Date().toISOString();
@@ -219,6 +230,7 @@ async function main(): Promise<void> {
     models,
     briefs,
     promptContent,
+    reminderContent,
     promptFile: opts.prompt,
     runId,
     resultsDir,

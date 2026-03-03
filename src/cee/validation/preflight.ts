@@ -88,7 +88,8 @@ const DECISION_PATTERNS = [
 const GIBBERISH_PATTERNS = [
   /^[^a-zA-Z]*$/, // No letters at all
   /(.)\1{5,}/, // Same character repeated 5+ times
-  /[a-z]{15,}/i, // Very long word (15+ chars) without spaces
+  // NOTE: /[a-z]{15,}/i was intentionally removed — it falsely flags long valid English words
+  // like "internationally" (15 chars). Keyboard-mashing runs are caught by /(.)\1{5,}/ above.
   /^[\W\d]+$/, // Only symbols and numbers
 ];
 
@@ -172,26 +173,67 @@ function calculateDecisionRelevance(text: string): number {
 }
 
 /**
- * Check if text appears to be gibberish
+ * Check if text appears to be gibberish.
+ *
+ * Requires conjunction of signals — a single low-coverage score on a short
+ * valid-English input is not sufficient to flag gibberish.
+ *
+ * Rules:
+ * 1. Explicit structural patterns (no letters, repeated chars, all symbols) → gibberish
+ * 2. High entropy (>5.0) AND low coverage (<0.3) → gibberish
+ * 3. Very low coverage (<0.15) ONLY when another signal is also present:
+ *    - High non-letter character ratio (>50%), OR
+ *    - All extracted "words" contain non-alphabetic characters (random token spam)
+ *
+ * Short-input exemption: inputs with ≤2 words that consist entirely of pure ASCII
+ * letter sequences bypass the coverage threshold check. A single uncommon-but-valid
+ * English word ("expand", "pivot") should not be classified as gibberish — the
+ * length/word-count validators handle these. For 3+ words with zero coverage and
+ * all pure letters (keyboard-row spam), the gibberish flag fires.
  */
 function isLikelyGibberish(text: string, entropy: number, coverage: number): boolean {
-  // Check explicit gibberish patterns
+  // Rule 1: Check explicit gibberish patterns (no letters, repeated chars, all symbols)
   for (const pattern of GIBBERISH_PATTERNS) {
     if (pattern.test(text)) {
       return true;
     }
   }
 
-  // High entropy + low dictionary coverage = gibberish
-  // Normal English text has entropy ~4.0-4.5 bits/char
-  // Gibberish tends to have entropy > 5.0
+  // Rule 2: High entropy + low dictionary coverage = gibberish
+  // Normal English text has entropy ~4.0-4.5 bits/char; gibberish tends > 5.0
   if (entropy > 5.0 && coverage < 0.3) {
     return true;
   }
 
-  // Very low coverage alone is suspicious
+  // Rule 3: Very low coverage (<0.15), but only flag as gibberish with a corroborating signal.
+  // A single low-coverage score alone is not sufficient — short valid English inputs
+  // may have low coverage simply because they use domain-specific or uncommon words.
   if (coverage < 0.15) {
-    return true;
+    const extractedWords = text.toLowerCase().match(/\b[a-z]+\b/g) || [];
+    const totalWordTokens = text.match(/\b\w+\b/g) || [];
+    const allPureLetterWords = extractedWords.length === totalWordTokens.length; // every token is pure letters
+
+    // Short-input exemption (≤2 words, all pure letters):
+    // A single word or two-word phrase that consists of pure letters is too ambiguous
+    // to call gibberish on coverage alone. "expand", "hire", "pivot" are not in COMMON_WORDS
+    // but they are valid English. Let length/word-count checks handle these.
+    if (totalWordTokens.length <= 2 && allPureLetterWords) {
+      return false;
+    }
+
+    // Corroborating signal A: high non-letter character ratio (symbol/number spam)
+    const letterChars = text.match(/[a-zA-Z]/g) || [];
+    const highNonLetterRatio = letterChars.length < text.length * 0.5;
+
+    if (highNonLetterRatio) {
+      return true;
+    }
+
+    // Corroborating signal B: multiple words, all pure letters, zero coverage
+    // (keyboard-row spam like "asdfghjkl qwerty zxcvbnm" — 3+ words, no known words)
+    if (totalWordTokens.length >= 3 && allPureLetterWords && coverage === 0) {
+      return true;
+    }
   }
 
   return false;

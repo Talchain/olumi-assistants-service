@@ -178,6 +178,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PreflightValidationFailed: "cee.preflight.failed",
         PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
         PreflightRejected: "cee.preflight.rejected",
+        PreflightCompleted: "cee.preflight.completed",
 
         // CEE verification events (v1.14)
         CeeVerificationSucceeded: "cee.verification.succeeded",
@@ -809,6 +810,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.PreflightValidationFailed,
         TelemetryEvents.PreflightReadinessAssessed,
         TelemetryEvents.PreflightRejected,
+        TelemetryEvents.PreflightCompleted,
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
@@ -1003,6 +1005,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.preflight.failed",
         "cee.preflight.readiness_assessed",
         "cee.preflight.rejected",
+        "cee.preflight.completed",
 
         // LLM Normalization events (Phase 1 NodeKind normalization)
         "llm.normalization.node_kind_mapped",

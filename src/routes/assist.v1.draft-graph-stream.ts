@@ -11,7 +11,8 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
-import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload } from "../cee/validation/preflight-decision.js";
 import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
 import { createResumeToken } from "../utils/sse-resume-token.js";
 import {
@@ -215,7 +216,7 @@ export default async function route(app: FastifyInstance) {
         ...telemetryCtx,
         latency_ms: Date.now() - start,
         error_code: "CEE_VALIDATION_FAILED",
-        http_status: 400,
+        http_status: 200, // SSE always opens with 200
       });
 
       logCeeCall({
@@ -224,21 +225,32 @@ export default async function route(app: FastifyInstance) {
         latencyMs: Date.now() - start,
         status: "error",
         errorCode: "CEE_VALIDATION_FAILED",
-        httpStatus: 400,
+        httpStatus: 200, // SSE always opens with 200
       });
 
+      // SSE protocol: always 200 — errors communicated via typed events.
       reply.raw.setHeader("X-CEE-Request-ID", requestId);
-      reply.raw.writeHead(400, SSE_HEADERS);
-      await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+      reply.raw.writeHead(200, SSE_HEADERS);
+      reply.raw.write(
+        `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: "SCHEMA_VALIDATION_FAILED", message: "Invalid input", details: errorBody.details })}\n\n`
+      );
       reply.raw.end();
       return reply;
     }
 
     const input = sanitizeDraftGraphInput(parsed.data, req.body);
 
-    // Preflight validation (if enabled)
+    // Preflight validation — delegates all policy ladder decisions to the
+    // shared evaluatePreflightDecision() function (identical logic as sync route).
+    //
+    // SSE protocol: the HTTP status is always 200 (stream opened) even for
+    // reject/clarify outcomes — errors and guidance are communicated via events.
     if (config.cee.preflightEnabled) {
-      const readiness = assessBriefReadiness(input.brief);
+      const decision = evaluatePreflightDecision(input.brief, {
+        preflightStrict: config.cee.preflightStrict,
+        preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
+      });
+      const { readiness } = decision;
 
       log.info({
         request_id: requestId,
@@ -248,7 +260,71 @@ export default async function route(app: FastifyInstance) {
         event: "cee.preflight.assessed",
       }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
 
-      // Clarification enforcement
+      // Emit telemetry (identical fields to sync route — comes from shared decision object).
+      emit(TelemetryEvents.PreflightCompleted, {
+        ...telemetryCtx,
+        ...decision.telemetry,
+      });
+
+      if (decision.action === "reject") {
+        const p = decision.payload as PreflightRejectPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: p.rejection_reason,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_PREFLIGHT_REJECTED",
+          httpStatus: 200, // SSE always opens with 200
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: p.rejection_reason, message: p.message })}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      if (decision.action === "clarify") {
+        const p = decision.payload as NeedsClarificationPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: "underspecified",
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "ok",
+          httpStatus: 200,
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: needs_clarification\ndata: ${JSON.stringify(p)}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      // action === "proceed": apply clarification enforcement (Phase 5) if enabled.
       if (config.cee.clarificationEnforced) {
         const allowDirectThreshold = config.cee.clarificationThresholdAllowDirect;
         const oneRoundThreshold = config.cee.clarificationThresholdOneRound;
@@ -297,13 +373,16 @@ export default async function route(app: FastifyInstance) {
             latencyMs: Date.now() - start,
             status: "error",
             errorCode: "CEE_CLARIFICATION_REQUIRED",
-            httpStatus: 400,
+            httpStatus: 200, // SSE always opens with 200
           });
 
+          // SSE protocol: always 200 — errors communicated via typed events.
           reply.raw.setHeader("X-CEE-Request-ID", requestId);
           reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
-          reply.raw.writeHead(400, SSE_HEADERS);
-          await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+          reply.raw.writeHead(200, SSE_HEADERS);
+          reply.raw.write(
+            `event: error\ndata: ${JSON.stringify({ code: "CEE_CLARIFICATION_REQUIRED", reason: "CLARIFICATION_REQUIRED", message: "Brief requires clarification before drafting", details: errorBody.details })}\n\n`
+          );
           reply.raw.end();
           return reply;
         }

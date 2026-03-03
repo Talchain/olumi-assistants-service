@@ -10,7 +10,8 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
-import { assessBriefReadiness } from "../cee/validation/readiness.js";
+import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload } from "../cee/validation/preflight-decision.js";
 import {
   parseSchemaVersion,
   transformResponseToV2,
@@ -19,6 +20,52 @@ import {
 } from "../cee/transforms/index.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../cee/transforms/analysis-ready.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
+
+// ============================================================================
+// Response contract — discriminated union on `status`
+// ============================================================================
+//
+// The draft-graph endpoint returns one of three shapes.
+// PLoT passes all three variants through unchanged.
+// The UI should handle each variant as a distinct state (not an error).
+//
+// Discriminant field: `status` (top-level key, always present in 200 responses)
+//
+//   DraftGraphSuccessResponse     status: "ok"                 — graph generated (HTTP 200)
+//   NeedsClarificationPayload     status: "needs_clarification" — show guidance  (HTTP 200)
+//   DraftGraphErrorResponse                                     — hard error      (HTTP 400)
+//
+// NeedsClarificationPayload is defined in preflight-decision.ts and re-used here.
+
+/** Graph-generated success response (V1 shape — V3 is flat nodes/edges at root). */
+export interface DraftGraphSuccessResponse {
+  status?: "ok";
+  graph: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** Hard-error response body (HTTP 400 / 429 / 500). */
+export interface DraftGraphErrorResponse {
+  schema: "cee.error.v1";
+  code: string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+  request_id?: string;
+}
+
+/**
+ * Discriminated union of all possible response bodies from /assist/v1/draft-graph.
+ *
+ * Discriminate on `status`:
+ *   - `"needs_clarification"` → NeedsClarificationPayload (HTTP 200)
+ *   - `undefined | "ok"`      → DraftGraphSuccessResponse (HTTP 200)
+ *   - absent + `code` field   → DraftGraphErrorResponse   (HTTP 400/429/500)
+ */
+export type DraftGraphResponse =
+  | import("../cee/validation/preflight-decision.js").NeedsClarificationPayload
+  | DraftGraphSuccessResponse
+  | DraftGraphErrorResponse;
 
 // Simple in-memory rate limiter for CEE Draft My Model
 // Keyed by API key ID when available, otherwise client IP
@@ -231,9 +278,14 @@ export default async function route(app: FastifyInstance) {
       };
     }
 
-    // Preflight validation - check brief readiness before LLM call
+    // Preflight validation — delegates all policy ladder decisions to the
+    // shared evaluatePreflightDecision() function (no duplicated logic here).
     if (config.cee.preflightEnabled) {
-      const readiness = assessBriefReadiness(baseInput.brief);
+      const decision = evaluatePreflightDecision(baseInput.brief, {
+        preflightStrict: config.cee.preflightStrict,
+        preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
+      });
+      const { readiness } = decision;
 
       // Log readiness assessment
       log.info({
@@ -245,22 +297,25 @@ export default async function route(app: FastifyInstance) {
         event: "cee.preflight.assessed",
       }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
 
-      // If strict mode and readiness below threshold, reject with guidance
-      if (config.cee.preflightStrict && readiness.score < config.cee.preflightReadinessThreshold) {
+      // Emit structured preflight outcome telemetry (cee.preflight.completed).
+      // Fields come from the shared decision object — identical from both routes.
+      emit(TelemetryEvents.PreflightCompleted, {
+        ...telemetryCtx,
+        ...decision.telemetry,
+      });
+
+      if (decision.action === "reject") {
+        const p = decision.payload as PreflightRejectPayload;
+
         const errorBody = buildCeeErrorResponse(
           "CEE_VALIDATION_FAILED",
-          readiness.summary,
+          p.message,
           {
-            retryable: true,
+            retryable: false,
             requestId,
             details: {
-              rejection_reason: "preflight_rejected",
-              readiness_score: readiness.score,
-              readiness_level: readiness.level,
-              factors: readiness.factors,
-              suggested_questions: readiness.suggested_questions,
-              preflight_issues: readiness.preflight.issues,
-              hint: "Please provide a clearer decision statement or answer the suggested questions",
+              rejection_reason: p.rejection_reason,
+              preflight_issues: p.preflight_issues,
             },
           }
         );
@@ -270,7 +325,7 @@ export default async function route(app: FastifyInstance) {
           latency_ms: Date.now() - start,
           readiness_score: readiness.score,
           readiness_level: readiness.level,
-          factors: readiness.factors,
+          rejection_reason: p.rejection_reason,
         });
 
         logCeeCall({
@@ -285,12 +340,39 @@ export default async function route(app: FastifyInstance) {
         reply.header("X-CEE-API-Version", "v1");
         reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
         reply.header("X-CEE-Request-ID", requestId);
-        reply.header("X-CEE-Readiness-Score", readiness.score.toString());
         reply.code(400);
         return reply.send(errorBody);
       }
 
-      // If readiness is low but not strict mode, log warning and continue
+      if (decision.action === "clarify") {
+        const p = decision.payload as NeedsClarificationPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: "underspecified",
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph",
+          latencyMs: Date.now() - start,
+          status: "ok",
+          httpStatus: 200,
+        });
+
+        reply.header("X-CEE-API-Version", "v1");
+        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+        reply.header("X-CEE-Request-ID", requestId);
+        reply.header("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.code(200);
+        return reply.send(p);
+      }
+
+      // action === "proceed": brief is valid and ready (or strict mode off).
+      // Low readiness but not in strict mode — log and continue to generation.
       if (readiness.level === "not_ready" || readiness.level === "needs_clarification") {
         log.warn({
           request_id: requestId,

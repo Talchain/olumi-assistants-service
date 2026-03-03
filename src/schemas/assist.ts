@@ -3,6 +3,16 @@ import { Graph } from "./graph.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 
 export const DraftGraphInput = z.object({
+  // TODO (backlog): Consider reducing min(30) to allow short valid decision questions
+  // like "Should I hire?" (14 chars) or "Expand to EU?" (13 chars) that currently fail
+  // here before reaching preflight readiness scoring.
+  //
+  // SHARED CONSTRAINT — this min(30) also appears in ClarifyBriefInput (line ~206).
+  // Both must be changed together if this is ever updated.
+  //
+  // Changing this requires verifying that the preflight short-input exemption (≤2-word
+  // all-letter inputs bypass coverage check) handles sub-30-char briefs gracefully.
+  // See: preflight calibration brief, March 2026 (src/cee/validation/preflight.ts)
   brief: z.string().min(30).max(5000),
   attachments: z
     .array(
@@ -203,6 +213,8 @@ export const SuggestOptionsOutput = z.object({
 });
 
 export const ClarifyBriefInput = z.object({
+  // SHARED CONSTRAINT — same min(30) as DraftGraphInput.brief above.
+  // Change both together. See backlog comment on DraftGraphInput for full context.
   brief: z.string().min(30).max(5000),
   round: z.number().int().min(0).max(2).default(0),
   previous_answers: z.array(z.object({

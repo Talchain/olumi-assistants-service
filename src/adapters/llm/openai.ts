@@ -436,6 +436,16 @@ const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
 
 const RAW_LLM_PREVIEW_MAX_CHARS = 500;
 
+// Compliance reminder appended to the user message for initial draft generation only.
+// Reinforces critical structural rules at the point of generation (not in the system prompt).
+// Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
+const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+- Output valid JSON only (no comments, no text outside the JSON object)
+- Every outcome and risk needs an inbound path from a controllable factor
+- Every option needs a complete path to goal: option → controllable → outcome/risk → goal
+- 2–6 options maximum
+- topology_plan is required — plan before you build`;
+
 /**
  * Truncate raw LLM output for debug tracing.
  * Returns the output with a truncation flag if over limit.
@@ -540,7 +550,8 @@ export class OpenAIAdapter implements LLMAdapter {
           })
           .join("\n\n")}`
       : "";
-    const userContent = `## Brief\n${brief}${docContext}`;
+    const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
+    const userContent = `## Brief\n${brief}${docContext}${complianceReminder}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();

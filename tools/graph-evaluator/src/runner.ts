@@ -37,8 +37,8 @@ if (_proxyUrl) {
 const RETRY_DELAYS_MS = [2_000, 8_000, 32_000];
 
 /** Default request timeout in milliseconds (reasoning models use a longer timeout). */
-const DEFAULT_TIMEOUT_MS = 30_000;
-const REASONING_TIMEOUT_MS = 90_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const REASONING_TIMEOUT_MS = 180_000;
 
 /** Failure codes that are eligible for retry. */
 const RETRYABLE_CODES: FailureCode[] = ["rate_limited", "server_error"];
@@ -59,6 +59,8 @@ export interface RunInput {
   briefs: Brief[];
   promptContent: string;
   promptFile: string;
+  /** Optional reminder text appended to every user message after two newlines. */
+  reminderContent?: string;
   runId: string;
   resultsDir: string;
   force: boolean;
@@ -326,7 +328,7 @@ function sleep(ms: number): Promise<void> {
  * Does NOT write to disk directly — use the io.saveResult callback for that.
  */
 export async function run(input: RunInput): Promise<LLMResponse[]> {
-  const { models, briefs, promptContent, dryRun, onResult } = input;
+  const { models, briefs, promptContent, reminderContent, dryRun, onResult } = input;
   const results: LLMResponse[] = [];
 
   for (const model of models) {
@@ -366,7 +368,10 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
       // ── API call ──────────────────────────────────────────────────────────
       console.log(`  Running: ${model.id} × ${brief.id}...`);
 
-      const callFn = () => callOpenAI(model, promptContent, brief.body);
+      const userMessage = reminderContent
+        ? `${brief.body}\n\n${reminderContent}`
+        : brief.body;
+      const callFn = () => callOpenAI(model, promptContent, userMessage);
 
       let result = await withRetry(callFn);
 

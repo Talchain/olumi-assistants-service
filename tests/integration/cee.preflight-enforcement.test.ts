@@ -73,8 +73,10 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       "X-Olumi-Assist-Key": "preflight-test-key",
     } as const;
 
-    it("rejects low-readiness brief in strict mode with CEE_VALIDATION_FAILED", async () => {
-      // Non-decision brief that passes preflight but has low readiness score
+    it("returns 200 needs_clarification for low-readiness brief in strict mode (policy ladder v1.17)", async () => {
+      // Policy ladder: valid English + underspecified → 200 with needs_clarification guidance.
+      // Only gibberish/empty/schema-violation → 400.
+      // Non-decision brief that passes preflight but has low readiness score:
       // - No decision keywords (decision_relevance: 0)
       // - Short length (length_score: ~0.4)
       // - No specificity indicators (specificity: ~0.3)
@@ -89,22 +91,16 @@ describe("CEE Preflight Enforcement (Integration)", () => {
         },
       });
 
-      expect(res.statusCode).toBe(400);
+      expect(res.statusCode).toBe(200);
       const body = res.json();
 
-      // Error response schema
-      expect(body.schema).toBe("cee.error.v1");
-      expect(body.code).toBe("CEE_VALIDATION_FAILED");
-      expect(body.retryable).toBe(true);
-
-      // Specific preflight rejection details
-      expect(body.details).toBeDefined();
-      expect(body.details.rejection_reason).toBe("preflight_rejected");
-      expect(typeof body.details.readiness_score).toBe("number");
-      expect(body.details.readiness_score).toBeLessThan(0.5);
-      expect(body.details.readiness_level).toBeDefined();
-      expect(body.details.suggested_questions).toBeDefined();
-      expect(body.details.hint).toContain("clearer decision statement");
+      // needs_clarification response schema
+      expect(body.status).toBe("needs_clarification");
+      expect(typeof body.readiness_score).toBe("number");
+      expect(body.readiness_score).toBeLessThan(0.5);
+      expect(body.readiness_level).toBeDefined();
+      expect(Array.isArray(body.clarification_questions)).toBe(true);
+      expect(body.summary).toBeDefined();
 
       // Readiness score header
       expect(res.headers["x-cee-readiness-score"]).toBeDefined();
@@ -136,7 +132,8 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(body.trace).toBeDefined();
     });
 
-    it("includes readiness factors in rejection response", async () => {
+    it("includes readiness factors in needs_clarification response (policy ladder v1.17)", async () => {
+      // Policy ladder: valid English + underspecified → 200 with factors in response body.
       // Brief without decision language - will have low decision_relevance
       const res = await app.inject({
         method: "POST",
@@ -147,13 +144,13 @@ describe("CEE Preflight Enforcement (Integration)", () => {
         },
       });
 
-      expect(res.statusCode).toBe(400);
+      expect(res.statusCode).toBe(200);
       const body = res.json();
 
-      expect(body.details).toBeDefined();
-      expect(body.details.factors).toBeDefined();
+      expect(body.status).toBe("needs_clarification");
+      expect(body.factors).toBeDefined();
       // Factors object should have numeric scores
-      const factors = body.details.factors;
+      const factors = body.factors;
       expect(typeof factors.decision_relevance_score).toBe("number");
       expect(typeof factors.clarity_score).toBe("number");
       expect(typeof factors.specificity_score).toBe("number");
@@ -354,9 +351,10 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       "X-Olumi-Assist-Key": "combined-test-key",
     } as const;
 
-    it("preflight rejection takes precedence over clarification requirement", async () => {
-      // Gibberish input fails preflight validation (not readiness threshold)
-      // This triggers preflight.valid = false, which means readiness = 0
+    it("gibberish input returns 400 CEE_VALIDATION_FAILED (hard reject, policy ladder v1.17)", async () => {
+      // Gibberish input fails preflight validation — preflight.valid = false → 400 hard reject.
+      // "asdfghjkl qwertyuiop zxcvbnm keyboard test" has 4 words, all pure letters, zero coverage.
+      // The 3+ words + all-pure-letters + coverage=0 conjunction triggers BRIEF_APPEARS_GIBBERISH.
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/draft-graph",
@@ -369,10 +367,10 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(res.statusCode).toBe(400);
       const body = res.json();
 
-      // Should be preflight rejection due to gibberish detection
+      // Hard reject: gibberish detected
       expect(body.code).toBe("CEE_VALIDATION_FAILED");
-      expect(body.details.rejection_reason).toBe("preflight_rejected");
-      expect(body.details.readiness_score).toBe(0);
+      // rejection_reason is now the preflight issue code (e.g. BRIEF_APPEARS_GIBBERISH)
+      expect(body.details.rejection_reason).toBe("BRIEF_APPEARS_GIBBERISH");
     });
 
     it("clarification check runs after preflight passes for low readiness", async () => {
@@ -394,6 +392,131 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(body.code).toBe("CEE_CLARIFICATION_REQUIRED");
       expect(body.details.readiness_score).toBeGreaterThan(0.25); // Above preflight threshold
       expect(body.details.readiness_score).toBeLessThan(0.8); // Below direct draft threshold
+    });
+  });
+
+  // ============================================================================
+  // Primary Regression Tests (route-level contract)
+  // ============================================================================
+  //
+  // These tests are the primary regression guard for the v1.17 fixes.
+  // They validate the full request path: Zod → preflight → policy ladder → response.
+  // If the gibberish regex is reintroduced or the policy ladder breaks, these fail.
+
+  describe("Primary Regression Guard (v1.17)", () => {
+    let app: FastifyInstance;
+
+    beforeAll(async () => {
+      _resetConfigCache();
+
+      vi.stubEnv("LLM_PROVIDER", "fixtures");
+      vi.stubEnv("CEE_CAUSAL_VALIDATION_ENABLED", "false");
+      vi.stubEnv("VALIDATION_CACHE_ENABLED", "false");
+
+      vi.stubEnv("ASSIST_API_KEYS", "regression-test-key");
+      vi.stubEnv("CEE_PREFLIGHT_ENABLED", "true");
+      vi.stubEnv("CEE_PREFLIGHT_STRICT", "true");
+      vi.stubEnv("CEE_PREFLIGHT_READINESS_THRESHOLD", "0.5");
+      vi.stubEnv("CEE_CLARIFICATION_ENFORCED", "false");
+
+      cleanBaseUrl();
+      app = await build();
+      await app.ready();
+    });
+
+    afterAll(async () => {
+      await app.close();
+      vi.unstubAllEnvs();
+    });
+
+    const headers = {
+      "X-Olumi-Assist-Key": "regression-test-key",
+    } as const;
+
+    it("'Should we expand internationally?' returns 200 with graph — NOT gibberish (primary regression)", async () => {
+      // This is the exact brief that was hard-rejected as BRIEF_APPEARS_GIBBERISH before v1.17.
+      // "internationally" (15 chars) matched /[a-z]{15,}/i which was removed in v1.17.
+      // Must NEVER return 400 with rejection_reason === "BRIEF_APPEARS_GIBBERISH".
+      //
+      // Readiness score (~0.64) is ABOVE the 0.5 threshold → action:"proceed" → graph response.
+      // (If score ever drops below 0.5, the pipeline outcome shifts to needs_clarification.
+      //  That would be a preflight calibration regression, and this test would catch it.)
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers,
+        payload: {
+          brief: "Should we expand internationally?",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // Must NOT be any kind of error
+      expect(body.code).toBeUndefined();
+      expect(body.details?.rejection_reason).toBeUndefined();
+      expect(body.status).not.toBe("needs_clarification");
+
+      // At threshold=0.5 this brief proceeds to pipeline — assert graph output (V3: flat nodes/edges)
+      expect(body.nodes).toBeDefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
+    });
+
+    it("low-readiness non-decision brief returns 200 needs_clarification in strict mode (shape contract)", async () => {
+      // Uses a brief that has: no decision keywords, no specificity, no context
+      // Readiness score well below 0.5 threshold → needs_clarification response.
+      // This validates the shape of the needs_clarification response at route level.
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers,
+        payload: {
+          brief: "The sky is blue and clouds are white today in our area.",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // Top-level keys (NOT nested under preflight or similar)
+      expect(body.status).toBe("needs_clarification");
+      expect(typeof body.readiness_score).toBe("number");
+      expect(body.readiness_score).toBeGreaterThan(0);
+      expect(body.readiness_score).toBeLessThanOrEqual(1);
+      expect(body.readiness_level).toBeDefined();
+      expect(Array.isArray(body.clarification_questions)).toBe(true);
+      // At least one non-empty clarification question
+      expect(body.clarification_questions.length).toBeGreaterThan(0);
+      for (const q of body.clarification_questions) {
+        expect(typeof q).toBe("string");
+        expect(q.length).toBeGreaterThan(0);
+      }
+
+      // Not a hard error
+      expect(body.code).toBeUndefined();
+      expect(body.details?.rejection_reason).toBeUndefined();
+    });
+
+    it("gibberish brief returns 400 CEE_VALIDATION_FAILED with exact code and reason", async () => {
+      // "asdfghjkl qwerty zxcvbnm poiuytrewq" — 4 words, all pure letters, coverage=0.
+      // Triggers rule 3: 3+ words + all-pure-letters + coverage===0 → BRIEF_APPEARS_GIBBERISH.
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/draft-graph",
+        headers,
+        payload: {
+          brief: "asdfghjkl qwerty zxcvbnm poiuytrewq",
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+
+      // Exact error code — not loose matching
+      expect(body.code).toBe("CEE_VALIDATION_FAILED");
+      // Exact rejection reason — not "preflight_rejected" or similar
+      expect(body.details.rejection_reason).toBe("BRIEF_APPEARS_GIBBERISH");
     });
   });
 });
