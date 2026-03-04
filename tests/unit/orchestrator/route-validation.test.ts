@@ -209,6 +209,80 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
     });
   });
 
+  // ── FramingSchema (A.4 type-tightening) ──────────────────────────────────
+
+  describe("FramingSchema — string constraints and limits", () => {
+    const FramingSchema = z.object({
+      stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
+      goal: z.string().optional(),
+      constraints: z.array(z.string().max(200)).max(20).optional(),
+      options: z.array(z.string().max(200)).max(20).optional(),
+    }).nullable();
+
+    it("accepts valid framing with string options and constraints", () => {
+      const result = FramingSchema.safeParse({
+        stage: "evaluate",
+        goal: "Maximise revenue",
+        options: ["Launch now", "Delay 6 months"],
+        constraints: ["Budget < $500k"],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects framing with more than 20 options", () => {
+      const result = FramingSchema.safeParse({
+        stage: "evaluate",
+        options: Array.from({ length: 21 }, (_, i) => `Option ${i}`),
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects framing with more than 20 constraints", () => {
+      const result = FramingSchema.safeParse({
+        stage: "evaluate",
+        constraints: Array.from({ length: 21 }, (_, i) => `Constraint ${i}`),
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects framing with an option string exceeding 200 chars", () => {
+      const result = FramingSchema.safeParse({
+        stage: "ideate",
+        options: ["a".repeat(201)],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects framing with a constraint string exceeding 200 chars", () => {
+      const result = FramingSchema.safeParse({
+        stage: "ideate",
+        constraints: ["b".repeat(201)],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts framing with exactly 20 options (boundary)", () => {
+      const result = FramingSchema.safeParse({
+        stage: "ideate",
+        options: Array.from({ length: 20 }, (_, i) => `Option ${i}`),
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts framing with an option string of exactly 200 chars (boundary)", () => {
+      const result = FramingSchema.safeParse({
+        stage: "ideate",
+        options: ["a".repeat(200)],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts null framing (nullable)", () => {
+      const result = FramingSchema.safeParse(null);
+      expect(result.success).toBe(true);
+    });
+  });
+
   // ── SystemEventSchema (Brief C) ─────────────────────────────────────────
 
   describe("SystemEventSchema — discriminated union validation", () => {

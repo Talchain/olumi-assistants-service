@@ -209,6 +209,33 @@ describe("assembleV2SystemPrompt", () => {
     });
   });
 
+  describe("Section character cap (2000 chars)", () => {
+    it("truncates graph section exceeding 2000 chars and appends truncation marker", async () => {
+      // Build a compact graph with a node label long enough to push the serialised
+      // output past the 2000-char cap. The serialised line for this node is:
+      //   "  n1 [factor] \"<label>\""  (~17 + label length chars)
+      // plus the "Graph (N nodes, M edges):\n" header (~27 chars).
+      // Total with a 2000-char label: ~2044 chars → exceeds 2000.
+      const longLabel = "x".repeat(2000);
+      const largeGraph: GraphV3Compact = {
+        nodes: [
+          { id: "n1", kind: "factor", label: longLabel },
+          { id: "n2", kind: "outcome", label: "Revenue" },
+        ],
+        edges: [{ from: "n1", to: "n2", strength: 0.8, exists: 0.9 }],
+        _node_count: 2,
+        _edge_count: 1,
+      };
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ graph_compact: largeGraph }));
+      expect(prompt).toContain("…truncated");
+    });
+
+    it("does not truncate graph section within 2000 chars", async () => {
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ graph_compact: COMPACT_GRAPH }));
+      expect(prompt).not.toContain("…truncated");
+    });
+  });
+
   describe("Event log summary (component 5)", () => {
     it("includes event log summary when present", async () => {
       const summary = "Framing confirmed: Maximise revenue. Graph drafted with 3 nodes, 2 edges.";

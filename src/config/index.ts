@@ -255,7 +255,9 @@ const ConfigSchema = z.object({
     strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
     orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
-    contextFabric: booleanString.default(false), // Context Fabric: 3-zone cache-aware context assembly pipeline
+    // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
+    // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
+    contextFabric: booleanString.default(false),
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
   }),
 
