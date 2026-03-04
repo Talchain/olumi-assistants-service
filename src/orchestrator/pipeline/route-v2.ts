@@ -13,6 +13,7 @@
 import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import type { OrchestratorTurnRequest } from "../types.js";
+import { getHttpStatusForError } from "../types.js";
 import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, registerInflightRequest } from "../idempotency.js";
 import { ORCHESTRATOR_TURN_BUDGET_MS } from "../../config/timeouts.js";
 import type { OrchestratorResponseEnvelopeV2 } from "./types.js";
@@ -177,7 +178,9 @@ export async function handleTurnV2(
     );
     resolveInflight(envelope);
 
-    const httpStatus = envelope.error ? 500 : 200;
+    const httpStatus = envelope.error
+      ? getHttpStatusForError(envelope.error as import("../types.js").OrchestratorError)
+      : 200;
     return { envelope, httpStatus };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
