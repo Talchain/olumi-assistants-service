@@ -1,6 +1,6 @@
 /**
- * Tests for route-boundary shape validation (C.1).
- * Verifies that graph and analysis_response schemas reject malformed inputs at the Zod level.
+ * Tests for route-boundary shape validation (C.1 + Brief C system events).
+ * Verifies that graph, analysis_response, and system_event schemas reject malformed inputs at the Zod level.
  */
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
@@ -16,6 +16,57 @@ const GraphSchema = z.object({
 const AnalysisResponseSchema = z.object({
   analysis_status: z.string(),
 }).passthrough().nullable();
+
+// ── SystemEventSchema (from route.ts) ──────────────────────────────────────
+const SystemEventBase = {
+  timestamp: z.string(),
+  event_id: z.string().min(1),
+};
+
+const SystemEventSchema = z.discriminatedUnion('event_type', [
+  z.object({
+    event_type: z.literal('patch_accepted'),
+    ...SystemEventBase,
+    details: z.object({
+      patch_id: z.string().optional(),
+      block_id: z.string().optional(),
+      operations: z.array(z.record(z.unknown())),
+      applied_graph_hash: z.string().optional(),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('patch_dismissed'),
+    ...SystemEventBase,
+    details: z.object({
+      patch_id: z.string().optional(),
+      block_id: z.string().optional(),
+      reason: z.string().optional(),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('direct_graph_edit'),
+    ...SystemEventBase,
+    details: z.object({
+      changed_node_ids: z.array(z.string()),
+      changed_edge_ids: z.array(z.string()),
+      operations: z.array(z.enum(['add', 'update', 'remove'])),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('direct_analysis_run'),
+    ...SystemEventBase,
+    details: z.object({}).strict(),
+  }),
+  z.object({
+    event_type: z.literal('feedback_submitted'),
+    ...SystemEventBase,
+    details: z.object({
+      turn_id: z.string(),
+      rating: z.enum(['up', 'down']),
+      comment: z.string().optional(),
+    }),
+  }),
+]);
 
 describe("Route-Boundary Shape Validation (C.1)", () => {
   describe("GraphSchema", () => {
@@ -155,6 +206,122 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
       if (result.success) {
         expect((result.data as any).custom_field).toBe("extra");
       }
+    });
+  });
+
+  // ── SystemEventSchema (Brief C) ─────────────────────────────────────────
+
+  describe("SystemEventSchema — discriminated union validation", () => {
+    const VALID_BASE = { timestamp: '2026-03-03T00:00:00Z', event_id: 'evt-1' };
+
+    it("accepts valid patch_accepted", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { patch_id: 'p1', operations: [] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts patch_accepted with only block_id (no patch_id)", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { block_id: 'blk-1', operations: [] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts valid patch_dismissed", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_dismissed',
+        ...VALID_BASE,
+        details: { patch_id: 'p1' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts valid direct_graph_edit", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'direct_graph_edit',
+        ...VALID_BASE,
+        details: { changed_node_ids: ['n1'], changed_edge_ids: [], operations: ['add'] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts valid direct_analysis_run with empty details", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'direct_analysis_run',
+        ...VALID_BASE,
+        details: {},
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects direct_analysis_run with unexpected fields in details (strict)", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'direct_analysis_run',
+        ...VALID_BASE,
+        details: { unexpected_field: 'oops' },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts valid feedback_submitted", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'feedback_submitted',
+        ...VALID_BASE,
+        details: { turn_id: 't1', rating: 'up' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects unknown event_type", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'totally_unknown_event',
+        ...VALID_BASE,
+        details: {},
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing event_id", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_dismissed',
+        timestamp: '2026-03-03T00:00:00Z',
+        details: { patch_id: 'p1' },
+        // event_id missing
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects empty event_id string", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_dismissed',
+        ...VALID_BASE,
+        event_id: '',  // empty — fails .min(1)
+        details: { patch_id: 'p1' },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects malformed details for feedback_submitted (missing turn_id)", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'feedback_submitted',
+        ...VALID_BASE,
+        details: { rating: 'up' }, // missing turn_id
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects invalid rating value for feedback_submitted", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'feedback_submitted',
+        ...VALID_BASE,
+        details: { turn_id: 't1', rating: 'meh' }, // invalid rating
+      });
+      expect(result.success).toBe(false);
     });
   });
 });

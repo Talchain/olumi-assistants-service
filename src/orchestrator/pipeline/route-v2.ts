@@ -20,6 +20,7 @@ import { executePipeline } from "./pipeline.js";
 import { createProductionLLMClient } from "./llm-client.js";
 import { createProductionToolDispatcher } from "./phase4-tools/index.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
+import { createPLoTClient } from "../plot-client.js";
 import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
 import { getGateToolNames } from "../intent-gate.js";
 import { validateGatePatternsAgainstRegistry } from "../tools/registry.js";
@@ -156,6 +157,8 @@ export async function handleTurnV2(
     const deps = {
       llmClient: createProductionLLMClient(),
       toolDispatcher: createProductionToolDispatcher(requestId, plotOpts, request),
+      plotClient: createPLoTClient(),
+      plotOpts,
     };
 
     // 5. Execute pipeline

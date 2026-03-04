@@ -38,7 +38,8 @@ import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, regis
 import { classifyIntent } from "./intent-gate.js";
 import type { ToolName } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
-import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "./plot-client.js";
+import type { PLoTClient, PLoTClientRunOpts } from "./plot-client.js";
+import { routeSystemEvent, appendSystemMessages } from "./system-event-router.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
 import { parseLLMResponse, getFirstToolInvocation } from "./response-parser.js";
 import type { ExtractedBlock } from "./response-parser.js";
@@ -250,7 +251,7 @@ export async function handleTurn(
 }
 
 // ============================================================================
-// System Event Handling
+// System Event Handling — delegates to system-event-router.ts
 // ============================================================================
 
 async function handleSystemEvent(
@@ -262,140 +263,93 @@ async function handleSystemEvent(
 ): Promise<TurnResult> {
   const event = turnRequest.system_event!;
 
-  log.info({ event_type: event.type, request_id: requestId }, "Handling system event");
+  const routerResult = await routeSystemEvent({
+    event,
+    turnRequest,
+    turnId,
+    requestId,
+    plotClient: getPlotClient(),
+    plotOpts,
+  });
 
-  switch (event.type) {
-    case 'patch_accepted': {
-      return handlePatchAccepted(turnRequest, turnId, requestId, plotOpts);
-    }
-    case 'patch_dismissed':
-    case 'feedback_submitted': {
-      // No LLM call — log + return empty
-      const envelope = assembleEnvelope({
-        turnId,
-        assistantText: null,
-        blocks: [],
-        context: turnRequest.context,
-        turnPlan: buildTurnPlan(null, 'deterministic', false),
-      });
-      return { envelope, httpStatus: 200 };
-    }
-
-    case 'direct_graph_edit': {
-      // Lightweight LLM acknowledgement — uses shorter ack timeout
-      const adapter = getAdapter('orchestrator');
-      let text = 'Model updated.';
-      try {
-        const result = await adapter.chat(
-          { system: 'Briefly acknowledge a graph edit made by the user.', userMessage: 'The user edited the graph directly.' },
-          { requestId, timeoutMs: ORCHESTRATOR_ACK_TIMEOUT_MS },
-        );
-        text = result.content || text;
-      } catch {
-        // Fallback text is fine — ack timeout is short by design
-      }
-
-      const envelope = assembleEnvelope({
-        turnId,
-        assistantText: text,
-        blocks: [],
-        context: turnRequest.context,
-        turnPlan: buildTurnPlan(null, 'deterministic', false),
-      });
-      return { envelope, httpStatus: 200 };
-    }
-
-    case 'direct_analysis_run': {
-      // Route to run_analysis
-      return dispatchTool('run_analysis', {}, turnRequest, turnId, request, requestId, 'deterministic', undefined, plotOpts);
-    }
-
-    default: {
-      log.warn({ event_type: event.type }, "Unknown system event type");
-      const envelope = assembleEnvelope({
-        turnId,
-        assistantText: null,
-        blocks: [],
-        context: turnRequest.context,
-      });
-      return { envelope, httpStatus: 200 };
-    }
+  // Error from router (e.g. MISSING_GRAPH_STATE) → return error envelope
+  if (routerResult.error) {
+    const errorTurnPlan = buildTurnPlan(null, 'deterministic', false);
+    errorTurnPlan.system_event = { type: event.event_type, event_id: event.event_id };
+    const envelope = assembleEnvelope({
+      turnId,
+      assistantText: null,
+      blocks: [],
+      context: turnRequest.context,
+      turnPlan: errorTurnPlan,
+      error: {
+        code: routerResult.error.code as OrchestratorError['code'],
+        message: routerResult.error.message,
+        recoverable: false,
+      },
+    });
+    return { envelope, httpStatus: routerResult.httpStatus };
   }
-}
 
-// ============================================================================
-// patch_accepted → PLoT validate-patch
-// ============================================================================
+  // direct_analysis_run Path B: delegate to existing run_analysis handler (path equivalence)
+  if (routerResult.delegateToTool === 'run_analysis') {
+    // Inject [system] context entry before delegating so the analysis handler sees it.
+    const updatedContext = {
+      ...turnRequest.context,
+      messages: appendSystemMessages(turnRequest.context.messages, routerResult.systemContextEntries),
+    };
+    return dispatchTool(
+      'run_analysis',
+      {},
+      { ...turnRequest, context: updatedContext },
+      turnId,
+      request,
+      requestId,
+      'deterministic',
+      undefined,
+      plotOpts,
+    );
+  }
 
-async function handlePatchAccepted(
-  turnRequest: OrchestratorTurnRequest,
-  turnId: string,
-  requestId: string,
-  plotOpts?: PLoTClientRunOpts,
-): Promise<TurnResult> {
-  const event = turnRequest.system_event!;
-  const payload = event.payload;
-  const warnings: string[] = [];
-  let graphHash: string | undefined;
+  // Inject [system] context entries (non-persistent — filtered on persistence)
+  const updatedContext = {
+    ...turnRequest.context,
+    messages: appendSystemMessages(turnRequest.context.messages, routerResult.systemContextEntries),
+  };
 
-  const client = getPlotClient();
-
-  if (client && turnRequest.context.graph) {
+  // direct_analysis_run Path A with narration: chain explain_results if message present
+  let finalBlocks = routerResult.blocks;
+  let finalAssistantText = routerResult.assistantText;
+  if (routerResult.needsNarration && turnRequest.message.trim().length > 5) {
+    const explainContext = {
+      ...updatedContext,
+      analysis_response: routerResult.analysisResponse ?? null,
+    };
+    const adapter = getAdapter('orchestrator');
     try {
-      // Build validate-patch payload: full graph + operations (if available in event payload)
-      const plotPayload: Record<string, unknown> = {
-        graph: turnRequest.context.graph,
-        operations: Array.isArray(payload.operations) ? payload.operations : [],
-        scenario_id: turnRequest.scenario_id,
-      };
-
-      const result: ValidatePatchResult = await client.validatePatch(plotPayload, requestId, plotOpts);
-
-      if (result.kind === 'success') {
-        graphHash = typeof result.data.graph_hash === 'string' ? result.data.graph_hash : undefined;
-        log.info(
-          { request_id: requestId, graph_hash: graphHash },
-          "patch_accepted: PLoT validate-patch succeeded",
-        );
-      } else if (result.kind === 'feature_disabled') {
-        warnings.push('PLoT validate-patch not available — graph_hash not computed');
-        log.info({ request_id: requestId }, "patch_accepted: PLoT validate-patch FEATURE_DISABLED");
-      } else {
-        // Rejection — should not happen for patch_accepted but handle gracefully
-        warnings.push(`PLoT validate-patch rejected: ${result.message ?? 'unknown reason'}`);
-        log.warn(
-          { request_id: requestId, code: result.code, message: result.message },
-          "patch_accepted: PLoT validate-patch rejected (unexpected)",
-        );
-      }
-    } catch (err) {
-      // PLoT error — do not block the user
-      const msg = err instanceof Error ? err.message : String(err);
-      warnings.push(`PLoT validate-patch failed: ${msg}`);
-      log.warn(
-        { request_id: requestId, error: msg },
-        "patch_accepted: PLoT validate-patch error — proceeding with ack",
-      );
+      const { handleExplainResults } = await import('./tools/explain-results.js');
+      const explainResult = await handleExplainResults(explainContext, adapter, requestId, turnId);
+      finalBlocks = [...finalBlocks, ...explainResult.blocks];
+      finalAssistantText = explainResult.assistantText;
+    } catch {
+      // Non-fatal: explanation failure should not block the analysis result
     }
-  } else if (!client) {
-    warnings.push('PLoT client not configured — graph_hash not computed');
   }
+
+  const turnPlan = buildTurnPlan(null, 'deterministic', false);
+  turnPlan.system_event = { type: event.event_type, event_id: event.event_id };
 
   const envelope = assembleEnvelope({
     turnId,
-    assistantText: null,
-    blocks: [],
-    context: turnRequest.context,
-    turnPlan: buildTurnPlan(null, 'deterministic', false),
-    graphHash,
+    assistantText: finalAssistantText,
+    blocks: finalBlocks,
+    context: updatedContext,
+    turnPlan,
+    graphHash: routerResult.graphHash,
+    analysisResponse: routerResult.analysisResponse,
   });
 
-  // Surface warnings in the envelope's parse_warnings field (debug aid)
-  if (warnings.length > 0) {
-    envelope.parse_warnings = warnings;
-  }
-
-  return { envelope, httpStatus: 200 };
+  return { envelope, httpStatus: routerResult.httpStatus };
 }
 
 // ============================================================================

@@ -76,7 +76,7 @@ function stageFromSystemEvent(
   event: SystemEvent,
   context: ConversationContext,
 ): StageIndicator | null {
-  switch (event.type) {
+  switch (event.event_type) {
     case 'direct_analysis_run':
       return {
         stage: 'evaluate',

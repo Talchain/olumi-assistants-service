@@ -96,16 +96,15 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // Request Validation
   // ---------------------------------------------------
 
-  it("returns 400 for missing message", async () => {
+  it("returns 200 for empty message (event-only turns allowed)", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest({ message: "" }),
     });
 
-    expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body);
-    expect(body.error.code).toBe("INVALID_REQUEST");
+    // Empty message is valid — system events may arrive without a user message.
+    expect(response.statusCode).toBe(200);
   });
 
   it("returns 400 for missing context", async () => {
@@ -286,21 +285,24 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // System Events
   // ---------------------------------------------------
 
-  it("returns 200 with empty blocks for patch_accepted event", async () => {
+  it("returns 200 with graph_patch block for patch_accepted (Path A — UI-validated)", async () => {
+    const minimalGraph = { nodes: [], edges: [], options: [], version: "3" };
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest({
         system_event: {
-          type: "patch_accepted",
-          payload: { block_id: "blk_123" },
+          event_type: "patch_accepted",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-1",
+          details: { patch_id: "patch-1", operations: [], applied_graph_hash: "abc123" },
         },
+        graph_state: minimalGraph,
       }),
     });
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
-    expect(body.blocks).toEqual([]);
     expect(body.assistant_text).toBeNull();
     expect(body.turn_plan?.routing).toBe("deterministic");
   });
@@ -311,8 +313,10 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest({
         system_event: {
-          type: "feedback_submitted",
-          payload: { rating: "positive" },
+          event_type: "feedback_submitted",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-2",
+          details: { turn_id: "t1", rating: "up" },
         },
       }),
     });

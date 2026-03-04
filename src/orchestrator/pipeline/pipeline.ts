@@ -10,13 +10,15 @@
 
 import { log } from "../../utils/telemetry.js";
 import type { OrchestratorTurnRequest } from "../types.js";
-import type { PipelineDeps, OrchestratorResponseEnvelopeV2 } from "./types.js";
+import type { PipelineDeps, OrchestratorResponseEnvelopeV2, EnrichedContext } from "./types.js";
 import { phase1Enrich } from "./phase1-enrichment/index.js";
 import { phase2Route } from "./phase2-specialists/index.js";
 import { phase3Generate } from "./phase3-llm/index.js";
 import { phase4Execute } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
 import { buildErrorEnvelope, computeContextHash } from "./phase5-validation/envelope-assembler.js";
+import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
+import { getAdapter } from "../../adapters/llm/router.js";
 
 /**
  * Execute the five-phase pipeline.
@@ -45,13 +47,70 @@ export async function executePipeline(
       request.system_event,
     );
 
-    // Early exit: feedback_submitted requires no LLM response (system prompt: "Do not respond.")
-    if (request.system_event?.type === 'feedback_submitted') {
-      log.info(
-        { request_id: requestId, turn_id: enrichedContext.turn_id },
-        'V2 pipeline: feedback_submitted — returning empty envelope',
+    // System event handling — deterministic routing, bypasses intent gate entirely
+    if (request.system_event) {
+      const routerResult = await routeSystemEvent({
+        event: request.system_event,
+        turnRequest: request,
+        turnId: enrichedContext.turn_id,
+        requestId,
+        plotClient: deps.plotClient ?? null,
+        plotOpts: deps.plotOpts,
+      });
+
+      // Error from router (e.g. MISSING_GRAPH_STATE) → error envelope
+      if (routerResult.error) {
+        return buildSystemEventErrorEnvelope(enrichedContext, routerResult.error.code, routerResult.error.message);
+      }
+
+      // direct_analysis_run Path B: delegate to run_analysis via regular pipeline
+      if (routerResult.delegateToTool === 'run_analysis') {
+        // Inject [system] entry into enriched context, then proceed through phases
+        const updatedEnrichedContext = injectSystemEntries(enrichedContext, routerResult.systemContextEntries);
+        return await runAnalysisViaPipeline(updatedEnrichedContext, deps, requestId, request.system_event);
+      }
+
+      // Inject [system] context entries into the enriched conversation history
+      const updatedEnrichedContext = injectSystemEntries(enrichedContext, routerResult.systemContextEntries);
+
+      // direct_analysis_run Path A with narration: chain explain_results
+      let finalBlocks = routerResult.blocks;
+      let finalAssistantText = routerResult.assistantText;
+      if (routerResult.needsNarration && request.message.trim().length > 5) {
+        const adapter = getAdapter('orchestrator');
+        try {
+          const { handleExplainResults } = await import('../tools/explain-results.js');
+          const explainContext = {
+            graph: updatedEnrichedContext.graph,
+            analysis_response: routerResult.analysisResponse ?? updatedEnrichedContext.analysis,
+            framing: updatedEnrichedContext.framing,
+            messages: updatedEnrichedContext.conversation_history,
+            selected_elements: updatedEnrichedContext.selected_elements,
+            scenario_id: updatedEnrichedContext.scenario_id,
+          };
+          const explainResult = await handleExplainResults(
+            explainContext,
+            adapter,
+            requestId,
+            updatedEnrichedContext.turn_id,
+          );
+          finalBlocks = [...finalBlocks, ...explainResult.blocks];
+          finalAssistantText = explainResult.assistantText;
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Build a direct V2 ack envelope from router result (skips phases 3-5)
+      return buildSystemEventAckEnvelope(
+        updatedEnrichedContext,
+        finalAssistantText,
+        finalBlocks,
+        routerResult.guidanceItems,
+        request.system_event,
+        routerResult.graphHash,
+        routerResult.analysisResponse,
       );
-      return buildFeedbackAckEnvelope(enrichedContext);
     }
 
     // Phase 2: Specialist Routing (stub)
@@ -104,8 +163,6 @@ export async function executePipeline(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-import type { EnrichedContext } from "./types.js";
 
 /**
  * Build a silent acknowledgement envelope for feedback_submitted events.
@@ -160,4 +217,182 @@ function buildFeedbackAckEnvelope(enrichedContext: EnrichedContext): Orchestrato
 
     guidance_items: [],
   };
+}
+
+/**
+ * Inject [system] sentinel strings into the enriched context's conversation history.
+ * Returns a new EnrichedContext — does not mutate the input.
+ */
+function injectSystemEntries(enrichedContext: EnrichedContext, entries: string[]): EnrichedContext {
+  if (entries.length === 0) return enrichedContext;
+  const updatedHistory = appendSystemMessages(enrichedContext.conversation_history, entries);
+  return {
+    ...enrichedContext,
+    conversation_history: updatedHistory,
+    messages: appendSystemMessages(enrichedContext.messages ?? [], entries),
+  };
+}
+
+/**
+ * Build a V2 envelope for system events that produced structured outputs.
+ *
+ * Silent envelope invariant: assistant_text is always string | null (never omitted).
+ */
+function buildSystemEventAckEnvelope(
+  enrichedContext: EnrichedContext,
+  assistantText: string | null,
+  blocks: import("../types.js").ConversationBlock[],
+  guidanceItems: import("../types/guidance-item.js").GuidanceItem[],
+  event: import("../types.js").SystemEvent,
+  graphHash?: string,
+  analysisResponse?: import("../types.js").V2RunResponseEnvelope,
+): OrchestratorResponseEnvelopeV2 {
+  const lineage: OrchestratorResponseEnvelopeV2['lineage'] = {
+    context_hash: enrichedContext.context_hash ?? computeContextHash(enrichedContext),
+    dsk_version_hash: enrichedContext.dsk.version_hash,
+  };
+
+  if (analysisResponse) {
+    lineage.response_hash = analysisResponse.response_hash ?? analysisResponse.meta?.response_hash;
+  }
+
+  if (graphHash) {
+    (lineage as Record<string, unknown>).graph_hash = graphHash;
+  }
+
+  return {
+    turn_id: enrichedContext.turn_id,
+    assistant_text: assistantText,
+    blocks,
+    suggested_actions: [],
+
+    lineage,
+
+    stage_indicator: {
+      stage: enrichedContext.stage_indicator.stage,
+      confidence: enrichedContext.stage_indicator.confidence,
+      source: enrichedContext.stage_indicator.source,
+    },
+
+    science_ledger: {
+      claims_used: [],
+      techniques_used: [],
+      scope_violations: [],
+      phrasing_violations: [],
+      rewrite_applied: false,
+    },
+
+    progress_marker: {
+      kind: analysisResponse ? 'ran_analysis' : 'none',
+    },
+
+    observability: {
+      triggers_fired: [],
+      triggers_suppressed: [],
+      intent_classification: enrichedContext.intent_classification,
+      specialist_contributions: [],
+      specialist_disagreement: null,
+    },
+
+    turn_plan: {
+      selected_tool: null,
+      routing: 'deterministic',
+      long_running: false,
+      system_event: { type: event.event_type, event_id: event.event_id },
+    },
+
+    guidance_items: guidanceItems,
+  };
+}
+
+/**
+ * Build a V2 error envelope for system event router errors (e.g. MISSING_GRAPH_STATE).
+ */
+function buildSystemEventErrorEnvelope(
+  enrichedContext: EnrichedContext,
+  code: string,
+  message: string,
+): OrchestratorResponseEnvelopeV2 {
+  return {
+    turn_id: enrichedContext.turn_id,
+    assistant_text: null,
+    blocks: [],
+    suggested_actions: [],
+
+    lineage: {
+      context_hash: enrichedContext.context_hash ?? computeContextHash(enrichedContext),
+      dsk_version_hash: enrichedContext.dsk.version_hash,
+    },
+
+    stage_indicator: {
+      stage: enrichedContext.stage_indicator.stage,
+      confidence: enrichedContext.stage_indicator.confidence,
+      source: enrichedContext.stage_indicator.source,
+    },
+
+    science_ledger: {
+      claims_used: [],
+      techniques_used: [],
+      scope_violations: [],
+      phrasing_violations: [],
+      rewrite_applied: false,
+    },
+
+    progress_marker: { kind: 'none' },
+
+    observability: {
+      triggers_fired: [],
+      triggers_suppressed: [],
+      intent_classification: enrichedContext.intent_classification,
+      specialist_contributions: [],
+      specialist_disagreement: null,
+    },
+
+    turn_plan: {
+      selected_tool: null,
+      routing: 'deterministic',
+      long_running: false,
+    },
+
+    guidance_items: [],
+
+    error: { code, message },
+  };
+}
+
+/**
+ * Run the analysis via the regular pipeline (direct_analysis_run Path B).
+ * Uses Phase 4 (run_analysis tool dispatch) and Phase 5 (envelope assembly).
+ *
+ * Path equivalence guarantee: same code path as "run the analysis" message.
+ */
+async function runAnalysisViaPipeline(
+  enrichedContext: EnrichedContext,
+  deps: PipelineDeps,
+  requestId: string,
+  event: import("../types.js").SystemEvent,
+): Promise<OrchestratorResponseEnvelopeV2> {
+  const specialistResult = phase2Route();
+
+  // Synthetic deterministic LLM result: route directly to run_analysis
+  const llmResult: import("./types.js").LLMResult = {
+    assistant_text: null,
+    tool_invocations: [{ name: 'run_analysis', input: {}, id: 'deterministic' }],
+    science_annotations: [],
+    raw_response: '',
+    suggested_actions: [],
+    diagnostics: null,
+    parse_warnings: [],
+  };
+
+  const toolResult = await phase4Execute(llmResult, enrichedContext, deps.toolDispatcher, requestId);
+
+  // Add system_event to turn_plan
+  const envelope = phase5Validate(llmResult, toolResult, enrichedContext, specialistResult);
+  envelope.turn_plan = {
+    ...envelope.turn_plan,
+    system_event: { type: event.event_type, event_id: event.event_id },
+  };
+
+  return envelope;
 }

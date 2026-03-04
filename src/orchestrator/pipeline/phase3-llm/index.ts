@@ -190,9 +190,9 @@ function buildEffectiveUserMessage(enriched: EnrichedContext, rawMessage: string
 
   // System event present — discard any '[system]' sentinel (and any user text)
   // and replace with a structured event description for the LLM
-  const payloadSummary = Object.keys(systemEvent.payload).length > 0
-    ? ` Payload: ${JSON.stringify(systemEvent.payload)}`
+  const detailsSummary = systemEvent.details && Object.keys(systemEvent.details).length > 0
+    ? ` Details: ${JSON.stringify(systemEvent.details)}`
     : '';
 
-  return `[System event: ${systemEvent.type}${payloadSummary}]`;
+  return `[System event: ${systemEvent.event_type}${detailsSummary}]`;
 }

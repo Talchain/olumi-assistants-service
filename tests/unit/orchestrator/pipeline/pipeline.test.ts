@@ -144,7 +144,7 @@ describe("pipeline", () => {
   it("feedback_submitted returns silent empty envelope without calling LLM", async () => {
     const deps = makeMockDeps();
     const request = makeRequest({
-      system_event: { type: "feedback_submitted", payload: { rating: 5 } },
+      system_event: { event_type: "feedback_submitted" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: { turn_id: "t1", rating: "up" as const } },
     });
 
     const envelope = await executePipeline(request, "req-1", deps);

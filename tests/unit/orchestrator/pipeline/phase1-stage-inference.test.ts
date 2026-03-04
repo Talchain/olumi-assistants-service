@@ -57,7 +57,7 @@ describe("stage-inference", () => {
   });
 
   it("uses explicit system event when present (direct_analysis_run)", () => {
-    const event: SystemEvent = { type: "direct_analysis_run", payload: {} };
+    const event: SystemEvent = { event_type: "direct_analysis_run", timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: {} };
     const result = inferStage(makeContext(), event);
     expect(result.stage).toBe("evaluate");
     expect(result.substate).toBe("needs_run");
@@ -66,7 +66,7 @@ describe("stage-inference", () => {
   });
 
   it("uses explicit system event (patch_accepted) with analysis → evaluate", () => {
-    const event: SystemEvent = { type: "patch_accepted", payload: {} };
+    const event: SystemEvent = { event_type: "patch_accepted", timestamp: "2026-03-03T00:00:00Z", event_id: "e2", details: { patch_id: "p1", operations: [] } };
     const result = inferStage(
       makeContext({
         graph: { nodes: [], edges: [], options: [] } as unknown as ConversationContext["graph"],
@@ -79,7 +79,7 @@ describe("stage-inference", () => {
   });
 
   it("uses explicit system event (patch_accepted) without analysis → ideate", () => {
-    const event: SystemEvent = { type: "patch_accepted", payload: {} };
+    const event: SystemEvent = { event_type: "patch_accepted", timestamp: "2026-03-03T00:00:00Z", event_id: "e3", details: { patch_id: "p1", operations: [] } };
     const result = inferStage(
       makeContext({ graph: { nodes: [], edges: [], options: [] } as unknown as ConversationContext["graph"] }),
       event,
@@ -89,7 +89,7 @@ describe("stage-inference", () => {
   });
 
   it("falls through on patch_dismissed (not a stage event)", () => {
-    const event: SystemEvent = { type: "patch_dismissed", payload: {} };
+    const event: SystemEvent = { event_type: "patch_dismissed", timestamp: "2026-03-03T00:00:00Z", event_id: "e4", details: { patch_id: "p1" } };
     const result = inferStage(makeContext(), event);
     // Falls through to data-driven → no graph → frame
     expect(result.stage).toBe("frame");

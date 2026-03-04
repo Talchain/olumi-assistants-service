@@ -21,6 +21,9 @@ export default defineConfig({
       "tests/validation/golden-briefs-runner.test.ts",
       // Exclude benchmark tests (run with pnpm benchmark:stability)
       "tests/benchmarks/**",
+      // Exclude staging smoke tests (require RUN_STAGING_SMOKE=1 and PLOT_BASE_URL)
+      // Run with: pnpm test:staging
+      "tests/staging/**",
     ],
     coverage: {
       provider: "v8",

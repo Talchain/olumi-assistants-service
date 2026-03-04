@@ -18,6 +18,7 @@
     "test:cee:telemetry": "vitest run tests/integration/cee.telemetry.test.ts tests/integration/cee.hero-journey.degraded.test.ts",
     "test:cee:calibration": "vitest run tests/integration/cee.calibration.test.ts",
     "preflight": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi:check",
+    "test:staging": "RUN_STAGING_SMOKE=1 vitest run --config vitest.staging.config.ts",
     "test:live": "LIVE_LLM=1 vitest run tests/integration/adversarial.test.ts tests/validation/golden-briefs-runner.test.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

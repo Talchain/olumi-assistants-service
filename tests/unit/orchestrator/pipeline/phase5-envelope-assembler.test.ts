@@ -107,7 +107,7 @@ describe("computeContextHash", () => {
 
   it("excludes system_event from hash", () => {
     const a = makeEnrichedContext();
-    const b = makeEnrichedContext({ system_event: { type: "direct_analysis_run", payload: {} } });
+    const b = makeEnrichedContext({ system_event: { event_type: "direct_analysis_run" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: {} } });
     expect(computeContextHash(a)).toBe(computeContextHash(b));
   });
 

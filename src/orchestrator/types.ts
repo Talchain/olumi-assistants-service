@@ -22,10 +22,54 @@ export type DecisionStage = 'frame' | 'ideate' | 'evaluate' | 'decide' | 'optimi
 // Request Types
 // ============================================================================
 
-export interface SystemEvent {
-  type: 'patch_accepted' | 'patch_dismissed' | 'feedback_submitted' | 'direct_graph_edit' | 'direct_analysis_run';
-  payload: Record<string, unknown>;
+// ============================================================================
+// System Event Types — discriminated union on event_type
+// ============================================================================
+
+export type SystemEventType =
+  | 'patch_accepted'
+  | 'patch_dismissed'
+  | 'direct_graph_edit'
+  | 'direct_analysis_run'
+  | 'feedback_submitted';
+
+/** Opaque operation record sent from UI in patch events. */
+export type SystemEventPatchOp = Record<string, unknown>;
+
+export interface PatchAcceptedDetails {
+  patch_id: string;
+  block_id?: string;
+  operations: SystemEventPatchOp[];
+  applied_graph_hash?: string;
 }
+
+export interface PatchDismissedDetails {
+  patch_id?: string;
+  block_id?: string;
+  reason?: string;
+}
+
+export interface DirectGraphEditDetails {
+  changed_node_ids: string[];
+  changed_edge_ids: string[];
+  operations: ('add' | 'update' | 'remove')[];
+}
+
+/** No details — graph_state and analysis_state come from the turn request fields. */
+export type DirectAnalysisRunDetails = Record<string, never>;
+
+export interface FeedbackSubmittedDetails {
+  turn_id: string;
+  rating: 'up' | 'down';
+  comment?: string;
+}
+
+export type SystemEvent =
+  | { event_type: 'patch_accepted'; timestamp: string; event_id: string; details: PatchAcceptedDetails }
+  | { event_type: 'patch_dismissed'; timestamp: string; event_id: string; details: PatchDismissedDetails }
+  | { event_type: 'direct_graph_edit'; timestamp: string; event_id: string; details: DirectGraphEditDetails }
+  | { event_type: 'direct_analysis_run'; timestamp: string; event_id: string; details: DirectAnalysisRunDetails }
+  | { event_type: 'feedback_submitted'; timestamp: string; event_id: string; details: FeedbackSubmittedDetails };
 
 export interface OrchestratorTurnRequest {
   /** User's natural language message */
@@ -38,6 +82,17 @@ export interface OrchestratorTurnRequest {
   system_event?: SystemEvent;
   /** Client-generated turn ID for idempotency */
   client_turn_id: string;
+  /**
+   * Full graph state provided by the UI.
+   * Required when system_event.details.applied_graph_hash is set (patch_accepted Path A)
+   * and for direct_analysis_run Path B validation.
+   */
+  graph_state?: GraphV3T | null;
+  /**
+   * Full analysis response provided by the UI (direct_analysis_run Path A).
+   * When present, CEE skips PLoT /v2/run and uses this directly.
+   */
+  analysis_state?: V2RunResponseEnvelope | null;
 }
 
 // ============================================================================
@@ -51,7 +106,7 @@ export interface SuggestedAction {
 }
 
 export interface OrchestratorError {
-  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'INTERNAL_PAYLOAD_ERROR' | 'UNKNOWN';
+  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'MISSING_GRAPH_STATE' | 'INTERNAL_PAYLOAD_ERROR' | 'UNKNOWN';
   message: string;
   tool?: string;
   recoverable: boolean;
@@ -63,6 +118,8 @@ export interface TurnPlan {
   routing: 'deterministic' | 'llm';
   long_running: boolean;
   tool_latency_ms?: number;
+  /** Populated when the turn was driven by a system event. Additive — does not conflict with routing fields. */
+  system_event?: { type: SystemEventType; event_id: string };
 }
 
 
@@ -323,6 +380,7 @@ export function getHttpStatusForError(error: OrchestratorError): number {
     case 'VALIDATION_REJECTED': return 422;
     case 'CONTEXT_TOO_LARGE': return 413;
     case 'INVALID_REQUEST': return 400;
+    case 'MISSING_GRAPH_STATE': return 400;
     case 'INTERNAL_PAYLOAD_ERROR': return 500;
     case 'UNKNOWN':
     default: return 500;

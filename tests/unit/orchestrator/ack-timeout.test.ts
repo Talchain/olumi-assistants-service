@@ -93,7 +93,9 @@ describe("Ack Timeout (C.3)", () => {
     });
   });
 
-  it("direct_graph_edit uses ORCHESTRATOR_ACK_TIMEOUT_MS (shorter timeout)", async () => {
+  it("direct_graph_edit is handled deterministically (no LLM call)", async () => {
+    // Brief C: direct_graph_edit is now handled by the system event router
+    // without an LLM call. It's deterministic and silent.
     const result = await handleTurn(
       {
         message: "edit",
@@ -105,24 +107,26 @@ describe("Ack Timeout (C.3)", () => {
           scenario_id: "s1",
         },
         scenario_id: "s1",
-        system_event: { type: "direct_graph_edit", payload: {} },
+        system_event: {
+          event_type: "direct_graph_edit",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-1",
+          details: { changed_node_ids: ["n1"], changed_edge_ids: [], operations: ["update"] },
+        },
         client_turn_id: "t1",
       },
       makeRequest(),
       "req-1",
     );
 
-    expect(mockChat).toHaveBeenCalledOnce();
-    const callOpts = mockChat.mock.calls[0][1];
-    expect(callOpts.timeoutMs).toBe(ORCHESTRATOR_ACK_TIMEOUT_MS);
-    // Verify it's the shorter timeout (default 5s vs 30s)
-    expect(callOpts.timeoutMs).toBeLessThanOrEqual(ORCHESTRATOR_TIMEOUT_MS);
+    // No LLM call — deterministic handler
+    expect(mockChat).not.toHaveBeenCalled();
     expect(result.httpStatus).toBe(200);
+    expect(result.envelope.assistant_text).toBeNull();
+    expect(result.envelope.error).toBeUndefined();
   });
 
-  it("ack timeout returns fallback text (not an error)", async () => {
-    mockChat.mockRejectedValue(new Error("LLM timeout"));
-
+  it("direct_graph_edit without graph_state returns silent response (no error)", async () => {
     const result = await handleTurn(
       {
         message: "edit",
@@ -134,7 +138,12 @@ describe("Ack Timeout (C.3)", () => {
           scenario_id: "s1",
         },
         scenario_id: "s1",
-        system_event: { type: "direct_graph_edit", payload: {} },
+        system_event: {
+          event_type: "direct_graph_edit",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-2",
+          details: { changed_node_ids: [], changed_edge_ids: [], operations: ["add"] },
+        },
         client_turn_id: "t2",
       },
       makeRequest(),
@@ -142,7 +151,7 @@ describe("Ack Timeout (C.3)", () => {
     );
 
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.assistant_text).toBe("Model updated.");
+    expect(result.envelope.assistant_text).toBeNull();
     expect(result.envelope.error).toBeUndefined();
   });
 

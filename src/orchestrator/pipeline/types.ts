@@ -293,6 +293,10 @@ export interface ToolDispatcher {
 export interface PipelineDeps {
   llmClient: LLMClient;
   toolDispatcher: ToolDispatcher;
+  /** PLoT client for system event routing (validate-patch). Optional — omit in tests that don't exercise PLoT. */
+  plotClient?: import("../plot-client.js").PLoTClient | null;
+  /** PLoT call opts (turn budget, signal). Passed to system event router. */
+  plotOpts?: PLoTClientRunOpts;
 }
 
 // ============================================================================

@@ -672,12 +672,15 @@ describe('handleTurn — patch_accepted system event', () => {
     vi.mocked(isProduction).mockReturnValue(false);
   });
 
+  const GRAPH_STATE = { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test' }], edges: [] };
+  const PATCH_OPERATIONS = [{ op: 'add_node', node: { id: 'fac_1', kind: 'factor', label: 'Cost' } }];
+
   function makePatchAcceptedRequest(overrides?: Partial<OrchestratorTurnRequest>): OrchestratorTurnRequest {
     turnCounter++;
     return {
       message: '',
       context: {
-        graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test' }], edges: [] },
+        graph: GRAPH_STATE,
         analysis_response: null,
         framing: { stage: 'frame' },
         messages: [],
@@ -685,17 +688,22 @@ describe('handleTurn — patch_accepted system event', () => {
       } as ConversationContext,
       scenario_id: 'test-scenario',
       client_turn_id: `patch-test-${turnCounter}-${Date.now()}`,
+      // Brief C: graph_state required for Path B (no applied_graph_hash)
+      graph_state: GRAPH_STATE as unknown as OrchestratorTurnRequest['graph_state'],
       system_event: {
-        type: 'patch_accepted' as const,
-        payload: {
-          operations: [{ op: 'add_node', node: { id: 'fac_1', kind: 'factor', label: 'Cost' } }],
+        event_type: 'patch_accepted' as const,
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-patch-1',
+        details: {
+          patch_id: 'patch-1',
+          operations: PATCH_OPERATIONS,
         },
       },
       ...overrides,
     };
   }
 
-  it('calls PLoT validate-patch and returns graph_hash in lineage when PLoT succeeds', async () => {
+  it('calls PLoT validate-patch (Path B) and returns graph_hash in lineage when PLoT succeeds', async () => {
     const mockValidatePatch = vi.fn().mockResolvedValue({
       kind: 'success',
       data: { graph_hash: 'abc123def456', verdict: 'accepted' },
@@ -718,8 +726,8 @@ describe('handleTurn — patch_accepted system event', () => {
     expect(mockValidatePatch).toHaveBeenCalledOnce();
     expect(mockValidatePatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        graph: req.context.graph,
-        operations: req.system_event!.payload.operations,
+        graph: req.graph_state,
+        operations: PATCH_OPERATIONS,
         scenario_id: 'test-scenario',
       }),
       'req-patch-001',
@@ -731,7 +739,7 @@ describe('handleTurn — patch_accepted system event', () => {
     expect(mockChatWithTools).not.toHaveBeenCalled();
   });
 
-  it('returns ack with warning when PLoT returns FEATURE_DISABLED', async () => {
+  it('Path B with FEATURE_DISABLED: returns "unavailable" message (no LLM call)', async () => {
     const mockValidatePatch = vi.fn().mockResolvedValue({
       kind: 'feature_disabled',
     });
@@ -744,27 +752,23 @@ describe('handleTurn — patch_accepted system event', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-patch-002');
 
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.parse_warnings).toContain(
-      'PLoT validate-patch not available — graph_hash not computed',
-    );
+    expect(result.envelope.assistant_text).toContain('unavailable');
+    expect(result.envelope.blocks).toEqual([]);
     expect(mockChatWithTools).not.toHaveBeenCalled();
   });
 
-  it('returns ack with warning when PLoT client is not configured', async () => {
-    // Default mock returns null (PLoT not configured)
+  it('Path B with null PLoT client: returns "unavailable" message', async () => {
     vi.mocked(createPLoTClient).mockReturnValue(null);
 
     const req = makePatchAcceptedRequest();
     const result = await handleTurn(req, mockFastifyRequest, 'req-patch-003');
 
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.parse_warnings).toContain(
-      'PLoT client not configured — graph_hash not computed',
-    );
+    expect(result.envelope.assistant_text).toContain('unavailable');
     expect(mockChatWithTools).not.toHaveBeenCalled();
   });
 
-  it('returns ack with warning when PLoT throws an error', async () => {
+  it('Path B with PLoT error: returns "unavailable" message (non-blocking)', async () => {
     const mockValidatePatch = vi.fn().mockRejectedValue(new Error('Connection refused'));
     vi.mocked(createPLoTClient).mockReturnValue({
       run: vi.fn().mockResolvedValue({}),
@@ -775,13 +779,53 @@ describe('handleTurn — patch_accepted system event', () => {
     const result = await handleTurn(req, mockFastifyRequest, 'req-patch-004');
 
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.parse_warnings).toContain(
-      'PLoT validate-patch failed: Connection refused',
-    );
-    expect(mockLogWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ request_id: 'req-patch-004', error: 'Connection refused' }),
-      expect.stringContaining('patch_accepted'),
-    );
+    expect(result.envelope.assistant_text).toContain('unavailable');
     expect(mockChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('Path A (applied_graph_hash present + graph_state): skips PLoT, returns 200', async () => {
+    const mockValidatePatch = vi.fn();
+    vi.mocked(createPLoTClient).mockReturnValue({
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: mockValidatePatch,
+    });
+
+    const req = makePatchAcceptedRequest({
+      system_event: {
+        event_type: 'patch_accepted',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-path-a',
+        details: {
+          patch_id: 'patch-a',
+          operations: PATCH_OPERATIONS,
+          applied_graph_hash: 'ui-validated-hash',
+        },
+      },
+    });
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-005');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.lineage.graph_hash).toBe('ui-validated-hash');
+    expect(mockValidatePatch).not.toHaveBeenCalled();
+  });
+
+  it('Path A GUARD: applied_graph_hash without graph_state → 400', async () => {
+    const req = makePatchAcceptedRequest({
+      graph_state: undefined,
+      system_event: {
+        event_type: 'patch_accepted',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-guard',
+        details: {
+          patch_id: 'patch-guard',
+          operations: [],
+          applied_graph_hash: 'some-hash',
+        },
+      },
+    });
+    const result = await handleTurn(req, mockFastifyRequest, 'req-patch-006');
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.envelope.error?.code).toBe('MISSING_GRAPH_STATE');
   });
 });

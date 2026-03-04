@@ -13,7 +13,7 @@ import { z } from "zod";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
-import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage } from "./types.js";
+import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage, V2RunResponseEnvelope } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { config } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
@@ -22,10 +22,56 @@ import { handleTurnV2 } from "./pipeline/route-v2.js";
 // Request Validation Schema
 // ============================================================================
 
-const SystemEventSchema = z.object({
-  type: z.enum(['patch_accepted', 'patch_dismissed', 'feedback_submitted', 'direct_graph_edit', 'direct_analysis_run']),
-  payload: z.record(z.unknown()),
-});
+// Shared base fields for all system event shapes
+const SystemEventBase = {
+  timestamp: z.string(),
+  event_id: z.string().min(1),
+};
+
+const SystemEventSchema = z.discriminatedUnion('event_type', [
+  z.object({
+    event_type: z.literal('patch_accepted'),
+    ...SystemEventBase,
+    details: z.object({
+      patch_id: z.string().optional(),
+      block_id: z.string().optional(),
+      operations: z.array(z.record(z.unknown())),
+      applied_graph_hash: z.string().optional(),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('patch_dismissed'),
+    ...SystemEventBase,
+    details: z.object({
+      patch_id: z.string().optional(),
+      block_id: z.string().optional(),
+      reason: z.string().optional(),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('direct_graph_edit'),
+    ...SystemEventBase,
+    details: z.object({
+      changed_node_ids: z.array(z.string()),
+      changed_edge_ids: z.array(z.string()),
+      operations: z.array(z.enum(['add', 'update', 'remove'])),
+    }),
+  }),
+  z.object({
+    event_type: z.literal('direct_analysis_run'),
+    ...SystemEventBase,
+    details: z.object({}).strict(),
+  }),
+  z.object({
+    event_type: z.literal('feedback_submitted'),
+    ...SystemEventBase,
+    details: z.object({
+      turn_id: z.string(),
+      rating: z.enum(['up', 'down']),
+      comment: z.string().optional(),
+    }),
+  }),
+]);
 
 const ConversationMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -74,12 +120,16 @@ const ConversationContextSchema = z.object({
 });
 
 const TurnRequestSchema = z.object({
-  message: z.string().min(1).max(10_000),
+  message: z.string().min(0).max(10_000).default(''),
   context: ConversationContextSchema,
   scenario_id: z.string().min(1).max(200),
   system_event: SystemEventSchema.optional(),
   client_turn_id: z.string().min(1).max(64),
   turn_nonce: z.number().int().min(0).optional(),
+  /** Full graph state from UI — required when system_event.details.applied_graph_hash is set. */
+  graph_state: GraphSchema.optional(),
+  /** Full analysis response from UI — present for direct_analysis_run Path A. */
+  analysis_state: z.object({}).passthrough().nullable().optional(),
 });
 
 // ============================================================================
@@ -116,13 +166,30 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       return reply.send(errorEnvelope);
     }
 
+    // Normalise system event: if only block_id is provided (no patch_id), copy it to patch_id
+    let systemEvent = parsed.data.system_event as SystemEvent | undefined;
+    if (
+      systemEvent &&
+      (systemEvent.event_type === 'patch_accepted' || systemEvent.event_type === 'patch_dismissed')
+    ) {
+      const det = systemEvent.details as { patch_id?: string; block_id?: string };
+      if (!det.patch_id && det.block_id) {
+        systemEvent = {
+          ...systemEvent,
+          details: { ...det, patch_id: det.block_id },
+        } as SystemEvent;
+      }
+    }
+
     // Map validated data to turn request
     const turnRequest: OrchestratorTurnRequest = {
       message: parsed.data.message,
       context: parsed.data.context as unknown as ConversationContext,
       scenario_id: parsed.data.scenario_id,
-      system_event: parsed.data.system_event as SystemEvent | undefined,
+      system_event: systemEvent,
       client_turn_id: parsed.data.client_turn_id,
+      graph_state: parsed.data.graph_state as unknown as typeof turnRequest.graph_state,
+      analysis_state: parsed.data.analysis_state as unknown as V2RunResponseEnvelope | null | undefined,
     };
 
     try {

@@ -65,7 +65,7 @@ describe("phase1-enrichment (index)", () => {
   });
 
   it("passes system_event through when provided", () => {
-    const event = { type: "direct_analysis_run" as const, payload: {} };
+    const event = { event_type: "direct_analysis_run" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: {} };
     const result = phase1Enrich("Hello", makeContext(), "s1", event);
     expect(result.system_event).toBe(event);
     expect(result.stage_indicator.source).toBe("explicit_event");

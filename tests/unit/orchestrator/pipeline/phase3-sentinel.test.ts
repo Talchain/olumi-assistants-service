@@ -114,7 +114,7 @@ describe("phase3Generate: system event sentinel filtering", () => {
 
     await phase3Generate(
       makeEnrichedContext({
-        system_event: { type: "direct_graph_edit", payload: { node_count: 5 } },
+        system_event: { event_type: "direct_graph_edit" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: { changed_node_ids: ["n1"], changed_edge_ids: [], operations: ["update" as const] } },
       }),
       makeSpecialistResult(),
       client,
@@ -138,7 +138,7 @@ describe("phase3Generate: system event sentinel filtering", () => {
 
     await phase3Generate(
       makeEnrichedContext({
-        system_event: { type: "patch_accepted", payload: { patch_id: "patch-1" } },
+        system_event: { event_type: "patch_accepted" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e2", details: { patch_id: "patch-1", operations: [] } },
       }),
       makeSpecialistResult(),
       client,

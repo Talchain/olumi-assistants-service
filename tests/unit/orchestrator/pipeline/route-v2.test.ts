@@ -240,7 +240,7 @@ describe("route-v2", () => {
     (executePipeline as ReturnType<typeof vi.fn>).mockResolvedValueOnce(silentEnvelope);
 
     const request = makeRequest({
-      system_event: { type: "feedback_submitted", payload: { rating: 4 } },
+      system_event: { event_type: "feedback_submitted" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: { turn_id: "t1", rating: "up" as const } },
     });
 
     const result = await handleTurnV2(request, mockFastifyRequest, "req-fb");
@@ -255,6 +255,6 @@ describe("route-v2", () => {
     expect(result.envelope.turn_plan.routing).toBe("deterministic");
     // executePipeline was called with the system_event present in the request
     const callArg = (executePipeline as ReturnType<typeof vi.fn>).mock.calls[0][0] as typeof request;
-    expect(callArg.system_event?.type).toBe("feedback_submitted");
+    expect(callArg.system_event?.event_type).toBe("feedback_submitted");
   });
 });
