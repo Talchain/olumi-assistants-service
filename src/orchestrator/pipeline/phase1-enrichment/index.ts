@@ -125,6 +125,7 @@ export function phase1Enrich(
     event_log_summary: eventLogSummary,
     selected_node_ids: selectedNodeIds,
     selected_edge_ids: selectedEdgeIds,
+    analysis_inputs: context.analysis_inputs,
 
     // Inferred state
     stage_indicator: stageIndicator,

@@ -19,6 +19,7 @@ import type {
   OrchestratorError,
   TurnPlan,
   GraphV3T,
+  AnalysisInputs,
 } from "../types.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
@@ -124,6 +125,7 @@ export interface EnrichedContext {
   selected_node_ids?: string[];                // from selected_elements (node IDs)
   selected_edge_ids?: string[];                // from selected_elements (edge IDs)
   context_hash?: string;                       // from computeContextHash
+  analysis_inputs?: AnalysisInputs | null;     // passed through from request for run_analysis tool
 
   // Inferred state
   stage_indicator: StageIndicator;

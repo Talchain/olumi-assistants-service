@@ -7,7 +7,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -1569,6 +1569,205 @@ export class OpenAIAdapter implements LLMAdapter {
       }
 
       log.error({ error }, "OpenAI chat call failed");
+      throw error;
+    }
+  }
+
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    const maxTokens = args.maxTokens ?? 4096;
+    const temperature = args.temperature ?? 0;
+    const timeoutMs = opts.timeoutMs || getTimeoutForModel(this.model);
+
+    const idempotencyKey = opts.requestId || makeIdempotencyKey();
+    const startTime = Date.now();
+
+    log.info(
+      {
+        model: this.model,
+        max_tokens: maxTokens,
+        temperature,
+        system_chars: args.system.length,
+        message_count: args.messages.length,
+        tool_count: args.tools.length,
+        tool_names: args.tools.map(t => t.name),
+        idempotency_key: idempotencyKey,
+      },
+      "calling OpenAI for chat with tools"
+    );
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    try {
+      const apiClient = getClient();
+      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+
+      // Convert messages: ToolResponseBlock[] content → OpenAI format
+      const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
+        { role: 'system', content: args.system },
+        ...args.messages.map((msg): OpenAI.ChatCompletionMessageParam => {
+          if (typeof msg.content === 'string') {
+            return { role: msg.role, content: msg.content };
+          }
+          // Array of ToolResponseBlock — map assistant blocks (text + tool_use)
+          if (msg.role === 'assistant') {
+            const parts: OpenAI.ChatCompletionContentPartText[] = [];
+            const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
+            for (const block of msg.content) {
+              if (block.type === 'text') {
+                parts.push({ type: 'text', text: block.text });
+              } else if (block.type === 'tool_use') {
+                toolCalls.push({
+                  id: block.id,
+                  type: 'function',
+                  function: { name: block.name, arguments: JSON.stringify(block.input) },
+                });
+              }
+            }
+            return {
+              role: 'assistant',
+              ...(parts.length > 0 ? { content: parts.map(p => p.text).join('') } : { content: null }),
+              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+            };
+          }
+          // User message with block content — flatten to text
+          const text = msg.content
+            .filter((b): b is Extract<ToolResponseBlock, { type: 'text' }> => b.type === 'text')
+            .map(b => b.text)
+            .join('');
+          return { role: 'user', content: text };
+        }),
+      ];
+
+      // Convert tool definitions: ToolDefinition → OpenAI function tool format
+      const openaiTools: OpenAI.ChatCompletionTool[] = args.tools.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema,
+        },
+      }));
+
+      // Map tool_choice
+      let toolChoice: OpenAI.ChatCompletionToolChoiceOption | undefined;
+      if (args.tool_choice) {
+        if (args.tool_choice.type === 'tool' && args.tool_choice.name) {
+          toolChoice = { type: 'function', function: { name: args.tool_choice.name } };
+        } else if (args.tool_choice.type === 'any') {
+          toolChoice = 'required';
+        } else {
+          toolChoice = 'auto';
+        }
+      }
+
+      const response = await withRetry(
+        async () =>
+          apiClient.chat.completions.create(
+            {
+              model: this.model,
+              messages: openaiMessages,
+              tools: openaiTools,
+              ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+              ...modelParams,
+            },
+            {
+              signal: abortController.signal as any,
+              headers: { 'Idempotency-Key': idempotencyKey },
+            }
+          ),
+        { adapter: 'openai', model: this.model, operation: 'chat_with_tools' }
+      );
+
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+
+      const choice = response.choices[0];
+      const msg = choice?.message;
+
+      // Map response to ToolResponseBlock[]
+      const content: ToolResponseBlock[] = [];
+      if (msg?.content) {
+        content.push({ type: 'text', text: msg.content });
+      }
+      for (const tc of msg?.tool_calls ?? []) {
+        if (tc.type !== 'function') continue;
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(tc.function.arguments); } catch { /* leave empty */ }
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.function.name,
+          input,
+        });
+      }
+
+      // Map finish_reason to stop_reason
+      const finishReason = choice?.finish_reason;
+      const stop_reason: ChatWithToolsResult['stop_reason'] =
+        finishReason === 'tool_calls' ? 'tool_use' :
+        finishReason === 'length' ? 'max_tokens' :
+        'end_turn';
+
+      log.info(
+        {
+          model: this.model,
+          latency_ms: latencyMs,
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          content_blocks: content.length,
+          tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
+          stop_reason,
+        },
+        "OpenAI chat with tools successful"
+      );
+
+      return {
+        content,
+        stop_reason,
+        model: this.model,
+        latencyMs,
+        usage: {
+          input_tokens: response.usage?.prompt_tokens ?? 0,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+        },
+      };
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
+
+      if (error instanceof Error) {
+        if (error.name === 'AbortError' || abortController.signal.aborted) {
+          log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, 'OpenAI chat_with_tools call timed out');
+          throw new UpstreamTimeoutError(
+            'OpenAI chat_with_tools timed out',
+            'openai',
+            'chat_with_tools',
+            'body',
+            elapsedMs,
+            error
+          );
+        }
+        if ('status' in error && typeof error.status === 'number') {
+          const apiError = error as any;
+          const requestId = apiError.headers?.get?.('x-request-id') || apiError.request_id;
+          log.error(
+            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
+            'OpenAI API returned non-2xx status'
+          );
+          throw new UpstreamHTTPError(
+            `OpenAI chat_with_tools failed: ${apiError.message || 'unknown error'}`,
+            'openai',
+            apiError.status,
+            apiError.code || apiError.type,
+            requestId,
+            elapsedMs,
+            error
+          );
+        }
+      }
+
+      log.error({ error }, 'OpenAI chat_with_tools call failed');
       throw error;
     }
   }

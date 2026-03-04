@@ -88,6 +88,7 @@ export async function phase4Execute(
     messages: enrichedContext.conversation_history,
     selected_elements: enrichedContext.selected_elements,
     scenario_id: enrichedContext.scenario_id,
+    analysis_inputs: enrichedContext.analysis_inputs,
   };
 
   const allBlocks: ToolResult['blocks'] = [];
