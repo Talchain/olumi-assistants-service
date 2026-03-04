@@ -126,6 +126,34 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[0].name).toBe("run_analysis");
     });
 
+    it("propagates tool_use block through phase3Generate entrypoint", async () => {
+      // Mock chatWithTools to return a tool_use block (not just text)
+      const client = makeMockLLMClient();
+      (client.chatWithTools as ReturnType<typeof vi.fn>).mockResolvedValue({
+        content: [
+          { type: "tool_use", id: "call_xyz", name: "draft_graph", input: { brief: "build a model" } },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 20, output_tokens: 10 },
+        model: "gpt-4o",
+        latencyMs: 80,
+      });
+
+      const result = await phase3Generate(
+        makeEnrichedContext(),
+        makeSpecialistResult(),
+        client,
+        "req-1",
+        "draft a graph for me",
+      );
+
+      expect(client.chatWithTools).toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect(result.tool_invocations[0].input).toEqual({ brief: "build a model" });
+      expect(result.assistant_text).toBeNull();
+    });
+
     it("falls back to LLM when prerequisites not met", async () => {
       const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
       (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -178,10 +206,10 @@ describe("phase3-llm", () => {
     it("extracts tool name and input from tool_use block; unknown extra fields ignored", () => {
       const fixture = makeToolUseResult({
         content: [
-          // Extra field on text block — parser must not throw
-          { type: "text", text: "Let me draft a model for you." } as unknown as ChatWithToolsResult["content"][number],
-          // Extra field on tool_use block — parser must not throw
-          { type: "tool_use", id: "call_123", name: "draft_graph", input: { brief: "test" } } as unknown as ChatWithToolsResult["content"][number],
+          // Extra runtime field on text block — parser must not throw or include it in output
+          { type: "text", text: "Let me draft a model for you.", extra_field: true } as unknown as ChatWithToolsResult["content"][number],
+          // Extra runtime field on tool_use block — parser must not throw or include it in output
+          { type: "tool_use", id: "call_123", name: "draft_graph", input: { brief: "test" }, extra_field: true } as unknown as ChatWithToolsResult["content"][number],
         ],
       });
 
@@ -225,20 +253,32 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[1].name).toBe("edit_graph");
     });
 
-    it("tool_use with empty input (adapter normalises malformed JSON to {}) is accepted — no tool dispatch skipped", () => {
-      // The OpenAI adapter sets input={} when JSON.parse fails.
-      // parseLLMResponse must not reject or throw — it passes through the empty object.
+    it("tool_use with runtime-invalid input (string) — parser completes without throwing, one invocation returned", () => {
+      // The TypeScript type says input: Record<string,unknown> but at runtime anything can arrive.
+      // The parser must not throw — it passes through whatever is in block.input.
       const fixture = makeToolUseResult({
         content: [
-          { type: "tool_use", id: "call_bad", name: "draft_graph", input: {} },
+          { type: "tool_use", id: "call_bad_str", name: "draft_graph", input: "bad" as unknown as Record<string, unknown> },
         ],
       });
 
+      expect(() => parseV2Response(fixture)).not.toThrow();
       const result = parseV2Response(fixture);
-
       expect(result.tool_invocations).toHaveLength(1);
       expect(result.tool_invocations[0].name).toBe("draft_graph");
-      expect(result.tool_invocations[0].input).toEqual({});
+    });
+
+    it("tool_use with runtime-invalid input (null) — parser completes without throwing, one invocation returned", () => {
+      const fixture = makeToolUseResult({
+        content: [
+          { type: "tool_use", id: "call_bad_null", name: "draft_graph", input: null as unknown as Record<string, unknown> },
+        ],
+      });
+
+      expect(() => parseV2Response(fixture)).not.toThrow();
+      const result = parseV2Response(fixture);
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
     });
 
     it("tool_use naming an unknown tool is parsed without error — dispatch is responsible for rejection", () => {

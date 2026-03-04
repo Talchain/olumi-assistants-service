@@ -214,6 +214,23 @@ describe("dispatch chaining: run_analysis + explain_results", () => {
     expect(result.blocks).toHaveLength(1);
   });
 
+  it("run_analysis failure rejects dispatch — explain_results is not called", async () => {
+    mockRunAnalysis.mockRejectedValue(new Error("PLoT timeout"));
+
+    await expect(
+      dispatchToolHandler(
+        "run_analysis",
+        {},
+        makeContext(),
+        "turn-1",
+        "req-1",
+        { intentClassification: "explain" },
+      ),
+    ).rejects.toThrow("PLoT timeout");
+
+    expect(mockExplainResults).not.toHaveBeenCalled();
+  });
+
   it("explain_results failure is non-fatal — analysis blocks still returned", async () => {
     mockExplainResults.mockRejectedValue(new Error("LLM timeout"));
 
