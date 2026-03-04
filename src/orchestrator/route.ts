@@ -94,7 +94,7 @@ const AnalysisInputsSchema = z.object({
     option_id: z.string(),
     label: z.string(),
     interventions: z.record(z.unknown()),
-  })),
+  }).passthrough()),
   constraints: z.array(z.unknown()).optional(),
   seed: z.number().optional(),
   n_samples: z.number().optional(),

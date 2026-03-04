@@ -142,6 +142,7 @@ function makeContext(
   scenarioId: string,
   graph: unknown = null,
   framing: unknown = null,
+  analysisInputs: unknown = null,
 ): Record<string, unknown> {
   return {
     graph,
@@ -149,6 +150,7 @@ function makeContext(
     framing,
     messages: [],
     scenario_id: scenarioId,
+    ...(analysisInputs !== null && { analysis_inputs: analysisInputs }),
   };
 }
 
@@ -182,7 +184,7 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
         context: makeContext(wId),
       }),
     }).catch(() => {/* non-fatal */});
-  });
+  }, 60_000);
 
   afterAll(() => {
     if (SKIP_REASON) return;
@@ -252,6 +254,13 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
 
       const scenarioId = `staging-t2-${randomUUID()}`;
+      const analysisInputs = {
+        options: [
+          { id: "opt_senior", option_id: "opt_senior",  label: "Hire senior developer",       interventions: { opt_senior: 1 } },
+          { id: "opt_junior", option_id: "opt_junior",  label: "Hire two junior developers",  interventions: { opt_junior: 1 } },
+        ],
+        goal_node_id: "goal_main",
+      };
       const result = await makeRequest(ORCHESTRATE_URL, {
         message: "run the analysis",
         scenario_id: scenarioId,
@@ -260,6 +269,7 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
           scenarioId,
           MINIMAL_GRAPH,
           { stage: "evaluate", goal: "Maximise team output" },
+          analysisInputs,
         ),
       });
 
