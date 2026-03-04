@@ -7,6 +7,7 @@
  * Gating:
  *   - RUN_STAGING_SMOKE=1      (explicit opt-in)
  *   - CEE_BASE_URL configured  (staging CEE URL)
+ *   - CEE_API_KEY configured   (X-Olumi-Assist-Key header)
  *
  * Run with: pnpm test:staging
  * (or: RUN_STAGING_SMOKE=1 CEE_BASE_URL=<url> vitest run tests/staging/)
@@ -22,12 +23,15 @@ import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
 
 const RUN_STAGING_SMOKE = process.env.RUN_STAGING_SMOKE === "1";
 const CEE_BASE_URL = process.env.CEE_BASE_URL;
+const CEE_API_KEY = process.env.CEE_API_KEY;
 
 const SKIP_REASON = !RUN_STAGING_SMOKE
   ? "Skipping staging smoke: RUN_STAGING_SMOKE not set"
   : !CEE_BASE_URL
     ? "Skipping staging smoke: CEE_BASE_URL not configured"
-    : null;
+    : !CEE_API_KEY
+      ? "Skipping staging smoke: CEE_API_KEY not configured"
+      : null;
 
 // ============================================================================
 // Helpers
@@ -50,7 +54,10 @@ async function makeRequest(
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Olumi-Assist-Key": CEE_API_KEY!,
+      },
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -164,7 +171,10 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
     const wId = randomUUID();
     await fetch(ORCHESTRATE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Olumi-Assist-Key": CEE_API_KEY!,
+      },
       body: JSON.stringify({
         message: "",
         scenario_id: wId,
