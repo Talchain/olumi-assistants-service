@@ -28,10 +28,18 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
     event_type: z.literal('patch_accepted'),
     ...SystemEventBase,
     details: z.object({
-      patch_id: z.string().optional(),
-      block_id: z.string().optional(),
+      patch_id: z.string().min(1).optional(),
+      block_id: z.string().min(1).optional(),
       operations: z.array(z.record(z.unknown())),
       applied_graph_hash: z.string().optional(),
+    }).superRefine((val, ctx) => {
+      if (!val.patch_id && !val.block_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['details'],
+          message: 'At least one of patch_id or block_id must be provided',
+        });
+      }
     }),
   }),
   z.object({
@@ -302,6 +310,54 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
         event_type: 'patch_accepted',
         ...VALID_BASE,
         details: { block_id: 'blk-1', operations: [] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    // Task 2: patch_accepted identifier requirement tests
+
+    it("rejects patch_accepted with both patch_id and block_id absent", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { operations: [] },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects patch_accepted with patch_id: '' and block_id: '' (empty strings)", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { patch_id: '', block_id: '', operations: [] },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts patch_accepted with only patch_id", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { patch_id: 'p1', operations: [] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts patch_accepted with only block_id — patch_id populated by normalisation", () => {
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { block_id: 'blk-1', operations: [] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts patch_accepted with both patch_id and block_id — patch_id takes precedence", () => {
+      // Validation passes; normalisation in route.ts leaves patch_id unchanged when both present.
+      const result = SystemEventSchema.safeParse({
+        event_type: 'patch_accepted',
+        ...VALID_BASE,
+        details: { patch_id: 'p1', block_id: 'blk-1', operations: [] },
       });
       expect(result.success).toBe(true);
     });

@@ -33,10 +33,18 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
     event_type: z.literal('patch_accepted'),
     ...SystemEventBase,
     details: z.object({
-      patch_id: z.string().optional(),
-      block_id: z.string().optional(),
+      patch_id: z.string().min(1).optional(),
+      block_id: z.string().min(1).optional(),
       operations: z.array(z.record(z.unknown())),
       applied_graph_hash: z.string().optional(),
+    }).superRefine((val, ctx) => {
+      if (!val.patch_id && !val.block_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['details'],
+          message: 'At least one of patch_id or block_id must be provided',
+        });
+      }
     }),
   }),
   z.object({
@@ -174,6 +182,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       (systemEvent.event_type === 'patch_accepted' || systemEvent.event_type === 'patch_dismissed')
     ) {
       const det = systemEvent.details as { patch_id?: string; block_id?: string };
+      // Precedence: if both present, patch_id wins, block_id is ignored.
       if (!det.patch_id && det.block_id) {
         systemEvent = {
           ...systemEvent,

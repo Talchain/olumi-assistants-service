@@ -206,6 +206,7 @@ export async function dispatchToolHandler(
       };
     }
 
+    // undo_patch: removed in v2, handler exists as latent LLM-invocable stub only (no gate patterns).
     case 'undo_patch': {
       const result = handleUndoPatch();
       return {

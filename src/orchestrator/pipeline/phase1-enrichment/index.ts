@@ -28,7 +28,7 @@ import { compactAnalysis } from "../../context/analysis-compact.js";
 import { buildEventLogSummary } from "../../context/event-log-summary.js";
 import { enforceContextBudget } from "../../context/budget.js";
 import type { BudgetEnforcementContext } from "../../context/budget.js";
-import { computeContextHash } from "../../context/context-hash.js";
+import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
 import type { GraphV3T } from "../../types.js";
 import { log } from "../../../utils/telemetry.js";
 
@@ -153,21 +153,10 @@ export function phase1Enrich(
 
   // 6. Compute context hash (after budget enforcement so hash reflects actual sent context)
   const budgetedMessages = budgetedContext.messages ?? trimmedMessages;
-  const budgetedFraming = budgetedContext.framing as { stage: string; goal?: string; constraints?: unknown[]; options?: unknown[] } | null;
-  const contextHash = computeContextHash({
-    graph: budgetedContext.graph_compact,
-    analysis_response: budgetedContext.analysis_response,
-    framing: budgetedFraming
-      ? {
-          stage: budgetedFraming.stage,
-          goal: budgetedFraming.goal,
-          constraints: budgetedFraming.constraints,
-          options: budgetedFraming.options,
-        }
-      : null,
+  const contextHash = computeContextHash(toHashableContext({
+    ...budgetedContext,
     messages: budgetedMessages,
-    selected_elements: budgetedContext.selected_elements as string[],
-  });
+  }));
 
   log.debug(
     { turn_id: turnId, scenario_id: scenarioId, context_hash: contextHash },

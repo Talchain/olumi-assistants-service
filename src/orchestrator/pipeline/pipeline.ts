@@ -16,7 +16,7 @@ import { phase2Route } from "./phase2-specialists/index.js";
 import { phase3Generate } from "./phase3-llm/index.js";
 import { phase4Execute } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
-import { buildErrorEnvelope, computeContextHash } from "./phase5-validation/envelope-assembler.js";
+import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 
@@ -179,7 +179,7 @@ function buildFeedbackAckEnvelope(enrichedContext: EnrichedContext): Orchestrato
     suggested_actions: [],
 
     lineage: {
-      context_hash: computeContextHash(enrichedContext),
+      context_hash: resolveContextHash(enrichedContext),
       dsk_version_hash: enrichedContext.dsk.version_hash,
     },
 
@@ -248,7 +248,7 @@ function buildSystemEventAckEnvelope(
   analysisResponse?: import("../types.js").V2RunResponseEnvelope,
 ): OrchestratorResponseEnvelopeV2 {
   const lineage: OrchestratorResponseEnvelopeV2['lineage'] = {
-    context_hash: enrichedContext.context_hash ?? computeContextHash(enrichedContext),
+    context_hash: resolveContextHash(enrichedContext),
     dsk_version_hash: enrichedContext.dsk.version_hash,
   };
 
@@ -320,7 +320,7 @@ function buildSystemEventErrorEnvelope(
     suggested_actions: [],
 
     lineage: {
-      context_hash: enrichedContext.context_hash ?? computeContextHash(enrichedContext),
+      context_hash: resolveContextHash(enrichedContext),
       dsk_version_hash: enrichedContext.dsk.version_hash,
     },
 

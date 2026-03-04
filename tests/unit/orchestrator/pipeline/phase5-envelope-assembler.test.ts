@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  computeContextHash,
   assembleV2Envelope,
   buildErrorEnvelope,
 } from "../../../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js";
+import { computeContextHash } from "../../../../src/orchestrator/context/context-hash.js";
 import type {
   EnrichedContext,
   SpecialistResult,
@@ -80,41 +80,24 @@ function makeScienceLedger(): ScienceLedger {
   };
 }
 
-describe("computeContextHash", () => {
-  it("returns a hex string", () => {
-    const hash = computeContextHash(makeEnrichedContext());
+// Note: computeContextHash is the canonical implementation from context/context-hash.ts.
+// Detailed hash tests live in tests/unit/orchestrator/context/context-hash.test.ts.
+// These tests cover the cross-cutting concern: hash is wired correctly into envelopes.
+describe("computeContextHash (canonical, from context/context-hash)", () => {
+  it("returns a 64-char hex string", () => {
+    const hash = computeContextHash({});
     expect(hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("is deterministic for the same input", () => {
-    const ctx = makeEnrichedContext();
+    const ctx = { messages: [{ role: "user" as const, content: "hello" }] };
     expect(computeContextHash(ctx)).toBe(computeContextHash(ctx));
   });
 
-  it("excludes conversation_history from hash", () => {
-    const a = makeEnrichedContext({ conversation_history: [] });
-    const b = makeEnrichedContext({
-      conversation_history: [{ role: "user", content: "hello" }],
-    });
-    expect(computeContextHash(a)).toBe(computeContextHash(b));
-  });
-
-  it("excludes turn_id from hash", () => {
-    const a = makeEnrichedContext({ turn_id: "aaa" });
-    const b = makeEnrichedContext({ turn_id: "bbb" });
-    expect(computeContextHash(a)).toBe(computeContextHash(b));
-  });
-
-  it("excludes system_event from hash", () => {
-    const a = makeEnrichedContext();
-    const b = makeEnrichedContext({ system_event: { event_type: "direct_analysis_run" as const, timestamp: "2026-03-03T00:00:00Z", event_id: "e1", details: {} } });
-    expect(computeContextHash(a)).toBe(computeContextHash(b));
-  });
-
-  it("produces different hashes for different scenario_ids", () => {
-    const a = makeEnrichedContext({ scenario_id: "s1" });
-    const b = makeEnrichedContext({ scenario_id: "s2" });
-    expect(computeContextHash(a)).not.toBe(computeContextHash(b));
+  it("different messages → different hash", () => {
+    const a = computeContextHash({ messages: [{ role: "user" as const, content: "hello" }] });
+    const b = computeContextHash({ messages: [{ role: "user" as const, content: "goodbye" }] });
+    expect(a).not.toBe(b);
   });
 });
 
@@ -360,5 +343,79 @@ describe("buildErrorEnvelope", () => {
     expect(envelope.lineage.context_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(envelope.stage_indicator.stage).toBe("evaluate");
     expect(envelope.observability.intent_classification).toBe("conversational");
+  });
+
+  // Task 1 new tests: three-tier hash rule
+
+  it("buildErrorEnvelope without enrichedContext → lineage.context_hash is ''", () => {
+    const envelope = buildErrorEnvelope("err-turn", "PIPELINE_ERROR", "fail");
+    expect(envelope.lineage.context_hash).toBe('');
+  });
+
+  it("normal and error envelope produce identical context_hash for same enriched context", () => {
+    const ctx = makeEnrichedContext();
+
+    const normalEnvelope = assembleV2Envelope({
+      enrichedContext: ctx,
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    const errorEnvelope = buildErrorEnvelope("err-turn", "PIPELINE_ERROR", "fail", ctx);
+
+    expect(normalEnvelope.lineage.context_hash).toBe(errorEnvelope.lineage.context_hash);
+  });
+
+  it("uses pre-computed context_hash from Phase 1 when present (tier-1 of three-tier rule)", () => {
+    const precomputedHash = 'a'.repeat(64);
+    const ctx = makeEnrichedContext({ context_hash: precomputedHash });
+
+    const errorEnvelope = buildErrorEnvelope("err-turn", "PIPELINE_ERROR", "fail", ctx);
+    expect(errorEnvelope.lineage.context_hash).toBe(precomputedHash);
+
+    const normalEnvelope = assembleV2Envelope({
+      enrichedContext: ctx,
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+    expect(normalEnvelope.lineage.context_hash).toBe(precomputedHash);
+  });
+
+  it("snapshot: context_hash value is stable across envelope types (locks hash algorithm)", () => {
+    // Fixed context: no graph, no analysis, no framing, messages [], selected_elements [].
+    // scenario_id is excluded from the canonical hash per context-hash.ts spec.
+    // If this snapshot breaks, the canonicalisation rules or hash version changed —
+    // increment HASH_VERSION in context/context-hash.ts and update this snapshot.
+    const ctx = makeEnrichedContext({ scenario_id: "snap-scenario" });
+
+    const normalHash = assembleV2Envelope({
+      enrichedContext: ctx,
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    }).lineage.context_hash;
+
+    const errorHash = buildErrorEnvelope("snap-turn", "ERR", "msg", ctx).lineage.context_hash;
+
+    // Both envelopes produce the same hash
+    expect(normalHash).toBe(errorHash);
+    // Inline snapshot — locks the exact hash value
+    expect({ normalHash, errorHash }).toMatchInlineSnapshot(`
+      {
+        "errorHash": "5d7adcb32559636faec6c6c2ac6d45faef469a58cd8df2800d2e55b3e43ae22a",
+        "normalHash": "5d7adcb32559636faec6c6c2ac6d45faef469a58cd8df2800d2e55b3e43ae22a",
+      }
+    `);
   });
 });

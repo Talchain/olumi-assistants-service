@@ -307,6 +307,71 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(body.turn_plan?.routing).toBe("deterministic");
   });
 
+  it("patch_accepted with only block_id: normaliser populates patch_id and route succeeds", async () => {
+    // FB-2: send block_id only (no patch_id).
+    // Zod validates, normaliser copies block_id → patch_id, handleTurn receives populated patch_id.
+    const minimalGraph = { nodes: [], edges: [], options: [], version: "3" };
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        system_event: {
+          event_type: "patch_accepted",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-blk-1",
+          details: { block_id: "blk-abc", operations: [], applied_graph_hash: "abc123" },
+        },
+        graph_state: minimalGraph,
+      }),
+    });
+
+    // Route must accept and process the event (normaliser fills in patch_id from block_id)
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.turn_plan?.routing).toBe("deterministic");
+  });
+
+  it("patch_accepted with both patch_id and block_id: patch_id takes precedence", async () => {
+    // FB-3: send both ids. Normaliser leaves patch_id unchanged (block_id is ignored per precedence rule).
+    const minimalGraph = { nodes: [], edges: [], options: [], version: "3" };
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        system_event: {
+          event_type: "patch_accepted",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-both-1",
+          details: { patch_id: "patch-primary", block_id: "blk-secondary", operations: [], applied_graph_hash: "abc123" },
+        },
+        graph_state: minimalGraph,
+      }),
+    });
+
+    // Route must accept both ids; patch_id is preserved as-is
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.turn_plan?.routing).toBe("deterministic");
+  });
+
+  it("patch_accepted with neither patch_id nor block_id: Zod rejects with 400", async () => {
+    // Confirm schema-level rejection flows through the real route
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: makeValidRequest({
+        system_event: {
+          event_type: "patch_accepted",
+          timestamp: "2026-03-03T00:00:00Z",
+          event_id: "evt-missing",
+          details: { operations: [] },
+        },
+      }),
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it("returns 200 with empty blocks for feedback_submitted event", async () => {
     const response = await app.inject({
       method: "POST",

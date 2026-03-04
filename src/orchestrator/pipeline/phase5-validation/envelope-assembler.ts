@@ -5,10 +5,10 @@
  * stage_indicator, progress_marker, science_ledger, observability, turn_plan, lineage.
  */
 
-import { createHash } from "node:crypto";
 import { isProduction, config } from "../../../config/index.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { getDskVersionHash } from "../../dsk-loader.js";
+import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
 import type {
   EnrichedContext,
   SpecialistResult,
@@ -23,48 +23,25 @@ import type {
 import type { StageTransition } from "./stage-transition.js";
 
 // ============================================================================
-// Context Hash
+// Helpers
 // ============================================================================
 
 /**
- * Compute SHA-256 hash of canonical JSON serialisation of EnrichedContext.
+ * Resolve context_hash for envelope lineage following the three-tier rule:
+ *   1. enrichedContext.context_hash exists → use it (pre-computed by Phase 1)
+ *   2. enrichedContext exists but context_hash missing → compute via canonical
+ *      computeContextHash, extracting only the HashableContext fields (mirrors Phase 1 logic)
+ *   3. enrichedContext missing → '' (empty string; enrichment did not complete)
  *
- * Excluded fields (per spec):
- * - conversation_history (entire array)
- * - system_event
- * - turn_id
- *
- * Everything else is included. This makes the hash stable for the same
- * scenario state regardless of conversation length or transient per-turn data.
+ * Never compute a hash from partial context objects. If enrichment didn't
+ * complete, the hash is ''.
  */
-export function computeContextHash(enrichedContext: EnrichedContext): string {
-  const {
-    conversation_history: _history,
-    system_event: _event,
-    turn_id: _turnId,
-    ...hashable
-  } = enrichedContext;
+export function resolveContextHash(enrichedContext: EnrichedContext | undefined): string {
+  if (!enrichedContext) return '';
+  if (enrichedContext.context_hash != null) return enrichedContext.context_hash;
 
-  const serialised = JSON.stringify(hashable, sortedReplacer);
-
-  return createHash('sha256')
-    .update(serialised)
-    .digest('hex');
-}
-
-/**
- * Sorted JSON replacer for deterministic serialisation.
- */
-function sortedReplacer(_key: string, value: unknown): unknown {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return Object.keys(value as Record<string, unknown>)
-      .sort()
-      .reduce((sorted: Record<string, unknown>, k) => {
-        sorted[k] = (value as Record<string, unknown>)[k];
-        return sorted;
-      }, {});
-  }
-  return value;
+  // Tier 2: project to HashableContext via canonical helper (same projection as Phase 1)
+  return computeContextHash(toHashableContext(enrichedContext));
 }
 
 // ============================================================================
@@ -95,9 +72,8 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     scienceLedger,
   } = input;
 
-  // Use pre-computed context hash from Phase 1 when available (canonical compact-context hash).
-  // Fall back to full EnrichedContext hash for backward compatibility.
-  const contextHash = enrichedContext.context_hash ?? computeContextHash(enrichedContext);
+  // Resolve context hash via three-tier rule (pre-computed → canonical compute → '').
+  const contextHash = resolveContextHash(enrichedContext);
 
   // Determine tool name and build turn_plan.
   // Use executed_tools from Phase4Result when available (multi-tool aware).
@@ -231,7 +207,7 @@ export function buildErrorEnvelope(
     guidance_items: [],
 
     lineage: {
-      context_hash: enrichedContext ? computeContextHash(enrichedContext) : '',
+      context_hash: resolveContextHash(enrichedContext),
       dsk_version_hash: null,
     },
 

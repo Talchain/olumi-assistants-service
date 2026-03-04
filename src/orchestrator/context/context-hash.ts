@@ -61,6 +61,49 @@ export interface HashableContext {
   selected_elements?: { node_ids?: string[]; edge_ids?: string[] } | string[] | null;
 }
 
+/**
+ * Minimal structural type for EnrichedContext fields consumed by toHashableContext.
+ * Using a structural interface avoids a circular dependency between context/ and pipeline/.
+ * EnrichedContext (pipeline/types.ts) satisfies this interface at the call sites.
+ */
+export interface EnrichedContextHashFields {
+  graph_compact?: GraphV3Compact | null;
+  analysis_response?: AnalysisResponseSummary | null;
+  framing?: {
+    stage: string;
+    goal?: string;
+    constraints?: unknown[] | readonly string[];
+    options?: unknown[] | readonly string[];
+  } | null;
+  messages?: Array<{ role: string; content: string }>;
+  selected_elements?: string[] | null;
+}
+
+/**
+ * Project an EnrichedContext (or any compatible shape) into a HashableContext.
+ *
+ * This is the canonical projection used by Phase 1 and Phase 5 (envelope assembler)
+ * to compute the context hash. Keeping it in one place prevents projection drift —
+ * if HashableContext grows a new field, update only here.
+ */
+export function toHashableContext(ctx: EnrichedContextHashFields): HashableContext {
+  const framing = ctx.framing;
+  return {
+    graph: ctx.graph_compact,
+    analysis_response: ctx.analysis_response,
+    framing: framing
+      ? {
+          stage: framing.stage,
+          goal: framing.goal,
+          constraints: framing.constraints as unknown[] | undefined,
+          options: framing.options as unknown[] | undefined,
+        }
+      : null,
+    messages: ctx.messages,
+    selected_elements: ctx.selected_elements ?? undefined,
+  };
+}
+
 // ============================================================================
 // Canonical Normalisation
 // ============================================================================

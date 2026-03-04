@@ -2,7 +2,7 @@
  * Tool Registry
  *
  * Returns the 5 LLM-visible tool definitions for the orchestrator.
- * Gate-only tools (undo_patch, run_exercise) are registered in GATE_ONLY_TOOL_NAMES
+ * Gate-only tools (run_exercise) are registered in GATE_ONLY_TOOL_NAMES
  * but are NOT in TOOL_DEFINITIONS (invisible to LLM). This ensures:
  * - validateGatePatternsAgainstRegistry() passes (gate names are known)
  * - Prompt-registry alignment test passes (LLM only sees TOOL_DEFINITIONS)
@@ -98,7 +98,7 @@ const TOOL_DEFINITIONS: OrchestratorToolDefinition[] = [
 
 /**
  * Get all LLM-visible tool definitions.
- * undo_patch is intentionally excluded — it has a separate handler (latent stub).
+ * undo_patch is intentionally excluded — it is a latent LLM-invocable stub with no gate patterns.
  */
 export function getToolDefinitions(): OrchestratorToolDefinition[] {
   return TOOL_DEFINITIONS;
@@ -106,7 +106,7 @@ export function getToolDefinitions(): OrchestratorToolDefinition[] {
 
 /**
  * Get a specific tool definition by name.
- * Returns undefined if not found (undo_patch has a separate handler).
+ * Returns undefined if not found (undo_patch is a latent stub, not in TOOL_DEFINITIONS).
  */
 export function getToolDefinition(name: string): OrchestratorToolDefinition | undefined {
   return TOOL_DEFINITIONS.find((t) => t.name === name);
@@ -130,9 +130,11 @@ export function getToolNames(): string[] {
  * Gate-only tool names — handled by the intent gate but NOT visible to the LLM.
  * These tools have dispatch handlers but are not in TOOL_DEFINITIONS.
  * validateGatePatternsAgainstRegistry accepts names from either set.
+ *
+ * undo_patch: removed in v2, handler exists as latent LLM-invocable stub only
+ * (no gate patterns). Not listed here because it is not gate-routed.
  */
 export const GATE_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'undo_patch',
   'run_exercise',
 ]);
 
