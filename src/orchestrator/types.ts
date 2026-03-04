@@ -345,8 +345,8 @@ export interface ConversationContext {
   framing: {
     stage: DecisionStage;
     goal?: string;
-    constraints?: unknown[];
-    options?: unknown[];
+    constraints?: string[];
+    options?: string[];
   } | null;
   messages: ConversationMessage[];
   event_log_summary?: string;

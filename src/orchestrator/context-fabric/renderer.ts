@@ -14,6 +14,8 @@
  *
  * Built in isolation — wired into the turn handler in a separate change
  * behind CEE_ORCHESTRATOR_CONTEXT_ENABLED.
+ * V2 prompt path (assembleV2SystemPrompt) must reach feature parity before this flag
+ * is enabled on staging. Tracked under A.4 / F.2.
  */
 
 import { createHash } from "node:crypto";

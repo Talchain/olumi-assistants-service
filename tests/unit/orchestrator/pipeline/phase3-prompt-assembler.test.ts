@@ -57,14 +57,8 @@ const COMPACT_ANALYSIS: AnalysisResponseSummary = {
 const FRAMING_WITH_ALL_FIELDS: EnrichedContext["framing"] = {
   goal: "Maximise first-year revenue",
   stage: "evaluate",
-  constraints: [
-    { id: "c1", label: "Budget < $500k" },
-    { id: "c2", label: "Launch by Q3" },
-  ],
-  options: [
-    { id: "opt_a", label: "Launch Now" },
-    { id: "opt_b", label: "Delay 6 Months" },
-  ],
+  constraints: ["Budget < $500k", "Launch by Q3"],
+  options: ["Launch Now", "Delay 6 Months"],
 };
 
 function makeEnrichedContext(overrides: Partial<EnrichedContext> = {}): EnrichedContext {

@@ -15,12 +15,25 @@ import type { GraphV3Compact } from "../../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../../context/analysis-compact.js";
 
 // ============================================================================
+// Section cap — prevents any single Zone 2 block from bloating the prompt
+// ============================================================================
+
+const SECTION_CHAR_CAP = 2000;
+
+function capSection(text: string): string {
+  if (text.length <= SECTION_CHAR_CAP) return text;
+  return text.slice(0, SECTION_CHAR_CAP) + '…truncated';
+}
+
+// ============================================================================
 // Compact Serialisers (structured text — not raw JSON)
 // ============================================================================
 
 /**
  * Serialise a compact graph into a structured text block for the LLM.
  * Format: one node per line, then one edge per line.
+ * Input arrays are pre-sorted deterministically by compactGraph() (nodes by id,
+ * edges by from then to). No additional sort is applied here.
  */
 function serialiseCompactGraph(g: GraphV3Compact): string {
   const lines: string[] = [`Graph (${g._node_count} nodes, ${g._edge_count} edges):`];
@@ -42,6 +55,8 @@ function serialiseCompactGraph(g: GraphV3Compact): string {
 
 /**
  * Serialise a compact analysis summary into structured text for the LLM.
+ * Input arrays are pre-sorted deterministically by compactAnalysis() (options by
+ * win_probability desc, drivers by sensitivity desc). No additional sort applied here.
  */
 function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
   const lines: string[] = ['Analysis:'];
@@ -100,45 +115,34 @@ export async function assembleV2SystemPrompt(
   zone2Sections.push(`Stage confidence: ${si.confidence} (${si.source})`);
 
   // Decision goal
-  const framing = enrichedContext.framing as Record<string, unknown> | null | undefined;
-  const goal = framing?.goal;
-  if (goal && typeof goal === 'string') {
-    zone2Sections.push(`Decision goal: ${goal}`);
+  const framing = enrichedContext.framing;
+  if (framing?.goal) {
+    zone2Sections.push(`Decision goal: ${framing.goal}`);
   }
 
-  // Framing constraints
-  const constraints = framing?.constraints;
-  if (Array.isArray(constraints) && constraints.length > 0) {
-    const constraintList = (constraints as unknown[]).map((c) => {
-      const co = c as Record<string, unknown>;
-      return co.label ?? co.name ?? co.id ?? String(c);
-    });
-    zone2Sections.push(`Constraints: ${constraintList.join(', ')}`);
+  // Framing constraints (bounded at API boundary: max 20 items × 200 chars each)
+  if (framing?.constraints && framing.constraints.length > 0) {
+    zone2Sections.push(capSection(`Constraints: ${framing.constraints.join(', ')}`));
   }
 
-  // Framing options
-  const options = framing?.options;
-  if (Array.isArray(options) && options.length > 0) {
-    const optionList = (options as unknown[]).map((o) => {
-      const oo = o as Record<string, unknown>;
-      return oo.label ?? oo.name ?? oo.id ?? String(o);
-    });
-    zone2Sections.push(`Options: ${optionList.join(', ')}`);
+  // Framing options (bounded at API boundary: max 20 items × 200 chars each)
+  if (framing?.options && framing.options.length > 0) {
+    zone2Sections.push(capSection(`Options: ${framing.options.join(', ')}`));
   }
 
   // Graph state (compact)
   if (enrichedContext.graph_compact) {
-    zone2Sections.push(serialiseCompactGraph(enrichedContext.graph_compact));
+    zone2Sections.push(capSection(serialiseCompactGraph(enrichedContext.graph_compact)));
   }
 
   // Analysis response (compact)
   if (enrichedContext.analysis_response) {
-    zone2Sections.push(serialiseCompactAnalysis(enrichedContext.analysis_response));
+    zone2Sections.push(capSection(serialiseCompactAnalysis(enrichedContext.analysis_response)));
   }
 
   // Event log summary (when populated — requires Supabase wiring in phase 1)
   if (enrichedContext.event_log_summary) {
-    zone2Sections.push(`Decision history: ${enrichedContext.event_log_summary}`);
+    zone2Sections.push(capSection(`Decision history: ${enrichedContext.event_log_summary}`));
   }
 
   // Intent classification

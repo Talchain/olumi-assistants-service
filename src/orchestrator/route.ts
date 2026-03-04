@@ -85,8 +85,8 @@ const ConversationMessageSchema = z.object({
 const FramingSchema = z.object({
   stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
   goal: z.string().optional(),
-  constraints: z.array(z.unknown()).optional(),
-  options: z.array(z.unknown()).optional(),
+  constraints: z.array(z.string().max(200)).max(20).optional(),
+  options: z.array(z.string().max(200)).max(20).optional(),
 }).nullable();
 
 const AnalysisInputsSchema = z.object({

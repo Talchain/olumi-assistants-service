@@ -386,6 +386,10 @@ async function dispatchViaLLM(
   let fabricContext: AssembledContext | null = null;
   let contextHash: string | undefined;
 
+  // CEE_ORCHESTRATOR_CONTEXT_ENABLED: enables the Context Fabric (3-zone) prompt path.
+  // DO NOT enable on staging until the V2 prompt path (assembleV2SystemPrompt) has
+  // feature parity: full graph summary, analysis summary, selected elements rendering.
+  // Tracked under A.4 / F.2.
   const fabricEnabled = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === 'true'
     || process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === '1';
 
