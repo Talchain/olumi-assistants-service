@@ -254,10 +254,11 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
 
       const scenarioId = `staging-t2-${randomUUID()}`;
+      // interventions must reference factor/outcome nodes (not option nodes)
       const analysisInputs = {
         options: [
-          { id: "opt_senior", option_id: "opt_senior",  label: "Hire senior developer",       interventions: { opt_senior: 1 } },
-          { id: "opt_junior", option_id: "opt_junior",  label: "Hire two junior developers",  interventions: { opt_junior: 1 } },
+          { id: "opt_senior", option_id: "opt_senior",  label: "Hire senior developer",       interventions: { fac_cost: 1, fac_productivity: 1 } },
+          { id: "opt_junior", option_id: "opt_junior",  label: "Hire two junior developers",  interventions: { fac_cost: 0.5, fac_productivity: 0.6 } },
         ],
         goal_node_id: "goal_main",
       };
