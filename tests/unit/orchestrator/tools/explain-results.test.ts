@@ -234,4 +234,41 @@ describe("handleExplainResults handler", () => {
       expect(oe?.message).toContain("LLM timeout");
     }
   });
+
+  it("supporting_refs ref_ids all correspond to fact_ids from the analysis response", async () => {
+    const factId = "sensitivity_market_demand";
+    const analysisResponse = makeAnalysisResponse({
+      fact_objects: [
+        { fact_id: factId, fact_type: "sensitivity_rank", value: 0.9 } as unknown as V2RunResponseEnvelope["fact_objects"] extends (infer T)[] | undefined ? T : never,
+      ],
+    } as Partial<V2RunResponseEnvelope>);
+    const context = makeContext({ analysis_response: analysisResponse });
+    const adapter = makeAdapter("The top driver is market demand.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    const block = result.blocks[0];
+    const data = block.data as { narrative: string; supporting_refs: Array<{ ref_type: string; ref_id: string; claim: string }> };
+    // Every ref_id must exist in the analysis response's fact_objects
+    const knownFactIds = new Set(
+      (analysisResponse.fact_objects as Array<{ fact_id: string }> | undefined ?? []).map((f) => f.fact_id),
+    );
+    for (const ref of data.supporting_refs) {
+      if (ref.ref_type === "fact") {
+        expect(knownFactIds.has(ref.ref_id), `Unknown fact_id in supporting_refs: ${ref.ref_id}`).toBe(true);
+      }
+    }
+  });
+
+  it("preserves 4-digit years in LLM output (grounded structure, not analysis value)", async () => {
+    const context = makeContext();
+    // Response contains a year — should NOT be stripped
+    const adapter = makeAdapter("Since 2023, this trend has accelerated.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    const block = result.blocks[0];
+    const narrative = (block.data as { narrative: string }).narrative;
+    expect(narrative).toContain("2023");
+  });
 });

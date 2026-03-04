@@ -9,7 +9,7 @@
  * |------------------|---------------------------------------------------------------------|
  * | run_analysis     | run it, analyse, analyze, run the analysis, simulate, ...           |
  * | draft_graph      | draft, draft a model, build the model, start over, new model, ...  |
- * | generate_brief   | brief, summary, generate brief, write the brief, write report, ... |
+ * | generate_brief   | generate brief, generate the brief, write the brief, create brief, decision brief, ... |
  * | explain_results  | explain, why, break it down, explain the results, ...              |
  * | edit_graph       | edit, modify, change, update the model, edit model, ...            |
  * | run_exercise     | pre-mortem, devil's advocate, disconfirmation, ...                  |
@@ -98,11 +98,12 @@ const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   // generate_brief
   ['generate brief', 'generate_brief'],
   ['generate a brief', 'generate_brief'],
+  ['generate the brief', 'generate_brief'],
   ['write the brief', 'generate_brief'],
   ['create brief', 'generate_brief'],
-  ['brief', 'generate_brief'],
-  ['summary', 'generate_brief'],
-  ['write a summary', 'generate_brief'],
+  ['create a brief', 'generate_brief'],
+  ['create the brief', 'generate_brief'],
+  ['decision brief', 'generate_brief'],
   ['generate report', 'generate_brief'],
   ['write report', 'generate_brief'],
 

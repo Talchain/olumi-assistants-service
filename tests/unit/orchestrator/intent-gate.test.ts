@@ -64,11 +64,12 @@ describe("Intent Gate — classifyIntent", () => {
     it.each([
       "generate brief",
       "generate a brief",
+      "generate the brief",
       "write the brief",
       "create brief",
-      "brief",
-      "summary",
-      "write a summary",
+      "create a brief",
+      "create the brief",
+      "decision brief",
       "generate report",
       "write report",
     ])("routes %j to generate_brief", (message) => {
@@ -285,6 +286,18 @@ describe("Intent Gate — classifyIntent", () => {
       expect(classifyIntent("give me a brief overview of the issue").tool).toBeNull();
     });
 
+    it("generate_brief near-miss: standalone 'brief' falls through to LLM (too ambiguous)", () => {
+      expect(classifyIntent("brief").tool).toBeNull();
+    });
+
+    it("generate_brief near-miss: standalone 'summary' falls through to LLM (too ambiguous)", () => {
+      expect(classifyIntent("summary").tool).toBeNull();
+    });
+
+    it("generate_brief near-miss: 'write a summary' falls through to LLM (too ambiguous)", () => {
+      expect(classifyIntent("write a summary").tool).toBeNull();
+    });
+
     it("explain_results near-miss: 'can you explain the methodology?'", () => {
       expect(classifyIntent("can you explain the methodology?").tool).toBeNull();
     });
@@ -292,6 +305,24 @@ describe("Intent Gate — classifyIntent", () => {
     it("edit_graph near-miss: 'I want to edit my profile'", () => {
       expect(classifyIntent("I want to edit my profile").tool).toBeNull();
     });
+  });
+});
+
+// ============================================================================
+// Intent collision negatives — must NOT route to generate_brief
+// ============================================================================
+
+describe("Intent Gate — generate_brief collision negatives", () => {
+  it.each([
+    "summarise the results",
+    "briefly explain",
+    "give me a quick summary",
+    "in brief, what happened",
+    "can you summarise",
+    "brief overview",
+  ])("does not route %j to generate_brief", (message) => {
+    const result = classifyIntent(message);
+    expect(result.tool).not.toBe("generate_brief");
   });
 });
 

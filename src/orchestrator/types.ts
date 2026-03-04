@@ -118,6 +118,10 @@ export interface TurnPlan {
   routing: 'deterministic' | 'llm';
   long_running: boolean;
   tool_latency_ms?: number;
+  /** All tools that executed this turn (in execution order). Single-tool turns have one entry. */
+  executed_tools?: string[];
+  /** Long-running tools deferred because one already executed this turn. */
+  deferred_tools?: string[];
   /** Populated when the turn was driven by a system event. Additive — does not conflict with routing fields. */
   system_event?: { type: SystemEventType; event_id: string };
 }

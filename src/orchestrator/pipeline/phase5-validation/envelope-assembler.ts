@@ -99,10 +99,18 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   // Fall back to full EnrichedContext hash for backward compatibility.
   const contextHash = enrichedContext.context_hash ?? computeContextHash(enrichedContext);
 
-  // Determine tool name and build turn_plan
-  const toolName = llmResult.tool_invocations.length > 0
-    ? llmResult.tool_invocations[0].name
-    : null;
+  // Determine tool name and build turn_plan.
+  // Use executed_tools from Phase4Result when available (multi-tool aware).
+  // Fall back to first llmResult invocation for backward compatibility.
+  const phase4Result = toolResult as (ToolResult & { executed_tools?: string[]; deferred_tools?: string[] });
+  const executedTools: string[] = phase4Result.executed_tools ?? [];
+  const deferredTools: string[] = phase4Result.deferred_tools ?? [];
+
+  const toolName = executedTools.length > 0
+    ? executedTools[0]
+    : llmResult.tool_invocations.length > 0
+      ? llmResult.tool_invocations[0].name
+      : null;
 
   const isDeterministic = llmResult.tool_invocations.length > 0
     && llmResult.tool_invocations[0].id === 'deterministic';
@@ -114,6 +122,12 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   };
   if (toolResult.tool_latency_ms !== undefined) {
     turnPlan.tool_latency_ms = toolResult.tool_latency_ms;
+  }
+  if (executedTools.length > 1) {
+    turnPlan.executed_tools = executedTools;
+  }
+  if (deferredTools.length > 0) {
+    turnPlan.deferred_tools = deferredTools;
   }
 
   // Merge suggested actions
