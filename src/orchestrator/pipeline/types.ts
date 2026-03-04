@@ -254,6 +254,16 @@ export interface OrchestratorResponseEnvelopeV2 {
    */
   guidance_items: GuidanceItem[];
 
+  /**
+   * When run_analysis returns blocked/failed — from PLoT V2RunError (422) or CEE prereq check.
+   * V2 contract: analysis failures communicated via analysis_status, not HTTP status.
+   */
+  analysis_status?: string;
+  status_reason?: string;
+  retryable?: boolean;
+  critiques?: unknown[];
+  meta?: Record<string, unknown>;
+
   error?: {
     code: string;
     message: string;

@@ -79,58 +79,122 @@ async function makeRequest(
 }
 
 /**
- * Lightweight critical-fields envelope validator (Test 8 cross-cutting check).
+ * Contract-grade envelope validator for 200 turn responses.
  * Does NOT import Zod from src/ — manual runtime checks only.
  *
- * Accepts either block_type or type per block element (V1/V2 compat).
+ * Validates:
+ *  1. turn_id: string
+ *  2. assistant_text: string | null
+ *  3. blocks: array, each element has block_type or type string
+ *  4. guidance_items: array
+ *  5. turn_plan: object with routing string; selected_tool string|null when present
+ *  6. lineage (when present): context_hash string; response_hash non-empty string when present
+ *  7. analysis_status branch: meta.request_id + retryable/critiques/results invariants
+ *  8. Negative: no error.v1 shape (code+message) on 200 envelopes
  */
 function assertEnvelopeSchema(body: unknown, label: string): void {
+  const snippet = () => JSON.stringify(body).slice(0, 500);
+
   if (typeof body !== "object" || body === null) {
-    throw new Error(`[${label}] Response body is not an object: ${JSON.stringify(body)}`);
+    throw new Error(`[${label}] body is not a non-null object. body: ${snippet()}`);
   }
   const b = body as Record<string, unknown>;
 
-  // assistant_text: string | null (must be present, not undefined)
-  if (!("assistant_text" in b)) {
-    throw new Error(`[${label}] assistant_text is missing from response`);
-  }
-  if (b.assistant_text !== null && typeof b.assistant_text !== "string") {
-    throw new Error(`[${label}] assistant_text must be string | null, got: ${JSON.stringify(b.assistant_text)}`);
+  // 1. turn_id: string
+  if (typeof b.turn_id !== "string") {
+    throw new Error(`[${label}] expected turn_id to be string, got ${typeof b.turn_id}. body: ${snippet()}`);
   }
 
-  // blocks: array, each element has block_type (string) OR type (string)
+  // 2. assistant_text: string | null
+  if (!("assistant_text" in b)) {
+    throw new Error(`[${label}] assistant_text missing from response. body: ${snippet()}`);
+  }
+  if (b.assistant_text !== null && typeof b.assistant_text !== "string") {
+    throw new Error(`[${label}] expected assistant_text to be string|null, got ${typeof b.assistant_text}. body: ${snippet()}`);
+  }
+
+  // 3. blocks: array; each has block_type or type string
   if (!Array.isArray(b.blocks)) {
-    throw new Error(`[${label}] blocks must be array, got: ${JSON.stringify(b.blocks)}`);
+    throw new Error(`[${label}] blocks must be array. body: ${snippet()}`);
   }
   for (const block of b.blocks) {
     const blk = block as Record<string, unknown>;
-    const hasBlockType = typeof blk.block_type === "string";
-    const hasType = typeof blk.type === "string";
-    if (!hasBlockType && !hasType) {
-      throw new Error(
-        `[${label}] Each block must have a string "block_type" or "type" field. Got: ${JSON.stringify(block)}`,
-      );
+    if (typeof blk.block_type !== "string" && typeof blk.type !== "string") {
+      throw new Error(`[${label}] each block must have string block_type or type. block: ${JSON.stringify(block)}. body: ${snippet()}`);
     }
   }
 
-  // guidance_items: array
+  // 4. guidance_items: array
   if (!Array.isArray(b.guidance_items)) {
-    throw new Error(`[${label}] guidance_items must be array, got: ${JSON.stringify(b.guidance_items)}`);
+    throw new Error(`[${label}] guidance_items must be array. body: ${snippet()}`);
   }
 
-  // turn_plan: object with selected_tool (string | null) and routing (string)
+  // 5. turn_plan: object with routing string
   if (typeof b.turn_plan !== "object" || b.turn_plan === null) {
-    throw new Error(`[${label}] turn_plan must be object, got: ${JSON.stringify(b.turn_plan)}`);
+    throw new Error(`[${label}] turn_plan must be object. body: ${snippet()}`);
   }
   const tp = b.turn_plan as Record<string, unknown>;
-  if (!("selected_tool" in tp)) {
-    throw new Error(`[${label}] turn_plan.selected_tool is missing`);
-  }
-  if (tp.selected_tool !== null && typeof tp.selected_tool !== "string") {
-    throw new Error(`[${label}] turn_plan.selected_tool must be string | null, got: ${JSON.stringify(tp.selected_tool)}`);
-  }
   if (typeof tp.routing !== "string") {
-    throw new Error(`[${label}] turn_plan.routing must be string, got: ${JSON.stringify(tp.routing)}`);
+    throw new Error(`[${label}] turn_plan.routing must be string. body: ${snippet()}`);
+  }
+  // selected_tool: checked only when present (some ack modes may omit)
+  if ("selected_tool" in tp && tp.selected_tool !== null && typeof tp.selected_tool !== "string") {
+    throw new Error(`[${label}] turn_plan.selected_tool must be string|null when present. body: ${snippet()}`);
+  }
+
+  // 6. lineage (when present)
+  if ("lineage" in b && b.lineage !== null && typeof b.lineage === "object") {
+    const lin = b.lineage as Record<string, unknown>;
+    if (typeof lin.context_hash !== "string") {
+      throw new Error(`[${label}] lineage.context_hash must be string. body: ${snippet()}`);
+    }
+    if ("response_hash" in lin && (typeof lin.response_hash !== "string" || lin.response_hash === "")) {
+      throw new Error(`[${label}] lineage.response_hash must be non-empty string when present. body: ${snippet()}`);
+    }
+  }
+
+  // 7. analysis_status branch (when present)
+  if ("analysis_status" in b) {
+    const as_ = b.analysis_status as string;
+    const meta = b.meta as Record<string, unknown> | null | undefined;
+    if (typeof meta !== "object" || meta === null) {
+      throw new Error(`[${label}] meta must be object when analysis_status present. body: ${snippet()}`);
+    }
+    if (typeof meta.request_id !== "string") {
+      throw new Error(`[${label}] meta.request_id must be string. body: ${snippet()}`);
+    }
+    if (as_ === "computed" || as_ === "partial") {
+      for (const f of ["seed_used", "response_hash", "computed_at", "n_samples"] as const) {
+        if (!(f in meta)) {
+          throw new Error(`[${label}] meta.${f} missing for analysis_status=${as_}. body: ${snippet()}`);
+        }
+      }
+    } else if (as_ === "blocked") {
+      if (b.retryable !== false) {
+        throw new Error(`[${label}] retryable must be false for blocked. body: ${snippet()}`);
+      }
+      if (!Array.isArray(b.critiques) || b.critiques.length === 0) {
+        throw new Error(`[${label}] critiques must be non-empty array for blocked. body: ${snippet()}`);
+      }
+      if ("results" in b) {
+        throw new Error(`[${label}] results must not be present for blocked. body: ${snippet()}`);
+      }
+    } else if (as_ === "failed") {
+      if (typeof b.retryable !== "boolean") {
+        throw new Error(`[${label}] retryable must be boolean for failed. body: ${snippet()}`);
+      }
+      if ("results" in b) {
+        throw new Error(`[${label}] results must not be present for failed. body: ${snippet()}`);
+      }
+    }
+  }
+
+  // 8. Negative: no error.v1 shape on 200 envelopes
+  if ("error" in b && b.error !== null && typeof b.error === "object") {
+    const err = b.error as Record<string, unknown>;
+    if (typeof err.code === "string" && typeof err.message === "string") {
+      throw new Error(`[${label}] unexpected error.v1 shape (code+message) in 200 envelope. body: ${snippet()}`);
+    }
   }
 }
 
@@ -649,6 +713,178 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
         `Call 1: ${JSON.stringify(pick(result1.body)).slice(0, 400)} ` +
         `Call 2: ${JSON.stringify(pick(result2.body)).slice(0, 400)}`,
       ).toEqual(pick(result1.body));
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Test E1: invalid analysis_inputs (bad goal_node_id) → 200 with blocked/failed analysis_status
+  // --------------------------------------------------------------------------
+
+  it(
+    "Test E1: run_analysis with invalid goal_node_id returns 200 with blocked/failed analysis_status",
+    { timeout: 60_000, skip: !!SKIP_REASON },
+    async () => {
+      if (SKIP_REASON) { console.log(SKIP_REASON); return; }
+
+      const scenarioId = `staging-e1-${randomUUID()}`;
+      const reqBody = {
+        message: "run the analysis",
+        scenario_id: scenarioId,
+        client_turn_id: randomUUID(),
+        context: makeContext(
+          scenarioId,
+          MINIMAL_GRAPH,
+          { stage: "evaluate" },
+          {
+            options: [
+              { id: "opt_x", option_id: "opt_x", label: "Bad option A", interventions: { fac_cost: 1 } },
+              { id: "opt_y", option_id: "opt_y", label: "Bad option B", interventions: { fac_cost: 0.5 } },
+            ],
+            goal_node_id: "goal_nonexistent",
+          },
+        ),
+      };
+      const result = await makeRequest(ORCHESTRATE_URL, reqBody);
+      const diag = {
+        url: ORCHESTRATE_URL, status: result.status,
+        req: JSON.stringify(reqBody).slice(0, 600), res: JSON.stringify(result.body).slice(0, 600),
+      };
+
+      expect(result.status, `Expected 200. Diag: ${JSON.stringify(diag)}`).toBe(200);
+
+      const b = result.body as Record<string, unknown>;
+      expect("analysis_status" in b, `Expected analysis_status field. Diag: ${JSON.stringify(diag)}`).toBe(true);
+
+      const as_ = b.analysis_status as string;
+      if (as_ === "blocked") {
+        expect(b.retryable, `Expected retryable=false for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
+        expect(
+          Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
+          `Expected non-empty critiques for blocked. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+        expect("results" in b, `Expected no results for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
+      } else if (as_ === "failed") {
+        expect(typeof b.retryable, `Expected retryable boolean for failed. Diag: ${JSON.stringify(diag)}`).toBe("boolean");
+        expect("results" in b, `Expected no results for failed. Diag: ${JSON.stringify(diag)}`).toBe(false);
+      } else {
+        throw new Error(`[Test E1] unexpected analysis_status: ${as_}. Diag: ${JSON.stringify(diag)}`);
+      }
+
+      expect(
+        typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
+        `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
+      ).toBe(true);
+
+      const meta = b.meta as Record<string, unknown> | null | undefined;
+      expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);
+      expect(typeof meta!.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+
+      // Negative: no error.v1 shape
+      if ("error" in b && b.error !== null && typeof b.error === "object") {
+        const err = b.error as Record<string, unknown>;
+        expect(
+          typeof err.code === "string" && typeof err.message === "string",
+          `Expected no error.v1 shape. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(false);
+      }
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Test E2: missing analysis_inputs → 200 with blocked analysis_status
+  // --------------------------------------------------------------------------
+
+  it(
+    "Test E2: run_analysis without analysis_inputs returns 200 with blocked analysis_status",
+    { timeout: 60_000, skip: !!SKIP_REASON },
+    async () => {
+      if (SKIP_REASON) { console.log(SKIP_REASON); return; }
+
+      const scenarioId = `staging-e2-${randomUUID()}`;
+      const reqBody = {
+        message: "run the analysis",
+        scenario_id: scenarioId,
+        client_turn_id: randomUUID(),
+        // no analysis_inputs — 4th arg omitted
+        context: makeContext(scenarioId, MINIMAL_GRAPH, { stage: "evaluate" }),
+      };
+      const result = await makeRequest(ORCHESTRATE_URL, reqBody);
+      const diag = {
+        url: ORCHESTRATE_URL, status: result.status,
+        req: JSON.stringify(reqBody).slice(0, 600), res: JSON.stringify(result.body).slice(0, 600),
+      };
+
+      expect(result.status, `Expected 200. Diag: ${JSON.stringify(diag)}`).toBe(200);
+
+      const b = result.body as Record<string, unknown>;
+      expect("analysis_status" in b, `Expected analysis_status field. Diag: ${JSON.stringify(diag)}`).toBe(true);
+      expect(b.analysis_status, `Expected analysis_status=blocked. Diag: ${JSON.stringify(diag)}`).toBe("blocked");
+      expect(b.retryable, `Expected retryable=false. Diag: ${JSON.stringify(diag)}`).toBe(false);
+      expect(
+        Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
+        `Expected non-empty critiques. Diag: ${JSON.stringify(diag)}`,
+      ).toBe(true);
+      expect("results" in b, `Expected no results. Diag: ${JSON.stringify(diag)}`).toBe(false);
+
+      expect(
+        typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
+        `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
+      ).toBe(true);
+
+      const meta = b.meta as Record<string, unknown> | null | undefined;
+      expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);
+      expect(typeof meta!.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+
+      // Negative: no error.v1 shape
+      if ("error" in b && b.error !== null && typeof b.error === "object") {
+        const err = b.error as Record<string, unknown>;
+        expect(
+          typeof err.code === "string" && typeof err.message === "string",
+          `Expected no error.v1 shape. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(false);
+      }
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Test E3: missing required scenario_id → 400 with error body
+  // --------------------------------------------------------------------------
+
+  it(
+    "Test E3: request missing required scenario_id returns 400 with error body",
+    { timeout: 60_000, skip: !!SKIP_REASON },
+    async () => {
+      if (SKIP_REASON) { console.log(SKIP_REASON); return; }
+
+      const reqBody = {
+        // scenario_id intentionally omitted
+        client_turn_id: randomUUID(),
+        message: "test",
+        context: makeContext(randomUUID()),
+      } as Record<string, unknown>;
+      const result = await makeRequest(ORCHESTRATE_URL, reqBody);
+      const diag = {
+        url: ORCHESTRATE_URL, status: result.status,
+        req: JSON.stringify(reqBody).slice(0, 600), res: JSON.stringify(result.body).slice(0, 600),
+      };
+
+      expect(result.status, `Expected 400. Diag: ${JSON.stringify(diag)}`).toBe(400);
+
+      const b = result.body as Record<string, unknown>;
+      expect(typeof b === "object" && b !== null, `Expected body to be object. Diag: ${JSON.stringify(diag)}`).toBe(true);
+
+      // Positive: body contains an error indicator (Fastify validation or CEE envelope)
+      const hasErrorObj = typeof b.error === "object" && b.error !== null;
+      const hasFastifyMessage = typeof b.message === "string" || typeof b.statusCode === "number";
+      expect(
+        hasErrorObj || hasFastifyMessage,
+        `Expected error object or message/statusCode fields. Diag: ${JSON.stringify(diag)}`,
+      ).toBe(true);
+
+      // Negative: not an analysis response
+      expect("analysis_status" in b, `Expected no analysis_status on 400. Diag: ${JSON.stringify(diag)}`).toBe(false);
+
+      // Do NOT call assertEnvelopeSchema on 400 responses
     },
   );
 });

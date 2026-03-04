@@ -72,13 +72,22 @@ export async function handleRunAnalysis(
   }
 
   if (!context.analysis_inputs) {
-    const err: OrchestratorError = {
-      code: 'TOOL_EXECUTION_FAILED',
-      message: 'Cannot run analysis: no analysis_inputs in context. Define options and constraints first.',
-      tool: 'run_analysis',
-      recoverable: false,
+    // No analysis_inputs — surface as blocked analysis result (V2 contract: failures via analysis_status)
+    return {
+      blocks: [],
+      analysisResponse: {
+        analysis_status: 'blocked',
+        status_reason: 'Analysis inputs not configured.',
+        retryable: false,
+        critiques: [{ message: 'analysis_inputs is required. Define options and constraints first.' }],
+        meta: { request_id: requestId, seed_used: 0, n_samples: 0, response_hash: '' },
+        results: [],
+      } as unknown as V2RunResponseEnvelope,
+      responseHash: undefined,
+      seedUsed: undefined,
+      nSamples: undefined,
+      latencyMs: 0,
     };
-    throw Object.assign(new Error(err.message), { orchestratorError: err });
   }
 
   // Build PLoT payload: full graph + analysis_inputs
@@ -93,10 +102,30 @@ export async function handleRunAnalysis(
   try {
     response = await plotClient.run(payload, requestId, plotOpts);
   } catch (error) {
-    if (error instanceof PLoTError || error instanceof PLoTTimeoutError) {
-      // toOrchestratorError() returns the override (if set from error.v1 envelope) or the default
-      const orchErr = error.toOrchestratorError();
-      throw Object.assign(error, { orchestratorError: orchErr });
+    if (error instanceof PLoTError) {
+      if (error.v2RunError) {
+        // 422 analysis blocked/failed — surface as structured result, not pipeline error
+        const v2 = error.v2RunError;
+        return {
+          blocks: [],
+          analysisResponse: {
+            analysis_status: v2.analysis_status,
+            status_reason: v2.status_reason,
+            retryable: false,
+            critiques: v2.critiques ?? [],
+            meta: { request_id: error.requestId ?? requestId, seed_used: 0, n_samples: 0, response_hash: '' },
+            results: [],
+          } as unknown as V2RunResponseEnvelope,
+          responseHash: undefined,
+          seedUsed: undefined,
+          nSamples: undefined,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+      throw Object.assign(error, { orchestratorError: error.toOrchestratorError() });
+    }
+    if (error instanceof PLoTTimeoutError) {
+      throw Object.assign(error, { orchestratorError: error.toOrchestratorError() });
     }
     throw error;
   }

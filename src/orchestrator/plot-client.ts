@@ -68,6 +68,13 @@ export class PLoTError extends Error {
    */
   orchestratorErrorOverride?: OrchestratorError;
 
+  /**
+   * Set when the PLoT /v2/run endpoint returns HTTP 422 with a parseable V2RunError body.
+   * Allows callers to surface the structured analysis_status/critiques as a result
+   * rather than treating the 422 as a pipeline error.
+   */
+  v2RunError?: V2RunError;
+
   constructor(
     message: string,
     public readonly status: number,
@@ -441,13 +448,15 @@ class PLoTClientImpl implements PLoTClient {
           "PLoT run 422 — V2RunError",
         );
 
-        throw new PLoTError(
+        const plotErr = new PLoTError(
           `PLoT run analysis blocked: ${errMsg}`,
           422,
           'run',
           elapsedMs,
           requestId,
         );
+        if (v2Err) plotErr.v2RunError = v2Err;
+        throw plotErr;
       }
 
       // 4xx/5xx → error.v1 envelope ({ schema, code, message, retryable, source })

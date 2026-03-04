@@ -175,6 +175,21 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     envelope.lineage.response_hash = ar.response_hash ?? ar.meta?.response_hash;
   }
 
+  // When analysis was blocked or failed, surface analysis_status fields in the envelope.
+  // V2 contract: failures communicated via analysis_status, not HTTP status.
+  if (toolResult.analysis_response) {
+    const ar = toolResult.analysis_response as Record<string, unknown>;
+    if (ar.analysis_status === 'blocked' || ar.analysis_status === 'failed') {
+      envelope.analysis_status = ar.analysis_status as string;
+      if (typeof ar.status_reason === 'string') envelope.status_reason = ar.status_reason;
+      if (typeof ar.retryable === 'boolean') envelope.retryable = ar.retryable;
+      if (Array.isArray(ar.critiques)) envelope.critiques = ar.critiques;
+      if (typeof ar.meta === 'object' && ar.meta !== null) {
+        envelope.meta = ar.meta as Record<string, unknown>;
+      }
+    }
+  }
+
   // Debug fields (non-production only)
   if (!isProduction()) {
     if (llmResult.diagnostics) {
