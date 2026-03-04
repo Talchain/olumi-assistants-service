@@ -49,7 +49,7 @@ const PROFILES: Readonly<Record<ContextFabricRoute, RouteProfile>> = deepFreeze(
     include_analysis_summary: true,
     include_full_analysis: false,
     include_archetypes: false,
-    include_selected_elements: false,
+    include_selected_elements: true,
     token_budget: 8000,
   },
   DRAFT_GRAPH: {
@@ -82,7 +82,7 @@ const PROFILES: Readonly<Record<ContextFabricRoute, RouteProfile>> = deepFreeze(
     include_analysis_summary: true,
     include_full_analysis: false,
     include_archetypes: false,
-    include_selected_elements: false,
+    include_selected_elements: true,
     token_budget: 10000,
   },
   GENERATE_BRIEF: {

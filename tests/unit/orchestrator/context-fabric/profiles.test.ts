@@ -46,7 +46,7 @@ describe("getProfile", () => {
     expect(p.include_full_graph).toBe(false);
     expect(p.include_analysis_summary).toBe(true);
     expect(p.include_archetypes).toBe(false);
-    expect(p.include_selected_elements).toBe(false);
+    expect(p.include_selected_elements).toBe(true); // Gap D: selected elements enabled for CHAT
     expect(p.token_budget).toBe(8000);
   });
 
@@ -72,7 +72,7 @@ describe("getProfile", () => {
     expect(p.include_graph_summary).toBe(true);
     expect(p.include_analysis_summary).toBe(true);
     expect(p.include_archetypes).toBe(false);
-    expect(p.include_selected_elements).toBe(false);
+    expect(p.include_selected_elements).toBe(true); // Gap D: selected elements enabled for EXPLAIN_RESULTS
   });
 
   it("GENERATE_BRIEF has correct flags", () => {

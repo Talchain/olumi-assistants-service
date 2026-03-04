@@ -527,9 +527,20 @@ describe("renderZone3", () => {
     expect(z3).toContain("edge_fac_1_out_1");
   });
 
-  it("selected elements excluded for CHAT (profile flag)", () => {
+  it("selected elements included for CHAT (profile flag enabled)", () => {
+    // Gap D: CHAT now includes selected elements (include_selected_elements: true)
     const z3 = renderZone3(profile, minimalState(), [], "current", ["fac_1"]);
-    expect(z3).not.toContain("Selected elements:");
+    expect(z3).toContain("Selected elements:");
+    expect(z3).toContain("fac_1");
+  });
+
+  it("selected elements included for EXPLAIN_RESULTS (profile flag enabled)", () => {
+    // Gap D: EXPLAIN_RESULTS now includes selected elements (include_selected_elements: true)
+    const explainProfile = getProfile("EXPLAIN_RESULTS");
+    const z3 = renderZone3(explainProfile, minimalState(), [], "current", ["fac_2", "edge_fac_2_out_1"]);
+    expect(z3).toContain("Selected elements:");
+    expect(z3).toContain("fac_2");
+    expect(z3).toContain("edge_fac_2_out_1");
   });
 
   it("has no \\r\\n in output", () => {

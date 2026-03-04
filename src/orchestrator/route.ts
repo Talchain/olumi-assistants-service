@@ -86,6 +86,7 @@ const FramingSchema = z.object({
   stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
   goal: z.string().optional(),
   constraints: z.array(z.unknown()).optional(),
+  options: z.array(z.unknown()).optional(),
 }).nullable();
 
 const AnalysisInputsSchema = z.object({

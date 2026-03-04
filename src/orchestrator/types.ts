@@ -346,6 +346,7 @@ export interface ConversationContext {
     stage: DecisionStage;
     goal?: string;
     constraints?: unknown[];
+    options?: unknown[];
   } | null;
   messages: ConversationMessage[];
   event_log_summary?: string;
