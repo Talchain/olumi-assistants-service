@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { phase3Generate } from "../../../../src/orchestrator/pipeline/phase3-llm/index.js";
-import { buildDeterministicLLMResult } from "../../../../src/orchestrator/pipeline/phase3-llm/response-parser.js";
+import { buildDeterministicLLMResult, parseV2Response } from "../../../../src/orchestrator/pipeline/phase3-llm/response-parser.js";
 import type { EnrichedContext, SpecialistResult, LLMClient } from "../../../../src/orchestrator/pipeline/types.js";
+import type { ChatWithToolsResult } from "../../../../src/adapters/llm/types.js";
 
 // Mock intent gate — control deterministic routing
 vi.mock("../../../../src/orchestrator/intent-gate.js", () => ({
@@ -148,6 +149,140 @@ describe("phase3-llm", () => {
 
       // Should fall back to LLM
       expect(client.chatWithTools).toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================================
+  // chatWithTools tool_use block parsing (Part A — C.4)
+  //
+  // Tests mock at the adapter boundary (chatWithTools) and assert Phase 3's
+  // extraction/parsing result via parseV2Response.
+  //
+  // The OpenAI adapter always normalises tool_use.input to Record<string, unknown>
+  // (malformed JSON → {}), so these tests exercise parseV2Response with
+  // production-shaped ChatWithToolsResult fixtures.
+  // ============================================================================
+
+  describe("chatWithTools tool_use parsing", () => {
+    function makeToolUseResult(overrides?: Partial<ChatWithToolsResult>): ChatWithToolsResult {
+      return {
+        content: [],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 10, output_tokens: 5 },
+        model: "gpt-4o",
+        latencyMs: 50,
+        ...overrides,
+      };
+    }
+
+    it("extracts tool name and input from tool_use block; unknown extra fields ignored", () => {
+      const fixture = makeToolUseResult({
+        content: [
+          // Extra field on text block — parser must not throw
+          { type: "text", text: "Let me draft a model for you." } as unknown as ChatWithToolsResult["content"][number],
+          // Extra field on tool_use block — parser must not throw
+          { type: "tool_use", id: "call_123", name: "draft_graph", input: { brief: "test" } } as unknown as ChatWithToolsResult["content"][number],
+        ],
+      });
+
+      const result = parseV2Response(fixture);
+
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].id).toBe("call_123");
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect(result.tool_invocations[0].input).toEqual({ brief: "test" });
+    });
+
+    it("returns conversational response (no tool_invocations) when response is text-only", () => {
+      const fixture = makeToolUseResult({
+        stop_reason: "end_turn",
+        content: [
+          { type: "text", text: "<response><assistant_text>Here is some context.</assistant_text></response>" },
+        ],
+      });
+
+      const result = parseV2Response(fixture);
+
+      expect(result.tool_invocations).toHaveLength(0);
+      expect(result.assistant_text).toBe("Here is some context.");
+    });
+
+    it("only the first tool_use block is surfaced — subsequent blocks also parsed but Phase 4 uses first", () => {
+      // parseLLMResponse parses all tool_use blocks; Phase 4 dispatch uses tool_invocations[0].
+      // This test locks that parseLLMResponse emits all blocks (not dropping extras).
+      const fixture = makeToolUseResult({
+        content: [
+          { type: "tool_use", id: "call_a", name: "draft_graph", input: { brief: "first" } },
+          { type: "tool_use", id: "call_b", name: "edit_graph", input: { op: "add" } },
+        ],
+      });
+
+      const result = parseV2Response(fixture);
+
+      // Parser emits all; first is the one Phase 4 will dispatch
+      expect(result.tool_invocations).toHaveLength(2);
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect(result.tool_invocations[1].name).toBe("edit_graph");
+    });
+
+    it("tool_use with empty input (adapter normalises malformed JSON to {}) is accepted — no tool dispatch skipped", () => {
+      // The OpenAI adapter sets input={} when JSON.parse fails.
+      // parseLLMResponse must not reject or throw — it passes through the empty object.
+      const fixture = makeToolUseResult({
+        content: [
+          { type: "tool_use", id: "call_bad", name: "draft_graph", input: {} },
+        ],
+      });
+
+      const result = parseV2Response(fixture);
+
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect(result.tool_invocations[0].input).toEqual({});
+    });
+
+    it("tool_use naming an unknown tool is parsed without error — dispatch is responsible for rejection", () => {
+      // parseLLMResponse is a pure parser: it must not validate tool names.
+      // The dispatch layer (Phase 4) is responsible for rejecting unknown tools.
+      const fixture = makeToolUseResult({
+        content: [
+          { type: "tool_use", id: "call_unk", name: "nonexistent_tool", input: { x: 1 } },
+        ],
+      });
+
+      const result = parseV2Response(fixture);
+
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("nonexistent_tool");
+      expect(result.tool_invocations[0].input).toEqual({ x: 1 });
+    });
+  });
+
+  // ============================================================================
+  // Auto-chain: intent classifier contract + dispatch chaining
+  //
+  // The classifier can emit 'explain' and 'recommend' (verified by phase1-intent-classifier.test.ts).
+  // The dispatch auto-chain logic is covered in dispatch-chaining.test.ts.
+  // These tests confirm the classifier contract that unlocks auto-chain.
+  // ============================================================================
+
+  describe("classifyUserIntent contract — values that trigger auto-chain", () => {
+    it("returns 'explain' for explain-intent strings", async () => {
+      const { classifyUserIntent } = await import("../../../../src/orchestrator/pipeline/phase1-enrichment/intent-classifier.js");
+      expect(classifyUserIntent("explain the results")).toBe("explain");
+      expect(classifyUserIntent("Why did this happen?")).toBe("explain");
+    });
+
+    it("returns 'recommend' for recommend-intent strings", async () => {
+      const { classifyUserIntent } = await import("../../../../src/orchestrator/pipeline/phase1-enrichment/intent-classifier.js");
+      expect(classifyUserIntent("recommend an option")).toBe("recommend");
+      expect(classifyUserIntent("Which option do you recommend?")).toBe("recommend");
+    });
+
+    it("does NOT return 'explain' for action strings (auto-chain not triggered)", async () => {
+      const { classifyUserIntent } = await import("../../../../src/orchestrator/pipeline/phase1-enrichment/intent-classifier.js");
+      expect(classifyUserIntent("run the analysis")).not.toBe("explain");
+      expect(classifyUserIntent("run the analysis")).not.toBe("recommend");
     });
   });
 });

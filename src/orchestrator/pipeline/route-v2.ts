@@ -109,7 +109,7 @@ export async function handleTurnV2(
 
   // 2. Turn nonce validation (optional — skip if absent)
   if (turnNonce === undefined) {
-    log.warn(
+    log.debug(
       { scenario_id: turnRequest.scenario_id },
       'turn_nonce absent — ordering not enforced',
     );
