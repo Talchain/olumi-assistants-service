@@ -1,1222 +1,1417 @@
 {
-  "version": "0.1.0",
-  "generated_at": "2026-03-02T21:41:57.991Z",
-  "dsk_version_hash": "6339b8094539b186a04ebbe35a33f5559882dc6be62c28c5e1e485631845f164",
+  "version": "1.0.0",
+  "generated_at": "2026-03-05T18:00:00Z",
   "objects": [
     {
       "id": "DSK-B-001",
       "type": "claim",
-      "title": "Anchoring bias",
-      "evidence_strength": "medium",
+      "title": "Anchoring and insufficient adjustment",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag anchoring when the user is deliberately using a known reference point as a calibrated starting estimate (e.g. last quarter’s actuals as a forecasting baseline)",
+        "Do not flag when the initial figure was generated through a structured estimation process such as Fermi decomposition"
       ],
       "stage_applicability": [
+        "frame",
         "evaluate"
       ],
       "context_tags": [
+        "pricing",
+        "resource_allocation",
         "general"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/j.socec.2010.10.008",
+          "page_or_section": "Full review — lab d=0.88, field d=0.05, boundary condition analysis"
+        },
+        {
+          "doi_or_isbn": "10.1016/j.socec.2020.101629",
+          "page_or_section": "Meta-analysis of anchoring in economic valuation (WTP/WTA)"
+        },
+        {
+          "doi_or_isbn": "10.1126/science.185.4157.1124",
+          "page_or_section": "Seminal — heuristics and biases, anchoring experiments"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
+          "pricing",
+          "resource_allocation",
           "general"
         ],
         "stages": [
+          "frame",
           "evaluate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "analysts",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_with_no_numerical_estimation_component"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "Anchoring is among the most replicated phenomena in judgement and decision-making research. When making numerical estimates, people anchor on an initial value and adjust insufficiently, even when the anchor is arbitrary or irrelevant. Lab studies show a large effect (d ≈ 0.88, Furnham & Boo 2011 review). However, field studies show dramatically attenuated effects (d ≈ 0.05), a ~94% collapse from lab conditions. The bias operates through selective accessibility: anchor exposure primes retrieval of anchor-consistent information. In economic contexts, meta-analytic evidence confirms anchoring reliably distorts willingness-to-pay and willingness-to-accept valuations (Li, Maniadis & Sedikides 2021). Robust across estimation, forecasting, pricing, and resource allocation tasks.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Lab-to-field attenuation is the critical boundary condition: anchoring is real but substantially weaker in naturalistic settings with real stakes. Attenuated by extreme or implausible anchors. Evidence on expertise is conflicted: one line suggests expertise diminishes susceptibility; meta-analytic variance analyses indicate relevant knowledge may aggravate the bias through rationalisation of the anchor (flagged for Neil). Reduced by explicit prompting to consider alternatives, sufficient deliberation time, and structured estimation protocols. Sequential information presentation amplifies anchoring through primacy effects.",
+        "known_limitations": "Almost all research uses WEIRD samples. Seminal studies (Tversky & Kahneman 1974) used simple numerical estimation tasks that may not generalise to complex multi-attribute product decisions. The d=0.05 field figure aggregates heterogeneous real-world contexts and may mask domain variation. Selective accessibility mechanism is well-supported but precise cognitive process remains debated. Cross-cultural replication data is limited."
       }
     },
     {
       "id": "DSK-B-002",
       "type": "claim",
-      "title": "Confirmation bias",
+      "title": "Confirmation bias and motivated reasoning",
       "evidence_strength": "medium",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user has explicitly been asked to build the strongest case for their preferred option as part of a structured advocacy exercise",
+        "Do not flag when the user is in a focused implementation phase where confirming feasibility of an already-decided course is the correct task"
       ],
       "stage_applicability": [
+        "ideate",
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "hiring"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037/a0015701",
+          "page_or_section": "Hart et al. 2009 meta-analysis — selective exposure, d=0.36, OR≈2.0"
+        },
+        {
+          "doi_or_isbn": "10.1037/1089-2680.2.2.175",
+          "page_or_section": "Nickerson 1998 — comprehensive review across paradigms"
+        },
+        {
+          "doi_or_isbn": "10.1080/17470216008416717",
+          "page_or_section": "Wason 1960 — seminal selection task, hypothesis-confirming search"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "hiring"
         ],
         "stages": [
+          "ideate",
           "evaluate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "analysts",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "none"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People selectively seek, interpret, and recall information that confirms existing beliefs, and discount disconfirming evidence. Hart et al. (2009) meta-analysis: people are roughly twice as likely to seek confirming over disconfirming information (OR ≈ 2.0, d = 0.36 for selective exposure). Effect strengthens with personal relevance and identity involvement. The concept is universally accepted but the measured effect size is modest. Confirmation bias manifests differently across sub-types — selective exposure, biased assimilation, and biased memory are distinct mechanisms with different effect sizes. Nickerson (1998) documents its pervasiveness across clinical, legal, scientific, and managerial domains.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Reduced by accountability to audiences with unknown views (predecisional accountability). Attenuated by adversarial collaboration and consider-the-opposite prompts. Strengthened by motivated reasoning when outcomes have personal or identity significance. Most problematic in hypothesis-generation phases where single-hypothesis focus prevents alternatives. Less impactful in structured evaluation frameworks that enforce multi-option comparison.",
+        "known_limitations": "Rated 'medium' despite universal conceptual acceptance because the measured effect size (d = 0.36) is modest and the bias is difficult to isolate experimentally as a single construct. WEIRD sample dominance. The relationship between confirmation bias and motivated reasoning remains theoretically contested."
       }
     },
     {
       "id": "DSK-B-003",
       "type": "claim",
-      "title": "Sunk cost fallacy",
-      "evidence_strength": "medium",
+      "title": "Sunk cost fallacy and escalation of commitment",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user is describing legitimate switching costs (contractual obligations, team retraining) that represent real future costs, not sunk costs",
+        "Do not flag when prior investment has created genuine informational advantages or network effects that have future value"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "resource_allocation"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.5465/amj.2010.0696",
+          "page_or_section": "Sleesman et al. 2012 meta-analysis — 166 studies, d≈0.57"
+        },
+        {
+          "doi_or_isbn": "10.1007/s40685-014-0014-8",
+          "page_or_section": "Roth, Robbert & Straus 2015 meta-analysis — 98 effect sizes, utilisation vs progress decisions"
+        },
+        {
+          "doi_or_isbn": "10.1016/0030-5073(76)90005-2",
+          "page_or_section": "Staw 1976 — seminal escalating commitment study"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "resource_allocation"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "project_leads",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_where_prior_investment_creates_verifiable_future_value"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People continue investing in failing courses of action because of prior irrecoverable investments. Sleesman et al. (2012) meta-analysis across 166 studies: sunk costs significantly increase continuation decisions (d ≈ 0.57). Effect is stronger when the decision-maker is personally responsible for the original commitment. Roth, Robbert & Straus (2015) meta-analysis of 98 effect sizes confirms the sunk-cost effect across utilisation and progress decisions, with effect contingent on decision type. Robust across finance, project management, and personal decisions. Moderated by decision type: stronger for utilisation decisions than progress decisions.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Attenuated by passage of time in utilisation decisions. Diminishes when the decision-maker was not personally responsible. Older adults show lower susceptibility. Explicit prospective framing ('if starting fresh today') reduces the effect. Important for Olumi's users: real-world sunk cost effects with real stakes may be smaller than vignette-based lab evidence suggests (Arkes & Ayton 1999). Product teams making real financial decisions may show weaker effects than naive participants in hypothetical scenarios.",
+        "known_limitations": "Phrasing band set to 'medium' despite 'strong' evidence because of lab-field gap concern. The d ≈ 0.57 figure comes primarily from vignette studies. Real-stakes field evidence is less conclusive. The distinction between sunk cost fallacy (irrational) and legitimate switching costs (rational) is difficult to operationalise. WEIRD sample dominance."
       }
     },
     {
       "id": "DSK-B-004",
       "type": "claim",
-      "title": "Overconfidence",
-      "evidence_strength": "medium",
+      "title": "Overconfidence and miscalibration",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag overconfidence when the user operates in a high-validity environment with tight feedback loops where calibration is typically good",
+        "Do not flag when the user is expressing well-calibrated uncertainty from a domain with a documented track record"
       ],
       "stage_applicability": [
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "resource_allocation"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037/0033-295X.115.2.502",
+          "page_or_section": "Moore & Healy 2008 — three forms, overprecision as most robust"
+        },
+        {
+          "doi_or_isbn": "10.1037/0278-7393.30.2.299",
+          "page_or_section": "Soll & Klayman 2004 — 90% intervals capture true value only 42-45%"
+        },
+        {
+          "doi_or_isbn": "10.1017/CBO9780511809477.022",
+          "page_or_section": "Alpert & Raiffa 1982 — seminal calibration studies, chapter in Judgment under Uncertainty"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "resource_allocation"
         ],
         "stages": [
           "evaluate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "analysts",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_in_high_validity_environments_with_tight_feedback_loops"
         ]
       },
-      "permitted_phrasing_band": "medium",
+      "permitted_phrasing_band": "strong",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People systematically overestimate the accuracy of their knowledge and the precision of their forecasts. The most robust form is overprecision: when people give 90% confidence intervals, the true value falls outside approximately 50-60% of the time (Soll & Klayman 2004: 42-45% hit rate vs expected 90%). Moore & Healy (2008) confirm overprecision as the most reliable and resistant-to-debiasing form. Strongest in hard, opaque domains; weakest in easy, transparent ones. Experts show marginally better calibration (~50% vs ~42% hit rate) but are equally or more overprecise than novices. Calibration training can improve performance (from ~45% to ~60-70%) but gains decay without reinforcement.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Reduces with calibration training, probability practice, and outcome feedback — but training effects decay without reinforcement. Well-calibrated in high-validity environments with tight feedback loops (weather forecasting, bridge). Three distinct forms (overprecision, overplacement, overestimation) behave differently. Asking people to 'think harder' does not improve calibration. Domain expertise improves the central estimate but does not reliably improve interval width.",
+        "known_limitations": "Calibration literature focuses on interval estimation tasks that may not map directly to complex strategic decisions. The relationship between calibration in knowledge tasks and real-world business decisions is assumed but not well-established. The boundary between healthy confidence and overconfidence is context-dependent. WEIRD sample dominance."
       }
     },
     {
       "id": "DSK-B-005",
       "type": "claim",
-      "title": "Availability heuristic",
-      "evidence_strength": "medium",
+      "title": "Availability heuristic in deliberate judgement",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user is citing a specific recent example that is genuinely representative of the reference class",
+        "Do not flag in domains where personal experience IS the most diagnostic information available"
       ],
       "stage_applicability": [
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/0010-0285(73)90033-9",
+          "page_or_section": "Tversky & Kahneman 1973 — seminal availability heuristic studies"
+        },
+        {
+          "doi_or_isbn": "10.1126/science.185.4157.1124",
+          "page_or_section": "Tversky & Kahneman 1974 — heuristics and biases, availability as heuristic"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy"
         ],
         "stages": [
           "evaluate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "analysts",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "none"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "When estimating the likelihood or frequency of events, people rely on how easily examples come to mind rather than actual frequency data. This leads to systematic overestimation of memorable, dramatic, or recent events and underestimation of common but undramatic ones. The directional effect on probability estimates is robust across decades of research (Tversky & Kahneman 1973). In deliberate decision contexts, availability inflates perceived probability of vivid outcomes and deflates probability of base-rate-frequent but psychologically pallid ones. The heuristic operates through ease of retrieval — the feeling of fluency matters more than the number of examples retrieved.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "The fluency-based mechanism has been contested but the directional effect (vivid/recent events overweighted) is robust. Attenuated when base rate data is available and salient. Reduced by explicit prompting to consider statistical evidence alongside anecdotal evidence. The heuristic is adaptive in stable environments where frequency of experience tracks actual frequency — becomes problematic when media exposure, emotional salience, or recency distort the available sample.",
+        "known_limitations": "Phrasing band set to 'medium' because magnitude in field settings is contested and mechanism debate introduces nuance. Most research uses frequency estimation tasks rather than complex multi-attribute decisions. The boundary between availability bias and reasonable updating from recent experience is difficult to draw. WEIRD sample dominance."
       }
     },
     {
       "id": "DSK-B-006",
       "type": "claim",
-      "title": "Status quo bias",
-      "evidence_strength": "medium",
+      "title": "Status quo bias and default effect",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user has conducted genuine analysis and the current course is objectively optimal",
+        "Do not flag in contexts where stability carries genuine strategic value and the user has weighed this explicitly"
       ],
       "stage_applicability": [
-        "evaluate"
+        "frame",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "build_vs_buy",
+        "vendor_selection"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1007/BF00055564",
+          "page_or_section": "Samuelson & Zeckhauser 1988 — seminal status quo bias experiments"
+        },
+        {
+          "doi_or_isbn": "10.15626/MP.2020.2470",
+          "page_or_section": "Xiao et al. 2021 — pre-registered replication, 3 of 4 scenarios confirmed"
+        },
+        {
+          "doi_or_isbn": "10.1126/science.1091721",
+          "page_or_section": "Johnson & Goldstein 2003 — default effects in organ donation"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "build_vs_buy",
+          "vendor_selection"
         ],
         "stages": [
-          "evaluate"
+          "frame",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "none"
         ]
       },
-      "permitted_phrasing_band": "medium",
+      "permitted_phrasing_band": "strong",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People disproportionately prefer the current state of affairs or default option, overweighting potential losses from change relative to equivalent gains. Samuelson & Zeckhauser (1988): probability of choosing the status quo increased 10-20 percentage points by labelling it as default. Johnson & Goldstein (2003): ~30 percentage point difference in organ donation consent between opt-in and opt-out. Xiao et al. (2021) pre-registered replication confirmed 3 of 4 original scenarios. Default effects are among the most replicated findings in behavioural science. Conceptually linked to loss aversion — disadvantages of leaving the status quo loom larger psychologically.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Diminishes when the status quo is explicitly framed as an active choice incurring opportunity costs. Fails when the status quo holds no inherent psychological anchor. Breaks down with overlapping or conflicting defaults. Attenuated by zero-based evaluation (evaluating current state against same criteria as alternatives). Stronger in consumer and policy contexts than high-stakes strategic decisions where scrutiny is higher.",
+        "known_limitations": "The distinction between status quo bias (irrational inertia) and legitimate preference for stability (rational risk management) is context-dependent. Most evidence from consumer and policy contexts; direct evidence in product team strategic decisions is limited. WEIRD dominance, though organ donation effects replicated cross-nationally."
       }
     },
     {
       "id": "DSK-B-007",
       "type": "claim",
-      "title": "Narrow framing",
+      "title": "Narrow framing and insufficient option generation",
       "evidence_strength": "medium",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the decision genuinely has only two viable options after thorough analysis",
+        "Do not flag during focused implementation planning where the strategic choice is settled and the task is execution"
       ],
       "stage_applicability": [
-        "evaluate"
+        "frame",
+        "ideate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "build_vs_buy",
+        "feature_scope"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "none",
+          "page_or_section": "Nutt, P.C. (2004). Expanding the search for alternatives during strategic decision-making. Academy of Management Perspectives, 18(4), 13–28. ISSN 1558-9080"
+        },
+        {
+          "doi_or_isbn": "10.1126/science.185.4157.1124",
+          "page_or_section": "Tversky & Kahneman 1974 — framing effects on option evaluation"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "build_vs_buy",
+          "feature_scope"
         ],
         "stages": [
-          "evaluate"
+          "frame",
+          "ideate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "implementation_phase_decisions_where_strategic_choice_is_settled"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "Decision-makers routinely consider too few options — often framing decisions as binary (do X or not) rather than generating a broader choice set. Nutt (2004) studied 168 strategic decisions: only 29% generated more than one option. Decisions with a single option had a failure rate of ~52%; those with multiple options had ~32%. This is a process failure rather than a measured cognitive bias with a traditional effect size, but the pattern is consistent across strategic decision research. Narrow framing interacts with several other biases: it prevents opportunity cost consideration and limits the evaluation reference class.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Rated 'medium' because this is a process observation rather than a precisely measured cognitive effect. The 52% vs 32% failure rate difference is from a single influential study. Forcing option generation can introduce its own problems: generating weak alternatives to fill a quota degrades rather than improves quality. Options must be genuinely distinct, not cosmetic variants.",
+        "known_limitations": "Thinner evidence base than classic cognitive biases — relies on strategic decision process research rather than controlled experiments. Causal mechanism unclear: does narrow framing cause worse decisions, or do the same factors (time pressure, overload) cause both? WEIRD, Western corporate sample bias in strategic decision research."
       }
     },
     {
       "id": "DSK-B-008",
       "type": "claim",
-      "title": "Planning fallacy",
-      "evidence_strength": "medium",
+      "title": "Planning fallacy and optimism bias",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when estimates are based on reference class forecasting or empirical base rates from comparable projects",
+        "Do not flag when the user has explicitly built contingency buffers derived from historical variance data"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "resource_allocation",
+        "feature_scope"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/S0065-2601(10)43001-4",
+          "page_or_section": "Buehler, Griffin & Peetz 2010 — review, 30-50% typical underestimation"
+        },
+        {
+          "doi_or_isbn": "10.1177/875697280603700302",
+          "page_or_section": "Flyvbjerg 2006 — mega-project overruns, reference class forecasting"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "resource_allocation",
+          "feature_scope"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "project_leads",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "none"
         ]
       },
-      "permitted_phrasing_band": "medium",
+      "permitted_phrasing_band": "strong",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People systematically underestimate the time, cost, and risk of future plans whilst overestimating benefits. Buehler, Griffin & Peetz (2010): typical project time underestimation of 30-50%. Driven by focusing on best-case scenarios and ignoring base rates — an 'inside view' treating each project as unique. Flyvbjerg (2006) documented systematic mega-project cost overruns, leading to government adoption of reference class forecasting in the UK and Denmark. Optimism bias operates as an independent effect from planning fallacy. Extremely well-documented across construction, IT, software development, and personal planning.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Reduced when evaluating others' plans rather than one's own. Diminished under algorithmic forecasting constraints and when reference class data is salient. Amplified by overconfidence, anchoring on best-case estimates, and personal commitment. Interacts with strategic misrepresentation: project champions may underestimate costs deliberately to secure funding. The coaching intervention differs depending on whether the user is deceiving themselves or their stakeholders.",
+        "known_limitations": "The 30-50% underestimation figure is robust for aggregate data but varies by domain. Most evidence from large infrastructure and IT projects — applicability to smaller product team decisions (feature scoping, sprint planning) is assumed but less directly studied. The recommended corrective (reference class forecasting) requires comparable past projects, which early-stage teams may lack."
       }
     },
     {
       "id": "DSK-B-009",
       "type": "claim",
       "title": "Affect heuristic",
-      "evidence_strength": "medium",
+      "evidence_strength": "strong",
+      "claim_category": "empirical",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user is an experienced domain expert whose affective reaction likely carries genuine diagnostic information",
+        "Do not flag when the user has already decomposed the decision analytically and is using emotional reaction as a final integration check"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "product_strategy",
+        "hiring"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/j.ejor.2005.04.006",
+          "page_or_section": "Slovic et al. 2007 — affect heuristic theory and evidence"
+        },
+        {
+          "doi_or_isbn": "10.1002/(SICI)1099-0771(200001/03)13:1<1::AID-BDM333>3.0.CO;2-S",
+          "page_or_section": "Finucane et al. 2000 — risk-benefit correlations r=-0.38 to -0.71"
+        },
+        {
+          "doi_or_isbn": "10.1146/annurev-psych-010213-115043",
+          "page_or_section": "Lerner et al. 2015 — emotion and decision making review"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "product_strategy",
+          "hiring"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "general_decision_makers"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "experienced_domain_experts_where_affective_signals_carry_diagnostic_information"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People use current emotional reaction as a shortcut for evaluating risks and benefits, producing a characteristic inverse correlation: positive affect raises perceived benefits and lowers perceived risks simultaneously, even when risk and benefit are objectively independent. Finucane et al. (2000): risk-benefit correlations of r = -0.38 to -0.71 across domains. Under time pressure, the inverse correlation strengthens (r = -0.50 to r = -0.70). Replicated across technologies, health risks, environmental hazards, financial products, and cross-culturally. The affect heuristic underlies many other phenomena: amplifies framing effects, interacts with availability, contributes to attribute substitution.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Strongest under time pressure, cognitive load, and when evaluating unfamiliar or emotionally charged topics. Attenuated by domain expertise, analytical decomposition, and deliberation time. Critical nuance: affect should not be uniformly treated as bias. Damasio's somatic marker hypothesis and ecological rationality argue affective signals carry genuine information where the person has relevant experience. Suppressing affect in experienced decision-makers may degrade quality. Coaching must differentiate: for novel decisions, prompt decomposition; for domain-experienced decisions, check affect against analysis.",
+        "known_limitations": "Phrasing band set to 'medium' because the boundary condition about when affect IS informative is critical. Inverse risk-benefit correlation studied primarily in Western populations. The distinction between integral affect (directed at target) and incidental affect (mood bleeding in) requires different coaching responses but is hard to operationalise."
       }
     },
     {
       "id": "DSK-P-001",
       "type": "protocol",
-      "title": "Pre-mortem protocol",
+      "title": "Pre-mortem exercise",
       "evidence_strength": "medium",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run when there is only one option and no meaningful alternatives",
+        "Do not run when the user has already identified fragile edges and wants to proceed"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1002/bdm.3960020103",
+          "page_or_section": "Theoretical foundation — prospective hindsight"
+        },
+        {
+          "doi_or_isbn": "10.1080/19488289.2016.1240118",
+          "page_or_section": "Gallop et al. 2016 — procedure and efficacy evidence"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-001",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "analysis results with fragile edges or evidence gaps",
+        "identified winning option"
+      ],
+      "steps": [
+        "It’s 12 months from now, and the decision to go with [winning option] has failed. Not just underperformed — failed. Based on what the analysis shows as fragile, what’s the most likely reason it went wrong?",
+        "Now consider: what’s a failure scenario that the model doesn’t capture — something outside the factors we’ve modelled? What would blindside you?",
+        "Looking at both scenarios, which warning signs would you expect to see in the first 3 months if things were heading towards failure?",
+        "Given those warning signs, what’s one concrete action you could take now to either prevent the failure or ensure you’d detect it early enough to course-correct?"
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "1-3 failure scenarios grounded in model weak points",
+        "early warning signs",
+        "at least one preventive or detection action"
       ]
     },
     {
       "id": "DSK-P-002",
       "type": "protocol",
-      "title": "Disconfirmation protocol",
-      "evidence_strength": "medium",
+      "title": "Outside view exercise",
+      "evidence_strength": "strong",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run when the user has explicitly stated their estimates are based on reference class data",
+        "Do not run for decisions where no comparable past situations exist"
       ],
       "stage_applicability": [
+        "frame",
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1287/mnsc.39.1.17",
+          "page_or_section": "Kahneman & Lovallo 1993 — outside view framework"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-002",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "current decision description",
+        "user's estimates or assumptions"
+      ],
+      "steps": [
+        "Before we look at the specifics of your situation, let’s step back. What’s the broader category this decision falls into? For example: product launches, hiring senior roles, entering a new market, technology migrations — what’s the reference class?",
+        "Now think about other times you or your organisation (or similar organisations) have made this type of decision. What typically happened? What was the base rate of success, the usual timeline, the common cost overrun?",
+        "How does your current plan compare to that base rate? If similar decisions typically take 50% longer than planned, for instance, what would that imply for your timeline?",
+        "Given the reference class data, which of your current assumptions look most optimistic? Would you like to adjust any factor values in the model to reflect the outside view?"
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "identified reference class",
+        "base rate comparison",
+        "adjusted assumptions if warranted"
       ]
     },
     {
       "id": "DSK-P-003",
       "type": "protocol",
-      "title": "Outside view protocol",
+      "title": "Disconfirmation exercise",
       "evidence_strength": "medium",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run when the analysis shows a close call — the user doesn't need more doubt",
+        "Do not run immediately after the user has already run a pre-mortem on the same decision"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037//0022-3514.47.6.1231",
+          "page_or_section": "Lord, Lepper & Preston 1984 — consider-the-opposite protocol"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-003",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "analysis results showing a clear winner with high win probability"
+      ],
+      "steps": [
+        "The analysis points clearly to [winning option] at [win probability]. Before committing, let’s stress-test that confidence. What’s one piece of evidence or one assumption that, if it turned out to be wrong, would make you switch to a different option?",
+        "Now think specifically about [runner-up option]. What would have to be true for it to actually be the better choice? What conditions would favour it over the current winner?",
+        "Looking at the factors driving the recommendation, which one are you least certain about? If that factor moved significantly against [winning option], would your intuition still favour it?",
+        "Based on this, do you want to gather more evidence on any specific factor before deciding, or does the recommendation still hold?"
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "identified disconfirming conditions",
+        "key uncertainty acknowledged",
+        "decision to proceed or gather evidence"
       ]
     },
     {
       "id": "DSK-P-004",
       "type": "protocol",
-      "title": "10-10-10 protocol",
+      "title": "Opportunity cost prompting exercise",
       "evidence_strength": "medium",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run for binary go/no-go decisions",
+        "Do not run when the user has already explicitly evaluated resource trade-offs across alternatives"
       ],
       "stage_applicability": [
-        "evaluate"
+        "frame",
+        "ideate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1086/599764",
+          "page_or_section": "Frederick et al. 2009 — opportunity cost salience intervention"
+        },
+        {
+          "doi_or_isbn": "10.1007/s40881-023-00134-6",
+          "page_or_section": "Maguire et al. 2023 — meta-analytic support for salience intervention"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-004",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "current options in the model",
+        "resource constraints if known"
+      ],
+      "steps": [
+        "You’re currently comparing [N options]. Before we analyse further, let’s check: if you commit the time, budget, and team capacity to [winning option], what else could those same resources be used for? What are you giving up?",
+        "Are there alternatives that aren’t currently in the model? Things you might do instead of any of these options — including doing nothing or redirecting resources entirely?",
+        "If you do want to add any alternatives, we can include them in the model. If not, it’s worth noting which opportunity costs you’ve consciously chosen to accept."
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "explicit acknowledgement of opportunity costs",
+        "optionally: additional options added to model"
       ]
     },
     {
       "id": "DSK-P-005",
       "type": "protocol",
-      "title": "Devils advocate protocol",
+      "title": "Devil’s advocate exercise",
       "evidence_strength": "medium",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run when the analysis already shows fragile robustness",
+        "Do not run immediately after a pre-mortem or disconfirmation exercise on the same decision"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/0749-5978(90)90051-A",
+          "page_or_section": "Schwenk 1990 — DA procedure and meta-analytic evidence"
+        },
+        {
+          "doi_or_isbn": "10.5465/255859",
+          "page_or_section": "Schweiger et al. 1986 — comparative procedure"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-005",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "analysis results showing a dominant factor or clear winner",
+        "factor sensitivity data"
+      ],
+      "steps": [
+        "The analysis shows [dominant factor] is driving the recommendation heavily. Let’s challenge that. I’ll take the position that [dominant factor] matters much less than the model suggests. What’s the strongest argument for why it might be overweighted?",
+        "If [dominant factor] were half as influential as currently modelled, which option would benefit? What would the decision look like?",
+        "Now stepping out of the devil’s advocate role: does that challenge change your view of the factor’s importance, or are you confident the current weighting is right? If you’re less certain, we could adjust the edge strength and re-run."
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "challenged assumption about dominant factor",
+        "decision to adjust or maintain current weighting"
       ]
     },
     {
       "id": "DSK-P-006",
       "type": "protocol",
-      "title": "Evidence typing protocol",
-      "evidence_strength": "medium",
+      "title": "Implementation intentions exercise",
+      "evidence_strength": "strong",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not run before the user has decided — requires commitment to an option",
+        "Do not run when the analysis suggests more evidence is needed before deciding"
       ],
       "stage_applicability": [
-        "evaluate"
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037/0003-066X.54.7.493",
+          "page_or_section": "Gollwitzer 1999 — implementation intention procedure"
         }
       ],
       "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
+      "linked_claim_id": "DSK-T-006",
       "required_inputs": [
-        "PLACEHOLDER — needs review"
+        "confirmed decision",
+        "identified key actions or next steps"
+      ],
+      "steps": [
+        "You’ve decided to go with [chosen option]. Let’s make sure this translates into action. What’s the very first concrete step you need to take to start implementing this decision?",
+        "Now let’s turn that into an if-then plan. When will you do it? Specifically: ‘When [situation/trigger], I will [action].’ For example: ‘When I open my laptop on Monday morning, I will send the brief to the team.’",
+        "What’s the most likely obstacle that could delay or derail implementation? Let’s create a second if-then plan for that: ‘If [obstacle], then I will [response].’",
+        "Finally, when should you check whether this decision is working? Let’s set a review trigger: ‘If [condition] by [date], I will revisit this decision.’"
       ],
       "expected_outputs": [
-        "PLACEHOLDER — needs review"
-      ]
-    },
-    {
-      "id": "DSK-P-007",
-      "type": "protocol",
-      "title": "Opportunity cost protocol",
-      "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
-      ],
-      "stage_applicability": [
-        "evaluate"
-      ],
-      "context_tags": [
-        "general"
-      ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "steps": [
-        "PLACEHOLDER — needs review"
-      ],
-      "required_inputs": [
-        "PLACEHOLDER — needs review"
-      ],
-      "expected_outputs": [
-        "PLACEHOLDER — needs review"
+        "specific if-then implementation plan",
+        "obstacle contingency plan",
+        "review trigger with date"
       ]
     },
     {
       "id": "DSK-T-001",
       "type": "claim",
-      "title": "Pre-mortem efficacy",
+      "title": "Pre-mortem and prospective hindsight",
       "evidence_strength": "medium",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not suggest when the team has already completed a structured risk assessment covering the same failure modes",
+        "Do not suggest for trivial or easily reversible decisions where the overhead is disproportionate"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1002/bdm.3960020103",
+          "page_or_section": "Mitchell, Russo & Pennington 1989 — prospective hindsight generates ~30% more reasons for outcomes vs standard forecasting"
+        },
+        {
+          "doi_or_isbn": "10.1080/19488289.2016.1240118",
+          "page_or_section": "Gallop, Willy & Bischoff 2016 — controlled study with 101 experienced PMs; pre-mortem teams identified more quality risks and more black swan risks than brainstorming"
+        },
+        {
+          "doi_or_isbn": "none",
+          "page_or_section": "Veinott, Klein & Wiggins 2010, Proceedings of 7th International ISCRAM Conference, Seattle — 178 participants; pre-mortem reduced overconfidence more than critique, pro/con, or cons-only methods"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "resource_allocation",
+          "build_vs_buy"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "project_leads"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_already_covered_by_formal_risk_assessment"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "key_findings": "Prospective hindsight — imagining a future event has already occurred — generates approximately 30% more reasons for outcomes than standard future-oriented forecasting (Mitchell et al. 1989). When applied as a pre-mortem (assuming failure and working backwards), the technique reliably reduces overconfidence in plans more than critique, pro/con listing, or cons-only methods (Veinott et al. 2010, n=178). In a controlled study with experienced programme managers, pre-mortem teams identified higher-quality risks and more black swan risks than brainstorming teams (Gallop et al. 2016, n=101).",
+        "effect_direction": "positive",
+        "boundary_conditions": "Evidence base is relatively thin: the foundational 1989 study examined prospective hindsight (not pre-mortems per se), the Veinott et al. study used students, and the Gallop et al. study is the strongest but still a single controlled experiment. The technique's strength is in surfacing risks, not in quantifying their probability. Most effective when participants have genuine domain knowledge. Less useful when conducted perfunctorily or when organisational culture punishes dissent.",
+        "known_limitations": "No large-scale RCTs. The frequently cited '30% improvement' statistic from Mitchell et al. 1989 refers to number of reasons generated, not quality of reasons — the original authors noted this distinction. Klein's 2007 HBR article that popularised the technique is a practitioner piece, not a peer-reviewed study. Long-term decision outcome improvements from pre-mortems have not been empirically demonstrated."
       }
     },
     {
       "id": "DSK-T-002",
       "type": "claim",
-      "title": "Disconfirmation efficacy",
-      "evidence_strength": "medium",
+      "title": "Outside view and reference class forecasting",
+      "evidence_strength": "strong",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not suggest when the user has already explicitly incorporated base rate data from comparable situations",
+        "Do not suggest when the decision is genuinely unprecedented with no meaningful reference class"
       ],
       "stage_applicability": [
+        "frame",
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1287/mnsc.39.1.17",
+          "page_or_section": "Kahneman & Lovallo 1993 — inside view vs outside view; planning optimism from treating each case as unique"
+        },
+        {
+          "doi_or_isbn": "10.1002/smj.962",
+          "page_or_section": "Lovallo, Clarke & Camerer 2012 — outside view via robust analogising outperformed case-specific forecasting in private equity decisions"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "resource_allocation",
+          "hiring"
         ],
         "stages": [
+          "frame",
           "evaluate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "executives",
+          "analysts"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "genuinely_unprecedented_decisions_with_no_reference_class"
         ]
       },
-      "permitted_phrasing_band": "medium",
+      "permitted_phrasing_band": "strong",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "key_findings": "Decision-makers reliably adopt an 'inside view' — focusing on the specifics of the current case while neglecting base rates from comparable past situations. This produces systematically optimistic forecasts of costs, timelines, and benefits (Kahneman & Lovallo 1993). The corrective 'outside view' — identifying a reference class of similar past decisions and using their outcome distribution — produces more accurate predictions. Lovallo, Clarke & Camerer (2012) demonstrated in private equity settings that reference class approaches outperformed case-specific forecasting.",
+        "effect_direction": "positive",
+        "boundary_conditions": "Most effective when a meaningful reference class exists (common for product launches, hiring, market entries, budgets). Less useful for genuinely novel decisions. The quality of the outside view depends critically on selecting an appropriate reference class — too broad dilutes accuracy, too narrow reintroduces inside-view bias. Expertise in the domain helps with reference class selection but does not eliminate the inside-view tendency.",
+        "known_limitations": "Kahneman and Tversky's original framework did not specify how to select reference classes. Flyvbjerg's practical implementation is primarily validated in infrastructure/transport projects. The technique requires historical data that may not be available for all decision types. People tend to resist the outside view even when presented with it."
       }
     },
     {
       "id": "DSK-T-003",
       "type": "claim",
-      "title": "Outside view / base rates efficacy",
+      "title": "Consider-the-opposite as a debiasing strategy",
       "evidence_strength": "medium",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not suggest when the user has already explicitly engaged in structured devil's advocacy or red-teaming",
+        "Do not suggest when the analysis shows genuine uncertainty (close call) — the user doesn't need to be pushed towards doubt when the model already reflects it"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037//0022-3514.47.6.1231",
+          "page_or_section": "Lord, Lepper & Preston 1984 — consider-the-opposite reduced biased assimilation and biased hypothesis testing more effectively than general 'be fair' instructions"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "hiring",
+          "build_vs_buy"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "executives"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "close_call_decisions_where_uncertainty_is_already_salient"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "key_findings": "Explicitly instructing people to consider reasons why their belief might be wrong — 'consider the opposite' — reduces biased assimilation of new evidence and biased hypothesis testing more effectively than general instructions to be fair and unbiased (Lord, Lepper & Preston 1984). The technique works because it forces retrieval of disconfirming information that would otherwise be suppressed by confirmation bias.",
+        "effect_direction": "positive",
+        "boundary_conditions": "Most effective when there is a clear favourite or high-confidence belief to challenge. Less useful when genuine uncertainty already exists. The instruction must be specific ('consider why X might fail') rather than generic ('be open-minded'). Effectiveness may be reduced when the decision-maker has strong emotional investment in the outcome.",
+        "known_limitations": "Original evidence is from laboratory studies with social judgements, not business decisions. The technique addresses biased evaluation of evidence but does not address biased evidence search. Generalisability to high-stakes organisational decisions is inferred rather than directly demonstrated. Single seminal study with limited replication in applied settings."
       }
     },
     {
       "id": "DSK-T-004",
       "type": "claim",
-      "title": "10-10-10 efficacy",
+      "title": "Opportunity cost neglect",
       "evidence_strength": "medium",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not flag when the user has explicitly considered and dismissed alternatives with documented reasoning",
+        "Do not flag for binary decisions (go/no-go) where opportunity costs are inherently salient"
       ],
       "stage_applicability": [
-        "evaluate"
+        "frame",
+        "ideate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1086/599764",
+          "page_or_section": "Frederick, Novemsky, Wang, Dhar & Nowlis 2009 — opportunity cost neglect in consumer choice; reminder of alternatives significantly shifted preferences"
+        },
+        {
+          "doi_or_isbn": "10.1007/s40881-023-00134-6",
+          "page_or_section": "Maguire, Persson & Tinghog 2023 — meta-analysis of 39 experiments (N=14,005); robust but smaller effect (d=0.22) than Frederick et al. original; original study may be outlier"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "resource_allocation",
+          "build_vs_buy"
         ],
         "stages": [
-          "evaluate"
+          "frame",
+          "ideate"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "executives"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "binary_go_no_go_decisions"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
+        "key_findings": "People frequently fail to consider the value of alternatives they forgo when making decisions. Frederick et al. (2009) demonstrated that simply reminding people of opportunity costs significantly changed their preferences (d=0.45-0.85). A subsequent meta-analysis of 39 experiments (N=14,005) confirmed the effect is robust and significant, though considerably smaller than the original estimate (d=0.22; Maguire, Persson & Tinghog 2023). The original Frederick et al. studies appear to be outliers that inflated the initial effect size estimate.",
         "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "boundary_conditions": "Most relevant when resources are constrained and allocation to one option precludes others. Less relevant for decisions with minimal resource commitment. The effect is strongest when opportunity costs are implicit rather than explicit — once made salient, people incorporate them more appropriately.",
+        "known_limitations": "The meta-analytic effect size (d=0.22) is small, substantially below the original d=0.45-0.85. Frederick et al. 2009 may be outliers biasing the initial literature. Primary evidence comes from consumer choice studies, not organisational decision-making. The debiasing mechanism (making opportunity costs salient) is simple but may be less effective in complex multi-factor organisational decisions where trade-offs are harder to compute."
       }
     },
     {
       "id": "DSK-T-005",
       "type": "claim",
-      "title": "Devils advocate efficacy",
+      "title": "Structured dissent and devil's advocacy",
       "evidence_strength": "medium",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not suggest when the model already shows fragile robustness — the analysis is already providing the challenge",
+        "Do not suggest when the user has explicitly requested a direct recommendation without deliberation"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1016/0749-5978(90)90051-A",
+          "page_or_section": "Schwenk 1990 — meta-analysis; DA more effective than expert-only approach at improving decision quality"
+        },
+        {
+          "doi_or_isbn": "10.5465/255859",
+          "page_or_section": "Schweiger, Sandberg & Ragan 1986 — DA and DI produced higher quality recommendations and assumptions than consensus"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "resource_allocation"
         ],
         "stages": [
-          "evaluate"
+          "evaluate",
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "executives"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_where_analysis_already_shows_fragile_robustness"
         ]
       },
       "permitted_phrasing_band": "medium",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "key_findings": "Assigning a specific role to argue against the preferred option — devil's advocacy — or structuring debate between opposing positions — dialectical inquiry — can improve decision quality by surfacing assumptions and counterarguments that would otherwise be suppressed. A meta-analysis found DA more effective than expert-only approaches (Schwenk 1990). Schweiger et al. (1986) found both DA and DI produced higher quality recommendations and assumptions than consensus, though DA groups reported lower satisfaction.",
+        "effect_direction": "positive",
+        "boundary_conditions": "Most effective when there is a dominant option that may be receiving insufficient scrutiny. The role must be formally assigned or the technique explicitly invoked — spontaneous devil's advocacy is often dismissed as obstructionism. Less effective if the dissent is perceived as insincere or performative. Works best when the devil's advocate has genuine domain knowledge.",
+        "known_limitations": "Evidence base is mixed: structured dissent improves assumption surfacing but does not consistently improve final decision outcomes in laboratory studies. The technique can backfire if it creates a false sense of thoroughness ('we already considered the opposite'). Most evidence predates modern organisational structures and decision support tools."
       }
     },
     {
       "id": "DSK-T-006",
       "type": "claim",
-      "title": "Evidence typing efficacy",
-      "evidence_strength": "medium",
+      "title": "Implementation intentions for decision follow-through",
+      "evidence_strength": "strong",
+      "claim_category": "technique_efficacy",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not suggest when the user has not yet decided — this is a post-decision technique",
+        "Do not suggest for decisions that require further evidence gathering before commitment"
       ],
       "stage_applicability": [
-        "evaluate"
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
       "source_citations": [
         {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
+          "doi_or_isbn": "10.1037/0003-066X.54.7.493",
+          "page_or_section": "Gollwitzer 1999 — implementation intentions: if-then plans that link situational cues to goal-directed responses"
+        },
+        {
+          "doi_or_isbn": "10.1016/S0065-2601(06)38002-1",
+          "page_or_section": "Gollwitzer & Sheeran 2006 — meta-analysis of 94 studies (n>8000): medium-to-large effect on goal attainment (d=0.65)"
         }
       ],
       "deprecated": false,
-      "claim_category": "empirical",
       "scope": {
         "decision_contexts": [
-          "general"
+          "general",
+          "resource_allocation",
+          "hiring",
+          "build_vs_buy"
         ],
         "stages": [
-          "evaluate"
+          "decide"
         ],
         "populations": [
-          "PLACEHOLDER — needs review"
+          "product_teams",
+          "managers",
+          "executives"
         ],
         "exclusions": [
-          "PLACEHOLDER — needs review"
+          "decisions_still_requiring_evidence_gathering"
         ]
       },
-      "permitted_phrasing_band": "medium",
+      "permitted_phrasing_band": "strong",
       "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
-      }
-    },
-    {
-      "id": "DSK-T-007",
-      "type": "claim",
-      "title": "Opportunity cost analysis efficacy",
-      "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
-      ],
-      "stage_applicability": [
-        "evaluate"
-      ],
-      "context_tags": [
-        "general"
-      ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "claim_category": "empirical",
-      "scope": {
-        "decision_contexts": [
-          "general"
-        ],
-        "stages": [
-          "evaluate"
-        ],
-        "populations": [
-          "PLACEHOLDER — needs review"
-        ],
-        "exclusions": [
-          "PLACEHOLDER — needs review"
-        ]
-      },
-      "permitted_phrasing_band": "medium",
-      "evidence_pack": {
-        "key_findings": "PLACEHOLDER — needs review",
-        "effect_direction": "negative",
-        "boundary_conditions": "PLACEHOLDER — needs review",
-        "known_limitations": "PLACEHOLDER — needs review"
+        "key_findings": "Forming specific if-then plans ('when situation X arises, I will do Y') substantially increases the likelihood of following through on intentions. A meta-analysis of 94 independent studies (n>8,000) found a medium-to-large effect (d=0.65) across health, academic, consumer, environmental, and professional domains (Gollwitzer & Sheeran 2006). The mechanism works by delegating behavioural control to environmental cues, reducing the cognitive load of remembering and initiating planned actions.",
+        "effect_direction": "positive",
+        "boundary_conditions": "Most effective for actions that are easy to forget or that face competing demands on attention. Requires the decision-maker to have genuine commitment to the goal — implementation intentions cannot substitute for motivation. Works best when the 'if' condition is specific and recognisable, and the 'then' action is concrete and achievable.",
+        "known_limitations": "Most research is on individual behaviour change (health, exercise, academic performance) rather than organisational decision implementation. The technique may be less effective for complex multi-step implementation requiring coordination across teams. The strong effect size (d=0.65) is measured against goal-intention-only controls; the incremental benefit over other structured planning approaches is less clear."
       }
     },
     {
       "id": "DSK-TR-001",
       "type": "trigger",
-      "title": "Binary framing detected",
+      "title": "Close call / fragile edges → pre-mortem",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "Analysis results show option separation <10% AND robustness != 'robust' (i.e. 'moderate' or 'fragile') [signal_type: graph]",
+      "linked_claim_ids": [
+        "DSK-T-001",
+        "DSK-B-008"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if user has already completed a pre-mortem or structured risk assessment this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage (cooldown: once per stage per decision)",
+        "Do not fire if user has explicitly acknowledged fragile edges and chosen to proceed"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "contraindications": [
+        "Do not fire if user has already completed a pre-mortem or structured risk assessment this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage (cooldown: once per stage per decision)",
+        "Do not fire if user has explicitly acknowledged fragile edges and chosen to proceed"
+      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
+      "deprecated": false,
+      "linked_protocol_ids": [
+        "DSK-P-001"
+      ],
+      "recommended_behaviour": "Surface pre-mortem coaching card (DSK-P-001) via ReviewCardBlock with science note. Offer 'try this' action to launch pre-mortem protocol conversationally."
     },
     {
       "id": "DSK-TR-002",
       "type": "trigger",
-      "title": "Certainty language detected",
+      "title": "Low confidence / planning optimism → outside view",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "User provides point estimates without range or uncertainty acknowledgement during framing or elicitation, OR model contains factors with low confidence scores and no reference class data cited. PoC heuristic: fire if user provides a numeric estimate AND conversation history for this stage contains none of: 'base rate', 'reference class', 'typically', 'historically', 'similar decisions', 'compared to', 'on average'. Simple keyword scan — not production quality but testable and debuggable. [signal_type: text]",
+      "linked_claim_ids": [
+        "DSK-T-002",
+        "DSK-B-001",
+        "DSK-B-008"
       ],
       "stage_applicability": [
+        "frame",
         "evaluate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if user has explicitly stated their estimates are based on reference class data or historical comparisons",
+        "Do not fire if this trigger has already fired for this decision in this stage",
+        "Do not fire if the decision is genuinely unprecedented with no meaningful reference class"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "contraindications": [
+        "Do not fire if user has explicitly stated their estimates are based on reference class data or historical comparisons",
+        "Do not fire if this trigger has already fired for this decision in this stage",
+        "Do not fire if the decision is genuinely unprecedented with no meaningful reference class"
+      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
+      "deprecated": false,
+      "linked_protocol_ids": [
+        "DSK-P-002"
+      ],
+      "recommended_behaviour": "Surface outside view coaching card (DSK-P-002) via ReviewCardBlock. Prompt user to identify reference class before accepting point estimates."
     },
     {
       "id": "DSK-TR-003",
       "type": "trigger",
-      "title": "Sunk cost language detected",
+      "title": "Clear winner with high confidence → disconfirmation",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "Analysis results show one option with win probability >70% AND robustness = 'robust' or 'moderate' [signal_type: graph]",
+      "linked_claim_ids": [
+        "DSK-T-003",
+        "DSK-B-002"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if user has already run a pre-mortem or devil's advocate exercise on this decision this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage",
+        "Do not fire if the analysis shows a close call (separation <10%) — the model already reflects uncertainty"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "contraindications": [
+        "Do not fire if user has already run a pre-mortem or devil's advocate exercise on this decision this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage",
+        "Do not fire if the analysis shows a close call (separation <10%) — the model already reflects uncertainty"
+      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
+      "deprecated": false,
+      "linked_protocol_ids": [
+        "DSK-P-003"
+      ],
+      "recommended_behaviour": "Surface disconfirmation coaching card (DSK-P-003) via ReviewCardBlock. Challenge user to identify conditions that would reverse the recommendation."
     },
     {
       "id": "DSK-TR-004",
       "type": "trigger",
-      "title": "Defaulted confidence cluster",
+      "title": "Multiple options without trade-off discussion → opportunity cost prompting",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "Model contains >=3 options AND user has not discussed what resources would be foregone by choosing any option, AND stage is frame or ideate. PoC heuristic: fire if option_count >= 3 from graph structure AND conversation history for this stage contains none of: 'opportunity cost', 'trade-off', 'giving up', 'instead of', 'alternative use', 'what else could', 'other options'. Simple keyword scan on conversation history — testable fallback. [signal_type: text]",
+      "linked_claim_ids": [
+        "DSK-T-004"
       ],
       "stage_applicability": [
-        "evaluate"
+        "frame",
+        "ideate"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire for binary go/no-go decisions where opportunity costs are inherently salient",
+        "Do not fire if user has explicitly considered and dismissed alternatives with documented reasoning",
+        "Do not fire if this trigger has already fired for this decision in this stage"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "contraindications": [
+        "Do not fire for binary go/no-go decisions where opportunity costs are inherently salient",
+        "Do not fire if user has explicitly considered and dismissed alternatives with documented reasoning",
+        "Do not fire if this trigger has already fired for this decision in this stage"
+      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
+      "deprecated": false,
+      "linked_protocol_ids": [
+        "DSK-P-004"
+      ],
+      "recommended_behaviour": "Surface opportunity cost coaching card (DSK-P-004) via ReviewCardBlock. Prompt user to consider what resources are foregone by current options."
     },
     {
       "id": "DSK-TR-005",
       "type": "trigger",
-      "title": "Single dominant factor",
+      "title": "Dominant factor detected → devil's advocate",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "ISL sensitivity analysis shows top factor contributing >50% of outcome variance, AND robustness != 'fragile' [signal_type: graph]",
+      "linked_claim_ids": [
+        "DSK-T-005",
+        "DSK-B-007"
       ],
       "stage_applicability": [
-        "evaluate"
+        "evaluate",
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if model already shows fragile robustness — the analysis is already providing the challenge",
+        "Do not fire if user has already run a pre-mortem or disconfirmation exercise this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "contraindications": [
+        "Do not fire if model already shows fragile robustness — the analysis is already providing the challenge",
+        "Do not fire if user has already run a pre-mortem or disconfirmation exercise this stage",
+        "Do not fire if this trigger has already fired for this decision in this stage"
+      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
+      "deprecated": false,
+      "linked_protocol_ids": [
+        "DSK-P-005"
+      ],
+      "recommended_behaviour": "Surface devil's advocate coaching card (DSK-P-005) via ReviewCardBlock. Challenge the dominant factor's weighting with structured dissent."
     },
     {
       "id": "DSK-TR-006",
       "type": "trigger",
-      "title": "Affect language detected",
+      "title": "Decision confirmed → implementation intentions",
       "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
+      "observable_signal": "User has explicitly confirmed a decision choice AND stage = decide AND analysis has been run at least once [signal_type: stage]",
+      "linked_claim_ids": [
+        "DSK-T-006"
       ],
       "stage_applicability": [
-        "evaluate"
+        "decide"
       ],
       "context_tags": [
-        "general"
+        "general",
+        "resource_allocation",
+        "hiring",
+        "build_vs_buy"
       ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
       "negative_conditions": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if user has not yet decided — this is post-decision only",
+        "Do not fire if analysis suggests more evidence is needed and user has not explicitly overridden that guidance",
+        "Do not fire if this trigger has already fired for this decision"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
-    },
-    {
-      "id": "DSK-TR-007",
-      "type": "trigger",
-      "title": "Optimistic timeline language detected",
-      "evidence_strength": "medium",
       "contraindications": [
-        "PLACEHOLDER — needs review"
+        "Do not fire if user has not yet decided — this is post-decision only",
+        "Do not fire if analysis suggests more evidence is needed and user has not explicitly overridden that guidance",
+        "Do not fire if this trigger has already fired for this decision"
       ],
-      "stage_applicability": [
-        "evaluate"
-      ],
-      "context_tags": [
-        "general"
-      ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
+      "version": "1.0.0",
+      "last_reviewed_at": "2026-03-03",
+      "source_citations": [],
       "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
-      "negative_conditions": [
-        "PLACEHOLDER — needs review"
+      "linked_protocol_ids": [
+        "DSK-P-006"
       ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
-    },
-    {
-      "id": "DSK-TR-008",
-      "type": "trigger",
-      "title": "Narrow option set detected",
-      "evidence_strength": "medium",
-      "contraindications": [
-        "PLACEHOLDER — needs review"
-      ],
-      "stage_applicability": [
-        "evaluate"
-      ],
-      "context_tags": [
-        "general"
-      ],
-      "version": "0.1.0",
-      "last_reviewed_at": "2026-03-02",
-      "source_citations": [
-        {
-          "doi_or_isbn": "PLACEHOLDER — needs review",
-          "page_or_section": "PLACEHOLDER — needs review"
-        }
-      ],
-      "deprecated": false,
-      "observable_signal": "PLACEHOLDER — needs review",
-      "recommended_behaviour": "PLACEHOLDER — needs review",
-      "negative_conditions": [
-        "PLACEHOLDER — needs review"
-      ],
-      "linked_claim_ids": [],
-      "linked_protocol_ids": []
+      "recommended_behaviour": "Surface implementation intentions coaching card (DSK-P-006) via ReviewCardBlock. Guide user through if-then planning for decision follow-through."
     }
-  ]
+  ],
+  "dsk_version_hash": "ca0f63fb0a7d942ccd7b5be67ffde5ad61edef92f8181269d8f966d690d9c896"
 }

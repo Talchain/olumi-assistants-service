@@ -182,8 +182,8 @@ function validateBase(
     err(diags, id, "last_reviewed_at", `Invalid ISO 8601 date: "${obj.last_reviewed_at}"`);
   }
 
-  // source_citations
-  if (!isNonEmptyArray(obj.source_citations)) {
+  // source_citations — triggers are routing logic, not empirical claims; exempt from min-citation rule
+  if (obj.type !== "trigger" && !isNonEmptyArray(obj.source_citations)) {
     err(diags, id, "source_citations", "Must have at least one source citation");
   }
 
@@ -369,7 +369,11 @@ function validateClaim(
 // Protocol validation
 // ---------------------------------------------------------------------------
 
-function validateProtocol(diags: LintDiagnostic[], obj: DSKProtocol): void {
+function validateProtocol(
+  diags: LintDiagnostic[],
+  obj: DSKProtocol,
+  idSet: Map<string, DSKObject>,
+): void {
   const id = obj.id;
 
   if (!isNonEmptyArray(obj.steps)) {
@@ -380,6 +384,20 @@ function validateProtocol(diags: LintDiagnostic[], obj: DSKProtocol): void {
   }
   if (!isNonEmptyArray(obj.expected_outputs)) {
     err(diags, id, "expected_outputs", "Must have at least one expected_output");
+  }
+
+  // Cross-reference: linked_claim_id (optional, singular)
+  if (obj.linked_claim_id !== undefined) {
+    if (!isNonEmptyString(obj.linked_claim_id)) {
+      err(diags, id, "linked_claim_id", "linked_claim_id must be a non-empty string if present");
+    } else {
+      const target = idSet.get(obj.linked_claim_id);
+      if (!target) {
+        err(diags, id, "linked_claim_id", `Referenced claim "${obj.linked_claim_id}" not found in bundle`);
+      } else if (target.type !== "claim") {
+        err(diags, id, "linked_claim_id", `Referenced id "${obj.linked_claim_id}" is type "${target.type}", expected "claim"`);
+      }
+    }
   }
 }
 
@@ -615,7 +633,7 @@ export function lintBundle(bundle: DSKBundle, contextVocab: string[]): LintResul
         validateClaim(errors, obj as DSKClaim, contextVocab);
         break;
       case "protocol":
-        validateProtocol(errors, obj as DSKProtocol);
+        validateProtocol(errors, obj as DSKProtocol, idSet);
         break;
       case "trigger":
         validateTrigger(errors, obj as DSKTrigger, idSet);

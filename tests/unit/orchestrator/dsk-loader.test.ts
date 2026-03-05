@@ -14,6 +14,7 @@ vi.mock("../../../src/config/index.js", () => ({
   config: {
     features: {
       dskV0: false,
+      dskEnabled: false,
     },
   },
 }));
@@ -96,7 +97,7 @@ describe("DSK Loader", () => {
   let queryDsk: (stage: string, tags: string[], codes: string[]) => unknown[];
   let getDskVersionHash: () => string | null;
   let _resetDskBundle: () => void;
-  let configModule: { config: { features: { dskV0: boolean } } };
+  let configModule: { config: { features: { dskV0: boolean; dskEnabled: boolean } } };
   let logModule: { log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } };
 
   beforeEach(async () => {
@@ -203,23 +204,13 @@ describe("DSK Loader", () => {
       expect(ids).not.toContain('DSK-T-002');
     });
 
-    it("rejects bundle with hash mismatch — logs error, bundle not loaded", async () => {
+    it("rejects bundle with hash mismatch — throws with both hashes in message", async () => {
       const hashModule = await import("../../../src/dsk/hash.js");
       vi.mocked(hashModule.computeDSKHash).mockReturnValue('different-hash-xyz');
       _resetDskBundle();
 
-      expect(() => loadDskBundle()).not.toThrow();
-      expect(getDskVersionHash()).toBeNull();
-      expect(queryDsk('frame', ['uncertainty'], [])).toEqual([]);
-
-      // Verify log.error was called with both hashes, locking in the corruption-detection contract
-      expect(logModule.log.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          stored_hash: TEST_BUNDLE.dsk_version_hash,
-          computed_hash: 'different-hash-xyz',
-        }),
-        expect.any(String),
-      );
+      expect(() => loadDskBundle()).toThrow(/hash mismatch/);
+      expect(() => loadDskBundle()).toThrow(/different-hash-xyz/);
     });
   });
 
@@ -231,19 +222,8 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("does not throw — logs warning and skips", () => {
-      expect(() => loadDskBundle()).not.toThrow();
-    });
-
-    it("queryDsk returns empty array", () => {
-      loadDskBundle();
-      const results = queryDsk('frame', ['uncertainty'], []);
-      expect(results).toEqual([]);
-    });
-
-    it("getDskVersionHash returns null", () => {
-      loadDskBundle();
-      expect(getDskVersionHash()).toBeNull();
+    it("throws with file-not-found message", () => {
+      expect(() => loadDskBundle()).toThrow(/not found/);
     });
   });
 
@@ -254,13 +234,8 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("does not throw — logs error and skips", () => {
-      expect(() => loadDskBundle()).not.toThrow();
-    });
-
-    it("getDskVersionHash returns null after parse error", () => {
-      loadDskBundle();
-      expect(getDskVersionHash()).toBeNull();
+    it("throws with not-valid-JSON message", () => {
+      expect(() => loadDskBundle()).toThrow(/not valid JSON/);
     });
   });
 
@@ -270,23 +245,24 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("missing version — does not throw, logs error, bundle not loaded", () => {
+    it("missing version — throws with shape error details", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ objects: [], dsk_version_hash: 'abc' }));
-      expect(() => loadDskBundle()).not.toThrow();
-      expect(getDskVersionHash()).toBeNull();
-      expect(logModule.log.error).toHaveBeenCalled();
+      expect(() => loadDskBundle()).toThrow(/shape invalid.*version/);
     });
 
-    it("objects is not an array — does not throw, bundle not loaded", () => {
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: null, dsk_version_hash: 'abc' }));
-      expect(() => loadDskBundle()).not.toThrow();
-      expect(getDskVersionHash()).toBeNull();
+    it("objects is not an array — throws with shape error details", () => {
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: null, dsk_version_hash: 'abc', generated_at: '2026-01-01T00:00:00Z' }));
+      expect(() => loadDskBundle()).toThrow(/shape invalid.*objects/);
     });
 
-    it("empty dsk_version_hash — does not throw, bundle not loaded", () => {
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: [], dsk_version_hash: '' }));
-      expect(() => loadDskBundle()).not.toThrow();
-      expect(getDskVersionHash()).toBeNull();
+    it("empty dsk_version_hash — throws with shape error details", () => {
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: [], dsk_version_hash: '', generated_at: '2026-01-01T00:00:00Z' }));
+      expect(() => loadDskBundle()).toThrow(/shape invalid.*dsk_version_hash/);
+    });
+
+    it("missing generated_at — throws with shape error details", () => {
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: [], dsk_version_hash: 'abc' }));
+      expect(() => loadDskBundle()).toThrow(/shape invalid.*generated_at/);
     });
   });
 });

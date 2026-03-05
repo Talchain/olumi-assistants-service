@@ -86,6 +86,8 @@ export interface DSKProtocol extends DSKObjectBase {
   required_inputs: string[];
   /** Ordered — do NOT sort during canonicalisation. */
   expected_outputs: string[];
+  /** Links this protocol to the technique efficacy claim it implements. Singular per protocol. */
+  linked_claim_id?: string;
 }
 
 export interface DSKTrigger extends DSKObjectBase {

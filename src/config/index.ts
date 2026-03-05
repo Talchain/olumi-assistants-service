@@ -259,6 +259,7 @@ const ConfigSchema = z.object({
     // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
     contextFabric: booleanString.default(false),
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
+    dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
   }),
 
   // Prompt Cache Configuration
@@ -470,6 +471,18 @@ const ConfigSchema = z.object({
     isVitest: booleanString.default(false),
   }),
 
+  // Research (web search for evidence gathering)
+  research: z.object({
+    enabled: booleanString.default(false),                                 // RESEARCH_ENABLED — master switch
+    model: z.string().default('gpt-4o'),                                   // RESEARCH_MODEL — model for Responses API
+    webSearchToolType: z.string().default('web_search_preview'),           // RESEARCH_WEB_SEARCH_TOOL_TYPE — tool type (updatable without code change)
+    rateLimitPerScenario: z.coerce.number().int().min(1).default(5),       // RESEARCH_RATE_LIMIT — max calls per scenario per window
+    rateLimitWindowMs: z.coerce.number().int().min(1).default(1_800_000),  // RESEARCH_RATE_LIMIT_WINDOW_MS — 30 minutes
+    cacheTtlMs: z.coerce.number().int().min(0).default(1_800_000),         // RESEARCH_CACHE_TTL_MS — 30 minutes
+    cacheMaxSize: z.coerce.number().int().min(1).default(200),             // RESEARCH_CACHE_MAX_SIZE
+    timeoutMs: z.coerce.number().int().min(1000).default(15_000),          // RESEARCH_TIMEOUT_MS — 15 seconds
+  }).default({}),
+
   // Prompt Management
   prompts: z.object({
     enabled: booleanString.default(false), // Master switch for prompt management
@@ -542,6 +555,7 @@ function parseConfig(): Config {
       orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,
+      dskEnabled: env.DSK_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -736,6 +750,16 @@ function parseConfig(): Config {
     },
     testing: {
       isVitest: env.VITEST,
+    },
+    research: {
+      enabled: env.RESEARCH_ENABLED,
+      model: env.RESEARCH_MODEL,
+      webSearchToolType: env.RESEARCH_WEB_SEARCH_TOOL_TYPE,
+      rateLimitPerScenario: env.RESEARCH_RATE_LIMIT,
+      rateLimitWindowMs: env.RESEARCH_RATE_LIMIT_WINDOW_MS,
+      cacheTtlMs: env.RESEARCH_CACHE_TTL_MS,
+      cacheMaxSize: env.RESEARCH_CACHE_MAX_SIZE,
+      timeoutMs: env.RESEARCH_TIMEOUT_MS,
     },
     prompts: {
       enabled: env.PROMPTS_ENABLED,

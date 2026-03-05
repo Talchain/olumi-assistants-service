@@ -28,6 +28,7 @@ import type { LLMAdapter, CallOpts, ChatResult } from "../adapters/llm/types.js"
 import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 import { buildLLMRawTrace } from "../cee/llm-output-store.js";
+import { getClaimById } from "../orchestrator/dsk-loader.js";
 
 // ============================================================================
 // Feature Flag
@@ -281,6 +282,22 @@ interface ShapeCheckResult {
  * - key_assumptions (array, max 5)
  * - decision_quality_prompts (array, max 3)
  *
+ * Optional DSK fields (warning-level, not errors):
+ * - bias_findings[].dsk_claim_id (string)
+ * - bias_findings[].evidence_strength ("strong" | "medium")
+ * - decision_quality_prompts[].dsk_claim_id (string)
+ * - decision_quality_prompts[].evidence_strength ("strong" | "medium")
+ * - decision_quality_prompts[].dsk_protocol_id (string)
+ *
+ * Prompt edit locations for DSK integration (DO NOT EDIT PROMPT — document only):
+ *   1. line 202-204 (bias_findings Each: {...}): add dsk_claim_id?, evidence_strength? to item schema
+ *   2. line 222 (decision_quality_prompts Each: {...}): add dsk_claim_id?, evidence_strength?, dsk_protocol_id?
+ *   3. line 241-260 (OUTPUT_SCHEMA): document optional DSK fields in bias_findings[] and decision_quality_prompts[]
+ *   4. line 105 (after </GROUNDING_RULES>, before <FIELD_SPECIFICATIONS>): inject <DSK_REFERENCE> block
+ *      with claim IDs, titles, evidence strengths — one row per claim, grouped by bias/technique
+ *   5. line 167-171 (STRUCTURAL bias table): add dsk_claim_id column mapping critique→bias→DSK claim
+ *   6. line 182-188 (SEMANTIC bias table): add dsk_claim_id column mapping bias type→DSK claim
+ *
  * Optional fields (prompt rules allow omission in certain conditions):
  * - scenario_contexts (object) - omit if fragile_edges is empty
  * - pre_mortem (object) - omit if fragile_edges is empty
@@ -361,6 +378,57 @@ function performShapeCheck(data: unknown): ShapeCheckResult {
 
   if ("framing_check" in obj && (typeof obj.framing_check !== "object" || obj.framing_check === null)) {
     warnings.push("framing_check should be an object");
+  }
+
+  // Optional DSK fields — warning-level validation only
+  // TODO(science_ledger): When the science_ledger is implemented, these optional fields
+  // will migrate to required fields with cross-validation against the ledger. For now,
+  // warn on type mismatches and (when DSK_ENABLED) verify IDs exist in the loaded bundle.
+  const dskCrossCheck = config.features.dskEnabled;
+  if (Array.isArray(obj.bias_findings)) {
+    for (const bf of obj.bias_findings as Record<string, unknown>[]) {
+      if ("dsk_claim_id" in bf && typeof bf.dsk_claim_id !== "string") {
+        warnings.push("bias_findings[].dsk_claim_id should be a string");
+      }
+      if ("evidence_strength" in bf && typeof bf.evidence_strength === "string") {
+        if (bf.evidence_strength !== "strong" && bf.evidence_strength !== "medium") {
+          warnings.push(`bias_findings[].evidence_strength "${bf.evidence_strength}" not in ["strong", "medium"]`);
+        }
+      }
+      // Cross-check: resolve claim from bundle and verify evidence_strength matches
+      if (dskCrossCheck && typeof bf.dsk_claim_id === "string") {
+        const claim = getClaimById(bf.dsk_claim_id);
+        if (!claim) {
+          warnings.push(`bias_findings[].dsk_claim_id "${bf.dsk_claim_id}" not found in loaded DSK bundle`);
+        } else if (typeof bf.evidence_strength === "string" && bf.evidence_strength !== claim.evidence_strength) {
+          warnings.push(`bias_findings[].evidence_strength "${bf.evidence_strength}" drifts from bundle value "${claim.evidence_strength}" for ${bf.dsk_claim_id}`);
+        }
+      }
+    }
+  }
+  if (Array.isArray(obj.decision_quality_prompts)) {
+    for (const dqp of obj.decision_quality_prompts as Record<string, unknown>[]) {
+      if ("dsk_claim_id" in dqp && typeof dqp.dsk_claim_id !== "string") {
+        warnings.push("decision_quality_prompts[].dsk_claim_id should be a string");
+      }
+      if ("evidence_strength" in dqp && typeof dqp.evidence_strength === "string") {
+        if (dqp.evidence_strength !== "strong" && dqp.evidence_strength !== "medium") {
+          warnings.push(`decision_quality_prompts[].evidence_strength "${dqp.evidence_strength}" not in ["strong", "medium"]`);
+        }
+      }
+      if ("dsk_protocol_id" in dqp && typeof dqp.dsk_protocol_id !== "string") {
+        warnings.push("decision_quality_prompts[].dsk_protocol_id should be a string");
+      }
+      // Cross-check: resolve claim from bundle and verify evidence_strength matches
+      if (dskCrossCheck && typeof dqp.dsk_claim_id === "string") {
+        const claim = getClaimById(dqp.dsk_claim_id);
+        if (!claim) {
+          warnings.push(`decision_quality_prompts[].dsk_claim_id "${dqp.dsk_claim_id}" not found in loaded DSK bundle`);
+        } else if (typeof dqp.evidence_strength === "string" && dqp.evidence_strength !== claim.evidence_strength) {
+          warnings.push(`decision_quality_prompts[].evidence_strength "${dqp.evidence_strength}" drifts from bundle value "${claim.evidence_strength}" for ${dqp.dsk_claim_id}`);
+        }
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors, warnings };

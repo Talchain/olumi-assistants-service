@@ -2,12 +2,13 @@
  * DSK v0 Loader
  *
  * Process-level singleton that loads the DSK bundle from disk at startup.
- * Gated by ENABLE_DSK_V0 feature flag (config.features.dskV0).
+ * Gated by ENABLE_DSK_V0 or DSK_ENABLED feature flags.
  *
  * When OFF: all exports are no-ops / return null / return [].
- * When ON:  reads data/dsk/v1.json, parses, caches in memory.
- *           ENOENT → warn and skip (non-fatal).
- *           Parse error → log error and skip (non-fatal).
+ * When ON:  reads data/dsk/v1.json, parses, validates hash, caches in memory.
+ *           Fail-fast: throws on ENOENT, parse error, shape mismatch, or hash
+ *           mismatch when the flag is explicitly ON — a corrupt or missing bundle
+ *           must not silently degrade to an empty DSK surface.
  *
  * Call order:
  *   1. loadDskBundle() at server startup (once)
@@ -19,7 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { config } from "../config/index.js";
 import { log } from "../utils/telemetry.js";
-import type { DSKBundle, DSKObject, DecisionStage } from "../dsk/types.js";
+import type { DSKBundle, DSKObject, DSKClaim, DSKProtocol, DSKTrigger, DecisionStage } from "../dsk/types.js";
 import { computeDSKHash } from "../dsk/hash.js";
 
 // ============================================================================
@@ -39,70 +40,71 @@ let _bundle: DSKBundle | null = null;
  * Idempotent — safe to call multiple times (only loads on first call when flag is ON).
  */
 export function loadDskBundle(): void {
-  if (!config.features.dskV0) {
-    log.info({ flag: 'ENABLE_DSK_V0', state: false }, 'DSK v0 loader skipped (flag OFF)');
+  // TODO: Deprecate ENABLE_DSK_V0 (config.features.dskV0) once DSK v1 bundle
+  // is stable in production. Single canonical flag: DSK_ENABLED.
+  // Dual gate exists because dskV0 predates production bundle integration.
+  if (!config.features.dskV0 && !config.features.dskEnabled) {
+    log.info({ flags: { ENABLE_DSK_V0: false, DSK_ENABLED: false } }, 'DSK loader skipped (both flags OFF)');
     return;
   }
 
+  const loadStart = Date.now();
   const filePath = path.resolve(process.cwd(), 'data/dsk/v1.json');
-  log.info({ flag: 'ENABLE_DSK_V0', state: true, resolved_path: filePath }, 'DSK v0 loader activated');
+  log.info({ flags: { ENABLE_DSK_V0: config.features.dskV0, DSK_ENABLED: config.features.dskEnabled }, resolved_path: filePath }, 'DSK loader activated');
 
+  let raw: string;
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as DSKBundle;
-
-    // Minimal shape guard: catch valid-JSON-but-nonsense-shape before hash verification
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      typeof parsed.version !== 'string' ||
-      !Array.isArray(parsed.objects) ||
-      typeof parsed.dsk_version_hash !== 'string' ||
-      parsed.dsk_version_hash.length === 0
-    ) {
-      log.error(
-        { resolved_path: filePath, flag: 'ENABLE_DSK_V0' },
-        'DSK bundle has invalid shape — skipping',
-      );
-      _bundle = null;
-      return;
-    }
-
-    // Verify hash integrity: recompute and compare to stored dsk_version_hash
-    const computed = computeDSKHash(parsed);
-    if (computed !== parsed.dsk_version_hash) {
-      log.error(
-        {
-          stored_hash: parsed.dsk_version_hash,
-          computed_hash: computed,
-          resolved_path: filePath,
-          flag: 'ENABLE_DSK_V0',
-        },
-        'DSK bundle hash mismatch — possible corruption, skipping',
-      );
-      _bundle = null;
-      return;
-    }
-
-    _bundle = parsed;
-    log.info(
-      { dsk_version: _bundle.version, object_count: _bundle.objects.length, resolved_path: filePath },
-      'DSK bundle loaded',
-    );
+    raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      log.warn(
-        { resolved_path: filePath, flag: 'ENABLE_DSK_V0' },
-        'DSK bundle file not found — skipping',
-      );
-    } else {
-      log.error(
-        { err, resolved_path: filePath, flag: 'ENABLE_DSK_V0' },
-        'DSK bundle parse error — skipping',
-      );
-    }
-    _bundle = null;
+    const msg = (err as NodeJS.ErrnoException).code === 'ENOENT'
+      ? `DSK bundle file not found: ${filePath}`
+      : `DSK bundle read error: ${(err as Error).message}`;
+    throw new Error(msg);
   }
+
+  let parsed: DSKBundle;
+  try {
+    parsed = JSON.parse(raw) as DSKBundle;
+  } catch {
+    throw new Error(`DSK bundle is not valid JSON: ${filePath}`);
+  }
+
+  // Shape guard: all required top-level fields
+  const shapeErrors: string[] = [];
+  if (typeof parsed !== 'object' || parsed === null) shapeErrors.push('not an object');
+  else {
+    if (typeof parsed.version !== 'string') shapeErrors.push('missing/invalid version');
+    if (typeof parsed.generated_at !== 'string') shapeErrors.push('missing/invalid generated_at');
+    if (typeof parsed.dsk_version_hash !== 'string' || parsed.dsk_version_hash.length === 0)
+      shapeErrors.push('missing/invalid dsk_version_hash');
+    if (!Array.isArray(parsed.objects)) shapeErrors.push('missing/invalid objects[]');
+  }
+  if (shapeErrors.length > 0) {
+    throw new Error(`DSK bundle shape invalid (${shapeErrors.join(', ')}): ${filePath}`);
+  }
+
+  // Verify hash integrity
+  const computed = computeDSKHash(parsed);
+  if (computed !== parsed.dsk_version_hash) {
+    throw new Error(
+      `DSK bundle hash mismatch — expected ${parsed.dsk_version_hash}, computed ${computed}: ${filePath}`,
+    );
+  }
+
+  _bundle = parsed;
+  const typeCounts: Record<string, number> = {};
+  for (const obj of _bundle.objects) typeCounts[obj.type] = (typeCounts[obj.type] ?? 0) + 1;
+  log.info(
+    {
+      dsk_version: _bundle.version,
+      dsk_hash_prefix: _bundle.dsk_version_hash.slice(0, 16),
+      object_count: _bundle.objects.length,
+      by_type: typeCounts,
+      load_ms: Date.now() - loadStart,
+      resolved_path: filePath,
+    },
+    'DSK bundle loaded',
+  );
 }
 
 // ============================================================================
@@ -147,6 +149,33 @@ export function queryDsk(stage: string, contextTags: string[], detectionCodes: s
  */
 export function getDskVersionHash(): string | null {
   return _bundle?.dsk_version_hash ?? null;
+}
+
+// ============================================================================
+// Typed accessors
+// ============================================================================
+
+export function getClaimById(id: string): DSKClaim | undefined {
+  return _bundle?.objects.find((o): o is DSKClaim => o.type === "claim" && o.id === id);
+}
+
+export function getProtocolById(id: string): DSKProtocol | undefined {
+  return _bundle?.objects.find((o): o is DSKProtocol => o.type === "protocol" && o.id === id);
+}
+
+export function getTriggerById(id: string): DSKTrigger | undefined {
+  return _bundle?.objects.find((o): o is DSKTrigger => o.type === "trigger" && o.id === id);
+}
+
+export function getAllByType<T extends DSKObject["type"]>(
+  type: T,
+): Extract<DSKObject, { type: T }>[] {
+  if (!_bundle) return [];
+  return _bundle.objects.filter((o): o is Extract<DSKObject, { type: T }> => o.type === type);
+}
+
+export function getVersion(): string | null {
+  return _bundle?.version ?? null;
 }
 
 // ============================================================================
