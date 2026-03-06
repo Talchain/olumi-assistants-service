@@ -1,0 +1,112 @@
+{
+  "id": "dr-03-needs-evidence",
+  "name": "Needs Evidence — European Expansion",
+  "description": "Expansion leads but with significant evidence gaps across all key factors. High model uncertainty and multiple structural critiques make the recommendation premature.",
+  "input": {
+    "winner": { "id": "opt_expand", "label": "Enter European Market", "win_probability": 0.61, "outcome_mean": 0.55 },
+    "runner_up": { "id": "opt_hold", "label": "Focus on Domestic", "win_probability": 0.39, "outcome_mean": 0.42 },
+    "margin": 0.11,
+    "deterministic_coaching": {
+      "headline_type": "NEEDS_EVIDENCE",
+      "readiness": "not_ready",
+      "evidence_gaps": [
+        { "factor_id": "fac_investment", "factor_label": "Expansion Investment", "voi": 0.45, "confidence": 0.25 },
+        { "factor_id": "fac_europe_entry", "factor_label": "Europe Market Entry", "voi": 0.38, "confidence": 0.3 },
+        { "factor_id": "fac_competition", "factor_label": "Competitive Intensity", "voi": 0.32, "confidence": 0.35 }
+      ],
+      "model_critiques": [
+        {
+          "type": "STRENGTH_CLUSTERING",
+          "severity": "high",
+          "message": "Multiple edge strengths are clustered around default values, suggesting insufficient calibration"
+        },
+        {
+          "type": "DOMINANT_FACTOR",
+          "severity": "medium",
+          "message": "Expansion Investment dominates the outcome variance, making the model fragile to this single estimate",
+          "affected_node_ids": ["fac_investment"]
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_expand",
+          "option_label": "Enter European Market",
+          "win_probability": 0.61,
+          "outcome": { "mean": 0.55, "p10": 0.18, "p90": 0.85 }
+        },
+        {
+          "option_id": "opt_hold",
+          "option_label": "Focus on Domestic",
+          "win_probability": 0.39,
+          "outcome": { "mean": 0.42, "p10": 0.22, "p90": 0.61 }
+        }
+      ],
+      "factor_sensitivity": [
+        { "factor_id": "fac_investment", "factor_label": "Expansion Investment", "elasticity": 0.71, "confidence": 0.25 },
+        { "factor_id": "fac_europe_entry", "factor_label": "Europe Market Entry", "elasticity": 0.55, "confidence": 0.30 },
+        { "factor_id": "fac_competition", "factor_label": "Competitive Intensity", "elasticity": 0.42, "confidence": 0.35 }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "fac_investment->risk_operational",
+          "from_label": "Expansion Investment",
+          "to_label": "Operational Complexity",
+          "switch_probability": 0.42,
+          "alternative_winner_id": "opt_hold",
+          "alternative_winner_label": "Focus on Domestic"
+        },
+        {
+          "edge_id": "fac_europe_entry->out_revenue",
+          "from_label": "Europe Market Entry",
+          "to_label": "Revenue Growth",
+          "switch_probability": 0.38,
+          "alternative_winner_id": "opt_hold",
+          "alternative_winner_label": "Focus on Domestic"
+        },
+        {
+          "edge_id": "fac_competition->out_revenue",
+          "from_label": "Competitive Intensity",
+          "to_label": "Revenue Growth",
+          "switch_probability": 0.29
+        }
+      ],
+      "robustness": { "recommendation_stability": 0.41, "overall_confidence": 0.38 }
+    },
+    "graph": {
+      "nodes": [
+        { "id": "dec_expansion", "kind": "decision", "label": "European Market Expansion" },
+        { "id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": { "interventions": { "fac_europe_entry": 1, "fac_investment": 1.0 } } },
+        { "id": "opt_hold", "kind": "option", "label": "Focus on Domestic", "data": { "interventions": { "fac_europe_entry": 0, "fac_investment": 0.2 } } },
+        { "id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry", "category": "controllable" },
+        { "id": "fac_investment", "kind": "factor", "label": "Expansion Investment", "category": "controllable" },
+        { "id": "fac_competition", "kind": "factor", "label": "Competitive Intensity", "category": "external" },
+        { "id": "out_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "risk_operational", "kind": "risk", "label": "Operational Complexity" },
+        { "id": "goal_growth", "kind": "goal", "label": "Reach 800 Pro Customers" }
+      ],
+      "edges": [
+        { "from": "dec_expansion", "to": "opt_expand", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "dec_expansion", "to": "opt_hold", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "fac_europe_entry", "to": "out_revenue", "strength": { "mean": 0.6, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "positive" },
+        { "from": "fac_investment", "to": "risk_operational", "strength": { "mean": 0.55, "std": 0.18 }, "exists_probability": 0.88, "effect_direction": "positive" },
+        { "from": "fac_competition", "to": "out_revenue", "strength": { "mean": -0.30, "std": 0.22 }, "exists_probability": 0.75, "effect_direction": "negative" },
+        { "from": "out_revenue", "to": "goal_growth", "strength": { "mean": 0.45, "std": 0.10 }, "exists_probability": 0.95, "effect_direction": "positive" },
+        { "from": "risk_operational", "to": "goal_growth", "strength": { "mean": -0.25, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "negative" }
+      ]
+    },
+    "brief": "Should we expand into the European market? We have 400 pro customers and want to reach 800."
+  },
+  "expected": {
+    "tone": "cautious",
+    "must_mention_factors": ["Expansion Investment", "Europe Market Entry", "Competitive Intensity"],
+    "forbidden_phrases": ["ready to proceed", "confident", "clear choice"],
+    "dsk_fields_expected": false,
+    "pre_mortem_expected": true
+  }
+}

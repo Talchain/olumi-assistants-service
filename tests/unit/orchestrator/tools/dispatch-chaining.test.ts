@@ -34,6 +34,7 @@ vi.mock("../../../../src/orchestrator/tools/explain-results.js", () => ({
 
 vi.mock("../../../../src/adapters/llm/router.js", () => ({
   getAdapter: mockGetAdapter,
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 // Shallow mock for other handlers to prevent side effects

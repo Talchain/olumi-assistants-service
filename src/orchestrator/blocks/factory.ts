@@ -31,6 +31,7 @@ import type {
   BriefBlockData,
   ReviewCardBlockData,
   FramingBlockData,
+  EvidenceBlockData,
   DecisionStage,
 } from "../types.js";
 
@@ -237,5 +238,25 @@ export function createFramingBlock(
     block_type: 'framing',
     data,
     provenance: makeProvenance('system', turnId),
+  };
+}
+
+/**
+ * Create an EvidenceBlock.
+ *
+ * Ephemeral ID (research results are context-dependent — claims extraction varies
+ * even for the same query due to web content changes).
+ */
+export function createEvidenceBlock(
+  data: EvidenceBlockData,
+  turnId: string,
+): ConversationBlock {
+  const blockId = ephemeralId('evidence');
+
+  return {
+    block_id: blockId,
+    block_type: 'evidence',
+    data,
+    provenance: makeProvenance('tool:research_topic', turnId),
   };
 }

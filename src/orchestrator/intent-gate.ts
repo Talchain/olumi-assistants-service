@@ -1,8 +1,9 @@
 /**
  * Intent Gate — Deterministic Routing with LLM Fallback
  *
- * Strict whole-message equality matching against a frozen pattern table.
- * No prefix matching, no substring matching, no word-count guards.
+ * Strict whole-message equality matching against a frozen pattern table,
+ * plus verb-prefix matching for research_topic (extracts query from remainder).
+ *
  * Pure function — no side effects, no logging, no async, no dependencies.
  *
  * | Tool             | Example patterns (after normalisation)                              |
@@ -13,6 +14,7 @@
  * | explain_results  | explain, why, break it down, explain the results, ...              |
  * | edit_graph       | edit, modify, change, update the model, edit model, ...            |
  * | run_exercise     | pre-mortem, devil's advocate, disconfirmation, ...                  |
+ * | research_topic   | research {topic}, look up {topic}, find data on {topic}, ...       |
  *
  * Excluded (too ambiguous without context — fall through to LLM):
  * go, let's go, do it, run (solo), why did, what happened
@@ -25,7 +27,7 @@
 // Types
 // ============================================================================
 
-export type ToolName = 'draft_graph' | 'edit_graph' | 'run_analysis' | 'explain_results' | 'generate_brief' | 'run_exercise';
+export type ToolName = 'draft_graph' | 'edit_graph' | 'run_analysis' | 'explain_results' | 'generate_brief' | 'run_exercise' | 'research_topic';
 
 export type ExerciseType = 'pre_mortem' | 'devil_advocate' | 'disconfirmation';
 
@@ -37,6 +39,8 @@ export interface IntentGateResult {
   matched_pattern?: string;
   /** Populated when tool === 'run_exercise' — the specific exercise type to run. */
   exercise?: ExerciseType;
+  /** Populated when tool === 'research_topic' — the extracted query from the message. */
+  research_query?: string;
 }
 
 // ============================================================================
@@ -174,15 +178,37 @@ export const PATTERN_TO_EXERCISE: ReadonlyMap<string, ExerciseType> = new Map([
 ]);
 
 // ============================================================================
+// Research Prefix Patterns
+// ============================================================================
+
+/**
+ * Verb-prefix patterns for research_topic routing.
+ * Matched against normalised message prefix. The remainder (after stripping
+ * the prefix) becomes the research query. Only matches when a non-empty
+ * topic follows the prefix.
+ *
+ * Ordered longest-first to avoid partial prefix matches.
+ */
+export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
+  'find evidence for ',
+  'find evidence on ',
+  'search for ',
+  'find data on ',
+  'look up ',
+  'research ',
+]);
+
+// ============================================================================
 // Startup Validation
 // ============================================================================
 
 /**
  * Get all unique tool names referenced in the intent gate pattern table.
  * Used by startup validation to check against the tool registry.
+ * Includes research_topic from prefix patterns.
  */
 export function getGateToolNames(): string[] {
-  return [...new Set(_patterns.map(([, tool]) => tool))];
+  return [...new Set([..._patterns.map(([, tool]) => tool), 'research_topic'])];
 }
 
 // ============================================================================
@@ -190,7 +216,8 @@ export function getGateToolNames(): string[] {
 // ============================================================================
 
 /**
- * Classify user intent via strict whole-message equality matching.
+ * Classify user intent via strict whole-message equality matching,
+ * then verb-prefix matching for research_topic.
  *
  * Pure function — no side effects, no async, no external dependencies.
  * Returns { tool, routing: 'deterministic', confidence: 'exact' } on match,
@@ -199,6 +226,7 @@ export function getGateToolNames(): string[] {
 export function classifyIntent(message: string): IntentGateResult {
   const normalised = normalise(message);
 
+  // 1. Exact whole-message match (all tools except research_topic)
   const tool = INTENT_PATTERNS.get(normalised) ?? null;
 
   if (tool) {
@@ -213,6 +241,24 @@ export function classifyIntent(message: string): IntentGateResult {
       result.exercise = PATTERN_TO_EXERCISE.get(normalised);
     }
     return result;
+  }
+
+  // 2. Verb-prefix match for research_topic
+  for (const prefix of RESEARCH_PREFIXES) {
+    if (normalised.startsWith(prefix)) {
+      const remainder = normalised.slice(prefix.length).trim();
+      // Only match when there's a clear topic (non-empty remainder)
+      if (remainder.length > 0) {
+        return {
+          tool: 'research_topic',
+          routing: 'deterministic',
+          confidence: 'exact',
+          normalised_message: normalised,
+          matched_pattern: prefix.trim(),
+          research_query: remainder,
+        };
+      }
+    }
   }
 
   return {

@@ -11,7 +11,8 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config } from "../config/index.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
-import type { PreflightRejectPayload, NeedsClarificationPayload } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
+import { formatBriefHeader } from "../cee/signals/brief-header.js";
 import {
   parseSchemaVersion,
   transformResponseToV2,
@@ -280,8 +281,9 @@ export default async function route(app: FastifyInstance) {
 
     // Preflight validation — delegates all policy ladder decisions to the
     // shared evaluatePreflightDecision() function (no duplicated logic here).
+    let preflightDecision: PreflightDecision | undefined;
     if (config.cee.preflightEnabled) {
-      const decision = evaluatePreflightDecision(baseInput.brief, {
+      const decision = preflightDecision = evaluatePreflightDecision(baseInput.brief, {
         preflightStrict: config.cee.preflightStrict,
         preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
       });
@@ -303,6 +305,27 @@ export default async function route(app: FastifyInstance) {
         ...telemetryCtx,
         ...decision.telemetry,
       });
+
+      // Emit BriefSignals telemetry (only when signals were computed — skipped on reject)
+      if (decision.briefSignals) {
+        emit(TelemetryEvents.CeeBriefSignals, {
+          ...telemetryCtx,
+          signals_version: "v1",
+          brief_strength: decision.briefSignals.brief_strength,
+          option_count_estimate: decision.briefSignals.option_count_estimate,
+          has_explicit_goal: decision.briefSignals.has_explicit_goal,
+          has_measurable_target: decision.briefSignals.has_measurable_target,
+          baseline_state: decision.briefSignals.baseline_state,
+          has_constraints: decision.briefSignals.has_constraints,
+          has_risks: decision.briefSignals.has_risks,
+          bias_signals: decision.briefSignals.bias_signals.map((b) => b.type),
+          word_count: decision.briefSignals.word_count,
+          numeric_anchor_count: decision.briefSignals.numeric_anchor_count,
+          questions_shown_count: (decision.payload as any)?.clarification_questions?.length ?? 0,
+          readiness_score: decision.telemetry.readiness_score,
+          action: decision.action,
+        });
+      }
 
       if (decision.action === "reject") {
         const p = decision.payload as PreflightRejectPayload;
@@ -453,6 +476,16 @@ export default async function route(app: FastifyInstance) {
             readiness_level: readiness.level,
           });
         }
+      }
+    }
+
+    // ── Thread BriefSignals into pipeline input ────────────────────────
+    if (preflightDecision?.briefSignals) {
+      if (config.cee.briefSignalsHeaderEnabled) {
+        (baseInput as any).briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
+      }
+      if (preflightDecision.briefSignals.bias_signals.length > 0) {
+        (baseInput as any).bias_signals = preflightDecision.briefSignals.bias_signals;
       }
     }
 

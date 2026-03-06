@@ -326,6 +326,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           finish_reason: ctx.llmMeta.finish_reason,
         }
       : {}),
+    // BriefSignals v1 — deterministic bias detection (persisted on trace for debug bundles)
+    ...(ctx.input.bias_signals?.length ? { bias_signals: ctx.input.bias_signals } : {}),
   };
 
   // ── Step 9b: Merge STRP trace onto trace variable ─────────────────────────
@@ -396,6 +398,8 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     goal_connectivity: goalConnectivity,
     model_quality_factors: modelQualityFactors,
     intervention_hints: interventionHints.length > 0 ? interventionHints : undefined,
+    // BriefSignals v1 — deterministic bias detection
+    bias_signals: ctx.input.bias_signals?.length ? ctx.input.bias_signals : undefined,
   };
 
   // ── Step 12: Pipeline checkpoint (post_stabilisation) ────────────────────

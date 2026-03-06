@@ -1,0 +1,49 @@
+{
+  "id": "08-cycle-creation",
+  "name": "Cycle-creating edge",
+  "description": "Attempts to add an edge from revenue back to investment, creating a cycle",
+  "graph": {
+    "nodes": [
+      {"id": "dec_expansion", "kind": "decision", "label": "European Market Expansion"},
+      {"id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": {"interventions": {"fac_europe_entry": 1, "fac_investment": 1.0}}},
+      {"id": "opt_hold", "kind": "option", "label": "Focus on Domestic (Status Quo)", "data": {"interventions": {"fac_europe_entry": 0, "fac_investment": 0.2}}},
+      {"id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry (0/1)", "category": "controllable", "data": {"value": 0, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["No EU pilot data", "Local partner availability unknown"]}},
+      {"id": "fac_investment", "kind": "factor", "label": "Expansion Investment (0-1, share of 500k cap)", "category": "controllable", "data": {"value": 0.2, "raw_value": 100000, "unit": "GBP", "cap": 500000, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Final vendor quotes pending", "Scope not fully defined"]}},
+      {"id": "fac_churn_rate", "kind": "factor", "label": "Monthly Churn Rate", "category": "observable", "data": {"value": 0.03, "raw_value": 3, "unit": "%", "extractionType": "explicit"}},
+      {"id": "fac_competition", "kind": "factor", "label": "Competitive Intensity", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "fac_regulations", "kind": "factor", "label": "Regulatory Complexity", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.3, "range_max": 0.9}},
+      {"id": "out_revenue", "kind": "outcome", "label": "Revenue Growth"},
+      {"id": "out_market_share", "kind": "outcome", "label": "Market Share Gain"},
+      {"id": "risk_operational", "kind": "risk", "label": "Operational Complexity"},
+      {"id": "risk_financial", "kind": "risk", "label": "Financial Exposure"},
+      {"id": "goal_growth", "kind": "goal", "label": "Reach 800 Pro Customers", "goal_threshold": 0.8, "goal_threshold_raw": 800, "goal_threshold_unit": "customers", "goal_threshold_cap": 1000}
+    ],
+    "edges": [
+      {"from": "dec_expansion", "to": "opt_expand", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_expansion", "to": "opt_hold", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hold", "to": "fac_europe_entry", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hold", "to": "fac_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_europe_entry", "to": "out_revenue", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "fac_europe_entry", "to": "out_market_share", "strength": {"mean": 0.70, "std": 0.20}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_europe_entry", "to": "risk_operational", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.88, "effect_direction": "positive"},
+      {"from": "fac_investment", "to": "out_revenue", "strength": {"mean": 0.20, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_investment", "to": "risk_financial", "strength": {"mean": 0.65, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "fac_churn_rate", "to": "risk_financial", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_competition", "to": "out_market_share", "strength": {"mean": -0.30, "std": 0.22}, "exists_probability": 0.75, "effect_direction": "negative"},
+      {"from": "fac_regulations", "to": "risk_operational", "strength": {"mean": 0.45, "std": 0.25}, "exists_probability": 0.70, "effect_direction": "positive"},
+      {"from": "out_revenue", "to": "goal_growth", "strength": {"mean": 0.45, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+      {"from": "out_market_share", "to": "goal_growth", "strength": {"mean": 0.15, "std": 0.15}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "risk_operational", "to": "goal_growth", "strength": {"mean": -0.15, "std": 0.18}, "exists_probability": 0.85, "effect_direction": "negative"},
+      {"from": "risk_financial", "to": "goal_growth", "strength": {"mean": -0.25, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "negative"}
+    ]
+  },
+  "edit_instruction": "Add an edge from Revenue Growth back to Expansion Investment",
+  "expected": {
+    "has_operations": false,
+    "topology_must_hold": true,
+    "expect_warning_substrings": ["cycle"],
+    "expect_rerun": false
+  }
+}

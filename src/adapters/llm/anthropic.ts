@@ -34,6 +34,7 @@ export type DraftArgs = {
   seed: number;
   model?: string;
   includeDebug?: boolean;
+  briefSignalsHeader?: string;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -261,7 +262,8 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
     : "";
 
   const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
-  const userContent = `## Brief\n${args.brief}${docContext}${complianceReminder}`;
+  const briefSignalsHeader = args.briefSignalsHeader ?? "";
+  const userContent = `## Brief\n${args.brief}${docContext}${complianceReminder}${briefSignalsHeader}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -1924,6 +1926,7 @@ export async function chatWithAnthropic(
 
     log.info(
       {
+        provider: 'anthropic',
         model,
         latency_ms: latencyMs,
         input_tokens: response.usage.input_tokens,
@@ -2131,6 +2134,7 @@ export async function chatWithToolsAnthropic(
 
     log.info(
       {
+        provider: 'anthropic',
         model,
         latency_ms: latencyMs,
         input_tokens: response.usage.input_tokens,
@@ -2220,6 +2224,7 @@ export class AnthropicAdapter implements LLMAdapter {
         docs,
         seed,
         model: this.model,
+        briefSignalsHeader: args.briefSignalsHeader,
       },
       { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault }
     );

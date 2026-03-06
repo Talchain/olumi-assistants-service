@@ -551,7 +551,8 @@ export class OpenAIAdapter implements LLMAdapter {
           .join("\n\n")}`
       : "";
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
-    const userContent = `## Brief\n${brief}${docContext}${complianceReminder}`;
+    const briefSignalsHeader = args.briefSignalsHeader ?? "";
+    const userContent = `## Brief\n${brief}${docContext}${complianceReminder}${briefSignalsHeader}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();

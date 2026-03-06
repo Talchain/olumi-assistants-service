@@ -13,6 +13,7 @@ vi.mock("../../../src/adapters/llm/router.js", () => ({
       ]),
     }),
   }),
+  getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
 
 // Mock prompt loader

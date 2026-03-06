@@ -89,6 +89,10 @@ type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
   archetype_hint?: string;
   raw_output?: boolean;
+  /** Pre-formatted BriefSignals header to append to user message (from preflight decision). */
+  briefSignalsHeader?: string;
+  /** Deterministic bias signals from BriefSignals v1 — persisted in response payload + trace. */
+  bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
 };
 
 /**
@@ -2176,6 +2180,8 @@ export async function finaliseCeeDraftResponse(
     } : { brief_hash: briefHash }),
     // Goal handling observability
     goal_handling: goalHandling as any,
+    // BriefSignals v1 — deterministic bias detection (persisted on trace for debug bundles)
+    ...(input.bias_signals?.length ? { bias_signals: input.bias_signals } : {}),
   } as any;
 
   const validationIssues: CEEValidationIssue[] = [];
@@ -2503,6 +2509,8 @@ export async function finaliseCeeDraftResponse(
     goal_connectivity: goalConnectivity,
     model_quality_factors: modelQualityFactors,
     intervention_hints: interventionHints.length > 0 ? interventionHints : undefined,
+    // BriefSignals v1 — deterministic bias detection
+    bias_signals: input.bias_signals?.length ? input.bias_signals : undefined,
   };
 
   // Pipeline checkpoint: post_stabilisation (final graph state before verification)

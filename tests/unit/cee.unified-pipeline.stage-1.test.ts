@@ -27,6 +27,7 @@ vi.mock("../../src/utils/costGuard.js", () => ({
 
 vi.mock("../../src/adapters/llm/router.js", () => ({
   getAdapter: vi.fn(),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({

@@ -106,10 +106,13 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     turnPlan.deferred_tools = deferredTools;
   }
 
-  // Merge suggested actions
+  // Merge suggested actions: LLM-originated + tool-originated + rescue routes
   const suggestedActions: SuggestedAction[] = [
     ...llmResult.suggested_actions,
   ];
+  if (toolResult.suggested_actions && toolResult.suggested_actions.length > 0) {
+    suggestedActions.push(...toolResult.suggested_actions);
+  }
 
   // When stuck, merge rescue routes into suggested_actions
   if (enrichedContext.stuck.detected) {

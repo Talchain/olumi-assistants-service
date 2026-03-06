@@ -12,6 +12,7 @@
 
 import { log } from "../../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../../config/timeouts.js";
+import { getMaxTokensFromConfig } from "../../../adapters/llm/router.js";
 import { classifyIntent } from "../../intent-gate.js";
 import type { ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
@@ -81,11 +82,13 @@ export async function phase3Generate(
         "V2 pipeline: deterministic routing — skipping LLM",
       );
 
-      // For run_exercise, pass the exercise type through as toolInput
-      const deterministicInput: Record<string, unknown> =
-        intentGate.tool === 'run_exercise' && intentGate.exercise
-          ? { exercise: intentGate.exercise }
-          : {};
+      // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
+      let deterministicInput: Record<string, unknown> = {};
+      if (intentGate.tool === 'run_exercise' && intentGate.exercise) {
+        deterministicInput = { exercise: intentGate.exercise };
+      } else if (intentGate.tool === 'research_topic' && intentGate.research_query) {
+        deterministicInput = { query: intentGate.research_query };
+      }
       return buildDeterministicLLMResult(intentGate.tool, deterministicInput);
     }
 
@@ -137,6 +140,7 @@ export async function phase3Generate(
       messages,
       tools: toolDefs,
       tool_choice: { type: 'auto' },
+      maxTokens: getMaxTokensFromConfig('orchestrator'),
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );

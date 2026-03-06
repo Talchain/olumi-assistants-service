@@ -55,6 +55,8 @@ const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'critique_graph': 'critique',
   'validate': 'validation',
   'decision_review': 'decision_review',
+  'orchestrator': 'orchestrator',
+  'edit_graph': 'edit_graph',
 };
 
 /**

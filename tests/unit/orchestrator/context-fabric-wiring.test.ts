@@ -31,6 +31,7 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
     chat: mockChat,
     chatWithTools: mockChatWithTools,
   }),
+  getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../../../src/orchestrator/plot-client.js', async (importOriginal) => {

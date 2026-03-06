@@ -320,6 +320,12 @@ export const CEEDraftGraphResponseV1Schema = DraftGraphOutput.and(
       // Graph quality enhancement - Phase 1
       weight_suggestions: z.array(CEEWeightSuggestionV1Schema).optional(),
       comparison_suggested: z.boolean().optional(),
+      // BriefSignals v1 — deterministic bias detection (persisted for downstream correlation)
+      bias_signals: z.array(z.object({
+        type: z.enum(["sunk_cost", "anchoring"]),
+        confidence: z.literal("high"),
+        evidence: z.string(),
+      })).optional(),
     })
     .passthrough(),
 );

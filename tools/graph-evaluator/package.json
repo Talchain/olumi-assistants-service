@@ -16,6 +16,7 @@
     "openai": "^6.7.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.0",
     "tsx": "^4.21.0",

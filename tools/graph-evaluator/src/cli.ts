@@ -1,12 +1,16 @@
 /**
  * CLI entry point for the graph evaluator.
  *
- * Parses CLI arguments, orchestrates the run, and handles all file I/O.
- * Calls runner, scorer, and reporter as pure functions.
+ * Supports three prompt types via --type flag:
+ *   draft_graph (default), edit_graph, decision_review
+ *
+ * Uses a per-type adapter pattern — each type has its own fixture loader,
+ * request builder, response parser, and scorer.
  *
  * Usage:
- *   npx ts-node --esm src/cli.ts --prompt prompts/draft_graph_v20.txt
- *   npx ts-node --esm src/cli.ts --prompt prompts/draft_graph_v20.txt --dry-run
+ *   npx tsx src/cli.ts --type draft_graph --prompt prompts/v170.txt --models gpt-4o
+ *   npx tsx src/cli.ts --type edit_graph --prompt prompts/edit_graph_v2.txt --models gpt-4o --cases all
+ *   npx tsx src/cli.ts --type decision_review --prompt prompts/decision_review_v11.txt --models gpt-4o
  */
 
 import { config as loadDotenv } from "dotenv";
@@ -33,7 +37,22 @@ import {
   ensureDir,
 } from "./io.js";
 
-import type { ScoredResult, RunManifest, RunConfig } from "./types.js";
+import { DraftGraphAdapter } from "./adapters/draft-graph.js";
+import { EditGraphAdapter } from "./adapters/edit-graph.js";
+import { DecisionReviewAdapter } from "./adapters/decision-review.js";
+import { ResearchAdapter, runResearchFixture } from "./adapters/research.js";
+
+import type {
+  ScoredResult,
+  RunManifest,
+  RunConfig,
+  PromptType,
+  BaseFixture,
+  GenericScoredResult,
+  LLMResponse,
+  EvaluatorAdapter,
+  ResearchFixture,
+} from "./types.js";
 
 // ESM __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -44,20 +63,61 @@ const TOOL_ROOT = resolve(__dirname, "..");
 // Version
 // =============================================================================
 
-const TOOL_VERSION = "1.0.0";
+const TOOL_VERSION = "2.0.0";
+
+// =============================================================================
+// Adapter resolution
+// =============================================================================
+
+function getAdapter(type: PromptType): EvaluatorAdapter {
+  switch (type) {
+    case "draft_graph":
+      return new DraftGraphAdapter();
+    case "edit_graph":
+      return new EditGraphAdapter();
+    case "decision_review":
+      return new DecisionReviewAdapter();
+    case "research":
+      return new ResearchAdapter();
+    default:
+      throw new Error(`Unknown prompt type: ${type}`);
+  }
+}
+
+function getCasesDir(type: PromptType): string {
+  switch (type) {
+    case "draft_graph":
+      return join(TOOL_ROOT, "briefs");
+    case "edit_graph":
+      return join(TOOL_ROOT, "fixtures", "edit-graph");
+    case "decision_review":
+      return join(TOOL_ROOT, "fixtures", "decision-review");
+    case "research":
+      return join(TOOL_ROOT, "fixtures", "research");
+    default:
+      throw new Error(`Unknown prompt type: ${type}`);
+  }
+}
 
 // =============================================================================
 // Main
 // =============================================================================
 
 async function main(): Promise<void> {
-  loadDotenv();
+  // Load .env from tool root first, then fall back to repo root two levels up
+  loadDotenv({ path: join(TOOL_ROOT, ".env") });
+  loadDotenv({ path: join(TOOL_ROOT, "..", "..", ".env") });
 
   const program = new Command()
     .name("graph-evaluator")
-    .description("Evaluate LLM draft-graph generation quality across models and briefs")
+    .description("Evaluate LLM prompt quality across models and test cases")
     .version(TOOL_VERSION)
     .requiredOption("--prompt <path>", "Path to the system prompt file (required)")
+    .option(
+      "--type <type>",
+      "Prompt type: draft_graph, edit_graph, decision_review (default: draft_graph)",
+      "draft_graph"
+    )
     .option(
       "--models <ids>",
       "Comma-separated model IDs to run (default: all)",
@@ -65,7 +125,12 @@ async function main(): Promise<void> {
     )
     .option(
       "--briefs <ids>",
-      "Comma-separated brief IDs to run (default: all)",
+      "Comma-separated brief/case IDs to run (default: all). Alias for --cases on draft_graph.",
+      ""
+    )
+    .option(
+      "--cases <ids>",
+      "Comma-separated case IDs to run (default: all)",
       ""
     )
     .option("--force", "Force re-run even if cached results exist", false)
@@ -76,33 +141,47 @@ async function main(): Promise<void> {
     )
     .option("--dry-run", "List combinations without calling APIs", false)
     .option("--run-id <id>", "Resume a specific run ID instead of generating a new one")
+    .option("--dsk-enabled", "Force DSK injection for all decision_review fixtures", false)
     .parse(process.argv);
 
   const opts = program.opts<{
     prompt: string;
+    type: string;
     models: string;
     briefs: string;
+    cases: string;
     force: boolean;
     resume: boolean;
     dryRun: boolean;
     runId?: string;
+    dskEnabled: boolean;
   }>();
+
+  const promptType = opts.type as PromptType;
+  if (!["draft_graph", "edit_graph", "decision_review", "research"].includes(promptType)) {
+    console.error(`Invalid --type: ${opts.type}. Must be draft_graph, edit_graph, decision_review, or research.`);
+    process.exit(1);
+  }
 
   // ── Resolve paths ──────────────────────────────────────────────────────────
   const promptPath = resolve(opts.prompt);
   const modelsDir = join(TOOL_ROOT, "models");
-  const briefsDir = join(TOOL_ROOT, "briefs");
+  const casesDir = getCasesDir(promptType);
   const resultsDir = join(TOOL_ROOT, "results");
 
   // ── Parse filter args ──────────────────────────────────────────────────────
   const modelFilter = opts.models
     ? opts.models.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  const briefFilter = opts.briefs
-    ? opts.briefs.split(",").map((s) => s.trim()).filter(Boolean)
+
+  // --cases takes priority, --briefs is alias for backward compat
+  // "all" is a sentinel meaning "no filter" — strip it so all cases run
+  const caseFilterRaw = opts.cases || opts.briefs;
+  const caseFilter = caseFilterRaw
+    ? caseFilterRaw.split(",").map((s) => s.trim()).filter((s) => s && s !== "all")
     : [];
 
-  // ── Load inputs ────────────────────────────────────────────────────────────
+  // ── Load models ─────────────────────────────────────────────────────────────
   console.log("Loading configuration...");
 
   let models;
@@ -118,19 +197,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  let briefs;
-  try {
-    briefs = await readBriefs(briefsDir, briefFilter.length > 0 ? briefFilter : undefined);
-  } catch (err) {
-    console.error(`Failed to load briefs from ${briefsDir}:`, err);
-    process.exit(1);
-  }
-
-  if (briefs.length === 0) {
-    console.error("No briefs found. Check briefs/ directory and --briefs filter.");
-    process.exit(1);
-  }
-
+  // ── Load prompt ─────────────────────────────────────────────────────────────
   let promptContent;
   try {
     promptContent = await readPrompt(promptPath);
@@ -147,10 +214,89 @@ async function main(): Promise<void> {
     reminderContent = (await readFile(reminderPath, "utf-8")).trim();
     console.log(`Reminder: ${reminderPath}`);
   } catch {
-    // No reminder file — proceed without it
+    // No reminder file
   }
 
-  // ── Build run configuration ────────────────────────────────────────────────
+  // ── Route to type-specific or legacy path ──────────────────────────────────
+  if (promptType === "draft_graph") {
+    await runDraftGraph({
+      promptPath,
+      promptContent,
+      reminderContent,
+      models,
+      modelsDir,
+      casesDir,
+      resultsDir,
+      caseFilter,
+      opts,
+    });
+  } else if (promptType === "research") {
+    await runResearch({
+      promptPath,
+      promptContent,
+      models,
+      modelsDir,
+      casesDir,
+      resultsDir,
+      caseFilter,
+      opts,
+    });
+  } else {
+    await runGenericType({
+      promptType,
+      promptPath,
+      promptContent,
+      reminderContent,
+      models,
+      modelsDir,
+      casesDir,
+      resultsDir,
+      caseFilter,
+      dskEnabled: opts.dskEnabled,
+      opts,
+    });
+  }
+}
+
+// =============================================================================
+// Draft-graph legacy path (preserves exact existing behaviour)
+// =============================================================================
+
+interface DraftGraphRunArgs {
+  promptPath: string;
+  promptContent: string;
+  reminderContent?: string;
+  models: Awaited<ReturnType<typeof readModels>>;
+  modelsDir: string;
+  casesDir: string;
+  resultsDir: string;
+  caseFilter: string[];
+  opts: {
+    prompt: string;
+    force: boolean;
+    resume: boolean;
+    dryRun: boolean;
+    runId?: string;
+  };
+}
+
+async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
+  const { promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, opts } = args;
+
+  let briefs;
+  try {
+    briefs = await readBriefs(casesDir, caseFilter.length > 0 ? caseFilter : undefined);
+  } catch (err) {
+    console.error(`Failed to load briefs from ${casesDir}:`, err);
+    process.exit(1);
+  }
+
+  if (briefs.length === 0) {
+    console.error("No briefs found. Check briefs/ directory and --briefs/--cases filter.");
+    process.exit(1);
+  }
+
+  // Build run configuration
   const runId = opts.runId ?? buildRunId(opts.prompt);
   const timestamp = new Date().toISOString();
   const promptHash = hashContent(promptContent);
@@ -167,9 +313,10 @@ async function main(): Promise<void> {
     resume: opts.resume,
     dry_run: opts.dryRun,
     results_dir: resultsDir,
+    prompt_type: "draft_graph",
   };
 
-  // ── Dry run: list combinations and exit ───────────────────────────────────
+  // Dry run
   if (opts.dryRun) {
     console.log(`\n[Dry Run] Would execute ${models.length * briefs.length} combination(s):\n`);
     for (const model of models) {
@@ -182,10 +329,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  // ── Create results directory ───────────────────────────────────────────────
+  // Create results directory
   await ensureDir(join(resultsDir, runId));
 
-  // ── Write run manifest ─────────────────────────────────────────────────────
+  // Write run manifest
   const gitSha = getGitSha();
   const modelHashes: Record<string, { config_hash: string }> = {};
   for (const model of models) {
@@ -200,7 +347,7 @@ async function main(): Promise<void> {
   const briefHashes: Record<string, { content_hash: string }> = {};
   for (const brief of briefs) {
     try {
-      const briefPath = join(briefsDir, `${brief.id}.md`);
+      const briefPath = join(casesDir, `${brief.id}.md`);
       briefHashes[brief.id] = { content_hash: await hashFile(briefPath) };
     } catch {
       briefHashes[brief.id] = { content_hash: "unknown" };
@@ -220,7 +367,7 @@ async function main(): Promise<void> {
 
   await saveManifest(resultsDir, runId, manifest);
 
-  // ── Run LLM calls ──────────────────────────────────────────────────────────
+  // Run LLM calls
   console.log(`\nStarting run: ${runId}`);
   console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
   console.log(`Briefs: ${briefs.map((b) => b.id).join(", ")}`);
@@ -248,7 +395,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // ── Score all responses ────────────────────────────────────────────────────
+  // Score all responses
   console.log("\nScoring results...");
 
   const scored: ScoredResult[] = responses.map((response) => {
@@ -262,7 +409,7 @@ async function main(): Promise<void> {
     };
   });
 
-  // ── Generate reports ───────────────────────────────────────────────────────
+  // Generate reports
   console.log("Generating reports...");
 
   const reports = generate({
@@ -275,7 +422,7 @@ async function main(): Promise<void> {
 
   await saveReports(resultsDir, runId, reports);
 
-  // ── Print summary ──────────────────────────────────────────────────────────
+  // Print summary
   const successCount = scored.filter((r) => r.score.overall_score != null).length;
   const failCount = scored.filter((r) => r.response.failure_code).length;
   const invalidCount = scored.filter(
@@ -299,6 +446,562 @@ async function main(): Promise<void> {
       );
     }
   }
+}
+
+// =============================================================================
+// Generic type path (edit_graph, decision_review)
+// =============================================================================
+
+interface GenericRunArgs {
+  promptType: PromptType;
+  promptPath: string;
+  promptContent: string;
+  reminderContent?: string;
+  models: Awaited<ReturnType<typeof readModels>>;
+  modelsDir: string;
+  casesDir: string;
+  resultsDir: string;
+  caseFilter: string[];
+  dskEnabled: boolean;
+  opts: {
+    prompt: string;
+    force: boolean;
+    resume: boolean;
+    dryRun: boolean;
+    runId?: string;
+  };
+}
+
+async function runGenericType(args: GenericRunArgs): Promise<void> {
+  const { promptType, promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, dskEnabled, opts } = args;
+
+  const adapter = getAdapter(promptType);
+
+  let fixtures: Array<{ id: string; [key: string]: unknown }>;
+  try {
+    fixtures = await adapter.loadCases(casesDir);
+  } catch (err) {
+    console.error(`Failed to load fixtures from ${casesDir}:`, err);
+    process.exit(1);
+  }
+
+  // Apply filter
+  if (caseFilter.length > 0) {
+    fixtures = fixtures.filter((f: { id: string }) => caseFilter.includes(f.id));
+  }
+
+  // --dsk-enabled: force inject_dsk=true on all fixtures (decision_review only)
+  if (dskEnabled && promptType === "decision_review") {
+    fixtures = fixtures.map((f) => ({ ...f, inject_dsk: true }));
+  }
+
+  if (fixtures.length === 0) {
+    console.error(`No fixtures found. Check ${casesDir} and --cases filter.`);
+    process.exit(1);
+  }
+
+  // Build fake Brief objects for the runner (which expects briefs)
+  const pseudoBriefs = fixtures.map((f) => ({
+    id: f.id,
+    meta: { expect_status_quo: false, has_numeric_target: false, complexity: "simple" as const },
+    body: "", // Will be overridden by adapter
+  }));
+
+  // Build run configuration
+  const runId = opts.runId ?? buildRunId(opts.prompt);
+  const timestamp = new Date().toISOString();
+  const promptHash = hashContent(promptContent);
+  const promptFilename = opts.prompt.split(/[/\\]/).pop() ?? opts.prompt;
+
+  const config: RunConfig = {
+    run_id: runId,
+    timestamp,
+    prompt_file: opts.prompt,
+    prompt_content: promptContent,
+    model_ids: models.map((m) => m.id),
+    brief_ids: fixtures.map((f) => f.id),
+    force: opts.force,
+    resume: opts.resume,
+    dry_run: opts.dryRun,
+    results_dir: resultsDir,
+    prompt_type: promptType,
+  };
+
+  // Dry run
+  if (opts.dryRun) {
+    console.log(`\n[Dry Run] Would execute ${models.length * fixtures.length} combination(s):\n`);
+    for (const model of models) {
+      for (const fixture of fixtures) {
+        console.log(`  ${model.id.padEnd(20)} × ${fixture.id}`);
+      }
+    }
+    console.log(`\nPrompt type: ${promptType}`);
+    console.log(`Prompt: ${opts.prompt} (${promptHash})`);
+    console.log(`Run ID would be: ${runId}`);
+    return;
+  }
+
+  // Create results directory
+  await ensureDir(join(resultsDir, runId));
+
+  // Write manifest
+  const gitSha = getGitSha();
+  const modelHashes: Record<string, { config_hash: string }> = {};
+  for (const model of models) {
+    try {
+      const configPath = join(modelsDir, `${model.id}.json`);
+      modelHashes[model.id] = { config_hash: await hashFile(configPath) };
+    } catch {
+      modelHashes[model.id] = { config_hash: "unknown" };
+    }
+  }
+
+  const briefHashes: Record<string, { content_hash: string }> = {};
+  for (const fixture of fixtures) {
+    briefHashes[fixture.id] = { content_hash: hashContent(JSON.stringify(fixture)) };
+  }
+
+  const manifest: RunManifest = {
+    run_id: runId,
+    timestamp,
+    git_sha: gitSha,
+    tool_version: TOOL_VERSION,
+    cli_args: process.argv.slice(2),
+    prompt: { filename: promptFilename, content_hash: promptHash },
+    models: modelHashes,
+    briefs: briefHashes,
+  };
+
+  await saveManifest(resultsDir, runId, manifest);
+
+  // Build per-fixture request content so runner can use it
+  const fixtureMap = new Map(fixtures.map((f) => [f.id, f]));
+
+  // Override brief bodies with adapter-built user messages
+  for (const pb of pseudoBriefs) {
+    const fixture = fixtureMap.get(pb.id)!;
+    const { system, user } = adapter.buildRequest(fixture, promptContent);
+    // Store the adapter-built user message as the brief body
+    pb.body = user;
+    // For non-draft_graph, the system prompt may be modified (e.g. DSK injection)
+    // We handle this by using a per-fixture prompt override mechanism
+  }
+
+  // For decision_review with DSK injection, we need per-fixture system prompts
+  // The runner doesn't support this, so we run fixtures sequentially
+  console.log(`\nStarting run: ${runId} (type: ${promptType})`);
+  console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
+  console.log(`Cases: ${fixtures.map((f) => f.id).join(", ")}`);
+  console.log();
+
+  const allResults: GenericScoredResult[] = [];
+
+  for (const model of models) {
+    for (const fixture of fixtures) {
+      const fixtureId = fixture.id;
+
+      // Check cache
+      if (!opts.force) {
+        const cached = await loadResponse(resultsDir, runId, model.id, fixtureId);
+        if (cached !== null && !opts.resume) {
+          console.log(`  [cache]  Skipping ${model.id} × ${fixtureId}`);
+          const parsed = cached.parsed_json ?? (cached.parsed_graph as unknown as Record<string, unknown>) ?? null;
+          const scoreResult = adapter.score(fixture, parsed, cached);
+          allResults.push({
+            response: cached,
+            score: scoreResult,
+            fixture_id: fixtureId,
+            model,
+            prompt_type: promptType,
+          });
+          continue;
+        }
+      }
+
+      // Build request via adapter
+      const { system, user } = adapter.buildRequest(fixture, promptContent);
+
+      // Run via the runner's single-call path
+      const responses = await run({
+        models: [model],
+        briefs: [{ id: fixtureId, meta: { expect_status_quo: false, has_numeric_target: false, complexity: "simple" }, body: user }],
+        promptContent: system,
+        reminderContent,
+        promptFile: opts.prompt,
+        runId,
+        resultsDir,
+        force: opts.force,
+        resume: opts.resume,
+        dryRun: false,
+        loadCached: async () => null, // Already handled above
+        saveResult: async (_modelId, _briefId, result) => {
+          // Also store parsed_json for non-draft_graph types
+          if (result.status === "success" && result.raw_text) {
+            const parseResult = adapter.parseResponse(result.raw_text);
+            if (parseResult.parsed) {
+              result.parsed_json = parseResult.parsed;
+            }
+          }
+          await saveResponse(resultsDir, runId, model.id, fixtureId, result);
+        },
+      });
+
+      const response = responses[0];
+      if (!response) continue;
+
+      // Parse and score
+      let parsed: Record<string, unknown> | null = null;
+      if (response.status === "success" && response.raw_text) {
+        const parseResult = adapter.parseResponse(response.raw_text);
+        parsed = parseResult.parsed;
+        if (parseResult.parsed) {
+          response.parsed_json = parseResult.parsed;
+        }
+      }
+
+      const scoreResult = adapter.score(fixture, parsed, response);
+
+      // Runner already printed "Done: ... latency/cost". Append the score on a new line.
+      console.log(`  Score:   ${model.id} × ${fixtureId} — ${scoreResult.overall?.toFixed(3) ?? "—"}`);
+
+      allResults.push({
+        response,
+        score: scoreResult,
+        fixture_id: fixtureId,
+        model,
+        prompt_type: promptType,
+      });
+    }
+  }
+
+  if (allResults.length === 0) {
+    console.log("No responses to score. Run complete.");
+    return;
+  }
+
+  // Generate generic CSV report
+  const csvLines = [
+    [
+      "run_id", "prompt_type", "model_id", "case_id", "target_mode",
+      "overall_score", "latency_ms", "input_tokens", "output_tokens",
+      "reasoning_tokens", "est_cost_usd", "failure_code", "parse_error",
+      ...Object.keys(allResults[0]?.score.dimensions ?? {}),
+    ].join(","),
+  ];
+
+  for (const r of allResults) {
+    const dims = Object.values(r.score.dimensions).map((v) =>
+      v === null ? "" : typeof v === "boolean" ? (v ? "1" : "0") : String(v)
+    );
+    csvLines.push(
+      [
+        config.run_id,
+        promptType,
+        r.model.id,
+        r.fixture_id,
+        r.model.target_mode,
+        r.score.overall?.toFixed(4) ?? "",
+        String(r.response.latency_ms),
+        String(r.response.input_tokens ?? ""),
+        String(r.response.output_tokens ?? ""),
+        String(r.response.reasoning_tokens ?? ""),
+        (r.response.est_cost_usd ?? 0).toFixed(6),
+        r.response.failure_code ?? "",
+        r.score.parse_error ?? "",
+        ...dims,
+      ].join(",")
+    );
+  }
+
+  const scoresCsv = csvLines.join("\n") + "\n";
+  const summaryMd = generateGenericSummary(allResults, config, promptHash);
+
+  await ensureDir(join(resultsDir, runId));
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(resultsDir, runId, "scores.csv"), scoresCsv, "utf-8");
+  await writeFile(join(resultsDir, runId, "summary.md"), summaryMd, "utf-8");
+
+  // Print summary
+  const successCount = allResults.filter((r) => r.score.overall != null).length;
+  const failCount = allResults.filter((r) => r.response.failure_code).length;
+
+  console.log(`\n✓ Run complete: ${runId}`);
+  console.log(`  ${successCount} scored | ${failCount} failed`);
+  console.log(`  Results: ${join(resultsDir, runId)}`);
+
+  const topResults = allResults
+    .filter((r) => r.score.overall != null)
+    .sort((a, b) => (b.score.overall ?? 0) - (a.score.overall ?? 0))
+    .slice(0, 3);
+
+  if (topResults.length > 0) {
+    console.log("\nTop results:");
+    for (const r of topResults) {
+      console.log(
+        `  ${r.model.id.padEnd(20)} × ${r.fixture_id.padEnd(30)} — overall: ${r.score.overall!.toFixed(3)}`
+      );
+    }
+  }
+}
+
+// =============================================================================
+// Research path (uses web_search_preview — bypasses standard runner)
+// =============================================================================
+
+interface ResearchRunArgs {
+  promptPath: string;
+  promptContent: string;
+  models: Awaited<ReturnType<typeof readModels>>;
+  modelsDir: string;
+  casesDir: string;
+  resultsDir: string;
+  caseFilter: string[];
+  opts: {
+    prompt: string;
+    force: boolean;
+    resume: boolean;
+    dryRun: boolean;
+    runId?: string;
+  };
+}
+
+async function runResearch(args: ResearchRunArgs): Promise<void> {
+  const { models, modelsDir, casesDir, resultsDir, caseFilter, opts } = args;
+
+  const adapter = new ResearchAdapter();
+
+  let fixtures: ResearchFixture[];
+  try {
+    fixtures = await adapter.loadCases(casesDir);
+  } catch (err) {
+    console.error(`Failed to load research fixtures from ${casesDir}:`, err);
+    process.exit(1);
+  }
+
+  if (caseFilter.length > 0) {
+    fixtures = fixtures.filter((f) => caseFilter.includes(f.id));
+  }
+
+  if (fixtures.length === 0) {
+    console.error(`No research fixtures found. Check ${casesDir} and --cases filter.`);
+    process.exit(1);
+  }
+
+  const runId = opts.runId ?? buildRunId(opts.prompt);
+  const timestamp = new Date().toISOString();
+  const promptHash = hashContent("research"); // No prompt file for research
+  const promptFilename = "research (web_search_preview)";
+
+  const runConfig: RunConfig = {
+    run_id: runId,
+    timestamp,
+    prompt_file: opts.prompt,
+    prompt_content: "",
+    model_ids: models.map((m) => m.id),
+    brief_ids: fixtures.map((f) => f.id),
+    force: opts.force,
+    resume: opts.resume,
+    dry_run: opts.dryRun,
+    results_dir: resultsDir,
+    prompt_type: "research",
+  };
+
+  if (opts.dryRun) {
+    console.log(`\n[Dry Run] Would execute ${models.length * fixtures.length} combination(s):\n`);
+    for (const model of models) {
+      for (const fixture of fixtures) {
+        console.log(`  ${model.id.padEnd(20)} × ${fixture.id}`);
+      }
+    }
+    console.log(`\nPrompt type: research (web_search_preview)`);
+    console.log(`Run ID would be: ${runId}`);
+    return;
+  }
+
+  await ensureDir(join(resultsDir, runId));
+
+  const gitSha = getGitSha();
+  const modelHashes: Record<string, { config_hash: string }> = {};
+  for (const model of models) {
+    try {
+      const configPath = join(modelsDir, `${model.id}.json`);
+      modelHashes[model.id] = { config_hash: await hashFile(configPath) };
+    } catch {
+      modelHashes[model.id] = { config_hash: "unknown" };
+    }
+  }
+
+  const briefHashes: Record<string, { content_hash: string }> = {};
+  for (const fixture of fixtures) {
+    briefHashes[fixture.id] = { content_hash: hashContent(JSON.stringify(fixture)) };
+  }
+
+  const manifest: RunManifest = {
+    run_id: runId,
+    timestamp,
+    git_sha: gitSha,
+    tool_version: TOOL_VERSION,
+    cli_args: process.argv.slice(2),
+    prompt: { filename: promptFilename, content_hash: promptHash },
+    models: modelHashes,
+    briefs: briefHashes,
+  };
+
+  await saveManifest(resultsDir, runId, manifest);
+
+  console.log(`\nStarting run: ${runId} (type: research)`);
+  console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
+  console.log(`Cases: ${fixtures.map((f) => f.id).join(", ")}`);
+  console.log();
+
+  const allResults: GenericScoredResult[] = [];
+
+  for (const model of models) {
+    for (const fixture of fixtures) {
+      // Check cache
+      if (!opts.force) {
+        const cached = await loadResponse(resultsDir, runId, model.id, fixture.id);
+        if (cached !== null && !opts.resume) {
+          console.log(`  [cache]  Skipping ${model.id} × ${fixture.id}`);
+          const parsed = cached.parsed_json ?? null;
+          const scoreResult = adapter.score(fixture, parsed, cached);
+          allResults.push({
+            response: cached,
+            score: scoreResult,
+            fixture_id: fixture.id,
+            model,
+            prompt_type: "research",
+          });
+          continue;
+        }
+      }
+
+      console.log(`  Running: ${model.id} × ${fixture.id}...`);
+
+      const { response, parsed } = await runResearchFixture(fixture, model);
+
+      await saveResponse(resultsDir, runId, model.id, fixture.id, response);
+
+      const scoreResult = adapter.score(fixture, parsed, response);
+
+      const statusStr =
+        response.status === "success"
+          ? `✓ ${response.latency_ms}ms, cost $${(response.est_cost_usd ?? 0).toFixed(4)}`
+          : `✗ ${response.failure_code}`;
+      console.log(`  Done:    ${model.id} × ${fixture.id} — ${statusStr}`);
+      console.log(`  Score:   ${model.id} × ${fixture.id} — ${scoreResult.overall?.toFixed(3) ?? "—"}`);
+
+      allResults.push({
+        response,
+        score: scoreResult,
+        fixture_id: fixture.id,
+        model,
+        prompt_type: "research",
+      });
+    }
+  }
+
+  if (allResults.length === 0) {
+    console.log("No responses to score. Run complete.");
+    return;
+  }
+
+  // Generate CSV + summary
+  const csvLines = [
+    [
+      "run_id", "prompt_type", "model_id", "case_id", "target_mode",
+      "overall_score", "latency_ms", "input_tokens", "output_tokens",
+      "est_cost_usd", "failure_code",
+      ...Object.keys(allResults[0]?.score.dimensions ?? {}),
+    ].join(","),
+  ];
+
+  for (const r of allResults) {
+    const dims = Object.values(r.score.dimensions).map((v) =>
+      v === null ? "" : typeof v === "boolean" ? (v ? "1" : "0") : String(v)
+    );
+    csvLines.push(
+      [
+        runConfig.run_id,
+        "research",
+        r.model.id,
+        r.fixture_id,
+        r.model.target_mode,
+        r.score.overall?.toFixed(4) ?? "",
+        String(r.response.latency_ms),
+        String(r.response.input_tokens ?? ""),
+        String(r.response.output_tokens ?? ""),
+        (r.response.est_cost_usd ?? 0).toFixed(6),
+        r.response.failure_code ?? "",
+        ...dims,
+      ].join(",")
+    );
+  }
+
+  const scoresCsv = csvLines.join("\n") + "\n";
+  const summaryMd = generateGenericSummary(allResults, runConfig, promptHash);
+
+  await ensureDir(join(resultsDir, runId));
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(resultsDir, runId, "scores.csv"), scoresCsv, "utf-8");
+  await writeFile(join(resultsDir, runId, "summary.md"), summaryMd, "utf-8");
+
+  const successCount = allResults.filter((r) => r.score.overall != null).length;
+  const failCount = allResults.filter((r) => r.response.failure_code).length;
+
+  console.log(`\n✓ Run complete: ${runId}`);
+  console.log(`  ${successCount} scored | ${failCount} failed`);
+  console.log(`  Results: ${join(resultsDir, runId)}`);
+
+  const topResults = allResults
+    .filter((r) => r.score.overall != null)
+    .sort((a, b) => (b.score.overall ?? 0) - (a.score.overall ?? 0))
+    .slice(0, 3);
+
+  if (topResults.length > 0) {
+    console.log("\nTop results:");
+    for (const r of topResults) {
+      console.log(
+        `  ${r.model.id.padEnd(20)} × ${r.fixture_id.padEnd(30)} — overall: ${r.score.overall!.toFixed(3)}`
+      );
+    }
+  }
+}
+
+// =============================================================================
+// Generic summary generator
+// =============================================================================
+
+function generateGenericSummary(
+  results: GenericScoredResult[],
+  config: RunConfig,
+  promptHash: string
+): string {
+  const lines: string[] = [];
+  lines.push(`# ${config.prompt_type} Evaluator — Run Summary\n`);
+  lines.push(`Run ID: \`${config.run_id}\``);
+  lines.push(`Prompt: \`${config.prompt_file}\` (${promptHash})`);
+  lines.push(`Type: ${config.prompt_type}\n`);
+
+  // Scores table
+  lines.push("## Scores\n");
+  const dimKeys = Object.keys(results[0]?.score.dimensions ?? {});
+  lines.push(`| Model | Case | Overall | ${dimKeys.join(" | ")} | Latency | Failure |`);
+  lines.push(`| --- | --- | --- | ${dimKeys.map(() => "---").join(" | ")} | --- | --- |`);
+
+  for (const r of results) {
+    const dims = Object.values(r.score.dimensions).map((v) => {
+      if (v === null) return "—";
+      if (typeof v === "boolean") return v ? "✓" : "✗";
+      return typeof v === "number" ? v.toFixed(3) : String(v);
+    });
+    lines.push(
+      `| ${r.model.id} | ${r.fixture_id} | ${r.score.overall?.toFixed(3) ?? "—"} | ${dims.join(" | ")} | ${r.response.latency_ms}ms | ${r.response.failure_code ?? "—"} |`
+    );
+  }
+
+  lines.push("");
+  return lines.join("\n");
 }
 
 main().catch((err) => {

@@ -1,0 +1,81 @@
+{
+  "id": "dr-01-clear-winner",
+  "name": "Clear Winner — European Expansion",
+  "description": "Expansion into Europe is the clear winner with high confidence and minimal evidence gaps. The review should be confident and decisive.",
+  "input": {
+    "winner": { "id": "opt_expand", "label": "Enter European Market", "win_probability": 0.72, "outcome_mean": 0.68 },
+    "runner_up": { "id": "opt_hold", "label": "Focus on Domestic", "win_probability": 0.28, "outcome_mean": 0.41 },
+    "margin": 0.15,
+    "deterministic_coaching": {
+      "headline_type": "CLEAR_WINNER",
+      "readiness": "ready",
+      "evidence_gaps": [
+        { "factor_id": "fac_competition", "factor_label": "Competitive Intensity", "voi": 0.05, "confidence": 0.7 }
+      ],
+      "model_critiques": []
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_expand",
+          "option_label": "Enter European Market",
+          "win_probability": 0.72,
+          "outcome": { "mean": 0.68, "p10": 0.42, "p90": 0.89 }
+        },
+        {
+          "option_id": "opt_hold",
+          "option_label": "Focus on Domestic",
+          "win_probability": 0.28,
+          "outcome": { "mean": 0.41, "p10": 0.25, "p90": 0.58 }
+        }
+      ],
+      "factor_sensitivity": [
+        { "factor_id": "fac_europe_entry", "factor_label": "Europe Market Entry", "elasticity": 0.72, "confidence": 0.88 },
+        { "factor_id": "fac_investment", "factor_label": "Expansion Investment", "elasticity": 0.45, "confidence": 0.82 },
+        { "factor_id": "fac_competition", "factor_label": "Competitive Intensity", "elasticity": 0.18, "confidence": 0.70 }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "fac_competition->out_revenue",
+          "from_label": "Competitive Intensity",
+          "to_label": "Revenue Growth",
+          "switch_probability": 0.08
+        }
+      ],
+      "robustness": { "recommendation_stability": 0.91, "overall_confidence": 0.85 }
+    },
+    "graph": {
+      "nodes": [
+        { "id": "dec_expansion", "kind": "decision", "label": "European Market Expansion" },
+        { "id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": { "interventions": { "fac_europe_entry": 1, "fac_investment": 1.0 } } },
+        { "id": "opt_hold", "kind": "option", "label": "Focus on Domestic", "data": { "interventions": { "fac_europe_entry": 0, "fac_investment": 0.2 } } },
+        { "id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry", "category": "controllable" },
+        { "id": "fac_investment", "kind": "factor", "label": "Expansion Investment", "category": "controllable" },
+        { "id": "fac_competition", "kind": "factor", "label": "Competitive Intensity", "category": "external" },
+        { "id": "out_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "risk_operational", "kind": "risk", "label": "Operational Complexity" },
+        { "id": "goal_growth", "kind": "goal", "label": "Reach 800 Pro Customers" }
+      ],
+      "edges": [
+        { "from": "dec_expansion", "to": "opt_expand", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "dec_expansion", "to": "opt_hold", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "fac_europe_entry", "to": "out_revenue", "strength": { "mean": 0.6, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "positive" },
+        { "from": "fac_investment", "to": "risk_operational", "strength": { "mean": 0.55, "std": 0.18 }, "exists_probability": 0.88, "effect_direction": "positive" },
+        { "from": "fac_competition", "to": "out_revenue", "strength": { "mean": -0.30, "std": 0.22 }, "exists_probability": 0.75, "effect_direction": "negative" },
+        { "from": "out_revenue", "to": "goal_growth", "strength": { "mean": 0.45, "std": 0.10 }, "exists_probability": 0.95, "effect_direction": "positive" },
+        { "from": "risk_operational", "to": "goal_growth", "strength": { "mean": -0.25, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "negative" }
+      ]
+    },
+    "brief": "Should we expand into the European market? We have 400 pro customers and want to reach 800."
+  },
+  "expected": {
+    "tone": "confident",
+    "must_mention_factors": ["Competitive Intensity"],
+    "dsk_fields_expected": false,
+    "pre_mortem_expected": false
+  }
+}

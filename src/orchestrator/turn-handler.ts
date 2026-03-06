@@ -21,7 +21,7 @@ import type { FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { ORCHESTRATOR_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
-import { getAdapter } from "../adapters/llm/router.js";
+import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type {
   OrchestratorTurnRequest,
   OrchestratorResponseEnvelope,
@@ -463,6 +463,7 @@ async function dispatchViaLLM(
       messages,
       tools: toolDefs,
       tool_choice: { type: 'auto' },
+      maxTokens: getMaxTokensFromConfig('orchestrator'),
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
@@ -562,6 +563,7 @@ async function dispatchTool(
     let assistantText: string | null = null;
     let analysisResponse = undefined;
     let toolLatencyMs: number | undefined;
+    let editGraphSuggestedActions: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> | undefined;
 
     switch (toolName) {
       case 'run_analysis': {
@@ -601,11 +603,14 @@ async function dispatchTool(
 
       case 'edit_graph': {
         const editDesc = (toolInput.edit_description as string) || turnRequest.message;
-        const adapter = getAdapter('orchestrator');
-        const result = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId, { plotOpts });
-        blocks = result.blocks;
-        assistantText = result.assistantText;
-        toolLatencyMs = result.latencyMs;
+        const adapter = getAdapter('edit_graph');
+        const editResult = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId, { plotOpts });
+        blocks = editResult.blocks;
+        assistantText = editResult.assistantText;
+        toolLatencyMs = editResult.latencyMs;
+        if (editResult.suggestedActions) {
+          editGraphSuggestedActions = editResult.suggestedActions;
+        }
         break;
       }
 
@@ -645,6 +650,7 @@ async function dispatchTool(
       analysisResponse,
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning, toolLatencyMs),
       contextHash,
+      suggestedActions: editGraphSuggestedActions,
     });
 
     log.info(

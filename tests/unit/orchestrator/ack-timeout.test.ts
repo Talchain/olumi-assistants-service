@@ -67,6 +67,7 @@ vi.mock("../../../src/adapters/llm/router.js", () => ({
     chat: mockChat,
     chatWithTools: mockChatWithTools,
   }),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 vi.mock("../../../src/orchestrator/idempotency.js", () => ({

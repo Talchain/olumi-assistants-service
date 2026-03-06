@@ -200,7 +200,7 @@ export interface V2RunResponseEnvelope {
 // Block Types
 // ============================================================================
 
-export type BlockType = 'framing' | 'commentary' | 'graph_patch' | 'fact' | 'review_card' | 'brief';
+export type BlockType = 'framing' | 'commentary' | 'graph_patch' | 'fact' | 'review_card' | 'brief' | 'evidence';
 
 export interface BlockProvenance {
   trigger: string;
@@ -217,7 +217,7 @@ export interface BlockAction {
 export interface ConversationBlock {
   block_id: string;
   block_type: BlockType;
-  data: GraphPatchBlockData | FactBlockData | CommentaryBlockData | BriefBlockData | ReviewCardBlockData | FramingBlockData;
+  data: GraphPatchBlockData | FactBlockData | CommentaryBlockData | BriefBlockData | ReviewCardBlockData | FramingBlockData | EvidenceBlockData;
   actions?: BlockAction[];
   provenance: BlockProvenance;
   related_elements?: { node_ids?: string[]; edge_ids?: string[] };
@@ -313,6 +313,33 @@ export interface FramingBlockData {
   stage: DecisionStage;
   goal?: string;
   constraints?: unknown[];
+}
+
+// ---- Evidence Block ----
+
+/**
+ * Evidence block — research findings from web search, grounded with citations.
+ * Produced by research_topic tool. Claims and mapping suggestions are best-effort;
+ * never auto-applied to the model — advisory only.
+ */
+export interface EvidenceBlockData {
+  query: string;
+  target_factor: string | null;
+  findings: string;
+  claims?: Array<{
+    claim: string;
+    value: string | null;
+    time_period: string | null;
+    context: string | null;
+    source_url: string | null;
+  }>;
+  model_mapping_suggestions?: Array<{
+    target_factor: string;
+    suggested_update: string;
+    confidence: 'direct' | 'inferred';
+  }>;
+  sources: Array<{ title: string; url: string }>;
+  confidence_note: string;
 }
 
 // ============================================================================

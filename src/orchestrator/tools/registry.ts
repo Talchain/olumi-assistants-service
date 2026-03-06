@@ -1,7 +1,7 @@
 /**
  * Tool Registry
  *
- * Returns the 5 LLM-visible tool definitions for the orchestrator.
+ * Returns the 6 LLM-visible tool definitions for the orchestrator.
  * Gate-only tools (run_exercise) are registered in GATE_ONLY_TOOL_NAMES
  * but are NOT in TOOL_DEFINITIONS (invisible to LLM). This ensures:
  * - validateGatePatternsAgainstRegistry() passes (gate names are known)
@@ -88,6 +88,31 @@ const TOOL_DEFINITIONS: OrchestratorToolDefinition[] = [
     },
     output_block_types: ['brief'] as BlockType[],
     requires: ['analysis_response'],
+    long_running: false,
+  },
+  {
+    name: 'research_topic',
+    description: 'Research a topic using web search to find evidence, benchmarks, or data relevant to the decision model.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The research query — what to search for.',
+        },
+        context: {
+          type: 'string',
+          description: 'Optional context about the decision.',
+        },
+        target_factor: {
+          type: 'string',
+          description: 'Optional factor label this research relates to.',
+        },
+      },
+      required: ['query'],
+    },
+    output_block_types: ['evidence'] as BlockType[],
+    requires: [],
     long_running: false,
   },
 ];

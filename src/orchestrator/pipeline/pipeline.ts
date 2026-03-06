@@ -19,6 +19,8 @@ import { phase5Validate } from "./phase5-validation/index.js";
 import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
+import { classifyIntent } from "../intent-gate.js";
+import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 
 /**
  * Execute the five-phase pipeline.
@@ -115,6 +117,25 @@ export async function executePipeline(
 
     // Phase 2: Specialist Routing (stub)
     const specialistResult = phase2Route();
+
+    // Analysis lookup — deterministic short-circuit for factual analysis queries.
+    // Fires AFTER the intent gate (if the gate matched a tool, skip lookup).
+    // If matched, returns a minimal V2 envelope and skips the LLM call entirely.
+    const intentGate = classifyIntent(request.message);
+    if (!intentGate.tool) {
+      const lookupResult = tryAnalysisLookup(
+        request.message,
+        enrichedContext.analysis,
+        enrichedContext.graph,
+      );
+      if (lookupResult.matched) {
+        log.info(
+          { request_id: requestId, pattern: lookupResult.pattern },
+          "V2 pipeline: analysis lookup matched — skipping LLM",
+        );
+        return buildLookupEnvelope(enrichedContext, lookupResult);
+      }
+    }
 
     // Phase 3: LLM Call (or deterministic routing)
     const llmResult = await phase3Generate(

@@ -16,6 +16,8 @@
 
 import { assessBriefReadiness } from "./readiness.js";
 import type { ReadinessAssessment } from "./readiness.js";
+import { computeBriefSignals } from "../signals/brief-signals.js";
+import type { BriefSignals } from "../signals/types.js";
 
 // ============================================================================
 // Types
@@ -74,6 +76,12 @@ export interface PreflightDecision {
   readiness: ReadinessAssessment;
   /** Telemetry fields to emit as cee.preflight.completed (identical from both routes). */
   telemetry: PreflightTelemetryData;
+  /**
+   * Deterministic brief quality signals. Computed once; all downstream
+   * consumers (header, telemetry, response payload) read from here.
+   * Undefined when action === "reject" (gibberish/too-short — no signals).
+   */
+  briefSignals?: BriefSignals;
 }
 
 // ============================================================================
@@ -125,6 +133,7 @@ export function evaluatePreflightDecision(
     const primaryIssue = readiness.preflight.issues[0];
     const rejectionReason = primaryIssue?.code ?? "BRIEF_INVALID";
 
+    // Skip BriefSignals computation on reject (gibberish/too-short)
     return {
       action: "reject",
       httpStatus: 400,
@@ -138,8 +147,17 @@ export function evaluatePreflightDecision(
     };
   }
 
+  // ── Compute BriefSignals (once — all downstream consumers read from here) ─
+  const briefSignals = computeBriefSignals(brief);
+
   // ── Rung 2: Guidance — valid English, but underspecified (strict mode) ────
   if (cfg.preflightStrict && readiness.score < cfg.preflightReadinessThreshold) {
+    // For weak briefs, use BriefSignals missing_items for targeted questions
+    const clarificationQuestions =
+      briefSignals.brief_strength === "weak"
+        ? briefSignals.missing_items.slice(0, 2).map((m) => m.suggested_question)
+        : (readiness.suggested_questions ?? []);
+
     return {
       action: "clarify",
       httpStatus: 200,
@@ -148,20 +166,39 @@ export function evaluatePreflightDecision(
         readiness_score: readiness.score,
         readiness_level: readiness.level,
         summary: readiness.summary,
-        clarification_questions: readiness.suggested_questions ?? [],
+        clarification_questions: clarificationQuestions,
         factors: readiness.factors,
       } satisfies NeedsClarificationPayload,
       readiness,
       telemetry,
+      briefSignals,
     };
   }
 
   // ── Rung 3: Proceed to generation pipeline ────────────────────────────────
+  // For weak briefs in non-strict mode, include advisory clarification
+  // questions in the payload. The UI can surface them without blocking
+  // generation. Without this, BriefSignals is inert when CEE_PREFLIGHT_STRICT=false.
+  let payload: NeedsClarificationPayload | null = null;
+  if (briefSignals.brief_strength === "weak") {
+    payload = {
+      status: "needs_clarification",
+      readiness_score: readiness.score,
+      readiness_level: readiness.level,
+      summary: readiness.summary,
+      clarification_questions: briefSignals.missing_items
+        .slice(0, 2)
+        .map((m) => m.suggested_question),
+      factors: readiness.factors,
+    };
+  }
+
   return {
     action: "proceed",
     httpStatus: 200,
-    payload: null,
+    payload,
     readiness,
     telemetry,
+    briefSignals,
   };
 }

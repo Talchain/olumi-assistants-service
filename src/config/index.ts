@@ -363,6 +363,8 @@ const ConfigSchema = z.object({
       validation: z.string().optional(),
       extraction: z.string().optional(), // Model for LLM-first factor/constraint extraction
       decision_review: z.string().optional(), // Model for decision review
+      orchestrator: z.string().optional(), // Model for orchestrator Phase 3 + tool-calling
+      edit_graph: z.string().optional(), // Model for edit_graph tool handler
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -374,6 +376,8 @@ const ConfigSchema = z.object({
       validation: z.coerce.number().int().positive().optional(),
       extraction: z.coerce.number().int().positive().optional(), // Max tokens for LLM-first extraction
       decision_review: z.coerce.number().int().positive().optional(), // Max tokens for decision review
+      orchestrator: z.coerce.number().int().positive().optional(), // Max tokens for orchestrator Phase 3
+      edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -414,6 +418,8 @@ const ConfigSchema = z.object({
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
     // Draft compliance reminder (appended to user message for initial graph generation only)
     draftComplianceReminderEnabled: booleanString.default(true), // CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED
+    // BriefSignals context header (appended to user message after compliance reminder)
+    briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -668,6 +674,8 @@ function parseConfig(): Config {
         validation: env.CEE_MODEL_VALIDATION,
         extraction: env.CEE_MODEL_EXTRACTION,
         decision_review: env.CEE_MODEL_DECISION_REVIEW,
+        orchestrator: env.CEE_MODEL_ORCHESTRATOR,
+        edit_graph: env.CEE_MODEL_EDIT_GRAPH,
       },
       // Per-operation max tokens limits
       maxTokens: {
@@ -678,6 +686,8 @@ function parseConfig(): Config {
         critique: env.CEE_MAX_TOKENS_CRITIQUE,
         validation: env.CEE_MAX_TOKENS_VALIDATION,
         decision_review: env.CEE_MAX_TOKENS_DECISION_REVIEW,
+        orchestrator: env.CEE_MAX_TOKENS_ORCHESTRATOR,
+        edit_graph: env.CEE_MAX_TOKENS_EDIT_GRAPH,
       },
       // Tiered model selection
       modelSelection: {

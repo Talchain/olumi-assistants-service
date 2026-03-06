@@ -12,12 +12,14 @@ export type CeeTask =
   | "clarification"
   | "preflight"
   | "draft_graph"
+  | "edit_graph"
   | "bias_check"
   | "evidence_helper"
   | "sensitivity_coach"
   | "options"
   | "suggest_options"
   | "explainer"
+  | "orchestrator"
   | "repair_graph"
   | "critique_graph"
   | "decision_review";
@@ -41,7 +43,9 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   sensitivity_coach: "gpt-4.1-2025-04-14",
   // Quality tier - optimized for specific tasks
   draft_graph: "gpt-4o",  // Reverted - gpt-4.1 has JSON mode compatibility issues
+  edit_graph: "gpt-4o",  // Quality tier - graph editing (override via CEE_MODEL_EDIT_GRAPH)
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
+  orchestrator: "gpt-4o",  // Orchestrator Phase 3 + tool-calling (override via CEE_MODEL_ORCHESTRATOR)
   repair_graph: "gpt-4o",  // Quality tier - graph repair
   // Premium tier - advanced reasoning for complex tasks
   options: "gpt-5.2",

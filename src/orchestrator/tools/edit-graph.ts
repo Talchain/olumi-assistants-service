@@ -28,6 +28,7 @@ import { createHash } from "node:crypto";
 import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
+import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type {
@@ -60,6 +61,8 @@ export interface EditGraphResult {
   appliedGraph: GraphV3T | null;
   /** True if the edit was rejected (structural or semantic). */
   wasRejected: boolean;
+  /** Suggested actions (e.g. "Re-run analysis" when rerun_recommended). */
+  suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
 }
 
 export interface EditGraphOpts {
@@ -69,6 +72,37 @@ export interface EditGraphOpts {
   maxRetries?: number;
   /** Turn budget opts forwarded to PLoT client for budget-aware retry. */
   plotOpts?: PLoTClientRunOpts;
+}
+
+// ============================================================================
+// Edit Graph LLM Result Types (v2 prompt output shape)
+// ============================================================================
+
+/** Per-operation metadata from the v2 prompt (not part of canonical PatchOperation). */
+export interface EditGraphOperationMeta {
+  impact: 'low' | 'moderate' | 'high';
+  rationale: string;
+}
+
+/** Advisory metadata for edges removed as a consequence of node removal. */
+export interface RemovedEdgeInfo {
+  from: string;
+  to: string;
+  reason: string;
+}
+
+/** Coaching output from the v2 prompt. */
+export interface EditGraphCoaching {
+  summary: string;
+  rerun_recommended: boolean;
+}
+
+/** Parsed result from the v2 edit_graph LLM response. */
+export interface EditGraphLLMResult {
+  operations: Array<PatchOperation & { impact?: string; rationale?: string }>;
+  removed_edges: RemovedEdgeInfo[];
+  warnings: string[];
+  coaching: EditGraphCoaching | null;
 }
 
 // ============================================================================
@@ -343,6 +377,7 @@ export async function handleEditGraph(
             ? (await getSystemPrompt('repair_edit_graph')) + '\n\n' + contextSection
             : fullSystemPrompt,
           userMessage,
+          maxTokens: getMaxTokensFromConfig('edit_graph'),
         },
         callOpts,
       );
@@ -365,10 +400,10 @@ export async function handleEditGraph(
       continue;
     }
 
-    // Parse operations from LLM response
-    let rawOps: unknown[];
+    // Parse operations from LLM response (v2 object or legacy array)
+    let llmResult: EditGraphLLMResult;
     try {
-      rawOps = parseRawOperations(chatResult.content);
+      llmResult = parseEditGraphResponse(chatResult.content);
     } catch (error) {
       if (attempt === totalAttempts) {
         const err: OrchestratorError = {
@@ -389,6 +424,37 @@ export async function handleEditGraph(
       continue;
     }
 
+    // Handle empty operations (no-op: conflict, forbidden edge, already-satisfied)
+    if (llmResult.operations.length === 0) {
+      const latencyMs = Date.now() - startTime;
+
+      // Build assistant text: warnings first, then coaching.summary
+      const parts: string[] = [];
+      if (llmResult.warnings.length > 0) {
+        parts.push(llmResult.warnings.join(' '));
+      }
+      if (llmResult.coaching?.summary) {
+        parts.push(llmResult.coaching.summary);
+      }
+      const assistantText = parts.join('\n\n') || 'No changes were needed for this request.';
+
+      log.info(
+        { request_id: requestId, attempt, warnings: llmResult.warnings.length, has_coaching: !!llmResult.coaching },
+        "edit_graph returned empty operations (no-op)",
+      );
+
+      return {
+        blocks: [],
+        assistantText,
+        latencyMs,
+        appliedGraph: null,
+        wasRejected: false,
+      };
+    }
+
+    // Strip impact/rationale from operations for the validation pipeline
+    const { operations: strippedOps, meta: operationMeta } = stripOperationMeta(llmResult.operations);
+    const rawOps: unknown[] = strippedOps;
     lastRawOps = rawOps;
 
     // Guard: reject oversized operation arrays before expensive validation
@@ -598,7 +664,10 @@ export async function handleEditGraph(
     // ---- Success: build block ----
     const latencyMs = Date.now() - startTime;
 
-    // Collect validation warnings: PLoT warnings + skip notice
+    // Collect validation warnings: LLM warnings + PLoT warnings + skip notice
+    if (llmResult.warnings.length > 0) {
+      allWarnings.push(...llmResult.warnings);
+    }
     if (plotWarnings) {
       allWarnings.push(...plotWarnings);
     }
@@ -620,6 +689,20 @@ export async function handleEditGraph(
 
     const block = createGraphPatchBlock(patchData, turnId);
 
+    // Store per-operation metadata and removed_edges in block debug payload
+    // (not part of GraphPatchBlockData — attached to provenance for observability)
+    const debugMeta: Record<string, unknown> = {};
+    if (operationMeta.some(m => m.impact !== 'low' || m.rationale !== '')) {
+      debugMeta.operation_meta = operationMeta;
+    }
+    if (llmResult.removed_edges.length > 0) {
+      debugMeta.removed_edges = llmResult.removed_edges;
+    }
+    if (Object.keys(debugMeta).length > 0) {
+      // Attach to block's provenance as _meta (non-contractual debug field)
+      (block.provenance as unknown as Record<string, unknown>)._meta = debugMeta;
+    }
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -628,6 +711,8 @@ export async function handleEditGraph(
         plot_validated: !!plotClient,
         repairs_applied: repairsApplied?.length ?? 0,
         applied_graph_hash: appliedGraphHash,
+        has_coaching: !!llmResult.coaching,
+        rerun_recommended: llmResult.coaching?.rerun_recommended ?? false,
         ...(promptMeta && {
           prompt_source: promptMeta.source,
           prompt_version: promptMeta.prompt_version,
@@ -636,13 +721,35 @@ export async function handleEditGraph(
       "edit_graph completed",
     );
 
-    // Build assistant text: narrate only if PLoT repairs materially differ
+    // Build assistant text: coaching.summary preferred, warnings appended
     let assistantText: string | null = null;
+    const textParts: string[] = [];
+
+    if (llmResult.coaching?.summary) {
+      textParts.push(llmResult.coaching.summary);
+    }
     if (repairsApplied && repairsApplied.length > 0) {
       const repairSummary = repairsApplied
         .map(r => `- ${r.message}`)
         .join('\n');
-      assistantText = `I've proposed the graph edits you requested. PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`;
+      textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
+    }
+    if (llmResult.warnings.length > 0) {
+      textParts.push(`Note: ${llmResult.warnings.join(' ')}`);
+    }
+
+    if (textParts.length > 0) {
+      assistantText = textParts.join('\n\n');
+    }
+
+    // Build suggested actions: "Re-run analysis" chip when rerun_recommended
+    const suggestedActions: EditGraphResult['suggestedActions'] = [];
+    if (llmResult.coaching?.rerun_recommended) {
+      suggestedActions.push({
+        label: 'Re-run analysis',
+        prompt: 'run the analysis again',
+        role: 'facilitator',
+      });
     }
 
     return {
@@ -651,6 +758,7 @@ export async function handleEditGraph(
       latencyMs,
       appliedGraph: appliedGraph ?? null,
       wasRejected: false,
+      ...(suggestedActions.length > 0 && { suggestedActions }),
     };
   }
 
@@ -713,22 +821,222 @@ function buildRejectionResult(
   };
 }
 
+// ============================================================================
+// Path Normalisation
+// ============================================================================
+
 /**
- * Parse raw operation objects from LLM response text.
- * Expects JSON array of operation objects, possibly wrapped in markdown.
+ * Normalise v2 prompt paths to the format expected by the patch validation pipeline.
+ *
+ * v2 prompt format → pipeline format:
+ * - `/nodes/fac_x` → `fac_x`
+ * - `/nodes/fac_x/label` → `fac_x` (field stored separately for update ops)
+ * - `/edges/fac_a->out_b` → `fac_a::out_b`
+ * - `/edges/fac_a->out_b/strength.mean` → `fac_a::out_b` (field stored separately)
+ * - Already-normalised paths (no `/` prefix) pass through unchanged.
  */
-function parseRawOperations(text: string): unknown[] {
-  // Extract JSON array from response (may be wrapped in markdown)
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    throw new Error('No JSON array found in LLM response');
+function normalisePath(path: string): { path: string; field?: string } {
+  // Already in pipeline format (no leading /)
+  if (!path.startsWith('/')) {
+    return { path };
   }
 
-  const parsed = JSON.parse(jsonMatch[0]) as unknown;
-
-  if (!Array.isArray(parsed)) {
-    throw new Error('Parsed response is not an array');
+  // /edges/<from>-><to>[/<field>]
+  const edgeMatch = path.match(/^\/edges\/([^/]+)->([^/]+)(?:\/(.+))?$/);
+  if (edgeMatch) {
+    return {
+      path: `${edgeMatch[1]}::${edgeMatch[2]}`,
+      field: edgeMatch[3],
+    };
   }
 
-  return parsed;
+  // /nodes/<id>[/<field>]
+  const nodeMatch = path.match(/^\/nodes\/([^/]+)(?:\/(.+))?$/);
+  if (nodeMatch) {
+    return {
+      path: nodeMatch[1],
+      field: nodeMatch[2],
+    };
+  }
+
+  // Unrecognised — pass through as-is
+  return { path };
+}
+
+// ============================================================================
+// Response Parsing (v2 object + legacy array)
+// ============================================================================
+
+/**
+ * Extract JSON from LLM response text. Handles:
+ * - Plain JSON (no wrapper)
+ * - Markdown fenced code blocks (```json ... ```)
+ * - Mixed text with embedded JSON
+ */
+function extractJson(text: string): unknown {
+  // Strip markdown fences if present
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const cleaned = fenceMatch ? fenceMatch[1].trim() : text.trim();
+
+  // Try parsing the cleaned text directly
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Fall through to regex extraction
+  }
+
+  // Try to extract a JSON object
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    return JSON.parse(objectMatch[0]);
+  }
+
+  // Try to extract a JSON array (legacy format)
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    return JSON.parse(arrayMatch[0]);
+  }
+
+  throw new Error('No valid JSON found in LLM response');
+}
+
+/**
+ * Parse the LLM response into an EditGraphLLMResult.
+ *
+ * Supports two formats:
+ * 1. **v2 object**: `{ operations, removed_edges, warnings, coaching }`
+ * 2. **Legacy array**: `[{ op, path, value, ... }, ...]` — backward compat with metric logging.
+ *
+ * Path normalisation is applied to all operations (v2 paths → pipeline paths).
+ */
+export function parseEditGraphResponse(text: string): EditGraphLLMResult {
+  const parsed = extractJson(text);
+
+  // Legacy array format detection
+  if (Array.isArray(parsed)) {
+    log.info(
+      { format: 'legacy_array', operations_count: parsed.length },
+      'edit_graph.legacy_array_response',
+    );
+    const normalised = (parsed as Array<Record<string, unknown>>).map(normaliseOperation);
+    return {
+      operations: normalised,
+      removed_edges: [],
+      warnings: [],
+      coaching: null,
+    };
+  }
+
+  // v2 object format
+  if (typeof parsed === 'object' && parsed !== null) {
+    const obj = parsed as Record<string, unknown>;
+
+    // Validate required field
+    if (!Array.isArray(obj.operations)) {
+      throw new Error('v2 response missing required "operations" array');
+    }
+
+    const operations = (obj.operations as Array<Record<string, unknown>>).map(normaliseOperation);
+
+    const removed_edges: RemovedEdgeInfo[] = Array.isArray(obj.removed_edges)
+      ? (obj.removed_edges as RemovedEdgeInfo[])
+      : [];
+
+    const warnings: string[] = Array.isArray(obj.warnings)
+      ? (obj.warnings as string[])
+      : [];
+
+    let coaching: EditGraphCoaching | null = null;
+    if (obj.coaching && typeof obj.coaching === 'object') {
+      const c = obj.coaching as Record<string, unknown>;
+      coaching = {
+        summary: typeof c.summary === 'string' ? c.summary : '',
+        rerun_recommended: c.rerun_recommended === true,
+      };
+    }
+
+    return { operations, removed_edges, warnings, coaching };
+  }
+
+  throw new Error('LLM response is neither an array nor an object');
+}
+
+/**
+ * Normalise edge value: if `strength` is a nested object `{ mean, std }`,
+ * flatten to `strength_mean` / `strength_std` for the Zod schema.
+ * Preserves all other fields.
+ */
+function normaliseEdgeValue(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const v = value as Record<string, unknown>;
+
+  // Check for nested strength: { mean, std }
+  if (v.strength && typeof v.strength === 'object') {
+    const s = v.strength as Record<string, unknown>;
+    const { strength, ...rest } = v;
+    return {
+      ...rest,
+      ...(s.mean !== undefined && { strength_mean: s.mean }),
+      ...(s.std !== undefined && { strength_std: s.std }),
+    };
+  }
+
+  return value;
+}
+
+/**
+ * Normalise a single raw operation from the LLM:
+ * - Convert v2 paths to pipeline format
+ * - Flatten nested strength objects to strength_mean/strength_std
+ * - Preserve impact/rationale as extra fields (stripped later)
+ */
+function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
+  const { path: normalisedPath, field } = normalisePath(String(raw.path ?? ''));
+
+  // Normalise edge values (add_edge, update_edge) for nested strength format
+  const isEdgeOp = raw.op === 'add_edge' || raw.op === 'update_edge';
+  let value = isEdgeOp ? normaliseEdgeValue(raw.value) : raw.value;
+  let oldValue = raw.old_value;
+
+  // For field-level update ops (path had /field suffix), wrap scalar value into { field: value }
+  // so the Zod update schemas (which expect a record) validate correctly.
+  if (field && (raw.op === 'update_node' || raw.op === 'update_edge')) {
+    if (value !== undefined && (typeof value !== 'object' || value === null)) {
+      value = { [field]: value };
+    }
+    if (oldValue !== undefined && (typeof oldValue !== 'object' || oldValue === null)) {
+      oldValue = { [field]: oldValue };
+    }
+  }
+
+  return {
+    op: raw.op as PatchOperation['op'],
+    path: normalisedPath,
+    ...(value !== undefined && { value }),
+    ...(oldValue !== undefined && { old_value: oldValue }),
+    ...(typeof raw.impact === 'string' && { impact: raw.impact }),
+    ...(typeof raw.rationale === 'string' && { rationale: raw.rationale }),
+  };
+}
+
+/**
+ * Strip impact and rationale from operations, returning clean PatchOperations
+ * and a parallel array of per-operation metadata.
+ */
+function stripOperationMeta(
+  ops: Array<PatchOperation & { impact?: string; rationale?: string }>,
+): { operations: PatchOperation[]; meta: EditGraphOperationMeta[] } {
+  const operations: PatchOperation[] = [];
+  const meta: EditGraphOperationMeta[] = [];
+
+  for (const op of ops) {
+    const { impact, rationale, ...cleanOp } = op as PatchOperation & { impact?: string; rationale?: string };
+    operations.push(cleanOp);
+    meta.push({
+      impact: (impact as EditGraphOperationMeta['impact']) ?? 'low',
+      rationale: rationale ?? '',
+    });
+  }
+
+  return { operations, meta };
 }

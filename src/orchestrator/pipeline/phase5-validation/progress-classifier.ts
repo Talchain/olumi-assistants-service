@@ -21,5 +21,6 @@ export function classifyProgress(toolResult: ToolResult): ProgressKind {
   if (toolResult.side_effects.analysis_ran) return 'ran_analysis';
   // Post-pilot: separate 'generated_brief' from explicit user commitment.
   if (toolResult.side_effects.brief_generated) return 'committed';
+  if (toolResult.blocks.some(b => b.block_type === 'evidence')) return 'added_evidence';
   return 'none';
 }

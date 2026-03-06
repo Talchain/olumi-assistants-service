@@ -28,6 +28,7 @@ vi.mock("../../src/cee/graph-orchestrator.js", () => ({
 
 vi.mock("../../src/adapters/llm/router.js", () => ({
   getAdapter: vi.fn(),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 vi.mock("../../src/config/index.js", () => ({

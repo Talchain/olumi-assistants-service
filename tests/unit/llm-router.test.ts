@@ -315,6 +315,47 @@ describe("LLM Router", () => {
       expect(adapter.model).toBe("gpt-5.2");
     });
 
+    it("uses gpt-4o for orchestrator when no CEE_MODEL_ORCHESTRATOR override", () => {
+      delete process.env.CEE_MODEL_ORCHESTRATOR;
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("orchestrator");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-4o");
+    });
+
+    it("uses gpt-4o for edit_graph when no CEE_MODEL_EDIT_GRAPH override", () => {
+      delete process.env.CEE_MODEL_EDIT_GRAPH;
+      delete process.env.LLM_MODEL;
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("edit_graph");
+
+      expect(adapter.name).toBe("openai");
+      expect(adapter.model).toBe("gpt-4o");
+    });
+
+    it("CEE_MODEL_ORCHESTRATOR env var overrides TASK_MODEL_DEFAULTS", () => {
+      process.env.CEE_MODEL_ORCHESTRATOR = "claude-sonnet-4-20250514";
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("orchestrator");
+
+      expect(adapter.name).toBe("anthropic");
+      expect(adapter.model).toBe("claude-sonnet-4-20250514");
+    });
+
+    it("CEE_MODEL_EDIT_GRAPH env var overrides TASK_MODEL_DEFAULTS", () => {
+      process.env.CEE_MODEL_EDIT_GRAPH = "gpt-5.2";
+      process.env.LLM_PROVIDER = "openai";
+
+      const adapter = getAdapter("edit_graph");
+
+      expect(adapter.model).toBe("gpt-5.2");
+    });
+
     it("non-CEE tasks fall back to LLM_MODEL or adapter default", () => {
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "openai";

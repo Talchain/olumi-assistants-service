@@ -555,7 +555,7 @@ describe("handleEditGraph", () => {
         "turn-1",
         { maxRetries: 0 },
       ),
-    ).rejects.toThrow("No JSON array found");
+    ).rejects.toThrow("No valid JSON found");
   });
 
   it("retries on parse failure and succeeds on second attempt", async () => {

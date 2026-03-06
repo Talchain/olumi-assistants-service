@@ -1,0 +1,16 @@
+{
+  "id": "rt-01-saas-churn-benchmark",
+  "name": "SaaS churn benchmark",
+  "description": "Query for industry-standard SaaS monthly churn rate benchmarks",
+  "query": "What is the average monthly churn rate for B2B SaaS companies? Include industry benchmarks and ranges by company size.",
+  "context_hint": "Decision model for a SaaS pricing strategy. Need to calibrate the churn_rate factor prior.",
+  "target_factor": "Monthly Churn Rate",
+  "expected": {
+    "min_findings_length": 100,
+    "min_source_count": 1,
+    "must_contain_keywords": ["churn", "SaaS", "%"],
+    "expects_numeric_values": true,
+    "expects_confidence_note": true,
+    "forbidden_substrings": []
+  }
+}

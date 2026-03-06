@@ -24,6 +24,7 @@ import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ExerciseType } from "../types/guidance-item.js";
 import { handleRunExercise } from "./run-exercise.js";
+import { handleResearchTopic } from "./research-topic.js";
 
 // ============================================================================
 // Types
@@ -35,6 +36,8 @@ export interface ToolDispatchResult {
   analysisResponse?: V2RunResponseEnvelope;
   toolLatencyMs?: number;
   guidanceItems: GuidanceItem[];
+  /** Suggested follow-up actions from tool handler (e.g. "Re-run analysis" after edit_graph). */
+  suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
 }
 
 export interface ToolDispatchOpts {
@@ -173,7 +176,7 @@ export async function dispatchToolHandler(
 
     case 'edit_graph': {
       const editDesc = (toolInput.edit_description as string) || '';
-      const adapter = getAdapter('orchestrator');
+      const adapter = getAdapter('edit_graph');
       const result = await handleEditGraph(
         context,
         editDesc,
@@ -191,6 +194,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: editGuidance,
+        suggestedActions: result.suggestedActions,
       };
     }
 
@@ -229,6 +233,19 @@ export async function dispatchToolHandler(
       }
       const adapter = getAdapter('orchestrator');
       const result = await handleRunExercise(exercise, context, adapter, requestId, turnId);
+      return {
+        blocks: result.blocks,
+        assistantText: result.assistantText,
+        toolLatencyMs: result.latencyMs,
+        guidanceItems: [],
+      };
+    }
+
+    case 'research_topic': {
+      const query = (toolInput.query as string) || '';
+      const targetFactor = toolInput.target_factor as string | undefined;
+      const researchContext = toolInput.context as string | undefined;
+      const result = await handleResearchTopic(query, context, requestId, turnId, targetFactor, researchContext);
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,

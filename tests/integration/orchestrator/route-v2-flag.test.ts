@@ -24,6 +24,7 @@ vi.mock("../../../src/adapters/llm/router.js", () => ({
       stop_reason: "end_turn",
     }),
   }),
+  getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
 
 // Mock PLoT client

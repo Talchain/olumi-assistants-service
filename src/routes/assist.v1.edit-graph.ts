@@ -68,7 +68,7 @@ export default async function route(app: FastifyInstance): Promise<void> {
       scenario_id: scenario_id ?? "direct-edit",
     };
 
-    const adapter = getAdapter("orchestrator");
+    const adapter = getAdapter("edit_graph");
     const turnId = `direct-edit-${requestId}`;
 
     try {

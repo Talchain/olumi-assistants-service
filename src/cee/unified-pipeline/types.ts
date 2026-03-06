@@ -55,6 +55,10 @@ export type DraftInputWithCeeExtras = DraftGraphInputT & {
   seed?: string;
   archetype_hint?: string;
   raw_output?: boolean;
+  /** Pre-formatted BriefSignals header to append to user message (from preflight decision). */
+  briefSignalsHeader?: string;
+  /** Deterministic bias signals from BriefSignals v1 — persisted in response payload + trace. */
+  bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
 };
 
 export interface StageContext {

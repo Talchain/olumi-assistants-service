@@ -27,6 +27,7 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
     chat: mockChat,
     chatWithTools: mockChatWithTools,
   }),
+  getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../../src/orchestrator/plot-client.js', async (importOriginal) => {
@@ -86,6 +87,7 @@ vi.mock('../../src/cee/unified-pipeline/index.js', () => ({
 import { handleTurn, _resetPlotClient } from '../../src/orchestrator/turn-handler.js';
 import { _clearIdempotencyCache } from '../../src/orchestrator/idempotency.js';
 import { createPLoTClient } from '../../src/orchestrator/plot-client.js';
+import { getAdapter } from '../../src/adapters/llm/router.js';
 import { isProduction } from '../../src/config/index.js';
 import type { OrchestratorTurnRequest, ConversationContext } from '../../src/orchestrator/types.js';
 import type { PLoTClient } from '../../src/orchestrator/plot-client.js';
@@ -827,5 +829,48 @@ describe('handleTurn — patch_accepted system event', () => {
 
     expect(result.httpStatus).toBe(400);
     expect(result.envelope.error?.code).toBe('MISSING_GRAPH_STATE');
+  });
+});
+
+describe('handleTurn — adapter task routing', () => {
+  beforeEach(() => {
+    _clearIdempotencyCache();
+    mockChatWithTools.mockReset();
+    mockChat.mockReset();
+    vi.mocked(getAdapter).mockClear();
+    vi.mocked(isProduction).mockReturnValue(false);
+  });
+
+  it('calls getAdapter("edit_graph") when edit_graph is deterministically dispatched', async () => {
+    // edit_graph handler calls adapter.chat() — mock it to return a valid JSON response
+    mockChat.mockResolvedValueOnce({
+      content: '{"operations": [], "removed_edges": [], "warnings": ["test"], "coaching": null}',
+      model: 'test-model',
+      latencyMs: 50,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+
+    const req = makeRequest({
+      message: 'edit the model',
+      context: {
+        graph: {
+          version: '3.0',
+          default_seed: 17,
+          nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test Goal' }],
+          edges: [],
+        },
+        analysis_response: null,
+        framing: { stage: 'ideate' },
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as unknown as ConversationContext,
+    });
+
+    await handleTurn(req, mockFastifyRequest, 'req-edit-adapter-001');
+
+    // Verify getAdapter was called with 'edit_graph' (not 'orchestrator')
+    const getAdapterCalls = vi.mocked(getAdapter).mock.calls;
+    const editGraphCall = getAdapterCalls.find(([task]) => task === 'edit_graph');
+    expect(editGraphCall).toBeDefined();
   });
 });

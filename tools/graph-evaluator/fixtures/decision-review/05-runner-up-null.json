@@ -1,0 +1,66 @@
+{
+  "id": "dr-05-runner-up-null",
+  "name": "Runner-Up Null — Single Viable Option",
+  "description": "Only one viable option exists (direct European entry). No runner-up to compare against. The review should avoid comparative language entirely.",
+  "input": {
+    "winner": { "id": "opt_expand", "label": "Enter European Market", "win_probability": 0.92, "outcome_mean": 0.78 },
+    "runner_up": null,
+    "margin": null,
+    "deterministic_coaching": {
+      "headline_type": "CLEAR_WINNER",
+      "readiness": "ready",
+      "evidence_gaps": [],
+      "model_critiques": []
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_expand",
+          "option_label": "Enter European Market",
+          "win_probability": 0.92,
+          "outcome": { "mean": 0.78, "p10": 0.55, "p90": 0.94 }
+        }
+      ],
+      "factor_sensitivity": [
+        { "factor_id": "fac_europe_entry", "factor_label": "Europe Market Entry", "elasticity": 0.65, "confidence": 0.88 },
+        { "factor_id": "fac_investment", "factor_label": "Expansion Investment", "elasticity": 0.40, "confidence": 0.82 }
+      ],
+      "fragile_edges": [],
+      "robustness": { "recommendation_stability": 0.95, "overall_confidence": 0.90 }
+    },
+    "graph": {
+      "nodes": [
+        { "id": "dec_expansion", "kind": "decision", "label": "European Market Expansion" },
+        { "id": "opt_expand", "kind": "option", "label": "Enter European Market", "data": { "interventions": { "fac_europe_entry": 1, "fac_investment": 1.0 } } },
+        { "id": "opt_hold", "kind": "option", "label": "Focus on Domestic", "data": { "interventions": { "fac_europe_entry": 0, "fac_investment": 0.2 } } },
+        { "id": "fac_europe_entry", "kind": "factor", "label": "Europe Market Entry", "category": "controllable" },
+        { "id": "fac_investment", "kind": "factor", "label": "Expansion Investment", "category": "controllable" },
+        { "id": "fac_competition", "kind": "factor", "label": "Competitive Intensity", "category": "external" },
+        { "id": "out_revenue", "kind": "outcome", "label": "Revenue Growth" },
+        { "id": "risk_operational", "kind": "risk", "label": "Operational Complexity" },
+        { "id": "goal_growth", "kind": "goal", "label": "Reach 800 Pro Customers" }
+      ],
+      "edges": [
+        { "from": "dec_expansion", "to": "opt_expand", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "dec_expansion", "to": "opt_hold", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_expand", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_europe_entry", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "opt_hold", "to": "fac_investment", "strength": { "mean": 1.0, "std": 0.01 }, "exists_probability": 1.0, "effect_direction": "positive" },
+        { "from": "fac_europe_entry", "to": "out_revenue", "strength": { "mean": 0.6, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "positive" },
+        { "from": "fac_investment", "to": "risk_operational", "strength": { "mean": 0.55, "std": 0.18 }, "exists_probability": 0.88, "effect_direction": "positive" },
+        { "from": "fac_competition", "to": "out_revenue", "strength": { "mean": -0.30, "std": 0.22 }, "exists_probability": 0.75, "effect_direction": "negative" },
+        { "from": "out_revenue", "to": "goal_growth", "strength": { "mean": 0.45, "std": 0.10 }, "exists_probability": 0.95, "effect_direction": "positive" },
+        { "from": "risk_operational", "to": "goal_growth", "strength": { "mean": -0.25, "std": 0.15 }, "exists_probability": 0.90, "effect_direction": "negative" }
+      ]
+    },
+    "brief": "We must choose how to enter the European market. Our only viable strategy is direct entry."
+  },
+  "expected": {
+    "tone": "confident",
+    "must_mention_factors": ["Europe Market Entry"],
+    "dsk_fields_expected": false,
+    "pre_mortem_expected": false,
+    "forbidden_phrases": ["compared to", "versus", "runner-up", "alternative option"]
+  }
+}

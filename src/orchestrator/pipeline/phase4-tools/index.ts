@@ -203,6 +203,9 @@ export function createProductionToolDispatcher(
         analysis_response: result.analysisResponse,
         tool_latency_ms: result.toolLatencyMs,
         guidance_items: result.guidanceItems,
+        ...(result.suggestedActions && result.suggestedActions.length > 0 && {
+          suggested_actions: result.suggestedActions,
+        }),
       };
     },
   };

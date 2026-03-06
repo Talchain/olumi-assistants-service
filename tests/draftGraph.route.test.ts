@@ -10,6 +10,7 @@ const allowedCostMock = vi.fn();
 
 vi.mock("../src/adapters/llm/router.js", () => ({
   getAdapter: (...args: any[]) => getAdapterMock(...args),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 vi.mock("../src/services/validateClientWithCache.js", () => ({

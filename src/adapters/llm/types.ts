@@ -29,6 +29,15 @@ export interface DraftGraphArgs {
   seed: number;
   flags?: Record<string, unknown>;
   includeDebug?: boolean;
+  /**
+   * Pre-formatted BriefSignals context header string (e.g. `[BRIEF_SIGNALS v1] options=2 ...`).
+   * Includes the `[BRIEF_SIGNALS v1]` prefix and leading newlines.
+   * Must be appended after the compliance reminder in the user message.
+   * Already sanitised and bounded — safe to append directly.
+   * Populated by the route handler from the preflight decision result;
+   * undefined when signals are unavailable (rejected briefs, flag disabled).
+   */
+  briefSignalsHeader?: string;
 }
 
 /**

@@ -179,6 +179,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PreflightReadinessAssessed: "cee.preflight.readiness_assessed",
         PreflightRejected: "cee.preflight.rejected",
         PreflightCompleted: "cee.preflight.completed",
+        CeeBriefSignals: "cee.brief_signals",
 
         // CEE verification events (v1.14)
         CeeVerificationSucceeded: "cee.verification.succeeded",
@@ -424,7 +425,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -625,6 +626,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.bias_check.requested": [TelemetryEvents.CeeBiasCheckRequested],
         "cee.bias_check.succeeded": [TelemetryEvents.CeeBiasCheckSucceeded],
         "cee.bias_check.failed": [TelemetryEvents.CeeBiasCheckFailed],
+        "cee.brief_signals": [TelemetryEvents.CeeBriefSignals],
         "cee.options.requested": [TelemetryEvents.CeeOptionsRequested],
         "cee.options.succeeded": [TelemetryEvents.CeeOptionsSucceeded],
         "cee.options.failed": [TelemetryEvents.CeeOptionsFailed],
@@ -811,6 +813,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.PreflightReadinessAssessed,
         TelemetryEvents.PreflightRejected,
         TelemetryEvents.PreflightCompleted,
+        TelemetryEvents.CeeBriefSignals,
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
@@ -984,6 +987,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.bias_check.requested",
         "cee.bias_check.succeeded",
         "cee.bias_check.failed",
+
+        // CEE v1 BriefSignals events
+        "cee.brief_signals",
 
         // CEE v1 Options events
         "cee.options.requested",

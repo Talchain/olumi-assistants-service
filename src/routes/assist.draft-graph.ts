@@ -870,6 +870,7 @@ export async function runDraftGraphPipeline(input: DraftGraphInputT, rawBody: un
           seed: 17,
           flags: typeof input.flags === "object" && input.flags !== null ? (input.flags as Record<string, unknown>) : undefined,
           includeDebug: input.include_debug === true,
+          briefSignalsHeader: (input as any).briefSignalsHeader,
         },
         { requestId, timeoutMs: effectiveLlmTimeout, collector, bypassCache: pipelineOpts?.refreshPrompts, forceDefault: pipelineOpts?.forceDefault, signal: pipelineOpts?.signal }
       );

@@ -160,6 +160,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
             ? (ctx.input.flags as Record<string, unknown>)
             : undefined,
           includeDebug: ctx.input.include_debug === true,
+          briefSignalsHeader: ctx.input.briefSignalsHeader,
         },
         {
           requestId,
