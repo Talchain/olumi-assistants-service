@@ -82,7 +82,9 @@ export async function readModels(
   const configs: ModelConfig[] = [];
   for (const file of jsonFiles) {
     const content = await readFile(join(modelsDir, file), "utf-8");
-    const config = JSON.parse(content) as ModelConfig;
+    const raw = JSON.parse(content) as Record<string, unknown>;
+    // Default provider to 'openai' for backward-compatible legacy configs
+    const config = { provider: "openai" as const, ...raw } as ModelConfig;
     configs.push(config);
   }
 
