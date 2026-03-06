@@ -262,6 +262,18 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     description: "Claude Sonnet 4 - high-quality balanced model",
     extendedThinking: true,
   },
+  "claude-sonnet-4-6": {
+    id: "claude-sonnet-4-6",
+    provider: "anthropic",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 3.0,
+    averageLatencyMs: 2000,
+    qualityScore: 0.96,
+    description: "Claude Sonnet 4.6 - latest balanced model, no extended thinking",
+    extendedThinking: false,
+  },
   "claude-sonnet-4-5-20250929": {
     id: "claude-sonnet-4-5-20250929",
     provider: "anthropic",
