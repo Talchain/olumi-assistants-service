@@ -28,6 +28,9 @@ test-results/
 # Prevent prompt backup accumulation
 data/prompts.json.backup.*
 
+# Test-generated prompt store artifacts
+:memory:*
+
 # Graph evaluator results (keep .gitkeep)
 tools/graph-evaluator/results/*
 !tools/graph-evaluator/results/.gitkeep

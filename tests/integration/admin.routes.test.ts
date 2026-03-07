@@ -26,6 +26,7 @@ beforeAll(async () => {
   vi.stubEnv("PROMPTS_ENABLED", "true");
   vi.stubEnv("PROMPTS_STORE_TYPE", "file");
   vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+  vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
   // Prevent any real API keys from leaking into tests
   vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
   cleanBaseUrl();
