@@ -96,7 +96,7 @@ description.
 </UNTRUSTED_POLICY>
 
 <TOOLS>
-Five tools available. The intent gate handles explicit commands
+Six tools available. The intent gate handles explicit commands
 (e.g. "run the analysis") deterministically. When the gate has
 not matched, you select.
 
@@ -125,6 +125,11 @@ generate_brief — Assemble a shareable Decision Brief.
   When: user asks for a brief, summary, or report.
   Requires: graph and analysis in context.
   Produces: BriefBlock.
+
+research_topic — Search the web for evidence, benchmarks, or data.
+  When: user asks to research, look up, or find evidence for a factor.
+  Requires: nothing (works at any stage).
+  Produces: EvidenceBlock.
 
 SELECTION RULES
 1. Check prerequisites — if context lacks what the tool needs,

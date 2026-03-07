@@ -108,7 +108,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(response.statusCode).toBe(200);
   });
 
-  it("returns 400 for missing context", async () => {
+  it("returns 200 when context is absent (auto-constructed from flat fields)", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
@@ -119,7 +119,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
+    // context is optional — auto-constructed with null graph, empty messages, etc.
+    expect(response.statusCode).toBe(200);
   });
 
   it("returns 400 for missing client_turn_id", async () => {
