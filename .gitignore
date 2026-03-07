@@ -25,6 +25,9 @@ test-results/
 .idea/
 .vscode/
 
+# Prevent prompt backup accumulation
+data/prompts.json.backup.*
+
 # Graph evaluator results (keep .gitkeep)
 tools/graph-evaluator/results/*
 !tools/graph-evaluator/results/.gitkeep
