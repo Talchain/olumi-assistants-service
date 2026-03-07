@@ -125,23 +125,6 @@ describe("extractAnalysisReady", () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it("returns undefined when safeParse fails (missing goal_node_id)", () => {
-    const body: Record<string, unknown> = {
-      analysis_ready: {
-        options: [
-          { id: "opt_a", label: "Option A", interventions: { fac_x: 0.5 } },
-        ],
-        // goal_node_id intentionally omitted to trigger validation failure
-        status: "ready",
-      },
-    };
-
-    const result = extractAnalysisReady(body);
-
-    // Should return undefined due to structural check (goal_node_id not a string)
-    expect(result).toBeUndefined();
-  });
-
   it("returns undefined and logs when analysis_ready is absent from body", async () => {
     const { log: _log } = await import("../../src/utils/telemetry.js");
 
@@ -176,6 +159,51 @@ describe("extractAnalysisReady", () => {
     const result = extractAnalysisReady(body);
     expect(result).toBeDefined();
     expect(result!.options[0].interventions).toEqual({ fac_x: 0.5, fac_y: 1 });
+  });
+
+  it("returns undefined and logs warning when safeParse fails (invalid top-level status)", async () => {
+    const { log: warnLog } = await import("../../src/utils/telemetry.js");
+
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", interventions: { fac_x: 0.5 } },
+        ],
+        goal_node_id: "goal_outcome",
+        // Invalid status enum value — passes structural check but fails safeParse
+        status: "invalid_status_value",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeUndefined();
+
+    expect(warnLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ omission_reason: "contract_validation_failed" }),
+      expect.stringContaining("contract validation"),
+    );
+  });
+
+  it("returns undefined and logs when structural check fails (missing goal_node_id)", async () => {
+    const { log: structLog } = await import("../../src/utils/telemetry.js");
+
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", interventions: { fac_x: 0.5 } },
+        ],
+        status: "ready",
+        // goal_node_id intentionally omitted
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeUndefined();
+
+    expect(structLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ omission_reason: "contract_validation_failed", field: "goal_node_id" }),
+      expect.any(String),
+    );
   });
 
   it("returns undefined when options array is empty after filtering", () => {

@@ -70,7 +70,7 @@ function extractAnalysisReadyFromResponse(envelope: Record<string, unknown>): Re
   if (!Array.isArray(blocks)) return null;
 
   for (const block of blocks) {
-    if (block.type !== "graph_patch") continue;
+    if (block.block_type !== "graph_patch") continue;
     const data = block.data as Record<string, unknown> | undefined;
     if (!data) continue;
     if (data.patch_type !== "full_draft") continue;

@@ -324,13 +324,22 @@ export function extractAnalysisReady(
   }
 
   const goalNodeId = ar.goal_node_id;
-  if (typeof goalNodeId !== 'string') return undefined;
+  if (typeof goalNodeId !== 'string') {
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'goal_node_id', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid goal_node_id');
+    return undefined;
+  }
 
   const status = ar.status;
-  if (typeof status !== 'string') return undefined;
+  if (typeof status !== 'string') {
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'status', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid status');
+    return undefined;
+  }
 
   const rawOptions = ar.options;
-  if (!Array.isArray(rawOptions)) return undefined;
+  if (!Array.isArray(rawOptions)) {
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'options', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid options array');
+    return undefined;
+  }
 
   // Build options for the contract (outward contract uses option_id, not id)
   const options: Array<{ option_id: string; label: string; status: string; interventions: Record<string, number> }> = [];
