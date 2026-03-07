@@ -281,6 +281,7 @@ export interface GraphPatchBlockData {
     options: Array<{
       option_id: string;
       label: string;
+      status: string;
       interventions: Record<string, number>;
     }>;
     goal_node_id: string;

@@ -1,6 +1,15 @@
 /**
  * Analysis-Ready Output Schema
  *
+ * Contract owner: CEE
+ * Canonical fixture: tools/fixtures/canonical/analysis-ready.json
+ * UI boundary validator: DecisionGuideAI/src/canvas/conversation/validateAnalysisReadyContract.ts
+ *
+ * ANY shape change requires simultaneous updates to all three:
+ * 1. This schema (version bump)
+ * 2. Canonical fixture (regenerate via npm run generate:analysis-ready-fixture)
+ * 3. UI adapter tests (update expectations in analysisReadyContract.spec.ts)
+ *
  * P0 Schema for direct pass-through to PLoT analysis engine.
  * Key requirement: interventions must be Record<string, number> (plain numbers).
  *
@@ -12,6 +21,12 @@
  */
 
 import { z } from "zod";
+
+/**
+ * Contract version for the analysis-ready payload shape.
+ * Bump on any breaking change. See governance rule in header comment.
+ */
+export const ANALYSIS_READY_CONTRACT_VERSION = '1.0.0';
 
 // ============================================================================
 // Option for Analysis

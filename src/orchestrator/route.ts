@@ -13,7 +13,7 @@ import { z } from "zod";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
-import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage, V2RunResponseEnvelope } from "./types.js";
+import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage, V2RunResponseEnvelope, ConversationBlock } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { config } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
@@ -144,6 +144,51 @@ const TurnRequestSchema = z.object({
 });
 
 // ============================================================================
+// Response-path diagnostics
+// ============================================================================
+
+/**
+ * Emit diagnostic logs for full_draft graph_patch blocks.
+ * Checks analysis_ready presence and option status fields.
+ * Diagnostic only — never rejects the response.
+ */
+function logAnalysisReadyDiagnostics(
+  envelope: { blocks: ConversationBlock[] },
+  requestId: string,
+): void {
+  const blocks = envelope.blocks;
+  if (!Array.isArray(blocks)) return;
+
+  for (const block of blocks) {
+    if (block.block_type !== 'graph_patch') continue;
+    const data = block.data as unknown as Record<string, unknown>;
+    if (!data || data.patch_type !== 'full_draft') continue;
+
+    const ar = data.analysis_ready as Record<string, unknown> | undefined;
+    if (!ar) {
+      // Distinguish between "pipeline didn't produce it" and "validation failed".
+      // extractAnalysisReady already logs the specific reason, so here we log
+      // a summary-level warning on the response path.
+      log.warn(
+        { request_id: requestId, omission_reason: 'absent_on_block' },
+        'analysis_ready absent from full_draft block',
+      );
+      continue;
+    }
+
+    // Check option status fields
+    const opts = (ar.options ?? []) as Array<Record<string, unknown>>;
+    const missingStatus = opts.filter(o => !o.status).length;
+    if (missingStatus > 0) {
+      log.warn(
+        { request_id: requestId, options_without_status: missingStatus },
+        'analysis_ready contract warning: options missing status field',
+      );
+    }
+  }
+}
+
+// ============================================================================
 // Route Registration
 // ============================================================================
 
@@ -233,6 +278,8 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
           "Orchestrator V2 turn completed",
         );
 
+        logAnalysisReadyDiagnostics(v2Result.envelope, requestId);
+
         reply.code(v2Result.httpStatus);
         return reply.send(v2Result.envelope);
       }
@@ -250,6 +297,8 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
         },
         "Orchestrator turn completed",
       );
+
+      logAnalysisReadyDiagnostics(result.envelope, requestId);
 
       reply.code(result.httpStatus);
       return reply.send(result.envelope);

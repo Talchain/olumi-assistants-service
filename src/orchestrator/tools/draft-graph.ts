@@ -14,6 +14,7 @@ import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
 import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
+import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 
 // ============================================================================
 // Types
@@ -306,23 +307,33 @@ function extractCoachingSummary(body: Record<string, unknown>): string | null {
  * Extract analysis_ready payload from pipeline response body.
  * Present when the unified pipeline produces a V3 schema response with
  * options, interventions, and goal_node_id.
+ *
+ * Sets status: 'ready' on every option (pipeline has resolved interventions
+ * for full_draft, so this is always valid).
+ *
+ * Validates the constructed payload against AnalysisReadyPayload before returning.
+ * Returns undefined (not a malformed payload) if validation fails.
  */
-function extractAnalysisReady(
+export function extractAnalysisReady(
   body: Record<string, unknown>,
-): GraphPatchBlockData['analysis_ready'] | null {
+): GraphPatchBlockData['analysis_ready'] | undefined {
   const ar = body.analysis_ready as Record<string, unknown> | undefined;
-  if (!ar || typeof ar !== 'object') return null;
+  if (!ar || typeof ar !== 'object') {
+    log.info({ omission_reason: 'not_in_pipeline_body', body_keys: Object.keys(body) }, 'analysis_ready absent from pipeline body');
+    return undefined;
+  }
 
   const goalNodeId = ar.goal_node_id;
-  if (typeof goalNodeId !== 'string') return null;
+  if (typeof goalNodeId !== 'string') return undefined;
 
   const status = ar.status;
-  if (typeof status !== 'string') return null;
+  if (typeof status !== 'string') return undefined;
 
   const rawOptions = ar.options;
-  if (!Array.isArray(rawOptions)) return null;
+  if (!Array.isArray(rawOptions)) return undefined;
 
-  const options: Array<{ option_id: string; label: string; interventions: Record<string, number> }> = [];
+  // Build options for the contract (outward contract uses option_id, not id)
+  const options: Array<{ option_id: string; label: string; status: string; interventions: Record<string, number> }> = [];
   for (const opt of rawOptions) {
     if (!opt || typeof opt !== 'object') continue;
     const o = opt as Record<string, unknown>;
@@ -344,12 +355,12 @@ function extractAnalysisReady(
       }
     }
 
-    options.push({ option_id: optionId, label: label as string, interventions: flat });
+    options.push({ option_id: optionId, label: label as string, status: 'ready', interventions: flat });
   }
 
-  if (options.length === 0) return null;
+  if (options.length === 0) return undefined;
 
-  return {
+  const payload = {
     options,
     goal_node_id: goalNodeId,
     status,
@@ -357,4 +368,33 @@ function extractAnalysisReady(
     model_adjustments: Array.isArray(ar.model_adjustments) ? ar.model_adjustments : undefined,
     goal_threshold: typeof ar.goal_threshold === 'number' ? ar.goal_threshold : undefined,
   };
+
+  // Validate against AnalysisReadyPayload contract before emitting.
+  // The schema expects `id` on options (OptionForAnalysis), but the outward contract
+  // uses `option_id`. Re-map for validation, then return the option_id version.
+  const forValidation = {
+    ...payload,
+    options: payload.options.map(o => ({
+      id: o.option_id,
+      label: o.label,
+      status: o.status,
+      interventions: o.interventions,
+    })),
+  };
+
+  const result = AnalysisReadyPayload.safeParse(forValidation);
+  if (!result.success) {
+    log.warn(
+      {
+        errors_flat: result.error.flatten(),
+        error_paths: result.error.issues.slice(0, 3).map(i => ({ path: i.path, message: i.message })),
+        body_keys: Object.keys(body),
+        omission_reason: 'contract_validation_failed',
+      },
+      'analysis_ready failed contract validation, omitting from block',
+    );
+    return undefined;
+  }
+
+  return payload;
 }

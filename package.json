@@ -31,6 +31,8 @@
     "perf:baseline": "node tests/perf/run-baseline.js",
     "perf:baseline:prod": "PERF_TARGET_URL=${ASSISTANTS_URL} node tests/perf/run-baseline.js",
     "fixtures:validate": "tsx tests/utils/validate-golden-briefs.ts",
+    "generate:analysis-ready-fixture": "tsx tools/generate-analysis-ready-fixture.ts",
+    "check:analysis-ready-contract": "tsx tools/generate-analysis-ready-fixture.ts --check",
     "ops:evidence": "tsx scripts/evidence-pack-cli.ts",
     "cee:demo": "tsx scripts/cee-demo-cli.ts",
     "cee:review": "tsx scripts/cee-review-cli.ts",
