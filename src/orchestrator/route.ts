@@ -83,7 +83,7 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
 
 const ConversationMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
-  content: z.string(),
+  content: z.string().nullable().transform((v) => v ?? ''),
   tool_calls: z.array(z.object({
     name: z.string(),
     input: z.record(z.unknown()),

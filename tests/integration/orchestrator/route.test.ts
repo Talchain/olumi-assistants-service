@@ -494,4 +494,217 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // 404 when feature disabled (NOT tested here since we mock config.features.orchestrator = true)
   // The feature flag gating is in server.ts, not in the route itself.
   // ---------------------------------------------------
+
+  // ---------------------------------------------------
+  // Multi-Turn Conversation Lifecycle
+  // ---------------------------------------------------
+
+  describe("multi-turn conversation lifecycle", () => {
+    const scenarioId = "lifecycle-test";
+
+    it("turn 1 → turn 2 (with history) → turn 3 (with graph) → turn 4 (system event)", async () => {
+      // Turn 1: initial message, empty history
+      const t1 = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Help me decide between two laptops",
+          scenario_id: scenarioId,
+          client_turn_id: "lifecycle-t1",
+          conversation_history: [],
+        },
+      });
+      expect(t1.statusCode).toBe(200);
+      const b1 = JSON.parse(t1.body);
+      expect(b1.turn_id).toBeDefined();
+
+      // Turn 2: follow-up with 2-message history
+      const t2 = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Price and battery life matter most",
+          scenario_id: scenarioId,
+          client_turn_id: "lifecycle-t2",
+          conversation_history: [
+            { role: "user", content: "Help me decide between two laptops" },
+            { role: "assistant", content: b1.assistant_text ?? "" },
+          ],
+        },
+      });
+      expect(t2.statusCode).toBe(200);
+
+      // Turn 3: with graph_state populated
+      const t3 = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Add performance as a factor",
+          scenario_id: scenarioId,
+          client_turn_id: "lifecycle-t3",
+          conversation_history: [
+            { role: "user", content: "Help me decide" },
+            { role: "assistant", content: "Sure, what factors?" },
+            { role: "user", content: "Price and battery" },
+            { role: "assistant", content: "Got it." },
+          ],
+          graph_state: {
+            nodes: [
+              { id: "d1", kind: "decision", label: "Laptop" },
+              { id: "f1", kind: "factor", label: "Price" },
+              { id: "f2", kind: "factor", label: "Battery Life" },
+            ],
+            edges: [
+              { from: "f1", to: "d1", strength: 0.7 },
+              { from: "f2", to: "d1", strength: 0.6 },
+            ],
+          },
+        },
+      });
+      expect(t3.statusCode).toBe(200);
+
+      // Turn 4: system event (patch_accepted) — no user message
+      const t4 = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "",
+          scenario_id: scenarioId,
+          client_turn_id: "lifecycle-t4",
+          conversation_history: [
+            { role: "user", content: "Add performance" },
+            { role: "assistant", content: "Here is the edit." },
+          ],
+          system_event: {
+            event_type: "patch_accepted",
+            timestamp: new Date().toISOString(),
+            event_id: "evt-lifecycle-1",
+            details: {
+              patch_id: "patch-lifecycle-1",
+              operations: [{ op: "add_node", path: "/nodes/f3", value: { id: "f3", kind: "factor" } }],
+              applied_graph_hash: "hash-lifecycle",
+            },
+          },
+          graph_state: {
+            nodes: [
+              { id: "d1", kind: "decision", label: "Laptop" },
+              { id: "f1", kind: "factor", label: "Price" },
+              { id: "f2", kind: "factor", label: "Battery Life" },
+              { id: "f3", kind: "factor", label: "Performance" },
+            ],
+            edges: [
+              { from: "f1", to: "d1" },
+              { from: "f2", to: "d1" },
+              { from: "f3", to: "d1" },
+            ],
+          },
+        },
+      });
+      expect(t4.statusCode).toBe(200);
+      const b4 = JSON.parse(t4.body);
+      expect(b4.turn_plan?.routing).toBe("deterministic");
+    });
+
+    it("accepts assistant messages with content: null in conversation_history", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "What should I do next?",
+          scenario_id: scenarioId,
+          client_turn_id: "null-content-flat",
+          conversation_history: [
+            { role: "user", content: "Draft a graph for my decision" },
+            { role: "assistant", content: null },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it("accepts assistant messages with content: null in context.messages", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Continue",
+          scenario_id: scenarioId,
+          client_turn_id: "null-content-ctx",
+          context: {
+            graph: null,
+            analysis_response: null,
+            framing: { stage: "frame" },
+            messages: [
+              { role: "user", content: "Build a graph" },
+              { role: "assistant", content: null },
+            ],
+            scenario_id: scenarioId,
+            analysis_inputs: null,
+          },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it("accepts history with tool_calls on assistant messages", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Looks good, what next?",
+          scenario_id: scenarioId,
+          client_turn_id: "tool-calls-hist",
+          conversation_history: [
+            { role: "user", content: "Draft a decision graph" },
+            {
+              role: "assistant",
+              content: "Here is the graph.",
+              tool_calls: [{ name: "draft_graph", input: { brief: "laptop decision" } }],
+            },
+            { role: "user", content: "Add battery life" },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ name: "edit_graph", input: { edit_description: "add battery life" } }],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it("validates direct_analysis_run system event with analysis_state (not rejected at schema level)", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "",
+          scenario_id: scenarioId,
+          client_turn_id: "analysis-run",
+          conversation_history: [
+            { role: "user", content: "Run the analysis" },
+            { role: "assistant", content: "Running now." },
+          ],
+          system_event: {
+            event_type: "direct_analysis_run",
+            timestamp: new Date().toISOString(),
+            event_id: "evt-analysis-1",
+            details: {},
+          },
+          analysis_state: {
+            analysis_status: "completed",
+            has_results: true,
+            results: [{ option_id: "opt1", score: 0.8 }],
+          },
+          graph_state: {
+            nodes: [{ id: "d1", kind: "decision", label: "Choice" }],
+            edges: [],
+          },
+        },
+      });
+      // Schema validation passes (not 400); handler may fail in test env (500)
+      // but critically this is NOT a validation rejection
+      expect(response.statusCode).not.toBe(400);
+    });
+  });
 });
