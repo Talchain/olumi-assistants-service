@@ -118,6 +118,12 @@ export async function handleDraftGraph(
     auto_apply: true,
   };
 
+  // Extract analysis_ready from pipeline response (present in V3 schema responses)
+  const analysisReady = extractAnalysisReady(body);
+  if (analysisReady) {
+    patchData.analysis_ready = analysisReady;
+  }
+
   // Extract coaching summary for narration hint (brief: include in assistantText)
   const coachingSummary = extractCoachingSummary(body);
 
@@ -294,4 +300,60 @@ function extractCoachingSummary(body: Record<string, unknown>): string | null {
   }
 
   return parts.length > 0 ? parts.join('\n') : null;
+}
+
+/**
+ * Extract analysis_ready payload from pipeline response body.
+ * Present when the unified pipeline produces a V3 schema response with
+ * options, interventions, and goal_node_id.
+ */
+function extractAnalysisReady(
+  body: Record<string, unknown>,
+): GraphPatchBlockData['analysis_ready'] | null {
+  const ar = body.analysis_ready as Record<string, unknown> | undefined;
+  if (!ar || typeof ar !== 'object') return null;
+
+  const goalNodeId = ar.goal_node_id;
+  if (typeof goalNodeId !== 'string') return null;
+
+  const status = ar.status;
+  if (typeof status !== 'string') return null;
+
+  const rawOptions = ar.options;
+  if (!Array.isArray(rawOptions)) return null;
+
+  const options: Array<{ option_id: string; label: string; interventions: Record<string, number> }> = [];
+  for (const opt of rawOptions) {
+    if (!opt || typeof opt !== 'object') continue;
+    const o = opt as Record<string, unknown>;
+    const optionId = o.option_id;
+    const label = o.label;
+    const intv = o.interventions;
+    if (typeof optionId !== 'string' || typeof label !== 'string') continue;
+    if (!intv || typeof intv !== 'object') continue;
+
+    // Flatten intervention values: { fac_id: 0.5 } or { fac_id: { value: 0.5 } }
+    const flat: Record<string, number> = {};
+    for (const [key, val] of Object.entries(intv as Record<string, unknown>)) {
+      if (typeof val === 'number') {
+        flat[key] = val;
+      } else if (val && typeof val === 'object' && 'value' in val) {
+        const v = (val as Record<string, unknown>).value;
+        if (typeof v === 'number') flat[key] = v;
+      }
+    }
+
+    options.push({ option_id: optionId, label: label as string, interventions: flat });
+  }
+
+  if (options.length === 0) return null;
+
+  return {
+    options,
+    goal_node_id: goalNodeId,
+    status,
+    blockers: Array.isArray(ar.blockers) ? ar.blockers : undefined,
+    model_adjustments: Array.isArray(ar.model_adjustments) ? ar.model_adjustments : undefined,
+    goal_threshold: typeof ar.goal_threshold === 'number' ? ar.goal_threshold : undefined,
+  };
 }

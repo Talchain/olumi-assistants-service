@@ -272,6 +272,23 @@ export interface GraphPatchBlockData {
     attempts?: number;
   };
   validation_warnings?: string[];
+  /**
+   * Analysis-ready payload from the draft pipeline (full_draft only).
+   * Contains option intervention mappings, goal_node_id, and readiness status.
+   * The UI uses this to populate the pre-analysis panel without a separate API call.
+   */
+  analysis_ready?: {
+    options: Array<{
+      option_id: string;
+      label: string;
+      interventions: Record<string, number>;
+    }>;
+    goal_node_id: string;
+    status: string;
+    blockers?: unknown[];
+    model_adjustments?: unknown[];
+    goal_threshold?: number;
+  };
 }
 
 // ---- Fact Block ----
