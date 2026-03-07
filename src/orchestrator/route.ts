@@ -130,7 +130,7 @@ const ConversationContextSchema = z.object({
 
 const TurnRequestSchema = z.object({
   message: z.string().min(0).max(10_000).default(''),
-  context: ConversationContextSchema,
+  context: ConversationContextSchema.optional(),
   scenario_id: z.string().min(1).max(200),
   system_event: SystemEventSchema.optional(),
   client_turn_id: z.string().min(1).max(64),
@@ -139,6 +139,8 @@ const TurnRequestSchema = z.object({
   graph_state: GraphSchema.optional(),
   /** Full analysis response from UI — present for direct_analysis_run Path A. */
   analysis_state: z.object({}).passthrough().nullable().optional(),
+  /** Flat conversation history from UI — mapped to context.messages when context is absent. */
+  conversation_history: z.array(ConversationMessageSchema).optional(),
 });
 
 // ============================================================================
@@ -168,12 +170,23 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
           code: 'INVALID_REQUEST' as const,
           message: 'Request validation failed',
           recoverable: false,
+          validation_errors: errorDetail,
         },
       };
 
       reply.code(400);
       return reply.send(errorEnvelope);
     }
+
+    // Normalise context: if absent, construct from flat UI fields
+    const context = parsed.data.context ?? {
+      graph: parsed.data.graph_state ?? null,
+      analysis_response: null,
+      framing: null,
+      messages: (parsed.data.conversation_history ?? []) as z.infer<typeof ConversationMessageSchema>[],
+      scenario_id: parsed.data.scenario_id,
+      analysis_inputs: null,
+    };
 
     // Normalise system event: if only block_id is provided (no patch_id), copy it to patch_id
     let systemEvent = parsed.data.system_event as SystemEvent | undefined;
@@ -194,7 +207,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     // Map validated data to turn request
     const turnRequest: OrchestratorTurnRequest = {
       message: parsed.data.message,
-      context: parsed.data.context as unknown as ConversationContext,
+      context: context as unknown as ConversationContext,
       scenario_id: parsed.data.scenario_id,
       system_event: systemEvent,
       client_turn_id: parsed.data.client_turn_id,
