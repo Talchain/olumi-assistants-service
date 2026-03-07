@@ -673,6 +673,23 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       expect(response.statusCode).toBe(200);
     });
 
+    it("accepts assistant messages with content omitted entirely", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "What happened?",
+          scenario_id: scenarioId,
+          client_turn_id: "omitted-content",
+          conversation_history: [
+            { role: "user", content: "Draft a graph" },
+            { role: "assistant", tool_calls: [{ name: "draft_graph", input: { brief: "test" } }] },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
     it("validates direct_analysis_run system event with analysis_state (not rejected at schema level)", async () => {
       const response = await app.inject({
         method: "POST",
