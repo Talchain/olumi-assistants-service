@@ -201,7 +201,11 @@ describe("extractAnalysisReady", () => {
     expect(result).toBeUndefined();
 
     expect(structLog.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ omission_reason: "contract_validation_failed", field: "goal_node_id" }),
+      expect.objectContaining({
+        omission_reason: "contract_validation_failed",
+        field: "goal_node_id",
+        analysis_ready_keys: expect.arrayContaining(["options", "status"]),
+      }),
       expect.any(String),
     );
   });

@@ -140,7 +140,7 @@ async function main() {
     console.error("ERROR: No analysis_ready found in any full_draft graph_patch block");
     console.error("Blocks:", JSON.stringify((envelope.blocks as unknown[])?.map((b: unknown) => {
       const blk = b as Record<string, unknown>;
-      return { type: blk.type, patch_type: (blk.data as Record<string, unknown>)?.patch_type };
+      return { block_type: blk.block_type, patch_type: (blk.data as Record<string, unknown>)?.patch_type };
     }), null, 2));
     exit(1);
   }

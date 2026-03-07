@@ -323,21 +323,23 @@ export function extractAnalysisReady(
     return undefined;
   }
 
+  const arKeys = Object.keys(ar);
+
   const goalNodeId = ar.goal_node_id;
   if (typeof goalNodeId !== 'string') {
-    log.warn({ omission_reason: 'contract_validation_failed', field: 'goal_node_id', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid goal_node_id');
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'goal_node_id', analysis_ready_keys: arKeys }, 'analysis_ready missing or invalid goal_node_id');
     return undefined;
   }
 
   const status = ar.status;
   if (typeof status !== 'string') {
-    log.warn({ omission_reason: 'contract_validation_failed', field: 'status', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid status');
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'status', analysis_ready_keys: arKeys }, 'analysis_ready missing or invalid status');
     return undefined;
   }
 
   const rawOptions = ar.options;
   if (!Array.isArray(rawOptions)) {
-    log.warn({ omission_reason: 'contract_validation_failed', field: 'options', body_keys: Object.keys(body) }, 'analysis_ready missing or invalid options array');
+    log.warn({ omission_reason: 'contract_validation_failed', field: 'options', analysis_ready_keys: arKeys }, 'analysis_ready missing or invalid options array');
     return undefined;
   }
 
@@ -367,7 +369,10 @@ export function extractAnalysisReady(
     options.push({ option_id: optionId, label: label as string, status: 'ready', interventions: flat });
   }
 
-  if (options.length === 0) return undefined;
+  if (options.length === 0) {
+    log.warn({ omission_reason: 'contract_validation_failed', raw_option_count: rawOptions.length }, 'analysis_ready has no valid options after filtering');
+    return undefined;
+  }
 
   const payload = {
     options,
