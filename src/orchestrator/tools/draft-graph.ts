@@ -108,6 +108,16 @@ export async function handleDraftGraph(
   const body = pipelineResult.body as Record<string, unknown>;
   const graph = body.graph ?? body;
 
+  log.info(
+    {
+      body_keys: Object.keys(body),
+      has_analysis_ready: 'analysis_ready' in body,
+      has_options: 'options' in body,
+      has_goal_node_id: 'goal_node_id' in body,
+    },
+    "draft_graph: pipeline body shape diagnostic",
+  );
+
   // Build full_draft patch: all nodes and edges as add operations
   const operations = buildFullDraftOps(graph);
 
