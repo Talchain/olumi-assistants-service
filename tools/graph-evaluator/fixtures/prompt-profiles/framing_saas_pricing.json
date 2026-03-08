@@ -1,0 +1,31 @@
+{
+  "fixture_id": "framing_saas_pricing",
+  "profile": "framing",
+  "zone1_id": "cf-v9",
+  "active_blocks": [
+    { "name": "stage_context", "version": "1.0.0" },
+    { "name": "bil_context", "version": "1.0.0" },
+    { "name": "conversation_summary", "version": "1.0.0" },
+    { "name": "recent_turns", "version": "1.0.0" },
+    { "name": "bil_hint", "version": "1.0.0" }
+  ],
+  "test_input": {
+    "stage": "frame",
+    "goal": "Optimise SaaS pricing for revenue growth",
+    "constraints": ["Keep churn under 5%", "No more than 20% increase"],
+    "options": ["Moderate increase", "Significant increase", "Keep current pricing"],
+    "hasGraph": false,
+    "hasAnalysis": false,
+    "bilEnabled": true,
+    "generateModel": false,
+    "messages": [
+      { "role": "user", "content": "We're deciding whether to raise our SaaS prices" },
+      { "role": "assistant", "content": "Good starting point. What outcome are you optimising for?" }
+    ]
+  },
+  "expected_behaviour": {
+    "profile_selected": "framing",
+    "must_contain_tags": ["STAGE", "CONVERSATION_SUMMARY", "RECENT_TURNS", "CONTEXT_HINTS"],
+    "must_not_contain_tags": ["GRAPH_STATE", "ANALYSIS_STATE", "EVENT_LOG"]
+  }
+}

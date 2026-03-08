@@ -1,0 +1,33 @@
+{
+  "fixture_id": "ablation_post_analysis_no_analysis_state",
+  "profile": "post_analysis",
+  "zone1_id": "cf-v9",
+  "ablation": {
+    "removed_block": "analysis_state",
+    "baseline_fixture": "post_analysis_pricing",
+    "comparison": {
+      "baseline_block_count": 7,
+      "ablated_block_count": 6,
+      "removed_block_chars": 0
+    }
+  },
+  "test_input": {
+    "stage": "evaluate",
+    "goal": "Optimise SaaS pricing for revenue growth",
+    "constraints": ["Keep churn under 5%"],
+    "options": ["Moderate increase", "Significant increase"],
+    "hasGraph": true,
+    "hasAnalysis": false,
+    "bilEnabled": false,
+    "generateModel": false,
+    "messages": [
+      { "role": "user", "content": "Run the analysis" },
+      { "role": "assistant", "content": "Results are ready." }
+    ]
+  },
+  "expected_behaviour": {
+    "profile_selected": "post_analysis",
+    "must_contain_tags": ["STAGE", "GRAPH_STATE", "CONVERSATION_SUMMARY", "RECENT_TURNS"],
+    "must_not_contain_tags": ["ANALYSIS_STATE", "BRIEF_ANALYSIS"]
+  }
+}

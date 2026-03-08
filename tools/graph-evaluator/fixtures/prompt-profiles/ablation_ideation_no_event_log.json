@@ -1,0 +1,32 @@
+{
+  "fixture_id": "ablation_ideation_no_event_log",
+  "profile": "ideation",
+  "zone1_id": "cf-v9",
+  "ablation": {
+    "removed_block": "event_log",
+    "baseline_fixture": "ideation_hiring_decision",
+    "comparison": {
+      "baseline_block_count": 7,
+      "ablated_block_count": 6,
+      "removed_block_chars": 0
+    }
+  },
+  "test_input": {
+    "stage": "ideate",
+    "goal": "Hire the best candidate",
+    "constraints": ["Budget under 150k"],
+    "options": ["Internal promotion", "External hire"],
+    "hasGraph": true,
+    "hasAnalysis": false,
+    "bilEnabled": true,
+    "generateModel": false,
+    "messages": [
+      { "role": "user", "content": "I need to fill a role" }
+    ]
+  },
+  "expected_behaviour": {
+    "profile_selected": "ideation",
+    "must_contain_tags": ["STAGE", "GRAPH_STATE", "CONVERSATION_SUMMARY", "RECENT_TURNS", "CONTEXT_HINTS"],
+    "must_not_contain_tags": ["EVENT_LOG", "ANALYSIS_STATE"]
+  }
+}

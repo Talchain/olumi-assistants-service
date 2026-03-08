@@ -1,0 +1,26 @@
+{
+  "fixture_id": "parallel_coaching_expansion",
+  "profile": "parallel_coaching",
+  "zone1_id": "parallel-coaching-v1",
+  "active_blocks": [
+    { "name": "stage_context", "version": "1.0.0" },
+    { "name": "bil_context", "version": "1.0.0" },
+    { "name": "bil_hint", "version": "1.0.0" }
+  ],
+  "test_input": {
+    "stage": "frame",
+    "goal": "Decide whether to expand into European market",
+    "constraints": ["Budget under 500k", "Must be profitable within 18 months"],
+    "options": ["Direct entry", "Partnership", "Acquisition"],
+    "hasGraph": false,
+    "hasAnalysis": false,
+    "bilEnabled": true,
+    "generateModel": true,
+    "messages": []
+  },
+  "expected_behaviour": {
+    "profile_selected": "parallel_coaching",
+    "must_contain_tags": ["STAGE", "CONTEXT_HINTS"],
+    "must_not_contain_tags": ["GRAPH_STATE", "ANALYSIS_STATE", "CONVERSATION_SUMMARY", "RECENT_TURNS", "EVENT_LOG"]
+  }
+}

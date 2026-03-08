@@ -262,6 +262,7 @@ const ConfigSchema = z.object({
     dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
     bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
     dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
+    zone2Registry: booleanString.default(false), // CEE_ZONE2_REGISTRY_ENABLED — Zone 2 block registry prompt assembly
   }),
 
   // Prompt Cache Configuration
@@ -566,6 +567,7 @@ function parseConfig(): Config {
       dskEnabled: env.DSK_ENABLED,
       bilEnabled: env.BIL_ENABLED,
       dskCoachingEnabled: env.DSK_COACHING_ENABLED,
+      zone2Registry: env.CEE_ZONE2_REGISTRY_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

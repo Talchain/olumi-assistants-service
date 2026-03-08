@@ -1,0 +1,33 @@
+{
+  "fixture_id": "ideation_hiring_decision",
+  "profile": "ideation",
+  "zone1_id": "cf-v9",
+  "active_blocks": [
+    { "name": "stage_context", "version": "1.0.0" },
+    { "name": "graph_state", "version": "1.0.0" },
+    { "name": "bil_context", "version": "1.0.0" },
+    { "name": "conversation_summary", "version": "1.0.0" },
+    { "name": "recent_turns", "version": "1.0.0" },
+    { "name": "event_log", "version": "1.0.0" },
+    { "name": "bil_hint", "version": "1.0.0" }
+  ],
+  "test_input": {
+    "stage": "ideate",
+    "goal": "Hire the best candidate for senior engineering role",
+    "constraints": ["Budget under 150k", "Start within 3 months"],
+    "options": ["Internal promotion", "External hire", "Contract-to-hire"],
+    "hasGraph": true,
+    "hasAnalysis": false,
+    "bilEnabled": true,
+    "generateModel": false,
+    "messages": [
+      { "role": "user", "content": "I need to fill a senior engineering position" },
+      { "role": "assistant", "content": "Let me help you model this hiring decision." }
+    ]
+  },
+  "expected_behaviour": {
+    "profile_selected": "ideation",
+    "must_contain_tags": ["STAGE", "GRAPH_STATE", "CONVERSATION_SUMMARY", "RECENT_TURNS", "CONTEXT_HINTS"],
+    "must_not_contain_tags": ["ANALYSIS_STATE"]
+  }
+}

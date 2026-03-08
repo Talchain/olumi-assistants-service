@@ -40,6 +40,11 @@ import { assembleDskCoachingItems } from "./dsk-coaching/index.js";
 import type { EvidenceGap } from "./dsk-coaching/index.js";
 import type { DskCoachingItems } from "../schemas/dsk-coaching.js";
 import type { GraphV3T } from "./types.js";
+import { assembleFullPrompt } from "./prompt-zones/assemble.js";
+import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
+import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
+import { compactGraph } from "./context/graph-compact.js";
+import { assembleAnalysisInputsSummary } from "./analysis-inputs/assemble.js";
 
 // ============================================================================
 // Types
@@ -261,9 +266,42 @@ async function runCoachingCall(
   // Append BIL context to user message if provided
   const userMessage = bilContext ? `${brief}\n\n${bilContext}` : brief;
 
+  let systemPrompt: string;
+
+  if (config.features.zone2Registry) {
+    // Zone 2 registry path: build TurnContext for parallel_coaching profile
+    const graph = context.graph ?? null;
+    const analysisResponse = context.analysis_response ?? null;
+    const turnContext: TurnContext = {
+      stage: context.framing?.stage ?? 'frame',
+      goal: context.framing?.goal,
+      constraints: context.framing?.constraints,
+      options: context.framing?.options,
+      graphCompact: graph ? compactGraph(graph) : null,
+      analysisSummary: analysisResponse ? assembleAnalysisInputsSummary(analysisResponse) : null,
+      eventLogSummary: context.event_log_summary ?? '',
+      messages: context.messages ?? [],
+      selectedElements: context.selected_elements ?? [],
+      bilContext,
+      bilEnabled: config.features.bilEnabled,
+      hasGraph: graph != null,
+      hasAnalysis: analysisResponse != null,
+      generateModel: true,
+    };
+    const assembled = assembleFullPrompt(
+      PARALLEL_COACHING_INSTRUCTION,
+      'parallel-coaching-v1',
+      turnContext,
+      ZONE2_BLOCKS,
+    );
+    systemPrompt = assembled.system_prompt;
+  } else {
+    systemPrompt = buildCoachingPrompt(context);
+  }
+
   const result = await adapter.chat(
     {
-      system: buildCoachingPrompt(context),
+      system: systemPrompt,
       userMessage,
       maxTokens: getMaxTokensFromConfig('orchestrator'),
     },

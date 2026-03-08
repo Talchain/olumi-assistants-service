@@ -68,6 +68,13 @@ import type {
   ConversationTurn,
   AssembledContext,
 } from "./context-fabric/types.js";
+import { getSystemPrompt } from "../adapters/llm/prompt-loader.js";
+import { assembleFullPrompt } from "./prompt-zones/assemble.js";
+import { validateAssembly } from "./prompt-zones/validate.js";
+import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
+import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
+import { compactGraph } from "./context/graph-compact.js";
+import { assembleAnalysisInputsSummary } from "./analysis-inputs/assemble.js";
 
 // ============================================================================
 // Singleton PLoT client (created on first use)
@@ -89,6 +96,37 @@ export function _resetPlotClient(): void {
 
 /** Prompt version identifier for Context Fabric. Bumped on prompt changes. */
 const PROMPT_VERSION = 'v0.1.0-cee-fabric';
+
+// ============================================================================
+// Zone 2 Registry — TurnContext builder
+// ============================================================================
+
+function buildTurnContext(
+  turnRequest: OrchestratorTurnRequest,
+  bilEnabled: boolean,
+  bilContext: string | undefined,
+): TurnContext {
+  const ctx = turnRequest.context;
+  const graph = ctx.graph ?? turnRequest.graph_state ?? null;
+  const analysisResponse = ctx.analysis_response ?? turnRequest.analysis_state ?? null;
+
+  return {
+    stage: ctx.framing?.stage ?? 'frame',
+    goal: ctx.framing?.goal,
+    constraints: ctx.framing?.constraints,
+    options: ctx.framing?.options,
+    graphCompact: graph ? compactGraph(graph) : null,
+    analysisSummary: analysisResponse ? assembleAnalysisInputsSummary(analysisResponse) : null,
+    eventLogSummary: ctx.event_log_summary ?? '',
+    messages: ctx.messages ?? [],
+    selectedElements: ctx.selected_elements ?? [],
+    bilContext,
+    bilEnabled,
+    hasGraph: graph != null,
+    hasAnalysis: analysisResponse != null,
+    generateModel: false,
+  };
+}
 
 // ============================================================================
 // Deterministic Routing Prerequisites
@@ -452,10 +490,45 @@ async function dispatchViaLLM(
     dskCoaching = assembleDskCoachingItems(bil, 'pre_model');
   }
 
+  // ── Zone 2 Registry (feature-flagged, highest priority) ─────────────────
+  let zone2SystemPrompt: string | null = null;
+
+  if (config.features.zone2Registry) {
+    try {
+      const bilContextStr = shouldInjectBil
+        ? formatBilForCoaching(extractBriefIntelligence(turnRequest.message, null, stage))
+        : undefined;
+      const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr);
+      const zone1 = await getSystemPrompt('orchestrator');
+      const assembled = assembleFullPrompt(zone1, 'cf-v9', turnContext, ZONE2_BLOCKS);
+      const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length);
+      if (warnings.length > 0) {
+        log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings');
+      }
+      log.info(
+        {
+          request_id: requestId,
+          profile: assembled.profile,
+          reason: assembled.selection_reason,
+          blocks: assembled.active_blocks.map((b) => `${b.name}@${b.version}`),
+          chars: assembled.total_chars,
+          trimmed: assembled.trimmed_blocks,
+        },
+        'Prompt assembled via Zone 2 registry',
+      );
+      zone2SystemPrompt = assembled.system_prompt;
+    } catch (err) {
+      log.warn(
+        { request_id: requestId, error: err instanceof Error ? err.message : String(err) },
+        'Zone 2 registry assembly failed, falling back',
+      );
+    }
+  }
+
   if (!adapter.chatWithTools) {
     // Fallback: use plain chat if adapter doesn't support tools
     log.warn({ request_id: requestId }, "Adapter does not support chatWithTools, using plain chat");
-    const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
+    const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
     const result = await adapter.chat(
       { system: systemPrompt, userMessage: enrichedUserMessage },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
@@ -474,8 +547,8 @@ async function dispatchViaLLM(
 
   // Full tool-calling flow
 
-  const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
-  const messages = fabricContext
+  const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
+  const messages = (zone2SystemPrompt || fabricContext)
     ? [{ role: 'user' as const, content: enrichedUserMessage }]
     : assembleMessages(turnRequest.context, enrichedUserMessage);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());

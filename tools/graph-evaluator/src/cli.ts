@@ -41,7 +41,9 @@ import { DraftGraphAdapter } from "./adapters/draft-graph.js";
 import { EditGraphAdapter } from "./adapters/edit-graph.js";
 import { DecisionReviewAdapter } from "./adapters/decision-review.js";
 import { ResearchAdapter, runResearchFixture } from "./adapters/research.js";
+import { OrchestratorAdapter } from "./adapters/orchestrator.js";
 
+import { judgeOrchestratorResponse } from "./orchestrator-judge.js";
 import type {
   ScoredResult,
   RunManifest,
@@ -52,6 +54,8 @@ import type {
   LLMResponse,
   EvaluatorAdapter,
   ResearchFixture,
+  OrchestratorFixture,
+  JudgeResult,
 } from "./types.js";
 
 // ESM __dirname equivalent
@@ -79,6 +83,8 @@ function getAdapter(type: PromptType): EvaluatorAdapter {
       return new DecisionReviewAdapter();
     case "research":
       return new ResearchAdapter();
+    case "orchestrator":
+      return new OrchestratorAdapter();
     default:
       throw new Error(`Unknown prompt type: ${type}`);
   }
@@ -94,6 +100,8 @@ function getCasesDir(type: PromptType): string {
       return join(TOOL_ROOT, "fixtures", "decision-review");
     case "research":
       return join(TOOL_ROOT, "fixtures", "research");
+    case "orchestrator":
+      return join(TOOL_ROOT, "fixtures", "orchestrator");
     default:
       throw new Error(`Unknown prompt type: ${type}`);
   }
@@ -142,6 +150,9 @@ async function main(): Promise<void> {
     .option("--dry-run", "List combinations without calling APIs", false)
     .option("--run-id <id>", "Resume a specific run ID instead of generating a new one")
     .option("--dsk-enabled", "Force DSK injection for all decision_review fixtures", false)
+    .option("--judge", "Run LLM-as-judge scoring after structural eval (orchestrator only)", false)
+    .option("--profile <fixture_id>", "Use assembled prompt from a profile fixture (Zone 2 registry)")
+    .option("--zone1-only", "Use Zone 1 prompt only for baseline regression", false)
     .parse(process.argv);
 
   const opts = program.opts<{
@@ -155,11 +166,14 @@ async function main(): Promise<void> {
     dryRun: boolean;
     runId?: string;
     dskEnabled: boolean;
+    judge: boolean;
+    profile?: string;
+    zone1Only: boolean;
   }>();
 
   const promptType = opts.type as PromptType;
-  if (!["draft_graph", "edit_graph", "decision_review", "research"].includes(promptType)) {
-    console.error(`Invalid --type: ${opts.type}. Must be draft_graph, edit_graph, decision_review, or research.`);
+  if (!["draft_graph", "edit_graph", "decision_review", "research", "orchestrator"].includes(promptType)) {
+    console.error(`Invalid --type: ${opts.type}. Must be draft_graph, edit_graph, decision_review, research, or orchestrator.`);
     process.exit(1);
   }
 
@@ -218,7 +232,19 @@ async function main(): Promise<void> {
   }
 
   // ── Route to type-specific or legacy path ──────────────────────────────────
-  if (promptType === "draft_graph") {
+  if (promptType === "orchestrator") {
+    await runOrchestrator({
+      promptPath,
+      promptContent,
+      models,
+      modelsDir,
+      casesDir,
+      resultsDir,
+      caseFilter,
+      judge: opts.judge,
+      opts,
+    });
+  } else if (promptType === "draft_graph") {
     await runDraftGraph({
       promptPath,
       promptContent,
@@ -682,7 +708,7 @@ async function runGenericType(args: GenericRunArgs): Promise<void> {
   // Generate generic CSV report
   const csvLines = [
     [
-      "run_id", "prompt_type", "model_id", "case_id", "target_mode",
+      "run_id", "prompt_type", "provider", "model_id", "case_id", "target_mode",
       "overall_score", "latency_ms", "input_tokens", "output_tokens",
       "reasoning_tokens", "est_cost_usd", "failure_code", "parse_error",
       ...Object.keys(allResults[0]?.score.dimensions ?? {}),
@@ -697,9 +723,10 @@ async function runGenericType(args: GenericRunArgs): Promise<void> {
       [
         config.run_id,
         promptType,
+        r.model.provider,
         r.model.id,
         r.fixture_id,
-        r.model.target_mode,
+        r.model.target_mode ?? "",
         r.score.overall?.toFixed(4) ?? "",
         String(r.response.latency_ms),
         String(r.response.input_tokens ?? ""),
@@ -909,7 +936,7 @@ async function runResearch(args: ResearchRunArgs): Promise<void> {
   // Generate CSV + summary
   const csvLines = [
     [
-      "run_id", "prompt_type", "model_id", "case_id", "target_mode",
+      "run_id", "prompt_type", "provider", "model_id", "case_id", "target_mode",
       "overall_score", "latency_ms", "input_tokens", "output_tokens",
       "est_cost_usd", "failure_code",
       ...Object.keys(allResults[0]?.score.dimensions ?? {}),
@@ -924,9 +951,10 @@ async function runResearch(args: ResearchRunArgs): Promise<void> {
       [
         runConfig.run_id,
         "research",
+        r.model.provider,
         r.model.id,
         r.fixture_id,
-        r.model.target_mode,
+        r.model.target_mode ?? "",
         r.score.overall?.toFixed(4) ?? "",
         String(r.response.latency_ms),
         String(r.response.input_tokens ?? ""),
@@ -966,6 +994,508 @@ async function runResearch(args: ResearchRunArgs): Promise<void> {
       );
     }
   }
+}
+
+// =============================================================================
+// Orchestrator path (multi-turn + judge support)
+// =============================================================================
+
+interface OrchestratorRunArgs {
+  promptPath: string;
+  promptContent: string;
+  models: Awaited<ReturnType<typeof readModels>>;
+  modelsDir: string;
+  casesDir: string;
+  resultsDir: string;
+  caseFilter: string[];
+  judge: boolean;
+  opts: {
+    prompt: string;
+    force: boolean;
+    resume: boolean;
+    dryRun: boolean;
+    runId?: string;
+  };
+}
+
+interface OrchestratorScoredResult extends GenericScoredResult {
+  judgeResult?: JudgeResult;
+  conversationHistory?: string;
+}
+
+async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
+  const { promptContent, models, modelsDir, casesDir, resultsDir, caseFilter, judge, opts } = args;
+
+  const adapter = new OrchestratorAdapter();
+
+  let fixtures: OrchestratorFixture[];
+  try {
+    fixtures = await adapter.loadCases(casesDir);
+  } catch (err) {
+    console.error(`Failed to load orchestrator fixtures from ${casesDir}:`, err);
+    process.exit(1);
+  }
+
+  if (caseFilter.length > 0) {
+    fixtures = fixtures.filter((f) => caseFilter.includes(f.id));
+  }
+
+  if (fixtures.length === 0) {
+    console.error(`No orchestrator fixtures found. Check ${casesDir} and --cases filter.`);
+    process.exit(1);
+  }
+
+  const runId = opts.runId ?? buildRunId(opts.prompt);
+  const timestamp = new Date().toISOString();
+  const promptHash = hashContent(promptContent);
+  const promptFilename = opts.prompt.split(/[/\\]/).pop() ?? opts.prompt;
+
+  const config: RunConfig = {
+    run_id: runId,
+    timestamp,
+    prompt_file: opts.prompt,
+    prompt_content: promptContent,
+    model_ids: models.map((m) => m.id),
+    brief_ids: fixtures.map((f) => f.id),
+    force: opts.force,
+    resume: opts.resume,
+    dry_run: opts.dryRun,
+    results_dir: resultsDir,
+    prompt_type: "orchestrator",
+  };
+
+  if (opts.dryRun) {
+    console.log(`\n[Dry Run] Would execute ${models.length * fixtures.length} combination(s):\n`);
+    for (const model of models) {
+      for (const fixture of fixtures) {
+        console.log(`  ${model.id.padEnd(20)} × ${fixture.id}`);
+      }
+    }
+    console.log(`\nPrompt type: orchestrator${judge ? " (with judge)" : ""}`);
+    console.log(`Prompt: ${opts.prompt} (${promptHash})`);
+    console.log(`Run ID would be: ${runId}`);
+    return;
+  }
+
+  await ensureDir(join(resultsDir, runId));
+
+  // Write manifest
+  const gitSha = getGitSha();
+  const modelHashes: Record<string, { config_hash: string }> = {};
+  for (const model of models) {
+    try {
+      const configPath = join(modelsDir, `${model.id}.json`);
+      modelHashes[model.id] = { config_hash: await hashFile(configPath) };
+    } catch {
+      modelHashes[model.id] = { config_hash: "unknown" };
+    }
+  }
+  const briefHashes: Record<string, { content_hash: string }> = {};
+  for (const fixture of fixtures) {
+    briefHashes[fixture.id] = { content_hash: hashContent(JSON.stringify(fixture)) };
+  }
+  const manifest: RunManifest = {
+    run_id: runId,
+    timestamp,
+    git_sha: gitSha,
+    tool_version: TOOL_VERSION,
+    cli_args: process.argv.slice(2),
+    prompt: { filename: promptFilename, content_hash: promptHash },
+    models: modelHashes,
+    briefs: briefHashes,
+  };
+  await saveManifest(resultsDir, runId, manifest);
+
+  console.log(`\nStarting run: ${runId} (type: orchestrator${judge ? " + judge" : ""})`);
+  console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
+  console.log(`Cases: ${fixtures.map((f) => f.id).join(", ")}`);
+  console.log();
+
+  // Import provider for direct multi-turn calls
+  const { getProvider } = await import("./providers/index.js");
+
+  const allResults: OrchestratorScoredResult[] = [];
+
+  for (const model of models) {
+    for (const fixture of fixtures) {
+      const fixtureId = fixture.id;
+
+      // Check cache
+      if (!opts.force) {
+        const cached = await loadResponse(resultsDir, runId, model.id, fixtureId);
+        if (cached !== null && !opts.resume) {
+          console.log(`  [cache]  Skipping ${model.id} × ${fixtureId}`);
+          const parsed = cached.parsed_json ?? null;
+          const scoreResult = adapter.score(fixture, parsed, cached);
+          allResults.push({
+            response: cached,
+            score: scoreResult,
+            fixture_id: fixtureId,
+            model,
+            prompt_type: "orchestrator",
+          });
+          continue;
+        }
+      }
+
+      console.log(`  Running: ${model.id} × ${fixtureId}...`);
+
+      let finalResponse: LLMResponse;
+      let conversationHistory = "";
+
+      if (adapter.isMultiTurn(fixture)) {
+        // Multi-turn: execute each segment, auto-fill assistant nulls
+        const segments = adapter.getMultiTurnSegments(fixture);
+        const filledTurns = [...(fixture.turns ?? [])];
+        const provider = getProvider(model);
+
+        let totalLatency = 0;
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        let lastRawText = "";
+        let lastOk = true;
+        let lastError: string | undefined;
+
+        for (const segment of segments) {
+          const result = await provider.chat(promptContent, segment.userMessage, model);
+          totalLatency += result.latency_ms;
+          totalInputTokens += result.input_tokens ?? 0;
+          totalOutputTokens += result.output_tokens ?? 0;
+
+          if (!result.ok) {
+            lastOk = false;
+            lastError = result.error ?? "unknown error";
+            break;
+          }
+
+          lastRawText = result.text ?? "";
+
+          // Auto-fill the corresponding assistant null turn
+          const nullIdx = filledTurns.findIndex(
+            (t) => t.role === "assistant" && t.content === null
+          );
+          if (nullIdx >= 0) {
+            filledTurns[nullIdx] = { role: "assistant", content: lastRawText };
+          }
+        }
+
+        // If there's a final user turn after all segments, make one more call
+        // with the full conversation as context
+        const lastTurn = filledTurns[filledTurns.length - 1];
+        if (lastTurn.role === "user" && lastOk) {
+          // Build full conversation context for the final call
+          const historyParts = filledTurns.slice(0, -1).map(
+            (t) => `[${t.role.toUpperCase()}]: ${t.content ?? ""}`
+          );
+          const contextPrefix = adapter.buildContextPrefix(fixture);
+          const finalUserMsg = [
+            contextPrefix,
+            "",
+            "CONVERSATION HISTORY:",
+            ...historyParts,
+            "",
+            "BEGIN_UNTRUSTED_CONTEXT",
+            lastTurn.content ?? "",
+            "END_UNTRUSTED_CONTEXT",
+          ].join("\n");
+
+          const result = await provider.chat(promptContent, finalUserMsg, model);
+          totalLatency += result.latency_ms;
+          totalInputTokens += result.input_tokens ?? 0;
+          totalOutputTokens += result.output_tokens ?? 0;
+
+          if (!result.ok) {
+            lastOk = false;
+            lastError = result.error ?? "unknown error";
+          } else {
+            lastRawText = result.text ?? "";
+          }
+        }
+
+        conversationHistory = adapter.buildConversationHistory(filledTurns);
+
+        const cost =
+          (totalInputTokens / 1_000_000) * (model.pricing?.input_per_1m ?? 0) +
+          (totalOutputTokens / 1_000_000) * (model.pricing?.output_per_1m ?? 0);
+
+        finalResponse = {
+          model_id: model.id,
+          brief_id: fixtureId,
+          status: lastOk ? "success" : "server_error",
+          raw_text: lastRawText,
+          latency_ms: totalLatency,
+          input_tokens: totalInputTokens,
+          output_tokens: totalOutputTokens,
+          est_cost_usd: cost,
+          pricing_source: "model_config",
+          failure_code: lastOk ? undefined : "server_error",
+          error_message: lastError,
+        };
+      } else {
+        // Single-turn: call provider directly (avoids JSON extraction mismatch for XML)
+        const { system, user } = adapter.buildRequest(fixture, promptContent);
+        const provider = getProvider(model);
+        const result = await provider.chat(system, user, model);
+
+        const cost =
+          ((result.input_tokens ?? 0) / 1_000_000) * (model.pricing?.input_per_1m ?? 0) +
+          ((result.output_tokens ?? 0) / 1_000_000) * (model.pricing?.output_per_1m ?? 0);
+
+        finalResponse = {
+          model_id: model.id,
+          brief_id: fixtureId,
+          status: result.ok ? "success" : "server_error",
+          raw_text: result.text ?? undefined,
+          latency_ms: result.latency_ms,
+          input_tokens: result.input_tokens,
+          output_tokens: result.output_tokens,
+          est_cost_usd: cost,
+          pricing_source: "model_config",
+          failure_code: result.ok ? undefined : "server_error",
+          error_message: result.ok ? undefined : (result.error ?? undefined),
+        };
+      }
+
+      // Save response
+      await saveResponse(resultsDir, runId, model.id, fixtureId, finalResponse);
+
+      // Parse and score structurally
+      let parsed: Record<string, unknown> | null = null;
+      if (finalResponse.status === "success" && finalResponse.raw_text) {
+        const parseResult = adapter.parseResponse(finalResponse.raw_text);
+        parsed = parseResult.parsed;
+        if (parseResult.parsed) finalResponse.parsed_json = parseResult.parsed;
+      }
+      const scoreResult = adapter.score(fixture, parsed, finalResponse);
+
+      const statusStr =
+        finalResponse.status === "success"
+          ? `✓ ${finalResponse.latency_ms}ms, cost $${(finalResponse.est_cost_usd ?? 0).toFixed(4)}`
+          : `✗ ${finalResponse.failure_code}`;
+      console.log(`  Done:    ${model.id} × ${fixtureId} — ${statusStr}`);
+      console.log(`  Score:   ${model.id} × ${fixtureId} — structural: ${scoreResult.overall?.toFixed(3) ?? "—"}`);
+
+      // Judge scoring (if --judge and raw_text available — parse_failed is expected for XML)
+      let judgeResult: JudgeResult | undefined;
+      if (judge && finalResponse.raw_text) {
+        console.log(`  Judging: ${model.id} × ${fixtureId}...`);
+        judgeResult = await judgeOrchestratorResponse(
+          fixture,
+          finalResponse.raw_text,
+          model.id,
+          conversationHistory || undefined
+        );
+
+        if (judgeResult.judge_error) {
+          console.log(`  Judge:   ${model.id} × ${fixtureId} — ERROR: ${judgeResult.judge_error}`);
+        } else {
+          console.log(
+            `  Judge:   ${model.id} × ${fixtureId} — qualitative: ${judgeResult.weighted_average.toFixed(3)} (${judgeResult.judge_latency_ms}ms, $${judgeResult.judge_cost_usd.toFixed(4)})`
+          );
+        }
+      }
+
+      allResults.push({
+        response: finalResponse,
+        score: scoreResult,
+        fixture_id: fixtureId,
+        model,
+        prompt_type: "orchestrator",
+        judgeResult,
+        conversationHistory,
+      });
+    }
+  }
+
+  if (allResults.length === 0) {
+    console.log("No responses to score. Run complete.");
+    return;
+  }
+
+  // Generate CSV + summary
+  const judgeActive = allResults.some((r) => r.judgeResult != null);
+  const judgeDimKeys = [
+    "scientific_polymath", "causal_mechanism", "coaching_over_telling",
+    "grounded_quantification", "warm_directness", "appropriate_brevity",
+    "constructive_challenge", "elicitation_quality", "session_coherence",
+  ];
+
+  const csvLines = [
+    [
+      "run_id", "prompt_type", "provider", "model_id", "case_id", "target_mode",
+      "structural_score", "latency_ms", "input_tokens", "output_tokens",
+      "est_cost_usd", "failure_code",
+      ...Object.keys(allResults[0]?.score.dimensions ?? {}),
+      ...(judgeActive ? ["judge_weighted_avg", "judge_latency_ms", "judge_cost_usd", ...judgeDimKeys.map((k) => `judge_${k}`)] : []),
+    ].join(","),
+  ];
+
+  for (const r of allResults) {
+    const dims = Object.values(r.score.dimensions).map((v) =>
+      v === null ? "" : typeof v === "boolean" ? (v ? "1" : "0") : String(v)
+    );
+    const judgeCols: string[] = [];
+    if (judgeActive) {
+      const jr = r.judgeResult;
+      judgeCols.push(
+        jr ? jr.weighted_average.toFixed(4) : "",
+        jr ? String(jr.judge_latency_ms) : "",
+        jr ? jr.judge_cost_usd.toFixed(6) : "",
+        ...judgeDimKeys.map((k) => {
+          const dim = jr?.scores[k as keyof typeof jr.scores];
+          return dim ? String(dim.score) : "";
+        })
+      );
+    }
+    csvLines.push(
+      [
+        config.run_id,
+        "orchestrator",
+        r.model.provider,
+        r.model.id,
+        r.fixture_id,
+        r.model.target_mode ?? "",
+        r.score.overall?.toFixed(4) ?? "",
+        String(r.response.latency_ms),
+        String(r.response.input_tokens ?? ""),
+        String(r.response.output_tokens ?? ""),
+        (r.response.est_cost_usd ?? 0).toFixed(6),
+        r.response.failure_code ?? "",
+        ...dims,
+        ...judgeCols,
+      ].join(",")
+    );
+  }
+
+  const scoresCsv = csvLines.join("\n") + "\n";
+  const summaryMd = generateOrchestratorSummary(allResults, config, promptHash, judgeActive);
+
+  await ensureDir(join(resultsDir, runId));
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(resultsDir, runId, "scores.csv"), scoresCsv, "utf-8");
+  await writeFile(join(resultsDir, runId, "summary.md"), summaryMd, "utf-8");
+
+  // Print summary
+  const successCount = allResults.filter((r) => r.score.overall != null).length;
+  const failCount = allResults.filter((r) => r.response.failure_code).length;
+
+  console.log(`\n✓ Run complete: ${runId}`);
+  console.log(`  ${successCount} scored | ${failCount} failed`);
+  console.log(`  Results: ${join(resultsDir, runId)}`);
+
+  if (judgeActive) {
+    // Print per-model judge averages
+    const modelIds = [...new Set(allResults.map((r) => r.model.id))];
+    console.log("\nJudge qualitative averages (per model):");
+    for (const mid of modelIds) {
+      const modelResults = allResults.filter(
+        (r) => r.model.id === mid && r.judgeResult && !r.judgeResult.judge_error
+      );
+      if (modelResults.length === 0) continue;
+      const avgQual =
+        modelResults.reduce((s, r) => s + (r.judgeResult?.weighted_average ?? 0), 0) / modelResults.length;
+      const avgStruct =
+        modelResults.reduce((s, r) => s + (r.score.overall ?? 0), 0) / modelResults.length;
+      console.log(
+        `  ${mid.padEnd(25)} structural: ${avgStruct.toFixed(3)}  qualitative: ${avgQual.toFixed(3)}`
+      );
+    }
+  }
+
+  const topResults = allResults
+    .filter((r) => r.score.overall != null)
+    .sort((a, b) => (b.score.overall ?? 0) - (a.score.overall ?? 0))
+    .slice(0, 3);
+
+  if (topResults.length > 0) {
+    console.log("\nTop results (structural):");
+    for (const r of topResults) {
+      console.log(
+        `  ${r.model.id.padEnd(20)} × ${r.fixture_id.padEnd(30)} — ${r.score.overall!.toFixed(3)}`
+      );
+    }
+  }
+}
+
+function generateOrchestratorSummary(
+  results: OrchestratorScoredResult[],
+  config: RunConfig,
+  promptHash: string,
+  judgeActive: boolean
+): string {
+  const lines: string[] = [];
+  lines.push(`# Orchestrator Evaluator — Run Summary\n`);
+  lines.push(`Run ID: \`${config.run_id}\``);
+  lines.push(`Prompt: \`${config.prompt_file}\` (${promptHash})`);
+  lines.push(`Judge: ${judgeActive ? "enabled" : "disabled"}\n`);
+
+  // Structural scores table
+  lines.push("## Structural Scores\n");
+  const dimKeys = Object.keys(results[0]?.score.dimensions ?? {});
+  lines.push(`| Model | Case | Overall | ${dimKeys.join(" | ")} | Latency |`);
+  lines.push(`| --- | --- | --- | ${dimKeys.map(() => "---").join(" | ")} | --- |`);
+
+  for (const r of results) {
+    const dims = Object.values(r.score.dimensions).map((v) => {
+      if (v === null) return "—";
+      if (typeof v === "boolean") return v ? "✓" : "✗";
+      return typeof v === "number" ? v.toFixed(3) : String(v);
+    });
+    lines.push(
+      `| ${r.model.id} | ${r.fixture_id} | ${r.score.overall?.toFixed(3) ?? "—"} | ${dims.join(" | ")} | ${r.response.latency_ms}ms |`
+    );
+  }
+
+  if (judgeActive) {
+    const judgeDimKeys = [
+      "scientific_polymath", "causal_mechanism", "coaching_over_telling",
+      "grounded_quantification", "warm_directness", "appropriate_brevity",
+      "constructive_challenge", "elicitation_quality", "session_coherence",
+    ];
+
+    lines.push("\n## Judge Qualitative Scores\n");
+    lines.push(`| Model | Case | Weighted Avg | ${judgeDimKeys.join(" | ")} | Impression |`);
+    lines.push(`| --- | --- | --- | ${judgeDimKeys.map(() => "---").join(" | ")} | --- |`);
+
+    for (const r of results) {
+      const jr = r.judgeResult;
+      if (!jr || jr.judge_error) {
+        lines.push(`| ${r.model.id} | ${r.fixture_id} | ERROR | ${judgeDimKeys.map(() => "—").join(" | ")} | ${jr?.judge_error ?? "no judge"} |`);
+        continue;
+      }
+      const dimScores = judgeDimKeys.map((k) => {
+        const d = jr.scores[k as keyof typeof jr.scores];
+        return d ? `${d.score}/5` : "—";
+      });
+      lines.push(
+        `| ${r.model.id} | ${r.fixture_id} | ${jr.weighted_average.toFixed(3)} | ${dimScores.join(" | ")} | ${jr.overall_impression.slice(0, 80)}... |`
+      );
+    }
+
+    // Per-model averages
+    const modelIds = [...new Set(results.map((r) => r.model.id))];
+    lines.push("\n## Per-Model Averages\n");
+    lines.push(`| Model | Structural | Qualitative | ${judgeDimKeys.join(" | ")} |`);
+    lines.push(`| --- | --- | --- | ${judgeDimKeys.map(() => "---").join(" | ")} |`);
+
+    for (const mid of modelIds) {
+      const mr = results.filter((r) => r.model.id === mid && r.judgeResult && !r.judgeResult.judge_error);
+      if (mr.length === 0) continue;
+      const avgStruct = mr.reduce((s, r) => s + (r.score.overall ?? 0), 0) / mr.length;
+      const avgQual = mr.reduce((s, r) => s + (r.judgeResult?.weighted_average ?? 0), 0) / mr.length;
+      const dimAvgs = judgeDimKeys.map((k) => {
+        const sum = mr.reduce((s, r) => {
+          const d = r.judgeResult?.scores[k as keyof typeof r.judgeResult.scores];
+          return s + (d?.score ?? 0);
+        }, 0);
+        return (sum / mr.length).toFixed(1);
+      });
+      lines.push(`| ${mid} | ${avgStruct.toFixed(3)} | ${avgQual.toFixed(3)} | ${dimAvgs.join(" | ")} |`);
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
 }
 
 // =============================================================================
