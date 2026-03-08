@@ -44,6 +44,18 @@ vi.mock("../../../src/orchestrator/context/hash.js", () => ({
   hashContext: vi.fn().mockReturnValue("test-hash-000"),
 }));
 
+// Mock idempotency — default: no cache hit, no inflight
+const mockGetIdempotentResponse = vi.fn().mockReturnValue(null);
+const mockSetIdempotentResponse = vi.fn();
+const mockGetInflightRequest = vi.fn().mockReturnValue(null);
+const mockRegisterInflightRequest = vi.fn();
+vi.mock("../../../src/orchestrator/idempotency.js", () => ({
+  getIdempotentResponse: (...args: unknown[]) => mockGetIdempotentResponse(...args),
+  setIdempotentResponse: (...args: unknown[]) => mockSetIdempotentResponse(...args),
+  getInflightRequest: (...args: unknown[]) => mockGetInflightRequest(...args),
+  registerInflightRequest: (...args: unknown[]) => mockRegisterInflightRequest(...args),
+}));
+
 import { handleParallelGenerate } from "../../../src/orchestrator/parallel-generate.js";
 import type { OrchestratorTurnRequest, ConversationContext } from "../../../src/orchestrator/types.js";
 import type { DraftGraphResult } from "../../../src/orchestrator/tools/draft-graph.js";
@@ -188,29 +200,46 @@ describe("handleParallelGenerate", () => {
     expect(mockChat).not.toHaveBeenCalled();
   });
 
-  // Test 6: Concurrency — both calls fire simultaneously, not sequentially
-  it("fires both calls concurrently (total time is max, not sum)", async () => {
-    const DRAFT_DELAY = 100;
-    const COACHING_DELAY = 80;
+  // Test 6: Concurrency — both calls overlap (deterministic call-order check)
+  it("fires both calls concurrently, not sequentially", async () => {
+    // Track when each mock is called relative to the other settling.
+    // If parallel: both are called before either resolves.
+    // If sequential: second is called only after first resolves.
+    const callOrder: string[] = [];
 
-    mockHandleDraftGraph.mockImplementation(
-      () => new Promise(resolve => setTimeout(() => resolve(makeDraftResult()), DRAFT_DELAY)),
-    );
-    mockChat.mockImplementation(
-      () => new Promise(resolve => setTimeout(() => resolve({ content: "Coaching text" }), COACHING_DELAY)),
-    );
+    mockHandleDraftGraph.mockImplementation(() => {
+      callOrder.push("draft_called");
+      return new Promise(resolve => {
+        setTimeout(() => {
+          callOrder.push("draft_resolved");
+          resolve(makeDraftResult());
+        }, 50);
+      });
+    });
+    mockChat.mockImplementation(() => {
+      callOrder.push("coaching_called");
+      return new Promise(resolve => {
+        setTimeout(() => {
+          callOrder.push("coaching_resolved");
+          resolve({ content: "Coaching text" });
+        }, 30);
+      });
+    });
 
-    const start = Date.now();
     const result = await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-6");
-    const elapsed = Date.now() - start;
 
     expect(result.httpStatus).toBe(200);
 
-    // If sequential, elapsed would be >= DRAFT_DELAY + COACHING_DELAY (180ms).
-    // Parallel should be close to max(DRAFT_DELAY, COACHING_DELAY) = 100ms.
-    // Allow generous margin for CI slowness but reject clearly sequential timing.
-    const sequentialMin = DRAFT_DELAY + COACHING_DELAY;
-    expect(elapsed).toBeLessThan(sequentialMin);
+    // Both must be called before either resolves (proves parallelism)
+    const draftCallIdx = callOrder.indexOf("draft_called");
+    const coachingCallIdx = callOrder.indexOf("coaching_called");
+    const firstResolveIdx = Math.min(
+      callOrder.indexOf("draft_resolved"),
+      callOrder.indexOf("coaching_resolved"),
+    );
+
+    expect(draftCallIdx).toBeLessThan(firstResolveIdx);
+    expect(coachingCallIdx).toBeLessThan(firstResolveIdx);
   });
 
   // Coaching call should NOT receive tool definitions
@@ -227,5 +256,70 @@ describe("handleParallelGenerate", () => {
     expect(chatArgs.system).toContain("Do NOT select or call any tools");
     // No 'tools' key in the call args
     expect(chatArgs).not.toHaveProperty("tools");
+  });
+
+  // Coaching prompt includes stage/framing context
+  it("includes stage and framing context in coaching system prompt", async () => {
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching response" });
+
+    const req = makeTurnRequest({
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: {
+          stage: "ideate" as const,
+          goal: "Maximise team velocity",
+          constraints: ["Budget: £200k", "Timeline: 6 months"],
+          options: ["Hire two developers", "Hire a tech lead"],
+        },
+        messages: [],
+        scenario_id: "test-scenario",
+        analysis_inputs: null,
+      } as unknown as ConversationContext,
+    });
+
+    await handleParallelGenerate(req, fakeRequest, "req-8");
+
+    const chatArgs = mockChat.mock.calls[0][0];
+    expect(chatArgs.system).toContain("Current stage: ideate");
+    expect(chatArgs.system).toContain("Decision goal: Maximise team velocity");
+    expect(chatArgs.system).toContain("Constraints: Budget: £200k; Timeline: 6 months");
+    expect(chatArgs.system).toContain("Options under consideration: Hire two developers; Hire a tech lead");
+  });
+
+  // Idempotency: cached response returned without firing LLM calls
+  it("returns cached response on idempotency hit", async () => {
+    const cachedEnvelope = {
+      turn_id: "cached-turn",
+      assistant_text: "Cached coaching text",
+      blocks: [],
+      lineage: { context_hash: "abc" },
+    };
+
+    mockGetIdempotentResponse.mockReturnValueOnce(cachedEnvelope);
+
+    const result = await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-9");
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_id).toBe("cached-turn");
+    // Neither LLM call nor draft_graph should have fired
+    expect(mockHandleDraftGraph).not.toHaveBeenCalled();
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  // Successful response is cached via setIdempotentResponse
+  it("caches successful response for idempotency", async () => {
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching text" });
+
+    await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-10");
+
+    expect(mockSetIdempotentResponse).toHaveBeenCalledTimes(1);
+    expect(mockSetIdempotentResponse).toHaveBeenCalledWith(
+      "test-scenario",
+      "test-turn-001",
+      expect.objectContaining({ assistant_text: "Coaching text" }),
+    );
   });
 });

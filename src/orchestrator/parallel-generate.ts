@@ -20,6 +20,13 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import type { DraftGraphResult } from "./tools/draft-graph.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
+import {
+  getIdempotentResponse,
+  setIdempotentResponse,
+  getInflightRequest,
+  registerInflightRequest,
+} from "./idempotency.js";
+import { getHttpStatusForError } from "./types.js";
 import type {
   OrchestratorTurnRequest,
   OrchestratorResponseEnvelope,
@@ -49,6 +56,37 @@ Your role on this turn:
 - Do NOT select or call any tools. The draft_graph tool is already executing.
 
 Respond conversationally as a decision science coach reviewing their brief.`;
+
+/**
+ * Build the coaching system prompt by appending stage/framing context
+ * from the conversation context (same data Zone 2 uses in the simple
+ * prompt assembly path). This gives the coaching LLM awareness of the
+ * user's decision stage, goal, and constraints without pulling in the
+ * full orchestrator prompt (which contains tool definitions).
+ */
+function buildCoachingPrompt(context: OrchestratorTurnRequest['context']): string {
+  const sections: string[] = [PARALLEL_COACHING_INSTRUCTION];
+
+  const stage = context.framing?.stage ?? 'frame';
+  sections.push(`Current stage: ${stage}`);
+
+  const goal = context.framing?.goal;
+  if (goal) {
+    sections.push(`Decision goal: ${goal}`);
+  }
+
+  const constraints = context.framing?.constraints;
+  if (constraints && constraints.length > 0) {
+    sections.push(`Constraints: ${constraints.join('; ')}`);
+  }
+
+  const options = context.framing?.options;
+  if (options && options.length > 0) {
+    sections.push(`Options under consideration: ${options.join('; ')}`);
+  }
+
+  return sections.join('\n');
+}
 
 // ============================================================================
 // Handler
@@ -82,6 +120,30 @@ export async function handleParallelGenerate(
     };
   }
 
+  // Idempotency: return cached response if available
+  const cached = getIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id);
+  if (cached) {
+    log.info({ request_id: requestId, client_turn_id: turnRequest.client_turn_id }, "parallel_generate: idempotency cache hit");
+    const status = cached.error ? getHttpStatusForError(cached.error) : 200;
+    return { envelope: cached, httpStatus: status };
+  }
+
+  // Concurrent dedup: await in-flight request if one exists
+  const inflightEnvelope = getInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id);
+  if (inflightEnvelope) {
+    log.info({ request_id: requestId, client_turn_id: turnRequest.client_turn_id }, "parallel_generate: inflight dedup hit");
+    const envelope = await inflightEnvelope;
+    const status = envelope.error ? getHttpStatusForError(envelope.error) : 200;
+    return { envelope, httpStatus: status };
+  }
+
+  // Register in-flight promise for concurrent dedup
+  let resolveInflight!: (value: OrchestratorResponseEnvelope) => void;
+  const inflightPromise = new Promise<OrchestratorResponseEnvelope>((resolve) => {
+    resolveInflight = resolve;
+  });
+  registerInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id, inflightPromise);
+
   log.info(
     { request_id: requestId, brief_length: brief.length, turn_id: turnId },
     "parallel_generate: starting concurrent draft_graph + coaching",
@@ -90,7 +152,7 @@ export async function handleParallelGenerate(
   // Fire both calls concurrently
   const [draftSettled, coachingSettled] = await Promise.allSettled([
     handleDraftGraph(brief, request, turnId),
-    runCoachingCall(brief, requestId),
+    runCoachingCall(brief, turnRequest.context, requestId),
   ]);
 
   const draftResult = draftSettled.status === 'fulfilled' ? draftSettled.value : null;
@@ -110,34 +172,39 @@ export async function handleParallelGenerate(
   );
 
   // Assemble response based on which calls succeeded
+  let result: ParallelGenerateResult;
+
   if (draftResult && coachingText !== null) {
-    return assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText);
+    result = assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText);
+  } else if (!draftResult && coachingText !== null) {
+    result = assembleDraftFailed(turnId, turnRequest, coachingText, draftError);
+  } else if (draftResult && coachingText === null) {
+    result = assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId);
+  } else {
+    result = assembleBothFailed(turnId, turnRequest, draftError, coachingError);
   }
 
-  if (!draftResult && coachingText !== null) {
-    return assembleDraftFailed(turnId, turnRequest, coachingText, draftError);
-  }
+  // Cache and resolve in-flight
+  setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
+  resolveInflight(result.envelope);
 
-  if (draftResult && coachingText === null) {
-    return assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId);
-  }
-
-  // Both failed
-  return assembleBothFailed(turnId, turnRequest, draftError, coachingError);
+  return result;
 }
 
 // ============================================================================
 // Coaching LLM call (no tools)
 // ============================================================================
 
-async function runCoachingCall(brief: string, requestId: string): Promise<string> {
+async function runCoachingCall(
+  brief: string,
+  context: OrchestratorTurnRequest['context'],
+  requestId: string,
+): Promise<string> {
   const adapter = getAdapter('orchestrator');
-
-  const systemPrompt = PARALLEL_COACHING_INSTRUCTION;
 
   const result = await adapter.chat(
     {
-      system: systemPrompt,
+      system: buildCoachingPrompt(context),
       userMessage: brief,
       maxTokens: getMaxTokensFromConfig('orchestrator'),
     },
