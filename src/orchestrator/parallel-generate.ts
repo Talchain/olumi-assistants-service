@@ -32,6 +32,9 @@ import type {
   OrchestratorResponseEnvelope,
   ConversationBlock,
 } from "./types.js";
+import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
+import { formatBilForCoaching, formatBilForDraftGraph } from "./brief-intelligence/format.js";
+import { config } from "../config/index.js";
 
 // ============================================================================
 // Types
@@ -144,16 +147,26 @@ export async function handleParallelGenerate(
   });
   registerInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id, inflightPromise);
 
+  // BIL extraction (deterministic, <50ms) — always runs; injection gated by flag
+  const bilEnabled = config.features.bilEnabled;
+  const bilMinLength = 50;
+  const bil = bilEnabled && brief.trim().length >= bilMinLength
+    ? extractBriefIntelligence(brief, null, turnRequest.context.framing?.stage ?? 'frame')
+    : null;
+
+  const coachingBilContext = bil ? formatBilForCoaching(bil) : undefined;
+  const draftBilHeader = bil ? formatBilForDraftGraph(bil) : undefined;
+
   log.info(
-    { request_id: requestId, brief_length: brief.length, turn_id: turnId },
+    { request_id: requestId, brief_length: brief.length, turn_id: turnId, bil_enabled: bilEnabled, bil_extracted: bil !== null },
     "parallel_generate: starting concurrent draft_graph + coaching",
   );
 
   try {
     // Fire both calls concurrently
     const [draftSettled, coachingSettled] = await Promise.allSettled([
-      handleDraftGraph(brief, request, turnId),
-      runCoachingCall(brief, turnRequest.context, requestId),
+      handleDraftGraph(brief, request, turnId, draftBilHeader ? { briefSignalsHeader: draftBilHeader } : undefined),
+      runCoachingCall(brief, turnRequest.context, requestId, coachingBilContext),
     ]);
 
     const draftResult = draftSettled.status === 'fulfilled' ? draftSettled.value : null;
@@ -226,13 +239,17 @@ async function runCoachingCall(
   brief: string,
   context: OrchestratorTurnRequest['context'],
   requestId: string,
+  bilContext?: string,
 ): Promise<string> {
   const adapter = getAdapter('orchestrator');
+
+  // Append BIL context to user message if provided
+  const userMessage = bilContext ? `${brief}\n\n${bilContext}` : brief;
 
   const result = await adapter.chat(
     {
       system: buildCoachingPrompt(context),
-      userMessage: brief,
+      userMessage,
       maxTokens: getMaxTokensFromConfig('orchestrator'),
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },

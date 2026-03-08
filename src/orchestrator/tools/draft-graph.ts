@@ -61,12 +61,14 @@ export async function handleDraftGraph(
   brief: string,
   request: FastifyRequest,
   turnId: string,
+  draftOpts?: { briefSignalsHeader?: string },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
 
-  // Build pipeline input
+  // Build pipeline input — compose briefSignalsHeader with any existing value (fix #10)
   const input: DraftInputWithCeeExtras = {
     brief,
+    ...(draftOpts?.briefSignalsHeader ? { briefSignalsHeader: draftOpts.briefSignalsHeader } : {}),
   };
 
   const opts: UnifiedPipelineOpts = {

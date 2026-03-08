@@ -56,6 +56,42 @@ vi.mock("../../../src/orchestrator/idempotency.js", () => ({
   registerInflightRequest: (...args: unknown[]) => mockRegisterInflightRequest(...args),
 }));
 
+// Mock config — bilEnabled OFF by default (flags-off parity)
+const mockConfig = {
+  features: { bilEnabled: false },
+};
+vi.mock("../../../src/config/index.js", () => ({
+  config: new Proxy({}, {
+    get: (_target, prop) => {
+      if (prop === 'features') return mockConfig.features;
+      return undefined;
+    },
+  }),
+}));
+
+// Mock BIL modules (real extraction tested in extract.test.ts)
+const mockExtract = vi.fn().mockReturnValue({
+  contract_version: '1.0.0',
+  goal: { label: 'test goal', measurable: false, confidence: 0.7 },
+  options: [],
+  constraints: [],
+  factors: [],
+  completeness_band: 'low',
+  ambiguity_flags: [],
+  missing_elements: ['constraints'],
+  dsk_cues: [],
+});
+vi.mock("../../../src/orchestrator/brief-intelligence/extract.js", () => ({
+  extractBriefIntelligence: (...args: unknown[]) => mockExtract(...args),
+}));
+
+const mockFormatCoaching = vi.fn().mockReturnValue('<BRIEF_ANALYSIS>\nTest coaching context\n</BRIEF_ANALYSIS>');
+const mockFormatDraft = vi.fn().mockReturnValue('<BRIEF_CONTEXT>\nTest draft context\n</BRIEF_CONTEXT>');
+vi.mock("../../../src/orchestrator/brief-intelligence/format.js", () => ({
+  formatBilForCoaching: (...args: unknown[]) => mockFormatCoaching(...args),
+  formatBilForDraftGraph: (...args: unknown[]) => mockFormatDraft(...args),
+}));
+
 import { handleParallelGenerate } from "../../../src/orchestrator/parallel-generate.js";
 import type { OrchestratorTurnRequest, ConversationContext } from "../../../src/orchestrator/types.js";
 import type { DraftGraphResult } from "../../../src/orchestrator/tools/draft-graph.js";
@@ -321,6 +357,81 @@ describe("handleParallelGenerate", () => {
       "test-turn-001",
       expect.objectContaining({ assistant_text: "Coaching text" }),
     );
+  });
+
+  // --------------------------------------------------------------------------
+  // BIL integration tests
+  // --------------------------------------------------------------------------
+
+  it("injects <BRIEF_ANALYSIS> into coaching when bilEnabled=true", async () => {
+    mockConfig.features.bilEnabled = true;
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching response" });
+
+    await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-bil-1");
+
+    // Coaching userMessage should contain the BIL context
+    expect(mockChat).toHaveBeenCalledTimes(1);
+    const chatArgs = mockChat.mock.calls[0][0];
+    expect(chatArgs.userMessage).toContain("<BRIEF_ANALYSIS>");
+
+    // Extract was called
+    expect(mockExtract).toHaveBeenCalledTimes(1);
+    expect(mockFormatCoaching).toHaveBeenCalledTimes(1);
+
+    mockConfig.features.bilEnabled = false;
+  });
+
+  it("injects briefSignalsHeader into draft_graph when bilEnabled=true", async () => {
+    mockConfig.features.bilEnabled = true;
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching response" });
+
+    await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-bil-2");
+
+    // draft_graph should receive opts with briefSignalsHeader
+    expect(mockHandleDraftGraph).toHaveBeenCalledTimes(1);
+    const draftArgs = mockHandleDraftGraph.mock.calls[0];
+    expect(draftArgs[3]).toEqual({ briefSignalsHeader: expect.stringContaining("<BRIEF_CONTEXT>") });
+
+    mockConfig.features.bilEnabled = false;
+  });
+
+  it("does NOT inject BIL when bilEnabled=false (flags-off parity)", async () => {
+    mockConfig.features.bilEnabled = false;
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching response" });
+
+    await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-bil-3");
+
+    // No BIL extraction
+    expect(mockExtract).not.toHaveBeenCalled();
+    expect(mockFormatCoaching).not.toHaveBeenCalled();
+    expect(mockFormatDraft).not.toHaveBeenCalled();
+
+    // Coaching userMessage is just the brief
+    const chatArgs = mockChat.mock.calls[0][0];
+    expect(chatArgs.userMessage).not.toContain("<BRIEF_ANALYSIS>");
+
+    // draft_graph has no opts
+    const draftArgs = mockHandleDraftGraph.mock.calls[0];
+    expect(draftArgs[3]).toBeUndefined();
+  });
+
+  it("does NOT inject BIL for short messages < 50 chars (fix #4)", async () => {
+    mockConfig.features.bilEnabled = true;
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching response" });
+
+    await handleParallelGenerate(
+      makeTurnRequest({ message: "Yes, run the model." }),
+      fakeRequest,
+      "req-bil-4",
+    );
+
+    expect(mockExtract).not.toHaveBeenCalled();
+
+    mockConfig.features.bilEnabled = false;
   });
 
   // In-flight promise is always resolved, even on unexpected throw

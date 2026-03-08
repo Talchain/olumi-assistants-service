@@ -52,7 +52,10 @@ import { handleGenerateBrief } from "./tools/generate-brief.js";
 import { handleEditGraph } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
 import { handleUndoPatch } from "./tools/undo-patch.js";
-import { isProduction } from "../config/index.js";
+import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
+import { isProduction, config } from "../config/index.js";
+import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
+import { formatBilForCoaching } from "./brief-intelligence/format.js";
 import { assembleContext } from "./context-fabric/index.js";
 import type {
   ContextFabricRoute as FabricRoute,
@@ -451,10 +454,23 @@ async function dispatchViaLLM(
   }
 
   // Full tool-calling flow
+  // BIL injection: enrich user message on frame/ideate stages when flag is ON
+  const stage = turnRequest.context.framing?.stage ?? 'frame';
+  const bilEnabled = config.features.bilEnabled;
+  const bilMinLength = 50;
+  const shouldInjectBil = bilEnabled && (stage === 'frame' || stage === 'ideate')
+    && turnRequest.message.trim().length >= bilMinLength;
+
+  let enrichedUserMessage = turnRequest.message;
+  if (shouldInjectBil) {
+    const bil = extractBriefIntelligence(turnRequest.message, null, stage);
+    enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
+  }
+
   const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
   const messages = fabricContext
-    ? [{ role: 'user' as const, content: turnRequest.message }]
-    : assembleMessages(turnRequest.context, turnRequest.message);
+    ? [{ role: 'user' as const, content: enrichedUserMessage }]
+    : assembleMessages(turnRequest.context, enrichedUserMessage);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());
 
   const llmResult = await adapter.chatWithTools(
@@ -842,6 +858,11 @@ function extractOrchestratorError(error: unknown, tool?: string): OrchestratorEr
   // Check for attached orchestratorError
   if (error && typeof error === 'object' && 'orchestratorError' in error) {
     return (error as { orchestratorError: OrchestratorError }).orchestratorError;
+  }
+
+  // Daily token budget exceeded — re-throw so the route handler can return 429
+  if (error instanceof DailyBudgetExceededError) {
+    throw error;
   }
 
   // Timeout detection

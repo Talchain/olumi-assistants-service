@@ -260,6 +260,7 @@ const ConfigSchema = z.object({
     contextFabric: booleanString.default(false),
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
     dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
+    bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
   }),
 
   // Prompt Cache Configuration
@@ -562,6 +563,7 @@ function parseConfig(): Config {
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,
       dskEnabled: env.DSK_ENABLED,
+      bilEnabled: env.BIL_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
