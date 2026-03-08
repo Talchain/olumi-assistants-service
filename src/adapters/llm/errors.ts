@@ -147,6 +147,29 @@ export class ClientDisconnectError extends Error {
 }
 
 /**
+ * Daily token budget exceeded — thrown by the UsageTrackingAdapter when
+ * a user has consumed their daily token allowance.
+ *
+ * Checked before every LLM call (including mid-pipeline multi-call flows).
+ * Carries retry_after_seconds for the Retry-After header and response body.
+ */
+export class DailyBudgetExceededError extends Error {
+  readonly name = "DailyBudgetExceededError";
+
+  constructor(
+    message: string,
+    public readonly retryAfterSeconds: number,
+    public readonly requestId: string,
+    public readonly userKey: string,
+  ) {
+    super(message);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, DailyBudgetExceededError);
+    }
+  }
+}
+
+/**
  * Unsupported operation error — thrown when an adapter does not support
  * an optional method (e.g., chatWithTools on a provider that lacks native tool calling).
  */
