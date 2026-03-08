@@ -56,6 +56,7 @@ import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 import { isProduction, config } from "../config/index.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
 import { formatBilForCoaching } from "./brief-intelligence/format.js";
+import { assembleDskCoachingItems } from "./dsk-coaching/index.js";
 import { assembleContext } from "./context-fabric/index.js";
 import type {
   ContextFabricRoute as FabricRoute,
@@ -443,9 +444,12 @@ async function dispatchViaLLM(
     && turnRequest.message.trim().length >= bilMinLength;
 
   let enrichedUserMessage = turnRequest.message;
+  let dskCoaching: import("../schemas/dsk-coaching.js").DskCoachingItems | undefined;
   if (shouldInjectBil) {
     const bil = extractBriefIntelligence(turnRequest.message, null, stage);
     enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
+    // Pre-model: bias alerts only (no technique recommendations — design rule)
+    dskCoaching = assembleDskCoachingItems(bil, 'pre_model');
   }
 
   if (!adapter.chatWithTools) {
@@ -464,6 +468,7 @@ async function dispatchViaLLM(
       context: turnRequest.context,
       turnPlan: buildTurnPlan(null, 'llm', false),
       contextHash,
+      dskCoaching,
     });
   }
 
@@ -516,6 +521,7 @@ async function dispatchViaLLM(
       parseWarnings: parsed.parse_warnings,
       includeDebug,
       contextHash,
+      dskCoaching,
     });
   }
 
@@ -530,6 +536,7 @@ async function dispatchViaLLM(
     'llm',
     contextHash,
     plotOpts,
+    dskCoaching,
   );
 
   // Merge LLM text with tool result (null = no text, '' = empty text from parser fallback)
@@ -572,6 +579,7 @@ async function dispatchTool(
   routing: 'deterministic' | 'llm' = 'llm',
   contextHash?: string,
   plotOpts?: PLoTClientRunOpts,
+  dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems,
 ): Promise<TurnResult> {
   const startTime = Date.now();
   const isLongRunning = toolName === 'run_analysis' || toolName === 'draft_graph';
@@ -669,6 +677,7 @@ async function dispatchTool(
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning, toolLatencyMs),
       contextHash,
       suggestedActions: editGraphSuggestedActions,
+      dskCoaching,
     });
 
     log.info(
@@ -688,6 +697,7 @@ async function dispatchTool(
       error: orchestratorError,
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning),
       contextHash,
+      dskCoaching,
     });
 
     const status = getHttpStatusForError(orchestratorError);

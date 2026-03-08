@@ -51,6 +51,8 @@ export interface EnvelopeInput {
   contextHash?: string;
   /** PLoT graph hash from validate-patch (patch_accepted only). */
   graphHash?: string;
+  /** DSK coaching items — omitted when disabled or both arrays empty. */
+  dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
 }
 
 /**
@@ -98,6 +100,11 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
     if (input.parseWarnings && input.parseWarnings.length > 0) {
       envelope.parse_warnings = input.parseWarnings;
     }
+  }
+
+  // DSK coaching — omit entirely when undefined (flags-off parity / omit-empty)
+  if (input.dskCoaching) {
+    envelope.dsk_coaching = input.dskCoaching;
   }
 
   return envelope;

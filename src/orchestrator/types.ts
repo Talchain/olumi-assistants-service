@@ -153,6 +153,8 @@ export interface OrchestratorResponseEnvelope {
   diagnostics?: string;
   /** Parse warnings from XML envelope extraction. Only in non-production. */
   parse_warnings?: string[];
+  /** DSK deterministic coaching items. Omitted when DSK_COACHING_ENABLED=false or both arrays empty. */
+  dsk_coaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
 }
 
 // ============================================================================

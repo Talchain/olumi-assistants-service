@@ -1,0 +1,77 @@
+{
+  "_contract_version": "1.0.0",
+  "_generated_at": "2026-03-08T00:00:00.000Z",
+  "_source_endpoint": "deterministic extraction (no LLM)",
+  "_governance": "Shape changes require: version bump + UI type update.",
+  "payload": {
+    "contract_version": "1.0.0",
+    "bias_alerts": [
+      {
+        "id": "0194d761a7f5",
+        "bias_type": "anchoring",
+        "human_description": "Is the first number mentioned anchoring your expectations?",
+        "suggested_reflection": "Try setting your estimate before looking at any reference numbers, then compare.",
+        "claim_id": "DSK-B-001",
+        "evidence_strength": "strong",
+        "confidence": 0.85,
+        "surface_targets": ["guidance_panel"]
+      },
+      {
+        "id": "0a7287cf19ea",
+        "bias_type": "sunk_cost",
+        "human_description": "Could past investment or time already spent be influencing this decision?",
+        "suggested_reflection": "Try evaluating each option as if starting fresh today, ignoring what has already been invested.",
+        "claim_id": "DSK-B-002",
+        "evidence_strength": "medium",
+        "confidence": 0.75,
+        "surface_targets": ["guidance_panel"]
+      }
+    ],
+    "technique_recommendations": [
+      {
+        "id": "f183df5fb047",
+        "factor_id": "market_size",
+        "factor_label": "Market size",
+        "technique_label": "Reference class forecasting",
+        "claim_id": "DSK-T-002",
+        "protocol_id": "DSK-P-002",
+        "evidence_strength": "strong",
+        "one_line_guidance": "What happened in similar decisions? Look for base rates before estimating Market size.",
+        "provisional": false,
+        "surface_targets": ["evidence_gap_card"]
+      },
+      {
+        "id": "2bccbf858f73",
+        "factor_id": "customer_demand",
+        "factor_label": "Customer demand",
+        "technique_label": "Implementation intentions",
+        "claim_id": "DSK-T-006",
+        "protocol_id": "DSK-P-006",
+        "evidence_strength": "strong",
+        "one_line_guidance": "Define exactly how and when you will gather data on Customer demand.",
+        "provisional": false,
+        "surface_targets": ["evidence_gap_card"]
+      },
+      {
+        "id": "81c79650c422",
+        "factor_id": "competitor_response",
+        "factor_label": "Competitor response",
+        "technique_label": "Devil's advocacy",
+        "claim_id": "DSK-T-005",
+        "protocol_id": "DSK-P-005",
+        "evidence_strength": "medium",
+        "one_line_guidance": "Assign someone to challenge the current assumption about Competitor response.",
+        "provisional": false,
+        "surface_targets": ["evidence_gap_card"]
+      }
+    ],
+    "metadata": {
+      "bil_version": "1.0.0",
+      "total_cues_evaluated": 3,
+      "total_gaps_evaluated": 5,
+      "alerts_surfaced": 2,
+      "recommendations_surfaced": 3,
+      "stage": "post_model"
+    }
+  }
+}

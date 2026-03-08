@@ -33,8 +33,13 @@ import type {
   ConversationBlock,
 } from "./types.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
+import type { BriefIntelligence } from "../schemas/brief-intelligence.js";
 import { formatBilForCoaching, formatBilForDraftGraph } from "./brief-intelligence/format.js";
 import { config } from "../config/index.js";
+import { assembleDskCoachingItems } from "./dsk-coaching/index.js";
+import type { EvidenceGap } from "./dsk-coaching/index.js";
+import type { DskCoachingItems } from "../schemas/dsk-coaching.js";
+import type { GraphV3T } from "./types.js";
 
 // ============================================================================
 // Types
@@ -185,17 +190,27 @@ export async function handleParallelGenerate(
       "parallel_generate: both calls settled",
     );
 
+    // DSK coaching assembly (post-model: bias alerts + technique recommendations)
+    const dskCoaching = bil
+      ? assembleDskCoachingItems(
+          bil,
+          'post_model',
+          extractEvidenceGapsFromGraph(bil, draftResult?.graphOutput ?? null),
+          null, // dominantDriverId — not available from draft_graph pipeline
+        )
+      : undefined;
+
     // Assemble response based on which calls succeeded
     let result: ParallelGenerateResult;
 
     if (draftResult && coachingText !== null) {
-      result = assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText);
+      result = assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText, dskCoaching);
     } else if (!draftResult && coachingText !== null) {
-      result = assembleDraftFailed(turnId, turnRequest, coachingText, draftError);
+      result = assembleDraftFailed(turnId, turnRequest, coachingText, draftError, dskCoaching);
     } else if (draftResult && coachingText === null) {
-      result = assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId);
+      result = assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId, dskCoaching);
     } else {
-      result = assembleBothFailed(turnId, turnRequest, draftError, coachingError);
+      result = assembleBothFailed(turnId, turnRequest, draftError, coachingError, dskCoaching);
     }
 
     // Cache and resolve in-flight
@@ -267,6 +282,7 @@ function assembleBothSucceeded(
   turnRequest: OrchestratorTurnRequest,
   draftResult: DraftGraphResult,
   coachingText: string,
+  dskCoaching?: DskCoachingItems,
 ): ParallelGenerateResult {
   const blocks: ConversationBlock[] = [...draftResult.blocks];
 
@@ -278,6 +294,7 @@ function assembleBothSucceeded(
       blocks,
       context: turnRequest.context,
       turnPlan: buildTurnPlan('draft_graph', 'deterministic', true, draftResult.latencyMs),
+      dskCoaching,
     }),
   };
 }
@@ -287,6 +304,7 @@ function assembleDraftFailed(
   turnRequest: OrchestratorTurnRequest,
   coachingText: string,
   draftError: unknown,
+  dskCoaching?: DskCoachingItems,
 ): ParallelGenerateResult {
   const errorNote = "I wasn't able to generate the model this time. You can try again, or refine your brief based on my notes below.";
   const assistantText = `${errorNote}\n\n${coachingText}`;
@@ -304,6 +322,7 @@ function assembleDraftFailed(
       blocks: [],
       context: turnRequest.context,
       turnPlan: buildTurnPlan('draft_graph', 'deterministic', true),
+      dskCoaching,
     }),
   };
 }
@@ -314,6 +333,7 @@ function assembleCoachingFailed(
   draftResult: DraftGraphResult,
   coachingError: unknown,
   requestId: string,
+  dskCoaching?: DskCoachingItems,
 ): ParallelGenerateResult {
   log.warn(
     { request_id: requestId, error: coachingError instanceof Error ? coachingError.message : String(coachingError) },
@@ -346,6 +366,7 @@ function assembleCoachingFailed(
       blocks,
       context: turnRequest.context,
       turnPlan: buildTurnPlan('draft_graph', 'deterministic', true, draftResult.latencyMs),
+      dskCoaching,
     }),
   };
 }
@@ -355,6 +376,7 @@ function assembleBothFailed(
   turnRequest: OrchestratorTurnRequest,
   draftError: unknown,
   coachingError: unknown,
+  dskCoaching?: DskCoachingItems,
 ): ParallelGenerateResult {
   log.error(
     {
@@ -372,6 +394,7 @@ function assembleBothFailed(
       assistantText: null,
       blocks: [],
       context: turnRequest.context,
+      dskCoaching,
       error: {
         code: 'TOOL_EXECUTION_FAILED',
         message: 'Both model generation and coaching failed. Please try again.',
@@ -381,4 +404,58 @@ function assembleBothFailed(
       },
     }),
   };
+}
+
+// ============================================================================
+// Evidence gap extraction
+// ============================================================================
+
+/**
+ * Extract evidence gaps from BIL factors + optional graph.
+ *
+ * Source mapping:
+ * - factor_id / factor_label: from BIL factor extraction (brief text)
+ * - confidence: from graph node exists_probability if present, else BIL factor confidence
+ * - has_observed_value: null (not available from draft_graph pipeline)
+ * - is_quantitative: null (not available from draft_graph pipeline)
+ * - voi: null (not available from draft_graph pipeline — requires run_analysis)
+ *
+ * When pipeline evidence_gaps become available on DraftGraphResult, prefer them
+ * over this BIL-derived fallback.
+ */
+/** @internal Exported for testing only. */
+export function extractEvidenceGapsFromGraph(
+  bil: BriefIntelligence,
+  graph: GraphV3T | null,
+): EvidenceGap[] {
+  if (bil.factors.length === 0) return [];
+
+  // Build node lookup from graph (if available)
+  const nodeMap = new Map<string, { confidence: number }>();
+  if (graph && Array.isArray((graph as Record<string, unknown>).nodes)) {
+    for (const node of (graph as Record<string, unknown[]>).nodes) {
+      const n = node as Record<string, unknown>;
+      const id = typeof n.id === 'string' ? n.id : undefined;
+      const label = typeof n.label === 'string' ? n.label.toLowerCase() : undefined;
+      const ep = typeof n.exists_probability === 'number' ? n.exists_probability : undefined;
+      if (id && ep != null) {
+        nodeMap.set(id, { confidence: ep });
+        if (label) nodeMap.set(label, { confidence: ep });
+      }
+    }
+  }
+
+  return bil.factors.map((f): EvidenceGap => {
+    // Try to match factor to graph node by label
+    const graphNode = nodeMap.get(f.label.toLowerCase());
+    return {
+      factor_id: f.label.toLowerCase().replace(/\s+/g, '_'),
+      factor_label: f.label,
+      confidence: graphNode?.confidence ?? f.confidence,
+      // Nullable — not available from draft_graph pipeline. Skip precedence rules 2-4 that need these.
+      has_observed_value: null,
+      is_quantitative: null,
+      voi: null,
+    };
+  });
 }

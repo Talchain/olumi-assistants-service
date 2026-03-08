@@ -261,6 +261,7 @@ const ConfigSchema = z.object({
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
     dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
     bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
+    dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
   }),
 
   // Prompt Cache Configuration
@@ -564,6 +565,7 @@ function parseConfig(): Config {
       dskV0: env.ENABLE_DSK_V0,
       dskEnabled: env.DSK_ENABLED,
       bilEnabled: env.BIL_ENABLED,
+      dskCoachingEnabled: env.DSK_COACHING_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
