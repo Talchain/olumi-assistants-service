@@ -17,6 +17,7 @@ import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, Decisio
 import { getHttpStatusForError } from "./types.js";
 import { config } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
+import { handleParallelGenerate } from "./parallel-generate.js";
 
 // ============================================================================
 // Request Validation Schema
@@ -141,6 +142,8 @@ const TurnRequestSchema = z.object({
   analysis_state: z.object({}).passthrough().nullable().optional(),
   /** Flat conversation history from UI — mapped to context.messages when context is absent. */
   conversation_history: z.array(ConversationMessageSchema).optional(),
+  /** When true, fires draft_graph and orchestrator coaching in parallel. */
+  generate_model: z.boolean().optional().default(false),
 });
 
 // ============================================================================
@@ -261,6 +264,32 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     };
 
     try {
+      // Parallel generation: draft_graph + orchestrator coaching concurrently
+      if (parsed.data.generate_model) {
+        const parallelResult = await handleParallelGenerate(
+          turnRequest,
+          req,
+          requestId,
+        );
+
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: turnRequest.scenario_id,
+            elapsed_ms: Date.now() - startTime,
+            http_status: parallelResult.httpStatus,
+            has_error: Boolean(parallelResult.envelope.error),
+            pipeline: 'parallel_generate',
+          },
+          "Parallel generate_model turn completed",
+        );
+
+        logAnalysisReadyDiagnostics(parallelResult.envelope, requestId);
+
+        reply.code(parallelResult.httpStatus);
+        return reply.send(parallelResult.envelope);
+      }
+
       // V2 pipeline (feature-flagged)
       if (config.features.orchestratorV2) {
         const turnNonce = parsed.data.turn_nonce;
