@@ -18,6 +18,8 @@ import { getHttpStatusForError } from "./types.js";
 import { config } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
 import { handleParallelGenerate } from "./parallel-generate.js";
+import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
+import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 
 // ============================================================================
 // Request Validation Schema
@@ -196,7 +198,7 @@ function logAnalysisReadyDiagnostics(
 // ============================================================================
 
 export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void> {
-  app.post("/orchestrate/v1/turn", async (req, reply) => {
+  app.post("/orchestrate/v1/turn", { preHandler: createOrchestratorRateLimitHook() }, async (req, reply) => {
     const startTime = Date.now();
     const requestId = getOrGenerateRequestId(req);
 
@@ -265,6 +267,27 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
 
     try {
       // Parallel generation: draft_graph + orchestrator coaching concurrently
+      // Guard: parallel path produces V1 envelopes; block when V2 is active
+      // to prevent mixed-envelope contracts on the same endpoint.
+      if (parsed.data.generate_model && config.features.orchestratorV2) {
+        log.warn(
+          { request_id: requestId, scenario_id: turnRequest.scenario_id },
+          "generate_model rejected: parallel path not yet compatible with V2 envelope contract",
+        );
+        reply.code(501);
+        return reply.send({
+          turn_id: 'not-implemented',
+          assistant_text: null,
+          blocks: [],
+          lineage: { context_hash: '' },
+          error: {
+            code: 'NOT_IMPLEMENTED' as const,
+            message: 'generate_model is not yet supported when the V2 pipeline is active',
+            recoverable: false,
+          },
+        });
+      }
+
       if (parsed.data.generate_model) {
         const parallelResult = await handleParallelGenerate(
           turnRequest,
@@ -332,6 +355,27 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       reply.code(result.httpStatus);
       return reply.send(result.envelope);
     } catch (error) {
+      // Daily token budget exceeded — return 429 with cee.error.v1 shape
+      if (error instanceof DailyBudgetExceededError) {
+        log.warn(
+          { event: 'daily_budget_exceeded', request_id: requestId, user_key: error.userKey },
+          'Daily token budget exceeded during orchestrator turn',
+        );
+        reply.header('Retry-After', error.retryAfterSeconds);
+        reply.code(429);
+        return reply.send({
+          schema: 'cee.error.v1',
+          code: 'CEE_RATE_LIMIT',
+          message: 'Daily token budget exceeded',
+          retryable: true,
+          source: 'cee',
+          request_id: requestId,
+          details: {
+            retry_after_seconds: error.retryAfterSeconds,
+          },
+        });
+      }
+
       log.error(
         { error, request_id: requestId, elapsed_ms: Date.now() - startTime },
         "Orchestrator turn unhandled error",

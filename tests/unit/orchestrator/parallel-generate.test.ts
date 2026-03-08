@@ -322,4 +322,28 @@ describe("handleParallelGenerate", () => {
       expect.objectContaining({ assistant_text: "Coaching text" }),
     );
   });
+
+  // In-flight promise is always resolved, even on unexpected throw
+  it("resolves in-flight promise on unexpected error in assembly", async () => {
+    // Make draft succeed but force an unexpected throw during assembly
+    // by having the draft return a result that causes hashContext to throw
+    // (simulated via mockChat throwing synchronously after allSettled completes)
+    mockHandleDraftGraph.mockResolvedValue(makeDraftResult());
+    mockChat.mockResolvedValue({ content: "Coaching text" });
+
+    // Sabotage assembleEnvelope indirectly: mock hashContext to throw
+    const { hashContext } = await import("../../../src/orchestrator/context/hash.js");
+    const mockHashContext = vi.mocked(hashContext);
+    mockHashContext.mockImplementationOnce(() => { throw new Error("hash boom"); });
+
+    const result = await handleParallelGenerate(makeTurnRequest(), fakeRequest, "req-11");
+
+    // Should get an error envelope, not a thrown exception
+    expect(result.httpStatus).toBe(500);
+    expect(result.envelope.error?.code).toBe("TOOL_EXECUTION_FAILED");
+
+    // In-flight must have been resolved (setIdempotentResponse called)
+    expect(mockSetIdempotentResponse).toHaveBeenCalledTimes(1);
+    expect(mockRegisterInflightRequest).toHaveBeenCalledTimes(1);
+  });
 });

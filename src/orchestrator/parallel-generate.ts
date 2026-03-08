@@ -149,46 +149,73 @@ export async function handleParallelGenerate(
     "parallel_generate: starting concurrent draft_graph + coaching",
   );
 
-  // Fire both calls concurrently
-  const [draftSettled, coachingSettled] = await Promise.allSettled([
-    handleDraftGraph(brief, request, turnId),
-    runCoachingCall(brief, turnRequest.context, requestId),
-  ]);
+  try {
+    // Fire both calls concurrently
+    const [draftSettled, coachingSettled] = await Promise.allSettled([
+      handleDraftGraph(brief, request, turnId),
+      runCoachingCall(brief, turnRequest.context, requestId),
+    ]);
 
-  const draftResult = draftSettled.status === 'fulfilled' ? draftSettled.value : null;
-  const draftError = draftSettled.status === 'rejected' ? draftSettled.reason : null;
-  const coachingText = coachingSettled.status === 'fulfilled' ? coachingSettled.value : null;
-  const coachingError = coachingSettled.status === 'rejected' ? coachingSettled.reason : null;
+    const draftResult = draftSettled.status === 'fulfilled' ? draftSettled.value : null;
+    const draftError = draftSettled.status === 'rejected' ? draftSettled.reason : null;
+    const coachingText = coachingSettled.status === 'fulfilled' ? coachingSettled.value : null;
+    const coachingError = coachingSettled.status === 'rejected' ? coachingSettled.reason : null;
 
-  log.info(
-    {
-      request_id: requestId,
-      draft_ok: draftResult !== null,
-      coaching_ok: coachingText !== null,
-      draft_error: draftError ? String(draftError) : undefined,
-      coaching_error: coachingError ? String(coachingError) : undefined,
-    },
-    "parallel_generate: both calls settled",
-  );
+    log.info(
+      {
+        request_id: requestId,
+        draft_ok: draftResult !== null,
+        coaching_ok: coachingText !== null,
+        draft_error: draftError ? String(draftError) : undefined,
+        coaching_error: coachingError ? String(coachingError) : undefined,
+      },
+      "parallel_generate: both calls settled",
+    );
 
-  // Assemble response based on which calls succeeded
-  let result: ParallelGenerateResult;
+    // Assemble response based on which calls succeeded
+    let result: ParallelGenerateResult;
 
-  if (draftResult && coachingText !== null) {
-    result = assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText);
-  } else if (!draftResult && coachingText !== null) {
-    result = assembleDraftFailed(turnId, turnRequest, coachingText, draftError);
-  } else if (draftResult && coachingText === null) {
-    result = assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId);
-  } else {
-    result = assembleBothFailed(turnId, turnRequest, draftError, coachingError);
+    if (draftResult && coachingText !== null) {
+      result = assembleBothSucceeded(turnId, turnRequest, draftResult, coachingText);
+    } else if (!draftResult && coachingText !== null) {
+      result = assembleDraftFailed(turnId, turnRequest, coachingText, draftError);
+    } else if (draftResult && coachingText === null) {
+      result = assembleCoachingFailed(turnId, turnRequest, draftResult, coachingError, requestId);
+    } else {
+      result = assembleBothFailed(turnId, turnRequest, draftError, coachingError);
+    }
+
+    // Cache and resolve in-flight
+    setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
+    resolveInflight(result.envelope);
+
+    return result;
+  } catch (error) {
+    // Unexpected throw (e.g. assembleEnvelope/hashContext failure) —
+    // build error envelope and always resolve in-flight to prevent hung waiters.
+    log.error(
+      { request_id: requestId, error: error instanceof Error ? error.message : String(error) },
+      "parallel_generate: unexpected error",
+    );
+
+    const errorEnvelope = assembleEnvelope({
+      turnId,
+      assistantText: null,
+      blocks: [],
+      context: turnRequest.context,
+      error: {
+        code: 'TOOL_EXECUTION_FAILED',
+        message: 'Parallel generation encountered an unexpected error.',
+        tool: 'draft_graph',
+        recoverable: true,
+      },
+    });
+
+    setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, errorEnvelope);
+    resolveInflight(errorEnvelope);
+
+    return { httpStatus: 500, envelope: errorEnvelope };
   }
-
-  // Cache and resolve in-flight
-  setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
-  resolveInflight(result.envelope);
-
-  return result;
 }
 
 // ============================================================================
