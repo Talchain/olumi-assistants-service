@@ -69,7 +69,7 @@ export const AnalysisInputsSummaryPayload = z.object({
   constraints_status: z.array(ConstraintStatusSchema).max(5),
   run_metadata: RunMetadataSchema,
 }).refine(
-  (val) => JSON.stringify(val).length <= 2048,
+  (val) => new TextEncoder().encode(JSON.stringify(val)).length <= 2048,
   { message: 'Serialized payload exceeds 2048 byte limit' },
 );
 

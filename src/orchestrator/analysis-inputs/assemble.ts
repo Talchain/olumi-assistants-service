@@ -193,14 +193,15 @@ export function assembleAnalysisInputsSummary(
     };
 
     // 2KB cap enforcement (fix #7): trim constraints_status then top_drivers
-    let serialized = JSON.stringify(payload);
-    while (serialized.length > 2048 && payload.constraints_status.length > 0) {
+    const encoder = new TextEncoder();
+    let byteLen = encoder.encode(JSON.stringify(payload)).length;
+    while (byteLen > 2048 && payload.constraints_status.length > 0) {
       payload.constraints_status.pop();
-      serialized = JSON.stringify(payload);
+      byteLen = encoder.encode(JSON.stringify(payload)).length;
     }
-    while (serialized.length > 2048 && payload.top_drivers.length > 0) {
+    while (byteLen > 2048 && payload.top_drivers.length > 0) {
       payload.top_drivers.pop();
-      serialized = JSON.stringify(payload);
+      byteLen = encoder.encode(JSON.stringify(payload)).length;
     }
 
     const result = AnalysisInputsSummaryPayload.safeParse(payload);

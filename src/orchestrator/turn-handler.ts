@@ -434,12 +434,26 @@ async function dispatchViaLLM(
     }
   }
 
+  // BIL injection: enrich user message on frame/ideate stages when flag is ON
+  // Placed before adapter branching so both chatWithTools and plain-chat paths use it.
+  const stage = turnRequest.context.framing?.stage ?? 'frame';
+  const bilEnabled = config.features.bilEnabled;
+  const bilMinLength = 50;
+  const shouldInjectBil = bilEnabled && (stage === 'frame' || stage === 'ideate')
+    && turnRequest.message.trim().length >= bilMinLength;
+
+  let enrichedUserMessage = turnRequest.message;
+  if (shouldInjectBil) {
+    const bil = extractBriefIntelligence(turnRequest.message, null, stage);
+    enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
+  }
+
   if (!adapter.chatWithTools) {
     // Fallback: use plain chat if adapter doesn't support tools
     log.warn({ request_id: requestId }, "Adapter does not support chatWithTools, using plain chat");
     const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
     const result = await adapter.chat(
-      { system: systemPrompt, userMessage: turnRequest.message },
+      { system: systemPrompt, userMessage: enrichedUserMessage },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
     );
 
@@ -454,18 +468,6 @@ async function dispatchViaLLM(
   }
 
   // Full tool-calling flow
-  // BIL injection: enrich user message on frame/ideate stages when flag is ON
-  const stage = turnRequest.context.framing?.stage ?? 'frame';
-  const bilEnabled = config.features.bilEnabled;
-  const bilMinLength = 50;
-  const shouldInjectBil = bilEnabled && (stage === 'frame' || stage === 'ideate')
-    && turnRequest.message.trim().length >= bilMinLength;
-
-  let enrichedUserMessage = turnRequest.message;
-  if (shouldInjectBil) {
-    const bil = extractBriefIntelligence(turnRequest.message, null, stage);
-    enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
-  }
 
   const systemPrompt = fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
   const messages = fabricContext
