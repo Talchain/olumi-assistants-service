@@ -46,6 +46,9 @@ import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
 import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
 import { compactGraph } from "./context/graph-compact.js";
 import { assembleAnalysisInputsSummary } from "./analysis-inputs/assemble.js";
+import { callBriefSpecialist } from "./moe-spike/call-specialist.js";
+import { compareSpikeWithBil } from "./moe-spike/compare.js";
+import { persistSpikeComparison } from "./moe-spike/persist.js";
 
 // ============================================================================
 // Types
@@ -174,11 +177,19 @@ export async function handleParallelGenerate(
   );
 
   try {
-    // Fire both calls concurrently
-    const [draftSettled, coachingSettled] = await Promise.allSettled([
+    // Fire calls concurrently — spike is conditional on feature flag + BIL
+    const moeSpikeEnabled = config.features.moeSpikeEnabled;
+    const promises: [Promise<DraftGraphResult>, Promise<string>, ...Promise<unknown>[]] = [
       handleDraftGraph(brief, request, turnId, draftBilHeader ? { briefSignalsHeader: draftBilHeader } : undefined),
       runCoachingCall(brief, turnRequest.context, requestId, coachingBilContext),
-    ]);
+    ];
+    if (moeSpikeEnabled && bil) {
+      promises.push(callBriefSpecialist(brief, requestId));
+    }
+
+    const settled = await Promise.allSettled(promises);
+    const draftSettled = settled[0];
+    const coachingSettled = settled[1];
 
     const draftResult = draftSettled.status === 'fulfilled' ? draftSettled.value : null;
     const draftError = draftSettled.status === 'rejected' ? draftSettled.reason : null;
@@ -195,6 +206,42 @@ export async function handleParallelGenerate(
       },
       "parallel_generate: both calls settled",
     );
+
+    // MoE spike: compare with BIL, log metadata only, persist fire-and-forget
+    if (moeSpikeEnabled && bil && settled.length > 2) {
+      const spikeSettled = settled[2];
+      if (spikeSettled.status === 'fulfilled') {
+        const outcome = spikeSettled.value as Awaited<ReturnType<typeof callBriefSpecialist>>;
+        if (outcome.ok) {
+          const comparison = compareSpikeWithBil(outcome.result, bil, outcome.briefHash);
+          log.info(
+            {
+              request_id: requestId,
+              verdict: comparison.verdict,
+              spike_bias_count: comparison.spike_bias_count,
+              bil_bias_count: comparison.bil_bias_count,
+              bias_agreed: comparison.bias_agreed.length,
+              bias_spike_only: comparison.bias_spike_only.length,
+              bias_bil_only: comparison.bias_bil_only.length,
+              latency_ms: outcome.latencyMs,
+            },
+            'moe-spike: comparison complete',
+          );
+          // Fire-and-forget — never awaited, never on critical path
+          persistSpikeComparison(comparison, outcome.result).catch(() => {});
+        } else {
+          log.warn(
+            { request_id: requestId, error: outcome.error, latency_ms: outcome.latencyMs },
+            'moe-spike: specialist call failed',
+          );
+        }
+      } else {
+        log.warn(
+          { request_id: requestId, error: String(spikeSettled.reason) },
+          'moe-spike: specialist call rejected',
+        );
+      }
+    }
 
     // DSK coaching assembly (post-model: bias alerts + technique recommendations)
     const dskCoaching = bil

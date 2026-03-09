@@ -263,6 +263,7 @@ const ConfigSchema = z.object({
     bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
     dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
     zone2Registry: booleanString.default(false), // CEE_ZONE2_REGISTRY_ENABLED — Zone 2 block registry prompt assembly
+    moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
   }),
 
   // Prompt Cache Configuration
@@ -354,6 +355,9 @@ const ConfigSchema = z.object({
     // Graph structure validation (Phase: Graph Validation)
     enforceSingleGoal: booleanString.default(true), // If true, merge multiple goals into compound goal
     orchestratorValidationEnabled: booleanString.default(false), // If true, enable deterministic validator in draft pipeline
+    // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
+    patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
+    patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Per-operation model selection for tiered cost optimization
@@ -568,6 +572,7 @@ function parseConfig(): Config {
       bilEnabled: env.BIL_ENABLED,
       dskCoachingEnabled: env.DSK_COACHING_ENABLED,
       zone2Registry: env.CEE_ZONE2_REGISTRY_ENABLED,
+      moeSpikeEnabled: env.MOE_SPIKE_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -668,6 +673,9 @@ function parseConfig(): Config {
       // Graph structure validation
       enforceSingleGoal: env.CEE_ENFORCE_SINGLE_GOAL,
       orchestratorValidationEnabled: env.CEE_ORCHESTRATOR_VALIDATION_ENABLED,
+      // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
+      patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
+      patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Per-operation model selection
