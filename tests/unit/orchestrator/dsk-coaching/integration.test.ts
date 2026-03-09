@@ -35,7 +35,7 @@ import { DskCoachingItemsPayload } from "../../../../src/schemas/dsk-coaching.js
 
 // Realistic BIL from a hiring decision brief
 const hiringBil: BriefIntelligence = {
-  contract_version: "1.0.0",
+  contract_version: "1.1.0",
   goal: { label: "hire best candidate for engineering lead", measurable: false, confidence: 0.7 },
   options: [
     { label: "Candidate A — internal promotion", confidence: 0.8 },
@@ -51,6 +51,8 @@ const hiringBil: BriefIntelligence = {
     { label: "leadership experience", confidence: 0.4 },
   ],
   completeness_band: "medium",
+  causal_framing_score: "weak",
+  specificity_score: "moderate",
   ambiguity_flags: ["Hedging: \"probably\""],
   missing_elements: [],
   dsk_cues: [

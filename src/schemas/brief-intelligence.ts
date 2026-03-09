@@ -12,7 +12,7 @@ import { z } from "zod";
  * Contract version for the Brief Intelligence Layer payload shape.
  * Bump on any breaking change. See governance rule in header comment.
  */
-export const BIL_CONTRACT_VERSION = '1.0.0';
+export const BIL_CONTRACT_VERSION = '1.1.0';
 
 // ============================================================================
 // Sub-schemas
@@ -71,6 +71,8 @@ export const BriefIntelligencePayload = z.object({
   constraints: z.array(ConstraintSchema),
   factors: z.array(FactorSchema),
   completeness_band: z.enum(['low', 'medium', 'high']),
+  causal_framing_score: z.enum(['strong', 'moderate', 'weak']),
+  specificity_score: z.enum(['specific', 'moderate', 'vague']),
   ambiguity_flags: z.array(z.string()),
   missing_elements: z.array(MissingElement),
   dsk_cues: z.array(DskCueSchema),

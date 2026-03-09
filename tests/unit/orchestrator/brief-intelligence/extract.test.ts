@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { extractBriefIntelligence } from "../../../../src/orchestrator/brief-intelligence/extract.js";
-import { BriefIntelligencePayload } from "../../../../src/schemas/brief-intelligence.js";
+import { BriefIntelligencePayload, BIL_CONTRACT_VERSION } from "../../../../src/schemas/brief-intelligence.js";
 
 // Mock DSK loader to avoid requiring bundle files
 vi.mock("../../../../src/orchestrator/dsk-loader.js", () => ({
@@ -171,7 +171,87 @@ describe("extractBriefIntelligence", () => {
 
   it("includes contract_version in output", () => {
     const bil = extractBriefIntelligence("Should we expand or stay? Budget $100K.");
-    expect(bil.contract_version).toBe("1.0.0");
+    expect(bil.contract_version).toBe(BIL_CONTRACT_VERSION);
+  });
+
+  // --------------------------------------------------------------------------
+  // Causal framing score (item 32)
+  // --------------------------------------------------------------------------
+
+  it("scores strong causal framing with 3+ distinct phrases", () => {
+    const bil = extractBriefIntelligence(
+      "Price increases lead to churn because customers are price-sensitive. " +
+      "Brand loyalty depends on perceived value. Marketing spend affects acquisition. " +
+      "Should we raise or hold prices? Budget is $200K.",
+    );
+    // "leads to", "because", "depends on", "affects" = 4 distinct
+    expect(bil.causal_framing_score).toBe("strong");
+  });
+
+  it("scores moderate causal framing with 1 phrase", () => {
+    const bil = extractBriefIntelligence(
+      "We should raise prices because our costs have increased. " +
+      "Should we go with Option A or Option B? Budget is $200K.",
+    );
+    // Only "because" = 1 distinct
+    expect(bil.causal_framing_score).toBe("moderate");
+  });
+
+  it("scores weak causal framing with no causal phrases", () => {
+    const bil = extractBriefIntelligence(
+      "Our pricing strategy needs updating. Option A: raise prices. " +
+      "Option B: introduce tiered plans. Budget is $200K.",
+    );
+    expect(bil.causal_framing_score).toBe("weak");
+  });
+
+  it("counts distinct causal phrases not total occurrences", () => {
+    const bil = extractBriefIntelligence(
+      "We are changing because of costs. We are also moving because of demand. " +
+      "And also because of competition. Should we act? Budget is $200K.",
+    );
+    // "because" appears 3 times but is only 1 distinct phrase
+    expect(bil.causal_framing_score).toBe("moderate");
+  });
+
+  // --------------------------------------------------------------------------
+  // Specificity score (item 33)
+  // --------------------------------------------------------------------------
+
+  it("scores specific with multiple numeric and temporal patterns", () => {
+    const bil = extractBriefIntelligence(
+      "Should we raise our SaaS prices from £49 to £59 by Q3 2026? " +
+      "We expect 15% churn reduction. Budget is $200K.",
+    );
+    // £49, £59, Q3 2026, 15%, $200K = multiple distinct
+    expect(bil.specificity_score).toBe("specific");
+  });
+
+  it("scores moderate when Q3 appears without a year", () => {
+    const bil = extractBriefIntelligence(
+      "We want to raise prices by Q3. Should we go with a 10% increase " +
+      "or hold steady? The team is ready.",
+    );
+    // "Q3" alone does not match the temporal pattern (year required).
+    // "10%" matches the percentage pattern → 1 distinct match → moderate.
+    expect(bil.specificity_score).toBe("moderate");
+  });
+
+  it("scores vague with no numeric or temporal language", () => {
+    const bil = extractBriefIntelligence(
+      "We need to improve our pricing strategy to be more competitive. " +
+      "Should we raise or lower prices? The team is ready.",
+    );
+    expect(bil.specificity_score).toBe("vague");
+  });
+
+  it("scores vague for 'this year' without a concrete date", () => {
+    const bil = extractBriefIntelligence(
+      "We need to do better this year. Our pricing is not competitive. " +
+      "Should we raise or lower? The team is ready to act.",
+    );
+    // "this year" has no numeric/temporal specificity
+    expect(bil.specificity_score).toBe("vague");
   });
 
   // --------------------------------------------------------------------------

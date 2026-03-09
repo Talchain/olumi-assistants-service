@@ -96,6 +96,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     maxOverlapPercentage: undefined,
     warning: undefined,
   }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   detectMissingBaseline: () => ({
     detected: false,
     hasBaseline: true,

@@ -1,29 +1,31 @@
 {
-  "_contract_version": "1.0.0",
-  "_generated_at": "2026-03-08T00:00:00.000Z",
+  "_contract_version": "1.1.0",
+  "_generated_at": "2026-03-09T00:00:00.000Z",
   "_source_endpoint": "deterministic extraction (no LLM)",
-  "_brief_name": "hiring-decision",
-  "_governance": "Any change to BriefIntelligence shape requires: 1) Schema version bump 2) UI type update 3) Ablation retest",
+  "_brief_name": "saas-pricing-decision",
+  "_governance": "Any change to BriefIntelligence shape requires: 1) Schema version bump 2) UI type update 3) Ablation retest. UI must update BriefIntelligence type to match v1.1.0. Causal phrases and specificity patterns must be identical.",
   "payload": {
-    "contract_version": "1.0.0",
+    "contract_version": "1.1.0",
     "goal": {
-      "label": "maximize team productivity",
-      "measurable": false,
-      "confidence": 0.7
+      "label": "maximize revenue",
+      "measurable": true,
+      "confidence": 0.9
     },
     "options": [
       { "label": "option a", "confidence": 0.9 },
       { "label": "option b", "confidence": 0.9 }
     ],
     "constraints": [
-      { "label": "budget", "type": "hard_limit", "confidence": 0.8 },
-      { "label": "deadline", "type": "hard_limit", "confidence": 0.5 }
+      { "label": "budget cap $150K", "type": "hard_limit", "confidence": 0.8 },
+      { "label": "deadline end of Q3 2026", "type": "hard_limit", "confidence": 0.8 }
     ],
     "factors": [
-      { "label": "team velocity", "confidence": 0.6 },
-      { "label": "code review quality", "confidence": 0.6 }
+      { "label": "customer churn", "confidence": 0.6 },
+      { "label": "perceived value", "confidence": 0.6 }
     ],
     "completeness_band": "high",
+    "causal_framing_score": "moderate",
+    "specificity_score": "specific",
     "ambiguity_flags": [],
     "missing_elements": [],
     "dsk_cues": []

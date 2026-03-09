@@ -47,12 +47,14 @@ import type { BriefIntelligence } from "../../../../src/schemas/brief-intelligen
 
 function makeBil(factors: Array<{ label: string; confidence: number }>): BriefIntelligence {
   return {
-    contract_version: "1.0.0",
+    contract_version: "1.1.0",
     goal: null,
     options: [],
     constraints: [],
     factors,
     completeness_band: "low",
+    causal_framing_score: "weak",
+    specificity_score: "vague",
     ambiguity_flags: [],
     missing_elements: [],
     dsk_cues: [],

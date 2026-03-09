@@ -17,6 +17,8 @@ describe("BriefIntelligencePayload schema", () => {
       { label: "Customer churn", confidence: 0.6 },
     ],
     completeness_band: "high" as const,
+    causal_framing_score: "moderate" as const,
+    specificity_score: "specific" as const,
     ambiguity_flags: ["Hedging: \"maybe\""],
     missing_elements: ["time_horizon" as const],
     dsk_cues: [
@@ -99,6 +101,22 @@ describe("BriefIntelligencePayload schema", () => {
     const result = BriefIntelligencePayload.safeParse({
       ...validPayload,
       contract_version: "2.0.0",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid causal_framing_score value", () => {
+    const result = BriefIntelligencePayload.safeParse({
+      ...validPayload,
+      causal_framing_score: "excellent",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid specificity_score value", () => {
+    const result = BriefIntelligencePayload.safeParse({
+      ...validPayload,
+      specificity_score: "detailed",
     });
     expect(result.success).toBe(false);
   });

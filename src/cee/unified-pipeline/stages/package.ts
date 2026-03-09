@@ -22,12 +22,15 @@ import {
   detectUniformStrengths,
   detectStrengthClustering,
   detectSameLeverOptions,
+  detectOptionSimilarity,
   detectMissingBaseline,
+  detectMissingCounterfactual,
   detectGoalNoBaselineValue,
   detectZeroExternalFactors,
   checkGoalConnectivity,
   computeModelQualityFactors,
 } from "../../structure/index.js";
+import { matchesStatusQuoLabel } from "../../structure/status-quo-patterns.js";
 import { verificationPipeline } from "../../verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../../schemas/ceeResponses.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
@@ -101,23 +104,13 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // ── Step 2b: STATUS_QUO_ABSENT coaching injection ─────────────────────────
   // If no option has a status-quo-like label, inject a coaching strengthen_item
   // so the user is prompted to add a baseline comparator.
-  // Patterns aligned with detectMissingBaseline() in structure/index.ts.
+  // Uses shared matchesStatusQuoLabel() from structure/status-quo-patterns.ts.
   {
-    const STATUS_QUO_PATTERNS: RegExp[] = [
-      /status\s*quo/i,
-      /do\s*nothing/i,
-      /no\s*action/i,
-      /no\s*change/i,
-      /baseline/i,
-      /current/i,
-      /as\s*is/i,
-    ];
     const nodes = ((ctx.graph as any).nodes ?? []) as Array<{ id: string; kind: string; label?: string; data?: any }>;
     const options = nodes.filter((n) => n.kind === "option");
     const hasStatusQuo = options.some((opt) => {
       if (opt.data?.is_status_quo === true) return true;
-      const text = `${opt.id} ${opt.label ?? ""}`;
-      return STATUS_QUO_PATTERNS.some((p) => p.test(text));
+      return matchesStatusQuoLabel(opt.label ?? "");
     });
 
     if (!hasStatusQuo && options.length > 0) {
@@ -239,10 +232,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     draftWarnings.push((sameLever as any).warning);
   }
 
-  const missingBaselineResult = detectMissingBaseline(ctx.graph as any);
-  if (missingBaselineResult.detected && (missingBaselineResult as any).warning) {
-    if (!draftWarnings) draftWarnings = [];
-    draftWarnings.push((missingBaselineResult as any).warning);
+  // Detect option similarity — emit to validationIssues (type: OPTION_SIMILARITY, severity: info)
+  const optSimilarity = detectOptionSimilarity(ctx.graph as any);
+  if (optSimilarity.detected) {
+    validationIssues.push(...optSimilarity.validationIssues);
+  }
+
+  // Detect missing counterfactual — emit to validationIssues (type: MISSING_COUNTERFACTUAL, severity: info)
+  // Supersedes detectMissingBaseline — skip baseline when counterfactual fires.
+  const missingCounterfactualResult = detectMissingCounterfactual(ctx.graph as any);
+  if (missingCounterfactualResult.detected && missingCounterfactualResult.validationIssue) {
+    validationIssues.push(missingCounterfactualResult.validationIssue);
+  }
+
+  // Detect missing baseline (legacy — skipped when counterfactual already fires)
+  if (!missingCounterfactualResult.detected) {
+    const missingBaselineResult = detectMissingBaseline(ctx.graph as any);
+    if (missingBaselineResult.detected && (missingBaselineResult as any).warning) {
+      if (!draftWarnings) draftWarnings = [];
+      draftWarnings.push((missingBaselineResult as any).warning);
+    }
   }
 
   const goalNoValue = detectGoalNoBaselineValue(ctx.graph as any);

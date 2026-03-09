@@ -23,7 +23,7 @@ vi.mock('../../../../src/adapters/llm/router.js', () => ({
 
 function makeBil(): BriefIntelligence {
   return {
-    contract_version: '1.0.0',
+    contract_version: '1.1.0',
     goal: { label: 'Test goal', measurable: true, confidence: 0.8 },
     options: [
       { label: 'Option A', confidence: 0.7 },
@@ -32,6 +32,8 @@ function makeBil(): BriefIntelligence {
     constraints: [],
     factors: [],
     completeness_band: 'medium',
+    causal_framing_score: 'weak',
+    specificity_score: 'vague',
     ambiguity_flags: [],
     missing_elements: [],
     dsk_cues: [],

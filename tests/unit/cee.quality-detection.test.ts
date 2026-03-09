@@ -241,11 +241,12 @@ describe("CEE Quality Detection Functions", () => {
     });
 
     it("should recognize various baseline patterns", () => {
+      // "Baseline option" intentionally excluded — bare "baseline" produces false
+      // positives on compound labels like "Improve baseline forecast".
       const patterns = [
         "Status quo",
         "Do nothing",
         "No action",
-        "Baseline option",
         "Current state approach",
         "As is",
       ];

@@ -9,7 +9,7 @@ import { getRequestId } from "../../utils/request-id.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { isSchemaValidationError, calculateBackoffDelay, SCHEMA_VALIDATION_RETRY_CONFIG } from "../../utils/retry.js";
 import { config, isProduction } from "../../config/index.js";
-import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
+import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, DailyBudgetExceededError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DRAFT_REQUEST_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS } from "../../config/timeouts.js";
 import { logCeeCall } from "../logging.js";
 import { persistDraftFailureBundle } from "../draft-failures/store.js";
@@ -39,7 +39,9 @@ import {
   wireOutcomesToGoal,
   detectStrengthClustering,
   detectSameLeverOptions,
+  detectOptionSimilarity,
   detectMissingBaseline,
+  detectMissingCounterfactual,
   detectGoalNoBaselineValue,
   checkGoalConnectivity,
   computeModelQualityFactors,
@@ -785,6 +787,34 @@ export async function finaliseCeeDraftResponse(
             stage: err.stage,
           },
           stage: err.stage,
+        }),
+      };
+    }
+
+    // Daily token budget exceeded — return 429 with CEE_RATE_LIMIT
+    if (err instanceof DailyBudgetExceededError) {
+      emit(TelemetryEvents.CeeDraftGraphFailed, {
+        request_id: requestId,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_RATE_LIMIT",
+        http_status: 429,
+      });
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph",
+        latencyMs: Date.now() - start,
+        status: "limited",
+        errorCode: "CEE_RATE_LIMIT",
+        httpStatus: 429,
+      });
+      return {
+        statusCode: 429,
+        body: buildCeeErrorResponse("CEE_RATE_LIMIT", "Daily token budget exceeded", {
+          retryable: true,
+          requestId,
+          details: {
+            retry_after_seconds: err.retryAfterSeconds,
+          },
         }),
       };
     }
@@ -2405,11 +2435,29 @@ export async function finaliseCeeDraftResponse(
     draftWarnings.push(sameLeverResult.warning);
   }
 
-  // Detect missing baseline option
-  const missingBaselineResult = detectMissingBaseline(graph);
-  if (missingBaselineResult.detected && missingBaselineResult.warning) {
-    if (!draftWarnings) draftWarnings = [];
-    draftWarnings.push(missingBaselineResult.warning);
+  // Detect option similarity via Jaccard on outgoing edge targets (item 34)
+  // Emits canonical CEEValidationIssue (type: OPTION_SIMILARITY, severity: info)
+  const optionSimilarityResult = detectOptionSimilarity(graph);
+  if (optionSimilarityResult.detected) {
+    validationIssues.push(...optionSimilarityResult.validationIssues);
+  }
+
+  // Detect missing counterfactual (item 35 — info-level critique)
+  // Emits canonical CEEValidationIssue (type: MISSING_COUNTERFACTUAL, severity: info)
+  // Supersedes detectMissingBaseline — when counterfactual fires, skip baseline
+  // to avoid duplicate/competing guidance for the same condition.
+  const missingCounterfactualResult = detectMissingCounterfactual(graph);
+  if (missingCounterfactualResult.detected && missingCounterfactualResult.validationIssue) {
+    validationIssues.push(missingCounterfactualResult.validationIssue);
+  }
+
+  // Detect missing baseline option (legacy — skipped when counterfactual already fires)
+  if (!missingCounterfactualResult.detected) {
+    const missingBaselineResult = detectMissingBaseline(graph);
+    if (missingBaselineResult.detected && missingBaselineResult.warning) {
+      if (!draftWarnings) draftWarnings = [];
+      draftWarnings.push(missingBaselineResult.warning);
+    }
   }
 
   // Detect goal without baseline value

@@ -12,6 +12,7 @@ import { computeBriefSignals } from "../../cee/signals/brief-signals.js";
 import type { BriefSignals, ConstraintMarker } from "../../cee/signals/types.js";
 import { BriefIntelligencePayload, BIL_CONTRACT_VERSION } from "../../schemas/brief-intelligence.js";
 import type { BriefIntelligence } from "../../schemas/brief-intelligence.js";
+import { matchesStatusQuoLabel } from "../../cee/structure/status-quo-patterns.js";
 import { queryDsk } from "../dsk-loader.js";
 import type { DSKTrigger } from "../../dsk/types.js";
 import { log } from "../../utils/telemetry.js";
@@ -28,6 +29,112 @@ const CAUSAL_PATTERNS = [
   /\b(?:impacts?|impacting)\s+(.{3,40}?)(?:[.,;!?]|$)/gi,
   /\b(?:determines?|determining)\s+(.{3,40}?)(?:[.,;!?]|$)/gi,
 ];
+
+// ============================================================================
+// Causal framing detection (item 32)
+// ============================================================================
+
+/**
+ * Canonical causal phrase list for causal_framing_score.
+ * The UI must use the identical list for client-side preview.
+ *
+ * Counts distinct phrase matches, not total occurrences.
+ *
+ * Stronger signals: "because", "leads to", "results in", "causes", "depends on"
+ * — these almost always indicate causal reasoning.
+ *
+ * Weaker signals: "increases", "reduces", "affects", "drives", "prevents"
+ * — these can appear in non-causal contexts (e.g. "increases in temperature")
+ * but are retained because they correlate with causal framing in decision briefs.
+ * Revisit weighting post-pilot if false-positive rate is high.
+ */
+export const CAUSAL_PHRASES: readonly string[] = [
+  "because",
+  "leads to",
+  "causes",
+  "results in",
+  "drives",
+  "affects",
+  "increases",
+  "reduces",
+  "prevents",
+  "depends on",
+] as const;
+
+/**
+ * Compute causal framing score from brief text.
+ *
+ * Counts distinct phrase matches, not total occurrences.
+ * A phrase that appears 3 times counts as 1 distinct match.
+ *
+ * 3+ distinct → strong, 1-2 → moderate, 0 → weak
+ */
+function computeCausalFramingScore(brief: string): 'strong' | 'moderate' | 'weak' {
+  const lower = brief.toLowerCase();
+  let distinctCount = 0;
+  for (const phrase of CAUSAL_PHRASES) {
+    // Word-boundary match to avoid matching substrings
+    const regex = new RegExp(`\\b${phrase.replace(/\s+/g, '\\s+')}\\b`, 'i');
+    if (regex.test(lower)) {
+      distinctCount++;
+    }
+  }
+  if (distinctCount >= 3) return 'strong';
+  if (distinctCount >= 1) return 'moderate';
+  return 'weak';
+}
+
+// ============================================================================
+// Specificity scoring (item 33)
+// ============================================================================
+
+/**
+ * Canonical specificity patterns for specificity_score.
+ * The UI must use the identical list for client-side preview.
+ *
+ * Counts distinct pattern matches, not total occurrences.
+ *
+ * Numeric patterns detect concrete quantitative anchors.
+ * Temporal patterns detect concrete time references (quarter+year, half+year, standalone year).
+ * "Q3" without a year does NOT match — only "Q3 2026" qualifies.
+ * Standalone years are constrained to 2020-2030 (not the broader 2020-2039 range).
+ */
+export const SPECIFICITY_PATTERNS: readonly RegExp[] = [
+  // Numeric: percentage
+  /\d+(?:\.\d+)?%/,
+  // Numeric: currency amounts (£, $, €)
+  /[£$€]\s?\d+/,
+  // Numeric: large comma-separated numbers (e.g. 1,000,000)
+  /\d{1,3}(?:,\d{3})+/,
+  // Numeric: shorthand thousands (e.g. 50k)
+  /\d+k\b/i,
+  // Numeric: shorthand millions (e.g. 2m, 1.5m)
+  /\d+(?:\.\d+)?m\b/i,
+  // Temporal: quarter or half with year (Q3 2026, H1 2025) — year required
+  /\b(?:Q[1-4]|H[12])\s?\d{4}\b/,
+  // Temporal: standalone year in 2020-2030 range
+  /\b20(?:2\d|30)\b/,
+] as const;
+
+/**
+ * Compute specificity score from brief text.
+ *
+ * Counts distinct pattern matches, not total occurrences.
+ * Multiple matches of the same pattern count as 1.
+ *
+ * 2+ distinct → specific, 1 → moderate, 0 → vague
+ */
+function computeSpecificityScore(brief: string): 'specific' | 'moderate' | 'vague' {
+  let distinctCount = 0;
+  for (const pattern of SPECIFICITY_PATTERNS) {
+    if (pattern.test(brief)) {
+      distinctCount++;
+    }
+  }
+  if (distinctCount >= 2) return 'specific';
+  if (distinctCount >= 1) return 'moderate';
+  return 'vague';
+}
 
 // ============================================================================
 // Ambiguity detection
@@ -73,18 +180,10 @@ const HARD_LIMIT_PATTERNS = [
 
 // ============================================================================
 // Status quo detection
+// — Uses shared matchesStatusQuoLabel() from cee/structure/status-quo-patterns.ts.
+//   That module is the single source of truth for status quo phrase matching
+//   across BIL, structure detectors, and packaging stages.
 // ============================================================================
-
-const STATUS_QUO_PATTERNS = [
-  /\bstatus\s+quo\b/i,
-  /\bkeep\s+current\b/i,
-  /\bdo\s+nothing\b/i,
-  /\bstay\s+(the\s+)?same\b/i,
-  /\bno\s+change\b/i,
-  /\bcurrent\s+approach\b/i,
-  /\bexisting\s+approach\b/i,
-  /\bremain\s+as.?is\b/i,
-];
 
 // ============================================================================
 // Helpers
@@ -243,7 +342,8 @@ function computeMissingElements(
   if (!hasTimeline) missing.push('time_horizon');
 
   // Check for status_quo_option: no option resembling "keep current"
-  const hasStatusQuo = STATUS_QUO_PATTERNS.some((p) => p.test(brief));
+  // Uses shared matchesStatusQuoLabel() — single source of truth for status quo phrases.
+  const hasStatusQuo = matchesStatusQuoLabel(brief);
   if (!hasStatusQuo) missing.push('status_quo_option');
 
   return missing.sort();
@@ -315,6 +415,8 @@ const FALLBACK: BriefIntelligence = {
   constraints: [],
   factors: [],
   completeness_band: 'low',
+  causal_framing_score: 'weak',
+  specificity_score: 'vague',
   ambiguity_flags: [],
   missing_elements: ['goal', 'constraints', 'risk_factors', 'status_quo_option', 'success_metric', 'time_horizon'],
   dsk_cues: [],
@@ -350,6 +452,8 @@ export function extractBriefIntelligence(
       constraints: mapConstraints(signals, brief),
       factors: extractFactors(brief),
       completeness_band: mapCompletenessBand(signals),
+      causal_framing_score: computeCausalFramingScore(brief),
+      specificity_score: computeSpecificityScore(brief),
       ambiguity_flags: detectAmbiguityFlags(brief),
       missing_elements: computeMissingElements(signals, brief),
       dsk_cues: matchDskCues(brief, signals, stage),

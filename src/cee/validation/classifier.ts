@@ -144,6 +144,9 @@ const INFO_CODES = [
   "MISSING_USER_QUESTIONS",
   // Observability info codes
   "EDGE_ORIGIN_DEFAULTED", // Edge origin was not set, defaulted to 'ai'
+  // Model critiques (items 34-35)
+  "OPTION_SIMILARITY", // Options share ≥80% outgoing edge targets (Jaccard)
+  "MISSING_COUNTERFACTUAL", // No status quo / baseline option detected
 ] as const;
 
 const ERROR_CODE_SET = new Set<string>(ERROR_CODES);
@@ -280,6 +283,9 @@ const SUGGESTION_MAP: Record<string, string> = {
   RANGE_DEGENERATE: "Intervention min equals max — provide a valid range for sensitivity analysis",
   // Observability info codes
   EDGE_ORIGIN_DEFAULTED: "Edge origin was not specified — defaulted to 'ai' for LLM-generated edges",
+  // Model critiques (items 34-35)
+  OPTION_SIMILARITY: "Options affect the same factors — consider whether they represent genuinely different approaches",
+  MISSING_COUNTERFACTUAL: "No status quo or baseline option detected — including a 'do nothing' option helps measure whether any change is worth the risk",
 };
 
 /**

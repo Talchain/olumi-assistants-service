@@ -1,8 +1,11 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
+import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
+import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
+type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
 
 export interface StructuralMeta {
   had_cycles?: boolean;
@@ -1273,6 +1276,124 @@ export function detectSameLeverOptions(
   };
 }
 
+// ============================================================================
+// Option similarity detection (item 34)
+// ============================================================================
+
+/**
+ * Result of option similarity detection via Jaccard on outgoing edge targets.
+ *
+ * Distinct from detectSameLeverOptions which uses intervention targets.
+ * This function uses graph topology (outgoing edges to factor nodes).
+ *
+ * `validationIssues` contains canonical CEEValidationIssue items
+ * (type: "OPTION_SIMILARITY", severity: "info") for the critique pipeline.
+ * `warnings` is retained for backward compatibility with draft_warnings consumers.
+ */
+export interface OptionSimilarityResult {
+  detected: boolean;
+  critiques: Array<{ optionA: string; optionB: string; jaccard: number }>;
+  warnings: CEEStructuralWarningV1[];
+  validationIssues: CEEValidationIssue[];
+}
+
+/**
+ * Detect option pairs whose outgoing factor-edge targets are highly similar.
+ *
+ * Jaccard similarity: |A ∩ B| / |A ∪ B| on unique outgoing edge target sets.
+ * Only considers edges where from=option and to=factor node.
+ * If both options have zero factor edges, Jaccard is undefined — no critique.
+ *
+ * @param graph Graph to analyse
+ * @param threshold Jaccard threshold (default 0.8)
+ * @returns Max 2 critiques, sorted by descending Jaccard
+ */
+export function detectOptionSimilarity(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.8,
+): OptionSimilarityResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+  const edges = (graph as any).edges as any[] ?? [];
+
+  // Build set of factor node IDs for filtering
+  const factorNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (node?.kind === "factor" && typeof node?.id === "string") {
+      factorNodeIds.add(node.id);
+    }
+  }
+
+  // Build option → unique outgoing factor-edge target sets
+  const optionTargets = new Map<string, Set<string>>();
+  const optionLabels = new Map<string, string>();
+  for (const node of nodes) {
+    if (node?.kind !== "option" || typeof node?.id !== "string") continue;
+    optionTargets.set(node.id, new Set());
+    optionLabels.set(node.id, node?.label ?? node.id);
+  }
+
+  for (const edge of edges) {
+    const from = typeof edge?.from === "string" ? edge.from : undefined;
+    const to = typeof edge?.to === "string" ? edge.to : undefined;
+    if (!from || !to) continue;
+    if (!optionTargets.has(from)) continue;
+    // Only count edges to factor nodes; ignore self-loops
+    if (from === to) continue;
+    if (!factorNodeIds.has(to)) continue;
+    optionTargets.get(from)!.add(to);
+  }
+
+  const optionIds = Array.from(optionTargets.keys());
+  if (optionIds.length < 2) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  // Compute Jaccard for each pair
+  const pairs: Array<{ optionA: string; optionB: string; jaccard: number }> = [];
+  for (let i = 0; i < optionIds.length; i++) {
+    for (let j = i + 1; j < optionIds.length; j++) {
+      const setA = optionTargets.get(optionIds[i])!;
+      const setB = optionTargets.get(optionIds[j])!;
+      // If both empty, Jaccard is undefined — skip
+      if (setA.size === 0 && setB.size === 0) continue;
+      const intersection = new Set([...setA].filter(t => setB.has(t)));
+      const union = new Set([...setA, ...setB]);
+      const jaccard = union.size > 0 ? intersection.size / union.size : 0;
+      if (jaccard >= threshold) {
+        pairs.push({ optionA: optionIds[i], optionB: optionIds[j], jaccard });
+      }
+    }
+  }
+
+  if (pairs.length === 0) {
+    return { detected: false, critiques: [], warnings: [], validationIssues: [] };
+  }
+
+  // Sort by descending Jaccard, take top 2
+  pairs.sort((a, b) => b.jaccard - a.jaccard);
+  const topPairs = pairs.slice(0, 2);
+
+  // Canonical critique pipeline shape (type: uppercase, severity: "info")
+  const validationIssues: CEEValidationIssue[] = topPairs.map(p =>
+    createValidationIssue({
+      code: "OPTION_SIMILARITY",
+      message: `Options "${optionLabels.get(p.optionA)}" and "${optionLabels.get(p.optionB)}" affect the same factors (Jaccard ${p.jaccard.toFixed(2)}). Consider whether they represent genuinely different approaches.`,
+      details: { optionA: p.optionA, optionB: p.optionB, jaccard: p.jaccard },
+    }),
+  );
+
+  return {
+    detected: true,
+    critiques: topPairs,
+    warnings: [],
+    validationIssues,
+  };
+}
+
 /**
  * Result of missing baseline detection.
  */
@@ -1284,7 +1405,7 @@ export interface MissingBaselineResult {
 
 /**
  * Detect when no status quo / baseline option exists.
- * Looks for options with labels containing "status quo", "do nothing", "no action", "baseline", "current".
+ * Uses shared matchesStatusQuoLabel() for label matching.
  */
 export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaselineResult {
   if (!graph || !Array.isArray((graph as any).nodes)) {
@@ -1292,25 +1413,17 @@ export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaseli
   }
 
   const nodes = (graph as any).nodes as any[];
-  const baselinePatterns = [
-    /status\s*quo/i,
-    /do\s*nothing/i,
-    /no\s*action/i,
-    /baseline/i,
-    /current\s*state/i,
-    /as\s*is/i,
-  ];
 
   let hasBaseline = false;
   for (const node of nodes) {
     if (node?.kind !== "option") continue;
-    const label = node?.label ?? "";
-    if (typeof label === "string" && baselinePatterns.some(p => p.test(label))) {
+    // Explicit semantic flag takes precedence over fuzzy text matching
+    if ((node?.data as any)?.is_status_quo === true) {
       hasBaseline = true;
       break;
     }
-    // Also check option data for status_quo flag
-    if ((node?.data as any)?.is_status_quo === true) {
+    const label = node?.label ?? "";
+    if (typeof label === "string" && matchesStatusQuoLabel(label)) {
       hasBaseline = true;
       break;
     }
@@ -1326,7 +1439,7 @@ export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaseli
     detected: true,
     hasBaseline: false,
     warning: {
-      id: "missing_baseline" as any,
+      id: "missing_baseline",
       severity: "low",
       node_ids: optionIds,
       edge_ids: [],
@@ -1334,7 +1447,71 @@ export function detectMissingBaseline(graph: GraphV1 | undefined): MissingBaseli
       affected_edge_ids: [],
       explanation: "No status quo / baseline option detected.",
       fix_hint: "Add a status quo option to enable comparison with no action",
-    } as CEEStructuralWarningV1,
+    },
+  };
+}
+
+// ============================================================================
+// Missing counterfactual detection (item 35)
+// ============================================================================
+
+/**
+ * Result of missing counterfactual detection.
+ *
+ * `validationIssue` contains the canonical CEEValidationIssue
+ * (type: "MISSING_COUNTERFACTUAL", severity: "info") for the critique pipeline.
+ * `warning` is retained for backward compatibility with draft_warnings consumers.
+ */
+export interface MissingCounterfactualResult {
+  detected: boolean;
+  hasCounterfactual: boolean;
+  validationIssue?: CEEValidationIssue;
+}
+
+/**
+ * Detect when no status quo / baseline option exists (info-level critique).
+ *
+ * detectMissingCounterfactual supersedes detectMissingBaseline for status quo
+ * detection. Both retained during transition; consolidate post-pilot.
+ *
+ * Checks is_status_quo flag first (explicit semantics beat fuzzy text),
+ * then falls back to matchesStatusQuoLabel() on option labels.
+ */
+export function detectMissingCounterfactual(graph: GraphV1 | undefined): MissingCounterfactualResult {
+  if (!graph || !Array.isArray((graph as any).nodes)) {
+    return { detected: false, hasCounterfactual: false };
+  }
+
+  const nodes = (graph as any).nodes as any[];
+
+  let hasCounterfactual = false;
+  for (const node of nodes) {
+    if (node?.kind !== "option") continue;
+    // Explicit semantic flag takes precedence over fuzzy text matching
+    if ((node?.data as any)?.is_status_quo === true) {
+      hasCounterfactual = true;
+      break;
+    }
+    const label = node?.label ?? "";
+    if (typeof label === "string" && matchesStatusQuoLabel(label)) {
+      hasCounterfactual = true;
+      break;
+    }
+  }
+
+  const optionIds = nodes.filter(n => n?.kind === "option").map(n => n?.id).filter(Boolean);
+
+  if (hasCounterfactual || optionIds.length === 0) {
+    return { detected: false, hasCounterfactual };
+  }
+
+  return {
+    detected: true,
+    hasCounterfactual: false,
+    validationIssue: createValidationIssue({
+      code: "MISSING_COUNTERFACTUAL",
+      message: "No status quo or baseline option detected. Including a \"do nothing\" option helps measure whether any change is worth the risk.",
+    }),
   };
 }
 
