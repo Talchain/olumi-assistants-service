@@ -138,7 +138,7 @@ function buildTurnContext(
  * falls through to LLM so it can explain what's missing conversationally.
  */
 const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationContext) => boolean>> = {
-  run_analysis: (ctx) => ctx.graph != null,
+  run_analysis: (ctx) => ctx.graph != null && ctx.analysis_inputs != null,
   explain_results: (ctx) => ctx.analysis_response != null,
   edit_graph: (ctx) => ctx.graph != null,
   generate_brief: (ctx) => ctx.graph != null && ctx.analysis_response != null,
@@ -489,8 +489,10 @@ async function dispatchViaLLM(
 
   let enrichedUserMessage = turnRequest.message;
   let dskCoaching: import("../schemas/dsk-coaching.js").DskCoachingItems | undefined;
-  if (shouldInjectBil) {
-    const bil = extractBriefIntelligence(turnRequest.message, null, stage);
+  const bil = shouldInjectBil
+    ? extractBriefIntelligence(turnRequest.message, null, stage)
+    : null;
+  if (bil) {
     enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
     // Pre-model: bias alerts only (no technique recommendations — design rule)
     dskCoaching = assembleDskCoachingItems(bil, 'pre_model');
@@ -501,8 +503,8 @@ async function dispatchViaLLM(
 
   if (config.features.zone2Registry) {
     try {
-      const bilContextStr = shouldInjectBil
-        ? formatBilForCoaching(extractBriefIntelligence(turnRequest.message, null, stage))
+      const bilContextStr = bil
+        ? formatBilForCoaching(bil)
         : undefined;
       const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr);
       const zone1 = await getSystemPrompt('orchestrator');

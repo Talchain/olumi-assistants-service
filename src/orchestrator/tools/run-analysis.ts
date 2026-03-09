@@ -72,22 +72,15 @@ export async function handleRunAnalysis(
   }
 
   if (!context.analysis_inputs) {
-    // No analysis_inputs — surface as blocked analysis result (V2 contract: failures via analysis_status)
-    return {
-      blocks: [],
-      analysisResponse: {
-        analysis_status: 'blocked',
-        status_reason: 'Analysis inputs not configured.',
-        retryable: false,
-        critiques: [{ message: 'analysis_inputs is required. Define options and constraints first.' }],
-        meta: { request_id: requestId, seed_used: 0, n_samples: 0, response_hash: '' },
-        results: [],
-      } as unknown as V2RunResponseEnvelope,
-      responseHash: undefined,
-      seedUsed: undefined,
-      nSamples: undefined,
-      latencyMs: 0,
+    // Safety net — prerequisite gate in turn-handler.ts should prevent reaching here.
+    // If called directly without analysis_inputs, throw so the caller can handle it.
+    const err: OrchestratorError = {
+      code: 'TOOL_EXECUTION_FAILED',
+      message: 'Cannot run analysis: no analysis_inputs in context.',
+      tool: 'run_analysis',
+      recoverable: true,
     };
+    throw Object.assign(new Error(err.message), { orchestratorError: err });
   }
 
   // Build PLoT payload: full graph + analysis_inputs

@@ -182,10 +182,16 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
 function parseEdgePath(path: string): [string, string] {
   if (path.includes('::')) {
     const parts = path.split('::');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new PatchApplyError('INVALID_OPERATION', `Invalid edge path format: "${path}"`);
+    }
     return [parts[0], parts[1]];
   }
   if (path.includes('->')) {
     const parts = path.split('->');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new PatchApplyError('INVALID_OPERATION', `Invalid edge path format: "${path}"`);
+    }
     return [parts[0], parts[1]];
   }
   throw new PatchApplyError('INVALID_OPERATION', `Invalid edge path format: "${path}"`);
