@@ -291,16 +291,95 @@ describe("injectScienceClaimsSection", () => {
     ).toThrow(/missing.*<\/INPUT_FIELDS>/i);
   });
 
-  it("throws when prompt already contains <SCIENCE_CLAIMS>", () => {
+  it("returns prompt unchanged and logs structured warning when prompt already contains <SCIENCE_CLAIMS>", () => {
     const promptWithSection =
       SAMPLE_PROMPT.replace(
         "</INPUT_FIELDS>",
         "</INPUT_FIELDS>\n<SCIENCE_CLAIMS>existing</SCIENCE_CLAIMS>",
       );
 
-    expect(() =>
-      injectScienceClaimsSection(promptWithSection, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>"),
-    ).toThrow(/refusing to double-inject/i);
+    const result = injectScienceClaimsSection(promptWithSection, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>");
+
+    // Returns original prompt unchanged — no double-injection
+    expect(result).toBe(promptWithSection);
+    // Section appears exactly once
+    const matches = result.match(/<SCIENCE_CLAIMS>/g);
+    expect(matches).toHaveLength(1);
+    // Warning was logged with structured diagnostic fields
+    expect(mockLog.warn).toHaveBeenCalledWith(
+      {
+        source: 'injectScienceClaimsSection',
+        has_open_tag: true,
+        has_close_tag: true,
+        science_claims_tag_count: 1,
+      },
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
+    );
+  });
+
+  it("returns prompt unchanged when only opening <SCIENCE_CLAIMS> tag is present (malformed)", () => {
+    const malformed = SAMPLE_PROMPT.replace(
+      "</INPUT_FIELDS>",
+      "</INPUT_FIELDS>\n<SCIENCE_CLAIMS>orphan open tag",
+    );
+
+    const result = injectScienceClaimsSection(malformed, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>");
+
+    expect(result).toBe(malformed);
+    expect(mockLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        has_open_tag: true,
+        has_close_tag: false,
+        science_claims_tag_count: 1,
+      }),
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
+    );
+  });
+
+  it("returns prompt unchanged when only closing </SCIENCE_CLAIMS> tag is present (malformed)", () => {
+    const malformed = SAMPLE_PROMPT.replace(
+      "</INPUT_FIELDS>",
+      "</INPUT_FIELDS>\norphan close tag</SCIENCE_CLAIMS>",
+    );
+
+    const result = injectScienceClaimsSection(malformed, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>");
+
+    expect(result).toBe(malformed);
+    expect(mockLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        has_open_tag: false,
+        has_close_tag: true,
+        science_claims_tag_count: 0,
+      }),
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
+    );
+  });
+
+  it("returns prompt unchanged when section present but structural markers are missing", () => {
+    // Section present but </INPUT_FIELDS> and <CONSTRUCTION_FLOW> are gone
+    const noMarkers = "<ROLE>Test</ROLE>\n<SCIENCE_CLAIMS>existing</SCIENCE_CLAIMS>";
+
+    const result = injectScienceClaimsSection(noMarkers, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>");
+
+    // Section-presence guard fires BEFORE marker checks — no throw
+    expect(result).toBe(noMarkers);
+    expect(mockLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ has_open_tag: true, has_close_tag: true }),
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
+    );
+  });
+
+  it("returns prompt unchanged when section present but markers are reordered", () => {
+    // Section present + markers in wrong order
+    const reordered =
+      "<CONSTRUCTION_FLOW>Build</CONSTRUCTION_FLOW>\n" +
+      "<SCIENCE_CLAIMS>existing</SCIENCE_CLAIMS>\n" +
+      "<INPUT_FIELDS>Fields</INPUT_FIELDS>";
+
+    const result = injectScienceClaimsSection(reordered, "<SCIENCE_CLAIMS>new</SCIENCE_CLAIMS>");
+
+    // Section-presence guard fires BEFORE marker-order check — no throw
+    expect(result).toBe(reordered);
   });
 });
 
@@ -575,5 +654,53 @@ describe("full prompt assembly integration", () => {
     expect(assembled).toContain("DSK-P-001");
     expect(assembled).toContain("Anchoring");
     expect(assembled).toContain("Pre-mortem");
+  });
+
+  it("when prompt already contains <SCIENCE_CLAIMS>, returns it unchanged with exactly one section", () => {
+    mockGetAllByType.mockImplementation((type: string) => {
+      if (type === "claim") {
+        return [
+          makeBiasClaim("DSK-B-001", "Anchoring", "strong"),
+          makeTechniqueClaim("DSK-T-001", "Pre-mortem", "medium"),
+        ];
+      }
+      if (type === "protocol") {
+        return [makeProtocol("DSK-P-001", "DSK-T-001")];
+      }
+      return [];
+    });
+
+    // Simulate a store prompt (v12+) that already has <SCIENCE_CLAIMS> baked in
+    const storePrompt = SAMPLE_PROMPT.replace(
+      "</INPUT_FIELDS>",
+      "</INPUT_FIELDS>\n\n<SCIENCE_CLAIMS>\nBaked-in claims from store\n</SCIENCE_CLAIMS>",
+    );
+
+    const scienceResult = buildScienceClaimsSection();
+    expect(scienceResult).not.toBeNull();
+
+    // Injection should be a no-op — returns prompt unchanged
+    const assembled = injectScienceClaimsSection(storePrompt, scienceResult!.section);
+    expect(assembled).toBe(storePrompt);
+
+    // <SCIENCE_CLAIMS> appears exactly once (the baked-in one)
+    const openTags = assembled.match(/<SCIENCE_CLAIMS>/g);
+    const closeTags = assembled.match(/<\/SCIENCE_CLAIMS>/g);
+    expect(openTags).toHaveLength(1);
+    expect(closeTags).toHaveLength(1);
+
+    // Baked-in content preserved
+    expect(assembled).toContain("Baked-in claims from store");
+
+    // Warning was logged with structured diagnostic fields
+    expect(mockLog.warn).toHaveBeenCalledWith(
+      {
+        source: 'injectScienceClaimsSection',
+        has_open_tag: true,
+        has_close_tag: true,
+        science_claims_tag_count: 1,
+      },
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
+    );
   });
 });

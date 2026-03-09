@@ -419,14 +419,30 @@ export default async function route(app: FastifyInstance) {
       const rawPrompt = await getSystemPrompt("decision_review");
       const promptMeta = getSystemPromptMeta("decision_review");
 
-      // Inject <SCIENCE_CLAIMS> section when DSK is enabled and bundle loaded
+      // Inject <SCIENCE_CLAIMS> section when DSK is enabled, bundle loaded,
+      // and the loaded prompt does not already contain the section (store v12+ may bake it in).
       let assembledPrompt = rawPrompt;
       const scienceResult = buildScienceClaimsSection();
-      if (scienceResult !== null) {
+      if (scienceResult !== null && !rawPrompt.includes('<SCIENCE_CLAIMS>')) {
         assembledPrompt = injectScienceClaimsSection(rawPrompt, scienceResult.section);
         log.info(
           { request_id: requestId, bias_claims: scienceResult.biasCount, technique_claims: scienceResult.techniqueCount },
           `Science claims injected: ${scienceResult.biasCount} bias, ${scienceResult.techniqueCount} technique`,
+        );
+      } else if (scienceResult !== null) {
+        // Caller-side skip: injector is the authoritative collision handler,
+        // but we log here with request-scoped context the injector lacks.
+        const openCount = (rawPrompt.match(/<SCIENCE_CLAIMS>/g) || []).length;
+        const closeCount = (rawPrompt.match(/<\/SCIENCE_CLAIMS>/g) || []).length;
+        log.warn(
+          {
+            request_id: requestId,
+            prompt_version: promptMeta.prompt_version,
+            has_open_tag: openCount > 0,
+            has_close_tag: closeCount > 0,
+            science_claims_tag_count: openCount,
+          },
+          'Skipping SCIENCE_CLAIMS injection: prompt already contains section',
         );
       }
 

@@ -112,19 +112,47 @@ export function buildScienceClaimsSection(): ScienceClaimsResult | null {
 const INPUT_FIELDS_END = '</INPUT_FIELDS>';
 const CONSTRUCTION_FLOW_START = '<CONSTRUCTION_FLOW>';
 
+/** Count non-overlapping occurrences of a substring in a string. */
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  let idx = 0;
+  while ((idx = text.indexOf(needle, idx)) !== -1) {
+    count++;
+    idx += needle.length;
+  }
+  return count;
+}
+
 /**
  * Inject the <SCIENCE_CLAIMS> section into the decision review prompt.
  *
  * The section is placed between </INPUT_FIELDS> and <CONSTRUCTION_FLOW>.
- * Throws on missing markers or if the prompt already contains <SCIENCE_CLAIMS>
- * (double-injection guard).
+ *
+ * Collision policy (single source of truth):
+ * If the prompt already contains any <SCIENCE_CLAIMS> tag (open or close,
+ * well-formed or malformed), the prompt is returned unchanged with a
+ * structured warning log. This prevents double-injection from store prompts
+ * that bake in the section, and safely handles malformed tag fragments.
+ *
+ * Throws only for missing structural markers (</INPUT_FIELDS>,
+ * <CONSTRUCTION_FLOW>) when no existing section is detected.
  */
 export function injectScienceClaimsSection(prompt: string, section: string): string {
-  // Guard: double-injection
-  if (prompt.includes('<SCIENCE_CLAIMS>')) {
-    throw new Error(
-      'Prompt already contains <SCIENCE_CLAIMS> — refusing to double-inject',
+  // Robust tag-count detection: check for any SCIENCE_CLAIMS tag presence
+  const openCount = countOccurrences(prompt, '<SCIENCE_CLAIMS>');
+  const closeCount = countOccurrences(prompt, '</SCIENCE_CLAIMS>');
+
+  if (openCount > 0 || closeCount > 0) {
+    log.warn(
+      {
+        source: 'injectScienceClaimsSection',
+        has_open_tag: openCount > 0,
+        has_close_tag: closeCount > 0,
+        science_claims_tag_count: openCount,
+      },
+      'Prompt already contains <SCIENCE_CLAIMS>, skipping injection',
     );
+    return prompt;
   }
 
   const endIdx = prompt.indexOf(INPUT_FIELDS_END);
