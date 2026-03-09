@@ -46,8 +46,17 @@ export interface StructuralValidationResult {
 // AI mutation safety limits — deliberately stricter than PLoT's platform limits (50/100).
 // They constrain per-turn graph mutations to keep patches reviewable.
 // PLoT remains the canonical validation authority for absolute graph size.
-const MAX_NODES = parseInt(process.env.CEE_GRAPH_MAX_NODES || '20', 10);
-const MAX_EDGES = parseInt(process.env.CEE_GRAPH_MAX_EDGES || '30', 10);
+const DEFAULT_MAX_NODES = 20;
+const DEFAULT_MAX_EDGES = 30;
+
+function parseEnvInt(envVar: string | undefined, fallback: number): number {
+  if (!envVar) return fallback;
+  const parsed = parseInt(envVar, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const MAX_NODES = parseEnvInt(process.env.CEE_GRAPH_MAX_NODES, DEFAULT_MAX_NODES);
+const MAX_EDGES = parseEnvInt(process.env.CEE_GRAPH_MAX_EDGES, DEFAULT_MAX_EDGES);
 const MIN_OPTIONS = 2;
 
 // ============================================================================

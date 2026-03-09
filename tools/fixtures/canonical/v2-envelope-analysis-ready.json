@@ -1,0 +1,68 @@
+{
+  "_contract_version": "1.0.0",
+  "_generated_at": "2026-03-09T00:00:00.000Z",
+  "_description": "Canonical V2 envelope shape with top-level analysis_ready. Cross-service consumers should validate against this fixture.",
+  "_governance": "Any change to envelope-level analysis_ready requires: 1) Schema version bump in pipeline/types.ts 2) Fixture regeneration 3) UI adapter test update",
+  "envelope": {
+    "turn_id": "fixture-turn-001",
+    "assistant_text": "I've built a decision model for your hiring decision.",
+    "blocks": [],
+    "suggested_actions": [],
+    "guidance_items": [],
+    "lineage": {
+      "context_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      "dsk_version_hash": null
+    },
+    "stage_indicator": {
+      "stage": "ideate",
+      "confidence": "high",
+      "source": "inferred"
+    },
+    "science_ledger": {
+      "claims_used": [],
+      "techniques_used": [],
+      "scope_violations": [],
+      "phrasing_violations": [],
+      "rewrite_applied": false
+    },
+    "progress_marker": {
+      "kind": "changed_model"
+    },
+    "observability": {
+      "triggers_fired": [],
+      "triggers_suppressed": [],
+      "intent_classification": "act",
+      "specialist_contributions": [],
+      "specialist_disagreement": null
+    },
+    "turn_plan": {
+      "selected_tool": "draft_graph",
+      "routing": "llm",
+      "long_running": false
+    },
+    "analysis_ready": {
+      "options": [
+        {
+          "option_id": "opt_developers",
+          "label": "Hire Two Developers",
+          "status": "ready",
+          "interventions": {
+            "fac_tech_lead": 0,
+            "fac_developers": 1
+          }
+        },
+        {
+          "option_id": "opt_tech_lead",
+          "label": "Hire Tech Lead",
+          "status": "ready",
+          "interventions": {
+            "fac_tech_lead": 1,
+            "fac_developers": 0
+          }
+        }
+      ],
+      "goal_node_id": "goal_productivity",
+      "status": "ready"
+    }
+  }
+}

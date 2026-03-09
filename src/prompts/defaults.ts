@@ -647,7 +647,7 @@ If any check fails, regenerate the graph internally and output only the final va
 <CONSTRAINTS>
 LIMITS:
 - Maximum {{maxNodes}} nodes (default: 50)
-- Maximum {{maxEdges}} edges (default: 200)
+- Maximum {{maxEdges}} edges (default: 100)
 
 NUMERIC RANGES:
 - strength.mean: [-1.0, +1.0] (never exactly 0)

@@ -197,7 +197,8 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   // Compute envelope-level analysis_ready from current graph state.
   // Uses the post-tool graph when available (graph_patch blocks carry applied_graph),
   // falling back to enrichedContext.graph for turns without graph mutations.
-  const graphPatchBlock = toolResult.blocks.find((b) => b.block_type === 'graph_patch');
+  // Use the final graph_patch block — it reflects the latest authoritative graph.
+  const graphPatchBlock = [...toolResult.blocks].reverse().find((b) => b.block_type === 'graph_patch');
   const appliedGraph = graphPatchBlock
     ? (graphPatchBlock.data as unknown as { applied_graph?: typeof enrichedContext.graph })?.applied_graph
     : undefined;

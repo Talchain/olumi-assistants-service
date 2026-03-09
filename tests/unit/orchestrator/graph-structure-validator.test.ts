@@ -200,4 +200,30 @@ describe('validateGraphStructure', () => {
 
     vi.unstubAllEnvs();
   });
+
+  it('NaN env values fall back to defaults (limits still enforced)', async () => {
+    vi.stubEnv('CEE_GRAPH_MAX_NODES', 'not-a-number');
+    vi.stubEnv('CEE_GRAPH_MAX_EDGES', '');
+
+    const { validateGraphStructure: validate } = await import(
+      '../../../src/orchestrator/graph-structure-validator.js?nan-guard-test'
+    );
+
+    // With defaults (20/30), a graph with 21 nodes should exceed the limit
+    const graph = makeValidGraph();
+    for (let i = 0; i < 16; i++) {
+      const id = `nan_${i}`;
+      graph.nodes.push({ id, kind: 'factor', label: `NaN ${i}` } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'opt_a', to: id,
+        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+    }
+
+    const result = validate(graph);
+    // Defaults should be enforced (20 nodes), 21 nodes > 20
+    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true);
+
+    vi.unstubAllEnvs();
+  });
 });

@@ -254,13 +254,14 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       }
     }
 
-    // Log unknown fields in direct_analysis_run details (passthrough schema)
+    // Log extra fields in direct_analysis_run details (schema expects empty object;
+    // passthrough preserves them instead of 400ing, but we surface them for observability).
     if (systemEvent?.event_type === 'direct_analysis_run') {
       const detailKeys = Object.keys((systemEvent as Record<string, unknown>).details ?? {});
       if (detailKeys.length > 0) {
         log.warn(
-          { request_id: requestId, unknown_keys: detailKeys },
-          'direct_analysis_run received unknown fields',
+          { request_id: requestId, extra_keys: detailKeys },
+          'direct_analysis_run: details contains extra fields beyond empty-object contract',
         );
       }
     }

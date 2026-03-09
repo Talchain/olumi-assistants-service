@@ -594,7 +594,7 @@ SHAPE CHECKLIST (prevent common errors):
 - Category field on all factor nodes
 
 VALIDATOR DETECTS (errors — must fix):
-- Node/edge count limits (max 50 nodes, 200 edges)
+- Node/edge count limits (max 50 nodes, 100 edges)
 - Invalid edge types (see FORBIDDEN EDGES above)
 - Unreachable nodes (no path to goal), cycles
 - Missing required data fields per category
