@@ -129,7 +129,9 @@ export async function dispatchToolHandler(
       }
 
       const analysisGuidance = result.analysisResponse
-        ? generatePostAnalysisGuidance(result.analysisResponse, context.graph ?? null)
+        ? generatePostAnalysisGuidance(result.analysisResponse, context.graph ?? null, {
+            intentClassification: opts?.intentClassification,
+          })
         : [];
 
       return {

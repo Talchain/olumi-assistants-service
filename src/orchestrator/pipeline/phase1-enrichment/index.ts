@@ -144,6 +144,7 @@ export function phase1Enrich(
     scenario_id: scenarioId,
     turn_id: turnId,
     system_event: systemEvent,
+    user_message: message,
   };
 
   // 5. Enforce context budget (operates on graph_compact, analysis_response, messages)

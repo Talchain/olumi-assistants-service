@@ -2,15 +2,16 @@ import { describe, it, expect, vi } from "vitest";
 import { phase4Execute } from "../../../../src/orchestrator/pipeline/phase4-tools/index.js";
 import type { EnrichedContext, LLMResult, ToolDispatcher, ToolResult } from "../../../../src/orchestrator/pipeline/types.js";
 import type { ConversationContext } from "../../../../src/orchestrator/types.js";
+import { setTestSink } from "../../../../src/utils/telemetry.js";
 
-function makeEnrichedContext(): EnrichedContext {
+function makeEnrichedContext(overrides?: Partial<EnrichedContext>): EnrichedContext {
   return {
     graph: null,
     analysis: null,
     framing: null,
     conversation_history: [],
     selected_elements: [],
-    stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+    stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
     intent_classification: "conversational",
     decision_archetype: { type: null, confidence: "low", evidence: "no keywords matched" },
     progress_markers: [],
@@ -19,6 +20,7 @@ function makeEnrichedContext(): EnrichedContext {
     user_profile: { coaching_style: "socratic", calibration_tendency: "unknown", challenge_tolerance: "medium" },
     scenario_id: "test-scenario",
     turn_id: "test-turn-id",
+    ...overrides,
   };
 }
 
@@ -84,7 +86,7 @@ describe("phase4-tools", () => {
           { id: "tool-2", name: "run_analysis", input: {} }, // second long-running tool deferred
         ],
       }),
-      makeEnrichedContext(),
+      makeEnrichedContext({ stage_indicator: { stage: "frame", confidence: "high", source: "inferred" } }),
       dispatcher,
       "req-1",
     );
@@ -125,7 +127,7 @@ describe("phase4-tools", () => {
           { id: "tool-2", name: "run_analysis", input: {} },
         ],
       }),
-      makeEnrichedContext(),
+      makeEnrichedContext({ stage_indicator: { stage: "frame", confidence: "high", source: "inferred" } }),
       dispatcher,
       "req-1",
     );
@@ -277,5 +279,36 @@ describe("phase4-tools", () => {
 
     // executed_tools reflects actual execution order
     expect(result.executed_tools).toEqual(["run_analysis", "explain_results"]);
+  });
+
+  it("emits OrchestratorToolSuppressed when stage policy blocks a tool", async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+
+    const dispatcher = makeMockDispatcher();
+
+    try {
+      await phase4Execute(
+        makeLLMResult({
+          tool_invocations: [{ id: "t1", name: "run_analysis", input: {} }],
+        }),
+        // FRAME stage — run_analysis is blocked
+        makeEnrichedContext({ stage_indicator: { stage: "frame", confidence: "high", source: "inferred" } }),
+        dispatcher,
+        "req-1",
+      );
+
+      // Tool should NOT have been dispatched
+      expect(dispatcher.dispatch).not.toHaveBeenCalled();
+
+      // Suppression event should have been emitted
+      const suppressionEvents = events.filter(e => e.name === "orchestrator.turn.tool_suppressed");
+      expect(suppressionEvents.length).toBe(1);
+      expect(suppressionEvents[0].data.tool_attempted).toBe("run_analysis");
+      expect(suppressionEvents[0].data.stage).toBe("frame");
+      expect(suppressionEvents[0].data.pipeline).toBe("v2");
+    } finally {
+      setTestSink(null);
+    }
   });
 });

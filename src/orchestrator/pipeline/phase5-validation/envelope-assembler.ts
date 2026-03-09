@@ -10,6 +10,7 @@ import { isLongRunningTool } from "../../tools/registry.js";
 import { getDskVersionHash } from "../../dsk-loader.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
 import { computeStructuralReadiness } from "../../tools/analysis-ready-helper.js";
+import { buildModelReceipt } from "./model-receipt.js";
 import type {
   EnrichedContext,
   SpecialistResult,
@@ -205,6 +206,12 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   const graphForReadiness = appliedGraph ?? enrichedContext.graph;
   if (graphForReadiness) {
     envelope.analysis_ready = computeStructuralReadiness(graphForReadiness);
+  }
+
+  // Model receipt (after analysis_ready so receipt can reference readiness)
+  const modelReceipt = buildModelReceipt(toolResult.blocks, envelope.analysis_ready);
+  if (modelReceipt) {
+    envelope.model_receipt = modelReceipt;
   }
 
   // Debug fields (non-production only)

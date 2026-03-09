@@ -107,9 +107,10 @@ describe("phase3-llm", () => {
       });
 
       const client = makeMockLLMClient();
-      // Provide graph so run_analysis prerequisites pass
+      // Provide graph so run_analysis prerequisites pass; use evaluate stage where run_analysis is allowed
       const ctx = makeEnrichedContext({
         graph: { nodes: [], edges: [], options: [] } as unknown as EnrichedContext["graph"],
+        stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
       });
 
       const result = await phase3Generate(
@@ -152,6 +153,61 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[0].name).toBe("draft_graph");
       expect(result.tool_invocations[0].input).toEqual({ brief: "build a model" });
       expect(result.assistant_text).toBeNull();
+    });
+
+    it("falls back to LLM when stage policy blocks deterministic tool", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "run_analysis",
+        confidence: "exact",
+        matched_pattern: "run analysis",
+      });
+
+      const client = makeMockLLMClient();
+      // Provide graph so prerequisites pass, but set stage to FRAME where run_analysis is blocked
+      const ctx = makeEnrichedContext({
+        graph: { nodes: [], edges: [], options: [] } as unknown as EnrichedContext["graph"],
+        stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+      });
+
+      await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-1",
+        "run analysis",
+      );
+
+      // Should fall back to LLM — stage policy blocks run_analysis in FRAME
+      expect(client.chatWithTools).toHaveBeenCalled();
+    });
+
+    it("falls back to LLM when research_topic lacks intent in FRAME", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "research_topic",
+        confidence: "prefix",
+        matched_pattern: "research",
+        research_query: "pricing",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+      });
+
+      await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-1",
+        "What about competitor pricing?", // No explicit research intent
+      );
+
+      // Should fall back to LLM — research_topic requires explicit intent in FRAME
+      expect(client.chatWithTools).toHaveBeenCalled();
     });
 
     it("falls back to LLM when prerequisites not met", async () => {

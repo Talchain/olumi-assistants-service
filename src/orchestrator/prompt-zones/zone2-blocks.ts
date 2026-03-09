@@ -17,6 +17,7 @@
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisInputsSummary } from "../../schemas/analysis-inputs-summary.js";
 import type { ConversationMessage } from "../types.js";
+import type { PrimaryGap } from "../brief-intelligence/primary-gap.js";
 
 // ============================================================================
 // TurnContext — per-turn structured state for block activation and rendering
@@ -57,6 +58,8 @@ export interface TurnContext {
   hasGraph: boolean;
   hasAnalysis: boolean;
   generateModel: boolean;
+  /** Primary gap from BIL — drives the PRIMARY_GAP_HINT block. */
+  primaryGap?: PrimaryGap | null;
 }
 
 // ============================================================================
@@ -441,6 +444,21 @@ const ANALYSIS_HINT: Zone2Block = {
   render: renderAnalysisHint,
 };
 
+const PRIMARY_GAP_HINT: Zone2Block = {
+  name: 'primary_gap_hint',
+  version: '1.0.0',
+  owner: 'bil',
+  scope: 'hint',
+  order: 82,
+  maxChars: 200,
+  xmlTag: '',
+  activation: (ctx) =>
+    ctx.bilEnabled && (ctx.stage === 'frame' || ctx.stage === 'ideate') && !!ctx.primaryGap,
+  render: (ctx) => ctx.primaryGap
+    ? `PRIMARY QUESTION TO ASK: ${ctx.primaryGap.coaching_prompt}`
+    : '',
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -455,6 +473,7 @@ export const ZONE2_BLOCKS: readonly Zone2Block[] = Object.freeze([
   EVENT_LOG,
   BIL_HINT,
   ANALYSIS_HINT,
+  PRIMARY_GAP_HINT,
 ]);
 
 /**

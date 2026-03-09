@@ -426,6 +426,8 @@ export const TelemetryEvents = {
   OrchestratorIdempotencyCached: "orchestrator.idempotency.cached",
   OrchestratorNumericFreehandStripped: "orchestrator.commentary.numeric_freehand_stripped",
   OrchestratorSystemEvent: "orchestrator.system_event",
+  OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
+  OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
 } as const;
 
 /**

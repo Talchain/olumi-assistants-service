@@ -154,6 +154,7 @@ export interface EnrichedContext {
   scenario_id: string;
   turn_id: string;
   system_event?: SystemEvent;
+  user_message?: string;
 }
 
 // ============================================================================
@@ -278,6 +279,9 @@ export interface OrchestratorResponseEnvelopeV2 {
     code: string;
     message: string;
   };
+
+  /** Server-constructed model receipt after draft_graph. */
+  model_receipt?: import("../types.js").ModelReceipt;
 
   /** Diagnostics content from LLM. Non-production only. */
   diagnostics?: string;

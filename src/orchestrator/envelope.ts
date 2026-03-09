@@ -22,6 +22,7 @@ import type {
 } from "./types.js";
 import { hashContext } from "./context/hash.js";
 import { computeStructuralReadiness } from "./tools/analysis-ready-helper.js";
+import { buildModelReceipt } from "./pipeline/phase5-validation/model-receipt.js";
 
 // ============================================================================
 // Envelope Builder
@@ -113,6 +114,14 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   // Recompute analysis_ready on graph_patch blocks from the graph being returned.
   // This is the canonical recompute — avoids stale/pass-through values.
   recomputeAnalysisReady(envelope.blocks, input.context);
+
+  // Model receipt — server-constructed metadata for the UI after draft_graph
+  const lastPatchBlock = [...envelope.blocks].reverse().find((b) => b.block_type === 'graph_patch');
+  const lastPatchData = lastPatchBlock?.data as GraphPatchBlockData | undefined;
+  const modelReceipt = buildModelReceipt(envelope.blocks, lastPatchData?.analysis_ready);
+  if (modelReceipt) {
+    envelope.model_receipt = modelReceipt;
+  }
 
   return envelope;
 }

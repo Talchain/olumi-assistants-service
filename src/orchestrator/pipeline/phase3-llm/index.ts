@@ -17,6 +17,7 @@ import { classifyIntent } from "../../intent-gate.js";
 import type { ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
+import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 
 import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
 import { assembleV2SystemPrompt } from "./prompt-assembler.js";
@@ -71,37 +72,58 @@ export async function phase3Generate(
     const checkPrereq = DETERMINISTIC_PREREQUISITES[intentGate.tool];
     const prerequisitesMet = checkPrereq ? checkPrereq(context) : true;
 
-    if (prerequisitesMet) {
+    if (!prerequisitesMet) {
+      // Prerequisites not met → fall through to LLM
       log.info(
         {
           request_id: requestId,
           tool: intentGate.tool,
-          routing: 'deterministic',
-          matched_pattern: intentGate.matched_pattern,
+          routing: 'llm',
+          reason: 'prerequisites_not_met',
         },
-        "V2 pipeline: deterministic routing — skipping LLM",
+        "V2 pipeline: deterministic gate matched but prerequisites not met — falling back to LLM",
       );
+    } else {
+      // Prerequisites met — check stage policy before dispatching.
+      // Matches V1 behavior: fall through to LLM for a conversational response.
+      const stageGuard = isToolAllowedAtStage(
+        intentGate.tool,
+        enrichedContext.stage_indicator.stage,
+        userMessage,
+      );
+      if (!stageGuard.allowed) {
+        log.info(
+          {
+            request_id: requestId,
+            tool: intentGate.tool,
+            stage: enrichedContext.stage_indicator.stage,
+            reason: stageGuard.reason,
+            routing: 'llm',
+          },
+          "V2 pipeline: stage policy suppressed deterministic tool — falling back to LLM",
+        );
+        // Fall through to LLM path
+      } else {
+        log.info(
+          {
+            request_id: requestId,
+            tool: intentGate.tool,
+            routing: 'deterministic',
+            matched_pattern: intentGate.matched_pattern,
+          },
+          "V2 pipeline: deterministic routing — skipping LLM",
+        );
 
-      // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
-      let deterministicInput: Record<string, unknown> = {};
-      if (intentGate.tool === 'run_exercise' && intentGate.exercise) {
-        deterministicInput = { exercise: intentGate.exercise };
-      } else if (intentGate.tool === 'research_topic' && intentGate.research_query) {
-        deterministicInput = { query: intentGate.research_query };
+        // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
+        let deterministicInput: Record<string, unknown> = {};
+        if (intentGate.tool === 'run_exercise' && intentGate.exercise) {
+          deterministicInput = { exercise: intentGate.exercise };
+        } else if (intentGate.tool === 'research_topic' && intentGate.research_query) {
+          deterministicInput = { query: intentGate.research_query };
+        }
+        return buildDeterministicLLMResult(intentGate.tool, deterministicInput);
       }
-      return buildDeterministicLLMResult(intentGate.tool, deterministicInput);
     }
-
-    // Prerequisites not met → fall through to LLM
-    log.info(
-      {
-        request_id: requestId,
-        tool: intentGate.tool,
-        routing: 'llm',
-        reason: 'prerequisites_not_met',
-      },
-      "V2 pipeline: deterministic gate matched but prerequisites not met — falling back to LLM",
-    );
   }
 
   // 2. LLM routing — full tool-calling flow

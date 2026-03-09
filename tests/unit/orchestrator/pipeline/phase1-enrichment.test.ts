@@ -85,4 +85,11 @@ describe("phase1-enrichment (index)", () => {
     expect(result.user_profile.calibration_tendency).toBe("unknown");
     expect(result.user_profile.challenge_tolerance).toBe("medium");
   });
+
+  it("stores user_message in enriched context", () => {
+    const result = phase1Enrich("What about pricing?", makeContext(), "s1");
+    expect(result.user_message).toBe("What about pricing?");
+  });
+
+  it.todo("V2 pipeline: BIL should be injected during FRAME enrichment (tracked: A.4/F.2)");
 });

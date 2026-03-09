@@ -26,6 +26,8 @@ import type {
 import { dispatchToolHandler } from "../../tools/dispatch.js";
 import type { ToolDispatchOpts } from "../../tools/dispatch.js";
 import { isLongRunningTool } from "../../tools/registry.js";
+import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
+import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import type { FastifyRequest } from "fastify";
 import type { PLoTClientRunOpts } from "../../plot-client.js";
 
@@ -104,6 +106,27 @@ export async function phase4Execute(
   const executedTools: string[] = [];
 
   for (const invocation of toExecute) {
+    // Stage policy guard — skip tool if not allowed at current stage
+    const stageGuard = isToolAllowedAtStage(
+      invocation.name,
+      enrichedContext.stage_indicator.stage,
+      enrichedContext.user_message,
+    );
+    if (!stageGuard.allowed) {
+      log.info(
+        { stage: enrichedContext.stage_indicator.stage, tool_attempted: invocation.name, reason: stageGuard.reason },
+        'Phase 4: stage policy suppressed tool invocation',
+      );
+      emit(TelemetryEvents.OrchestratorToolSuppressed, {
+        tool_attempted: invocation.name,
+        stage: enrichedContext.stage_indicator.stage,
+        scenario_id: enrichedContext.scenario_id,
+        turn_id: enrichedContext.turn_id,
+        pipeline: 'v2',
+      });
+      continue;
+    }
+
     const result = await toolDispatcher.dispatch(
       invocation.name,
       invocation.input,

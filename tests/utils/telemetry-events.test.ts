@@ -400,6 +400,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         OrchestratorIdempotencyCached: "orchestrator.idempotency.cached",
         OrchestratorNumericFreehandStripped: "orchestrator.commentary.numeric_freehand_stripped",
         OrchestratorSystemEvent: "orchestrator.system_event",
+        OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
+        OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -869,6 +871,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.OrchestratorIdempotencyCached,
         TelemetryEvents.OrchestratorNumericFreehandStripped,
         TelemetryEvents.OrchestratorSystemEvent,
+        TelemetryEvents.OrchestratorModeDisagreement,
+        TelemetryEvents.OrchestratorToolSuppressed,
       ];
 
       for (const event of allEvents) {
@@ -1243,6 +1247,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "orchestrator.idempotency.cached",
         "orchestrator.commentary.numeric_freehand_stripped",
         "orchestrator.system_event",
+        "orchestrator.turn.mode_disagreement",
+        "orchestrator.turn.tool_suppressed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

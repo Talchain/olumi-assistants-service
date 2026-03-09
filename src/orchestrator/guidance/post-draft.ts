@@ -306,6 +306,34 @@ export function generatePostDraftGuidance(
     }
   }
 
-  // ── 5. Deduplicate, sort, cap ─────────────────────────────────────────────
+  // ── 5. Structural: COMPLEXITY_CHECK ──────────────────────────────────────
+  if (graph.nodes.length > 10) {
+    // Find lowest-connectivity node (degree ≤ 1)
+    let lowestConnNode: { id: string; label?: string; degree: number } | null = null;
+    for (const node of graph.nodes) {
+      const degree = degrees.get(node.id) ?? 0;
+      if (degree <= 1) {
+        if (!lowestConnNode || degree < lowestConnNode.degree || (degree === lowestConnNode.degree && node.id < lowestConnNode.id)) {
+          lowestConnNode = { id: node.id, label: node.label, degree };
+        }
+      }
+    }
+    if (lowestConnNode) {
+      const item_id = computeGuidanceItemId(SIGNAL_CODES.COMPLEXITY_CHECK, lowestConnNode.id, 'structural');
+      items.push({
+        item_id,
+        signal_code: SIGNAL_CODES.COMPLEXITY_CHECK,
+        category: 'could_fix',
+        source: 'structural',
+        title: `Model has ${graph.nodes.length} nodes — consider simplifying`,
+        detail: `"${lowestConnNode.label ?? lowestConnNode.id}" has low connectivity (degree ${lowestConnNode.degree}). Removing weakly-connected nodes can improve clarity.`,
+        primary_action: { type: 'open_inspector', node_id: lowestConnNode.id },
+        target_object: { type: 'node', id: lowestConnNode.id, label: lowestConnNode.label },
+        priority: 30,
+      });
+    }
+  }
+
+  // ── 6. Deduplicate, sort, cap ─────────────────────────────────────────────
   return sortGuidanceItems(deduplicateGuidanceItems(items)).slice(0, MAX_ITEMS);
 }

@@ -155,6 +155,22 @@ export interface OrchestratorResponseEnvelope {
   parse_warnings?: string[];
   /** DSK deterministic coaching items. Omitted when DSK_COACHING_ENABLED=false or both arrays empty. */
   dsk_coaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
+  /** Server-constructed model receipt after draft_graph. */
+  model_receipt?: ModelReceipt;
+}
+
+// ============================================================================
+// Model Receipt — server-side metadata for the UI after draft_graph
+// ============================================================================
+
+export interface ModelReceipt {
+  node_count: number;
+  edge_count: number;
+  option_labels: string[];
+  goal_label: string | null;
+  top_insight: string | null;
+  readiness_status: string | null;
+  repairs_applied_count: number;
 }
 
 // ============================================================================

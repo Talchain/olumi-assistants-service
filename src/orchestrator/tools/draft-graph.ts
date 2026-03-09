@@ -129,6 +129,9 @@ export async function handleDraftGraph(
 
   // Extract coaching summary for narration hint (brief: include in assistantText)
   const coachingSummary = extractCoachingSummary(body);
+  if (coachingSummary) {
+    patchData.summary = coachingSummary;
+  }
 
   // Extract validation warnings if present (plain strings for assistantText / validation_warnings)
   const warnings = extractWarnings(body);

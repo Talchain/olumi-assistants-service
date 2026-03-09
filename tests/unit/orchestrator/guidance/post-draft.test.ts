@@ -231,4 +231,51 @@ describe("generatePostDraftGuidance", () => {
       }
     });
   });
+
+  describe("COMPLEXITY_CHECK", () => {
+    it("fires when graph > 10 nodes AND has low-connectivity candidate", () => {
+      const nodes = Array.from({ length: 11 }, (_, i) => ({
+        id: `n${i}`, kind: i === 0 ? 'goal' : (i < 4 ? 'option' : 'factor'), label: `Node ${i}`,
+      }));
+      // Connect all except n10 (degree 0)
+      const edges = nodes.slice(1, 10).map((n) => ({
+        from: n.id, to: 'n0', strength: { mean: 0.5, std: 0.1 },
+      }));
+      const graph = { schema_version: 'v3', nodes, edges } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.COMPLEXITY_CHECK);
+      expect(item).toBeDefined();
+      expect(item?.category).toBe('could_fix');
+      expect(item?.priority).toBe(30);
+      expect(item?.target_object?.id).toBe('n10'); // isolated node
+    });
+
+    it("does not fire when ≤ 10 nodes", () => {
+      const nodes = Array.from({ length: 10 }, (_, i) => ({
+        id: `n${i}`, kind: 'factor', label: `Node ${i}`,
+      }));
+      const graph = { schema_version: 'v3', nodes, edges: [] } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.COMPLEXITY_CHECK);
+      expect(item).toBeUndefined();
+    });
+
+    it("does not fire when > 10 nodes but all nodes have degree ≥ 2", () => {
+      const nodes = Array.from({ length: 12 }, (_, i) => ({
+        id: `n${i}`, kind: 'factor', label: `Node ${i}`,
+      }));
+      // Connect each node to at least 2 others (circular chain + extra)
+      const edges = nodes.map((n, i) => ({
+        from: n.id, to: nodes[(i + 1) % nodes.length].id, strength: { mean: 0.5, std: 0.1 },
+      }));
+      // Add reverse edges so everyone has degree ≥ 2
+      const reverseEdges = nodes.map((n, i) => ({
+        from: nodes[(i + 1) % nodes.length].id, to: n.id, strength: { mean: 0.5, std: 0.1 },
+      }));
+      const graph = { schema_version: 'v3', nodes, edges: [...edges, ...reverseEdges] } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.COMPLEXITY_CHECK);
+      expect(item).toBeUndefined();
+    });
+  });
 });

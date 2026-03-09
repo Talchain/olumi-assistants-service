@@ -408,25 +408,24 @@ function convertConstraintViolations(
 function buildTechniqueOffers(
   response: V2RunResponseEnvelope,
   analysisHash: string | undefined,
+  options?: { responseMode?: string },
 ): GuidanceItem[] {
+  // RECOVER mode → suppress all technique offers
+  if (options?.responseMode === 'RECOVER') return [];
+
   const items: GuidanceItem[] = [];
 
   const robustnessLevel = getRobustnessLevel(response);
   const results = getOptionResults(response)
     .sort((a, b) => getWinProbability(b) - getWinProbability(a));
 
-  // Check for high-influence factors (top-level or per-result)
-  let hasHighInfluenceFactor = false;
-  for (const factor of getAllFactors(response)) {
-    const influence = getFactorInfluence(factor);
-    if (influence !== null && influence > TECHNIQUE_INFLUENCE_THRESHOLD) {
-      hasHighInfluenceFactor = true;
-      break;
-    }
-  }
+  // Compute separation for PRE_MORTEM trigger
+  const topTwoSeparation = results.length >= 2
+    ? Math.abs(getWinProbability(results[0]) - getWinProbability(results[1]))
+    : Infinity;
 
-  // PRE_MORTEM: fragile OR any factor influence > 0.5
-  if (robustnessLevel === 'fragile' || hasHighInfluenceFactor) {
+  // PRE_MORTEM: separation < 10% AND not robust
+  if (topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD && robustnessLevel !== 'robust') {
     const item_id = computeGuidanceItemId(SIGNAL_CODES.TECHNIQUE_PRE_MORTEM, undefined, 'analysis');
     const item: GuidanceItem = {
       item_id,
@@ -441,6 +440,34 @@ function buildTechniqueOffers(
     };
     if (analysisHash) item.valid_while = { analysis_hash: analysisHash };
     items.push(item);
+  }
+
+  // DOMINANT_FACTOR: any factor with influence > 0.5
+  for (const factor of getAllFactors(response)) {
+    const influence = getFactorInfluence(factor);
+    if (influence !== null && influence > TECHNIQUE_INFLUENCE_THRESHOLD) {
+      const factorId = getFactorId(factor);
+      const factorLabel = getFactorLabel(factor);
+      const item_id = computeGuidanceItemId(SIGNAL_CODES.DOMINANT_FACTOR, factorId ?? undefined, 'analysis');
+      const item: GuidanceItem = {
+        item_id,
+        signal_code: SIGNAL_CODES.DOMINANT_FACTOR,
+        category: 'should_fix',
+        source: 'analysis',
+        title: `"${factorLabel}" dominates the outcome`,
+        detail: 'This factor has outsized influence on the result. Verify its calibration or consider whether the model is too dependent on a single driver.',
+        primary_action: factorId
+          ? { type: 'open_inspector', node_id: factorId }
+          : { type: 'discuss', prompt: `Examine why "${factorLabel}" dominates the analysis.` },
+        target_object: factorId
+          ? { type: 'node', id: factorId, label: factorLabel }
+          : { type: 'graph' },
+        priority: 60,
+      };
+      if (analysisHash) item.valid_while = { analysis_hash: analysisHash };
+      items.push(item);
+      break; // Only emit for the first dominant factor
+    }
   }
 
   // DISCONFIRMATION: top option win_probability > 0.7
@@ -463,9 +490,7 @@ function buildTechniqueOffers(
 
   // DEVIL_ADVOCATE: top two options within 10% win probability
   if (results.length >= 2) {
-    const topProb = getWinProbability(results[0]);
-    const runnerUpProb = getWinProbability(results[1]);
-    if (Math.abs(topProb - runnerUpProb) <= TECHNIQUE_CLOSE_CALL_THRESHOLD) {
+    if (topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD) {
       const item_id = computeGuidanceItemId(SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE, undefined, 'analysis');
       const item: GuidanceItem = {
         item_id,
@@ -495,11 +520,13 @@ function buildTechniqueOffers(
  *
  * @param response - Full V2RunResponseEnvelope from PLoT
  * @param graph - Current graph state (for node lookup)
+ * @param options - Optional intent/mode context for conditional guidance
  * @returns Sorted, deduplicated GuidanceItem[] (max 12)
  */
 export function generatePostAnalysisGuidance(
   response: V2RunResponseEnvelope,
   graph: GraphV3T | null,
+  options?: { intentClassification?: string; responseMode?: string },
 ): GuidanceItem[] {
   const analysisHash = getAnalysisHash(response);
   const nodeMap = buildNodeMap(graph);
@@ -510,8 +537,45 @@ export function generatePostAnalysisGuidance(
     ...convertRobustness(response, analysisHash),
     ...convertConstraintViolations(response, analysisHash),
     // Technique offers appended last
-    ...buildTechniqueOffers(response, analysisHash),
+    ...buildTechniqueOffers(response, analysisHash, { responseMode: options?.responseMode }),
   ];
+
+  // CTA_LITE: fires after every analysis, unless explain intent or RECOVER mode
+  if (options?.intentClassification !== 'explain' && options?.responseMode !== 'RECOVER') {
+    const results = getOptionResults(response)
+      .sort((a, b) => getWinProbability(b) - getWinProbability(a));
+    const robustnessLevel = getRobustnessLevel(response);
+    const topTwoSeparation = results.length >= 2
+      ? Math.abs(getWinProbability(results[0]) - getWinProbability(results[1]))
+      : Infinity;
+
+    const isRobustAndClear = robustnessLevel !== 'fragile' && results.length > 0 && getWinProbability(results[0]) > 0.6;
+    const isFragileOrClose = robustnessLevel === 'fragile' || topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD;
+
+    let ctaPrompt: string;
+    if (isFragileOrClose) {
+      ctaPrompt = 'What evidence would strengthen the model?';
+    } else if (isRobustAndClear) {
+      ctaPrompt = 'Generate the decision brief';
+    } else {
+      // Default fallback → brief CTA
+      ctaPrompt = 'Generate the decision brief';
+    }
+
+    const ctaItemId = computeGuidanceItemId(SIGNAL_CODES.CTA_LITE, undefined, 'analysis');
+    const ctaItem: GuidanceItem = {
+      item_id: ctaItemId,
+      signal_code: SIGNAL_CODES.CTA_LITE,
+      category: 'technique',
+      source: 'analysis',
+      title: isFragileOrClose ? 'Strengthen the model' : 'Ready to decide?',
+      primary_action: { type: 'discuss', prompt: ctaPrompt },
+      target_object: { type: 'graph' },
+      priority: 10,
+    };
+    if (analysisHash) ctaItem.valid_while = { analysis_hash: analysisHash };
+    items.push(ctaItem);
+  }
 
   return sortGuidanceItems(deduplicateGuidanceItems(items)).slice(0, MAX_ITEMS);
 }

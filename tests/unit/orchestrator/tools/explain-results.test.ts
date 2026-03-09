@@ -218,21 +218,20 @@ describe("handleExplainResults handler", () => {
     expect(narrative).toContain("[value]");
   });
 
-  it("propagates LLM errors with TOOL_EXECUTION_FAILED orchestratorError", async () => {
+  it("gracefully degrades with tiered fallback when LLM throws", async () => {
     const context = makeContext();
     const adapter = {
       chat: vi.fn().mockRejectedValue(new Error("LLM timeout")),
     };
 
-    try {
-      await handleExplainResults(context, adapter as never, "req-1", "turn-1");
-      expect.fail("should have thrown");
-    } catch (error) {
-      const oe = (error as { orchestratorError?: { code: string; message: string } }).orchestratorError;
-      expect(oe?.code).toBe("TOOL_EXECUTION_FAILED");
-      expect(oe?.message).toContain("Failed to generate explanation");
-      expect(oe?.message).toContain("LLM timeout");
-    }
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    // Should return a fallback block instead of throwing
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+    // Tier 1: winner exists in default fixture → short explanation
+    const narrative = (result.blocks[0].data as { narrative: string }).narrative;
+    expect(narrative).toContain("Option A leads at");
   });
 
   it("supporting_refs ref_ids all correspond to fact_ids from the analysis response", async () => {
@@ -270,5 +269,66 @@ describe("handleExplainResults handler", () => {
     const block = result.blocks[0];
     const narrative = (block.data as { narrative: string }).narrative;
     expect(narrative).toContain("2023");
+  });
+
+  it("returns graceful fallback when analysis_response has null results", async () => {
+    const analysisResponse = makeAnalysisResponse({
+      results: null as unknown as V2RunResponseEnvelope["results"],
+    });
+    const context = makeContext({ analysis_response: analysisResponse });
+    const adapter = makeAdapter("Some explanation.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    // Should still produce a valid block — buildAnalysisSummary won't crash
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+  });
+
+  it("handles results missing win_probability without crashing", async () => {
+    const analysisResponse = makeAnalysisResponse({
+      results: [
+        { option_label: "Option A" } as unknown as V2RunResponseEnvelope["results"][number],
+        { option_label: "Option B", win_probability: 0.4 } as unknown as V2RunResponseEnvelope["results"][number],
+      ] as V2RunResponseEnvelope["results"],
+    });
+    const context = makeContext({ analysis_response: analysisResponse });
+    const adapter = makeAdapter("Option B is the leader.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+  });
+
+  it("handles empty factor_sensitivity without crashing", async () => {
+    const analysisResponse = makeAnalysisResponse({
+      factor_sensitivity: [] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    });
+    const context = makeContext({ analysis_response: analysisResponse });
+    const adapter = makeAdapter("No major drivers detected.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+  });
+
+  it("returns Tier 2 generic fallback when LLM throws and no valid results for Tier 1", async () => {
+    const analysisResponse = makeAnalysisResponse({
+      results: [] as V2RunResponseEnvelope["results"],
+    });
+    const context = makeContext({ analysis_response: analysisResponse });
+    const adapter = {
+      chat: vi.fn().mockRejectedValue(new Error("LLM timeout")),
+    };
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].block_type).toBe("commentary");
+    const narrative = (result.blocks[0].data as { narrative: string }).narrative;
+    // Tier 2: no winner extractable → generic message
+    expect(narrative).toContain("unable to generate a detailed explanation");
   });
 });

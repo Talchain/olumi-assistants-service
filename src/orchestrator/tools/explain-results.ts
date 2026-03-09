@@ -146,23 +146,22 @@ export async function handleExplainResults(
   const startTime = Date.now();
   const analysisResponse = context.analysis_response;
 
-  // Build summary for LLM context (avoid injecting full response)
-  const summary = buildAnalysisSummary(analysisResponse);
-
-  // Check for constraint tension
-  const tensionNote = detectConstraintTension(analysisResponse);
-
-  // Build system prompt for explanation
-  const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus);
-
-  const opts: CallOpts = {
-    requestId,
-    timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
-  };
-
-  let chatResult;
   try {
-    chatResult = await adapter.chat(
+    // Build summary for LLM context (avoid injecting full response)
+    const summary = buildAnalysisSummary(analysisResponse);
+
+    // Check for constraint tension
+    const tensionNote = detectConstraintTension(analysisResponse);
+
+    // Build system prompt for explanation
+    const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus);
+
+    const opts: CallOpts = {
+      requestId,
+      timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
+    };
+
+    const chatResult = await adapter.chat(
       {
         system: systemPrompt,
         userMessage: focus
@@ -171,44 +170,59 @@ export async function handleExplainResults(
       },
       opts,
     );
-  } catch (error) {
-    const err: OrchestratorError = {
-      code: 'TOOL_EXECUTION_FAILED',
-      message: `Failed to generate explanation: ${error instanceof Error ? error.message : String(error)}`,
-      tool: 'explain_results',
-      recoverable: true,
-      suggested_retry: 'Try asking for the explanation again.',
-    };
-    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err });
-  }
 
-  const latencyMs = Date.now() - startTime;
+    const latencyMs = Date.now() - startTime;
 
-  // Strip ungrounded numerics
-  const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content);
+    // Strip ungrounded numerics
+    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content);
 
-  if (strippedCount > 0) {
-    log.info(
-      { request_id: requestId, stripped_count: strippedCount },
-      "commentary.numeric_freehand_stripped",
+    if (strippedCount > 0) {
+      log.info(
+        { request_id: requestId, stripped_count: strippedCount },
+        "commentary.numeric_freehand_stripped",
+      );
+    }
+
+    // Build supporting refs from analysis elements
+    const refs = buildSupportingRefs(analysisResponse);
+
+    const block = createCommentaryBlock(
+      cleaned,
+      turnId,
+      'tool:explain_results',
+      refs,
     );
+
+    return {
+      blocks: [block],
+      assistantText: null,
+      latencyMs,
+    };
+  } catch (error) {
+    // Tiered graceful degradation — never 500.
+    // Tier 1: if winner + top driver extractable, produce short explanation.
+    // Tier 2: generic fallback when even that's missing.
+    log.warn(
+      { request_id: requestId, error: error instanceof Error ? error.message : String(error) },
+      'explain_results: falling back to graceful degradation',
+    );
+
+    const insight = extractFallbackInsight(analysisResponse);
+    const fallbackText = insight
+      ?? 'I was unable to generate a detailed explanation of the analysis results. The analysis data may be incomplete. Try running the analysis again, or ask a more specific question.';
+
+    const block = createCommentaryBlock(
+      fallbackText,
+      turnId,
+      'tool:explain_results:fallback',
+    );
+
+    return {
+      blocks: [block],
+      assistantText: null,
+      latencyMs: Date.now() - startTime,
+    };
   }
-
-  // Build supporting refs from analysis elements
-  const refs = buildSupportingRefs(analysisResponse);
-
-  const block = createCommentaryBlock(
-    cleaned,
-    turnId,
-    'tool:explain_results',
-    refs,
-  );
-
-  return {
-    blocks: [block],
-    assistantText: null,
-    latencyMs,
-  };
 }
 
 // ============================================================================
@@ -217,45 +231,84 @@ export async function handleExplainResults(
 
 /**
  * Build a compact analysis summary for LLM context.
+ * Defensive: every field access is guarded — malformed analysis data must not crash.
  */
 function buildAnalysisSummary(response: V2RunResponseEnvelope): string {
   const parts: string[] = [];
 
-  // Results summary (option comparison)
-  if (response.results && response.results.length > 0) {
-    const results = response.results as Array<Record<string, unknown>>;
-    const optionSummaries = results
+  // Results summary (option comparison) — filter to entries with valid label + probability
+  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const validResults = results.filter(
+    (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
+  );
+  if (validResults.length > 0) {
+    const optionSummaries = validResults
       .map((r) => `${r.option_label}: ${((r.win_probability as number) * 100).toFixed(1)}%`)
       .join(', ');
     parts.push(`Option comparison: ${optionSummaries}`);
   }
 
-  // Sensitivity summary (top drivers)
-  if (response.factor_sensitivity && response.factor_sensitivity.length > 0) {
-    const factors = response.factor_sensitivity as Array<Record<string, unknown>>;
+  // Sensitivity summary (top drivers) — guard each entry
+  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
+  if (factors.length > 0) {
     const top5 = factors.slice(0, 5)
-      .map((f) => `${f.label} (elasticity: ${f.elasticity}, direction: ${f.direction})`)
+      .filter((f) => f.label != null)
+      .map((f) => `${f.label} (elasticity: ${f.elasticity ?? 'N/A'}, direction: ${f.direction ?? 'N/A'})`)
       .join('; ');
-    parts.push(`Top sensitivity drivers: ${top5}`);
-  }
-
-  // Robustness
-  if (response.robustness) {
-    parts.push(`Robustness: ${response.robustness.level}`);
-    if (response.robustness.fragile_edges && (response.robustness.fragile_edges as unknown[]).length > 0) {
-      parts.push(`Fragile edges: ${(response.robustness.fragile_edges as unknown[]).length}`);
+    if (top5) {
+      parts.push(`Top sensitivity drivers: ${top5}`);
     }
   }
 
-  // Constraint analysis
+  // Robustness — guard level and fragile_edges
+  if (response.robustness) {
+    parts.push(`Robustness: ${response.robustness.level ?? 'unknown'}`);
+    const fragileEdges = Array.isArray(response.robustness.fragile_edges) ? response.robustness.fragile_edges : [];
+    if (fragileEdges.length > 0) {
+      parts.push(`Fragile edges: ${fragileEdges.length}`);
+    }
+  }
+
+  // Constraint analysis — guard joint_probability
   if (response.constraint_analysis) {
     const ca = response.constraint_analysis;
-    if (ca.joint_probability !== undefined) {
+    if (typeof ca.joint_probability === 'number' && Number.isFinite(ca.joint_probability)) {
       parts.push(`Constraint joint probability: ${(ca.joint_probability * 100).toFixed(1)}%`);
     }
   }
 
-  return parts.join('\n');
+  return parts.length > 0
+    ? parts.join('\n')
+    : 'Analysis data is available but contains no detailed results.';
+}
+
+/**
+ * Extract winner label and top driver for tiered degradation fallback.
+ * Returns null if neither can be extracted.
+ */
+function extractFallbackInsight(response: V2RunResponseEnvelope): string | null {
+  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const validResults = results.filter(
+    (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
+  );
+
+  if (validResults.length === 0) return null;
+
+  // Sort by win_probability desc, take winner
+  const sorted = [...validResults].sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
+  const winner = sorted[0];
+  const winnerLabel = winner.option_label as string;
+  const winnerProb = ((winner.win_probability as number) * 100).toFixed(1);
+
+  // Try to get top driver
+  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
+  const topDriver = factors.find((f) => f.label != null);
+  const driverLabel = topDriver ? String(topDriver.label) : null;
+
+  if (driverLabel) {
+    return `Based on the analysis, ${winnerLabel} leads at ${winnerProb}%. The biggest driver is ${driverLabel}. I wasn't able to generate a full explanation — try asking a more specific question.`;
+  }
+  return `Based on the analysis, ${winnerLabel} leads at ${winnerProb}%. I wasn't able to generate a full explanation — try asking a more specific question.`;
 }
 
 function buildExplanationPrompt(summary: string, tensionNote: string | null, focus?: string): string {

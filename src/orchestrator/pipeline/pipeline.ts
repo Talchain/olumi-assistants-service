@@ -8,7 +8,9 @@
  * Phase 4 (tool execution) and Phase 5 (persistence stubs).
  */
 
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
+import { extractDeclaredMode, inferResponseMode } from "../response-parser.js";
+import { isToolAllowedAtStage } from "../tools/stage-policy.js";
 import type { OrchestratorTurnRequest } from "../types.js";
 import type { PipelineDeps, OrchestratorResponseEnvelopeV2, EnrichedContext } from "./types.js";
 import { phase1Enrich } from "./phase1-enrichment/index.js";
@@ -145,6 +147,40 @@ export async function executePipeline(
       requestId,
       request.message,
     );
+
+    // V2 mode consistency telemetry
+    const v2DeclaredMode = extractDeclaredMode(llmResult.diagnostics);
+    const v2InferredMode = llmResult.tool_invocations.length > 0
+      ? 'ACT' as const
+      : inferResponseMode({ assistant_text: llmResult.assistant_text, tool_invocations: llmResult.tool_invocations } as never);
+    const v2ToolAttempted = llmResult.tool_invocations[0]?.name ?? null;
+    const v2ToolPermitted = v2ToolAttempted
+      ? isToolAllowedAtStage(v2ToolAttempted, enrichedContext.stage_indicator.stage, request.message).allowed
+      : true;
+    const v2ModeDisagreement = v2DeclaredMode !== 'unknown' && v2DeclaredMode !== v2InferredMode;
+
+    log.info(
+      {
+        response_mode_declared: v2DeclaredMode,
+        response_mode_inferred: v2InferredMode,
+        tool_selected: v2ToolAttempted,
+        tool_permitted: v2ToolPermitted,
+        stage: enrichedContext.stage_indicator.stage,
+        mode_disagreement: v2ModeDisagreement,
+      },
+      'orchestrator.v2.turn.telemetry',
+    );
+
+    if (v2ModeDisagreement) {
+      emit(TelemetryEvents.OrchestratorModeDisagreement, {
+        declared: v2DeclaredMode,
+        inferred: v2InferredMode,
+        tool_selected: v2ToolAttempted,
+        stage: enrichedContext.stage_indicator.stage,
+        scenario_id: enrichedContext.scenario_id,
+        pipeline: 'v2',
+      });
+    }
 
     // Phase 4: Tool Execution
     const toolResult = await phase4Execute(

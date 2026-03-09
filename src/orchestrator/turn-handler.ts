@@ -20,7 +20,7 @@
 import type { FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { ORCHESTRATOR_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
-import { log } from "../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type {
   OrchestratorTurnRequest,
@@ -56,6 +56,8 @@ import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 import { isProduction, config } from "../config/index.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
 import { formatBilForCoaching } from "./brief-intelligence/format.js";
+import { selectPrimaryGap } from "./brief-intelligence/primary-gap.js";
+import type { BriefIntelligence } from "../schemas/brief-intelligence.js";
 import { assembleDskCoachingItems } from "./dsk-coaching/index.js";
 import { assembleContext } from "./context-fabric/index.js";
 import type {
@@ -75,6 +77,7 @@ import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
 import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
 import { compactGraph } from "./context/graph-compact.js";
 import { assembleAnalysisInputsSummary } from "./analysis-inputs/assemble.js";
+import { isToolAllowedAtStage } from "./tools/stage-policy.js";
 
 // ============================================================================
 // Singleton PLoT client (created on first use)
@@ -105,6 +108,7 @@ function buildTurnContext(
   turnRequest: OrchestratorTurnRequest,
   bilEnabled: boolean,
   bilContext: string | undefined,
+  bil?: BriefIntelligence | null,
 ): TurnContext {
   const ctx = turnRequest.context;
   const graph = ctx.graph ?? turnRequest.graph_state ?? null;
@@ -125,6 +129,7 @@ function buildTurnContext(
     hasGraph: graph != null,
     hasAnalysis: analysisResponse != null,
     generateModel: false,
+    primaryGap: bil ? selectPrimaryGap(bil) : null,
   };
 }
 
@@ -227,7 +232,20 @@ export async function handleTurn(
       }
     }
 
-    const actualRouting = (intent.routing === 'deterministic' && prerequisitesMet) ? 'deterministic' : 'llm';
+    // Stage policy guard — check if the gate-matched tool is allowed at the current stage
+    const currentStage = turnRequest.context.framing?.stage ?? 'frame';
+    let actualRouting: 'deterministic' | 'llm' = (intent.routing === 'deterministic' && prerequisitesMet) ? 'deterministic' : 'llm';
+
+    if (actualRouting === 'deterministic' && intent.tool) {
+      const stageGuard = isToolAllowedAtStage(intent.tool, currentStage, turnRequest.message);
+      if (!stageGuard.allowed) {
+        actualRouting = 'llm';
+        log.info(
+          { request_id: requestId, stage: currentStage, tool_attempted: intent.tool, reason: stageGuard.reason },
+          'Stage policy: deterministic tool suppressed, falling through to LLM',
+        );
+      }
+    }
 
     log.info(
       {
@@ -506,9 +524,9 @@ async function dispatchViaLLM(
       const bilContextStr = bil
         ? formatBilForCoaching(bil)
         : undefined;
-      const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr);
+      const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr, bil);
       const zone1 = await getSystemPrompt('orchestrator');
-      const assembled = assembleFullPrompt(zone1, 'cf-v12', turnContext, ZONE2_BLOCKS);
+      const assembled = assembleFullPrompt(zone1, 'cf-v13', turnContext, ZONE2_BLOCKS);
       const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length);
       if (warnings.length > 0) {
         log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings');
@@ -584,11 +602,24 @@ async function dispatchViaLLM(
   }
 
   // Response mode telemetry (cf-v11.1)
+  const declaredMode = extractDeclaredMode(parsed.diagnostics);
+  const inferredMode = inferResponseMode(parsed);
+  const toolAttempted = toolInvocation?.name ?? null;
+  const telemetryStage = turnRequest.context.framing?.stage ?? 'frame';
+  const toolPermitted = toolAttempted
+    ? isToolAllowedAtStage(toolAttempted, telemetryStage, turnRequest.message).allowed
+    : true;
+  const modeDisagreement = declaredMode !== 'unknown' && declaredMode !== inferredMode;
+
   log.info(
     {
-      response_mode_declared: extractDeclaredMode(parsed.diagnostics),
-      response_mode_inferred: inferResponseMode(parsed),
-      tool_selected: toolInvocation?.name ?? null,
+      response_mode_declared: declaredMode,
+      response_mode_inferred: inferredMode,
+      tool_selected: toolAttempted,
+      tool_attempted: toolAttempted,
+      tool_permitted: toolPermitted,
+      stage: telemetryStage,
+      mode_disagreement: modeDisagreement,
       gate_match: gateMatch,
       patch_ops_count: toolInvocation?.name === 'edit_graph'
         ? (toolInvocation.input as Record<string, unknown>).operations
@@ -602,6 +633,24 @@ async function dispatchViaLLM(
     'orchestrator.turn.telemetry',
   );
 
+  // Emit discrete events on disagreement/suppression
+  if (modeDisagreement) {
+    emit(TelemetryEvents.OrchestratorModeDisagreement, {
+      declared: declaredMode,
+      inferred: inferredMode,
+      tool_selected: toolAttempted,
+      stage: telemetryStage,
+      scenario_id: turnRequest.scenario_id,
+    });
+  }
+  if (!toolPermitted && toolAttempted) {
+    emit(TelemetryEvents.OrchestratorToolSuppressed, {
+      tool_attempted: toolAttempted,
+      stage: telemetryStage,
+      scenario_id: turnRequest.scenario_id,
+    });
+  }
+
   const includeDebug = !isProduction();
 
   // Convert AI-authored XML blocks into ConversationBlock[]
@@ -610,6 +659,29 @@ async function dispatchViaLLM(
 
   if (!toolInvocation) {
     // Pure conversation — no tool call
+    return assembleEnvelope({
+      turnId,
+      assistantText: parsed.assistant_text,
+      blocks: xmlBlocks,
+      suggestedActions,
+      context: turnRequest.context,
+      turnPlan: buildTurnPlan(null, 'llm', false),
+      diagnostics: parsed.diagnostics,
+      parseWarnings: parsed.parse_warnings,
+      includeDebug,
+      contextHash,
+      dskCoaching,
+    });
+  }
+
+  // Stage policy guard — block tool if not allowed at current stage
+  const llmStage = turnRequest.context.framing?.stage ?? 'frame';
+  const llmStageGuard = isToolAllowedAtStage(toolInvocation.name, llmStage, turnRequest.message);
+  if (!llmStageGuard.allowed) {
+    log.info(
+      { request_id: requestId, stage: llmStage, tool_attempted: toolInvocation.name, reason: llmStageGuard.reason },
+      'Stage policy: LLM-selected tool suppressed, returning conversational envelope',
+    );
     return assembleEnvelope({
       turnId,
       assistantText: parsed.assistant_text,

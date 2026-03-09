@@ -87,8 +87,8 @@ describe('Zone2 Block Registry', () => {
     expect(new Set(orders).size).toBe(orders.length);
   });
 
-  it('has canonical order [10, 20, 30, 40, 50, 60, 70, 80, 81]', () => {
-    expect(ZONE2_BLOCKS.map((b) => b.order)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 81]);
+  it('has canonical order [10, 20, 30, 40, 50, 60, 70, 80, 81, 82]', () => {
+    expect(ZONE2_BLOCKS.map((b) => b.order)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 81, 82]);
   });
 
   it('all blocks have valid scope', () => {
@@ -374,6 +374,78 @@ describe('Block activation', () => {
     const block = ZONE2_BLOCKS.find((b) => b.name === 'bil_hint')!;
     expect(block.activation(makeMinimalContext({ bilEnabled: true, stage: 'frame', bilContext: 'test' }))).toBe(true);
     expect(block.activation(makeMinimalContext({ bilEnabled: true, stage: 'frame' }))).toBe(false);
+  });
+});
+
+// ============================================================================
+// Primary gap hint (Task 4)
+// ============================================================================
+
+describe('primary_gap_hint', () => {
+  it('activates when bilEnabled, frame stage, and primaryGap is set', () => {
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'primary_gap_hint')!;
+    expect(block).toBeDefined();
+    expect(
+      block.activation(makeMinimalContext({
+        bilEnabled: true,
+        stage: 'frame',
+        primaryGap: { gap_id: 'goal', coaching_prompt: 'What outcome are you trying to achieve?' },
+      })),
+    ).toBe(true);
+  });
+
+  it('does not activate when primaryGap is null', () => {
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'primary_gap_hint')!;
+    expect(
+      block.activation(makeMinimalContext({
+        bilEnabled: true,
+        stage: 'frame',
+        primaryGap: null,
+      })),
+    ).toBe(false);
+  });
+
+  it('does not activate when bilEnabled is false', () => {
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'primary_gap_hint')!;
+    expect(
+      block.activation(makeMinimalContext({
+        bilEnabled: false,
+        stage: 'frame',
+        primaryGap: { gap_id: 'goal', coaching_prompt: 'What outcome are you trying to achieve?' },
+      })),
+    ).toBe(false);
+  });
+
+  it('renders coaching prompt', () => {
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'primary_gap_hint')!;
+    const result = block.render(makeMinimalContext({
+      bilEnabled: true,
+      stage: 'frame',
+      primaryGap: { gap_id: 'constraints', coaching_prompt: 'Are there any hard limits?' },
+    }));
+    expect(result).toContain('PRIMARY QUESTION TO ASK');
+    expect(result).toContain('Are there any hard limits?');
+  });
+});
+
+// ============================================================================
+// BIL injection verification (Task 3)
+// ============================================================================
+
+describe('BIL injection verification', () => {
+  it('FRAME turn with BIL enabled and bilContext set → bil_context block active, content includes Missing:', () => {
+    const bilContext = 'Completeness: partial\nGoal: Revenue Growth (measurable: true)\nMissing: constraints, time_horizon';
+    const ctx = makeMinimalContext({
+      stage: 'frame',
+      bilEnabled: true,
+      bilContext,
+    });
+
+    const bilContextBlock = ZONE2_BLOCKS.find((b) => b.name === 'bil_context')!;
+    expect(bilContextBlock.activation(ctx)).toBe(true);
+
+    const rendered = bilContextBlock.render(ctx);
+    expect(rendered).toContain('Missing:');
   });
 });
 

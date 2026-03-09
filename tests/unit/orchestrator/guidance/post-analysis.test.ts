@@ -210,13 +210,45 @@ describe("generatePostAnalysisGuidance", () => {
   });
 
   describe("technique offers", () => {
-    it("offers TECHNIQUE_PRE_MORTEM when result is fragile", () => {
-      const response = makeResponse({ robustness: { level: 'fragile', fragile_edges: [] } as any });
+    it("offers TECHNIQUE_PRE_MORTEM when separation < 10% AND not robust", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.52 },
+          { option_label: 'B', win_probability: 0.48 },
+        ] as any,
+        robustness: { level: 'fragile', fragile_edges: [] } as any,
+      });
       const items = generatePostAnalysisGuidance(response, null);
       const item = items.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_PRE_MORTEM);
       expect(item).toBeDefined();
       expect(item?.category).toBe('technique');
       expect(item?.primary_action.type).toBe('run_exercise');
+    });
+
+    it("does NOT offer TECHNIQUE_PRE_MORTEM when separation > 10%", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.70 },
+          { option_label: 'B', win_probability: 0.30 },
+        ] as any,
+        robustness: { level: 'fragile', fragile_edges: [] } as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_PRE_MORTEM);
+      expect(item).toBeUndefined();
+    });
+
+    it("does NOT offer TECHNIQUE_PRE_MORTEM when robust (even if close)", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.52 },
+          { option_label: 'B', win_probability: 0.48 },
+        ] as any,
+        robustness: { level: 'robust', fragile_edges: [] } as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_PRE_MORTEM);
+      expect(item).toBeUndefined();
     });
 
     it("offers TECHNIQUE_DISCONFIRMATION when top option win_prob > 0.7", () => {
@@ -241,6 +273,98 @@ describe("generatePostAnalysisGuidance", () => {
       const items = generatePostAnalysisGuidance(response, null);
       const item = items.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE);
       expect(item).toBeDefined();
+    });
+
+    it("emits DOMINANT_FACTOR when factor influence > 0.5", () => {
+      const response = makeResponse({
+        factor_sensitivity: [
+          { label: 'Revenue', elasticity: 0.7, node_id: 'f1' },
+        ] as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.DOMINANT_FACTOR);
+      expect(item).toBeDefined();
+      expect(item?.category).toBe('should_fix');
+      expect(item?.priority).toBe(60);
+      expect(item?.target_object?.id).toBe('f1');
+    });
+
+    it("does NOT emit DOMINANT_FACTOR when all factors < 0.5", () => {
+      const response = makeResponse({
+        factor_sensitivity: [
+          { label: 'Minor', elasticity: 0.3, node_id: 'f1' },
+        ] as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.DOMINANT_FACTOR);
+      expect(item).toBeUndefined();
+    });
+
+    it("suppresses all technique offers in RECOVER mode", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.52 },
+          { option_label: 'B', win_probability: 0.48 },
+        ] as any,
+        factor_sensitivity: [
+          { label: 'Revenue', elasticity: 0.7, node_id: 'f1' },
+        ] as any,
+        robustness: { level: 'fragile', fragile_edges: [] } as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null, { responseMode: 'RECOVER' });
+      const techniques = items.filter((i) =>
+        [SIGNAL_CODES.TECHNIQUE_PRE_MORTEM, SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE, SIGNAL_CODES.TECHNIQUE_DISCONFIRMATION, SIGNAL_CODES.DOMINANT_FACTOR].includes(i.signal_code as any)
+      );
+      expect(techniques).toHaveLength(0);
+      // CTA_LITE also suppressed in RECOVER
+      const cta = items.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(cta).toBeUndefined();
+    });
+  });
+
+  describe("CTA_LITE", () => {
+    it("fires on normal analysis completion", () => {
+      const response = makeResponse();
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(item).toBeDefined();
+      expect(item?.category).toBe('technique');
+      expect(item?.priority).toBe(10);
+    });
+
+    it("uses brief CTA when robust + clear winner", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.80 },
+          { option_label: 'B', win_probability: 0.20 },
+        ] as any,
+        robustness: { level: 'robust', fragile_edges: [] } as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(item).toBeDefined();
+      expect((item?.primary_action as { type: 'discuss'; prompt: string }).prompt).toBe('Generate the decision brief');
+    });
+
+    it("uses evidence CTA when fragile or close call", () => {
+      const response = makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.52 },
+          { option_label: 'B', win_probability: 0.48 },
+        ] as any,
+        robustness: { level: 'fragile', fragile_edges: [] } as any,
+      });
+      const items = generatePostAnalysisGuidance(response, null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(item).toBeDefined();
+      expect((item?.primary_action as { type: 'discuss'; prompt: string }).prompt).toBe('What evidence would strengthen the model?');
+    });
+
+    it("suppressed when intentClassification is 'explain'", () => {
+      const response = makeResponse();
+      const items = generatePostAnalysisGuidance(response, null, { intentClassification: 'explain' });
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(item).toBeUndefined();
     });
   });
 
