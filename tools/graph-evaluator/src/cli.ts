@@ -242,6 +242,8 @@ async function main(): Promise<void> {
       resultsDir,
       caseFilter,
       judge: opts.judge,
+      profile: opts.profile,
+      zone1Only: opts.zone1Only,
       opts,
     });
   } else if (promptType === "draft_graph") {
@@ -1000,6 +1002,16 @@ async function runResearch(args: ResearchRunArgs): Promise<void> {
 // Orchestrator path (multi-turn + judge support)
 // =============================================================================
 
+/** Profile fixture structure for --profile flag */
+interface ProfileFixture {
+  fixture_id: string;
+  profile: string;
+  zone1_id: string;
+  active_blocks: Array<{ name: string; version: string }>;
+  test_input: Record<string, unknown>;
+  expected_behaviour: Record<string, unknown>;
+}
+
 interface OrchestratorRunArgs {
   promptPath: string;
   promptContent: string;
@@ -1009,6 +1021,8 @@ interface OrchestratorRunArgs {
   resultsDir: string;
   caseFilter: string[];
   judge: boolean;
+  profile?: string;
+  zone1Only: boolean;
   opts: {
     prompt: string;
     force: boolean;
@@ -1024,7 +1038,7 @@ interface OrchestratorScoredResult extends GenericScoredResult {
 }
 
 async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
-  const { promptContent, models, modelsDir, casesDir, resultsDir, caseFilter, judge, opts } = args;
+  const { promptContent, models, modelsDir, casesDir, resultsDir, caseFilter, judge, profile, zone1Only, opts } = args;
 
   const adapter = new OrchestratorAdapter();
 
@@ -1106,7 +1120,85 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
   };
   await saveManifest(resultsDir, runId, manifest);
 
-  console.log(`\nStarting run: ${runId} (type: orchestrator${judge ? " + judge" : ""})`);
+  // ── Resolve effective prompt (--profile / --zone1-only) ───────────────────
+  let effectivePrompt = promptContent;
+  let promptMode = "full";
+
+  if (zone1Only) {
+    // Zone 1 only: use the raw prompt file content with no Zone 2 assembly
+    promptMode = "zone1-only";
+    console.log("  [mode] Zone 1 only — no Zone 2 blocks appended");
+  } else if (profile) {
+    // Load profile fixture and assemble Zone 2 blocks from test_input
+    const profilesDir = join(TOOL_ROOT, "fixtures", "prompt-profiles");
+    const profilePath = join(profilesDir, `${profile}.json`);
+    let profileFixture: ProfileFixture;
+    try {
+      const profileContent = await readFile(profilePath, "utf-8");
+      profileFixture = JSON.parse(profileContent) as ProfileFixture;
+    } catch (err) {
+      console.error(`Failed to load profile fixture '${profile}' from ${profilePath}:`, err);
+      process.exit(1);
+    }
+
+    // Build Zone 2 context lines from test_input
+    const input = profileFixture.test_input;
+    const zone2Parts: string[] = [];
+
+    // stage_context block
+    const stageLines: string[] = [`Stage: ${input.stage ?? "frame"}`];
+    if (input.goal) stageLines.push(`Goal: ${input.goal}`);
+    if (Array.isArray(input.constraints) && input.constraints.length > 0) {
+      stageLines.push(`Constraints: ${input.constraints.join("; ")}`);
+    }
+    if (Array.isArray(input.options) && input.options.length > 0) {
+      stageLines.push(`Options: ${input.options.join("; ")}`);
+    }
+    zone2Parts.push(`<STAGE>\n${stageLines.join("\n")}\n</STAGE>`);
+
+    // conversation_summary block (if messages present)
+    const messages = (input.messages ?? []) as Array<{ role: string; content: string }>;
+    if (messages.length > 0) {
+      const clauses: string[] = [];
+      if (input.goal) clauses.push(`User described a decision: "${input.goal}"`);
+      clauses.push(`${messages.length} conversation turns`);
+      zone2Parts.push(`<CONVERSATION_SUMMARY>\n${clauses.join(". ")}.\n</CONVERSATION_SUMMARY>`);
+    }
+
+    // recent_turns block (if messages present)
+    if (messages.length > 0) {
+      const recent = messages.slice(-3);
+      const turnLines = recent.map((m) => {
+        const content = String(m.content).slice(0, 500);
+        if (m.role === "user") {
+          return `BEGIN_UNTRUSTED_CONTEXT\nuser: ${content}\nEND_UNTRUSTED_CONTEXT`;
+        }
+        return `assistant: ${content}`;
+      });
+      zone2Parts.push(`<RECENT_TURNS>\n${turnLines.join("\n")}\n</RECENT_TURNS>`);
+    }
+
+    // hints block
+    const hintLines: string[] = [];
+    for (const block of profileFixture.active_blocks) {
+      if (block.name === "bil_hint") {
+        hintLines.push("A deterministic brief analysis is appended below — use its findings to ground your coaching. Do not repeat the analysis verbatim; reference specific elements.");
+      }
+      if (block.name === "analysis_hint") {
+        hintLines.push("Post-analysis data is available in context. Reference specific results, drivers, and robustness when coaching — all numbers must come from this data.");
+      }
+    }
+    if (hintLines.length > 0) {
+      zone2Parts.push(`<CONTEXT_HINTS>\n${hintLines.join("\n")}\n</CONTEXT_HINTS>`);
+    }
+
+    effectivePrompt = promptContent + "\n\n" + zone2Parts.join("\n\n");
+    promptMode = `profile:${profileFixture.fixture_id}`;
+    console.log(`  [mode] Profile: ${profileFixture.fixture_id} (${profileFixture.profile})`);
+    console.log(`  [mode] Active blocks: ${profileFixture.active_blocks.map((b) => b.name).join(", ")}`);
+  }
+
+  console.log(`\nStarting run: ${runId} (type: orchestrator${judge ? " + judge" : ""}, prompt: ${promptMode})`);
   console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
   console.log(`Cases: ${fixtures.map((f) => f.id).join(", ")}`);
   console.log();
@@ -1157,7 +1249,7 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
         let lastError: string | undefined;
 
         for (const segment of segments) {
-          const result = await provider.chat(promptContent, segment.userMessage, model);
+          const result = await provider.chat(effectivePrompt, segment.userMessage, model);
           totalLatency += result.latency_ms;
           totalInputTokens += result.input_tokens ?? 0;
           totalOutputTokens += result.output_tokens ?? 0;
@@ -1199,7 +1291,7 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
             "END_UNTRUSTED_CONTEXT",
           ].join("\n");
 
-          const result = await provider.chat(promptContent, finalUserMsg, model);
+          const result = await provider.chat(effectivePrompt, finalUserMsg, model);
           totalLatency += result.latency_ms;
           totalInputTokens += result.input_tokens ?? 0;
           totalOutputTokens += result.output_tokens ?? 0;
@@ -1233,7 +1325,7 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
         };
       } else {
         // Single-turn: call provider directly (avoids JSON extraction mismatch for XML)
-        const { system, user } = adapter.buildRequest(fixture, promptContent);
+        const { system, user } = adapter.buildRequest(fixture, effectivePrompt);
         const provider = getProvider(model);
         const result = await provider.chat(system, user, model);
 

@@ -219,7 +219,7 @@ function renderAnalysisState(ctx: TurnContext): string {
   if (a.top_drivers.length > 0) {
     lines.push('Top drivers:');
     for (const d of a.top_drivers) {
-      lines.push(`  ${d.factor_label}: elasticity ${d.elasticity.toFixed(2)}`);
+      lines.push(`  ${d.factor_label}: sensitivity ${d.elasticity.toFixed(2)}`);
     }
   }
 
@@ -240,8 +240,11 @@ function renderAnalysisState(ctx: TurnContext): string {
 
 function renderBilContext(ctx: TurnContext): string {
   // Pre-rendered by formatBilForCoaching(). Pass through only.
+  // Strip outer <BRIEF_ANALYSIS> tags — assembly wraps with xmlTag.
   if (!ctx.bilContext) return '';
-  return trimText(ctx.bilContext, 800);
+  let content = ctx.bilContext;
+  content = content.replace(/^<BRIEF_ANALYSIS>\n?/, '').replace(/\n?<\/BRIEF_ANALYSIS>$/, '');
+  return trimText(content, 800);
 }
 
 function renderConversationSummary(ctx: TurnContext): string {

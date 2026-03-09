@@ -177,14 +177,20 @@ describe('Block renderers', () => {
     expect(result).toContain('Winner: Price Increase (62.0%)');
     expect(result).toContain('Robustness: moderate');
     expect(result).toContain('Demand Volume');
+    // Must use user-safe term, not banned "elasticity"
+    expect(result).toContain('sensitivity');
+    expect(result).not.toContain('elasticity');
   });
 
-  it('bil_context passes through pre-rendered content', () => {
+  it('bil_context strips outer XML tags to prevent double-wrapping', () => {
     const bilStr = '<BRIEF_ANALYSIS>\nCompleteness: adequate\nGoal: Revenue\n</BRIEF_ANALYSIS>';
     const ctx = makeMinimalContext({ bilContext: bilStr, bilEnabled: true, stage: 'frame' });
     const block = ZONE2_BLOCKS.find((b) => b.name === 'bil_context')!;
     const result = block.render(ctx);
     expect(result).toContain('Completeness: adequate');
+    // Renderer must strip outer tags — assembly adds them via xmlTag
+    expect(result).not.toContain('<BRIEF_ANALYSIS>');
+    expect(result).not.toContain('</BRIEF_ANALYSIS>');
   });
 
   it('conversation_summary omits missing clauses cleanly', () => {

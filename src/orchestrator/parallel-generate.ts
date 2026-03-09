@@ -41,6 +41,7 @@ import type { EvidenceGap } from "./dsk-coaching/index.js";
 import type { DskCoachingItems } from "../schemas/dsk-coaching.js";
 import type { GraphV3T } from "./types.js";
 import { assembleFullPrompt } from "./prompt-zones/assemble.js";
+import { validateAssembly } from "./prompt-zones/validate.js";
 import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
 import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
 import { compactGraph } from "./context/graph-compact.js";
@@ -293,6 +294,21 @@ async function runCoachingCall(
       'parallel-coaching-v1',
       turnContext,
       ZONE2_BLOCKS,
+    );
+    const warnings = validateAssembly(assembled, ZONE2_BLOCKS, PARALLEL_COACHING_INSTRUCTION.length);
+    if (warnings.length > 0) {
+      log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings (parallel coaching)');
+    }
+    log.info(
+      {
+        request_id: requestId,
+        profile: assembled.profile,
+        reason: assembled.selection_reason,
+        blocks: assembled.active_blocks.map((b) => `${b.name}@${b.version}`),
+        chars: assembled.total_chars,
+        trimmed: assembled.trimmed_blocks,
+      },
+      'Prompt assembled via Zone 2 registry (parallel coaching)',
     );
     systemPrompt = assembled.system_prompt;
   } else {
