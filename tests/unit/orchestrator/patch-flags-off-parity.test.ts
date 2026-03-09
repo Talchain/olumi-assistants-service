@@ -1,73 +1,160 @@
-import { describe, it, expect } from 'vitest';
-import { checkPatchBudget } from '../../../src/orchestrator/tools/edit-graph.js';
-import { validateGraphStructure } from '../../../src/orchestrator/graph-structure-validator.js';
-import type { PatchOperation } from '../../../src/orchestrator/types.js';
-import type { GraphV3T } from '../../../src/schemas/cee-v3.js';
-
 /**
  * Flags-off parity tests (Fix 7).
  *
- * These tests prove that the budget and pre-validation logic are correct
- * in isolation, so that when the feature flags are OFF, the pipeline simply
- * skips these checks and operates as before.
+ * Prove that disabling CEE_PATCH_BUDGET_ENABLED / CEE_PATCH_PRE_VALIDATION_ENABLED
+ * restores pre-cf-v11.1 behaviour: patches that would be rejected by the new guards
+ * pass through handleEditGraph and produce a graph_patch block.
  *
- * The integration with the flag check (config.cee.patchBudgetEnabled /
- * config.cee.patchPreValidationEnabled) is tested implicitly: when the
- * flag is false, the code skips calling these functions entirely.
+ * Both tests use a mock LLM adapter (no real LLM calls) and null PLoT client.
  */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-describe('Flags-off parity: CEE_PATCH_BUDGET_ENABLED=false', () => {
-  it('oversized ops would be rejected by budget check — proves the check is the only gate', () => {
-    // 4 node ops + 5 edge ops — exceeds both budgets
-    const ops: PatchOperation[] = [
-      { op: 'add_node', path: 'n1', value: { id: 'n1', kind: 'factor', label: 'A' } },
-      { op: 'add_node', path: 'n2', value: { id: 'n2', kind: 'factor', label: 'B' } },
-      { op: 'add_node', path: 'n3', value: { id: 'n3', kind: 'factor', label: 'C' } },
-      { op: 'update_node', path: 'n4', value: { label: 'D' } },
-      { op: 'add_edge', path: 'n1::n2', value: { from: 'n1', to: 'n2' } },
-      { op: 'add_edge', path: 'n2::n3', value: { from: 'n2', to: 'n3' } },
-      { op: 'add_edge', path: 'n3::n4', value: { from: 'n3', to: 'n4' } },
-      { op: 'remove_edge', path: 'n4::n5' },
-      { op: 'update_edge', path: 'n5::n6', value: { strength_mean: 0.8 } },
-    ];
+// ============================================================================
+// Mocks — must be declared before imports
+// ============================================================================
 
-    // Budget check WOULD reject
-    const budgetResult = checkPatchBudget(ops);
-    expect(budgetResult.allowed).toBe(false);
-    expect(budgetResult.nodeOps).toBe(4);
-    expect(budgetResult.edgeOps).toBe(5);
+vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue('You are editing a graph.'),
+}));
 
-    // When flag is OFF, checkPatchBudget is never called → ops pass through
-    // This test proves budget check is the ONLY gate for this rejection
-  });
+let mockPatchBudgetEnabled = false;
+let mockPatchPreValidationEnabled = false;
+
+vi.mock('../../../src/config/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/config/index.js')>();
+  return {
+    ...original,
+    config: new Proxy(original.config, {
+      get(target, prop) {
+        if (prop === 'cee') {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(ceeTarget, ceeProp) {
+              if (ceeProp === 'maxRepairRetries') return 0;
+              if (ceeProp === 'patchBudgetEnabled') return mockPatchBudgetEnabled;
+              if (ceeProp === 'patchPreValidationEnabled') return mockPatchPreValidationEnabled;
+              return Reflect.get(ceeTarget, ceeProp);
+            },
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
 });
 
-describe('Flags-off parity: CEE_PATCH_PRE_VALIDATION_ENABLED=false', () => {
-  it('orphan-creating op would be caught by structural validation — proves the check is the only gate', () => {
-    // Graph that has an orphan node (no edges connected)
-    const graphWithOrphan: GraphV3T = {
+import { handleEditGraph } from '../../../src/orchestrator/tools/edit-graph.js';
+import type { ConversationContext, GraphPatchBlockData } from '../../../src/orchestrator/types.js';
+import type { LLMAdapter } from '../../../src/adapters/llm/types.js';
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeContext(): ConversationContext {
+  return {
+    graph: {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Revenue' },
         { id: 'dec_1', kind: 'decision', label: 'Choose' },
-        { id: 'opt_a', kind: 'option', label: 'A' },
-        { id: 'opt_b', kind: 'option', label: 'B' },
-        { id: 'orphan', kind: 'factor', label: 'Disconnected' },
+        { id: 'opt_a', kind: 'option', label: 'Option A' },
+        { id: 'opt_b', kind: 'option', label: 'Option B' },
+        { id: 'fac_1', kind: 'factor', label: 'Price' },
       ],
       edges: [
         { from: 'dec_1', to: 'opt_a' },
         { from: 'dec_1', to: 'opt_b' },
-        { from: 'opt_a', to: 'goal_1' },
-        { from: 'opt_b', to: 'goal_1' },
-        // 'orphan' node has no edges → ORPHAN_NODE violation
+        { from: 'opt_a', to: 'fac_1' },
+        { from: 'opt_b', to: 'fac_1' },
+        { from: 'fac_1', to: 'goal_1' },
       ],
-    } as unknown as GraphV3T;
+    } as unknown as ConversationContext['graph'],
+    analysis_response: null,
+    framing: null,
+    messages: [],
+    scenario_id: 'test-scenario',
+  };
+}
 
-    // Structural validation WOULD catch the orphan
-    const result = validateGraphStructure(graphWithOrphan);
-    expect(result.valid).toBe(false);
-    expect(result.violations.some((v) => v.code === 'ORPHAN_NODE')).toBe(true);
+function makeAdapter(responseJson: unknown): LLMAdapter {
+  return {
+    name: 'test',
+    model: 'test-model',
+    chat: vi.fn().mockResolvedValue({ content: JSON.stringify(responseJson) }),
+    draftGraph: vi.fn(),
+    repairGraph: vi.fn(),
+    suggestOptions: vi.fn(),
+    clarifyBrief: vi.fn(),
+    critiqueGraph: vi.fn(),
+    explainDiff: vi.fn(),
+  } as unknown as LLMAdapter;
+}
 
-    // When flag is OFF, validateGraphStructure is never called → ops pass through
-    // This test proves structural validation is the ONLY gate for this rejection
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('Flags-off parity: CEE_PATCH_BUDGET_ENABLED=false', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPatchBudgetEnabled = false;
+    mockPatchPreValidationEnabled = false;
+  });
+
+  it('5 node ops passes through handleEditGraph without rejection when budget flag is off', async () => {
+    // 5 node ops — would exceed the 3-node budget
+    const ops = [
+      { op: 'update_node', path: 'goal_1', value: { label: 'Revenue v2' } },
+      { op: 'update_node', path: 'dec_1', value: { label: 'Choose v2' } },
+      { op: 'update_node', path: 'opt_a', value: { label: 'Option A v2' } },
+      { op: 'update_node', path: 'opt_b', value: { label: 'Option B v2' } },
+      { op: 'update_node', path: 'fac_1', value: { label: 'Price v2' } },
+    ];
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      'Rename everything',
+      adapter,
+      'req-1',
+      'turn-1',
+      { maxRetries: 0 },
+    );
+
+    // GraphPatchBlock IS returned — no rejection envelope
+    expect(result.wasRejected).not.toBe(true);
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe('proposed');
+    expect(data.operations.length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('Flags-off parity: CEE_PATCH_PRE_VALIDATION_ENABLED=false', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPatchBudgetEnabled = false;
+    mockPatchPreValidationEnabled = false;
+  });
+
+  it('orphan-creating patch passes through handleEditGraph without rejection when pre-validation flag is off', async () => {
+    // add_node with no edges → would create an orphan (ORPHAN_NODE violation)
+    const ops = [
+      { op: 'add_node', path: 'orphan_1', value: { id: 'orphan_1', kind: 'factor', label: 'Disconnected' } },
+    ];
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      'Add disconnected factor',
+      adapter,
+      'req-2',
+      'turn-2',
+      { maxRetries: 0 },
+    );
+
+    // GraphPatchBlock IS returned — no rejection envelope
+    expect(result.wasRejected).not.toBe(true);
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe('proposed');
+    expect(data.operations.some((o) => o.path === 'orphan_1')).toBe(true);
   });
 });

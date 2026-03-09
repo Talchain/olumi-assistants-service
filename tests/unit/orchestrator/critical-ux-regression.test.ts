@@ -100,9 +100,9 @@ describe('Critical UX regression: exploratory question must not trigger edit_gra
     expect(extractDeclaredMode(parsed.diagnostics)).toBe('INTERPRET');
 
     // 4. Inferred mode: heuristic — may classify as SUGGEST due to conversational
-    //    language like "consider". The key invariant is: NOT 'ACT' (no tool calls).
+    //    language like "consider". Must be INTERPRET or SUGGEST for a non-mutation turn.
     const inferred = inferResponseMode(parsed);
-    expect(inferred).not.toBe('ACT');
+    expect(['INTERPRET', 'SUGGEST']).toContain(inferred);
 
     // 5. Graph was analysable before — still analysable after (no mutation)
     const validation = validateGraphStructure(ANALYSABLE_GRAPH);
@@ -152,9 +152,9 @@ describe('Critical UX regression: exploratory question must not trigger edit_gra
 
     // Inferred mode: heuristic that scans for keyword patterns.
     // Mock text contains "consider" which triggers SUGGEST — that's expected.
-    // The critical invariant: inferred must NOT be 'ACT' (no tool calls occurred).
+    // Must be INTERPRET or SUGGEST (never ACT or RECOVER for a conversational turn).
     const inferred = inferResponseMode(parsed);
-    expect(inferred).not.toBe('ACT');
+    expect(['INTERPRET', 'SUGGEST']).toContain(inferred);
 
     // No tool selected → telemetry would log tool_selected: null, patch_ops_count: null
     const toolInvocation = getFirstToolInvocation(parsed);

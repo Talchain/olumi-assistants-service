@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { routeSystemEvent } from '../../../src/orchestrator/system-event-router.js';
+import { routeSystemEvent, hasPendingPatch } from '../../../src/orchestrator/system-event-router.js';
 import type { SystemEvent, OrchestratorTurnRequest, ConversationMessage } from '../../../src/orchestrator/types.js';
 
 // Suppress log output
@@ -95,5 +95,34 @@ describe('System event validation (Task 6)', () => {
     expect(result.assistantText).toBeTruthy();
     expect(result.assistantText).toContain('model');
     expect(result.error).toBeUndefined();
+  });
+});
+
+describe('hasPendingPatch — false-positive resistance', () => {
+  it('user message mentioning "proposed" and "graph_patch" in plain English → returns false', () => {
+    const messages: ConversationMessage[] = [
+      {
+        role: 'user',
+        content: 'I proposed a graph_patch approach to restructure the model',
+      } as ConversationMessage,
+    ];
+
+    expect(hasPendingPatch(messages)).toBe(false);
+  });
+
+  it('structured GraphPatchBlock with status "proposed" → returns true', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: {
+          blocks: [{
+            block_type: 'graph_patch',
+            data: { patch_type: 'edit', operations: [], status: 'proposed' },
+          }],
+        },
+      },
+    ] as unknown as ConversationMessage[];
+
+    expect(hasPendingPatch(messages)).toBe(true);
   });
 });

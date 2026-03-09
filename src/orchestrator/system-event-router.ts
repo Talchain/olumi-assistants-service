@@ -601,21 +601,24 @@ function buildGraphPatchBlock(
  * Check whether the conversation context contains a pending (proposed/previewed) patch.
  *
  * Scans messages for the most recent graph_patch block with status 'proposed' or 'previewed'.
- * Uses structured block scanning only — no string matching (which can false-positive
- * on user messages that mention "graph_patch" or "proposed").
+ * Uses structured block scanning only — no string matching to avoid false positives
+ * on user messages that mention "graph_patch" or "proposed".
  *
- * This is the canonical source of truth — no separate server-side tracking.
+ * Note: ConversationMessage.content is typed as `string` (Zod-coerced at the route
+ * boundary). In production, the guard only fires when the caller passes structured
+ * content (e.g. internal callers, future type widening). At the route layer, content
+ * is always a string and this function returns false — the patch_accepted event is
+ * then handled via the silent-envelope path (safe, idempotent).
+ *
+ * Exported for testing.
  */
-function hasPendingPatch(messages: ConversationMessage[]): boolean {
+export function hasPendingPatch(messages: ConversationMessage[]): boolean {
   // Walk backwards through messages to find the latest graph_patch block.
-  // ConversationMessage.content is typed as string (Zod-coerced at route boundary),
-  // so we check both structured object content (from unit-test mocks or future type
-  // widening) and string content (serialized blocks or keyword markers).
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    const content = msg.content as unknown; // widen to check both shapes
+    const content = msg.content as unknown; // widen to check structured shapes
 
-    // Path 1: structured content (unit tests, future type widening)
+    // Structured content (internal callers, unit-test mocks, future type widening)
     if (typeof content === 'object' && content !== null) {
       const blocks = (content as Record<string, unknown>).blocks;
       if (Array.isArray(blocks)) {
@@ -630,13 +633,6 @@ function hasPendingPatch(messages: ConversationMessage[]): boolean {
             }
           }
         }
-      }
-    }
-
-    // Path 2: string content — look for serialized graph_patch with pending status
-    if (typeof content === 'string' && content.includes('graph_patch')) {
-      if (content.includes('"proposed"') || content.includes('"previewed"')) {
-        return true;
       }
     }
   }
