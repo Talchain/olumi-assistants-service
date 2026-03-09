@@ -1,7 +1,7 @@
 {
   "fixture_id": "framing_bil_off",
   "profile": "framing",
-  "zone1_id": "cf-v9",
+  "zone1_id": "cf-v12",
   "parity_check": {
     "baseline_fixture": "framing_saas_pricing",
     "description": "Same as framing_saas_pricing but with BIL disabled. Should have same blocks minus bil_context and bil_hint."

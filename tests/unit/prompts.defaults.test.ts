@@ -357,7 +357,7 @@ describe('Decision Review Fallback Prompt (v9)', () => {
   });
 });
 
-describe('Orchestrator Prompt (cf-v11.1)', () => {
+describe('Orchestrator Prompt (cf-v12)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
@@ -399,7 +399,7 @@ describe('Orchestrator Prompt (cf-v11.1)', () => {
 
   it('orchestrator prompt is within expected length range', () => {
     const prompt = loadPromptSync('orchestrator');
-    // cf-v11.1: ~48k chars (~12k tokens)
+    // cf-v12: ~48k chars (~12k tokens)
     expect(prompt.length).toBeGreaterThan(40000);
     expect(prompt.length).toBeLessThan(60000);
   });

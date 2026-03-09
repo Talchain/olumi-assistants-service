@@ -508,7 +508,7 @@ async function dispatchViaLLM(
         : undefined;
       const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr);
       const zone1 = await getSystemPrompt('orchestrator');
-      const assembled = assembleFullPrompt(zone1, 'cf-v9', turnContext, ZONE2_BLOCKS);
+      const assembled = assembleFullPrompt(zone1, 'cf-v12', turnContext, ZONE2_BLOCKS);
       const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length);
       if (warnings.length > 0) {
         log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings');

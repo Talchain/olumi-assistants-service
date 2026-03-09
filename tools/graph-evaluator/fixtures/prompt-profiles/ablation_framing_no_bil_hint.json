@@ -1,7 +1,7 @@
 {
   "fixture_id": "ablation_framing_no_bil_hint",
   "profile": "framing",
-  "zone1_id": "cf-v9",
+  "zone1_id": "cf-v12",
   "ablation": {
     "removed_block": "bil_hint",
     "baseline_fixture": "framing_saas_pricing",

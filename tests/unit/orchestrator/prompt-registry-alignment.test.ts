@@ -23,6 +23,7 @@ import { describe, it, expect } from "vitest";
 import { getToolNames } from "../../../src/orchestrator/tools/registry.js";
 import { ORCHESTRATOR_PROMPT_CF_V4 } from "../../../src/prompts/orchestrator-cf-v4.js";
 import { ORCHESTRATOR_PROMPT_CF_V11 } from "../../../src/prompts/orchestrator-cf-v11.js";
+import { ORCHESTRATOR_PROMPT_CF_V12 } from "../../../src/prompts/orchestrator-cf-v12.js";
 
 // ============================================================================
 // Helpers
@@ -98,6 +99,19 @@ describe("orchestrator prompt cf-v11.1 ↔ tool registry alignment", () => {
 
   it("cf-v11.1 prompt lists the same tools as the registry", () => {
     const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V11).sort();
+    const registryTools = getToolNames().sort();
+
+    expect(promptTools).toEqual(registryTools);
+  });
+});
+
+describe("orchestrator prompt cf-v12 ↔ tool registry alignment", () => {
+  it("cf-v12 prompt contains Version: cf-v12", () => {
+    expect(ORCHESTRATOR_PROMPT_CF_V12).toContain("Version: cf-v12");
+  });
+
+  it("cf-v12 prompt lists the same tools as the registry", () => {
+    const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V12).sort();
     const registryTools = getToolNames().sort();
 
     expect(promptTools).toEqual(registryTools);
