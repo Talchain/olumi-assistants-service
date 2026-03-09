@@ -25,6 +25,8 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
             get(ceeTarget, ceeProp) {
               if (ceeProp === "maxRepairRetries") return 0;
               if (ceeProp === "maxPatchOperations") return mockMaxPatchOperations;
+              if (ceeProp === "patchPreValidationEnabled") return false;
+              if (ceeProp === "patchBudgetEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });

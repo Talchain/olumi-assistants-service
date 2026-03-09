@@ -357,7 +357,7 @@ describe('Decision Review Fallback Prompt (v9)', () => {
   });
 });
 
-describe('Orchestrator Prompt (cf-v4.0.5)', () => {
+describe('Orchestrator Prompt (cf-v11.1)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
@@ -399,9 +399,9 @@ describe('Orchestrator Prompt (cf-v4.0.5)', () => {
 
   it('orchestrator prompt is within expected length range', () => {
     const prompt = loadPromptSync('orchestrator');
-    // ~262 lines, ~1,700 tokens → roughly 6,000–10,000 chars
-    expect(prompt.length).toBeGreaterThan(6000);
-    expect(prompt.length).toBeLessThan(10000);
+    // cf-v11.1: ~48k chars (~12k tokens)
+    expect(prompt.length).toBeGreaterThan(40000);
+    expect(prompt.length).toBeLessThan(60000);
   });
 
   it('orchestrator prompt is retrievable via getSystemPrompt (async store-aware path)', async () => {

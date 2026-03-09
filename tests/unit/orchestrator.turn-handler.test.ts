@@ -677,6 +677,14 @@ describe('handleTurn — patch_accepted system event', () => {
   const GRAPH_STATE = { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test' }], edges: [] };
   const PATCH_OPERATIONS = [{ op: 'add_node', node: { id: 'fac_1', kind: 'factor', label: 'Cost' } }];
 
+  // A pending patch in context.messages is required by the cf-v11.1 guard
+  const PENDING_PATCH_MSG = {
+    role: 'assistant',
+    content: {
+      blocks: [{ block_type: 'graph_patch', data: { patch_type: 'edit', operations: [], status: 'proposed' } }],
+    },
+  };
+
   function makePatchAcceptedRequest(overrides?: Partial<OrchestratorTurnRequest>): OrchestratorTurnRequest {
     turnCounter++;
     return {
@@ -685,7 +693,7 @@ describe('handleTurn — patch_accepted system event', () => {
         graph: GRAPH_STATE,
         analysis_response: null,
         framing: { stage: 'frame' },
-        messages: [],
+        messages: [PENDING_PATCH_MSG],
         scenario_id: 'test-scenario',
       } as ConversationContext,
       scenario_id: 'test-scenario',

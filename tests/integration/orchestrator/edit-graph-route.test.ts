@@ -41,6 +41,16 @@ vi.mock("../../../src/config/index.js", async (importOriginal) => {
             },
           });
         }
+        if (prop === "cee") {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(ceeTarget, ceeProp) {
+              if (ceeProp === "maxRepairRetries") return 0;
+              if (ceeProp === "patchPreValidationEnabled") return false;
+              if (ceeProp === "patchBudgetEnabled") return false;
+              return Reflect.get(ceeTarget, ceeProp);
+            },
+          });
+        }
         return Reflect.get(target, prop);
       },
     }),

@@ -144,7 +144,8 @@ describe('parseOrchestratorResponse', () => {
     expect(result.assistant_text).toBe('Hello');
     expect(result.blocks).toHaveLength(0);
     expect(result.suggested_actions).toHaveLength(0);
-    expect(result.parse_warnings).toHaveLength(0);
+    // No diagnostics tag → Path 3 warning about missing diagnostics
+    expect(result.parse_warnings.some((w) => w.includes('diagnostics'))).toBe(true);
   });
 
   it('handles missing <diagnostics> gracefully (diagnostics: null)', () => {
@@ -154,7 +155,8 @@ describe('parseOrchestratorResponse', () => {
 
     expect(result.diagnostics).toBeNull();
     expect(result.assistant_text).toBe('No diagnostics here');
-    expect(result.parse_warnings).toHaveLength(0);
+    // Path 3: <response> present but <diagnostics> missing → warning
+    expect(result.parse_warnings.some((w) => w.includes('diagnostics'))).toBe(true);
   });
 
   it('handles <response> present but <assistant_text> missing (fallback 2)', () => {
@@ -183,21 +185,23 @@ describe('parseOrchestratorResponse', () => {
     expect(result.parse_warnings).toContain('No <response> envelope found — treating as plain text');
   });
 
-  it('handles empty string input (fallback 4)', () => {
+  it('handles empty string input (Path 6 — generic fallback)', () => {
     const result = parseOrchestratorResponse('');
 
-    expect(result.assistant_text).toBe('');
+    // Path 6: empty input → generic fallback message (not empty string)
+    expect(result.assistant_text).toContain('trouble processing');
     expect(result.diagnostics).toBeNull();
     expect(result.blocks).toHaveLength(0);
     expect(result.suggested_actions).toHaveLength(0);
-    expect(result.parse_warnings).toContain('Empty or whitespace-only input');
+    expect(result.parse_warnings.some((w) => w.includes('Empty'))).toBe(true);
   });
 
-  it('handles whitespace-only input (fallback 4)', () => {
+  it('handles whitespace-only input (Path 6 — generic fallback)', () => {
     const result = parseOrchestratorResponse('   \n\n  \t  ');
 
-    expect(result.assistant_text).toBe('');
-    expect(result.parse_warnings).toContain('Empty or whitespace-only input');
+    // Path 6: whitespace-only → same generic fallback
+    expect(result.assistant_text).toContain('trouble processing');
+    expect(result.parse_warnings.some((w) => w.includes('Empty'))).toBe(true);
   });
 
   it('trims leading whitespace/newlines before parsing', () => {
@@ -206,7 +210,8 @@ describe('parseOrchestratorResponse', () => {
     const result = parseOrchestratorResponse(raw);
 
     expect(result.assistant_text).toBe('Trimmed');
-    expect(result.parse_warnings).toHaveLength(0);
+    // No diagnostics → Path 3 warning, but content is still parsed correctly
+    expect(result.parse_warnings.every((w) => !w.includes('Empty'))).toBe(true);
   });
 
   it('handles malformed XML (unclosed tags) with best-effort fallback', () => {

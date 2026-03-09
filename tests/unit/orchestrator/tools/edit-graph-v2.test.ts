@@ -25,6 +25,8 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(ceeTarget, ceeProp) {
               if (ceeProp === "maxRepairRetries") return 1;
+              if (ceeProp === "patchPreValidationEnabled") return false;
+              if (ceeProp === "patchBudgetEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });

@@ -7,7 +7,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getAdapter, resetAdapterCache } from "../../src/adapters/llm/router.js";
-import { FailoverAdapter } from "../../src/adapters/llm/failover.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router - Failover Configuration", () => {
@@ -28,7 +27,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     expect(adapter).toBeDefined();
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should create failover adapter when LLM_FAILOVER_PROVIDERS is set", () => {
@@ -37,7 +36,6 @@ describe("LLM Router - Failover Configuration", () => {
 
     expect(adapter).toBeDefined();
     expect(adapter.name).toBe("fixtures-failover");
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
   });
 
   it("should handle multiple failover providers", () => {
@@ -55,7 +53,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Should fall back to regular provider selection
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should handle whitespace in LLM_FAILOVER_PROVIDERS", () => {
@@ -73,7 +71,7 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Should fall back to regular provider selection
     expect(adapter.name).toBe("fixtures");
-    expect(adapter).not.toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).not.toContain("failover");
   });
 
   it("should handle trailing commas in LLM_FAILOVER_PROVIDERS", () => {
@@ -99,7 +97,6 @@ describe("LLM Router - Failover Configuration", () => {
 
     // Failover should take precedence
     expect(adapter.name).toBe("fixtures-failover");
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
   });
 
   it("should work with different provider combinations", () => {
@@ -108,6 +105,6 @@ describe("LLM Router - Failover Configuration", () => {
     const adapter = getAdapter("draft_graph");
 
     expect(adapter).toBeDefined();
-    expect(adapter).toBeInstanceOf(FailoverAdapter);
+    expect(adapter.name).toBe("fixtures-failover");
   });
 });

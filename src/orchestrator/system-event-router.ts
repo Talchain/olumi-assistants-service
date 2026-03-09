@@ -108,6 +108,43 @@ export async function routeSystemEvent(
     'System event received',
   );
 
+  // ── System event validation (cf-v11.1) ──────────────────────────────────
+
+  // patch_accepted / patch_dismissed: verify a pending patch exists in context
+  if (event.event_type === 'patch_accepted' || event.event_type === 'patch_dismissed') {
+    if (!hasPendingPatch(turnRequest.context.messages)) {
+      log.warn(
+        { event_type: event.event_type, session_id: turnRequest.scenario_id, reason: 'no_pending_patch' },
+        'System event ignored — no pending patch in conversation context',
+      );
+      // Ignore silently — no error to user
+      return {
+        assistantText: null,
+        blocks: [],
+        guidanceItems: [],
+        systemContextEntries: [],
+        httpStatus: 200,
+      };
+    }
+  }
+
+  // direct_analysis_run: verify graph exists in context
+  if (event.event_type === 'direct_analysis_run') {
+    if (!turnRequest.graph_state && !turnRequest.context.graph) {
+      log.info(
+        { event_type: event.event_type, session_id: turnRequest.scenario_id },
+        'direct_analysis_run — no graph in context, returning guidance',
+      );
+      return {
+        assistantText: "You'll need a model before running analysis. Describe your decision and I'll draft one.",
+        blocks: [],
+        guidanceItems: [],
+        systemContextEntries: [],
+        httpStatus: 200,
+      };
+    }
+  }
+
   switch (event.event_type) {
     case 'patch_accepted':
       return handlePatchAccepted(event, turnRequest, turnId, requestId, plotClient, plotOpts);
@@ -554,4 +591,45 @@ function buildGraphPatchBlock(
       action_type: 'undo',
     },
   ]);
+}
+
+// ============================================================================
+// Pending Patch Detection
+// ============================================================================
+
+/**
+ * Check whether the conversation context contains a pending (proposed/previewed) patch.
+ *
+ * Scans messages for the most recent graph_patch block with status 'proposed' or 'previewed'.
+ * Uses structured block scanning only — no string matching (which can false-positive
+ * on user messages that mention "graph_patch" or "proposed").
+ *
+ * This is the canonical source of truth — no separate server-side tracking.
+ */
+function hasPendingPatch(messages: ConversationMessage[]): boolean {
+  // Walk backwards through messages to find the latest graph_patch block
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const content = msg.content;
+
+    // Messages may contain blocks as structured content
+    if (typeof content === 'object' && content !== null) {
+      const blocks = (content as Record<string, unknown>).blocks;
+      if (Array.isArray(blocks)) {
+        for (const block of blocks) {
+          if (
+            typeof block === 'object' && block !== null &&
+            (block as Record<string, unknown>).block_type === 'graph_patch'
+          ) {
+            const data = (block as Record<string, unknown>).data as Record<string, unknown> | undefined;
+            if (data && (data.status === 'proposed' || data.status === 'previewed')) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return false;
 }

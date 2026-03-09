@@ -254,6 +254,29 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       }
     }
 
+    // ── Message length guard (cf-v11.1) ────────────────────────────────────
+    // Canonical check at route boundary — applies to V1, V2, and parallel paths.
+    // Zod caps at 10,000 (schema); this enforces the friendly 4,000-char limit.
+    const MAX_MESSAGE_LENGTH = 4000;
+    if (parsed.data.message.length > MAX_MESSAGE_LENGTH) {
+      log.warn(
+        { request_id: requestId, message_length: parsed.data.message.length, max: MAX_MESSAGE_LENGTH },
+        'Orchestrator message length exceeded',
+      );
+      reply.code(400);
+      return reply.send({
+        turn_id: 'validation-error',
+        assistant_text: "Your message is too long. Try breaking it into shorter messages, or focus on the key points of your decision.",
+        blocks: [],
+        lineage: { context_hash: '' },
+        error: {
+          code: 'INVALID_REQUEST' as const,
+          message: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters.`,
+          recoverable: true,
+        },
+      });
+    }
+
     // Map validated data to turn request
     const turnRequest: OrchestratorTurnRequest = {
       message: parsed.data.message,

@@ -1,0 +1,116 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { buildPatchRejectionEnvelope } from '../../../src/orchestrator/patch-rejection-helper.js';
+import type { ConversationContext } from '../../../src/orchestrator/types.js';
+
+// Suppress log output in tests
+vi.mock('../../../src/utils/telemetry.js', () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  TelemetryEvents: {},
+}));
+
+const mockContext: ConversationContext = {
+  messages: [],
+  framing: null,
+  graph: null,
+  analysis_response: null,
+  scenario_id: 'test',
+};
+
+describe('buildPatchRejectionEnvelope', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('produces valid envelope for budget_exceeded — no GraphPatchBlock, has suggested_actions', async () => {
+    const { log } = await import('../../../src/utils/telemetry.js');
+
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'budget_exceeded',
+        detail: 'Patch contains 5 node operations.',
+        node_ops: 5,
+        edge_ops: 2,
+        suggested_actions: [
+          { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
+          { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
+        ],
+      },
+      'test-turn-id',
+      mockContext,
+    );
+
+    // Envelope shape
+    expect(envelope.turn_id).toBe('test-turn-id');
+    expect(envelope.assistant_text).toBeTruthy();
+    expect(envelope.assistant_text).toContain('5 node operations');
+    expect(envelope.assistant_text).toContain('limit');
+
+    // No GraphPatchBlock
+    expect(envelope.blocks).toHaveLength(0);
+    const graphPatchBlocks = envelope.blocks.filter(
+      (b) => b.block_type === 'graph_patch',
+    );
+    expect(graphPatchBlocks).toHaveLength(0);
+
+    // Suggested actions present
+    expect(envelope.suggested_actions).toHaveLength(2);
+    expect(envelope.suggested_actions![0].role).toBe('facilitator');
+    expect(envelope.suggested_actions![1].role).toBe('challenger');
+
+    // Log output
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'budget_exceeded',
+        node_ops: 5,
+        edge_ops: 2,
+      }),
+      expect.any(String),
+    );
+  });
+
+  it('produces valid envelope for structural_violation — no GraphPatchBlock, has suggested_actions', async () => {
+    const { log } = await import('../../../src/utils/telemetry.js');
+
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'structural_violation',
+        detail: 'Consider simplifying the change.',
+        violations: [
+          'This change would leave a node with no connections.',
+          'This change would create a circular dependency in the model.',
+        ],
+        suggested_actions: [
+          { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a smaller change.' },
+        ],
+      },
+      'test-turn-id-2',
+      mockContext,
+    );
+
+    // Envelope shape
+    expect(envelope.turn_id).toBe('test-turn-id-2');
+    expect(envelope.assistant_text).toBeTruthy();
+    expect(envelope.assistant_text).toContain('invalid state');
+    expect(envelope.assistant_text).toContain('no connections');
+    expect(envelope.assistant_text).toContain('circular dependency');
+
+    // No GraphPatchBlock
+    expect(envelope.blocks).toHaveLength(0);
+
+    // Suggested actions present
+    expect(envelope.suggested_actions).toHaveLength(1);
+    expect(envelope.suggested_actions![0].role).toBe('facilitator');
+
+    // Log output
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'structural_violation',
+        violations: expect.arrayContaining([
+          expect.stringContaining('no connections'),
+        ]),
+      }),
+      expect.any(String),
+    );
+  });
+});

@@ -18,6 +18,9 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(ceeTarget, ceeProp) {
               if (ceeProp === "maxRepairRetries") return 1;
+              // Disable cf-v11.1 pre-validation for legacy tests (tested separately in patch-budget/validator tests)
+              if (ceeProp === "patchPreValidationEnabled") return false;
+              if (ceeProp === "patchBudgetEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });

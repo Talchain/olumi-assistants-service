@@ -22,6 +22,7 @@
 import { describe, it, expect } from "vitest";
 import { getToolNames } from "../../../src/orchestrator/tools/registry.js";
 import { ORCHESTRATOR_PROMPT_CF_V4 } from "../../../src/prompts/orchestrator-cf-v4.js";
+import { ORCHESTRATOR_PROMPT_CF_V11 } from "../../../src/prompts/orchestrator-cf-v11.js";
 
 // ============================================================================
 // Helpers
@@ -42,11 +43,11 @@ function parsePromptToolNames(prompt: string): string[] {
 
   const toolsSection = toolsMatch[1];
 
-  // Match lines of the form: `toolname — ...` (em-dash delimiter)
-  // Tool names are snake_case identifiers at the start of a line (after optional whitespace)
+  // Match lines of the form: `tool_name — ...` (em-dash delimiter)
+  // Tool names are snake_case identifiers containing at least one underscore
   const names: string[] = [];
   for (const line of toolsSection.split('\n')) {
-    const match = line.match(/^\s*([a-z][a-z_]+)\s+—/);
+    const match = line.match(/^\s*([a-z]+_[a-z_]+)\s+—/);
     if (match) {
       names.push(match[1]);
     }
@@ -84,6 +85,19 @@ describe("orchestrator prompt ↔ tool registry alignment", () => {
 
   it("bidirectional alignment — prompt and registry have the same tool set", () => {
     const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V4).sort();
+    const registryTools = getToolNames().sort();
+
+    expect(promptTools).toEqual(registryTools);
+  });
+});
+
+describe("orchestrator prompt cf-v11.1 ↔ tool registry alignment", () => {
+  it("cf-v11.1 prompt contains Version: cf-v11.1", () => {
+    expect(ORCHESTRATOR_PROMPT_CF_V11).toContain("Version: cf-v11.1");
+  });
+
+  it("cf-v11.1 prompt lists the same tools as the registry", () => {
+    const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V11).sort();
     const registryTools = getToolNames().sort();
 
     expect(promptTools).toEqual(registryTools);

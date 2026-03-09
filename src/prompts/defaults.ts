@@ -17,6 +17,7 @@ import { getDraftGraphPromptV19, DRAFT_GRAPH_PROMPT_V19 } from './defaults-v19.j
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
 import { getOrchestratorPrompt, ORCHESTRATOR_PROMPT_CF_V4 } from './orchestrator-cf-v4.js';
+import { getOrchestratorPromptV11, ORCHESTRATOR_PROMPT_CF_V11 } from './orchestrator-cf-v11.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -2064,7 +2065,12 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
   registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
-  registerDefaultPrompt('orchestrator', getOrchestratorPrompt());
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV11());
+
+  // Log orchestrator prompt version at registration
+  const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V11.match(/Version:\s*([\S]+)/);
+  const promptVersion = promptVersionMatch ? promptVersionMatch[1] : 'unknown';
+  log.info({ prompt_version: promptVersion, operation: 'orchestrator' }, 'Orchestrator prompt registered');
 
   // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
   // - isl_synthesis: Uses template-based narrative generation (no LLM)
@@ -2097,7 +2103,7 @@ export const PROMPT_TEMPLATES = {
   decision_review: DECISION_REVIEW_PROMPT,
   edit_graph: EDIT_GRAPH_PROMPT,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
-  orchestrator: ORCHESTRATOR_PROMPT_CF_V4,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V11,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 

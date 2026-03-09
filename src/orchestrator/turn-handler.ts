@@ -41,7 +41,7 @@ import { createPLoTClient } from "./plot-client.js";
 import type { PLoTClient, PLoTClientRunOpts } from "./plot-client.js";
 import { routeSystemEvent, appendSystemMessages } from "./system-event-router.js";
 import { assembleSystemPrompt, assembleMessages, assembleToolDefinitions } from "./prompt-assembly.js";
-import { parseLLMResponse, getFirstToolInvocation } from "./response-parser.js";
+import { parseLLMResponse, getFirstToolInvocation, extractDeclaredMode, inferResponseMode } from "./response-parser.js";
 import type { ExtractedBlock } from "./response-parser.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
 import { getToolDefinitions } from "./tools/registry.js";
@@ -206,6 +206,8 @@ export async function handleTurn(
   registerInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id, inflightPromise);
 
   try {
+    // Message length is enforced at route boundary (route.ts) for all pipeline paths.
+
     // 3. Check system event
     if (turnRequest.system_event) {
       const result = await handleSystemEvent(turnRequest, turnId, request, requestId, plotOpts);
@@ -261,6 +263,8 @@ export async function handleTurn(
         requestId,
         budgetController.signal,
         plotOpts,
+        intent.routing === 'deterministic',
+        turnStartedAt,
       );
     }
 
@@ -421,6 +425,8 @@ async function dispatchViaLLM(
   requestId: string,
   _abortSignal: AbortSignal,
   plotOpts?: PLoTClientRunOpts,
+  gateMatch: boolean = false,
+  turnStartedAt: number = Date.now(),
 ): Promise<OrchestratorResponseEnvelope> {
   const adapter = getAdapter('orchestrator');
 
@@ -574,6 +580,25 @@ async function dispatchViaLLM(
       "XML envelope parse warnings",
     );
   }
+
+  // Response mode telemetry (cf-v11.1)
+  log.info(
+    {
+      response_mode_declared: extractDeclaredMode(parsed.diagnostics),
+      response_mode_inferred: inferResponseMode(parsed),
+      tool_selected: toolInvocation?.name ?? null,
+      gate_match: gateMatch,
+      patch_ops_count: toolInvocation?.name === 'edit_graph'
+        ? (toolInvocation.input as Record<string, unknown>).operations
+          ? (Array.isArray((toolInvocation.input as Record<string, unknown>).operations)
+            ? ((toolInvocation.input as Record<string, unknown>).operations as unknown[]).length
+            : null)
+          : null
+        : null,
+      turn_duration_ms: Date.now() - turnStartedAt,
+    },
+    'orchestrator.turn.telemetry',
+  );
 
   const includeDebug = !isProduction();
 

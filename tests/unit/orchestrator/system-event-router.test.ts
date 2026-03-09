@@ -25,6 +25,16 @@ const BASE_GRAPH = {
   edges: [],
 };
 
+/** A message containing a pending graph_patch block (status: 'proposed'). */
+const PENDING_PATCH_MESSAGE: ConversationMessage = {
+  role: 'assistant',
+  content: {
+    blocks: [
+      { block_type: 'graph_patch', data: { patch_type: 'edit', operations: [], status: 'proposed' } },
+    ],
+  },
+} as unknown as ConversationMessage;
+
 function makeRequest(overrides?: Partial<OrchestratorTurnRequest>): OrchestratorTurnRequest {
   return {
     message: 'hello',
@@ -39,6 +49,13 @@ function makeRequest(overrides?: Partial<OrchestratorTurnRequest>): Orchestrator
     },
     ...overrides,
   } as OrchestratorTurnRequest;
+}
+
+/** makeRequest with a pending patch in context.messages (for patch_accepted/dismissed tests). */
+function makeRequestWithPendingPatch(overrides?: Partial<OrchestratorTurnRequest>): OrchestratorTurnRequest {
+  const base = makeRequest(overrides);
+  base.context.messages = [PENDING_PATCH_MESSAGE, ...base.context.messages];
+  return base;
 }
 
 function makePatchAccepted(overrides?: Record<string, unknown>): SystemEvent {
@@ -161,7 +178,7 @@ describe('patch_accepted', () => {
 
       await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: mockClient,
@@ -175,7 +192,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -191,7 +208,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -206,7 +223,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -223,7 +240,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -238,7 +255,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: undefined }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: undefined }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -260,7 +277,7 @@ describe('patch_accepted', () => {
 
       await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: mockClient,
@@ -275,7 +292,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: mockClient,
@@ -293,7 +310,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: mockClient,
@@ -312,7 +329,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: mockClient,
@@ -328,7 +345,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -344,7 +361,7 @@ describe('patch_accepted', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ graph_state: undefined }),
+        turnRequest: makeRequestWithPendingPatch({ graph_state: undefined }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -371,7 +388,7 @@ describe('patch_dismissed', () => {
 
     const result = await routeSystemEvent({
       event,
-      turnRequest: makeRequest(),
+      turnRequest: makeRequestWithPendingPatch(),
       turnId: TURN_ID,
       requestId: REQUEST_ID,
       plotClient: null,
@@ -396,7 +413,7 @@ describe('patch_dismissed', () => {
 
     const result = await routeSystemEvent({
       event,
-      turnRequest: makeRequest(),
+      turnRequest: makeRequestWithPendingPatch(),
       turnId: TURN_ID,
       requestId: REQUEST_ID,
       plotClient: null,
@@ -496,6 +513,9 @@ describe('direct_analysis_run', () => {
     details: {},
   });
 
+  // direct_analysis_run requires graph_state or context.graph (cf-v11.1 guard)
+  const withGraph = { graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] };
+
   describe('Path A (analysis_state present)', () => {
     it('does NOT set delegateToTool', async () => {
       const event = makeDirectAnalysisEvent();
@@ -503,7 +523,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ analysis_state: analysisState }),
+        turnRequest: makeRequest({ analysis_state: analysisState, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -518,7 +538,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ analysis_state: analysisState }),
+        turnRequest: makeRequest({ analysis_state: analysisState, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -535,7 +555,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ analysis_state: analysisState }),
+        turnRequest: makeRequest({ analysis_state: analysisState, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -552,7 +572,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ message: 'hi', analysis_state: analysisState }),
+        turnRequest: makeRequest({ message: 'hi', analysis_state: analysisState, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -567,7 +587,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ message: 'What does this mean?', analysis_state: analysisState }),
+        turnRequest: makeRequest({ message: 'What does this mean?', analysis_state: analysisState, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -583,7 +603,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ analysis_state: undefined }),
+        turnRequest: makeRequest({ analysis_state: undefined, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -601,7 +621,7 @@ describe('direct_analysis_run', () => {
 
       const result = await routeSystemEvent({
         event,
-        turnRequest: makeRequest({ analysis_state: undefined }),
+        turnRequest: makeRequest({ analysis_state: undefined, ...withGraph }),
         turnId: TURN_ID,
         requestId: REQUEST_ID,
         plotClient: null,
@@ -661,7 +681,7 @@ describe('Path equivalence: direct_analysis_run Path B vs run_analysis message',
 
     const result = await routeSystemEvent({
       event,
-      turnRequest: makeRequest({ analysis_state: undefined }),
+      turnRequest: makeRequest({ analysis_state: undefined, graph_state: { nodes: [{ id: 'n1', kind: 'factor', label: 'Rev' }], edges: [] } as unknown as OrchestratorTurnRequest['graph_state'] }),
       turnId: TURN_ID,
       requestId: REQUEST_ID,
       plotClient: null,

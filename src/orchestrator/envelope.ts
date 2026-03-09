@@ -17,8 +17,11 @@ import type {
   ConversationContext,
   V2RunResponseEnvelope,
   DecisionStage,
+  GraphPatchBlockData,
+  GraphV3T,
 } from "./types.js";
 import { hashContext } from "./context/hash.js";
+import { computeStructuralReadiness } from "./tools/analysis-ready-helper.js";
 
 // ============================================================================
 // Envelope Builder
@@ -106,6 +109,10 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   if (input.dskCoaching) {
     envelope.dsk_coaching = input.dskCoaching;
   }
+
+  // Recompute analysis_ready on graph_patch blocks from the graph being returned.
+  // This is the canonical recompute — avoids stale/pass-through values.
+  recomputeAnalysisReady(envelope.blocks, input.context);
 
   return envelope;
 }
@@ -198,4 +205,38 @@ export function buildTurnPlan(
   }
 
   return plan;
+}
+
+// ============================================================================
+// analysis_ready Recomputation
+// ============================================================================
+
+/**
+ * Recompute analysis_ready on graph_patch blocks from the post-patch graph.
+ *
+ * Canonical recompute at envelope assembly time — the graph being returned
+ * to the user is the single source of truth. Prefers applied_graph (post-PLoT)
+ * over the input context graph (pre-turn).
+ *
+ * Mutates blocks in place (they are owned by this envelope).
+ */
+function recomputeAnalysisReady(
+  blocks: ConversationBlock[],
+  context: ConversationContext,
+): void {
+  for (const block of blocks) {
+    if (block.block_type !== 'graph_patch') continue;
+    const data = block.data as GraphPatchBlockData;
+
+    // Resolve the graph to compute readiness from:
+    // 1. applied_graph on the block (post-PLoT canonical state)
+    // 2. context.graph (pre-turn state, for drafts that haven't been through PLoT yet)
+    const graph: GraphV3T | null = data.applied_graph ?? context.graph ?? null;
+    if (!graph) continue;
+
+    const readiness = computeStructuralReadiness(graph);
+    if (readiness) {
+      data.analysis_ready = readiness;
+    }
+  }
 }

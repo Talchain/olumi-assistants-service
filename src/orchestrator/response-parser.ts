@@ -276,11 +276,13 @@ function parseSuggestedActionsWithWarnings(
  * Never throws. All malformed input results in a degraded-but-valid
  * ParsedResponse with parse_warnings describing the issues.
  *
- * Fallback cascade:
- * 1. <response> + <assistant_text> found → extract normally
- * 2. <response> found, <assistant_text> missing → assistant_text = '', warning
- * 3. No <response> tag → entire input (trimmed) as plain assistant_text, warning
- * 4. Empty/whitespace input → assistant_text = '', warning
+ * Parse paths (numbered 1–6, tested in diagnostics-parsing.test.ts):
+ * Path 1 (tool-only): handled at parseLLMResponse layer — no text → null
+ * Path 2 (full envelope): <diagnostics> + <response> + <assistant_text> → normal
+ * Path 3 (partial envelope): <response> present, <diagnostics> missing → warn, parse
+ * Path 4 (standalone tag): no <response> but <assistant_text> extractable → warn, extract
+ * Path 5 (plain text): no XML structure → entire input as assistant_text, warn
+ * Path 6 (empty): empty/whitespace → generic fallback message
  */
 export function parseOrchestratorResponse(raw: string): ParsedResponse {
   const warnings: string[] = [];
@@ -288,12 +290,12 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
   // Trim leading whitespace (models may emit leading whitespace/newlines)
   const trimmed = raw.trimStart();
 
-  // Fallback 4: empty or whitespace-only input
+  // Path 6: empty or whitespace-only input → generic fallback message
   if (!trimmed) {
-    warnings.push('Empty or whitespace-only input');
+    warnings.push('Empty or whitespace-only input — returning generic fallback');
     return {
       diagnostics: null,
-      assistant_text: '',
+      assistant_text: "I had trouble processing that. Could you rephrase your question?",
       blocks: [],
       suggested_actions: [],
       parse_warnings: warnings,
@@ -303,14 +305,33 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
   // Extract diagnostics (capture, don't discard)
   const diagnostics = extractDiagnostics(trimmed);
 
+  // Path 3 (partial envelope): <diagnostics> missing or malformed
+  if (!diagnostics && trimmed.includes('<response>')) {
+    warnings.push('<diagnostics> missing or malformed — response_mode_declared will be unknown');
+  }
+
   // Strip diagnostics from text for further processing
   const withoutDiagnostics = stripDiagnostics(trimmed);
 
   // Try to find <response> envelope
   const responseContent = extractTag(withoutDiagnostics, 'response');
 
-  // Fallback 3: no <response> tag
+  // No <response> tag found
   if (!responseContent) {
+    // Path 4 (standalone tag): no <response> but <assistant_text> is extractable directly
+    const standaloneAssistantText = extractTag(withoutDiagnostics, 'assistant_text');
+    if (standaloneAssistantText !== null) {
+      warnings.push('No <response> envelope but <assistant_text> found — extracting directly');
+      return {
+        diagnostics,
+        assistant_text: unescapeXmlEntities(standaloneAssistantText),
+        blocks: [],
+        suggested_actions: [],
+        parse_warnings: warnings,
+      };
+    }
+
+    // Path 5 (plain text): nothing structured — treat entire text as plain assistant_text
     warnings.push('No <response> envelope found — treating as plain text');
     return {
       diagnostics,
@@ -326,7 +347,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
 
   let assistantText: string;
   if (assistantTextRaw === null) {
-    // Fallback 2: <response> found but <assistant_text> missing
+    // Path 3 sub-case: <response> found but <assistant_text> missing
     warnings.push('<response> present but <assistant_text> missing');
     assistantText = '';
   } else {
@@ -470,4 +491,52 @@ export function hasToolInvocations(parsed: ParsedLLMResponse): boolean {
  */
 export function getFirstToolInvocation(parsed: ParsedLLMResponse): ToolInvocation | null {
   return parsed.tool_invocations[0] ?? null;
+}
+
+// ============================================================================
+// Response Mode Telemetry (cf-v11.1)
+// ============================================================================
+
+export type ResponseMode = 'INTERPRET' | 'SUGGEST' | 'ACT' | 'RECOVER' | 'unknown';
+
+/**
+ * Extract the declared response mode from the <diagnostics> content.
+ *
+ * Looks for "Mode: INTERPRET|SUGGEST|ACT|RECOVER" (case-insensitive).
+ * Returns 'unknown' if not found or diagnostics is null.
+ */
+export function extractDeclaredMode(diagnostics: string | null): ResponseMode {
+  if (!diagnostics) return 'unknown';
+
+  const match = diagnostics.match(/Mode:\s*(INTERPRET|SUGGEST|ACT|RECOVER)/i);
+  if (!match) return 'unknown';
+
+  return match[1].toUpperCase() as ResponseMode;
+}
+
+/**
+ * Infer the actual response mode from parsed LLM response.
+ *
+ * Ground truth derived from actual behaviour:
+ * - ACT: tool was invoked
+ * - RECOVER: response contains error/problem/blocked language
+ * - SUGGEST: response contains suggestion language
+ * - INTERPRET: default
+ */
+export function inferResponseMode(parsed: ParsedLLMResponse): ResponseMode {
+  if (parsed.tool_invocations.length > 0) return 'ACT';
+
+  const text = parsed.assistant_text?.toLowerCase() ?? '';
+
+  // RECOVER patterns
+  if (/\b(sorry|error|failed|blocked|can't|cannot|unable to|went wrong)\b/.test(text)) {
+    return 'RECOVER';
+  }
+
+  // SUGGEST patterns
+  if (/\b(would you like|shall i|consider|worth (adding|considering|including)|i could)\b/.test(text)) {
+    return 'SUGGEST';
+  }
+
+  return 'INTERPRET';
 }

@@ -48,6 +48,10 @@ import {
   formatPatchValidationErrors,
   type PatchValidationResult,
 } from "../patch-validation.js";
+import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
+import { validateGraphStructure, VIOLATION_MESSAGES } from "../graph-structure-validator.js";
+import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
+import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 
 // ============================================================================
 // Types
@@ -513,6 +517,101 @@ export async function handleEditGraph(
       context.graph as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> },
     );
 
+    // Step 1.5: Strip no-ops and enforce complexity budget (cf-v11.1)
+    const strippedForBudget = stripNoOps(operations);
+
+    if (config.cee.patchBudgetEnabled) {
+      const budgetResult = checkPatchBudget(strippedForBudget);
+      if (!budgetResult.allowed) {
+        log.warn(
+          { request_id: requestId, attempt, node_ops: budgetResult.nodeOps, edge_ops: budgetResult.edgeOps },
+          'edit_graph rejected — complexity budget exceeded',
+        );
+        const rejectionCtx: PatchRejectionContext = {
+          reason: 'budget_exceeded',
+          detail: 'Consider breaking this into smaller steps, or rebuilding the model from an updated brief.',
+          node_ops: budgetResult.nodeOps,
+          edge_ops: budgetResult.edgeOps,
+          suggested_actions: [
+            { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
+            { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
+          ],
+        };
+        const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+        return {
+          blocks: [],
+          assistantText: envelope.assistant_text,
+          latencyMs: Date.now() - startTime,
+          appliedGraph: null,
+          wasRejected: true,
+          suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+        };
+      }
+    }
+
+    // Step 1.6: Pre-validation — apply patch to candidate graph and validate structure
+    let candidateGraph: GraphV3T | undefined;
+
+    if (config.cee.patchPreValidationEnabled) {
+      try {
+        candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
+      } catch (applyErr) {
+        if (applyErr instanceof PatchApplyError) {
+          log.warn(
+            { request_id: requestId, attempt, code: applyErr.code, error: applyErr.message },
+            'edit_graph rejected — patch apply error',
+          );
+          const rejectionCtx: PatchRejectionContext = {
+            reason: 'structural_violation',
+            detail: 'Try a different approach to the change.',
+            violations: [applyErr.message],
+            suggested_actions: [
+              { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            ],
+          };
+          const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+          return {
+            blocks: [],
+            assistantText: envelope.assistant_text,
+            latencyMs: Date.now() - startTime,
+            appliedGraph: null,
+            wasRejected: true,
+            suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+          };
+        }
+        throw applyErr;
+      }
+
+      const structResult = validateGraphStructure(candidateGraph);
+      if (!structResult.valid) {
+        const translatedViolations = structResult.violations.map(
+          (v) => VIOLATION_MESSAGES[v.code] ?? v.detail,
+        );
+        log.warn(
+          { request_id: requestId, attempt, violations: structResult.violations.map((v) => v.code) },
+          'edit_graph rejected — structural validation failed',
+        );
+        const rejectionCtx: PatchRejectionContext = {
+          reason: 'structural_violation',
+          detail: 'Consider simplifying the change or approaching it differently.',
+          violations: translatedViolations,
+          suggested_actions: [
+            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
+          ],
+        };
+        const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+        return {
+          blocks: [],
+          assistantText: envelope.assistant_text,
+          latencyMs: Date.now() - startTime,
+          appliedGraph: null,
+          wasRejected: true,
+          suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+        };
+      }
+    }
+
     // Step 2: PLoT semantic validation (if client configured)
     let repairsApplied: RepairEntry[] | undefined;
     let appliedGraph: GraphV3T | undefined;
@@ -675,6 +774,10 @@ export async function handleEditGraph(
       allWarnings.push('PLOT_VALIDATION_SKIPPED: PLoT was unavailable — this patch has not been canonically validated');
     }
 
+    // Compute analysis_ready from post-patch graph (single candidate graph flow)
+    const readinessGraph = appliedGraph ?? candidateGraph;
+    const analysisReady = readinessGraph ? computeStructuralReadiness(readinessGraph) : undefined;
+
     const patchData: GraphPatchBlockData = {
       patch_type: 'edit',
       operations,
@@ -685,6 +788,7 @@ export async function handleEditGraph(
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
       ...(allWarnings.length > 0 && { validation_warnings: allWarnings }),
+      ...(analysisReady && { analysis_ready: analysisReady }),
     };
 
     const block = createGraphPatchBlock(patchData, turnId);
@@ -1039,4 +1143,92 @@ function stripOperationMeta(
   }
 
   return { operations, meta };
+}
+
+// ============================================================================
+// Patch Budget (cf-v11.1)
+// ============================================================================
+
+const MAX_NODE_OPS = 3;
+const MAX_EDGE_OPS = 4;
+
+interface PatchBudgetResult {
+  allowed: boolean;
+  nodeOps: number;
+  edgeOps: number;
+}
+
+/**
+ * Check whether a set of operations fits within the complexity budget.
+ *
+ * Classification:
+ * - add_node, remove_node, update_node → node op
+ * - add_edge, remove_edge, update_edge → edge op
+ *
+ * Implicit edge removals from remove_node do NOT count.
+ */
+export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResult {
+  let nodeOps = 0;
+  let edgeOps = 0;
+
+  for (const op of operations) {
+    switch (op.op) {
+      case 'add_node':
+      case 'remove_node':
+      case 'update_node':
+        nodeOps++;
+        break;
+      case 'add_edge':
+      case 'remove_edge':
+      case 'update_edge':
+        edgeOps++;
+        break;
+    }
+  }
+
+  return {
+    allowed: nodeOps <= MAX_NODE_OPS && edgeOps <= MAX_EDGE_OPS,
+    nodeOps,
+    edgeOps,
+  };
+}
+
+/**
+ * Remove no-op operations (where value deeply equals old_value).
+ *
+ * Uses recursive structural equality — not JSON.stringify (key order is not guaranteed).
+ * Operations without old_value are kept (safe default).
+ */
+export function stripNoOps(operations: PatchOperation[]): PatchOperation[] {
+  return operations.filter((op) => {
+    if (op.old_value === undefined) return true;
+    if (op.value === undefined) return true;
+    return !deepEqual(op.value, op.old_value);
+  });
+}
+
+/**
+ * Simple recursive structural equality for JSON-compatible values.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== typeof b) return false;
+
+  if (typeof a !== 'object') return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, (b as unknown[])[i]));
+  }
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+
+  if (aKeys.length !== bKeys.length) return false;
+
+  return aKeys.every((key) => key in bObj && deepEqual(aObj[key], bObj[key]));
 }

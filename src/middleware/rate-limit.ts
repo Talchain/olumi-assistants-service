@@ -2,15 +2,21 @@
  * Per-user rate limiting for the orchestrator endpoint.
  *
  * Applies to POST /orchestrate/v1/turn only.
- * Keys by JWT sub (decoded, not verified) or IP fallback.
+ * Keys by JWT sub + scenario_id (preferred), or IP fallback.
  * In-memory store — suitable for single-instance pilot deployment.
+ *
+ * Key priority:
+ *   user:{sub}:scenario:{scenario_id} → user:{sub} → ip:{ip}
+ *
+ * Unauthenticated requests use IP-only at a stricter limit (10/min).
+ * scenario_id from unauthenticated requests is untrusted and ignored.
  *
  * Fail-open: if the rate limiter throws, a structured warning is logged
  * and the request proceeds.
  */
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { resolveUserKey } from '../utils/jwt-extract.js';
+import { extractJwtSub, extractClientIp } from '../utils/jwt-extract.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -19,7 +25,8 @@ import { log } from '../utils/telemetry.js';
 // ---------------------------------------------------------------------------
 
 const MAX_REQUESTS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_MAX) || 30;
-const WINDOW_MS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_WINDOW_MS) || 3_600_000; // 60 min
+const MAX_REQUESTS_UNAUTHENTICATED = 10; // Stricter for IP-only
+const WINDOW_MS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_WINDOW_MS) || 60_000; // 1 minute
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -39,6 +46,12 @@ export function _resetStore(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Key types for logging
+// ---------------------------------------------------------------------------
+
+export type RateLimitKeyType = 'user+scenario' | 'user' | 'ip';
+
+// ---------------------------------------------------------------------------
 // Core logic
 // ---------------------------------------------------------------------------
 
@@ -50,7 +63,7 @@ interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
-export function checkRateLimit(key: string, now: number = Date.now()): RateLimitResult {
+export function checkRateLimit(key: string, now: number = Date.now(), limit: number = MAX_REQUESTS): RateLimitResult {
   let entry = _store.get(key);
 
   // Lazy reset if window has expired
@@ -62,16 +75,44 @@ export function checkRateLimit(key: string, now: number = Date.now()): RateLimit
   entry.count += 1;
 
   const resetAt = entry.windowStart + WINDOW_MS;
-  const remaining = Math.max(0, MAX_REQUESTS - entry.count);
+  const remaining = Math.max(0, limit - entry.count);
   const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
 
   return {
-    allowed: entry.count <= MAX_REQUESTS,
-    limit: MAX_REQUESTS,
+    allowed: entry.count <= limit,
+    limit,
     remaining,
     resetAt,
     retryAfterSeconds,
   };
+}
+
+/**
+ * Resolve rate-limit key and type from request.
+ *
+ * Key priority:
+ *   user:{sub}:scenario:{scenario_id} → user:{sub} → ip:{ip}
+ *
+ * Unauthenticated traffic always uses IP-only at the stricter limit.
+ * scenario_id from unauthenticated requests is untrusted and ignored
+ * to prevent limit evasion via scenario rotation.
+ */
+export function resolveRateLimitKey(
+  request: FastifyRequest,
+  scenarioId?: string,
+): { key: string; keyType: RateLimitKeyType; limit: number } {
+  const sub = extractJwtSub(request.headers.authorization);
+
+  if (sub && scenarioId) {
+    return { key: `user:${sub}:scenario:${scenarioId}`, keyType: 'user+scenario', limit: MAX_REQUESTS };
+  }
+  if (sub) {
+    return { key: `user:${sub}`, keyType: 'user', limit: MAX_REQUESTS };
+  }
+
+  // Unauthenticated: IP-only, stricter limit. scenario_id ignored.
+  const ip = extractClientIp(request);
+  return { key: `ip:${ip}`, keyType: 'ip', limit: MAX_REQUESTS_UNAUTHENTICATED };
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +131,12 @@ export function createOrchestratorRateLimitHook() {
     reply: FastifyReply,
   ): Promise<void> {
     try {
-      const userKey = resolveUserKey(request);
-      const result = checkRateLimit(userKey);
+      // Extract scenario_id from body if available (body is parsed by this point)
+      const body = request.body as Record<string, unknown> | undefined;
+      const scenarioId = typeof body?.scenario_id === 'string' ? body.scenario_id : undefined;
+
+      const { key, keyType, limit } = resolveRateLimitKey(request, scenarioId);
+      const result = checkRateLimit(key, Date.now(), limit);
       const requestId = getRequestId(request);
 
       // Always attach rate-limit headers (including on 200s)
@@ -105,16 +150,16 @@ export function createOrchestratorRateLimitHook() {
         log.warn({
           event: 'orchestrator_rate_limit_hit',
           request_id: requestId,
-          user_key: userKey,
+          key_type: keyType,
           limit: result.limit,
           window_ms: WINDOW_MS,
-        }, 'Orchestrator per-user rate limit exceeded');
+        }, 'Orchestrator rate limit exceeded');
 
         // cee.error.v1 shape — matches buildCeeErrorResponse() contract
-        const body = {
+        const responseBody = {
           schema: 'cee.error.v1',
           code: 'CEE_RATE_LIMIT',
-          message: "You've reached the request limit. Please try again in a few minutes.",
+          message: "You're sending messages faster than Olumi can process them. Please wait a moment before your next message.",
           retryable: true,
           source: 'cee',
           request_id: requestId,
@@ -123,7 +168,7 @@ export function createOrchestratorRateLimitHook() {
           },
         };
 
-        reply.code(429).send(body);
+        reply.code(429).send(responseBody);
         return;
       }
     } catch (err: unknown) {
