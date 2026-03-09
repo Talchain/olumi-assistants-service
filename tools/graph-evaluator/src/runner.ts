@@ -1,19 +1,19 @@
 /**
- * Runner — iterates models × briefs, calls OpenAI Responses API, returns results.
+ * Runner — iterates models × briefs, calls the appropriate LLM provider,
+ * returns results.
  *
  * This module exports a clean async function with typed I/O. It does NOT read
  * CLI args, write to stdout, or perform file I/O directly. All of that is
  * handled by cli.ts and io.ts, enabling future API integration.
  */
 
-import OpenAI from "openai";
 import { extractJSON } from "./json-extractor.js";
+import { getProvider } from "./providers/index.js";
 import type {
   ModelConfig,
   Brief,
   LLMResponse,
   FailureCode,
-  TokenUsage,
 } from "./types.js";
 
 // Configure HTTP proxy for Node.js native fetch (undici).
@@ -35,10 +35,6 @@ if (_proxyUrl) {
 
 /** Exponential backoff delays in ms (max 3 attempts after initial). */
 const RETRY_DELAYS_MS = [2_000, 8_000, 32_000];
-
-/** Default request timeout in milliseconds (reasoning models use a longer timeout). */
-const DEFAULT_TIMEOUT_MS = 120_000;
-const REASONING_TIMEOUT_MS = 180_000;
 
 /** Failure codes that are eligible for retry. */
 const RETRYABLE_CODES: FailureCode[] = ["rate_limited", "server_error"];
@@ -79,214 +75,98 @@ export interface RunInput {
 // =============================================================================
 
 function calculateCost(
-  usage: TokenUsage,
+  inputTokens: number,
+  outputTokens: number,
   pricing: ModelConfig["pricing"]
-): { cost: number; source: "api_usage" | "model_config" } {
-  const inputCost = (usage.input_tokens / 1_000_000) * pricing.input_per_1m;
-  const outputCost = (usage.output_tokens / 1_000_000) * pricing.output_per_1m;
-  return {
-    cost: inputCost + outputCost,
-    source: "api_usage",
-  };
+): number {
+  if (!pricing) return 0;
+  return (
+    (inputTokens / 1_000_000) * pricing.input_per_1m +
+    (outputTokens / 1_000_000) * pricing.output_per_1m
+  );
 }
 
 // =============================================================================
-// OpenAI Responses API call
+// Single-model call via provider abstraction
 // =============================================================================
 
-/**
- * Call the OpenAI Responses API for a single model × brief combination.
- *
- * Uses `client.responses.create()` (not chat.completions).
- * - `instructions` = system prompt equivalent
- * - `input` = user message
- * - `reasoning` parameter only sent for models with `reasoning_effort` in params
- */
-async function callOpenAI(
+async function callModel(
   model: ModelConfig,
   promptContent: string,
-  briefBody: string
+  userMessage: string
 ): Promise<LLMResponse> {
-  const apiKey = process.env[model.api_key_env];
-  if (!apiKey) {
-    throw new Error(
-      `API key not set. Expected environment variable: ${model.api_key_env}`
-    );
-  }
+  const provider = getProvider(model);
+  const result = await provider.chat(promptContent, userMessage, model);
 
-  const client = new OpenAI({ apiKey });
-
-  // Build request params
-  const params: Record<string, unknown> = {
-    model: model.model,
-    instructions: promptContent,
-    input: briefBody,
-  };
-
-  // Only add reasoning parameter for models that support it
-  if (model.params.reasoning_effort !== undefined) {
-    params["reasoning"] = { effort: model.params.reasoning_effort };
-  }
-
-  // Temperature — only for non-reasoning models
-  if (
-    model.params.temperature !== undefined &&
-    model.params.reasoning_effort === undefined
-  ) {
-    params["temperature"] = model.params.temperature;
-  }
-
-  const startTime = Date.now();
-
-  // Dynamic timeout: reasoning models need longer (90s), others use 30s
-  const timeoutMs =
-    model.params.reasoning_effort !== undefined
-      ? REASONING_TIMEOUT_MS
-      : DEFAULT_TIMEOUT_MS;
-
-  // Make the API call with a timeout signal
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(
-    () => controller.abort("timeout"),
-    timeoutMs
+  const cost = calculateCost(
+    result.input_tokens ?? 0,
+    result.output_tokens ?? 0,
+    model.pricing
   );
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = await (client.responses as any).create(params, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutHandle);
-
-    const latencyMs = Date.now() - startTime;
-
-    // Extract output text from response
-    const rawText: string =
-      response.output_text ??
-      response.output
-        ?.filter((o: { type: string }) => o.type === "message")
-        ?.flatMap((o: { content: Array<{ type: string; text: string }> }) =>
-          o.content
-            ?.filter((c) => c.type === "output_text" || c.type === "text")
-            ?.map((c) => c.text) ?? []
-        )
-        ?.join("") ??
-      "";
-
-    // Extract token usage
-    const usageData = response.usage ?? {};
-    const usage: TokenUsage = {
-      input_tokens: usageData.input_tokens ?? usageData.prompt_tokens ?? 0,
-      output_tokens: usageData.output_tokens ?? usageData.completion_tokens ?? 0,
-      reasoning_tokens:
-        usageData.output_tokens_details?.reasoning_tokens ??
-        usageData.completion_tokens_details?.reasoning_tokens,
-    };
-
-    // Calculate cost from usage
-    const { cost, source } = calculateCost(usage, model.pricing);
-
-    // Extract JSON from raw response
-    const extraction = extractJSON(rawText);
-
-    if (extraction.parsed === null) {
-      return {
-        model_id: model.id,
-        brief_id: "", // Set by caller
-        status: "parse_failed",
-        failure_code: "parse_failed",
-        raw_text: rawText,
-        extraction_attempted: extraction.extraction_attempted,
-        latency_ms: latencyMs,
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
-        est_cost_usd: cost,
-        pricing_source: source,
-        error_message: "No extractable JSON found in response",
-      };
-    }
-
+  if (!result.ok) {
+    // Map provider error string to FailureCode
+    const failureCode = classifyErrorString(result.error ?? "server_error");
     return {
       model_id: model.id,
       brief_id: "",
-      status: "success",
-      raw_text: rawText,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      parsed_graph: extraction.parsed as any,
-      extraction_attempted: extraction.extraction_attempted,
-      latency_ms: latencyMs,
-      input_tokens: usage.input_tokens,
-      output_tokens: usage.output_tokens,
-      reasoning_tokens: usage.reasoning_tokens,
-      est_cost_usd: cost,
-      pricing_source: source,
-    };
-  } catch (err) {
-    clearTimeout(timeoutHandle);
-    const latencyMs = Date.now() - startTime;
-    return classifyError(err, model.id, latencyMs, model.pricing);
-  }
-}
-
-// =============================================================================
-// Error classification
-// =============================================================================
-
-function classifyError(
-  err: unknown,
-  modelId: string,
-  latencyMs: number,
-  pricing: ModelConfig["pricing"]
-): LLMResponse {
-  const base = {
-    model_id: modelId,
-    brief_id: "",
-    latency_ms: latencyMs,
-    est_cost_usd: 0,
-    pricing_source: "model_config" as const,
-  };
-
-  // AbortError = timeout. The OpenAI SDK throws APIConnectionError with message
-  // "Request was aborted." when AbortController fires — catch that too.
-  if (
-    err instanceof Error &&
-    (err.name === "AbortError" ||
-      String(err.message).includes("timeout") ||
-      String(err.message).toLowerCase().includes("aborted"))
-  ) {
-    return {
-      ...base,
-      status: "timeout_failed",
-      failure_code: "timeout_failed",
-      error_message: "Request timed out",
-    };
-  }
-
-  // OpenAI API errors
-  if (err instanceof OpenAI.APIError) {
-    let failureCode: FailureCode;
-    if (err.status === 429) failureCode = "rate_limited";
-    else if (err.status === 401 || err.status === 403) failureCode = "auth_failed";
-    else if (err.status === 400) failureCode = "invalid_request";
-    else if (err.status != null && err.status >= 500) failureCode = "server_error";
-    else failureCode = "server_error";
-
-    return {
-      ...base,
       status: failureCode,
       failure_code: failureCode,
-      error_message: err.message,
+      error_message: result.error ?? undefined,
+      latency_ms: result.latency_ms,
+      input_tokens: result.input_tokens,
+      output_tokens: result.output_tokens,
+      est_cost_usd: cost,
+      pricing_source: "api_usage",
     };
   }
 
-  // Generic error
+  const rawText = result.text ?? "";
+
+  // Extract JSON from raw response (draft_graph path — other adapters handle
+  // parsing themselves, but runner needs to return something for scoring)
+  const extraction = extractJSON(rawText);
+
+  if (extraction.parsed === null) {
+    return {
+      model_id: model.id,
+      brief_id: "",
+      status: "parse_failed",
+      failure_code: "parse_failed",
+      raw_text: rawText,
+      extraction_attempted: extraction.extraction_attempted,
+      latency_ms: result.latency_ms,
+      input_tokens: result.input_tokens,
+      output_tokens: result.output_tokens,
+      est_cost_usd: cost,
+      pricing_source: "api_usage",
+      error_message: "No extractable JSON found in response",
+    };
+  }
+
   return {
-    ...base,
-    status: "server_error",
-    failure_code: "server_error",
-    error_message: err instanceof Error ? err.message : String(err),
+    model_id: model.id,
+    brief_id: "",
+    status: "success",
+    raw_text: rawText,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parsed_graph: extraction.parsed as any,
+    extraction_attempted: extraction.extraction_attempted,
+    latency_ms: result.latency_ms,
+    input_tokens: result.input_tokens,
+    output_tokens: result.output_tokens,
+    est_cost_usd: cost,
+    pricing_source: "api_usage",
   };
+}
+
+function classifyErrorString(err: string): FailureCode {
+  const lower = err.toLowerCase();
+  if (lower.includes("timeout")) return "timeout_failed";
+  if (lower.includes("rate_limited")) return "rate_limited";
+  if (lower.includes("auth_failed")) return "auth_failed";
+  if (lower.includes("invalid_request")) return "invalid_request";
+  return "server_error";
 }
 
 // =============================================================================
@@ -361,7 +241,7 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
 
       // ── Dry run ───────────────────────────────────────────────────────────
       if (dryRun) {
-        console.log(`  [dry-run] Would run: ${model.id} × ${brief.id} (${brief.meta.complexity})`);
+        console.log(`  [dry-run] Would run: ${model.id} × ${brief.id} (${brief.meta?.complexity ?? "unknown"})`);
         continue;
       }
 
@@ -371,7 +251,7 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
       const userMessage = reminderContent
         ? `${brief.body}\n\n${reminderContent}`
         : brief.body;
-      const callFn = () => callOpenAI(model, promptContent, userMessage);
+      const callFn = () => callModel(model, promptContent, userMessage);
 
       let result = await withRetry(callFn);
 
@@ -381,7 +261,7 @@ export async function run(input: RunInput): Promise<LLMResponse[]> {
         result = await withRetry(callFn, true);
       }
 
-      // Stamp the brief_id (callOpenAI doesn't have it in scope)
+      // Stamp the brief_id (callModel doesn't have it in scope)
       result.brief_id = brief.id;
 
       // ── Save to disk ──────────────────────────────────────────────────────

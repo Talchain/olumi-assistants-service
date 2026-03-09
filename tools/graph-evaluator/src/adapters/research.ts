@@ -61,7 +61,7 @@ export async function callResearchAPI(
   query: string,
   contextHint: string | null
 ): Promise<{ result: ResearchResult | null; raw: string; latencyMs: number; usage: { input: number; output: number }; error?: string; failureCode?: FailureCode }> {
-  const apiKey = process.env[model.api_key_env];
+  const apiKey = model.api_key_env ? process.env[model.api_key_env] : undefined;
   if (!apiKey) {
     return {
       result: null,
@@ -274,8 +274,8 @@ export async function runResearchFixture(
   const { result, raw, latencyMs, usage, error, failureCode } =
     await callResearchAPI(model, fixture.query, fixture.context_hint);
 
-  const inputCost = (usage.input / 1_000_000) * model.pricing.input_per_1m;
-  const outputCost = (usage.output / 1_000_000) * model.pricing.output_per_1m;
+  const inputCost = model.pricing ? (usage.input / 1_000_000) * model.pricing.input_per_1m : 0;
+  const outputCost = model.pricing ? (usage.output / 1_000_000) * model.pricing.output_per_1m : 0;
   const estCost = inputCost + outputCost;
 
   if (!result || failureCode) {

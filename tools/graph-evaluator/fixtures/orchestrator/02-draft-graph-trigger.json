@@ -1,0 +1,15 @@
+{
+  "id": "orch-02-draft-graph-trigger",
+  "name": "Draft Graph — Sufficient Context",
+  "description": "User provides goal, options, and factors. The orchestrator should select draft_graph tool.",
+  "stage": "frame",
+  "user_message": "Our goal is to maximise annual recurring revenue. We're choosing between raising prices by 20%, launching a new enterprise tier, or keeping pricing unchanged. Key factors are customer churn risk, competitive response, and sales team capacity. Our constraint is keeping churn below 5%.",
+  "expected": {
+    "expected_tool": "draft_graph",
+    "expects_coaching": false,
+    "min_actions": 0,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": false
+  }
+}

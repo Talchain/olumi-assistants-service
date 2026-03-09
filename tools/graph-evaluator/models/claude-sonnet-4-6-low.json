@@ -1,0 +1,9 @@
+{
+  "id": "claude-sonnet-4-6-low",
+  "display_name": "Claude Sonnet 4.6 (low thinking)",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "max_tokens": 4096,
+  "timeout_ms": 120000,
+  "thinking": { "type": "enabled", "budget_tokens": 2000 }
+}

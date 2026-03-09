@@ -1,0 +1,46 @@
+{
+  "id": "orch-08-multi-turn-post-analysis",
+  "name": "Multi-turn Post-Analysis — Dominant Factor Follow-up",
+  "description": "Two-turn post-analysis conversation. First turn asks about results, second probes the dominant factor. Should reference pricing sensitivity and use uncertainty language.",
+  "stage": "evaluate",
+  "turns": [
+    { "role": "user", "content": "What did the analysis find?" },
+    { "role": "assistant", "content": null },
+    { "role": "user", "content": "Tell me more about the pricing sensitivity. How confident should I be in that number?" }
+  ],
+  "canonical_state": {
+    "winner": { "id": "opt_premium", "label": "Premium Pricing", "win_probability": 0.58 },
+    "runner_up": { "id": "opt_competitive", "label": "Competitive Pricing", "win_probability": 0.42 },
+    "margin": 0.08,
+    "robustness": "fragile",
+    "top_drivers": [
+      { "factor_id": "fac_pricing", "factor_label": "Pricing", "sensitivity_pct": 62 },
+      { "factor_id": "fac_retention", "factor_label": "Customer Retention", "sensitivity_pct": 18 }
+    ],
+    "factor_sensitivity": [
+      { "factor_label": "Pricing", "elasticity": 0.62 }
+    ]
+  },
+  "graph_context": {
+    "nodes": [
+      { "id": "goal_rev", "kind": "goal", "label": "Maximise Revenue" },
+      { "id": "fac_pricing", "kind": "factor", "label": "Pricing", "category": "controllable" },
+      { "id": "fac_retention", "kind": "factor", "label": "Customer Retention", "category": "observable" },
+      { "id": "opt_premium", "kind": "option", "label": "Premium Pricing" },
+      { "id": "opt_competitive", "kind": "option", "label": "Competitive Pricing" }
+    ],
+    "edges": [
+      { "from": "fac_pricing", "to": "goal_rev", "strength": { "mean": 0.7, "std": 0.2 }, "exists_probability": 0.9 },
+      { "from": "fac_retention", "to": "goal_rev", "strength": { "mean": 0.4, "std": 0.15 }, "exists_probability": 0.85 }
+    ]
+  },
+  "expected": {
+    "expected_tool": null,
+    "expects_coaching": true,
+    "min_actions": 1,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": true,
+    "must_contain": ["Pricing"]
+  }
+}

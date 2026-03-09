@@ -1,0 +1,16 @@
+{
+  "id": "orch-01-framing-elicit",
+  "name": "Framing — Structured Elicitation",
+  "description": "User describes a decision without enough detail. The orchestrator should elicit goal, options, and factors — not invoke a tool yet.",
+  "stage": "frame",
+  "user_message": "We're thinking about whether to expand into the US market next year.",
+  "expected": {
+    "expected_tool": null,
+    "expects_coaching": false,
+    "min_actions": 1,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": false,
+    "must_contain": ["goal", "option"]
+  }
+}

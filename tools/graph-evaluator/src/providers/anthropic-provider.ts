@@ -36,22 +36,17 @@ export class AnthropicProvider implements LLMProvider {
     const timeoutMs = config.timeout_ms ?? DEFAULT_TIMEOUT_MS;
     const maxTokens = config.max_tokens ?? DEFAULT_MAX_TOKENS;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const params: Record<string, any> = {
+    const params: Anthropic.MessageCreateParamsNonStreaming = {
       model: config.model,
       system,
       messages: [{ role: "user", content: user }],
       max_tokens: maxTokens,
     };
 
-    // Only pass model-specific params for Claude models
-    if (isClaudeModel(config.model)) {
-      if (config.thinking !== undefined) {
-        params["thinking"] = config.thinking;
-      }
-      if (config.effort !== undefined) {
-        params["effort"] = config.effort;
-      }
+    // Only pass thinking config for Claude models
+    if (isClaudeModel(config.model) && config.thinking !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (params as any)["thinking"] = config.thinking;
     }
 
     const controller = new AbortController();

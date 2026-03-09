@@ -1,0 +1,9 @@
+{
+  "id": "claude-sonnet-4-6",
+  "display_name": "Claude Sonnet 4.6",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "max_tokens": 12096,
+  "timeout_ms": 120000,
+  "thinking": { "type": "enabled", "budget_tokens": 8000 }
+}

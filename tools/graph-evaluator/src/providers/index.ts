@@ -10,8 +10,7 @@ import { OpenAIProvider } from "./openai-provider.js";
 import { AnthropicProvider } from "./anthropic-provider.js";
 import type { LLMProvider, ModelConfig } from "./types.js";
 
-export { OpenAIProvider } from "./openai-provider.js";
-export { AnthropicProvider } from "./anthropic-provider.js";
+export { OpenAIProvider, AnthropicProvider };
 export type { LLMProvider, LLMResult, ModelConfig as ProviderModelConfig } from "./types.js";
 
 export function getProvider(config: ModelConfig): LLMProvider {

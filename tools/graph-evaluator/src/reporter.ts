@@ -17,9 +17,10 @@ const ANALYSIS_PACK_CHAR_LIMIT = 30_000;
 function generateScoresCsv(results: ScoredResult[], config: RunConfig): string {
   const rows = results.map((r) => ({
     run_id: config.run_id,
+    provider: r.model.provider,
     model_id: r.model.id,
     brief_id: r.brief.id,
-    target_mode: r.model.target_mode,
+    target_mode: r.model.target_mode ?? "",
     structural_valid: r.score.structural_valid,
     param_quality: r.score.param_quality?.toFixed(4) ?? "",
     option_diff: r.score.option_diff?.toFixed(4) ?? "",
@@ -104,7 +105,7 @@ function generateSummaryMd(
     String(i + 1),
     r.model.id,
     r.brief.id,
-    r.model.target_mode,
+    r.model.target_mode ?? "",
     fmtScore(r.score.overall_score),
     fmtBool(r.score.structural_valid),
     fmtScore(r.score.param_quality),
@@ -175,7 +176,7 @@ function generateSummaryMd(
     const briefHeaders = ["Model", "Mode", "Overall", "Struct", "Violations", "Failure"];
     const briefRows = sortedByScore.map((r) => [
       r.model.id,
-      r.model.target_mode,
+      r.model.target_mode ?? "",
       fmtScore(r.score.overall_score),
       fmtBool(r.score.structural_valid),
       r.score.violation_codes.join(", ") || "—",
@@ -313,7 +314,7 @@ function generateAnalysisPackMd(
   const tableRows = results.map((r) => [
     r.model.id,
     r.brief.id,
-    r.model.target_mode,
+    r.model.target_mode ?? "",
     fmtScore(r.score.overall_score),
     fmtBool(r.score.structural_valid),
     fmtScore(r.score.param_quality),

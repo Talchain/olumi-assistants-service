@@ -192,7 +192,7 @@ export interface ScoreResult {
 // Prompt type system
 // =============================================================================
 
-export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research";
+export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research" | "orchestrator";
 
 // =============================================================================
 // Generic fixture / score for multi-type support
@@ -354,6 +354,92 @@ export interface ResearchScore {
   has_numeric_values: boolean;
   has_confidence_note: boolean;
   overall: number;
+}
+
+// =============================================================================
+// Orchestrator types
+// =============================================================================
+
+export interface OrchestratorTurn {
+  role: "user" | "assistant";
+  content: string | null;
+}
+
+export interface OrchestratorFixture extends BaseFixture {
+  /** The stage context to provide as the user message */
+  stage: "frame" | "ideate" | "evaluate" | "decide";
+  /** Single-turn user message (legacy). Ignored if turns is present. */
+  user_message?: string;
+  /** Multi-turn conversation. assistant turns with null content are filled by the model. */
+  turns?: OrchestratorTurn[];
+  /** Optional canonical_state JSON to include in context */
+  canonical_state?: Record<string, unknown>;
+  /** Optional graph context to include */
+  graph_context?: { nodes: GraphNode[]; edges: GraphEdge[] };
+  /** Expected behaviour assertions */
+  expected: {
+    /** Expected tool to be selected (null = no tool) */
+    expected_tool: string | null;
+    /** Whether the response should contain coaching (review_card blocks) */
+    expects_coaching: boolean;
+    /** Required coaching play name if applicable */
+    coaching_play?: string;
+    /** Minimum expected suggested_actions count */
+    min_actions: number;
+    /** Maximum expected suggested_actions count */
+    max_actions: number;
+    /** Banned terms that must NOT appear in user-facing text */
+    banned_terms_checked: boolean;
+    /** Whether response should use uncertainty language (not absolutes) */
+    expects_uncertainty_language: boolean;
+    /** Forbidden phrases that must not appear */
+    forbidden_phrases?: string[];
+    /** Required substrings in assistant_text */
+    must_contain?: string[];
+  };
+}
+
+export interface OrchestratorScore {
+  valid_envelope: boolean;
+  diagnostics_present: boolean;
+  assistant_text_present: boolean;
+  blocks_tag_present: boolean;
+  actions_tag_present: boolean;
+  tool_selection_correct: boolean;
+  no_banned_terms: boolean;
+  uncertainty_language: boolean;
+  block_types_valid: boolean;
+  suggested_actions_valid: boolean;
+  coaching_correct: boolean;
+  no_forbidden_phrases: boolean;
+  must_contain_met: boolean;
+  xml_well_formed: boolean;
+  overall: number;
+}
+
+export interface JudgeDimensionScore {
+  score: number;
+  reason: string;
+}
+
+export interface JudgeResult {
+  rubric_version: string;
+  scores: {
+    scientific_polymath: JudgeDimensionScore;
+    causal_mechanism: JudgeDimensionScore;
+    coaching_over_telling: JudgeDimensionScore;
+    grounded_quantification: JudgeDimensionScore;
+    warm_directness: JudgeDimensionScore;
+    appropriate_brevity: JudgeDimensionScore;
+    constructive_challenge: JudgeDimensionScore;
+    elicitation_quality: JudgeDimensionScore;
+    session_coherence: JudgeDimensionScore;
+  };
+  overall_impression: string;
+  weighted_average: number;
+  judge_latency_ms: number;
+  judge_cost_usd: number;
+  judge_error?: string;
 }
 
 // =============================================================================
