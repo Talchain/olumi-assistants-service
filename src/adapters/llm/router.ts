@@ -40,6 +40,7 @@ import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIAdapter } from "./openai.js";
 import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
+import { withUsageTracking } from "./usage-tracking.js";
 import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
 import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
 
@@ -640,7 +641,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
       );
     }
     // Cache the wrapped failover adapter
-    wrappedAdapters.set(failoverCacheKey, withCaching(failoverAdapter));
+    wrappedAdapters.set(failoverCacheKey, withUsageTracking(withCaching(failoverAdapter)));
     return wrappedAdapters.get(failoverCacheKey)!;
   }
   const providersConfig = getConfig();
@@ -767,7 +768,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
   const cacheKey = `single:${selectedProvider}:${selectedModel || "default"}`;
   if (!wrappedAdapters.has(cacheKey)) {
     const adapter = getAdapterInstance(selectedProvider, selectedModel);
-    wrappedAdapters.set(cacheKey, withCaching(adapter));
+    wrappedAdapters.set(cacheKey, withUsageTracking(withCaching(adapter)));
   }
   return wrappedAdapters.get(cacheKey)!;
 }

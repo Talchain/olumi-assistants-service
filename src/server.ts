@@ -75,6 +75,8 @@ import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 import { loadDskBundle } from "./orchestrator/dsk-loader.js";
+import { initSentry, setSentryRequestTag, setupSentryFastify } from "./middleware/sentry.js";
+import { createContextRegistrationHook, createContextCleanupHook } from "./middleware/token-budget.js";
 
 export const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -126,6 +128,9 @@ function resolveAllowedOrigins(): string[] {
  * (Can be imported for testing or run directly)
  */
 export async function build() {
+  // Sentry: initialise early (no-op when SENTRY_DSN is unset)
+  initSentry();
+
   // Fail-fast: Validate all configuration at startup
   // This ensures misconfiguration is caught immediately rather than lazily
   validateConfig();
@@ -325,6 +330,7 @@ await app.register(rateLimit, {
   app.addHook("onRequest", async (request, _reply) => {
     attachRequestId(request);
     incrementRequestCount();
+    setSentryRequestTag(getRequestId(request));
 
     // Warn if request arrives before cache warming completes (race condition diagnostic)
     // Skip healthz to avoid noise during startup probes
@@ -350,6 +356,21 @@ await app.register(rateLimit, {
 
   // Boundary logging: Service headers + boundary events (observability v1)
   await app.register(boundaryLoggingPlugin);
+
+  // Token budget: register request context for LLM routes, clean up on response.
+  // Budget enforcement itself happens at the adapter boundary (usage-tracking.ts).
+  {
+    const contextReg = createContextRegistrationHook();
+    const contextCleanup = createContextCleanupHook();
+
+    app.addHook("onRequest", async (request) => {
+      await contextReg(request);
+    });
+
+    app.addHook("onResponse", async (request) => {
+      await contextCleanup(request);
+    });
+  }
 
   // Response hook: Add X-Request-Id header to every response
   app.addHook("onSend", async (request, reply, payload) => {
@@ -867,6 +888,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       }
     }
   }
+
+  // Sentry: register Fastify error handler AFTER all routes
+  setupSentryFastify(app);
 
   return app;
 }
