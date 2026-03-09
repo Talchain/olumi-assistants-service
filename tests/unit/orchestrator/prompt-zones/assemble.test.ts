@@ -153,6 +153,31 @@ describe('assembleFullPrompt', () => {
   });
 });
 
+describe('BIL double-wrapping regression', () => {
+  it('pre-wrapped bilContext produces exactly one <BRIEF_ANALYSIS> wrapper, never nested', () => {
+    const ctx = makeCtx({
+      bilEnabled: true,
+      bilContext: '<BRIEF_ANALYSIS>\nCompleteness: adequate\nGoal: Revenue\n</BRIEF_ANALYSIS>',
+      stage: 'frame',
+      messages: [{ role: 'user', content: 'Hello' }],
+    });
+    const result = assembleFullPrompt(ZONE1, 'cf-v9', ctx);
+    const prompt = result.system_prompt;
+
+    // Exactly one opening and one closing tag
+    const opens = (prompt.match(/<BRIEF_ANALYSIS>/g) ?? []).length;
+    const closes = (prompt.match(/<\/BRIEF_ANALYSIS>/g) ?? []).length;
+    expect(opens).toBe(1);
+    expect(closes).toBe(1);
+
+    // No nested pattern: <BRIEF_ANALYSIS> followed by <BRIEF_ANALYSIS>
+    expect(prompt).not.toMatch(/<BRIEF_ANALYSIS>\s*<BRIEF_ANALYSIS>/);
+
+    // Inner content is present
+    expect(prompt).toContain('Completeness: adequate');
+  });
+});
+
 describe('Budget trimming', () => {
   it('trims blocks in priority order when over budget', () => {
     // Create a very large event_log to trigger trimming
