@@ -5,18 +5,18 @@
  * share limits, and the /v1/limits endpoint stay in sync.
  *
  * Platform defaults from @talchain/schemas: MAX_NODES=50, MAX_EDGES=100.
- * CEE intentionally uses higher MAX_EDGES (200) to accommodate complex
- * causal graphs that exceed the platform standard. This is a deliberate
- * divergence — CEE's graph complexity requirements differ from other consumers.
+ * CEE defaults now match PLoT canonical limits (Decision Model Schema v2.8 D.1).
+ * CEE should never produce graphs PLoT will reject.
  *
  * Can be overridden via GRAPH_MAX_NODES / GRAPH_MAX_EDGES env vars.
  */
 
 import { LIMITS as PLATFORM_LIMITS } from "@talchain/schemas";
 
-// CEE defaults: MAX_NODES matches platform, MAX_EDGES is higher (200 vs 100)
+// CEE defaults: both match PLoT canonical limits (Decision Model Schema v2.8 D.1).
+// CEE should never produce graphs PLoT will reject.
 const DEFAULT_MAX_NODES = PLATFORM_LIMITS.MAX_NODES; // 50 — matches platform
-const DEFAULT_MAX_EDGES = 200; // CEE override: platform is 100, CEE needs 200
+const DEFAULT_MAX_EDGES = 100; // Aligned with PLoT canonical limit (Decision Model Schema v2.8 D.1)
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

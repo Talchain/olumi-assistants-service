@@ -6,7 +6,11 @@
  *
  * Checks run exhaustively (no short-circuit) — all violations are reported.
  *
- * Limits: 12 nodes, 20 edges (orchestrator-specific; tighter than CEE pipeline's 50/200).
+ * Limits: configurable via CEE_GRAPH_MAX_NODES / CEE_GRAPH_MAX_EDGES env vars
+ * (defaults: 20 nodes, 30 edges). These are AI mutation safety limits, deliberately
+ * stricter than PLoT's platform limits (50/100). They constrain per-turn graph
+ * mutations to keep patches reviewable. PLoT remains the canonical validation
+ * authority for absolute graph size.
  */
 
 import type { GraphV3T } from "../schemas/cee-v3.js";
@@ -39,8 +43,11 @@ export interface StructuralValidationResult {
 // Constants
 // ============================================================================
 
-const MAX_NODES = 12;
-const MAX_EDGES = 20;
+// AI mutation safety limits — deliberately stricter than PLoT's platform limits (50/100).
+// They constrain per-turn graph mutations to keep patches reviewable.
+// PLoT remains the canonical validation authority for absolute graph size.
+const MAX_NODES = parseInt(process.env.CEE_GRAPH_MAX_NODES || '20', 10);
+const MAX_EDGES = parseInt(process.env.CEE_GRAPH_MAX_EDGES || '30', 10);
 const MIN_OPTIONS = 2;
 
 // ============================================================================

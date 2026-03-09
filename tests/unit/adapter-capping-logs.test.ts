@@ -50,7 +50,7 @@ describe("Adapter Capping Logs", () => {
 
     it("GRAPH_MAX_EDGES is defined and positive", () => {
       expect(GRAPH_MAX_EDGES).toBeGreaterThan(0);
-      expect(GRAPH_MAX_EDGES).toBe(200); // Default value
+      expect(GRAPH_MAX_EDGES).toBe(100); // Default value (aligned with PLoT canonical limit)
     });
 
     it("GRAPH_MAX_EDGES is greater than GRAPH_MAX_NODES", () => {
@@ -127,7 +127,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 250, after: 200, max: 200, capped: true },
+        edges: { before: 150, after: 100, max: 100, capped: true },
         request_id: 'req-123',
       };
 
@@ -136,7 +136,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'anthropic',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 250, after: 200, max: 200, capped: true },
+        edges: { before: 150, after: 100, max: 100, capped: true },
         request_id: 'idem-456',
       };
 
@@ -165,7 +165,7 @@ describe("Adapter Capping Logs", () => {
       const edgesCapped = oversizedEdgeCount > GRAPH_MAX_EDGES;
 
       expect(edgesCapped).toBe(true);
-      expect(oversizedEdgeCount).toBe(250);
+      expect(oversizedEdgeCount).toBe(150);
     });
 
     it("verifies no capping when under limits", () => {
@@ -182,7 +182,7 @@ describe("Adapter Capping Logs", () => {
     it("event only emits when capping occurs", () => {
       // Scenario: nodes capped, edges not capped
       const nodesBefore = 75;
-      const edgesBefore = 150;
+      const edgesBefore = 80; // < 100 (GRAPH_MAX_EDGES)
       const nodesCapped = nodesBefore > GRAPH_MAX_NODES;
       const edgesCapped = edgesBefore > GRAPH_MAX_EDGES;
 
@@ -228,7 +228,7 @@ describe("Adapter Capping Logs", () => {
 
     it("before count is preserved in event", () => {
       const nodesBefore = 75;
-      const edgesBefore = 250;
+      const edgesBefore = 150;
 
       const event: GraphCappedEvent = {
         event: 'cee.repair.graph_capped',
@@ -249,9 +249,9 @@ describe("Adapter Capping Logs", () => {
       };
 
       expect(event.nodes.before).toBe(75);
-      expect(event.edges.before).toBe(250);
+      expect(event.edges.before).toBe(150);
       expect(event.nodes.before - event.nodes.after).toBe(25); // 75 - 50
-      expect(event.edges.before - event.edges.after).toBe(50); // 250 - 200
+      expect(event.edges.before - event.edges.after).toBe(50); // 150 - 100
     });
   });
 
@@ -262,7 +262,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
       };
 
       // Event name follows cee.* namespace convention
@@ -276,7 +276,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
       };
 
       const anthropicEvent: GraphCappedEvent = {
@@ -284,7 +284,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'anthropic',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
       };
 
       expect(openaiEvent.adapter).toBe('openai');
@@ -297,7 +297,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
       };
 
       expect(repairEvent.path).toBe('repair');
@@ -311,7 +311,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
         request_id: 'req-123',
       };
 
@@ -320,7 +320,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'openai',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
       };
 
       expect(eventWithId.request_id).toBe('req-123');
@@ -333,7 +333,7 @@ describe("Adapter Capping Logs", () => {
         adapter: 'anthropic',
         path: 'repair',
         nodes: { before: 75, after: 50, max: 50, capped: true },
-        edges: { before: 100, after: 100, max: 200, capped: false },
+        edges: { before: 100, after: 100, max: 100, capped: false },
         request_id: 'req-456',
         idempotency_key: 'idem-789',
       };
@@ -357,8 +357,8 @@ describe("Adapter Capping Logs", () => {
      */
     it("Fixture 1: Only nodes exceed limit → event emitted with nodes.capped=true, edges.capped=false", () => {
       const fixture = {
-        nodesBefore: 75,  // > 50 (GRAPH_MAX_NODES)
-        edgesBefore: 150, // < 200 (GRAPH_MAX_EDGES)
+        nodesBefore: 75, // > 50 (GRAPH_MAX_NODES)
+        edgesBefore: 80, // < 100 (GRAPH_MAX_EDGES)
       };
 
       const nodesCapped = fixture.nodesBefore > GRAPH_MAX_NODES;
@@ -408,7 +408,7 @@ describe("Adapter Capping Logs", () => {
     it("Fixture 2: Only edges exceed limit → event emitted with nodes.capped=false, edges.capped=true", () => {
       const fixture = {
         nodesBefore: 40,  // < 50 (GRAPH_MAX_NODES)
-        edgesBefore: 250, // > 200 (GRAPH_MAX_EDGES)
+        edgesBefore: 150, // > 100 (GRAPH_MAX_EDGES)
       };
 
       const nodesCapped = fixture.nodesBefore > GRAPH_MAX_NODES;
@@ -459,7 +459,7 @@ describe("Adapter Capping Logs", () => {
     it("Fixture 3: Neither exceeds limit → NO event emitted", () => {
       const fixture = {
         nodesBefore: 30,  // < 50 (GRAPH_MAX_NODES)
-        edgesBefore: 100, // < 200 (GRAPH_MAX_EDGES)
+        edgesBefore: 100, // < 100 (GRAPH_MAX_EDGES) — exactly at limit, not capped (strict >)
       };
 
       const nodesCapped = fixture.nodesBefore > GRAPH_MAX_NODES;
@@ -490,7 +490,7 @@ describe("Adapter Capping Logs", () => {
     it("Fixture 4: Both exceed limits → event emitted with both capped=true", () => {
       const fixture = {
         nodesBefore: 75,  // > 50 (GRAPH_MAX_NODES)
-        edgesBefore: 250, // > 200 (GRAPH_MAX_EDGES)
+        edgesBefore: 150, // > 100 (GRAPH_MAX_EDGES)
       };
 
       const nodesCapped = fixture.nodesBefore > GRAPH_MAX_NODES;
@@ -544,7 +544,7 @@ describe("Adapter Capping Logs", () => {
     it("Fixture boundary: Exactly at limits → NO event emitted", () => {
       const fixture = {
         nodesBefore: GRAPH_MAX_NODES, // exactly 50
-        edgesBefore: GRAPH_MAX_EDGES, // exactly 200
+        edgesBefore: GRAPH_MAX_EDGES, // exactly 100 (at limit, not capped)
       };
 
       const nodesCapped = fixture.nodesBefore > GRAPH_MAX_NODES;

@@ -2104,7 +2104,7 @@ export const PROMPT_TEMPLATES = {
   decision_review: DECISION_REVIEW_PROMPT,
   edit_graph: EDIT_GRAPH_PROMPT,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
-  orchestrator: ORCHESTRATOR_PROMPT_CF_V11,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V12,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 

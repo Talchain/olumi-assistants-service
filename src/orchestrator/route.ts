@@ -71,7 +71,7 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
   z.object({
     event_type: z.literal('direct_analysis_run'),
     ...SystemEventBase,
-    details: z.object({}).strict(),
+    details: z.object({}).passthrough(),
   }),
   z.object({
     event_type: z.literal('feedback_submitted'),
@@ -251,6 +251,17 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
           ...systemEvent,
           details: { ...det, patch_id: det.block_id },
         } as SystemEvent;
+      }
+    }
+
+    // Log unknown fields in direct_analysis_run details (passthrough schema)
+    if (systemEvent?.event_type === 'direct_analysis_run') {
+      const detailKeys = Object.keys((systemEvent as Record<string, unknown>).details ?? {});
+      if (detailKeys.length > 0) {
+        log.warn(
+          { request_id: requestId, unknown_keys: detailKeys },
+          'direct_analysis_run received unknown fields',
+        );
       }
     }
 

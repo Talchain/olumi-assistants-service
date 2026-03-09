@@ -62,10 +62,10 @@ describe("CEE Caps Consistency Invariant", () => {
     });
 
     it("default caps match between graphCaps.ts exports", () => {
-      // These are the canonical values - test that we're using them
+      // Canonical values aligned with PLoT (Decision Model Schema v2.8 D.1)
       expect(GRAPH_MAX_NODES).toBeGreaterThanOrEqual(50);
-      expect(GRAPH_MAX_EDGES).toBeGreaterThanOrEqual(200);
-      // Edge cap should be greater than node cap (typical ratio is 4:1)
+      expect(GRAPH_MAX_EDGES).toBeGreaterThanOrEqual(100);
+      // Edge cap should be greater than node cap
       expect(GRAPH_MAX_EDGES).toBeGreaterThan(GRAPH_MAX_NODES);
     });
   });

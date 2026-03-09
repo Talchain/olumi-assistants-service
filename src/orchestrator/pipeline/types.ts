@@ -20,6 +20,7 @@ import type {
   TurnPlan,
   GraphV3T,
   AnalysisInputs,
+  GraphPatchBlockData,
 } from "../types.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
@@ -255,6 +256,13 @@ export interface OrchestratorResponseEnvelopeV2 {
    * read this field are unaffected.
    */
   guidance_items: GuidanceItem[];
+
+  /**
+   * Envelope-level analysis readiness computed from the current graph state.
+   * The UI uses this to enable/disable the Analyse button.
+   * Absent when no graph exists. Computed via computeStructuralReadiness().
+   */
+  analysis_ready?: GraphPatchBlockData['analysis_ready'];
 
   /**
    * When run_analysis returns blocked/failed — from PLoT V2RunError (422) or CEE prereq check.

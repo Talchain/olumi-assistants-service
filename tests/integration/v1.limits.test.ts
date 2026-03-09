@@ -16,7 +16,7 @@ describe("GET /v1/limits", () => {
     // Configure API key and graph caps for deterministic tests
     vi.stubEnv("ASSIST_API_KEYS", "test-key-limits");
     vi.stubEnv("GRAPH_MAX_NODES", "50");
-    vi.stubEnv("GRAPH_MAX_EDGES", "200");
+    vi.stubEnv("GRAPH_MAX_EDGES", "100");
     vi.stubEnv("RATE_LIMIT_RPM", "120");
     vi.stubEnv("SSE_RATE_LIMIT_RPM", "20");
 
@@ -65,6 +65,6 @@ describe("GET /v1/limits", () => {
 
     // Graph caps should reflect configured values
     expect(body.graph_max_nodes).toBe(50);
-    expect(body.graph_max_edges).toBe(200);
+    expect(body.graph_max_edges).toBe(100);
   });
 });

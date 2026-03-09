@@ -9,6 +9,7 @@ import { isProduction, config } from "../../../config/index.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { getDskVersionHash } from "../../dsk-loader.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
+import { computeStructuralReadiness } from "../../tools/analysis-ready-helper.js";
 import type {
   EnrichedContext,
   SpecialistResult,
@@ -191,6 +192,18 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
         envelope.meta = ar.meta as Record<string, unknown>;
       }
     }
+  }
+
+  // Compute envelope-level analysis_ready from current graph state.
+  // Uses the post-tool graph when available (graph_patch blocks carry applied_graph),
+  // falling back to enrichedContext.graph for turns without graph mutations.
+  const graphPatchBlock = toolResult.blocks.find((b) => b.block_type === 'graph_patch');
+  const appliedGraph = graphPatchBlock
+    ? (graphPatchBlock.data as unknown as { applied_graph?: typeof enrichedContext.graph })?.applied_graph
+    : undefined;
+  const graphForReadiness = appliedGraph ?? enrichedContext.graph;
+  if (graphForReadiness) {
+    envelope.analysis_ready = computeStructuralReadiness(graphForReadiness);
   }
 
   // Debug fields (non-production only)

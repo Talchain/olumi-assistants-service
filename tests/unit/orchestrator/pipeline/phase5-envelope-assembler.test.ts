@@ -313,6 +313,126 @@ describe("assembleV2Envelope", () => {
     vi.doUnmock("../../../../src/config/index.js");
     vi.doUnmock("../../../../src/orchestrator/dsk-loader.js");
   });
+  // ==========================================================================
+  // analysis_ready contract tests
+  // ==========================================================================
+
+  describe("analysis_ready", () => {
+    /** Minimal graph with goal + 2 options + edges — enough for "ready" status */
+    function makeReadyGraph() {
+      return {
+        nodes: [
+          { id: "goal-1", kind: "goal" as const, label: "Maximise ROI" },
+          { id: "opt-a", kind: "option" as const, label: "Option A", interventions: { "f-1": 0.5 } },
+          { id: "opt-b", kind: "option" as const, label: "Option B", interventions: { "f-1": 0.8 } },
+          { id: "factor-1", kind: "factor" as const, label: "Revenue" },
+        ],
+        edges: [
+          { id: "e1", from: "opt-a", to: "factor-1" },
+          { id: "e2", from: "opt-b", to: "factor-1" },
+          { id: "e3", from: "factor-1", to: "goal-1" },
+        ],
+      } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T;
+    }
+
+    it("includes analysis_ready with status and options after draft_graph (graph in context)", () => {
+      const envelope = assembleV2Envelope({
+        enrichedContext: makeEnrichedContext({ graph: makeReadyGraph() }),
+        specialistResult: makeSpecialistResult(),
+        llmResult: makeLLMResult(),
+        toolResult: makeToolResult(),
+        progressKind: "changed_model",
+        stageTransition: null,
+        scienceLedger: makeScienceLedger(),
+      });
+
+      expect(envelope.analysis_ready).toBeDefined();
+      expect(envelope.analysis_ready!.status).toBe("ready");
+      expect(envelope.analysis_ready!.goal_node_id).toBe("goal-1");
+      expect(envelope.analysis_ready!.options).toHaveLength(2);
+      expect(envelope.analysis_ready!.options[0]).toHaveProperty("option_id");
+      expect(envelope.analysis_ready!.options[0]).toHaveProperty("label");
+      expect(envelope.analysis_ready!.options[0]).toHaveProperty("status");
+      expect(envelope.analysis_ready!.options[0]).toHaveProperty("interventions");
+    });
+
+    it("includes updated analysis_ready after edit_graph (applied_graph in block)", () => {
+      const updatedGraph = makeReadyGraph();
+      const blocks = [
+        {
+          block_id: "blk-1",
+          block_type: "graph_patch" as const,
+          data: {
+            patch_type: "edit" as const,
+            operations: [],
+            status: "proposed" as const,
+            applied_graph: updatedGraph,
+          },
+          provenance: { source: "edit_graph" as const },
+        },
+      ];
+      const envelope = assembleV2Envelope({
+        enrichedContext: makeEnrichedContext({ graph: null }),
+        specialistResult: makeSpecialistResult(),
+        llmResult: makeLLMResult(),
+        toolResult: makeToolResult({ blocks: blocks as any }),
+        progressKind: "changed_model",
+        stageTransition: null,
+        scienceLedger: makeScienceLedger(),
+      });
+
+      expect(envelope.analysis_ready).toBeDefined();
+      expect(envelope.analysis_ready!.status).toBe("ready");
+      expect(envelope.analysis_ready!.options).toHaveLength(2);
+    });
+
+    it("analysis_ready is absent when no graph exists", () => {
+      const envelope = assembleV2Envelope({
+        enrichedContext: makeEnrichedContext({ graph: null }),
+        specialistResult: makeSpecialistResult(),
+        llmResult: makeLLMResult(),
+        toolResult: makeToolResult(),
+        progressKind: "none",
+        stageTransition: null,
+        scienceLedger: makeScienceLedger(),
+      });
+
+      expect(envelope.analysis_ready).toBeUndefined();
+    });
+
+    it("canonical fixture shape for cross-service testing", () => {
+      const envelope = assembleV2Envelope({
+        enrichedContext: makeEnrichedContext({ graph: makeReadyGraph() }),
+        specialistResult: makeSpecialistResult(),
+        llmResult: makeLLMResult(),
+        toolResult: makeToolResult(),
+        progressKind: "changed_model",
+        stageTransition: null,
+        scienceLedger: makeScienceLedger(),
+      });
+
+      const ar = envelope.analysis_ready!;
+      expect(ar).toEqual(
+        expect.objectContaining({
+          status: expect.any(String),
+          goal_node_id: expect.any(String),
+          options: expect.arrayContaining([
+            expect.objectContaining({
+              option_id: expect.any(String),
+              label: expect.any(String),
+              status: expect.any(String),
+              interventions: expect.any(Object),
+            }),
+          ]),
+        }),
+      );
+
+      // Field name is exactly "analysis_ready" — not "readiness" or "analysis_readiness"
+      expect(envelope).toHaveProperty("analysis_ready");
+      expect(envelope).not.toHaveProperty("readiness");
+      expect(envelope).not.toHaveProperty("analysis_readiness");
+    });
+  });
 }); // assembleV2Envelope
 
 describe("buildErrorEnvelope", () => {

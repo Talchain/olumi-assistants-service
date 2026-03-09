@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { validateGraphStructure, type StructuralViolationCode } from '../../../src/orchestrator/graph-structure-validator.js';
 import type { GraphV3T } from '../../../src/schemas/cee-v3.js';
 
@@ -67,10 +67,10 @@ describe('validateGraphStructure', () => {
     expect(hasViolation(result, 'FEWER_THAN_TWO_OPTIONS')).toBe(true);
   });
 
-  it('NODE_LIMIT_EXCEEDED: detects more than 12 nodes', () => {
+  it('NODE_LIMIT_EXCEEDED: detects more than default 20 nodes', () => {
     const graph = makeValidGraph();
-    // Add 8 more nodes (5 existing + 8 = 13)
-    for (let i = 0; i < 8; i++) {
+    // Add 16 more nodes (5 existing + 16 = 21 > default 20)
+    for (let i = 0; i < 16; i++) {
       const id = `extra_${i}`;
       graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
       // Connect to avoid orphan violation
@@ -85,13 +85,13 @@ describe('validateGraphStructure', () => {
     expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true);
   });
 
-  it('EDGE_LIMIT_EXCEEDED: detects more than 20 edges', () => {
+  it('EDGE_LIMIT_EXCEEDED: detects more than default 30 edges', () => {
     const graph = makeValidGraph();
-    // Add enough extra nodes and edges to exceed 20
-    for (let i = 0; i < 8; i++) {
+    // Add enough extra nodes and edges to exceed 30
+    // 5 existing edges + 13 nodes × 2 edges each = 5 + 26 = 31 > 30
+    for (let i = 0; i < 13; i++) {
       const id = `extra_${i}`;
       graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
-      // 2 edges each = 16 new + 5 existing = 21
       graph.edges.push({
         from: 'opt_a', to: id,
         strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
@@ -164,5 +164,40 @@ describe('validateGraphStructure', () => {
     expect(hasViolation(result, 'FEWER_THAN_TWO_OPTIONS')).toBe(true);
     expect(hasViolation(result, 'ORPHAN_NODE')).toBe(true);
     expect(result.violations.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('defaults are 20 nodes / 30 edges (from env or hardcoded default)', () => {
+    // With no env override and default limits of 20/30, a graph with exactly 20 nodes should pass
+    const graph = makeValidGraph();
+    // Add 15 more nodes (5 existing + 15 = 20, exactly at limit)
+    for (let i = 0; i < 15; i++) {
+      const id = `extra_${i}`;
+      graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'opt_a', to: id,
+        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+    }
+
+    const result = validateGraphStructure(graph);
+    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(false);
+  });
+
+  it('env override: CEE_GRAPH_MAX_NODES and CEE_GRAPH_MAX_EDGES are respected', async () => {
+    // Re-import with env overrides set — module-level constants re-evaluate
+    vi.stubEnv('CEE_GRAPH_MAX_NODES', '4');
+    vi.stubEnv('CEE_GRAPH_MAX_EDGES', '3');
+
+    // Dynamic import with unique query string to bypass vitest module cache
+    const { validateGraphStructure: validate } = await import(
+      '../../../src/orchestrator/graph-structure-validator.js?env-override-test'
+    );
+
+    const graph = makeValidGraph(); // 5 nodes, 5 edges
+    const result = validate(graph);
+    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true); // 5 nodes > 4 limit
+    expect(hasViolation(result, 'EDGE_LIMIT_EXCEEDED')).toBe(true); // 5 edges > 3 limit
+
+    vi.unstubAllEnvs();
   });
 });
