@@ -78,6 +78,8 @@ import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
 import { compactGraph } from "./context/graph-compact.js";
 import { assembleAnalysisInputsSummary } from "./analysis-inputs/assemble.js";
 import { isToolAllowedAtStage } from "./tools/stage-policy.js";
+import { inferStage } from "./pipeline/phase1-enrichment/stage-inference.js";
+import type { DecisionStage } from "./types.js";
 
 // ============================================================================
 // Singleton PLoT client (created on first use)
@@ -109,13 +111,14 @@ function buildTurnContext(
   bilEnabled: boolean,
   bilContext: string | undefined,
   bil?: BriefIntelligence | null,
+  computedStage?: DecisionStage,
 ): TurnContext {
   const ctx = turnRequest.context;
   const graph = ctx.graph ?? turnRequest.graph_state ?? null;
   const analysisResponse = ctx.analysis_response ?? turnRequest.analysis_state ?? null;
 
   return {
-    stage: ctx.framing?.stage ?? 'frame',
+    stage: computedStage ?? ctx.framing?.stage ?? 'frame',
     goal: ctx.framing?.goal,
     constraints: ctx.framing?.constraints,
     options: ctx.framing?.options,
@@ -221,6 +224,11 @@ export async function handleTurn(
       return result;
     }
 
+    // 3b. Compute authoritative stage — override UI-provided stage when state disagrees.
+    //     Key invariant: no graph → FRAME, regardless of what the UI sends.
+    const inferredStage = inferStage(turnRequest.context, turnRequest.system_event);
+    const currentStage: DecisionStage = inferredStage.stage;
+
     // 4. Intent gate
     const intent = classifyIntent(turnRequest.message);
 
@@ -233,7 +241,6 @@ export async function handleTurn(
     }
 
     // Stage policy guard — check if the gate-matched tool is allowed at the current stage
-    const currentStage = turnRequest.context.framing?.stage ?? 'frame';
     let actualRouting: 'deterministic' | 'llm' = (intent.routing === 'deterministic' && prerequisitesMet) ? 'deterministic' : 'llm';
 
     if (actualRouting === 'deterministic' && intent.tool) {
@@ -270,6 +277,7 @@ export async function handleTurn(
         request,
         requestId,
         plotOpts,
+        currentStage,
       );
     } else {
       // LLM routing — use chatWithTools
@@ -283,6 +291,7 @@ export async function handleTurn(
         plotOpts,
         intent.routing === 'deterministic',
         turnStartedAt,
+        currentStage,
       );
     }
 
@@ -427,8 +436,9 @@ async function dispatchDeterministic(
   request: FastifyRequest,
   requestId: string,
   plotOpts?: PLoTClientRunOpts,
+  computedStage?: DecisionStage,
 ): Promise<OrchestratorResponseEnvelope> {
-  const result = await dispatchTool(tool, {}, turnRequest, turnId, request, requestId, 'deterministic', undefined, plotOpts);
+  const result = await dispatchTool(tool, {}, turnRequest, turnId, request, requestId, 'deterministic', undefined, plotOpts, computedStage);
   return result.envelope;
 }
 
@@ -445,6 +455,7 @@ async function dispatchViaLLM(
   plotOpts?: PLoTClientRunOpts,
   gateMatch: boolean = false,
   turnStartedAt: number = Date.now(),
+  currentStage: DecisionStage = 'frame',
 ): Promise<OrchestratorResponseEnvelope> {
   const adapter = getAdapter('orchestrator');
 
@@ -461,8 +472,8 @@ async function dispatchViaLLM(
 
   if (fabricEnabled) {
     try {
-      const state = extractDecisionState(turnRequest.context);
-      const stage = toFabricStage(turnRequest.context.framing?.stage);
+      const state = extractDecisionState(turnRequest.context, currentStage);
+      const stage = toFabricStage(currentStage);
       const turns = toConversationTurns(turnRequest.context.messages);
 
       const assembled = assembleContext(
@@ -499,16 +510,15 @@ async function dispatchViaLLM(
 
   // BIL injection: enrich user message on frame/ideate stages when flag is ON
   // Placed before adapter branching so both chatWithTools and plain-chat paths use it.
-  const stage = turnRequest.context.framing?.stage ?? 'frame';
   const bilEnabled = config.features.bilEnabled;
   const bilMinLength = 50;
-  const shouldInjectBil = bilEnabled && (stage === 'frame' || stage === 'ideate')
+  const shouldInjectBil = bilEnabled && (currentStage === 'frame' || currentStage === 'ideate')
     && turnRequest.message.trim().length >= bilMinLength;
 
   let enrichedUserMessage = turnRequest.message;
   let dskCoaching: import("../schemas/dsk-coaching.js").DskCoachingItems | undefined;
   const bil = shouldInjectBil
-    ? extractBriefIntelligence(turnRequest.message, null, stage)
+    ? extractBriefIntelligence(turnRequest.message, null, currentStage ?? 'frame')
     : null;
   if (bil) {
     enrichedUserMessage = `${turnRequest.message}\n\n${formatBilForCoaching(bil)}`;
@@ -524,7 +534,7 @@ async function dispatchViaLLM(
       const bilContextStr = bil
         ? formatBilForCoaching(bil)
         : undefined;
-      const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr, bil);
+      const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr, bil, currentStage);
       const zone1 = await getSystemPrompt('orchestrator');
       const assembled = assembleFullPrompt(zone1, 'cf-v13', turnContext, ZONE2_BLOCKS);
       const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length);
@@ -568,6 +578,7 @@ async function dispatchViaLLM(
       turnPlan: buildTurnPlan(null, 'llm', false),
       contextHash,
       dskCoaching,
+      computedStage: currentStage,
     });
   }
 
@@ -605,9 +616,8 @@ async function dispatchViaLLM(
   const declaredMode = extractDeclaredMode(parsed.diagnostics);
   const inferredMode = inferResponseMode(parsed);
   const toolAttempted = toolInvocation?.name ?? null;
-  const telemetryStage = turnRequest.context.framing?.stage ?? 'frame';
   const toolPermitted = toolAttempted
-    ? isToolAllowedAtStage(toolAttempted, telemetryStage, turnRequest.message).allowed
+    ? isToolAllowedAtStage(toolAttempted, currentStage, turnRequest.message).allowed
     : true;
   const modeDisagreement = declaredMode !== 'unknown' && declaredMode !== inferredMode;
 
@@ -618,7 +628,7 @@ async function dispatchViaLLM(
       tool_selected: toolAttempted,
       tool_attempted: toolAttempted,
       tool_permitted: toolPermitted,
-      stage: telemetryStage,
+      stage: currentStage,
       mode_disagreement: modeDisagreement,
       gate_match: gateMatch,
       patch_ops_count: toolInvocation?.name === 'edit_graph'
@@ -639,14 +649,14 @@ async function dispatchViaLLM(
       declared: declaredMode,
       inferred: inferredMode,
       tool_selected: toolAttempted,
-      stage: telemetryStage,
+      stage: currentStage,
       scenario_id: turnRequest.scenario_id,
     });
   }
   if (!toolPermitted && toolAttempted) {
     emit(TelemetryEvents.OrchestratorToolSuppressed, {
       tool_attempted: toolAttempted,
-      stage: telemetryStage,
+      stage: currentStage,
       scenario_id: turnRequest.scenario_id,
     });
   }
@@ -671,15 +681,15 @@ async function dispatchViaLLM(
       includeDebug,
       contextHash,
       dskCoaching,
+      computedStage: currentStage,
     });
   }
 
   // Stage policy guard — block tool if not allowed at current stage
-  const llmStage = turnRequest.context.framing?.stage ?? 'frame';
-  const llmStageGuard = isToolAllowedAtStage(toolInvocation.name, llmStage, turnRequest.message);
+  const llmStageGuard = isToolAllowedAtStage(toolInvocation.name, currentStage, turnRequest.message);
   if (!llmStageGuard.allowed) {
     log.info(
-      { request_id: requestId, stage: llmStage, tool_attempted: toolInvocation.name, reason: llmStageGuard.reason },
+      { request_id: requestId, stage: currentStage, tool_attempted: toolInvocation.name, reason: llmStageGuard.reason },
       'Stage policy: LLM-selected tool suppressed, returning conversational envelope',
     );
     return assembleEnvelope({
@@ -694,6 +704,7 @@ async function dispatchViaLLM(
       includeDebug,
       contextHash,
       dskCoaching,
+      computedStage: currentStage,
     });
   }
 
@@ -708,6 +719,7 @@ async function dispatchViaLLM(
     'llm',
     contextHash,
     plotOpts,
+    currentStage,
     dskCoaching,
   );
 
@@ -751,6 +763,7 @@ async function dispatchTool(
   routing: 'deterministic' | 'llm' = 'llm',
   contextHash?: string,
   plotOpts?: PLoTClientRunOpts,
+  computedStage?: DecisionStage,
   dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems,
 ): Promise<TurnResult> {
   const startTime = Date.now();
@@ -850,6 +863,7 @@ async function dispatchTool(
       contextHash,
       suggestedActions: editGraphSuggestedActions,
       dskCoaching,
+      computedStage,
     });
 
     log.info(
@@ -870,6 +884,7 @@ async function dispatchTool(
       turnPlan: buildTurnPlan(toolName, routing, isLongRunning),
       contextHash,
       dskCoaching,
+      computedStage,
     });
 
     const status = getHttpStatusForError(orchestratorError);
@@ -1005,7 +1020,7 @@ function toConversationTurns(messages: ConversationMessage[]): ConversationTurn[
 /**
  * Build a DecisionState from ConversationContext for Context Fabric.
  */
-function extractDecisionState(context: ConversationContext): DecisionState {
+function extractDecisionState(context: ConversationContext, computedStage?: DecisionStage): DecisionState {
   const graphSummary = context.graph
     ? extractGraphSummary(context.graph as GraphV3T)
     : null;
@@ -1014,7 +1029,7 @@ function extractDecisionState(context: ConversationContext): DecisionState {
     ? extractAnalysisSummary(context.analysis_response as V2RunResponseEnvelope)
     : null;
 
-  const stage = toFabricStage(context.framing?.stage);
+  const stage = toFabricStage(computedStage ?? context.framing?.stage);
 
   return {
     graph_summary: graphSummary,

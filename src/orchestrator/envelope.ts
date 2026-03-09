@@ -57,6 +57,8 @@ export interface EnvelopeInput {
   graphHash?: string;
   /** DSK coaching items — omitted when disabled or both arrays empty. */
   dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
+  /** Authoritative computed stage (from inferStage). Overrides framing.stage if provided. */
+  computedStage?: DecisionStage;
 }
 
 /**
@@ -66,7 +68,7 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   const turnId = input.turnId ?? randomUUID();
 
   const lineage = buildLineage(input.context, input.analysisResponse, input.contextHash, input.graphHash);
-  const stage = resolveStage(input.context);
+  const stage = input.computedStage ?? resolveStage(input.context);
 
   const envelope: OrchestratorResponseEnvelope = {
     turn_id: turnId,

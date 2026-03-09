@@ -331,8 +331,8 @@ describe('handleTurn — parse → assemble integration', () => {
 
     const req = makeRequest({
       context: {
-        graph: null,
-        analysis_response: null,
+        graph: { nodes: [], edges: [] },
+        analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: 'h' }, results: [] },
         framing: { stage: 'evaluate' },
         messages: [],
         scenario_id: 'test-scenario',
