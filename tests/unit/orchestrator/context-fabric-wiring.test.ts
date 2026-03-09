@@ -448,7 +448,7 @@ describe('Context Fabric wiring in turn handler', () => {
     process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = 'true';
 
     // "run the analysis" routes deterministically to run_analysis.
-    // Needs graph so prerequisite passes (graph != null).
+    // Needs graph AND analysis_inputs so prerequisite passes.
     // PLoT client is null (mock), so it will return an error envelope — that's fine,
     // the assertion is that assembleContext was never called.
     const req = makeRequest({
@@ -459,6 +459,12 @@ describe('Context Fabric wiring in turn handler', () => {
         framing: { stage: 'evaluate' },
         messages: [],
         scenario_id: 'test-scenario',
+        analysis_inputs: {
+          options: [
+            { option_id: 'opt_a', label: 'A', interventions: {} },
+            { option_id: 'opt_b', label: 'B', interventions: {} },
+          ],
+        },
       } as ConversationContext,
     });
     const result = await handleTurn(req, mockFastifyRequest, 'req-run-analysis');

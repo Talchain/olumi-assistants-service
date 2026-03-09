@@ -468,7 +468,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // ---------------------------------------------------
 
   it("returns 502 for run_analysis without PLoT client", async () => {
-    // Provide graph so prerequisite passes — triggers run_analysis deterministically
+    // Provide graph + analysis_inputs so prerequisite passes — triggers run_analysis deterministically
     // PLoT client is null (mock), so tool execution fails
     const response = await app.inject({
       method: "POST",
@@ -481,6 +481,12 @@ describe("POST /orchestrate/v1/turn — integration", () => {
           framing: { stage: "evaluate" },
           messages: [],
           scenario_id: "test-scenario",
+          analysis_inputs: {
+            options: [
+              { option_id: "opt_a", label: "A", interventions: {} },
+              { option_id: "opt_b", label: "B", interventions: {} },
+            ],
+          },
         },
       }),
     });
