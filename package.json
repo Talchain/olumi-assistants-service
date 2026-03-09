@@ -62,6 +62,7 @@
     "@fastify/cors": "^10.1.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
+    "@sentry/node": "^10.42.0",
     "@supabase/supabase-js": "^2.90.1",
     "@talchain/schemas": "0.1.0",
     "archiver": "^7.0.1",
