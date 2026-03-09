@@ -1,7 +1,7 @@
 {
   "fixture_id": "framing_saas_pricing",
   "profile": "framing",
-  "zone1_id": "cf-v12",
+  "zone1_id": "cf-v13",
   "active_blocks": [
     { "name": "stage_context", "version": "1.0.0" },
     { "name": "bil_context", "version": "1.0.0" },

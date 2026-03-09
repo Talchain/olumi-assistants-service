@@ -19,6 +19,7 @@ import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.
 import { getOrchestratorPrompt, ORCHESTRATOR_PROMPT_CF_V4 } from './orchestrator-cf-v4.js';
 import { ORCHESTRATOR_PROMPT_CF_V11 } from './orchestrator-cf-v11.js';
 import { getOrchestratorPromptV12, ORCHESTRATOR_PROMPT_CF_V12 } from './orchestrator-cf-v12.js';
+import { getOrchestratorPromptV13, ORCHESTRATOR_PROMPT_CF_V13 } from './orchestrator-cf-v13.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -2066,10 +2067,10 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
   registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
-  registerDefaultPrompt('orchestrator', getOrchestratorPromptV12());
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV13());
 
   // Log orchestrator prompt version at registration
-  const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V12.match(/Version:\s*([\S]+)/);
+  const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V13.match(/Version:\s*([\S]+)/);
   const promptVersion = promptVersionMatch ? promptVersionMatch[1] : 'unknown';
   log.info({ prompt_version: promptVersion, operation: 'orchestrator' }, 'Orchestrator prompt registered');
 
@@ -2104,7 +2105,7 @@ export const PROMPT_TEMPLATES = {
   decision_review: DECISION_REVIEW_PROMPT,
   edit_graph: EDIT_GRAPH_PROMPT,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
-  orchestrator: ORCHESTRATOR_PROMPT_CF_V12,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V13,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 

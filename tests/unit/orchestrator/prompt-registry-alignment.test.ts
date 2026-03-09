@@ -24,6 +24,7 @@ import { getToolNames } from "../../../src/orchestrator/tools/registry.js";
 import { ORCHESTRATOR_PROMPT_CF_V4 } from "../../../src/prompts/orchestrator-cf-v4.js";
 import { ORCHESTRATOR_PROMPT_CF_V11 } from "../../../src/prompts/orchestrator-cf-v11.js";
 import { ORCHESTRATOR_PROMPT_CF_V12 } from "../../../src/prompts/orchestrator-cf-v12.js";
+import { ORCHESTRATOR_PROMPT_CF_V13 } from "../../../src/prompts/orchestrator-cf-v13.js";
 
 // ============================================================================
 // Helpers
@@ -112,6 +113,19 @@ describe("orchestrator prompt cf-v12 ↔ tool registry alignment", () => {
 
   it("cf-v12 prompt lists the same tools as the registry", () => {
     const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V12).sort();
+    const registryTools = getToolNames().sort();
+
+    expect(promptTools).toEqual(registryTools);
+  });
+});
+
+describe("orchestrator prompt cf-v13 ↔ tool registry alignment", () => {
+  it("cf-v13 prompt contains Version: cf-v13", () => {
+    expect(ORCHESTRATOR_PROMPT_CF_V13).toContain("Version: cf-v13");
+  });
+
+  it("cf-v13 prompt lists the same tools as the registry", () => {
+    const promptTools = parsePromptToolNames(ORCHESTRATOR_PROMPT_CF_V13).sort();
     const registryTools = getToolNames().sort();
 
     expect(promptTools).toEqual(registryTools);

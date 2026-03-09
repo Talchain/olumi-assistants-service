@@ -1,7 +1,7 @@
 {
   "fixture_id": "ideation_hiring_decision",
   "profile": "ideation",
-  "zone1_id": "cf-v12",
+  "zone1_id": "cf-v13",
   "active_blocks": [
     { "name": "stage_context", "version": "1.0.0" },
     { "name": "graph_state", "version": "1.0.0" },

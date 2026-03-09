@@ -1,7 +1,7 @@
 {
   "fixture_id": "ablation_ideation_no_event_log",
   "profile": "ideation",
-  "zone1_id": "cf-v12",
+  "zone1_id": "cf-v13",
   "ablation": {
     "removed_block": "event_log",
     "baseline_fixture": "ideation_hiring_decision",

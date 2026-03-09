@@ -1,7 +1,7 @@
 {
   "fixture_id": "ablation_post_analysis_no_analysis_state",
   "profile": "post_analysis",
-  "zone1_id": "cf-v12",
+  "zone1_id": "cf-v13",
   "ablation": {
     "removed_block": "analysis_state",
     "baseline_fixture": "post_analysis_pricing",
