@@ -48,11 +48,9 @@ export function applyPatchOperations(
   graph: GraphV3T,
   operations: PatchOperation[],
 ): GraphV3T {
-  // Deep clone to guarantee purity
-  const candidate: GraphV3T = {
-    nodes: graph.nodes.map((n) => ({ ...n })),
-    edges: graph.edges.map((e) => ({ ...e })),
-  };
+  // Deep clone to guarantee purity — structuredClone handles nested objects
+  // (observed_state, strength, provenance) that spread would share by reference
+  const candidate: GraphV3T = structuredClone({ nodes: graph.nodes, edges: graph.edges }) as GraphV3T;
 
   for (const op of operations) {
     switch (op.op) {
@@ -97,10 +95,10 @@ function applyAddNode(graph: GraphV3T, op: PatchOperation): void {
 
   const value = op.value as Record<string, unknown>;
   graph.nodes.push({
-    id: nodeId,
+    ...value,
+    id: nodeId, // op.path is authoritative — override any id in value
     kind: value.kind as string,
     label: value.label as string,
-    ...value,
   } as GraphV3T['nodes'][number]);
 }
 
@@ -126,7 +124,9 @@ function applyUpdateNode(graph: GraphV3T, op: PatchOperation): void {
   }
 
   const updates = op.value as Record<string, unknown>;
-  Object.assign(node, updates);
+  // Guard: prevent overwriting the node's identity field
+  const { id: _id, ...safeUpdates } = updates;
+  Object.assign(node, safeUpdates);
 }
 
 function applyAddEdge(graph: GraphV3T, op: PatchOperation): void {
@@ -167,7 +167,9 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
   }
 
   const updates = op.value as Record<string, unknown>;
-  Object.assign(edge, updates);
+  // Guard: prevent overwriting edge identity fields
+  const { from: _from, to: _to, ...safeUpdates } = updates;
+  Object.assign(edge, safeUpdates);
 }
 
 // ============================================================================

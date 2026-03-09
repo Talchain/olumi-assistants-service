@@ -607,12 +607,15 @@ function buildGraphPatchBlock(
  * This is the canonical source of truth — no separate server-side tracking.
  */
 function hasPendingPatch(messages: ConversationMessage[]): boolean {
-  // Walk backwards through messages to find the latest graph_patch block
+  // Walk backwards through messages to find the latest graph_patch block.
+  // ConversationMessage.content is typed as string (Zod-coerced at route boundary),
+  // so we check both structured object content (from unit-test mocks or future type
+  // widening) and string content (serialized blocks or keyword markers).
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    const content = msg.content;
+    const content = msg.content as unknown; // widen to check both shapes
 
-    // Messages may contain blocks as structured content
+    // Path 1: structured content (unit tests, future type widening)
     if (typeof content === 'object' && content !== null) {
       const blocks = (content as Record<string, unknown>).blocks;
       if (Array.isArray(blocks)) {
@@ -627,6 +630,13 @@ function hasPendingPatch(messages: ConversationMessage[]): boolean {
             }
           }
         }
+      }
+    }
+
+    // Path 2: string content — look for serialized graph_patch with pending status
+    if (typeof content === 'string' && content.includes('graph_patch')) {
+      if (content.includes('"proposed"') || content.includes('"previewed"')) {
+        return true;
       }
     }
   }

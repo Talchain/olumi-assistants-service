@@ -6,7 +6,7 @@
  *
  * Checks run exhaustively (no short-circuit) — all violations are reported.
  *
- * Limits: 12 nodes, 20 edges (match src/validators/graph-validator.types.ts constants).
+ * Limits: 12 nodes, 20 edges (orchestrator-specific; tighter than CEE pipeline's 50/200).
  */
 
 import type { GraphV3T } from "../schemas/cee-v3.js";
@@ -139,6 +139,11 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
   }
 }
 
+function isDirected(edge: GraphV3T['edges'][number]): boolean {
+  // Treat absent edge_type as 'directed' (backward compat, matches schemas/graph.ts)
+  return (edge as Record<string, unknown>).edge_type !== 'bidirected';
+}
+
 function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): void {
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
   if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
@@ -146,9 +151,10 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   const decisionNodes = graph.nodes.filter((n) => n.kind === 'decision');
   if (decisionNodes.length === 0) return; // Already caught by NO_DECISION check
 
-  // Build forward adjacency list (directed edges only)
+  // Build forward adjacency list — skip bidirected edges (unmeasured confounders)
   const forward = new Map<string, Set<string>>();
   for (const edge of graph.edges) {
+    if (!isDirected(edge)) continue;
     if (!forward.has(edge.from)) forward.set(edge.from, new Set());
     forward.get(edge.from)!.add(edge.to);
   }
@@ -202,9 +208,10 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
 }
 
 function checkCycles(graph: GraphV3T, violations: StructuralViolation[]): void {
-  // Build forward adjacency list
+  // Build forward adjacency list — skip bidirected edges (not directed paths)
   const forward = new Map<string, string[]>();
   for (const edge of graph.edges) {
+    if (!isDirected(edge)) continue;
     if (!forward.has(edge.from)) forward.set(edge.from, []);
     forward.get(edge.from)!.push(edge.to);
   }

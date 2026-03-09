@@ -175,7 +175,6 @@ export function createOrchestratorRateLimitHook() {
       // Fail open — log structured warning and allow the request through
       const requestId = getRequestId(request);
       log.warn({
-        level: 'warn',
         event: 'rate_limit_error',
         request_id: requestId,
         route: request.url,
