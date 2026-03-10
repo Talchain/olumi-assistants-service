@@ -564,7 +564,7 @@ async function dispatchViaLLM(
   if (!adapter.chatWithTools) {
     // Fallback: use plain chat if adapter doesn't support tools
     log.warn({ request_id: requestId }, "Adapter does not support chatWithTools, using plain chat");
-    const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
+    const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context, currentStage);
     const result = await adapter.chat(
       { system: systemPrompt, userMessage: enrichedUserMessage },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
@@ -584,7 +584,7 @@ async function dispatchViaLLM(
 
   // Full tool-calling flow
 
-  const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context);
+  const systemPrompt = zone2SystemPrompt || fabricContext?.full_context || await assembleSystemPrompt(turnRequest.context, currentStage);
   const messages = (zone2SystemPrompt || fabricContext)
     ? [{ role: 'user' as const, content: enrichedUserMessage }]
     : assembleMessages(turnRequest.context, enrichedUserMessage);

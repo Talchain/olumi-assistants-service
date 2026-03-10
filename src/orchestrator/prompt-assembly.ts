@@ -30,14 +30,14 @@ import type { ConversationContext, ConversationMessage } from "./types.js";
  * Zone 1 is byte-identical on every call (cache-stable).
  * Zone 2 varies with conversation state.
  */
-export async function assembleSystemPrompt(context: ConversationContext): Promise<string> {
+export async function assembleSystemPrompt(context: ConversationContext, stageOverride?: string): Promise<string> {
   // Zone 1: Static orchestrator prompt (from prompt store / cache / defaults)
   const zone1 = await getSystemPrompt('orchestrator');
 
   // Zone 2: Dynamic conversation context
   const zone2Sections: string[] = [];
 
-  const stage = context.framing?.stage ?? 'frame';
+  const stage = stageOverride ?? context.framing?.stage ?? 'frame';
   zone2Sections.push(`Current stage: ${stage}`);
 
   const goal = context.framing?.goal ?? '';
