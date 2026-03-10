@@ -25,7 +25,7 @@ export function inferStage(
     if (stage) return stage;
   }
 
-  // 2. No graph → frame
+  // 2. No graph → frame.
   if (!context.graph) {
     return {
       stage: 'frame',
@@ -38,7 +38,17 @@ export function inferStage(
   const analysis = context.analysis_response as Record<string, unknown> | null;
 
   if (!analysis) {
-    // Graph but no analysis → ideate (user is building/refining the model)
+    // Structurally empty graph (no nodes) with no analysis → treat as no graph.
+    // Protects against placeholder/stub payloads promoting the stage to ideate.
+    // If analysis already exists the graph was valid at run time, so we trust it.
+    if (context.graph.nodes.length === 0) {
+      return {
+        stage: 'frame',
+        confidence: 'high',
+        source: 'inferred',
+      };
+    }
+    // Graph with nodes but no analysis → ideate (user is building/refining the model)
     return {
       stage: 'ideate',
       confidence: 'high',

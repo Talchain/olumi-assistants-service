@@ -21,12 +21,26 @@ describe("stage-inference", () => {
     expect(result.source).toBe("inferred");
   });
 
-  it("returns 'ideate' when graph exists but no analysis", () => {
+  it("returns 'ideate' when graph with nodes exists but no analysis", () => {
     const result = inferStage(
-      makeContext({ graph: { nodes: [], edges: [], options: [] } as unknown as ConversationContext["graph"] }),
+      makeContext({
+        graph: {
+          nodes: [{ id: "n1", kind: "decision", label: "Decision" }],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
     );
     expect(result.stage).toBe("ideate");
     expect(result.confidence).toBe("high");
+  });
+
+  it("returns 'frame' when graph is structurally empty (no nodes) and no analysis", () => {
+    const result = inferStage(
+      makeContext({ graph: { nodes: [], edges: [] } as unknown as ConversationContext["graph"] }),
+    );
+    expect(result.stage).toBe("frame");
+    expect(result.confidence).toBe("high");
+    expect(result.source).toBe("inferred");
   });
 
   it("returns 'evaluate' with substate 'has_run' when analysis complete", () => {

@@ -18,6 +18,7 @@
 
 import type { ToolResponseBlock, ChatWithToolsResult } from "../adapters/llm/types.js";
 import type { SuggestedAction } from "./types.js";
+import { log } from "../utils/telemetry.js";
 
 // ============================================================================
 // Parsed Response Types
@@ -241,13 +242,15 @@ function parseSuggestedActionsWithWarnings(
 
     if (!label || !message) {
       const missingFields = [...(!label ? ['label'] : []), ...(!message ? ['message'] : [])];
-      warnings.push(JSON.stringify({
+      const diagnostic = {
         issue: 'action_dropped_missing_fields',
         action_index: actionIndex,
         missing_fields: missingFields,
         label_char_count: label?.length ?? 0,
         message_char_count: message?.length ?? 0,
-      }));
+      };
+      warnings.push(JSON.stringify(diagnostic));
+      log.warn(diagnostic, 'response-parser: suggested action dropped — missing required fields');
       actionIndex++;
       continue;
     }
