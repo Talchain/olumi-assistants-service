@@ -88,14 +88,12 @@ function buildAssistantText(ctx: PatchRejectionContext): string {
     );
   }
 
-  // structural_violation
-  const violationList = ctx.violations?.length
-    ? '\n\n' + ctx.violations.map((v) => `- ${v}`).join('\n')
-    : '';
+  // structural_violation — never surface raw violation text to the user.
+  // Violations are logged at warn level above and stored in the block's
+  // rejection.reason for debugging, but must not appear in assistant_text.
+  if (ctx.violations?.length) {
+    log.warn({ violations: ctx.violations }, 'edit_graph structural violations suppressed from user-facing text');
+  }
 
-  return (
-    `I tried to make that change, but it would leave the model in an invalid state.` +
-    violationList +
-    `\n\n${ctx.detail}`
-  );
+  return "I wasn't able to make that change safely. Let me try a simpler approach — which option should we configure first?";
 }

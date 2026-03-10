@@ -287,6 +287,12 @@ export interface OrchestratorResponseEnvelopeV2 {
   diagnostics?: string;
   /** Parse warnings from XML envelope extraction. Non-production only. */
   parse_warnings?: string[];
+  /**
+   * Contract violation codes from Phase 5 validation. Populated by phase5Validate
+   * when violations are found; used by emitTurnTrace for structured log diagnostics.
+   * Internal — not serialised to the HTTP response.
+   */
+  _contract_violation_codes?: string[];
 }
 
 // ============================================================================

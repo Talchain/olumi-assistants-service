@@ -91,9 +91,12 @@ describe('buildPatchRejectionEnvelope', () => {
     // Envelope shape
     expect(envelope.turn_id).toBe('test-turn-id-2');
     expect(envelope.assistant_text).toBeTruthy();
-    expect(envelope.assistant_text).toContain('invalid state');
-    expect(envelope.assistant_text).toContain('no connections');
-    expect(envelope.assistant_text).toContain('circular dependency');
+    // Raw violation strings must NOT appear in user-facing text (security: no structural leakage)
+    expect(envelope.assistant_text).not.toContain('invalid state');
+    expect(envelope.assistant_text).not.toContain('no connections');
+    expect(envelope.assistant_text).not.toContain('circular dependency');
+    // Safe fallback message is shown instead
+    expect(envelope.assistant_text).toContain("wasn't able to make that change safely");
 
     // No GraphPatchBlock
     expect(envelope.blocks).toHaveLength(0);
@@ -102,7 +105,7 @@ describe('buildPatchRejectionEnvelope', () => {
     expect(envelope.suggested_actions).toHaveLength(1);
     expect(envelope.suggested_actions![0].role).toBe('facilitator');
 
-    // Log output
+    // Violations must be logged (for debugging) even though they are suppressed from user-facing text
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: 'structural_violation',
@@ -111,6 +114,11 @@ describe('buildPatchRejectionEnvelope', () => {
         ]),
       }),
       expect.any(String),
+    );
+    // Second warn call logs the suppression of violations from user-facing text
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ violations: expect.any(Array) }),
+      expect.stringContaining('suppressed'),
     );
   });
 });

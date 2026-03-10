@@ -12,8 +12,8 @@ function makeContext(overrides?: Partial<ConversationContext>): ConversationCont
     scenario_id: "test-scenario",
     analysis_inputs: {
       options: [
-        { option_id: "opt_a", label: "Option A", interventions: {} },
-        { option_id: "opt_b", label: "Option B", interventions: {} },
+        { option_id: "opt_a", label: "Option A", interventions: { fac_price: { value: 1.2 } } },
+        { option_id: "opt_b", label: "Option B", interventions: { fac_price: { value: 0.9 } } },
       ],
     },
     ...overrides,
@@ -162,5 +162,30 @@ describe("run_analysis Tool Handler", () => {
         "turn-1",
       ),
     ).rejects.toThrow("no analysis_inputs");
+  });
+
+  it("throws recoverable error when options have empty interventions (Task 6)", async () => {
+    const client = makeMockClient(makePLoTResponse());
+    const ctx = makeContext({
+      analysis_inputs: {
+        options: [
+          { option_id: "opt_a", label: "Option A", interventions: {} },
+          { option_id: "opt_b", label: "Option B", interventions: { fac_price: { value: 1 } } },
+        ],
+      },
+    });
+
+    await expect(
+      handleRunAnalysis(ctx, client, "req-1", "turn-1"),
+    ).rejects.toThrow(/intervention values/);
+
+    // Verify error is recoverable
+    try {
+      await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+    } catch (err: unknown) {
+      const orchErr = (err as { orchestratorError: { recoverable: boolean; suggested_retry: string } }).orchestratorError;
+      expect(orchErr.recoverable).toBe(true);
+      expect(orchErr.suggested_retry).toBeTruthy();
+    }
   });
 });

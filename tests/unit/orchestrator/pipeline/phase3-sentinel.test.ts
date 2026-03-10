@@ -21,7 +21,13 @@ vi.mock("../../../../src/orchestrator/intent-gate.js", () => ({
 
 vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
   getSystemPrompt: vi.fn().mockResolvedValue("System prompt"),
-  getSystemPromptMeta: vi.fn(),
+  getSystemPromptMeta: vi.fn().mockReturnValue({
+    taskId: "orchestrator",
+    source: "default",
+    prompt_version: "default:orchestrator",
+    prompt_hash: "test-hash",
+    instance_id: "test-instance",
+  }),
 }));
 
 vi.mock("../../../../src/orchestrator/prompt-assembly.js", () => ({

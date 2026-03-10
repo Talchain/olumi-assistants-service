@@ -269,8 +269,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest({
         context: {
-          graph: null,
-          analysis_response: null,
+          graph: { nodes: [{ id: "n1", kind: "decision", label: "D" }], edges: [] },
+          analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: "h" }, results: [] },
           framing: { stage: "evaluate" },
           messages: [],
           scenario_id: "test-scenario",
@@ -483,8 +483,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
           scenario_id: "test-scenario",
           analysis_inputs: {
             options: [
-              { option_id: "opt_a", label: "A", interventions: {} },
-              { option_id: "opt_b", label: "B", interventions: {} },
+              { option_id: "opt_a", label: "A", interventions: { fac_price: { value: 1.2 } } },
+              { option_id: "opt_b", label: "B", interventions: { fac_price: { value: 0.9 } } },
             ],
           },
         },

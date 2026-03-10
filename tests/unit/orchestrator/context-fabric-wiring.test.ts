@@ -389,8 +389,8 @@ describe('Context Fabric wiring in turn handler', () => {
 
     const req = makeRequest({
       context: {
-        graph: null,
-        analysis_response: null,
+        graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D' }], edges: [] } as any,
+        analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: 'h' }, results: [] } as any,
         framing: { stage: 'evaluate' },
         messages: [],
         scenario_id: 'test-scenario',
@@ -461,8 +461,8 @@ describe('Context Fabric wiring in turn handler', () => {
         scenario_id: 'test-scenario',
         analysis_inputs: {
           options: [
-            { option_id: 'opt_a', label: 'A', interventions: {} },
-            { option_id: 'opt_b', label: 'B', interventions: {} },
+            { option_id: 'opt_a', label: 'A', interventions: { fac_price: { value: 1.2 } } },
+            { option_id: 'opt_b', label: 'B', interventions: { fac_price: { value: 0.9 } } },
           ],
         },
       } as ConversationContext,

@@ -912,16 +912,31 @@ function buildRejectionResult(
   const latencyMs = Date.now() - startTime;
 
   log.warn(
-    { elapsed_ms: latencyMs, reason },
+    { elapsed_ms: latencyMs, reason, code },
     "edit_graph rejected — all attempts exhausted",
   );
 
+  // Never surface raw structural violation text to the user.
+  // The raw reason is preserved in the block's rejection.reason for debugging;
+  // the assistant text always gives a safe, actionable recovery message.
+  const isStructuralRejection =
+    code === 'STRUCTURAL_VALIDATION_FAILED' || code === 'PLOT_SEMANTIC_REJECTED';
+  const userFacingText = isStructuralRejection
+    ? "I wasn't able to make that change safely. Let me try a simpler approach — which option should we configure first?"
+    : `I wasn't able to apply that change. ${reason}`;
+
   return {
     blocks: [block],
-    assistantText: `I wasn't able to produce valid graph edits. ${reason}`,
+    assistantText: userFacingText,
     latencyMs,
     appliedGraph: null,
     wasRejected: true,
+    suggestedActions: isStructuralRejection
+      ? [
+          { role: 'facilitator', label: 'Try a simpler change', prompt: 'Try a simpler version of this change.' },
+          { role: 'facilitator', label: 'Start fresh', prompt: 'Let\'s rebuild the model from the updated brief.' },
+        ]
+      : undefined,
   };
 }
 

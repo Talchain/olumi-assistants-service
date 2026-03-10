@@ -66,7 +66,13 @@ export function phase5Validate(
   });
 
   // 6. Response contract validation — drop malformed chips/blocks, inject fallback if needed
-  validateV2EnvelopeContract(envelope, enrichedContext.stage_indicator.stage);
+  const contractResult = validateV2EnvelopeContract(envelope, enrichedContext.stage_indicator.stage);
+
+  // Attach violation codes to envelope for diagnostic trace (pipeline.ts emitTurnTrace).
+  // Only the codes are needed — detail strings are already in the warn log from the validator.
+  if (contractResult.violations.length > 0) {
+    envelope._contract_violation_codes = contractResult.violations.map((v) => v.code);
+  }
 
   return envelope;
 }

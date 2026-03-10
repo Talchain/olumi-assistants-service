@@ -206,6 +206,79 @@ describe('handleTurn — parse → assemble integration', () => {
 
     // Debug fields included because isProduction() returns false
     expect(env.diagnostics).toBe('Route: conversational. No tool needed.');
+
+    expect(env.debug).toEqual({
+      response_summary: {
+        assistant_text_present: true,
+        assistant_text_length: 'Here is a test response.'.length,
+        block_count_by_type: {},
+        suggested_action_count: 1,
+        error_present: false,
+      },
+      turn_summary: {
+        stage: 'frame',
+        response_mode_declared: null,
+        response_mode_inferred: 'INTERPRET',
+        tool_selected: null,
+        tool_permitted: null,
+      },
+      fallback_summary: {
+        fallback_injected: false,
+        fallback_reason: null,
+      },
+      contract_summary: {
+        contract_violations_count: 0,
+        contract_violation_codes: [],
+      },
+    });
+  });
+
+  it('recomputes debug response summary after tool envelope merges', async () => {
+    const xmlResponse = makeXmlEnvelope({
+      diagnostics: 'Route: tool.',
+      assistantText: 'Tool summary from XML.',
+      suggestedActions: `
+        <action>
+          <role>facilitator</role>
+          <label>Inspect result</label>
+          <message>Show me the result details.</message>
+        </action>`,
+      blocks: `
+        <block>
+          <type>commentary</type>
+          <title>Key Insight</title>
+          <content>Revenue is the dominant driver.</content>
+        </block>`,
+      toolUse: `
+        <tool_use name="run_analysis">
+          <focus>top drivers</focus>
+        </tool_use>`,
+    });
+
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 100, output_tokens: 80 },
+      model: 'test-model',
+      latencyMs: 150,
+    });
+
+    const result = await handleTurn(makeRequest(), mockFastifyRequest, 'req-test-debug-tool');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.assistant_text).toBe('Tool summary from XML.');
+    expect(result.envelope.debug?.response_summary.assistant_text_present).toBe(true);
+    expect(result.envelope.debug?.response_summary.assistant_text_length).toBe('Tool summary from XML.'.length);
+    expect(result.envelope.debug?.response_summary.block_count_by_type).toEqual({ commentary: 1 });
+    expect(result.envelope.debug?.response_summary.suggested_action_count).toBe(1);
+    expect(result.envelope.debug?.turn_summary).toEqual({
+      stage: 'frame',
+      response_mode_declared: null,
+      response_mode_inferred: 'INTERPRET',
+      tool_selected: null,
+      tool_permitted: null,
+    });
+    expect(result.envelope.diagnostics).toBe('Route: tool.');
   });
 
   it('returns envelope with empty blocks and actions when LLM returns minimal XML', async () => {
@@ -332,7 +405,7 @@ describe('handleTurn — parse → assemble integration', () => {
 
     const req = makeRequest({
       context: {
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D' }], edges: [] },
         analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: 'h' }, results: [] },
         framing: { stage: 'evaluate' },
         messages: [],
@@ -413,7 +486,7 @@ describe('handleTurn — intent gate integration', () => {
     const req = makeRequest({
       message: 'brief',
       context: {
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D' }], edges: [] },
         analysis_response: {
           decision_brief: { headline: 'Test brief summary' },
           meta: { seed_used: 42, n_samples: 1000, response_hash: 'abc123' },

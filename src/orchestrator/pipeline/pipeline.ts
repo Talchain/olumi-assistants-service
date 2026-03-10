@@ -198,6 +198,22 @@ export async function executePipeline(
       specialistResult,
     );
 
+    // Per-turn diagnostic trace (Task 1)
+    emitTurnTrace({
+      enrichedContext,
+      requestId,
+      request,
+      toolSelected: v2ToolAttempted,
+      toolPermitted: v2ToolPermitted,
+      toolSuppressedReason: !v2ToolPermitted && v2ToolAttempted
+        ? `${v2ToolAttempted} not allowed at stage '${enrichedContext.stage_indicator.stage}'`
+        : null,
+      declaredMode: v2DeclaredMode,
+      inferredMode: v2InferredMode,
+      envelope,
+      stageFallbackInjected: toolResult.stage_fallback_injected,
+    });
+
     return envelope;
   } catch (error) {
     const turnId = enrichedContext?.turn_id ?? 'pipeline-error';
@@ -452,4 +468,62 @@ async function runAnalysisViaPipeline(
   };
 
   return envelope;
+}
+
+// ============================================================================
+// Per-turn Diagnostic Trace (Task 1)
+// ============================================================================
+
+interface TurnTraceInput {
+  enrichedContext: EnrichedContext;
+  requestId: string;
+  request: OrchestratorTurnRequest;
+  toolSelected: string | null;
+  toolPermitted: boolean;
+  toolSuppressedReason: string | null;
+  declaredMode: string;
+  inferredMode: string;
+  envelope: OrchestratorResponseEnvelopeV2;
+  /** True when Phase 4 injected the stage+tool-aware fallback message. */
+  stageFallbackInjected?: boolean;
+}
+
+/**
+ * Emit a structured trace log at the end of every V2 pipeline turn.
+ * Captures the full diagnostic picture: stage, tools, context, response shape.
+ */
+function emitTurnTrace(input: TurnTraceInput): void {
+  const { enrichedContext: ec, request, envelope } = input;
+  const graph = ec.graph;
+  const analysis = ec.analysis as Record<string, unknown> | null;
+  const brief = analysis?.decision_brief;
+
+  log.info(
+    {
+      event: 'orchestrator.turn.trace',
+      turn_id: ec.turn_id,
+      request_id: input.requestId,
+      scenario_id: ec.scenario_id,
+      user_message_preview: (request.message ?? '').slice(0, 80),
+      stage_from_ui: request.context.framing?.stage ?? null,
+      stage_inferred: ec.stage_indicator.stage,
+      has_graph: graph != null && (graph.nodes?.length ?? 0) > 0,
+      graph_node_count: graph?.nodes?.length ?? 0,
+      has_analysis: analysis != null,
+      has_brief: brief != null,
+      brief_length: typeof brief === 'string' ? brief.length : brief ? JSON.stringify(brief).length : 0,
+      conversation_turns: ec.conversation_history?.length ?? 0,
+      tool_selected: input.toolSelected,
+      tool_permitted: input.toolPermitted,
+      tool_suppressed_reason: input.toolSuppressedReason,
+      response_mode_declared: input.declaredMode,
+      response_mode_inferred: input.inferredMode,
+      assistant_text_length: envelope.assistant_text?.length ?? 0,
+      blocks_count: envelope.blocks.length,
+      chips_count: envelope.suggested_actions.length,
+      fallback_injected: input.stageFallbackInjected ?? false,
+      contract_violations: envelope._contract_violation_codes ?? [],
+    },
+    'orchestrator.turn.trace',
+  );
 }

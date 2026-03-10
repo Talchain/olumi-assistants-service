@@ -153,10 +153,37 @@ export interface OrchestratorResponseEnvelope {
   diagnostics?: string;
   /** Parse warnings from XML envelope extraction. Only in non-production. */
   parse_warnings?: string[];
+  /** Structured debug summaries. Only in non-production. */
+  debug?: OrchestratorDebugPayload;
   /** DSK deterministic coaching items. Omitted when DSK_COACHING_ENABLED=false or both arrays empty. */
   dsk_coaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
   /** Server-constructed model receipt after draft_graph. */
   model_receipt?: ModelReceipt;
+}
+
+export interface OrchestratorDebugPayload {
+  response_summary: {
+    assistant_text_present: boolean;
+    assistant_text_length: number;
+    block_count_by_type: Record<string, number>;
+    suggested_action_count: number;
+    error_present: boolean;
+  };
+  turn_summary: {
+    stage: string | null;
+    response_mode_declared: string | null;
+    response_mode_inferred: string | null;
+    tool_selected: string | null;
+    tool_permitted: boolean | null;
+  };
+  fallback_summary: {
+    fallback_injected: boolean;
+    fallback_reason: string | null;
+  };
+  contract_summary: {
+    contract_violations_count: number;
+    contract_violation_codes: string[];
+  };
 }
 
 // ============================================================================

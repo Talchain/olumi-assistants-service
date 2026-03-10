@@ -186,6 +186,93 @@ describe('assembleEnvelope', () => {
     expect(envelope.diagnostics).toBeUndefined();
   });
 
+  it('adds structured debug summary fields when includeDebug is true', () => {
+    const envelope = assembleEnvelope(makeInput({
+      assistantText: 'Hello from the assistant',
+      blocks: [makeServerBlock('fact'), makeAIBlock('commentary')],
+      suggestedActions: [
+        { label: 'Explore', prompt: 'Show me more', role: 'facilitator' },
+        { label: 'Challenge', prompt: 'Stress test this', role: 'challenger' },
+      ],
+      diagnostics: 'Route: explain_results',
+      parseWarnings: ['Missing field'],
+      includeDebug: true,
+      debugSummary: {
+        stage: 'evaluate',
+        response_mode_declared: 'tool',
+        response_mode_inferred: 'tool',
+        tool_selected: 'run_analysis',
+        tool_permitted: true,
+      },
+    }));
+
+    expect(envelope.diagnostics).toBe('Route: explain_results');
+    expect(envelope.parse_warnings).toEqual(['Missing field']);
+    expect(envelope.debug).toEqual({
+      response_summary: {
+        assistant_text_present: true,
+        assistant_text_length: 'Hello from the assistant'.length,
+        block_count_by_type: { fact: 1, commentary: 1 },
+        suggested_action_count: 2,
+        error_present: false,
+      },
+      turn_summary: {
+        stage: 'evaluate',
+        response_mode_declared: 'tool',
+        response_mode_inferred: 'tool',
+        tool_selected: 'run_analysis',
+        tool_permitted: true,
+      },
+      fallback_summary: {
+        fallback_injected: false,
+        fallback_reason: null,
+      },
+      contract_summary: {
+        contract_violations_count: 0,
+        contract_violation_codes: [],
+      },
+    });
+  });
+
+  it('reports empty assistant text in debug summary', () => {
+    const envelope = assembleEnvelope(makeInput({
+      assistantText: '',
+      blocks: [makeServerBlock('fact')],
+      includeDebug: true,
+    }));
+
+    expect(envelope.assistant_text).toBe('');
+    expect(envelope.debug?.response_summary.assistant_text_present).toBe(false);
+    expect(envelope.debug?.response_summary.assistant_text_length).toBe(0);
+    expect(envelope.debug?.response_summary.block_count_by_type).toEqual({ fact: 1 });
+    expect(envelope.debug?.response_summary.suggested_action_count).toBe(0);
+    expect(envelope.debug?.turn_summary).toEqual({
+      stage: null,
+      response_mode_declared: null,
+      response_mode_inferred: null,
+      tool_selected: null,
+      tool_permitted: null,
+    });
+  });
+
+  it('reports fallback and contract summary when fallback is injected', () => {
+    const envelope = assembleEnvelope(makeInput({
+      assistantText: null,
+      blocks: [],
+      includeDebug: true,
+    }));
+
+    expect(envelope.debug?.fallback_summary).toEqual({
+      fallback_injected: true,
+      fallback_reason: 'empty_response_fallback',
+    });
+    expect(envelope.debug?.contract_summary).toEqual({
+      contract_violations_count: 1,
+      contract_violation_codes: ['empty_response_fallback'],
+    });
+    expect(envelope.debug?.response_summary.assistant_text_present).toBe(true);
+  });
+
   // ---------- context_hash ----------
 
   it('context_hash is deterministic (same input → same hash)', () => {

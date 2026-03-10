@@ -25,8 +25,13 @@ export function inferStage(
     if (stage) return stage;
   }
 
-  // 2. No graph → frame.
-  if (!context.graph) {
+  // 2. No graph or empty graph → frame.
+  // Treat null, undefined, or structurally empty graphs (no nodes array or
+  // zero nodes) the same way — the user has not built a model yet.
+  const graphNodes = context.graph?.nodes;
+  const hasGraph = context.graph != null && Array.isArray(graphNodes) && graphNodes.length > 0;
+
+  if (!hasGraph) {
     return {
       stage: 'frame',
       confidence: 'high',
@@ -34,20 +39,10 @@ export function inferStage(
     };
   }
 
-  // 3. Graph exists — check analysis state
+  // 3. Graph with nodes — check analysis state
   const analysis = context.analysis_response as Record<string, unknown> | null;
 
   if (!analysis) {
-    // Structurally empty graph (no nodes) with no analysis → treat as no graph.
-    // Protects against placeholder/stub payloads promoting the stage to ideate.
-    // If analysis already exists the graph was valid at run time, so we trust it.
-    if (context.graph.nodes.length === 0) {
-      return {
-        stage: 'frame',
-        confidence: 'high',
-        source: 'inferred',
-      };
-    }
     // Graph with nodes but no analysis → ideate (user is building/refining the model)
     return {
       stage: 'ideate',
@@ -56,19 +51,13 @@ export function inferStage(
     };
   }
 
-  // 4. Analysis exists — check for brief
-  const hasBrief = analysis.decision_brief != null;
-
-  if (hasBrief) {
-    // Brief has been generated → decide
-    return {
-      stage: 'decide',
-      confidence: 'high',
-      source: 'inferred',
-    };
-  }
-
-  // 5. Analysis exists, no brief → evaluate
+  // 4. Analysis exists — always evaluate.
+  // 'decide' is user-intent-led: it must only be set by an explicit user signal
+  // (e.g. "I'm ready to decide" or requesting a decision brief), never inferred
+  // from data. Keeping users in evaluate after analysis prevents premature stage
+  // lock and ensures they see results before being pushed toward a decision.
+  //
+  // 5. Analysis exists → evaluate
   // Substate: has_run (analysis is complete since it's present in context)
   return {
     stage: 'evaluate',

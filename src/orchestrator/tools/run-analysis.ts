@@ -76,9 +76,31 @@ export async function handleRunAnalysis(
     // If called directly without analysis_inputs, throw so the caller can handle it.
     const err: OrchestratorError = {
       code: 'TOOL_EXECUTION_FAILED',
-      message: 'Cannot run analysis: no analysis_inputs in context.',
+      message: 'Cannot run analysis: no analysis_inputs in context. Options need intervention values — tell me what each option changes and I\'ll configure them, or set values directly on the canvas.',
       tool: 'run_analysis',
       recoverable: true,
+      suggested_retry: 'Configure option interventions first, then re-run.',
+    };
+    throw Object.assign(new Error(err.message), { orchestratorError: err });
+  }
+
+  // Option-configuration recovery: check if options have configured interventions.
+  // Empty interventions cause PLoT to return degenerate results or fail.
+  const unconfigured = context.analysis_inputs.options.filter(
+    (opt) => !opt.interventions || Object.keys(opt.interventions).length === 0,
+  );
+  if (unconfigured.length > 0) {
+    const labels = unconfigured.map((o) => o.label || o.option_id).join(', ');
+    log.warn(
+      { unconfigured_options: labels, turn_id: turnId },
+      'run_analysis: options missing intervention values — returning recovery message',
+    );
+    const err: OrchestratorError = {
+      code: 'TOOL_EXECUTION_FAILED',
+      message: `The analysis can't run yet — ${unconfigured.length === 1 ? `option "${labels}" has` : `options ${labels} have`} no intervention values configured. Each option needs to specify how it changes the model factors. You can set these on the canvas, or describe what each option changes and I'll configure them.`,
+      tool: 'run_analysis',
+      recoverable: true,
+      suggested_retry: 'Configure option interventions, then ask to run the analysis again.',
     };
     throw Object.assign(new Error(err.message), { orchestratorError: err });
   }

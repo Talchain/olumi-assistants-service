@@ -153,8 +153,13 @@ export async function handleExplainResults(
     // Check for constraint tension
     const tensionNote = detectConstraintTension(analysisResponse);
 
-    // Build system prompt for explanation
-    const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus);
+    // Build system prompt for explanation — include framing so the LLM grounds its
+    // explanation in the actual decision goal and constraints, not just raw numbers.
+    const framingContext = {
+      goal: context.framing?.goal,
+      constraints: Array.isArray(context.framing?.constraints) ? context.framing.constraints : undefined,
+    };
+    const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus, framingContext);
 
     const opts: CallOpts = {
       requestId,
@@ -311,15 +316,31 @@ function extractFallbackInsight(response: V2RunResponseEnvelope): string | null 
   return `Based on the analysis, ${winnerLabel} leads at ${winnerProb}%. I wasn't able to generate a full explanation — try asking a more specific question.`;
 }
 
-function buildExplanationPrompt(summary: string, tensionNote: string | null, focus?: string): string {
+function buildExplanationPrompt(
+  summary: string,
+  tensionNote: string | null,
+  focus?: string,
+  framing?: { goal?: string; constraints?: string[] },
+): string {
   const sections = [
     'You are explaining analysis results from a Monte Carlo decision model.',
     'Use ONLY the data provided below. Do NOT generate specific numbers, percentages, or statistics from memory.',
     'When referencing a specific value, cite it from the analysis data.',
-    '',
-    '## Analysis Data',
-    summary,
   ];
+
+  // Ground the explanation in the actual decision context so responses
+  // are relevant to the user's goal, not just abstract model statistics.
+  if (framing?.goal || (framing?.constraints && framing.constraints.length > 0)) {
+    sections.push('', '## Decision Context');
+    if (framing.goal) {
+      sections.push(`Goal: ${framing.goal}`);
+    }
+    if (framing.constraints && framing.constraints.length > 0) {
+      sections.push(`Constraints: ${framing.constraints.join(', ')}`);
+    }
+  }
+
+  sections.push('', '## Analysis Data', summary);
 
   if (tensionNote) {
     sections.push('', '## Constraint Note', tensionNote);
@@ -335,7 +356,8 @@ function buildExplanationPrompt(summary: string, tensionNote: string | null, foc
     '- Be concise and clear.',
     '- Cite specific values from the analysis data above.',
     '- Do NOT invent or estimate numbers.',
-    '- Explain what the results mean for the user\'s decision.',
+    '- Explain what the results mean for the user\'s decision goal.',
+    '- Reference the goal and constraints when interpreting the results.',
   );
 
   return sections.join('\n');

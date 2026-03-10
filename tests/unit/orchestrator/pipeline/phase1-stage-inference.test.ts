@@ -46,7 +46,7 @@ describe("stage-inference", () => {
   it("returns 'evaluate' with substate 'has_run' when analysis complete", () => {
     const result = inferStage(
       makeContext({
-        graph: { nodes: [], edges: [], options: [] } as unknown as ConversationContext["graph"],
+        graph: { nodes: [{ id: "n1", kind: "decision", label: "D" }], edges: [] } as unknown as ConversationContext["graph"],
         analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: "abc" }, results: [] } as unknown as ConversationContext["analysis_response"],
       }),
     );
@@ -55,10 +55,12 @@ describe("stage-inference", () => {
     expect(result.confidence).toBe("high");
   });
 
-  it("returns 'decide' when brief has been generated", () => {
+  it("returns 'evaluate' even when brief has been generated (decide is user-intent-led, never auto-derived)", () => {
+    // Task 2: 'decide' must NOT be auto-derived from data. The user must explicitly
+    // signal intent to decide. A generated brief keeps us in evaluate.
     const result = inferStage(
       makeContext({
-        graph: { nodes: [], edges: [], options: [] } as unknown as ConversationContext["graph"],
+        graph: { nodes: [{ id: "n1", kind: "decision", label: "D" }], edges: [] } as unknown as ConversationContext["graph"],
         analysis_response: {
           meta: { seed_used: 1, n_samples: 100, response_hash: "abc" },
           results: [],
@@ -66,7 +68,19 @@ describe("stage-inference", () => {
         } as unknown as ConversationContext["analysis_response"],
       }),
     );
-    expect(result.stage).toBe("decide");
+    expect(result.stage).toBe("evaluate");
+    expect(result.confidence).toBe("high");
+  });
+
+  it("returns 'frame' when graph has empty nodes even with analysis present", () => {
+    // Task 2: empty-nodes graph is treated as no graph regardless of analysis
+    const result = inferStage(
+      makeContext({
+        graph: { nodes: [], edges: [] } as unknown as ConversationContext["graph"],
+        analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: "abc" }, results: [] } as unknown as ConversationContext["analysis_response"],
+      }),
+    );
+    expect(result.stage).toBe("frame");
     expect(result.confidence).toBe("high");
   });
 

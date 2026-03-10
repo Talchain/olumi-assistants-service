@@ -23,7 +23,7 @@ import type {
   ToolDispatcher,
   ConversationContext,
 } from "../types.js";
-import { getStageAwareFallback } from "../../validation/stage-fallbacks.js";
+import { getStageAwareFallbackEntry } from "../../validation/stage-fallbacks.js";
 import { dispatchToolHandler } from "../../tools/dispatch.js";
 import type { ToolDispatchOpts } from "../../tools/dispatch.js";
 import { isLongRunningTool } from "../../tools/registry.js";
@@ -41,6 +41,8 @@ export interface Phase4Result extends ToolResult {
   executed_tools: string[];
   /** Long-running tools deferred because one already ran this turn. */
   deferred_tools: string[];
+  /** True when the stage+tool-aware fallback message was injected (all tools suppressed, no LLM text). */
+  stage_fallback_injected?: boolean;
 }
 
 /**
@@ -84,11 +86,14 @@ export async function phase4Execute(
   const deferred = longRunning.slice(1);
 
   // Build mutable context — will be updated after each tool result.
+  // Includes all accumulated decision context (brief, constraints, event log)
+  // so every tool sees the full picture.
   let currentContext: ConversationContext = {
     graph: enrichedContext.graph,
     analysis_response: enrichedContext.analysis,
     framing: enrichedContext.framing,
     messages: enrichedContext.conversation_history,
+    event_log_summary: enrichedContext.event_log_summary,
     selected_elements: enrichedContext.selected_elements,
     scenario_id: enrichedContext.scenario_id,
     analysis_inputs: enrichedContext.analysis_inputs,
@@ -101,10 +106,12 @@ export async function phase4Execute(
     brief_generated: false,
   };
   const allGuidanceItems: ToolResult['guidance_items'] = [];
+  const allSuggestedActions: ToolResult['suggested_actions'] = [];
   let assistantText: string | null = llmResult.assistant_text;
   let analysisResponse: ToolResult['analysis_response'];
   let toolLatencyMs: number | undefined;
   const executedTools: string[] = [];
+  let stageFallbackInjected = false;
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -172,7 +179,12 @@ export async function phase4Execute(
   const allToolsSuppressed = toExecute.length > 0 && executedTools.length === 0;
   if (allToolsSuppressed && !assistantText?.trim()) {
     const suppressedTool = toExecute[0]?.name;
-    assistantText = getStageAwareFallback(enrichedContext.stage_indicator.stage, suppressedTool);
+    const fallbackEntry = getStageAwareFallbackEntry(enrichedContext.stage_indicator.stage, suppressedTool);
+    assistantText = fallbackEntry.message;
+    stageFallbackInjected = true;
+    // Inject actionable chip so the user has an obvious next step
+    allGuidanceItems.length = 0; // clear any stale guidance
+    allSuggestedActions.push(fallbackEntry.chip);
     log.info(
       { stage: enrichedContext.stage_indicator.stage, suppressed_tool: suppressedTool, turn_id: enrichedContext.turn_id },
       'Phase 4: all tools suppressed with no LLM text — stage+tool-aware fallback injected',
@@ -193,8 +205,10 @@ export async function phase4Execute(
     ...(analysisResponse && { analysis_response: analysisResponse }),
     ...(toolLatencyMs !== undefined && { tool_latency_ms: toolLatencyMs }),
     guidance_items: allGuidanceItems,
+    ...(allSuggestedActions.length > 0 && { suggested_actions: allSuggestedActions }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
+    ...(stageFallbackInjected && { stage_fallback_injected: true }),
   };
 }
 

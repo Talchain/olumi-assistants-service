@@ -662,6 +662,13 @@ async function dispatchViaLLM(
   }
 
   const includeDebug = !isProduction();
+  const debugSummary = {
+    stage: currentStage,
+    response_mode_declared: declaredMode === 'unknown' ? null : declaredMode,
+    response_mode_inferred: inferredMode ?? null,
+    tool_selected: toolAttempted,
+    tool_permitted: toolAttempted ? toolPermitted : null,
+  };
 
   // Convert AI-authored XML blocks into ConversationBlock[]
   const xmlBlocks = convertExtractedBlocks(parsed.extracted_blocks, turnId);
@@ -682,6 +689,7 @@ async function dispatchViaLLM(
       contextHash,
       dskCoaching,
       computedStage: currentStage,
+      debugSummary,
     });
   }
 
@@ -705,6 +713,7 @@ async function dispatchViaLLM(
       contextHash,
       dskCoaching,
       computedStage: currentStage,
+      debugSummary,
     });
   }
 
@@ -744,7 +753,65 @@ async function dispatchViaLLM(
     if (parsed.parse_warnings.length > 0) {
       toolResult.envelope.parse_warnings = parsed.parse_warnings;
     }
+    toolResult.envelope.debug = {
+      response_summary: {
+        assistant_text_present: (toolResult.envelope.assistant_text?.trim().length ?? 0) > 0,
+        assistant_text_length: toolResult.envelope.assistant_text?.length ?? 0,
+        block_count_by_type: toolResult.envelope.blocks.reduce<Record<string, number>>((counts, block) => {
+          counts[block.block_type] = (counts[block.block_type] ?? 0) + 1;
+          return counts;
+        }, {}),
+        suggested_action_count: toolResult.envelope.suggested_actions?.length ?? 0,
+        error_present: toolResult.envelope.error !== undefined,
+      },
+      turn_summary: debugSummary,
+      fallback_summary: {
+        fallback_injected: toolResult.envelope.debug?.fallback_summary.fallback_injected ?? false,
+        fallback_reason: toolResult.envelope.debug?.fallback_summary.fallback_reason ?? null,
+      },
+      contract_summary: {
+        contract_violations_count: toolResult.envelope.debug?.contract_summary.contract_violations_count ?? 0,
+        contract_violation_codes: toolResult.envelope.debug?.contract_summary.contract_violation_codes ?? [],
+      },
+    };
   }
+
+  // Per-turn diagnostic trace (V1 path, mirrors V2 emitTurnTrace in pipeline.ts)
+  const ctx = turnRequest.context;
+  const graph = ctx.graph as { nodes?: unknown[] } | null;
+  const analysis = ctx.analysis_response as Record<string, unknown> | null;
+  const brief = analysis?.decision_brief;
+  log.info(
+    {
+      event: 'orchestrator.turn.trace',
+      turn_id: turnId,
+      request_id: requestId,
+      scenario_id: turnRequest.scenario_id,
+      user_message_preview: (turnRequest.message ?? '').slice(0, 80),
+      stage_from_ui: ctx.framing?.stage ?? null,
+      stage_inferred: currentStage,
+      has_graph: graph != null && (graph.nodes?.length ?? 0) > 0,
+      graph_node_count: graph?.nodes?.length ?? 0,
+      has_analysis: analysis != null,
+      has_brief: brief != null,
+      brief_length: typeof brief === 'string' ? brief.length : brief ? JSON.stringify(brief).length : 0,
+      conversation_turns: ctx.messages?.length ?? 0,
+      tool_selected: toolAttempted,
+      tool_permitted: toolPermitted,
+      tool_suppressed_reason: !toolPermitted && toolAttempted
+        ? `${toolAttempted} not allowed at stage '${currentStage}'`
+        : null,
+      response_mode_declared: declaredMode,
+      response_mode_inferred: inferredMode,
+      assistant_text_length: toolResult.envelope.assistant_text?.length ?? 0,
+      blocks_count: toolResult.envelope.blocks.length,
+      chips_count: toolResult.envelope.suggested_actions?.length ?? 0,
+      fallback_injected: false, // V1 uses assembleEnvelope contract validator for fallback
+      contract_violations: toolResult.envelope.debug?.contract_summary.contract_violation_codes ?? [],
+      pipeline: 'v1',
+    },
+    'orchestrator.turn.trace',
+  );
 
   return toolResult.envelope;
 }

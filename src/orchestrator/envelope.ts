@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   OrchestratorResponseEnvelope,
+  OrchestratorDebugPayload,
   ConversationBlock,
   SuggestedAction,
   ResponseLineage,
@@ -60,6 +61,8 @@ export interface EnvelopeInput {
   dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
   /** Authoritative computed stage (from inferStage). Overrides framing.stage if provided. */
   computedStage?: DecisionStage;
+  /** Read-only debug summary inputs from the current turn flow. */
+  debugSummary?: Partial<OrchestratorDebugPayload["turn_summary"]>;
 }
 
 /**
@@ -127,7 +130,11 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   }
 
   // Response contract validation — drop malformed chips/blocks, inject fallback if needed
-  validateV1EnvelopeContract(envelope, input.computedStage);
+  const contractResult = validateV1EnvelopeContract(envelope, input.computedStage);
+
+  if (input.includeDebug) {
+    envelope.debug = buildDebugPayload(envelope, input, contractResult.violations.map((violation) => violation.code));
+  }
 
   return envelope;
 }
@@ -194,6 +201,44 @@ function resolveStage(context: ConversationContext): DecisionStage | undefined {
   }
 
   return context.framing.stage;
+}
+
+function buildDebugPayload(
+  envelope: OrchestratorResponseEnvelope,
+  input: EnvelopeInput,
+  contractViolationCodes: string[],
+): OrchestratorDebugPayload {
+  const trimmedAssistantText = envelope.assistant_text?.trim() ?? "";
+  const blockCountByType = envelope.blocks.reduce<Record<string, number>>((counts, block) => {
+    counts[block.block_type] = (counts[block.block_type] ?? 0) + 1;
+    return counts;
+  }, {});
+  const fallbackInjected = contractViolationCodes.includes("empty_response_fallback");
+
+  return {
+    response_summary: {
+      assistant_text_present: trimmedAssistantText.length > 0,
+      assistant_text_length: envelope.assistant_text?.length ?? 0,
+      block_count_by_type: blockCountByType,
+      suggested_action_count: envelope.suggested_actions?.length ?? 0,
+      error_present: envelope.error !== undefined,
+    },
+    turn_summary: {
+      stage: input.debugSummary?.stage ?? null,
+      response_mode_declared: input.debugSummary?.response_mode_declared ?? null,
+      response_mode_inferred: input.debugSummary?.response_mode_inferred ?? null,
+      tool_selected: input.debugSummary?.tool_selected ?? null,
+      tool_permitted: input.debugSummary?.tool_permitted ?? null,
+    },
+    fallback_summary: {
+      fallback_injected: fallbackInjected,
+      fallback_reason: fallbackInjected ? "empty_response_fallback" : null,
+    },
+    contract_summary: {
+      contract_violations_count: contractViolationCodes.length,
+      contract_violation_codes: contractViolationCodes,
+    },
+  };
 }
 
 // ============================================================================

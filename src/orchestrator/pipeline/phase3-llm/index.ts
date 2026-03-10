@@ -22,6 +22,8 @@ import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
 import { assembleV2SystemPrompt } from "./prompt-assembler.js";
 import { parseV2Response, buildDeterministicLLMResult } from "./response-parser.js";
+import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
+import { config } from "../../../config/index.js";
 
 // ============================================================================
 // Deterministic Routing Prerequisites
@@ -128,6 +130,24 @@ export async function phase3Generate(
 
   // 2. LLM routing — full tool-calling flow
   const systemPrompt = await assembleV2SystemPrompt(enrichedContext);
+
+  // Task 7: Log prompt identity for every V2 LLM call
+  const promptMeta = getSystemPromptMeta('orchestrator');
+  log.info(
+    {
+      request_id: requestId,
+      prompt_task_id: promptMeta.taskId,
+      prompt_version: promptMeta.prompt_version,
+      prompt_hash: promptMeta.prompt_hash ?? null,
+      prompt_source: promptMeta.source,
+      prompt_instance_id: promptMeta.instance_id ?? null,
+      zone2_enabled: config.features.contextFabric,
+      system_prompt_chars: systemPrompt.length,
+      pipeline: 'v2',
+    },
+    'phase3.prompt_identity',
+  );
+
   const context = buildConversationContext(enrichedContext);
 
   // Filter [system] sentinel: when a system_event is present, replace with event context.

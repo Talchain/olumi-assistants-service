@@ -6,7 +6,7 @@ import type { PipelineDeps, LLMClient, ToolDispatcher, ToolResult } from "../../
 // Mock config
 vi.mock("../../../src/config/index.js", () => ({
   isProduction: () => false,
-  config: { features: { orchestratorV2: false } },
+  config: { features: { orchestratorV2: false, contextFabric: false } },
 }));
 
 // Mock intent gate — no deterministic match for test messages
@@ -17,6 +17,13 @@ vi.mock("../../../src/orchestrator/intent-gate.js", () => ({
 // Mock prompt assembly
 vi.mock("../../../src/adapters/llm/prompt-loader.js", () => ({
   getSystemPrompt: vi.fn().mockResolvedValue("System prompt"),
+  getSystemPromptMeta: vi.fn().mockReturnValue({
+    taskId: "orchestrator",
+    source: "default",
+    prompt_version: "default:orchestrator",
+    prompt_hash: "test-hash",
+    instance_id: "test-instance",
+  }),
 }));
 
 vi.mock("../../../src/orchestrator/prompt-assembly.js", () => ({
