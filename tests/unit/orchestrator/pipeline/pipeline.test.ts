@@ -176,4 +176,46 @@ describe("pipeline", () => {
     expect(envelope.science_ledger).toBeDefined();
     expect(envelope.progress_marker.kind).toBe("none");
   });
+
+  it("follow-up explanation with rehydrated analysis stays in evaluate and dispatches explain_results", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    // classifyIntent is called twice per turn: once in pipeline.ts (analysis-lookup guard)
+    // and once inside phase3Generate. Both calls must return the deterministic result.
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "explain_results",
+      confidence: "exact",
+      matched_pattern: "explain results",
+    });
+
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Here is what drove the analysis result.",
+      guidance_items: [],
+    } as ToolResult);
+
+    const envelope = await executePipeline(makeRequest({
+      message: "Explain the results",
+      context: {
+        graph: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+        analysis_response: {
+          analysis_status: "completed",
+          meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 100 },
+          results: [],
+          response_hash: "analysis-hash",
+        } as any,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+    }), "req-followup", deps);
+
+    expect(envelope.stage_indicator.stage).toBe("evaluate");
+    expect((deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("explain_results");
+    expect(envelope.assistant_text).toBe("Here is what drove the analysis result.");
+    const explainContext = (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(explainContext.analysis_response?.response_hash).toBe("analysis-hash");
+  });
 });

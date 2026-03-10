@@ -231,7 +231,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     // Normalise context: if absent, construct from flat UI fields
     const context = parsed.data.context ?? {
       graph: parsed.data.graph_state ?? null,
-      analysis_response: null,
+      analysis_response: parsed.data.analysis_state ?? null,
       framing: null,
       messages: (parsed.data.conversation_history ?? []) as z.infer<typeof ConversationMessageSchema>[],
       scenario_id: parsed.data.scenario_id,

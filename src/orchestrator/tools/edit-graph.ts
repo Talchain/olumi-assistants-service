@@ -109,6 +109,8 @@ export interface EditGraphLLMResult {
   coaching: EditGraphCoaching | null;
 }
 
+export type EditIntentCategory = 'parameter_update' | 'option_configuration' | 'structural';
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -116,6 +118,87 @@ export interface EditGraphLLMResult {
 /** Maximum number of operations per patch. Configurable via MAX_PATCH_OPERATIONS env var, default 15. */
 function getMaxPatchOperations(): number {
   return config.cee.maxPatchOperations;
+}
+
+export function classifyEditIntent(editDescription: string): EditIntentCategory {
+  const message = editDescription.toLowerCase();
+  const hasStructuralVerb = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option)\b/.test(message);
+  const hasOptionConfigVerb = /\b(configure|set|adjust|update|change|tune|edit)\b/.test(message)
+    && /\b(option|intervention)\b/.test(message);
+  const hasValueUpdateVerb = /\b(set|lower|raise|increase|decrease|reduce|boost|make|adjust|update|tune|change|add)\b/.test(message);
+  const hasValueTarget = /\b(high|low|higher|lower|more|less|sensitivity|cost|price|pay|willingness|churn|agency|percent|%|value|parameter|weight|strength|mean|std|probability|exists)\b/.test(message);
+
+  if (hasStructuralVerb) {
+    return 'structural';
+  }
+  if (hasOptionConfigVerb) {
+    return 'option_configuration';
+  }
+  if (hasValueUpdateVerb && hasValueTarget) {
+    return 'parameter_update';
+  }
+  return 'structural';
+}
+
+function buildIntentInstruction(intentCategory: EditIntentCategory): string | null {
+  if (intentCategory === 'parameter_update') {
+    return [
+      'This is a narrow parameter/value update.',
+      'Prefer update_node or update_edge operations only.',
+      'Do not add_node, remove_node, add_edge, or remove_edge unless the user explicitly asked for a topology change.',
+      'Update existing fields only.',
+    ].join(' ');
+  }
+  if (intentCategory === 'option_configuration') {
+    return [
+      'This is an option/intervention configuration update.',
+      'Prefer the narrowest valid update to an existing option or intervention field.',
+      'Do not add_node, remove_node, add_edge, or remove_edge unless the user explicitly asked for a topology change.',
+    ].join(' ');
+  }
+  return null;
+}
+
+function hasStructuralOperations(operations: PatchOperation[]): boolean {
+  return operations.some((op) =>
+    op.op === 'add_node'
+    || op.op === 'remove_node'
+    || op.op === 'add_edge'
+    || op.op === 'remove_edge',
+  );
+}
+
+function buildRecoveryQuestion(
+  intentCategory: EditIntentCategory,
+  editDescription: string,
+  context: ConversationContext,
+): string {
+  if (intentCategory === 'option_configuration') {
+    const optionLabels = (context.graph?.nodes ?? [])
+      .filter((node) => node.kind === 'option')
+      .map((node) => ('label' in node && typeof node.label === 'string') ? node.label : null)
+      .filter((label): label is string => label !== null && label.length > 0);
+    if (optionLabels.length > 0) {
+      return `Which option should I configure first${optionLabels.length <= 3 ? ` — ${optionLabels.join(', ')}` : ''}?`;
+    }
+    return 'Which existing option should I configure, and what factor should it change?';
+  }
+  return `Which existing factor or edge should I update for "${editDescription.trim()}"?`;
+}
+
+function buildIntentRecoveryResult(
+  intentCategory: EditIntentCategory,
+  editDescription: string,
+  context: ConversationContext,
+  startTime: number,
+): EditGraphResult {
+  return {
+    blocks: [],
+    assistantText: buildRecoveryQuestion(intentCategory, editDescription, context),
+    latencyMs: Date.now() - startTime,
+    appliedGraph: null,
+    wasRejected: true,
+  };
 }
 
 // ============================================================================
@@ -303,6 +386,8 @@ export async function handleEditGraph(
   const maxRetries = opts?.maxRetries ?? config.cee.maxRepairRetries;
   const plotClient = opts?.plotClient ?? null;
   const baseGraphHash = computeGraphHash(context.graph);
+  const intentCategory = classifyEditIntent(editDescription);
+  const intentInstruction = buildIntentInstruction(intentCategory);
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
   const systemPrompt = await getSystemPrompt('edit_graph');
@@ -332,7 +417,7 @@ export async function handleEditGraph(
   const contextSection = serialiseEditContextForLLM(context);
 
   // Combine system prompt with serialised context
-  const fullSystemPrompt = `${systemPrompt}\n\n${contextSection}`;
+  const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
 
   const callOpts: CallOpts = {
     requestId,
@@ -344,6 +429,7 @@ export async function handleEditGraph(
   let lastValidationResult: PatchValidationResult | undefined;
   let lastPlotErrors: string | undefined;
   let lastRawOps: unknown[] | undefined;
+  let consecutiveNarrowStructuralFailures = 0;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const isRepair = attempt > 1;
@@ -367,6 +453,7 @@ export async function handleEditGraph(
         '## Original Edit Request',
         editDescription,
         '',
+        ...(intentInstruction ? ['## Narrow Edit Constraint', intentInstruction, ''] : []),
         '## Previous (Invalid) Operations',
         JSON.stringify(lastRawOps ?? [], null, 2),
       ].join('\n');
@@ -461,6 +548,24 @@ export async function handleEditGraph(
     const rawOps: unknown[] = strippedOps;
     lastRawOps = rawOps;
 
+    if (intentCategory !== 'structural' && hasStructuralOperations(strippedOps)) {
+      consecutiveNarrowStructuralFailures++;
+      lastValidationResult = {
+        valid: false,
+        operations: [],
+        referentialErrors: [{
+          index: 0,
+          op: 'intent_guard',
+          path: '',
+          message: `Narrow ${intentCategory} request must use field-level updates only.`,
+        }],
+      };
+      if (consecutiveNarrowStructuralFailures >= 2) {
+        return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+      }
+      continue;
+    }
+
     // Guard: reject oversized operation arrays before expensive validation
     const maxOps = getMaxPatchOperations();
     if (rawOps.length > maxOps) {
@@ -482,6 +587,14 @@ export async function handleEditGraph(
     lastValidationResult = validationResult;
 
     if (!validationResult.valid) {
+      if (intentCategory !== 'structural') {
+        consecutiveNarrowStructuralFailures++;
+        if (consecutiveNarrowStructuralFailures >= 2) {
+          return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+        }
+      } else {
+        consecutiveNarrowStructuralFailures = 0;
+      }
       log.warn(
         {
           request_id: requestId,
@@ -557,6 +670,18 @@ export async function handleEditGraph(
         candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
       } catch (applyErr) {
         if (applyErr instanceof PatchApplyError) {
+          if (intentCategory !== 'structural') {
+            consecutiveNarrowStructuralFailures++;
+            lastValidationResult = {
+              valid: false,
+              operations: operations as unknown as import('../patch-validation.js').ValidatedPatchOperation[],
+              referentialErrors: [{ index: 0, op: applyErr.code, path: '', message: applyErr.message }],
+            };
+            if (consecutiveNarrowStructuralFailures >= 2) {
+              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+            }
+            continue;
+          }
           log.warn(
             { request_id: requestId, attempt, code: applyErr.code, error: applyErr.message },
             'edit_graph rejected — patch apply error',
@@ -584,6 +709,23 @@ export async function handleEditGraph(
 
       const structResult = validateGraphStructure(candidateGraph);
       if (!structResult.valid) {
+        if (intentCategory !== 'structural') {
+          consecutiveNarrowStructuralFailures++;
+          lastValidationResult = {
+            valid: false,
+            operations: operations as unknown as import('../patch-validation.js').ValidatedPatchOperation[],
+            referentialErrors: structResult.violations.map((violation, index) => ({
+              index,
+              op: violation.code,
+              path: '',
+              message: violation.detail,
+            })),
+          };
+          if (consecutiveNarrowStructuralFailures >= 2) {
+            return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+          }
+          continue;
+        }
         const translatedViolations = structResult.violations.map(
           (v) => VIOLATION_MESSAGES[v.code] ?? v.detail,
         );
@@ -643,6 +785,12 @@ export async function handleEditGraph(
           const reason = plotResult.message ?? 'Semantic validation rejected by PLoT';
           const plotCode = plotResult.code;
           const plotViolations = plotResult.violations;
+          if (intentCategory !== 'structural') {
+            consecutiveNarrowStructuralFailures++;
+            if (consecutiveNarrowStructuralFailures >= 2) {
+              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+            }
+          }
 
           log.warn(
             { request_id: requestId, attempt, reason, plot_code: plotCode },
@@ -675,6 +823,12 @@ export async function handleEditGraph(
             const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
             const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
             const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
+            if (intentCategory !== 'structural') {
+              consecutiveNarrowStructuralFailures++;
+              if (consecutiveNarrowStructuralFailures >= 2) {
+                return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+              }
+            }
 
             log.warn(
               { request_id: requestId, attempt, verdict, reason, plot_code: plotCode },
@@ -773,6 +927,8 @@ export async function handleEditGraph(
     if (!plotClient) {
       allWarnings.push('PLOT_VALIDATION_SKIPPED: PLoT was unavailable — this patch has not been canonically validated');
     }
+
+    consecutiveNarrowStructuralFailures = 0;
 
     // Compute analysis_ready from post-patch graph (single candidate graph flow)
     const readinessGraph = appliedGraph ?? candidateGraph;

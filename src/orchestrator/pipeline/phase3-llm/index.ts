@@ -142,6 +142,8 @@ export async function phase3Generate(
       prompt_source: promptMeta.source,
       prompt_instance_id: promptMeta.instance_id ?? null,
       zone2_enabled: config.features.contextFabric,
+      v2_prompt_zone2_included: true,
+      context_fabric_config_enabled: config.features.contextFabric,
       system_prompt_chars: systemPrompt.length,
       pipeline: 'v2',
     },

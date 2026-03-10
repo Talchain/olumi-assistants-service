@@ -1630,6 +1630,15 @@ preserves causal integrity. Do not silently rebalance, rename, or rewrite
 unrelated parts of the graph. Every operation must be traceable to the
 user's instruction or a necessary structural consequence of it.
 
+<PATCH_SELECTION>
+Default to field-level updates for narrow edits.
+- Requests to set, raise, lower, increase, decrease, tune, or otherwise change an existing value or parameter are non-structural.
+- Requests to configure an existing option or intervention are non-structural unless the user explicitly asks to add, remove, or reconnect graph structure.
+- For non-structural requests, prefer update_node or update_edge only.
+- Do not add_node, remove_node, add_edge, or remove_edge unless the user explicitly asked for a topology change.
+- If you cannot identify the exact existing node, edge, or option field to update safely, return operations: [] and ask one precise question in coaching.summary.
+</PATCH_SELECTION>
+
 <TOPOLOGY_RULES>
 ALLOWED EDGE PATTERNS:
 - decision→option (structural: mean=1.0, std=0.01, exists_probability=1.0)

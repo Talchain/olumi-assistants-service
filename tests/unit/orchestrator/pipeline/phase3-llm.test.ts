@@ -3,6 +3,7 @@ import { phase3Generate } from "../../../../src/orchestrator/pipeline/phase3-llm
 import { buildDeterministicLLMResult, parseV2Response } from "../../../../src/orchestrator/pipeline/phase3-llm/response-parser.js";
 import type { EnrichedContext, SpecialistResult, LLMClient } from "../../../../src/orchestrator/pipeline/types.js";
 import type { ChatWithToolsResult } from "../../../../src/adapters/llm/types.js";
+import { log } from "../../../../src/utils/telemetry.js";
 
 // Mock intent gate — control deterministic routing
 vi.mock("../../../../src/orchestrator/intent-gate.js", () => ({
@@ -240,6 +241,41 @@ describe("phase3-llm", () => {
 
       // Should fall back to LLM
       expect(client.chatWithTools).toHaveBeenCalled();
+    });
+
+    it("logs zone2_enabled from the runtime context-fabric flag", async () => {
+      const originalFlag = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED;
+      process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = "1";
+      const infoSpy = vi.spyOn(log, "info").mockImplementation(() => log);
+      const client = makeMockLLMClient();
+      let promptLog: [Record<string, unknown>, string] | undefined;
+
+      try {
+        await phase3Generate(
+          makeEnrichedContext(),
+          makeSpecialistResult(),
+          client,
+          "req-zone2",
+          "Hello there",
+        );
+        promptLog = infoSpy.mock.calls.find((call) => call[1] === "phase3.prompt_identity") as
+          | [Record<string, unknown>, string]
+          | undefined;
+      } finally {
+        infoSpy.mockRestore();
+        if (originalFlag === undefined) {
+          delete process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED;
+        } else {
+          process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = originalFlag;
+        }
+      }
+
+      expect(promptLog).toBeDefined();
+      expect(promptLog?.[0].zone2_enabled).toBe(true);
+      expect(promptLog?.[0].v2_prompt_zone2_included).toBe(true);
+      // context_fabric_config_enabled reads config.features.contextFabric which is itself sourced
+      // from CEE_ORCHESTRATOR_CONTEXT_ENABLED — both flags reflect the same runtime source.
+      expect(promptLog?.[0].context_fabric_config_enabled).toBe(true);
     });
   });
 

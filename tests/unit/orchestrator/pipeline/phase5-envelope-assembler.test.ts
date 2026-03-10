@@ -268,6 +268,27 @@ describe("assembleV2Envelope", () => {
     expect(envelope.guidance_items).toEqual([]);
   });
 
+  it("includes analysis_response in the final V2 envelope when a tool produced analysis", () => {
+    const analysisResponse = {
+      analysis_status: "completed",
+      meta: { response_hash: "analysis-hash", seed_used: 7, n_samples: 1000 },
+      results: [],
+      response_hash: "analysis-hash",
+    };
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult({ analysis_response: analysisResponse as any }),
+      progressKind: "ran_analysis",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.analysis_response).toEqual(analysisResponse);
+    expect(envelope.lineage.response_hash).toBe("analysis-hash");
+  });
+
   it("lineage.dsk_version_hash is null when ENABLE_DSK_V0 is OFF", () => {
     // config mock already has dskV0: false and getDskVersionHash returns null
     const envelope = assembleV2Envelope({

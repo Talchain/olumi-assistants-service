@@ -38,6 +38,7 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
 });
 
 import {
+  classifyEditIntent,
   parseEditGraphResponse,
   handleEditGraph,
   type EditGraphLLMResult,
@@ -287,6 +288,24 @@ describe("parseEditGraphResponse", () => {
     expect(value.strength_mean).toBe(0.6);
     expect(value.strength_std).toBe(0.15);
     expect(value.strength).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// classifyEditIntent Tests
+// ============================================================================
+
+describe("classifyEditIntent", () => {
+  it("classifies value updates as parameter_update", () => {
+    expect(classifyEditIntent("Set customer willingness to pay high")).toBe("parameter_update");
+  });
+
+  it("classifies option configuration requests as option_configuration", () => {
+    expect(classifyEditIntent("Configure the premium option to increase price")).toBe("option_configuration");
+  });
+
+  it("classifies topology changes as structural", () => {
+    expect(classifyEditIntent("Add a competitor factor")).toBe("structural");
   });
 });
 
@@ -635,7 +654,7 @@ describe("golden fixtures", () => {
 
 describe("prompt loading", () => {
   // Test 19a: Handler loads prompt via getSystemPrompt('edit_graph')
-  it("calls getSystemPrompt with 'edit_graph'", async () => {
+  it("uses prompt-loader for edit_graph system prompt", async () => {
     const { getSystemPrompt } = await import("../../../../src/adapters/llm/prompt-loader.js");
     const adapter = makeAdapter(V2_GOOD_RESPONSE);
 
@@ -648,6 +667,72 @@ describe("prompt loading", () => {
     );
 
     expect(getSystemPrompt).toHaveBeenCalledWith("edit_graph");
+  });
+
+  it("steers narrow value edits toward field-level updates in the system prompt", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1/data.value",
+          value: "high",
+          old_value: "medium",
+          impact: "low",
+          rationale: "Update the existing factor value",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated the factor value.", rerun_recommended: false },
+    });
+
+    await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay high",
+      adapter,
+      "req-narrow-prompt",
+      "turn-narrow-prompt",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("Prefer update_node or update_edge operations only.");
+    expect(firstCall.system).not.toContain("Prefer the narrowest valid update to an existing option");
+  });
+
+  it("returns a concise recovery question after repeated structural outputs for a narrow request", async () => {
+    const structuralResponse = {
+      operations: [
+        {
+          op: "add_node",
+          path: "/nodes/fac_customer_willingness",
+          value: { id: "fac_customer_willingness", kind: "factor", label: "Customer Willingness To Pay" },
+          impact: "moderate",
+          rationale: "Create a new factor for willingness to pay",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added a new factor.", rerun_recommended: false },
+    };
+    const adapter = {
+      ...makeAdapter(structuralResponse),
+      chat: vi.fn()
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralResponse) })
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralResponse) }),
+    } as unknown as LLMAdapter;
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay high",
+      adapter,
+      "req-recovery",
+      "turn-recovery",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(true);
+    expect(result.assistantText).toContain("Which existing factor or edge should I update");
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
   });
 
   // Test 19b: Default prompt contains v2-specific content (not old inline prompt)

@@ -125,6 +125,29 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(response.statusCode).toBe(200);
   });
 
+  it("preserves top-level analysis_state when context is absent", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: {
+        message: "Explain the results",
+        scenario_id: "test",
+        client_turn_id: "turn-analysis-state",
+        analysis_state: {
+          analysis_status: "completed",
+          meta: { response_hash: "analysis-hash" },
+          results: [],
+        },
+        graph_state: {
+          nodes: [{ id: "d1", kind: "decision", label: "Decision" }],
+          edges: [],
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
   it("returns 400 for missing client_turn_id", async () => {
     const response = await app.inject({
       method: "POST",

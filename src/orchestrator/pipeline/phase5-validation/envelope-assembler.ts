@@ -174,6 +174,10 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     turn_plan: turnPlan,
   };
 
+  if (toolResult.analysis_response) {
+    envelope.analysis_response = toolResult.analysis_response;
+  }
+
   // Add analysis response hash to lineage if available
   if (toolResult.analysis_response) {
     const ar = toolResult.analysis_response;

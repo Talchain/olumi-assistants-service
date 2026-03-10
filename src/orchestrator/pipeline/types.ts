@@ -219,6 +219,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   assistant_text: string | null;
   blocks: ConversationBlock[];
   suggested_actions: SuggestedAction[];
+  analysis_response?: V2RunResponseEnvelope;
 
   lineage: {
     context_hash: string;
