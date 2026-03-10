@@ -23,6 +23,7 @@ import type {
 import { hashContext } from "./context/hash.js";
 import { computeStructuralReadiness } from "./tools/analysis-ready-helper.js";
 import { buildModelReceipt } from "./pipeline/phase5-validation/model-receipt.js";
+import { validateV1EnvelopeContract } from "./validation/response-contract.js";
 
 // ============================================================================
 // Envelope Builder
@@ -124,6 +125,9 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   if (modelReceipt) {
     envelope.model_receipt = modelReceipt;
   }
+
+  // Response contract validation — drop malformed chips/blocks, inject fallback if needed
+  validateV1EnvelopeContract(envelope, input.computedStage);
 
   return envelope;
 }

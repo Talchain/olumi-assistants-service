@@ -23,6 +23,7 @@ import type {
   ToolDispatcher,
   ConversationContext,
 } from "../types.js";
+import { getStageAwareFallback } from "../../validation/stage-fallbacks.js";
 import { dispatchToolHandler } from "../../tools/dispatch.js";
 import type { ToolDispatchOpts } from "../../tools/dispatch.js";
 import { isLongRunningTool } from "../../tools/registry.js";
@@ -164,6 +165,18 @@ export async function phase4Execute(
     if (invocation.name === 'generate_brief') {
       sideEffects.brief_generated = true;
     }
+  }
+
+  // Guaranteed fallback: all tools suppressed + blank/null LLM text → never emit silent response.
+  // Check after the loop so we only fire when nothing executed AND there is no usable text.
+  const allToolsSuppressed = toExecute.length > 0 && executedTools.length === 0;
+  if (allToolsSuppressed && !assistantText?.trim()) {
+    const suppressedTool = toExecute[0]?.name;
+    assistantText = getStageAwareFallback(enrichedContext.stage_indicator.stage, suppressedTool);
+    log.info(
+      { stage: enrichedContext.stage_indicator.stage, suppressed_tool: suppressedTool, turn_id: enrichedContext.turn_id },
+      'Phase 4: all tools suppressed with no LLM text — stage+tool-aware fallback injected',
+    );
   }
 
   // Append deferred note if any long-running tools were skipped

@@ -402,6 +402,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         OrchestratorSystemEvent: "orchestrator.system_event",
         OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
         OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
+        OrchestratorContractViolation: "orchestrator.turn.contract_violation",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -873,6 +874,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.OrchestratorSystemEvent,
         TelemetryEvents.OrchestratorModeDisagreement,
         TelemetryEvents.OrchestratorToolSuppressed,
+        TelemetryEvents.OrchestratorContractViolation,
       ];
 
       for (const event of allEvents) {
@@ -1249,6 +1251,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "orchestrator.system_event",
         "orchestrator.turn.mode_disagreement",
         "orchestrator.turn.tool_suppressed",
+        "orchestrator.turn.contract_violation",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

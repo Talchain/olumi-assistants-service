@@ -316,7 +316,12 @@ describe('parseOrchestratorResponse', () => {
 
     expect(result.suggested_actions).toHaveLength(1);
     expect(result.suggested_actions[0].label).toBe('Valid');
-    expect(result.parse_warnings.filter(w => w.includes('missing required'))).toHaveLength(2);
+    // Warnings are now structured JSON diagnostics
+    const droppedWarnings = result.parse_warnings.filter(w => {
+      try { return (JSON.parse(w) as Record<string, unknown>).issue === 'action_dropped_missing_fields'; }
+      catch { return false; }
+    });
+    expect(droppedWarnings).toHaveLength(2);
   });
 
   it('unescapes all five XML entities in assistant_text', () => {

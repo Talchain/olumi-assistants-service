@@ -100,12 +100,26 @@ describe('assembleEnvelope', () => {
     expect(envelope.assistant_text).toBe('The analysis suggests...');
   });
 
-  it('handles null assistant_text', () => {
+  it('handles null assistant_text — contract validator injects stage-aware fallback', () => {
     const envelope = assembleEnvelope(makeInput({
       assistantText: null,
     }));
 
+    // Contract validator: null assistant_text + no blocks + no error → fallback injected
+    expect(envelope.assistant_text).not.toBeNull();
+    expect(typeof envelope.assistant_text).toBe('string');
+    expect((envelope.assistant_text as string).length).toBeGreaterThan(0);
+  });
+
+  it('handles null assistant_text with error set — no fallback injection', () => {
+    const envelope = assembleEnvelope(makeInput({
+      assistantText: null,
+      error: { code: 'UNKNOWN', message: 'Pipeline failed', recoverable: false },
+    }));
+
+    // Contract validator skips fallback when error is set
     expect(envelope.assistant_text).toBeNull();
+    expect(envelope.error?.code).toBe('UNKNOWN');
   });
 
   // ---------- include_debug ----------

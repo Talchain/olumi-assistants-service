@@ -270,6 +270,125 @@ Some text without a proper response envelope.`;
     });
   });
 
+  // =========================================================================
+  // Suggested action diagnostics (Task 2)
+  // =========================================================================
+
+  describe("suggested action parsing — diagnostics", () => {
+    it("extracts multi-line <message> content correctly", () => {
+      const xmlText = `<diagnostics>ok</diagnostics>
+<response>
+  <assistant_text>Here are your options.</assistant_text>
+  <suggested_actions>
+    <action>
+      <role>facilitator</role>
+      <label>Multi-line choice</label>
+      <message>
+This spans
+multiple lines
+of content
+      </message>
+    </action>
+  </suggested_actions>
+</response>`;
+
+      const result = makeResult({
+        content: [{ type: "text", text: xmlText }],
+      });
+      const parsed = parseLLMResponse(result);
+
+      expect(parsed.suggested_actions).toHaveLength(1);
+      const prompt = parsed.suggested_actions[0].prompt;
+      expect(prompt).toContain("This spans");
+      expect(prompt).toContain("multiple lines");
+      expect(prompt).toContain("of content");
+    });
+
+    it("emits structured JSON diagnostic when <message> is missing from an action", () => {
+      const xmlText = `<diagnostics>ok</diagnostics>
+<response>
+  <assistant_text>Here.</assistant_text>
+  <suggested_actions>
+    <action>
+      <role>facilitator</role>
+      <label>LabelOnly</label>
+    </action>
+  </suggested_actions>
+</response>`;
+
+      const result = makeResult({
+        content: [{ type: "text", text: xmlText }],
+      });
+      const parsed = parseLLMResponse(result);
+
+      // Action dropped — no suggested actions emitted
+      expect(parsed.suggested_actions).toHaveLength(0);
+
+      // Warning is parseable JSON with structured fields
+      expect(parsed.parse_warnings).toHaveLength(1);
+      const warning = JSON.parse(parsed.parse_warnings[0]) as Record<string, unknown>;
+      expect(warning.issue).toBe("action_dropped_missing_fields");
+      expect(warning.missing_fields).toContain("message");
+      expect(warning.label_char_count).toBe("LabelOnly".length);
+      expect(warning.message_char_count).toBe(0);
+      expect(warning.action_index).toBe(0);
+    });
+
+    it("emits structured JSON diagnostic when <label> is missing from an action", () => {
+      const xmlText = `<diagnostics>ok</diagnostics>
+<response>
+  <assistant_text>Here.</assistant_text>
+  <suggested_actions>
+    <action>
+      <role>facilitator</role>
+      <message>message text here</message>
+    </action>
+  </suggested_actions>
+</response>`;
+
+      const result = makeResult({
+        content: [{ type: "text", text: xmlText }],
+      });
+      const parsed = parseLLMResponse(result);
+
+      expect(parsed.suggested_actions).toHaveLength(0);
+      const warning = JSON.parse(parsed.parse_warnings[0]) as Record<string, unknown>;
+      expect(warning.issue).toBe("action_dropped_missing_fields");
+      expect(warning.missing_fields).toContain("label");
+      expect(warning.label_char_count).toBe(0);
+      expect(warning.message_char_count).toBe("message text here".length);
+    });
+
+    it("action_index increments correctly across mixed valid and invalid actions", () => {
+      const xmlText = `<diagnostics>ok</diagnostics>
+<response>
+  <assistant_text>Here.</assistant_text>
+  <suggested_actions>
+    <action>
+      <role>facilitator</role>
+      <label>First valid</label>
+      <message>First message</message>
+    </action>
+    <action>
+      <role>facilitator</role>
+      <label>No message action</label>
+    </action>
+  </suggested_actions>
+</response>`;
+
+      const result = makeResult({
+        content: [{ type: "text", text: xmlText }],
+      });
+      const parsed = parseLLMResponse(result);
+
+      // First action valid
+      expect(parsed.suggested_actions).toHaveLength(1);
+      // Second action dropped — warning action_index = 1 (one action was accepted before)
+      const warning = JSON.parse(parsed.parse_warnings[0]) as Record<string, unknown>;
+      expect(warning.action_index).toBe(1);
+    });
+  });
+
   describe("getFirstToolInvocation", () => {
     it("returns first tool invocation", () => {
       const parsed = parseLLMResponse(makeResult({

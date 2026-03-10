@@ -428,6 +428,7 @@ export const TelemetryEvents = {
   OrchestratorSystemEvent: "orchestrator.system_event",
   OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
   OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
+  OrchestratorContractViolation: "orchestrator.turn.contract_violation",
 } as const;
 
 /**

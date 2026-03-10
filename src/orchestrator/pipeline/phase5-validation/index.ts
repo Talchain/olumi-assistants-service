@@ -25,6 +25,7 @@ import { validateScience } from "./science-validator.js";
 import { extractClaims } from "./claims-ledger.js";
 import { writeObservation } from "./observation-writer.js";
 import { assembleV2Envelope } from "./envelope-assembler.js";
+import { validateV2EnvelopeContract } from "../../validation/response-contract.js";
 
 /**
  * Phase 5 entry point: validate and assemble the response envelope.
@@ -54,7 +55,7 @@ export function phase5Validate(
   writeObservation(enrichedContext.turn_id, enrichedContext.scenario_id);
 
   // 5. Assemble envelope
-  return assembleV2Envelope({
+  const envelope = assembleV2Envelope({
     enrichedContext,
     specialistResult,
     llmResult,
@@ -63,4 +64,9 @@ export function phase5Validate(
     stageTransition,
     scienceLedger,
   });
+
+  // 6. Response contract validation — drop malformed chips/blocks, inject fallback if needed
+  validateV2EnvelopeContract(envelope, enrichedContext.stage_indicator.stage);
+
+  return envelope;
 }

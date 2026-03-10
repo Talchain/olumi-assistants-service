@@ -228,6 +228,7 @@ function parseSuggestedActionsWithWarnings(
   const results: ParsedAction[] = [];
 
   let truncated = false;
+  let actionIndex = 0;
   for (const raw of rawActions) {
     if (results.length >= 2) {
       truncated = true;
@@ -239,7 +240,15 @@ function parseSuggestedActionsWithWarnings(
     const role = extractTag(raw, 'role');
 
     if (!label || !message) {
-      warnings.push('Action missing required <label> or <message> — dropped');
+      const missingFields = [...(!label ? ['label'] : []), ...(!message ? ['message'] : [])];
+      warnings.push(JSON.stringify({
+        issue: 'action_dropped_missing_fields',
+        action_index: actionIndex,
+        missing_fields: missingFields,
+        label_char_count: label?.length ?? 0,
+        message_char_count: message?.length ?? 0,
+      }));
+      actionIndex++;
       continue;
     }
 
@@ -256,6 +265,7 @@ function parseSuggestedActionsWithWarnings(
       message: unescapeXmlEntities(message),
       role: validRole,
     });
+    actionIndex++;
   }
 
   if (truncated) {
