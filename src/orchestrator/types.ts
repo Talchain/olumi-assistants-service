@@ -125,12 +125,21 @@ export interface PendingClarificationState {
   candidate_labels: string[];
 }
 
+export interface PendingProposalState {
+  tool: 'edit_graph';
+  original_edit_request: string;
+  proposed_changes: ProposedChangesPayload;
+  candidate_labels: string[];
+  base_graph_hash: string;
+}
+
 export interface ConversationalState {
   active_entities: string[];
   stated_constraints: CanonicalConstraint[];
   current_topic: ConversationalTopic;
   last_failed_action: LastFailedAction | null;
   pending_clarification?: PendingClarificationState | null;
+  pending_proposal?: PendingProposalState | null;
 }
 
 export type ProposedChangeActionType =

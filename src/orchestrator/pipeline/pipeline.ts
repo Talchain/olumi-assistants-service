@@ -85,17 +85,27 @@ export async function executePipeline(
       // direct_analysis_run Path A with narration: chain explain_results
       let finalBlocks = routerResult.blocks;
       let finalAssistantText = routerResult.assistantText;
-      if (routerResult.needsNarration && request.message.trim().length > 5) {
+      const narrationGraph = request.graph_state ?? updatedEnrichedContext.graph;
+      const narrationAnalysis = routerResult.analysisResponse ?? updatedEnrichedContext.analysis;
+      const canNarrateResults = (
+        routerResult.needsNarration
+        && request.message.trim().length > 5
+        && isAnalysisExplainable(narrationAnalysis)
+        && isAnalysisCurrent(updatedEnrichedContext.stage_indicator.stage, narrationAnalysis)
+      );
+      if (canNarrateResults) {
         const adapter = getAdapter('orchestrator');
         try {
           const { handleExplainResults } = await import('../tools/explain-results.js');
           const explainContext = {
-            graph: updatedEnrichedContext.graph,
-            analysis_response: routerResult.analysisResponse ?? updatedEnrichedContext.analysis,
+            graph: narrationGraph,
+            analysis_response: narrationAnalysis,
             framing: updatedEnrichedContext.framing,
             messages: updatedEnrichedContext.conversation_history,
             selected_elements: updatedEnrichedContext.selected_elements,
             scenario_id: updatedEnrichedContext.scenario_id,
+            analysis_inputs: updatedEnrichedContext.analysis_inputs,
+            conversational_state: updatedEnrichedContext.conversational_state,
           };
           const explainResult = await handleExplainResults(
             explainContext,
@@ -469,17 +479,16 @@ function emitTurnTrace(input: TurnTraceInput): void {
   });
   const freshTurnIntentRaw = classifyUserIntent(request.message ?? '');
   const initialIntentGate = input.initialIntentGate ?? classifyIntent(request.message ?? '');
-  const explainOverrideApplied = (
-    ec.stage_indicator.stage === 'evaluate'
-    && analysisExplainable
-    && (freshTurnIntentRaw === 'explain' || freshTurnIntentRaw === 'recommend')
-    && initialIntentGate.tool === 'edit_graph'
-    && input.toolSelected === 'explain_results'
-  );
+  const routeMetadata = envelope._route_metadata ?? null;
+  const explainOverrideApplied = routeMetadata?.outcome === 'results_explanation';
   const explainOverrideReason = explainOverrideApplied
-    ? 'evaluate_with_analysis_explanation_followup'
+    ? routeMetadata?.reasoning ?? 'results_explanation'
     : null;
-  const freshTurnIntentEffective = explainOverrideApplied ? 'explain' : freshTurnIntentRaw;
+  const freshTurnIntentEffective = routeMetadata?.outcome === 'rationale_explanation'
+    ? 'explain'
+    : explainOverrideApplied
+      ? 'explain'
+      : freshTurnIntentRaw;
   const editTrace = input.toolSelected === 'edit_graph'
     ? (input.editGraphDiagnostics ?? null)
     : null;
@@ -539,6 +548,8 @@ function emitTurnTrace(input: TurnTraceInput): void {
       chips_count: envelope.suggested_actions.length,
       fallback_injected: input.stageFallbackInjected ?? false,
       contract_violations: envelope._contract_violation_codes ?? [],
+      route_outcome: routeMetadata?.outcome ?? null,
+      route_reasoning: routeMetadata?.reasoning ?? null,
       fresh_turn_intent_raw: freshTurnIntentRaw,
       fresh_turn_intent_effective: freshTurnIntentEffective,
       explain_override_applied: explainOverrideApplied,

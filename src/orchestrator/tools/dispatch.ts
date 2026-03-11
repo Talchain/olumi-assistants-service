@@ -9,7 +9,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, V2RunResponseEnvelope } from "../types.js";
+import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, PendingProposalState, V2RunResponseEnvelope } from "../types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { createPLoTClient } from "../plot-client.js";
 import { getAdapter } from "../../adapters/llm/router.js";
@@ -26,6 +26,8 @@ import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ExerciseType } from "../types/guidance-item.js";
 import { handleRunExercise } from "./run-exercise.js";
 import { handleResearchTopic } from "./research-topic.js";
+import type { RouteMetadata } from "../pipeline/types.js";
+import { isAnalysisExplainable } from "../analysis-state.js";
 
 // ============================================================================
 // Types
@@ -42,7 +44,9 @@ export interface ToolDispatchResult {
   /** edit_graph-only diagnostics for orchestrator turn trace. */
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
   pendingClarification?: PendingClarificationState;
+  pendingProposal?: PendingProposalState;
   proposedChanges?: import("../types.js").ProposedChangesPayload;
+  routeMetadata?: RouteMetadata;
 }
 
 export interface ToolDispatchOpts {
@@ -114,7 +118,7 @@ export async function dispatchToolHandler(
 
       // Auto-chain explain_results when intent is 'explain' or 'recommend' (not pure 'act')
       const intent = opts?.intentClassification;
-      if (intent === 'explain' || intent === 'recommend') {
+      if ((intent === 'explain' || intent === 'recommend') && isAnalysisExplainable(result.analysisResponse)) {
         const explainContext: ConversationContext = {
           ...context,
           analysis_response: result.analysisResponse,
@@ -190,7 +194,7 @@ export async function dispatchToolHandler(
         adapter,
         requestId,
         turnId,
-        { plotClient: getPlotClient(), plotOpts: opts?.plotOpts },
+        { plotClient: getPlotClient(), plotOpts: opts?.plotOpts, invocationInput: toolInput },
       );
       // Run post-edit guidance only when edit succeeded (not rejected)
       const editGuidance = (!result.wasRejected && result.appliedGraph)
@@ -204,7 +208,9 @@ export async function dispatchToolHandler(
         suggestedActions: result.suggestedActions,
         editGraphDiagnostics: result.diagnostics,
         pendingClarification: result.pendingClarification,
+        pendingProposal: result.pendingProposal,
         proposedChanges: result.proposedChanges,
+        routeMetadata: result.routeMetadata,
       };
     }
 

@@ -70,6 +70,7 @@ export async function phase4Execute(
       guidance_items: [],
       executed_tools: [],
       deferred_tools: [],
+      ...(llmResult.route_metadata && { route_metadata: llmResult.route_metadata }),
     };
   }
 
@@ -115,7 +116,9 @@ export async function phase4Execute(
   let stageFallbackInjected = false;
   let editGraphDiagnostics: ToolResult['edit_graph_diagnostics'];
   let pendingClarification: ToolResult['pending_clarification'];
+  let pendingProposal: ToolResult['pending_proposal'];
   let proposedChanges: ToolResult['proposed_changes'];
+  let routeMetadata = llmResult.route_metadata;
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -174,8 +177,14 @@ export async function phase4Execute(
     if (result.pending_clarification) {
       pendingClarification = result.pending_clarification;
     }
+    if (result.pending_proposal) {
+      pendingProposal = result.pending_proposal;
+    }
     if (result.proposed_changes) {
       proposedChanges = result.proposed_changes;
+    }
+    if (result.route_metadata) {
+      routeMetadata = result.route_metadata;
     }
 
     // Accumulate side effects from the actual tool result, not the tool name.
@@ -220,7 +229,9 @@ export async function phase4Execute(
     ...(allSuggestedActions.length > 0 && { suggested_actions: allSuggestedActions }),
     ...(editGraphDiagnostics && { edit_graph_diagnostics: editGraphDiagnostics }),
     ...(pendingClarification && { pending_clarification: pendingClarification }),
+    ...(pendingProposal && { pending_proposal: pendingProposal }),
     ...(proposedChanges && { proposed_changes: proposedChanges }),
+    ...(routeMetadata && { route_metadata: routeMetadata }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -270,7 +281,9 @@ export function createProductionToolDispatcher(
         guidance_items: result.guidanceItems,
         edit_graph_diagnostics: result.editGraphDiagnostics,
         pending_clarification: result.pendingClarification,
+        pending_proposal: result.pendingProposal,
         proposed_changes: result.proposedChanges,
+        route_metadata: result.routeMetadata,
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,
         }),

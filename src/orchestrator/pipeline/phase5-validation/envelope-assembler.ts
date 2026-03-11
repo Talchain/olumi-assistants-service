@@ -123,17 +123,17 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
 
   // Resolve assistant text: tool result text takes priority, then LLM text
   const assistantText = toolResult.assistant_text ?? llmResult.assistant_text;
-  const clarificationToolInvocation = (
-    toolResult.pending_clarification
-    && toolName === 'edit_graph'
-  )
+  const editGraphCarryForwardInvocation = toolName === 'edit_graph'
     ? {
         name: 'edit_graph',
         input: {
           ...(llmResult.tool_invocations.find((invocation) => invocation.name === 'edit_graph')?.input ?? {
-            edit_description: toolResult.pending_clarification.original_edit_request,
+            edit_description: toolResult.pending_clarification?.original_edit_request
+              ?? toolResult.pending_proposal?.original_edit_request
+              ?? '',
           }),
-          pending_clarification: toolResult.pending_clarification,
+          ...(toolResult.pending_clarification && { pending_clarification: toolResult.pending_clarification }),
+          ...(toolResult.pending_proposal && { pending_proposal: toolResult.pending_proposal }),
         },
       }
     : null;
@@ -156,7 +156,11 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   const envelope: OrchestratorResponseEnvelopeV2 = {
     turn_id: enrichedContext.turn_id,
     assistant_text: assistantText,
-    ...(clarificationToolInvocation && { assistant_tool_calls: [clarificationToolInvocation] }),
+    ...(
+      editGraphCarryForwardInvocation
+      && (toolResult.pending_clarification || toolResult.pending_proposal)
+      && { assistant_tool_calls: [editGraphCarryForwardInvocation] }
+    ),
     blocks: toolResult.blocks,
     suggested_actions: suggestedActions,
     ...(toolResult.proposed_changes && { proposed_changes: toolResult.proposed_changes }),
@@ -242,6 +246,10 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     if (llmResult.parse_warnings.length > 0) {
       envelope.parse_warnings = llmResult.parse_warnings;
     }
+  }
+
+  if (toolResult.route_metadata ?? llmResult.route_metadata) {
+    envelope._route_metadata = toolResult.route_metadata ?? llmResult.route_metadata;
   }
 
   return envelope;

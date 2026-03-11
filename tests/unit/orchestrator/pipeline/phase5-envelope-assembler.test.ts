@@ -265,6 +265,77 @@ describe("assembleV2Envelope", () => {
     }]);
   });
 
+  it("emits assistant_tool_calls for structured edit_graph proposal carry-forward", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        tool_invocations: [{
+          id: "deterministic",
+          name: "edit_graph",
+          input: { edit_description: "Update all three options" },
+        }],
+      }),
+      toolResult: makeToolResult({
+        assistant_text: "Here’s the change I’d propose. If you want, I can apply it next.",
+        pending_proposal: {
+          tool: "edit_graph",
+          original_edit_request: "Update all three options",
+          base_graph_hash: "abc123",
+          candidate_labels: ["Option A", "Option B", "Option C"],
+          proposed_changes: {
+            changes: [
+              { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+            ],
+          },
+        },
+      }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.assistant_tool_calls).toEqual([{
+      name: "edit_graph",
+      input: {
+        edit_description: "Update all three options",
+        pending_proposal: {
+          tool: "edit_graph",
+          original_edit_request: "Update all three options",
+          base_graph_hash: "abc123",
+          candidate_labels: ["Option A", "Option B", "Option C"],
+          proposed_changes: {
+            changes: [
+              { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+            ],
+          },
+        },
+      },
+    }]);
+  });
+
+  it("stores internal route metadata when a touched path returns it", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult({
+        route_metadata: {
+          outcome: "proposal_created",
+          reasoning: "returned_pending_proposal",
+        },
+      }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope._route_metadata).toEqual({
+      outcome: "proposal_created",
+      reasoning: "returned_pending_proposal",
+    });
+  });
+
   it("guidance_items survives JSON serialisation round-trip", () => {
     const guidanceItem = {
       item_id: 'gi_abc123',
@@ -353,9 +424,8 @@ describe("assembleV2Envelope", () => {
       getDskVersionHash: () => 'test-bundle-hash-abc123',
     }));
 
-    const { assembleV2Envelope: assemble } = await import(
-      "../../../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js?dsk-on"
-    );
+    const modulePath = "../../../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js?dsk-on";
+    const { assembleV2Envelope: assemble } = await import(modulePath);
 
     const envelope = assemble({
       enrichedContext: makeEnrichedContext({ dsk: { claims: [], triggers: [], techniques: [], version_hash: null } }),

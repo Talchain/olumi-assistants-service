@@ -7,7 +7,7 @@
 
 import { parseLLMResponse } from "../../response-parser.js";
 import type { ChatWithToolsResult } from "../../../adapters/llm/types.js";
-import type { LLMResult, ScienceAnnotation, SuggestedAction } from "../types.js";
+import type { LLMResult, RouteMetadata, ScienceAnnotation, SuggestedAction } from "../types.js";
 
 /**
  * Parse a ChatWithToolsResult into V2 LLMResult.
@@ -42,6 +42,7 @@ export function parseV2Response(result: ChatWithToolsResult): LLMResult {
 export function buildDeterministicLLMResult(
   toolName: string,
   toolInput: Record<string, unknown>,
+  routeMetadata?: RouteMetadata,
 ): LLMResult {
   return {
     assistant_text: null,
@@ -51,5 +52,22 @@ export function buildDeterministicLLMResult(
     suggested_actions: [],
     diagnostics: null,
     parse_warnings: [],
+    ...(routeMetadata && { route_metadata: routeMetadata }),
+  };
+}
+
+export function buildConversationalLLMResult(
+  assistantText: string | null,
+  routeMetadata?: RouteMetadata,
+): LLMResult {
+  return {
+    assistant_text: assistantText,
+    tool_invocations: [],
+    science_annotations: [] as ScienceAnnotation[],
+    raw_response: assistantText ?? '',
+    suggested_actions: [],
+    diagnostics: null,
+    parse_warnings: [],
+    ...(routeMetadata && { route_metadata: routeMetadata }),
   };
 }

@@ -73,8 +73,10 @@ function makeMockLLMClient(): LLMClient {
 }
 
 describe("phase3-llm", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({ routing: "llm", tool: null });
   });
 
   describe("buildDeterministicLLMResult", () => {
@@ -160,7 +162,7 @@ describe("phase3-llm", () => {
         makeSpecialistResult(),
         client,
         "req-1",
-        "draft a graph for me",
+        "hello there",
       );
 
       expect(client.chatWithTools).toHaveBeenCalled();
@@ -322,7 +324,7 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[0].name).toBe("edit_graph");
     });
 
-    it("does not override edit_graph before analysis exists", async () => {
+    it("uses rationale_explanation before analysis exists instead of explain_results", async () => {
       const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
       (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
         routing: "deterministic",
@@ -346,8 +348,44 @@ describe("phase3-llm", () => {
         "Why",
       );
 
-      expect(client.chatWithTools).toHaveBeenCalled();
+      expect(client.chat).toHaveBeenCalled();
+      expect(client.chatWithTools).not.toHaveBeenCalled();
       expect(result.tool_invocations).toHaveLength(0);
+      expect(result.route_metadata?.outcome).toBe("rationale_explanation");
+    });
+
+    it("uses rationale_explanation before explainable analysis exists", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "explain_results",
+        confidence: "exact",
+        matched_pattern: "why",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        analysis: null,
+        graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+        framing: { goal: "Maximise growth" } as EnrichedContext["framing"],
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-rationale",
+        "Why is this the current recommendation?",
+      );
+
+      expect(client.chat).toHaveBeenCalled();
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(0);
+      expect(result.route_metadata).toEqual({
+        outcome: "rationale_explanation",
+        reasoning: "analysis_not_current_or_not_explainable",
+      });
     });
 
     it("resumes pending clarification follow-up into deterministic edit_graph when user replies with an exact visible label", async () => {
@@ -387,6 +425,10 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[0].name).toBe("edit_graph");
       expect(result.tool_invocations[0].input).toEqual({
         edit_description: "Reduce it by 10% for Onboarding Time",
+      });
+      expect(result.route_metadata).toEqual({
+        outcome: "clarification_continuation",
+        reasoning: "resolved_from_pending_clarification",
       });
     });
 
@@ -429,6 +471,238 @@ describe("phase3-llm", () => {
       expect(result.tool_invocations[0].input).toEqual({
         edit_description: "Reduce it by 10% for Onboarding Time",
       });
+    });
+
+    it("supports bounded grouped clarification continuation for explicit all-three replies", async () => {
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        graph: {
+          nodes: [
+            { id: "o1", kind: "option", label: "Option A" },
+            { id: "o2", kind: "option", label: "Option B" },
+            { id: "o3", kind: "option", label: "Option C" },
+          ],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "configuring",
+          last_failed_action: null,
+          pending_clarification: {
+            tool: "edit_graph",
+            original_edit_request: "Raise the budget",
+            candidate_labels: ["Option A", "Option B", "Option C"],
+          },
+        },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-clarify-grouped",
+        "all three",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0]).toEqual({
+        id: "deterministic",
+        name: "edit_graph",
+        input: {
+          edit_description: "Raise the budget",
+          grouped_target_labels: ["Option A", "Option B", "Option C"],
+        },
+      });
+    });
+
+    it("confirms a pending proposal deterministically", async () => {
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        graph: {
+          nodes: [{ id: "o1", kind: "option", label: "Option A" }],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+          pending_proposal: {
+            tool: "edit_graph",
+            original_edit_request: "Update Option A",
+            // SHA-256 of JSON.stringify({ nodes: [{ id: "o1", kind: "option", label: "Option A" }], edges: [] })
+            // Must match computeGraphHash in edit-graph.ts (16-char SHA-256 hex).
+            base_graph_hash: "c21e935fc93c86d8",
+            candidate_labels: ["Option A"],
+            proposed_changes: {
+              changes: [
+                { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+              ],
+            },
+          },
+        },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-proposal-confirm",
+        "yes, apply it",
+      );
+
+      expect(result.tool_invocations[0]).toEqual({
+        id: "deterministic",
+        name: "edit_graph",
+        input: {
+          edit_description: "Update Option A",
+          confirmation_mode: "apply_pending_proposal",
+          pending_proposal: {
+            tool: "edit_graph",
+            original_edit_request: "Update Option A",
+            base_graph_hash: "c21e935fc93c86d8",
+            candidate_labels: ["Option A"],
+            proposed_changes: {
+              changes: [
+                { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+              ],
+            },
+          },
+        },
+      });
+      expect(result.route_metadata).toEqual({
+        outcome: "proposal_confirmation",
+        reasoning: "confirmed_pending_proposal",
+      });
+    });
+
+    it("dismisses a pending proposal without calling tools", async () => {
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+          pending_proposal: {
+            tool: "edit_graph",
+            original_edit_request: "Update Option A",
+            base_graph_hash: "abc123",
+            candidate_labels: ["Option A"],
+            proposed_changes: {
+              changes: [
+                { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+              ],
+            },
+          },
+        },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-proposal-dismiss",
+        "no, leave it",
+      );
+
+      expect(result.tool_invocations).toHaveLength(0);
+      expect(result.assistant_text).toBe("Okay — I won’t apply that change.");
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+    });
+
+    it("allows narrow explicit generate override from accumulated framing context", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "draft_graph",
+        confidence: "exact",
+        matched_pattern: "draft graph",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
+        framing: {
+          goal: "Choose the best launch plan",
+          options: ["Launch now", "Delay"],
+          constraints: ["Budget"],
+        } as unknown as EnrichedContext["framing"],
+        conversation_history: [
+          { role: "user", content: "We need to choose between launching now or delaying." },
+        ] as EnrichedContext["conversation_history"],
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-generate",
+        "draft the model",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect((result.tool_invocations[0].input.brief as string)).toContain("Choose the best launch plan");
+      expect(result.route_metadata).toEqual({
+        outcome: "explicit_generate",
+        reasoning: "explicit_generate_with_sufficient_context",
+      });
+    });
+
+    it("returns concise blocked-generation clarification when explicit generate lacks minimum framing", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "draft_graph",
+        confidence: "exact",
+        matched_pattern: "draft graph",
+      });
+
+      const client = makeMockLLMClient();
+      const result = await phase3Generate(
+        makeEnrichedContext(),
+        makeSpecialistResult(),
+        client,
+        "req-generate-blocked",
+        "build the model",
+      );
+
+      expect(result.tool_invocations).toHaveLength(0);
+      expect(result.assistant_text).toContain("I can draft it once I have a bit more framing");
+      expect(result.route_metadata).toEqual({
+        outcome: "generation_clarification",
+        reasoning: "explicit_generate_missing_minimum_viable_framing",
+      });
+    });
+
+    it("does not redraft an existing model unless regeneration is explicit", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "draft_graph",
+        confidence: "exact",
+        matched_pattern: "draft graph",
+      });
+
+      const client = makeMockLLMClient();
+      const result = await phase3Generate(
+        makeEnrichedContext({
+          graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+          framing: { goal: "Choose the best launch plan" } as EnrichedContext["framing"],
+        }),
+        makeSpecialistResult(),
+        client,
+        "req-generate-existing",
+        "draft the model",
+      );
+
+      expect(result.tool_invocations).toHaveLength(0);
+      expect(result.assistant_text).toContain("You already have a model");
+      expect(client.chatWithTools).not.toHaveBeenCalled();
     });
 
     it("falls back to LLM when user reply does not match any candidate label", async () => {

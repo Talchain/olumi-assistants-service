@@ -172,6 +172,76 @@ describe("buildConversationalState — pending_clarification", () => {
   });
 });
 
+describe("buildConversationalState — pending_proposal", () => {
+  it("extracts pending proposal from structured tool state", () => {
+    const messages = makeMessages([
+      { role: "user", content: "Update all three options" },
+      {
+        role: "assistant",
+        content: "Here’s the change I’d propose. If you want, I can apply it next.",
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Update all three options",
+            pending_proposal: {
+              tool: "edit_graph",
+              original_edit_request: "Update all three options",
+              base_graph_hash: "abc123",
+              candidate_labels: ["Option A", "Option B", "Option C"],
+              proposed_changes: {
+                changes: [
+                  { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+                ],
+              },
+            },
+          },
+        }],
+      },
+    ]);
+
+    const state = buildConversationalState("yes", makeContext({ messages }), "act");
+
+    expect(state.pending_proposal).toEqual({
+      tool: "edit_graph",
+      original_edit_request: "Update all three options",
+      base_graph_hash: "abc123",
+      candidate_labels: ["Option A", "Option B", "Option C"],
+      proposed_changes: {
+        changes: [
+          { description: "Update Option A", element_label: "Option A", action_type: "option_config" },
+        ],
+      },
+    });
+  });
+
+  it("returns null when pending proposal is missing required fields", () => {
+    const messages = makeMessages([
+      { role: "user", content: "Update all three options" },
+      {
+        role: "assistant",
+        content: "Here’s the change I’d propose. If you want, I can apply it next.",
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Update all three options",
+            pending_proposal: {
+              tool: "edit_graph",
+              original_edit_request: "Update all three options",
+              base_graph_hash: "",
+              candidate_labels: ["Option A"],
+              proposed_changes: { changes: [] },
+            },
+          },
+        }],
+      },
+    ]);
+
+    const state = buildConversationalState("yes", makeContext({ messages }), "act");
+
+    expect(state.pending_proposal).toBeNull();
+  });
+});
+
 // ============================================================================
 // buildClarificationContinuationInput — exercised via phase3Generate,
 // but topic classification is exercised here directly.

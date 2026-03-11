@@ -6,6 +6,8 @@ import type {
   ConversationMessage,
   LastFailedAction,
   PendingClarificationState,
+  PendingProposalState,
+  ProposedChangesPayload,
 } from "../../types.js";
 import type { IntentClassification } from "../types.js";
 
@@ -191,6 +193,64 @@ function toPendingClarificationState(value: unknown): PendingClarificationState 
   };
 }
 
+function toProposedChangesPayload(value: unknown): ProposedChangesPayload | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.changes)) return null;
+
+  const changes = candidate.changes
+    .filter((change): change is Record<string, unknown> => !!change && typeof change === 'object')
+    .map((change) => ({
+      description: typeof change.description === 'string' ? change.description.trim() : '',
+      element_label: typeof change.element_label === 'string' ? change.element_label.trim() : '',
+      action_type: change.action_type,
+    }))
+    .filter((change): change is ProposedChangesPayload['changes'][number] =>
+      change.description.length > 0
+      && change.element_label.length > 0
+      && (
+        change.action_type === 'value_update'
+        || change.action_type === 'option_config'
+        || change.action_type === 'structural_add'
+        || change.action_type === 'structural_remove'
+      ),
+    );
+
+  if (changes.length === 0) return null;
+  return { changes };
+}
+
+function toPendingProposalState(value: unknown): PendingProposalState | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.tool !== 'edit_graph') return null;
+  if (typeof candidate.original_edit_request !== 'string') return null;
+  if (!Array.isArray(candidate.candidate_labels)) return null;
+  if (typeof candidate.base_graph_hash !== 'string' || candidate.base_graph_hash.trim().length === 0) return null;
+
+  const originalEditRequest = candidate.original_edit_request.trim();
+  const candidateLabels = uniqueStable(
+    candidate.candidate_labels
+      .filter((label): label is string => typeof label === 'string')
+      .map((label) => label.trim())
+      .filter((label) => label.length > 0),
+  );
+  const proposedChanges = toProposedChangesPayload(candidate.proposed_changes);
+
+  if (originalEditRequest.length === 0 || candidateLabels.length === 0 || !proposedChanges) {
+    return null;
+  }
+
+  return {
+    tool: 'edit_graph',
+    original_edit_request: originalEditRequest,
+    proposed_changes: proposedChanges,
+    candidate_labels: candidateLabels,
+    base_graph_hash: candidate.base_graph_hash.trim(),
+  };
+}
+
 function extractPendingClarification(messages: ConversationMessage[]): PendingClarificationState | null {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
@@ -213,6 +273,28 @@ function extractPendingClarification(messages: ConversationMessage[]): PendingCl
   return null;
 }
 
+function extractPendingProposal(messages: ConversationMessage[]): PendingProposalState | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    if (!message.tool_calls || message.tool_calls.length === 0) continue;
+
+    const editToolCall = message.tool_calls.find((toolCall) =>
+      toolCall.name === 'edit_graph'
+      && typeof toolCall.input.edit_description === 'string'
+      && toolCall.input.edit_description.trim().length > 0,
+    );
+    if (!editToolCall) continue;
+
+    const structuredState = toPendingProposalState(editToolCall.input.pending_proposal);
+    if (structuredState) {
+      return structuredState;
+    }
+  }
+
+  return null;
+}
+
 export function buildConversationalState(
   message: string,
   context: ConversationContext,
@@ -226,5 +308,6 @@ export function buildConversationalState(
     current_topic: classifyCurrentTopic(message, intentClassification, context),
     last_failed_action: extractLastFailedAction(recentMessages),
     pending_clarification: extractPendingClarification(recentMessages),
+    pending_proposal: extractPendingProposal(recentMessages),
   };
 }

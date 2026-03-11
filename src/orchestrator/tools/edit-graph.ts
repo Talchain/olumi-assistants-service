@@ -37,6 +37,7 @@ import type {
   GraphPatchBlockData,
   GraphV3T,
   PendingClarificationState,
+  PendingProposalState,
   PatchOperation,
   OrchestratorError,
   RepairEntry,
@@ -44,6 +45,7 @@ import type {
   ProposedChangeActionType,
   SuggestedAction,
 } from "../types.js";
+import type { RouteMetadata } from "../pipeline/types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { serialiseEditContextForLLM } from "../context/serialise.js";
@@ -73,10 +75,12 @@ export interface EditGraphResult {
   /** Suggested actions (e.g. "Re-run analysis" when rerun_recommended). */
   suggestedActions?: SuggestedAction[];
   pendingClarification?: PendingClarificationState;
+  pendingProposal?: PendingProposalState;
   /** Lightweight proposal payload for propose_and_confirm mode. */
   proposedChanges?: ProposedChangesPayload;
   /** Edit-specific diagnostics for orchestrator turn trace (edit_graph turns only). */
   diagnostics?: EditGraphTraceDiagnostics;
+  routeMetadata?: RouteMetadata;
 }
 
 export interface EditGraphOpts {
@@ -86,6 +90,8 @@ export interface EditGraphOpts {
   maxRetries?: number;
   /** Turn budget opts forwarded to PLoT client for budget-aware retry. */
   plotOpts?: PLoTClientRunOpts;
+  /** Internal invocation context carried through orchestrator state. */
+  invocationInput?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -669,11 +675,32 @@ function mapOpsForPlot(ops: PatchOperation[]): Record<string, unknown>[] {
 /**
  * Compute a short SHA-256 hash of the input graph for optimistic concurrency audit trail.
  */
-function computeGraphHash(graph: unknown): string {
+export function computeGraphHash(graph: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify(graph))
     .digest('hex')
     .substring(0, 16);
+}
+
+function readGroupedTargetLabels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .filter((label): label is string => typeof label === 'string')
+      .map((label) => label.trim())
+      .filter((label) => label.length > 0),
+  )];
+}
+
+function resolveExplicitGroupedTargets(
+  context: ConversationContext,
+  groupedTargetLabels: string[],
+): ResolvedEditTarget[] {
+  if (groupedTargetLabels.length === 0) return [];
+  const allTargets = getResolvedTargets(context);
+  return groupedTargetLabels
+    .map((label) => allTargets.find((target) => normaliseMatchingText(target.label) === normaliseMatchingText(label)) ?? null)
+    .filter((target): target is ResolvedEditTarget => target !== null);
 }
 
 // ============================================================================
@@ -712,10 +739,21 @@ export async function handleEditGraph(
   const startTime = Date.now();
   const maxRetries = opts?.maxRetries ?? config.cee.maxRepairRetries;
   const plotClient = opts?.plotClient ?? null;
+  const invocationInput = opts?.invocationInput ?? {};
   const baseGraphHash = computeGraphHash(context.graph);
+  const groupedTargetLabels = readGroupedTargetLabels(invocationInput.grouped_target_labels);
+  const groupedTargets = resolveExplicitGroupedTargets(context, groupedTargetLabels);
+  const pendingProposal = invocationInput.pending_proposal as PendingProposalState | undefined;
+  const confirmationMode = invocationInput.confirmation_mode === 'apply_pending_proposal';
   const intentCategory = classifyEditIntent(editDescription);
-  const targetResolution = resolveEditTarget(editDescription, context, intentCategory);
-  const resolutionMode = determineEditResolutionMode(editDescription, context, intentCategory, targetResolution);
+  const targetResolution = groupedTargets.length > 0
+    ? buildResolutionResult('graph_local', 'high', groupedTargets)
+    : resolveEditTarget(editDescription, context, intentCategory);
+  const resolutionMode = confirmationMode
+    ? 'auto_apply'
+    : groupedTargets.length > 0
+    ? 'auto_apply'
+    : determineEditResolutionMode(editDescription, context, intentCategory, targetResolution);
   const conversationalStateSummary = context.conversational_state
     ? {
         active_entities_count: context.conversational_state.active_entities.length,
@@ -730,11 +768,24 @@ export async function handleEditGraph(
     alternatives_count: targetResolution.alternatives.length,
   };
   let proposalReturned = false;
+  const routeMetadata = (): RouteMetadata | undefined => {
+    if (confirmationMode) {
+      return { outcome: 'proposal_confirmation', reasoning: 'confirmed_pending_proposal' };
+    }
+    if (proposalReturned) {
+      return { outcome: 'proposal_created', reasoning: 'returned_pending_proposal' };
+    }
+    return undefined;
+  };
   const resolvedTargetInstruction = targetResolution.resolved_target
     ? `Apply this request to the existing ${targetResolution.resolved_target.label} ${targetResolution.resolved_target.type} only.`
     : null;
+  const groupedTargetInstruction = groupedTargets.length > 0
+    ? `Apply the same change to these existing targets only: ${groupedTargets.map((target) => target.label).join(', ')}.`
+    : null;
   const intentInstruction = [
     buildIntentInstruction(intentCategory),
+    groupedTargetInstruction,
     resolutionMode === 'auto_apply' ? resolvedTargetInstruction : null,
   ]
     .filter((part): part is string => typeof part === 'string' && part.length > 0)
@@ -788,19 +839,31 @@ export async function handleEditGraph(
       suggestedActions: buildClarificationActions(editDescription, targetResolution),
       pendingClarification,
       diagnostics: diagnostics(),
+      routeMetadata: routeMetadata(),
     };
   }
 
   if (resolutionMode === 'propose_and_confirm') {
     proposalReturned = true;
+    const proposedChanges = pendingProposal?.proposed_changes ?? buildProposedChanges(editDescription, targetResolution, intentCategory);
+    const candidateLabels = pendingProposal?.candidate_labels
+      ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
     return {
       blocks: [],
       assistantText: PROPOSE_AND_CONFIRM_ASSISTANT_TEXT,
       latencyMs: Date.now() - startTime,
       appliedGraph: null,
       wasRejected: false,
-      proposedChanges: buildProposedChanges(editDescription, targetResolution, intentCategory),
+      pendingProposal: {
+        tool: 'edit_graph',
+        original_edit_request: editDescription.trim(),
+        proposed_changes: proposedChanges,
+        candidate_labels: candidateLabels,
+        base_graph_hash: baseGraphHash,
+      },
+      proposedChanges,
       diagnostics: diagnostics(),
+      routeMetadata: routeMetadata(),
     };
   }
 
@@ -1517,6 +1580,7 @@ export async function handleEditGraph(
       wasRejected: false,
       ...(suggestedActions.length > 0 && { suggestedActions }),
       diagnostics: diagnostics(),
+      routeMetadata: routeMetadata(),
     };
   }
 

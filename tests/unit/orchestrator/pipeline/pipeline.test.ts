@@ -264,9 +264,36 @@ describe("pipeline", () => {
     expect(traceCall?.[0].fresh_turn_intent_raw).toBe("recommend");
     expect(traceCall?.[0].fresh_turn_intent_effective).toBe("explain");
     expect(traceCall?.[0].explain_override_applied).toBe(true);
-    expect(traceCall?.[0].explain_override_reason).toBe("evaluate_with_analysis_explanation_followup");
+    expect(traceCall?.[0].route_outcome).toBe("results_explanation");
+    expect(traceCall?.[0].explain_override_reason).toBe("completed_current_analysis_available");
     expect(traceCall?.[0].edit_path_summary).toBeNull();
     infoSpy.mockRestore();
+  });
+
+  it("does not narrate direct_analysis_run Path A when the provided analysis is not explainable", async () => {
+    const deps = makeMockDeps();
+
+    const envelope = await executePipeline(makeRequest({
+      message: "Why was this recommended?",
+      graph_state: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+      system_event: {
+        event_type: "direct_analysis_run",
+        timestamp: "2026-03-03T00:00:00Z",
+        event_id: "evt-direct-analysis",
+        details: {},
+      },
+      analysis_state: {
+        analysis_status: "blocked",
+        status_reason: "Missing interventions",
+        critiques: [],
+        meta: { response_hash: "", seed_used: 1, n_samples: 100 },
+        response_hash: "",
+      } as any,
+    }), "req-direct-analysis-blocked", deps);
+
+    expect(deps.llmClient.chat).not.toHaveBeenCalled();
+    expect(deps.llmClient.chatWithTools).not.toHaveBeenCalled();
+    expect(envelope.assistant_text).toBeNull();
   });
 
   it("emits edit_graph-specific trace diagnostics on edit_graph turns", async () => {

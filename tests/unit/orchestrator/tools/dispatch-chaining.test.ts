@@ -88,6 +88,7 @@ function makeContext(overrides?: Partial<ConversationContext>): ConversationCont
 
 function makeAnalysisResponse(): V2RunResponseEnvelope {
   return {
+    analysis_status: "completed",
     meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
     results: [{ option_label: "Option A", win_probability: 0.6 }],
     response_hash: "top-hash",
@@ -316,6 +317,7 @@ describe("dispatchToolHandler — edit_graph PLoT handoff", () => {
     expect(mockHandleEditGraph.mock.calls[0][5]).toEqual({
       plotClient,
       plotOpts: undefined,
+      invocationInput: { edit_description: "Rename Price" },
     });
   });
 });

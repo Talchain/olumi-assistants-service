@@ -18,13 +18,13 @@ import type { IntentGateResult, ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
-import { determineEditResolutionMode } from "../../tools/edit-graph.js";
+import { computeGraphHash, determineEditResolutionMode } from "../../tools/edit-graph.js";
 import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisRunnable } from "../../analysis-state.js";
 import { classifyUserIntent } from "../phase1-enrichment/intent-classifier.js";
 
-import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
+import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext, RouteMetadata } from "../types.js";
 import { assembleV2SystemPrompt } from "./prompt-assembler.js";
-import { parseV2Response, buildDeterministicLLMResult } from "./response-parser.js";
+import { parseV2Response, buildConversationalLLMResult, buildDeterministicLLMResult } from "./response-parser.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
 import { config } from "../../../config/index.js";
 
@@ -43,10 +43,18 @@ const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationCo
   generate_brief: (ctx) => ctx.graph != null && isAnalysisCurrent(ctx.framing?.stage ?? null, ctx.analysis_response),
   run_exercise: (ctx) => isAnalysisCurrent(ctx.framing?.stage ?? null, ctx.analysis_response),
   draft_graph: (ctx) => {
-    const f = ctx.framing;
-    if (!f) return false;
-    const fr = f as Record<string, unknown>;
-    return Boolean(f.goal || fr.brief_text || (Array.isArray(fr.options) && (fr.options as unknown[]).length > 0));
+    // Prerequisites check uses only structured framing fields — no message-length heuristics.
+    // The explicit-generate path (buildExplicitGenerateRoute) applies message-length heuristics
+    // separately when the user explicitly asks to generate.
+    const framing = ctx.framing as Record<string, unknown> | null;
+    const goal = typeof ctx.framing?.goal === 'string' ? ctx.framing.goal.trim() : '';
+    const optionsCount = Array.isArray(framing?.options)
+      ? framing.options.filter((o) => typeof o === 'string' && (o as string).trim().length > 0).length
+      : 0;
+    const constraintCount = Array.isArray(framing?.constraints)
+      ? framing.constraints.filter((c) => typeof c === 'string' && (c as string).trim().length > 0).length
+      : 0;
+    return goal.length > 0 || optionsCount > 0 || constraintCount > 0;
   },
 };
 
@@ -74,13 +82,24 @@ export async function phase3Generate(
   // Build context once; reused for resolution-mode check, prerequisite check, and LLM assembly.
   const context = buildConversationContext(enrichedContext);
   const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
+  const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
   const freshTurnIntent = classifyUserIntent(userMessage);
-  const editResolutionMode = (clarificationToolInput || intentGate.tool === 'edit_graph')
+  const hasExplainableCurrentAnalysis = (
+    isAnalysisExplainable(enrichedContext.analysis)
+    && isAnalysisCurrent(enrichedContext.stage_indicator.stage, enrichedContext.analysis)
+  );
+  const rationaleOnlyFollowUp = shouldUseRationaleExplanation(enrichedContext, userMessage, freshTurnIntent, hasExplainableCurrentAnalysis);
+  const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
+  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && !hasExplainableCurrentAnalysis;
+  const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
+    && hasStableModel(enrichedContext)
+    && !isClearRegenerateRequest(userMessage);
+  const editResolutionMode = (clarificationToolInput || proposalFollowUp?.action === 'confirm' || intentGate.tool === 'edit_graph')
     ? determineEditResolutionMode(userMessage, context)
     : null;
   const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
   const shouldPreferExplainResults = (
-    isAnalysisExplainable(enrichedContext.analysis)
+    hasExplainableCurrentAnalysis
     && intentGate.tool === 'edit_graph'
     && (
       (
@@ -90,12 +109,65 @@ export async function phase3Generate(
       || shouldAvoidEditGraph
     )
   );
-  const effectiveIntentGate = clarificationToolInput
+  if (proposalFollowUp?.action === 'dismiss') {
+    return buildConversationalLLMResult(
+      'Okay — I won’t apply that change.',
+      { outcome: 'proposal_dismissal', reasoning: 'dismissed_pending_proposal' },
+    );
+  }
+  if (proposalFollowUp?.action === 'stale') {
+    return buildConversationalLLMResult(
+      'That proposal is out of date because the model changed. If you still want it, ask me to apply it again and I’ll regenerate it from the current model.',
+      { outcome: 'proposal_dismissal', reasoning: 'pending_proposal_invalidated_by_graph_change' },
+    );
+  }
+  if (explicitGenerate.kind === 'clarify') {
+    return buildConversationalLLMResult(
+      explicitGenerate.assistantText,
+      { outcome: 'generation_clarification', reasoning: explicitGenerate.reasoning },
+    );
+  }
+  if (shouldBlockStableModelRedraft) {
+    return buildConversationalLLMResult(
+      'You already have a model. If you want a fresh one, ask me to regenerate it. Otherwise tell me what to change.',
+      { outcome: 'generation_clarification', reasoning: 'stable_model_exists_and_regenerate_not_requested' },
+    );
+  }
+  if (rationaleOnlyFollowUp) {
+    const rationaleText = await generateRationaleExplanation(llmClient, enrichedContext, userMessage, requestId);
+    return buildConversationalLLMResult(
+      rationaleText,
+      { outcome: 'rationale_explanation', reasoning: 'analysis_not_current_or_not_explainable' },
+    );
+  }
+
+  const effectiveIntentGate = proposalFollowUp?.action === 'confirm'
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'edit_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[pending_proposal_confirmation]',
+      }
+    : clarificationToolInput
     ? {
         routing: 'deterministic' as const,
         tool: 'edit_graph' as const,
         confidence: 'exact' as const,
         matched_pattern: '[clarification_continuation]',
+      }
+    : explicitGenerate.kind === 'deterministic'
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'draft_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[explicit_generate_override]',
+      }
+    : shouldBlockExplainResults
+    ? {
+        ...intentGate,
+        tool: null,
+        routing: 'llm' as const,
+        matched_pattern: intentGate.matched_pattern ?? '[results_explanation_blocked]',
       }
     : shouldPreferExplainResults
     ? {
@@ -141,7 +213,11 @@ export async function phase3Generate(
         enrichedContext.stage_indicator.stage,
         userMessage,
       );
-      if (!stageGuard.allowed) {
+      const allowExplicitGenerateOverride = (
+        effectiveIntentGate.tool === 'draft_graph'
+        && explicitGenerate.kind === 'deterministic'
+      );
+      if (!stageGuard.allowed && !allowExplicitGenerateOverride) {
         log.info(
           {
             request_id: requestId,
@@ -168,14 +244,28 @@ export async function phase3Generate(
 
         // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
         let deterministicInput: Record<string, unknown> = clarificationToolInput ?? {};
+        let routeMetadata: RouteMetadata | undefined;
         if (effectiveIntentGate.tool === 'run_exercise' && effectiveIntentGate.exercise) {
           deterministicInput = { exercise: effectiveIntentGate.exercise };
         } else if (effectiveIntentGate.tool === 'research_topic' && effectiveIntentGate.research_query) {
           deterministicInput = { query: effectiveIntentGate.research_query };
+        } else if (effectiveIntentGate.tool === 'draft_graph' && explicitGenerate.kind === 'deterministic') {
+          deterministicInput = { brief: explicitGenerate.brief };
+          routeMetadata = { outcome: 'explicit_generate', reasoning: explicitGenerate.reasoning };
+        } else if (effectiveIntentGate.tool === 'edit_graph' && proposalFollowUp?.action === 'confirm') {
+          deterministicInput = {
+            edit_description: proposalFollowUp.pendingProposal.original_edit_request,
+            pending_proposal: proposalFollowUp.pendingProposal,
+            confirmation_mode: 'apply_pending_proposal',
+          };
+          routeMetadata = { outcome: 'proposal_confirmation', reasoning: 'confirmed_pending_proposal' };
         } else if (effectiveIntentGate.tool === 'edit_graph' && clarificationToolInput) {
           deterministicInput = clarificationToolInput;
+          routeMetadata = { outcome: 'clarification_continuation', reasoning: 'resolved_from_pending_clarification' };
+        } else if (effectiveIntentGate.tool === 'explain_results' && shouldPreferExplainResults) {
+          routeMetadata = { outcome: 'results_explanation', reasoning: 'completed_current_analysis_available' };
         }
-        return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput);
+        return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput, routeMetadata);
       }
     }
   }
@@ -207,7 +297,9 @@ export async function phase3Generate(
   const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
 
   const messages = assembleMessages(context, effectiveUserMessage);
-  const toolDefs = assembleToolDefinitions(getToolDefinitions());
+  const toolDefs = assembleToolDefinitions(getToolDefinitions()).filter((tool) =>
+    hasExplainableCurrentAnalysis || tool.name !== 'explain_results',
+  );
 
   if (!llmClient.chatWithTools) {
     // Fallback: plain chat if adapter doesn't support tools
@@ -239,7 +331,11 @@ export async function phase3Generate(
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
 
-  return parseV2Response(llmResult);
+  const parsed = parseV2Response(llmResult);
+  return {
+    ...parsed,
+    route_metadata: { outcome: 'default_llm', reasoning: 'no_deterministic_route_applied' },
+  };
 }
 
 // ============================================================================
@@ -313,14 +409,271 @@ function buildClarificationContinuationInput(
   if (trimmed.length === 0) return null;
 
   const normalisedInput = normaliseLabelText(trimmed);
-  // Match using normalised comparison so minor capitalisation or punctuation differences
-  // ("onboarding time" vs "Onboarding Time", "Option A." vs "Option A") don't break continuation.
-  const matchedLabel = pending.candidate_labels.find(
+
+  // Exact match takes highest priority — avoids false multi-matches when one label is a
+  // substring of another (e.g. "Onboarding" and "Onboarding Time").
+  const exactMatches = pending.candidate_labels.filter(
     (label) => normalisedInput === normaliseLabelText(label),
   );
-  if (!matchedLabel) return null;
+  if (exactMatches.length === 1) {
+    return { edit_description: `${pending.original_edit_request} for ${exactMatches[0]}` };
+  }
+
+  // Substring fallback — only when no exact match exists.
+  if (exactMatches.length === 0) {
+    const substringMatches = pending.candidate_labels.filter(
+      (label) => normalisedInput.includes(normaliseLabelText(label)),
+    );
+    if (substringMatches.length === 1) {
+      return { edit_description: `${pending.original_edit_request} for ${substringMatches[0]}` };
+    }
+  }
+
+  const groupedLabels = resolveGroupedContinuationLabels(
+    normalisedInput,
+    pending.candidate_labels,
+    enrichedContext.conversational_state?.active_entities ?? [],
+  );
+  if (!groupedLabels) return null;
 
   return {
-    edit_description: `${pending.original_edit_request} for ${matchedLabel}`,
+    edit_description: pending.original_edit_request,
+    grouped_target_labels: groupedLabels,
   };
 }
+
+function resolveGroupedContinuationLabels(
+  normalisedInput: string,
+  candidateLabels: string[],
+  activeEntities: string[],
+): string[] | null {
+  const explicitMatches = candidateLabels.filter((label) => normalisedInput.includes(normaliseLabelText(label)));
+  if (explicitMatches.length >= 1) {
+    return explicitMatches;
+  }
+
+  if (candidateLabels.length === 2 && /\bboth\b/.test(normalisedInput)) {
+    return candidateLabels;
+  }
+  if (candidateLabels.length === 3 && /\ball three\b/.test(normalisedInput)) {
+    return candidateLabels;
+  }
+  if (/\ball options\b/.test(normalisedInput)) {
+    return candidateLabels;
+  }
+  if (/\bthat one\b|\bthat option\b|\bthat factor\b/.test(normalisedInput)) {
+    const activeMatch = activeEntities.find((entity) =>
+      candidateLabels.some((candidate) => normaliseLabelText(candidate) === normaliseLabelText(entity)),
+    );
+    if (activeMatch) {
+      return [activeMatch];
+    }
+  }
+  return null;
+}
+
+function shouldUseRationaleExplanation(
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+  freshTurnIntent: ReturnType<typeof classifyUserIntent>,
+  hasExplainableCurrentAnalysis: boolean,
+): boolean {
+  if (hasExplainableCurrentAnalysis) return false;
+  if (freshTurnIntent !== 'explain' && freshTurnIntent !== 'recommend') return false;
+  if (!enrichedContext.graph && !enrichedContext.framing) return false;
+  return /\bwhy\b|\brecommend(?:ed|ation)?\b|\bwalk me through\b|\bbreak it down\b/i.test(userMessage);
+}
+
+async function generateRationaleExplanation(
+  llmClient: LLMClient,
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+  requestId: string,
+): Promise<string> {
+  const contextSummary = buildRationaleContextSummary(enrichedContext);
+  const response = await llmClient.chat(
+    {
+      system: [
+        'You are explaining current model rationale before analysis has produced explainable results.',
+        'Do not claim the analysis has run successfully unless the context explicitly says so.',
+        'Answer in plain English, briefly, and ground the explanation in the stated goal, options, constraints, and current model structure.',
+      ].join(' '),
+      userMessage: `Question: ${userMessage}\n\nCurrent context:\n${contextSummary}`,
+    },
+    { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
+  );
+  return response.content;
+}
+
+function buildRationaleContextSummary(enrichedContext: EnrichedContext): string {
+  const graphLabels = (enrichedContext.graph?.nodes ?? [])
+    .map((node) => ('label' in node && typeof node.label === 'string') ? node.label : null)
+    .filter((label): label is string => label !== null)
+    .slice(0, 12);
+  const framing = enrichedContext.framing as Record<string, unknown> | null;
+  const options = Array.isArray(framing?.options)
+    ? framing.options
+        .filter((option): option is string => typeof option === 'string' && option.trim().length > 0)
+        .slice(0, 6)
+    : [];
+  const constraints = Array.isArray(framing?.constraints)
+    ? framing.constraints
+        .filter((constraint): constraint is string => typeof constraint === 'string' && constraint.trim().length > 0)
+        .slice(0, 6)
+    : [];
+
+  return [
+    `Goal: ${typeof enrichedContext.framing?.goal === 'string' ? enrichedContext.framing.goal : 'unknown'}`,
+    `Options: ${options.length > 0 ? options.join(', ') : 'unknown'}`,
+    `Constraints: ${constraints.length > 0 ? constraints.join(', ') : 'none stated'}`,
+    `Model labels: ${graphLabels.length > 0 ? graphLabels.join(', ') : 'no model yet'}`,
+  ].join('\n');
+}
+
+type ExplicitGenerateRoute =
+  | { kind: 'none' }
+  | { kind: 'deterministic'; brief: string; reasoning: string }
+  | { kind: 'clarify'; assistantText: string; reasoning: string };
+
+function buildExplicitGenerateRoute(
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+  intentGate: IntentGateResult,
+  context: ConversationContext,
+): ExplicitGenerateRoute {
+  if (!isExplicitGenerateRequest(userMessage, intentGate)) return { kind: 'none' };
+  if (hasStableModel(enrichedContext) && !isClearRegenerateRequest(userMessage)) {
+    return { kind: 'none' };
+  }
+  if (!hasMinimumViableFramingContext(context, userMessage)) {
+    return {
+      kind: 'clarify',
+      assistantText: buildGenerationClarificationMessage(enrichedContext),
+      reasoning: 'explicit_generate_missing_minimum_viable_framing',
+    };
+  }
+  return {
+    kind: 'deterministic',
+    brief: buildDraftBriefFromConversation(enrichedContext, userMessage),
+    reasoning: hasStableModel(enrichedContext)
+      ? 'explicit_regenerate_with_sufficient_context'
+      : 'explicit_generate_with_sufficient_context',
+  };
+}
+
+function isExplicitGenerateRequest(userMessage: string, intentGate: IntentGateResult): boolean {
+  if (intentGate.tool === 'draft_graph') return true;
+  return /\b(draft|build|generate|create)\b.+\b(model|graph)\b|\bdraft it\b|\bbuild it\b/i.test(userMessage);
+}
+
+function isClearRegenerateRequest(userMessage: string): boolean {
+  return /\b(regenerate|redraft|rebuild|start over|new model)\b/i.test(userMessage);
+}
+
+function hasStableModel(enrichedContext: EnrichedContext): boolean {
+  return (enrichedContext.graph?.nodes?.length ?? 0) > 0;
+}
+
+function hasMinimumViableFramingContext(context: ConversationContext, userMessage: string): boolean {
+  const framing = context.framing as Record<string, unknown> | null;
+  const goal = typeof context.framing?.goal === 'string' ? context.framing.goal.trim() : '';
+  const optionsCount = Array.isArray(framing?.options)
+    ? framing.options.filter((option) => typeof option === 'string' && option.trim().length > 0).length
+    : 0;
+  const constraintCount = Array.isArray(framing?.constraints)
+    ? framing.constraints.filter((constraint) => typeof constraint === 'string' && constraint.trim().length > 0).length
+    : 0;
+  const userTurns = [...context.messages, { role: 'user' as const, content: userMessage }]
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content.trim())
+    .filter((content) => content.length >= 20);
+  const combinedLength = userTurns.join(' ').length;
+
+  return goal.length > 0 || optionsCount > 0 || constraintCount > 0 || userTurns.length >= 2 || combinedLength >= 120;
+}
+
+function buildDraftBriefFromConversation(enrichedContext: EnrichedContext, userMessage: string): string {
+  const framing = enrichedContext.framing as Record<string, unknown> | null;
+  const parts: string[] = [];
+  if (typeof enrichedContext.framing?.goal === 'string' && enrichedContext.framing.goal.trim().length > 0) {
+    parts.push(`Goal: ${enrichedContext.framing.goal.trim()}`);
+  }
+  if (Array.isArray(framing?.options)) {
+    const options = framing.options.filter((option): option is string => typeof option === 'string' && option.trim().length > 0);
+    if (options.length > 0) {
+      parts.push(`Options: ${options.join('; ')}`);
+    }
+  }
+  if (Array.isArray(framing?.constraints)) {
+    const constraints = framing.constraints.filter((constraint): constraint is string => typeof constraint === 'string' && constraint.trim().length > 0);
+    if (constraints.length > 0) {
+      parts.push(`Constraints: ${constraints.join('; ')}`);
+    }
+  }
+  const recentUserMessages = [...enrichedContext.conversation_history, { role: 'user' as const, content: userMessage }]
+    .filter((message) => message.role === 'user' && message.content !== SYSTEM_EVENT_SENTINEL)
+    .map((message) => message.content.trim())
+    .filter((content) => content.length > 0)
+    .slice(-4);
+  if (recentUserMessages.length > 0) {
+    parts.push(`Conversation context: ${recentUserMessages.join(' ')}`);
+  }
+  return parts.join('\n');
+}
+
+function buildGenerationClarificationMessage(enrichedContext: EnrichedContext): string {
+  const framing = enrichedContext.framing as Record<string, unknown> | null;
+  const missing: string[] = [];
+  const goal = typeof enrichedContext.framing?.goal === 'string' ? enrichedContext.framing.goal.trim() : '';
+  const optionsCount = Array.isArray(framing?.options)
+    ? framing.options.filter((option) => typeof option === 'string' && option.trim().length > 0).length
+    : 0;
+  const constraintCount = Array.isArray(framing?.constraints)
+    ? framing.constraints.filter((constraint) => typeof constraint === 'string' && constraint.trim().length > 0).length
+    : 0;
+
+  if (!goal) missing.push('what decision or outcome you want the model to optimise for');
+  if (optionsCount === 0) missing.push('the main options you want compared');
+  if (constraintCount === 0) missing.push('the biggest constraint or trade-off');
+
+  const prompts = missing.slice(0, 3).map((item, index) => `${index + 1}. ${item}`);
+  return `I can draft it once I have a bit more framing:\n${prompts.join('\n')}`;
+}
+
+type PendingProposalContinuation =
+  | { action: 'confirm'; pendingProposal: NonNullable<EnrichedContext['conversational_state']['pending_proposal']> }
+  | { action: 'dismiss' }
+  | { action: 'stale' }
+  | null;
+
+function buildPendingProposalContinuation(
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+): PendingProposalContinuation {
+  const pendingProposal = enrichedContext.conversational_state?.pending_proposal;
+  if (!pendingProposal) return null;
+
+  const normalised = normaliseLabelText(userMessage);
+  if (isDismissalMessage(normalised)) {
+    return { action: 'dismiss' };
+  }
+  if (!isConfirmationMessage(normalised)) {
+    return null;
+  }
+
+  if (!enrichedContext.graph || computeGraphHash(enrichedContext.graph) !== pendingProposal.base_graph_hash) {
+    return { action: 'stale' };
+  }
+
+  return { action: 'confirm', pendingProposal };
+}
+
+function isConfirmationMessage(normalised: string): boolean {
+  return /\b(yes|yep|yeah|ok|okay|apply|do it|go ahead|looks good|sounds good|please do)\b/.test(normalised)
+    && !/\b(no|dont|don't|stop|cancel|not now)\b/.test(normalised);
+}
+
+function isDismissalMessage(normalised: string): boolean {
+  return /\b(no|dont|don't|cancel|dismiss|not now|leave it)\b/.test(normalised);
+}
+

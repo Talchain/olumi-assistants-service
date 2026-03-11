@@ -15,6 +15,7 @@ import type {
   SuggestedAction,
   ConversationalState,
   PendingClarificationState,
+  PendingProposalState,
   ProposedChangesPayload,
   SystemEvent,
   DecisionStage,
@@ -39,6 +40,21 @@ import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
 
 export type ProgressKind = 'changed_model' | 'ran_analysis' | 'added_evidence' | 'committed' | 'none';
 export type IntentClassification = 'explain' | 'recommend' | 'act' | 'conversational';
+export type RouteOutcome =
+  | 'default_llm'
+  | 'explicit_generate'
+  | 'generation_clarification'
+  | 'clarification_continuation'
+  | 'proposal_created'
+  | 'proposal_confirmation'
+  | 'proposal_dismissal'
+  | 'results_explanation'
+  | 'rationale_explanation';
+
+export interface RouteMetadata {
+  outcome: RouteOutcome;
+  reasoning: string;
+}
 
 export interface StageIndicator {
   stage: DecisionStage;
@@ -185,6 +201,7 @@ export interface LLMResult {
   suggested_actions: SuggestedAction[];
   diagnostics: string | null;
   parse_warnings: string[];
+  route_metadata?: RouteMetadata;
 }
 
 // ============================================================================
@@ -208,7 +225,9 @@ export interface ToolResult {
   /** edit_graph-only diagnostics for turn trace. */
   edit_graph_diagnostics?: EditGraphTraceDiagnostics;
   pending_clarification?: PendingClarificationState;
+  pending_proposal?: PendingProposalState;
   proposed_changes?: ProposedChangesPayload;
+  route_metadata?: RouteMetadata;
 }
 
 // ============================================================================
@@ -299,6 +318,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   diagnostics?: string;
   /** Parse warnings from XML envelope extraction. Non-production only. */
   parse_warnings?: string[];
+  _route_metadata?: RouteMetadata;
   /**
    * Contract violation codes from Phase 5 validation. Populated by phase5Validate
    * when violations are found; used by emitTurnTrace for structured log diagnostics.
