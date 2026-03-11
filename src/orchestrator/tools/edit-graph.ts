@@ -137,7 +137,7 @@ function getMaxPatchOperations(): number {
 
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();
-  const hasStructuralVerb = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option)\b/.test(message);
+  const hasStructuralVerb = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option|add (?:a |an )?(?:new )?(?:[a-z0-9_-]+\s+){0,2}(?:factor|outcome|risk|option|node|edge))\b/.test(message);
   const hasOptionConfigVerb = /\b(configure|set|adjust|update|change|tune|edit)\b/.test(message)
     && /\b(option|intervention)\b/.test(message);
   const hasValueUpdateVerb = /\b(set|lower|raise|increase|decrease|reduce|boost|make|adjust|update|tune|change|add)\b/.test(message);
