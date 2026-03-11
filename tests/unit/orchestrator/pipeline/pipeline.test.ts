@@ -296,6 +296,19 @@ describe("pipeline", () => {
         validation_outcome: "success",
         validation_violation_codes: [],
         recovery_path_chosen: "none",
+        conversational_state_summary: {
+          active_entities_count: 1,
+          stated_constraints_count: 1,
+          current_topic: "editing",
+        },
+        target_resolution: {
+          method: "exact_label",
+          confidence: "high",
+          resolved_label: "Price",
+          alternatives_count: 0,
+        },
+        resolution_mode: "auto_apply",
+        proposal_returned: false,
       },
     } as ToolResult);
 
@@ -334,6 +347,19 @@ describe("pipeline", () => {
     expect(traceCall?.[0].repeated_failure_escalation_applied).toBe(false);
     expect(traceCall?.[0].structural_ops_proposed_anyway).toBe(false);
     expect(traceCall?.[0].edit_path_summary).toBe("intent=parameter_update;mode=narrow_parameter_update;ops=1;validation=success;recovery=none");
+    expect(traceCall?.[0].conversational_state_summary).toEqual({
+      active_entities_count: 1,
+      stated_constraints_count: 1,
+      current_topic: "editing",
+    });
+    expect(traceCall?.[0].target_resolution).toEqual({
+      method: "exact_label",
+      confidence: "high",
+      resolved_label: "Price",
+      alternatives_count: 0,
+    });
+    expect(traceCall?.[0].resolution_mode).toBe("auto_apply");
+    expect(traceCall?.[0].proposal_returned).toBe(false);
     const effectivePromptComponents = traceCall?.[0].effective_prompt_components as Record<string, unknown>;
     expect(effectivePromptComponents.zone2_structurally_included).toBe(true);
     expect(effectivePromptComponents.narrow_edit_instruction_shaping_applied).toBe(true);

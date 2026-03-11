@@ -882,7 +882,10 @@ async function dispatchTool(
       case 'edit_graph': {
         const editDesc = (toolInput.edit_description as string) || turnRequest.message;
         const adapter = getAdapter('edit_graph');
-        const editResult = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId, { plotOpts });
+        const editResult = await handleEditGraph(turnRequest.context, editDesc, adapter, requestId, turnId, {
+          plotClient: getPlotClient(),
+          plotOpts,
+        });
         blocks = editResult.blocks;
         assistantText = editResult.assistantText;
         toolLatencyMs = editResult.latencyMs;

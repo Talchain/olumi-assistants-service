@@ -105,6 +105,43 @@ export interface SuggestedAction {
   role: 'facilitator' | 'challenger';
 }
 
+export type ConversationalTopic =
+  | 'framing'
+  | 'editing'
+  | 'configuring'
+  | 'analysing'
+  | 'explaining';
+
+export type CanonicalConstraint = `${'budget' | 'timeline' | 'threshold'}:${string}`;
+
+export interface LastFailedAction {
+  tool: string;
+  reason: string;
+}
+
+export interface ConversationalState {
+  active_entities: string[];
+  stated_constraints: CanonicalConstraint[];
+  current_topic: ConversationalTopic;
+  last_failed_action: LastFailedAction | null;
+}
+
+export type ProposedChangeActionType =
+  | 'value_update'
+  | 'option_config'
+  | 'structural_add'
+  | 'structural_remove';
+
+export interface ProposedChange {
+  description: string;
+  element_label: string;
+  action_type: ProposedChangeActionType;
+}
+
+export interface ProposedChangesPayload {
+  changes: ProposedChange[];
+}
+
 export interface OrchestratorError {
   code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'MISSING_GRAPH_STATE' | 'INTERNAL_PAYLOAD_ERROR' | 'UNKNOWN';
   message: string;
@@ -443,6 +480,7 @@ export interface ConversationContext {
   selected_elements?: string[];
   scenario_id: string;
   analysis_inputs?: AnalysisInputs | null;
+  conversational_state?: ConversationalState;
 }
 
 export interface OrchestratorEvent {

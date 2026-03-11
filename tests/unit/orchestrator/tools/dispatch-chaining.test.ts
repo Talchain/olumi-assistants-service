@@ -18,10 +18,12 @@ const {
   mockRunAnalysis,
   mockExplainResults,
   mockGetAdapter,
+  mockHandleEditGraph,
 } = vi.hoisted(() => ({
   mockRunAnalysis: vi.fn(),
   mockExplainResults: vi.fn(),
   mockGetAdapter: vi.fn(),
+  mockHandleEditGraph: vi.fn(),
 }));
 
 vi.mock("../../../../src/orchestrator/tools/run-analysis.js", () => ({
@@ -45,7 +47,7 @@ vi.mock("../../../../src/orchestrator/tools/generate-brief.js", () => ({
   handleGenerateBrief: vi.fn(),
 }));
 vi.mock("../../../../src/orchestrator/tools/edit-graph.js", () => ({
-  handleEditGraph: vi.fn(),
+  handleEditGraph: mockHandleEditGraph,
 }));
 vi.mock("../../../../src/orchestrator/tools/undo-patch.js", () => ({
   handleUndoPatch: vi.fn(),
@@ -62,6 +64,7 @@ vi.mock("../../../../src/orchestrator/plot-client.js", () => ({
 }));
 
 import { dispatchToolHandler, _resetDispatchPlotClient } from "../../../../src/orchestrator/tools/dispatch.js";
+import { createPLoTClient } from "../../../../src/orchestrator/plot-client.js";
 import { validateGatePatternsAgainstRegistry } from "../../../../src/orchestrator/tools/registry.js";
 import type { ConversationContext, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 
@@ -277,6 +280,43 @@ describe("dispatch chaining: run_analysis + explain_results", () => {
 
     expect(result.analysisResponse).toBeDefined();
     expect(result.analysisResponse?.response_hash).toBe("top-hash");
+  });
+});
+
+describe("dispatchToolHandler — edit_graph PLoT handoff", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetDispatchPlotClient();
+    mockGetAdapter.mockReturnValue({ chat: vi.fn() });
+    mockHandleEditGraph.mockResolvedValue({
+      blocks: [],
+      assistantText: null,
+      latencyMs: 10,
+      appliedGraph: null,
+      wasRejected: false,
+    });
+  });
+
+  it("passes the shared PLoT client into handleEditGraph when configured", async () => {
+    const plotClient = {
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: vi.fn().mockResolvedValue({ kind: "success", data: { verdict: "accepted" } }),
+    };
+    vi.mocked(createPLoTClient).mockReturnValue(plotClient as never);
+
+    await dispatchToolHandler(
+      "edit_graph",
+      { edit_description: "Rename Price" },
+      makeContext(),
+      "turn-1",
+      "req-1",
+    );
+
+    expect(mockHandleEditGraph).toHaveBeenCalledOnce();
+    expect(mockHandleEditGraph.mock.calls[0][5]).toEqual({
+      plotClient,
+      plotOpts: undefined,
+    });
   });
 });
 

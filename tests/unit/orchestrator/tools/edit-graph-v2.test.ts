@@ -42,8 +42,10 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
 
 import {
   classifyEditIntent,
+  determineEditResolutionMode,
   parseEditGraphResponse,
   handleEditGraph,
+  resolveEditTarget,
   type EditGraphLLMResult,
   type EditGraphResult,
 } from "../../../../src/orchestrator/tools/edit-graph.js";
@@ -90,6 +92,7 @@ function makeContext(overrides?: Partial<ConversationContext>): ConversationCont
     analysis_response: null,
     framing: null,
     messages: [],
+    conversational_state: { active_entities: [], stated_constraints: [], current_topic: "framing", last_failed_action: null },
     scenario_id: "test-scenario",
     ...overrides,
   };
@@ -317,6 +320,81 @@ describe("classifyEditIntent", () => {
   });
 });
 
+describe("target resolution and resolution modes", () => {
+  it("resolves exact label matches with high confidence", () => {
+    const resolution = resolveEditTarget("Set Price higher", makeContext());
+    expect(resolution.match_type).toBe("exact_label");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Price");
+  });
+
+  it("resolves alias matches with high confidence", () => {
+    const resolution = resolveEditTarget(
+      "Set onboarding to 2 months",
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+    );
+
+    expect(resolution.match_type).toBe("alias");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Onboarding Time");
+  });
+
+  it("uses conversational active_entities for pronoun/coreference resolution", () => {
+    const resolution = resolveEditTarget(
+      "Set it to 2 months",
+      makeContext({
+        graph: {
+          nodes: [{ id: "f1", kind: "factor", label: "Onboarding Time" }],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+        conversational_state: {
+          active_entities: ["Onboarding Time"],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+        },
+      }),
+    );
+
+    expect(resolution.match_type).toBe("active_entity");
+    expect(resolution.confidence).toBe("high");
+    expect(resolution.resolved_target?.label).toBe("Onboarding Time");
+  });
+
+  it("returns clarify mode for ambiguous alias matches", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "f1", kind: "factor", label: "Onboarding Time" },
+          { id: "f2", kind: "factor", label: "Hiring Delay" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+    const resolution = resolveEditTarget("Set ramp-up time to 2 months", context);
+
+    expect(resolution.match_type).toBe("ambiguous");
+    expect(resolution.alternatives.map((candidate) => candidate.label)).toEqual([
+      "Onboarding Time",
+      "Hiring Delay",
+    ]);
+    expect(determineEditResolutionMode("Set ramp-up time to 2 months", context)).toBe("clarify");
+  });
+
+  it("returns propose_and_confirm for compound edits against one resolved target", () => {
+    const context = makeContext();
+    expect(determineEditResolutionMode("Update Price and also rename Price", context)).toBe("propose_and_confirm");
+  });
+});
+
 // ============================================================================
 // Operation Mapping Tests
 // ============================================================================
@@ -518,6 +596,93 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.suggestedActions).toBeUndefined();
+  });
+
+  it("returns clarify output with suggestion chips for ambiguous targets", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Set ramp-up time to 2 months",
+      adapter,
+      "req-clarify",
+      "turn-clarify",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(true);
+    expect(result.assistantText).toContain("Which one should I update");
+    expect(result.suggestedActions?.map((action) => action.label)).toEqual([
+      "Onboarding Time",
+      "Hiring Delay",
+    ]);
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(result.diagnostics?.resolution_mode).toBe("clarify");
+    expect(result.diagnostics?.target_resolution?.alternatives_count).toBe(2);
+  });
+
+  it("returns minimal proposed_changes for compound edits without executing the LLM path", async () => {
+    const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update Price and also lower Price",
+      adapter,
+      "req-proposal",
+      "turn-proposal",
+    );
+
+    expect(result.blocks).toEqual([]);
+    expect(result.wasRejected).toBe(false);
+    expect(result.proposedChanges).toEqual({
+      changes: [
+        { description: "Update Price", element_label: "Price", action_type: "value_update" },
+        { description: "Also lower Price", element_label: "Price", action_type: "value_update" },
+      ],
+    });
+    expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
+    expect(result.diagnostics?.proposal_returned).toBe(true);
+  });
+
+  it("constrains auto-apply prompt with the resolved target label context", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/f1",
+          value: { value: "2 months" },
+          old_value: { value: "1 month" },
+          impact: "low",
+          rationale: "Update onboarding time",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated onboarding time.", rerun_recommended: false },
+    });
+
+    await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [{ id: "f1", kind: "factor", label: "Onboarding Time" }],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Set onboarding to 2 months",
+      adapter,
+      "req-auto-apply",
+      "turn-auto-apply",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("Apply this request to the existing Onboarding Time factor only.");
   });
 });
 

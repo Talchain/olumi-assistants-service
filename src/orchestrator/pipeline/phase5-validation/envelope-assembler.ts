@@ -144,6 +144,7 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     assistant_text: assistantText,
     blocks: toolResult.blocks,
     suggested_actions: suggestedActions,
+    ...(toolResult.proposed_changes && { proposed_changes: toolResult.proposed_changes }),
     guidance_items: toolResult.guidance_items,
 
     lineage: {

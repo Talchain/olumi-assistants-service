@@ -13,6 +13,8 @@ import type {
   ConversationBlock,
   ConversationMessage,
   SuggestedAction,
+  ConversationalState,
+  ProposedChangesPayload,
   SystemEvent,
   DecisionStage,
   V2RunResponseEnvelope,
@@ -135,6 +137,7 @@ export interface EnrichedContext {
   decision_archetype: DecisionArchetype;
   progress_markers: ProgressKind[];
   stuck: StuckState;
+  conversational_state: ConversationalState;
 
   // DSK (stubbed — populated by A.9)
   dsk: {
@@ -203,6 +206,7 @@ export interface ToolResult {
   suggested_actions?: SuggestedAction[];
   /** edit_graph-only diagnostics for turn trace. */
   edit_graph_diagnostics?: EditGraphTraceDiagnostics;
+  proposed_changes?: ProposedChangesPayload;
 }
 
 // ============================================================================
@@ -222,6 +226,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   assistant_text: string | null;
   blocks: ConversationBlock[];
   suggested_actions: SuggestedAction[];
+  proposed_changes?: ProposedChangesPayload;
   analysis_response?: V2RunResponseEnvelope;
 
   lineage: {
@@ -344,6 +349,8 @@ export type {
   ConversationBlock,
   ConversationMessage,
   SuggestedAction,
+  ConversationalState,
+  ProposedChangesPayload,
   SystemEvent,
   DecisionStage,
   V2RunResponseEnvelope,

@@ -23,6 +23,7 @@ import { trackProgress } from "./progress-tracker.js";
 import { detectStuck } from "./stuck-detector.js";
 import { loadDSK } from "./dsk-loader.js";
 import { loadUserProfile } from "./user-profile-loader.js";
+import { buildConversationalState } from "./conversational-state.js";
 import { compactGraph } from "../../context/graph-compact.js";
 import { compactAnalysis } from "../../context/analysis-compact.js";
 import { buildEventLogSummary } from "../../context/event-log-summary.js";
@@ -71,6 +72,9 @@ export function phase1Enrich(
 
   // Stuck detection
   const stuck = detectStuck(context.messages, progressMarkers);
+
+  // Conversational state
+  const conversationalState = buildConversationalState(message, context, intentClassification);
 
   // DSK (stub)
   const dsk = loadDSK();
@@ -133,6 +137,7 @@ export function phase1Enrich(
     decision_archetype: decisionArchetype,
     progress_markers: progressMarkers,
     stuck,
+    conversational_state: conversationalState,
 
     // DSK (stub)
     dsk,

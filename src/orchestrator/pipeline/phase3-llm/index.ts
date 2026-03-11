@@ -14,10 +14,11 @@ import { log } from "../../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "../../../adapters/llm/router.js";
 import { classifyIntent } from "../../intent-gate.js";
-import type { ToolName } from "../../intent-gate.js";
+import type { IntentGateResult, ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
+import { determineEditResolutionMode } from "../../tools/edit-graph.js";
 import { classifyUserIntent } from "../phase1-enrichment/intent-classifier.js";
 
 import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
@@ -65,15 +66,25 @@ export async function phase3Generate(
   llmClient: LLMClient,
   requestId: string,
   userMessage: string,
+  initialIntentGate?: IntentGateResult,
 ): Promise<LLMResult> {
   // 1. Check deterministic intent gate
-  const intentGate = classifyIntent(userMessage);
+  const intentGate = initialIntentGate ?? classifyIntent(userMessage);
   const freshTurnIntent = classifyUserIntent(userMessage);
+  const editResolutionMode = intentGate.tool === 'edit_graph'
+    ? determineEditResolutionMode(userMessage, buildConversationContext(enrichedContext))
+    : null;
+  const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
   const shouldPreferExplainResults = (
-    enrichedContext.stage_indicator.stage === 'evaluate'
-    && enrichedContext.analysis != null
-    && (freshTurnIntent === 'explain' || freshTurnIntent === 'recommend')
+    enrichedContext.analysis != null
     && intentGate.tool === 'edit_graph'
+    && (
+      (
+        enrichedContext.stage_indicator.stage === 'evaluate'
+        && (freshTurnIntent === 'explain' || freshTurnIntent === 'recommend')
+      )
+      || shouldAvoidEditGraph
+    )
   );
   const effectiveIntentGate = shouldPreferExplainResults
     ? {
@@ -82,7 +93,18 @@ export async function phase3Generate(
         routing: 'deterministic' as const,
         matched_pattern: intentGate.matched_pattern ?? '[fresh_turn_explain_override]',
       }
+    : shouldAvoidEditGraph
+      ? {
+          ...intentGate,
+          tool: null,
+          routing: 'llm' as const,
+          matched_pattern: intentGate.matched_pattern ?? '[edit_graph_bypass]',
+        }
     : intentGate;
+
+  // `no_edit_answer` is a routing-only outcome. With evaluation-stage analysis we
+  // deterministically narrate via explain_results; otherwise we bypass edit_graph
+  // and let the orchestrator LLM answer without executing a tool.
 
   if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
     // Check prerequisites
@@ -232,6 +254,7 @@ function buildConversationContext(enriched: EnrichedContext): ConversationContex
     messages: filteredHistory,
     selected_elements: enriched.selected_elements,
     scenario_id: enriched.scenario_id,
+    conversational_state: enriched.conversational_state,
   };
 }
 

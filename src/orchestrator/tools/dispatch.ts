@@ -41,6 +41,7 @@ export interface ToolDispatchResult {
   suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
   /** edit_graph-only diagnostics for orchestrator turn trace. */
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
+  proposedChanges?: import("../types.js").ProposedChangesPayload;
 }
 
 export interface ToolDispatchOpts {
@@ -188,7 +189,7 @@ export async function dispatchToolHandler(
         adapter,
         requestId,
         turnId,
-        { plotOpts: opts?.plotOpts },
+        { plotClient: getPlotClient(), plotOpts: opts?.plotOpts },
       );
       // Run post-edit guidance only when edit succeeded (not rejected)
       const editGuidance = (!result.wasRejected && result.appliedGraph)
@@ -201,6 +202,7 @@ export async function dispatchToolHandler(
         guidanceItems: editGuidance,
         suggestedActions: result.suggestedActions,
         editGraphDiagnostics: result.diagnostics,
+        proposedChanges: result.proposedChanges,
       };
     }
 

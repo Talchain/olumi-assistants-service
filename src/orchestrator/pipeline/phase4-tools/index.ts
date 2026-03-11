@@ -97,6 +97,7 @@ export async function phase4Execute(
     selected_elements: enrichedContext.selected_elements,
     scenario_id: enrichedContext.scenario_id,
     analysis_inputs: enrichedContext.analysis_inputs,
+    conversational_state: enrichedContext.conversational_state,
   };
 
   const allBlocks: ToolResult['blocks'] = [];
@@ -113,6 +114,7 @@ export async function phase4Execute(
   const executedTools: string[] = [];
   let stageFallbackInjected = false;
   let editGraphDiagnostics: ToolResult['edit_graph_diagnostics'];
+  let proposedChanges: ToolResult['proposed_changes'];
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -147,6 +149,9 @@ export async function phase4Execute(
 
     allBlocks.push(...result.blocks);
     allGuidanceItems.push(...(result.guidance_items ?? []));
+    if (result.suggested_actions && result.suggested_actions.length > 0) {
+      allSuggestedActions.push(...result.suggested_actions);
+    }
     executedTools.push(invocation.name);
 
     if (result.assistant_text) {
@@ -164,6 +169,9 @@ export async function phase4Execute(
     }
     if (invocation.name === 'edit_graph' && result.edit_graph_diagnostics) {
       editGraphDiagnostics = result.edit_graph_diagnostics;
+    }
+    if (result.proposed_changes) {
+      proposedChanges = result.proposed_changes;
     }
 
     // Accumulate side effects
@@ -211,6 +219,7 @@ export async function phase4Execute(
     guidance_items: allGuidanceItems,
     ...(allSuggestedActions.length > 0 && { suggested_actions: allSuggestedActions }),
     ...(editGraphDiagnostics && { edit_graph_diagnostics: editGraphDiagnostics }),
+    ...(proposedChanges && { proposed_changes: proposedChanges }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -259,6 +268,7 @@ export function createProductionToolDispatcher(
         tool_latency_ms: result.toolLatencyMs,
         guidance_items: result.guidanceItems,
         edit_graph_diagnostics: result.editGraphDiagnostics,
+        proposed_changes: result.proposedChanges,
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,
         }),

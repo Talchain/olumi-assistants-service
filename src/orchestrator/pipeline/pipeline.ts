@@ -22,6 +22,7 @@ import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/enve
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { classifyIntent } from "../intent-gate.js";
+import type { IntentGateResult } from "../intent-gate.js";
 import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
@@ -149,6 +150,7 @@ export async function executePipeline(
       deps.llmClient,
       requestId,
       request.message,
+      intentGate,
     );
 
     // V2 mode consistency telemetry
@@ -216,6 +218,7 @@ export async function executePipeline(
       envelope,
       editGraphDiagnostics: toolResult.edit_graph_diagnostics,
       stageFallbackInjected: toolResult.stage_fallback_injected,
+      initialIntentGate: intentGate,
     });
 
     return envelope;
@@ -478,7 +481,7 @@ async function runAnalysisViaPipeline(
 // Per-turn Diagnostic Trace (Task 1)
 // ============================================================================
 
-interface TurnTraceInput {
+export interface TurnTraceInput {
   enrichedContext: EnrichedContext;
   requestId: string;
   request: OrchestratorTurnRequest;
@@ -492,6 +495,7 @@ interface TurnTraceInput {
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
   /** True when Phase 4 injected the stage+tool-aware fallback message. */
   stageFallbackInjected?: boolean;
+  initialIntentGate?: IntentGateResult;
 }
 
 /**
@@ -504,7 +508,7 @@ function emitTurnTrace(input: TurnTraceInput): void {
   const analysis = ec.analysis as Record<string, unknown> | null;
   const brief = analysis?.decision_brief;
   const freshTurnIntentRaw = classifyUserIntent(request.message ?? '');
-  const initialIntentGate = classifyIntent(request.message ?? '');
+  const initialIntentGate = input.initialIntentGate ?? classifyIntent(request.message ?? '');
   const explainOverrideApplied = (
     ec.stage_indicator.stage === 'evaluate'
     && analysis != null
@@ -590,6 +594,10 @@ function emitTurnTrace(input: TurnTraceInput): void {
       validation_outcome: editTrace?.validation_outcome ?? null,
       validation_violation_codes: editTrace?.validation_violation_codes ?? null,
       recovery_path_chosen: editTrace?.recovery_path_chosen ?? null,
+      conversational_state_summary: editTrace?.conversational_state_summary ?? null,
+      target_resolution: editTrace?.target_resolution ?? null,
+      resolution_mode: editTrace?.resolution_mode ?? null,
+      proposal_returned: editTrace?.proposal_returned ?? null,
     },
     'orchestrator.turn.trace',
   );

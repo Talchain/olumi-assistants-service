@@ -39,6 +39,9 @@ import type {
   PatchOperation,
   OrchestratorError,
   RepairEntry,
+  ProposedChangesPayload,
+  ProposedChangeActionType,
+  SuggestedAction,
 } from "../types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
@@ -52,6 +55,7 @@ import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { validateGraphStructure, VIOLATION_MESSAGES } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
+import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 
 // ============================================================================
 // Types
@@ -66,7 +70,9 @@ export interface EditGraphResult {
   /** True if the edit was rejected (structural or semantic). */
   wasRejected: boolean;
   /** Suggested actions (e.g. "Re-run analysis" when rerun_recommended). */
-  suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
+  suggestedActions?: SuggestedAction[];
+  /** Lightweight proposal payload for propose_and_confirm mode. */
+  proposedChanges?: ProposedChangesPayload;
   /** Edit-specific diagnostics for orchestrator turn trace (edit_graph turns only). */
   diagnostics?: EditGraphTraceDiagnostics;
 }
@@ -113,6 +119,36 @@ export interface EditGraphLLMResult {
 
 export type EditIntentCategory = 'parameter_update' | 'option_configuration' | 'structural';
 
+export type EditTargetMatchType =
+  | 'exact_label'
+  | 'alias'
+  | 'active_entity'
+  | 'graph_local'
+  | 'ambiguous'
+  | 'none';
+
+export type EditResolutionConfidence = 'high' | 'medium' | 'low';
+
+export type EditResolutionMode =
+  | 'auto_apply'
+  | 'propose_and_confirm'
+  | 'clarify'
+  | 'no_edit_answer';
+
+export interface ResolvedEditTarget {
+  id: string;
+  label: string;
+  type: string;
+}
+
+export interface EditTargetResolutionResult {
+  match_type: EditTargetMatchType;
+  resolved_target: ResolvedEditTarget | null;
+  confidence: EditResolutionConfidence;
+  alternatives: Array<{ id: string; label: string }>;
+  candidate_labels: string[];
+}
+
 export interface EditGraphTraceDiagnostics {
   classified_intent: EditIntentCategory;
   instruction_mode_applied: 'narrow_parameter_update' | 'narrow_option_configuration' | 'structural_default';
@@ -124,6 +160,19 @@ export interface EditGraphTraceDiagnostics {
   validation_outcome: string;
   validation_violation_codes: string[];
   recovery_path_chosen: string;
+  conversational_state_summary: {
+    active_entities_count: number;
+    stated_constraints_count: number;
+    current_topic: string;
+  } | null;
+  target_resolution: {
+    method: EditTargetMatchType | null;
+    confidence: EditResolutionConfidence | null;
+    resolved_label: string | null;
+    alternatives_count: number;
+  } | null;
+  resolution_mode: EditResolutionMode | null;
+  proposal_returned: boolean | null;
 }
 
 // ============================================================================
@@ -135,13 +184,15 @@ function getMaxPatchOperations(): number {
   return config.cee.maxPatchOperations;
 }
 
+const PROPOSE_AND_CONFIRM_ASSISTANT_TEXT = 'Here’s the change I’d propose. If you want, I can apply it next.';
+
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();
   const hasStructuralVerb = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option|add (?:a |an )?(?:new )?(?:[a-z0-9_-]+\s+){0,2}(?:factor|outcome|risk|option|node|edge))\b/.test(message);
   const hasOptionConfigVerb = /\b(configure|set|adjust|update|change|tune|edit)\b/.test(message)
     && /\b(option|intervention)\b/.test(message);
   const hasValueUpdateVerb = /\b(set|lower|raise|increase|decrease|reduce|boost|make|adjust|update|tune|change|add)\b/.test(message);
-  const hasValueTarget = /\b(high|low|higher|lower|more|less|sensitivity|cost|price|pay|willingness|churn|agency|percent|%|value|parameter|weight|strength|mean|std|probability|exists)\b/.test(message);
+  const hasValueTarget = /\b(high|low|higher|lower|more|less|sensitivity|cost|price|pay|willingness|churn|agency|percent|%|value|parameter|weight|strength|mean|std|probability|exists|month|months|week|weeks|day|days|year|years|delay|time)\b/.test(message);
 
   if (hasStructuralVerb) {
     return 'structural';
@@ -178,6 +229,250 @@ function resolveInstructionMode(intentCategory: EditIntentCategory): EditGraphTr
   if (intentCategory === 'parameter_update') return 'narrow_parameter_update';
   if (intentCategory === 'option_configuration') return 'narrow_option_configuration';
   return 'structural_default';
+}
+
+// Seed aliases only. If a graph uses different labels, resolution safely falls
+// back to later match stages and ultimately clarify when confidence stays low.
+const TARGET_ALIAS_MAP: Record<string, string[]> = {
+  onboarding: ['Onboarding Time'],
+  'onboarding time': ['Onboarding Time'],
+  churn: ['Monthly Churn Rate'],
+  'monthly churn': ['Monthly Churn Rate'],
+  'ramp up time': ['Onboarding Time', 'Hiring Delay'],
+  'ramp-up time': ['Onboarding Time', 'Hiring Delay'],
+};
+
+function normaliseMatchingText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9%]+/g, ' ').trim();
+}
+
+function getResolvedTargets(context: ConversationContext): ResolvedEditTarget[] {
+  return (context.graph?.nodes ?? [])
+    .filter((node) => typeof node.label === 'string' && node.label.trim().length > 0)
+    .map((node) => ({
+      id: node.id,
+      label: node.label.trim(),
+      type: node.kind,
+    }));
+}
+
+function dedupeTargets(targets: ResolvedEditTarget[]): ResolvedEditTarget[] {
+  const seen = new Set<string>();
+  const deduped: ResolvedEditTarget[] = [];
+  for (const target of targets) {
+    const key = `${target.id}:${target.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(target);
+  }
+  return deduped;
+}
+
+function buildResolutionResult(
+  matchType: EditTargetMatchType,
+  confidence: EditResolutionConfidence,
+  matches: ResolvedEditTarget[],
+): EditTargetResolutionResult {
+  const uniqueMatches = dedupeTargets(matches);
+  return {
+    match_type: uniqueMatches.length > 1 ? 'ambiguous' : matchType,
+    resolved_target: uniqueMatches.length === 1 ? uniqueMatches[0] : null,
+    confidence: uniqueMatches.length > 1 ? 'medium' : confidence,
+    alternatives: uniqueMatches.length > 1
+      ? uniqueMatches.slice(0, 3).map((match) => ({ id: match.id, label: match.label }))
+      : [],
+    candidate_labels: uniqueMatches.map((match) => match.label),
+  };
+}
+
+function containsCoreferenceReference(message: string): boolean {
+  return /\b(it|this|that|them|those)\b/i.test(message);
+}
+
+function isCompoundEditRequest(editDescription: string): boolean {
+  return /\b(and|also|then)\b|,/.test(editDescription.toLowerCase());
+}
+
+function isHighImpactEditRequest(editDescription: string, intentCategory: EditIntentCategory): boolean {
+  if (intentCategory === 'structural') return true;
+  return /\b(remove|delete|rebuild|replace|entirely|all|every|double|halve|major)\b/i.test(editDescription);
+}
+
+function isLowImpactEditRequest(editDescription: string, intentCategory: EditIntentCategory): boolean {
+  if (intentCategory === 'structural') return false;
+  return /\b(set|update|change|make|adjust|lower|raise|increase|decrease)\b/i.test(editDescription)
+    && !isCompoundEditRequest(editDescription)
+    && !isHighImpactEditRequest(editDescription, intentCategory);
+}
+
+function selectGraphLocalTarget(
+  context: ConversationContext,
+  intentCategory: EditIntentCategory,
+): ResolvedEditTarget[] {
+  const targets = getResolvedTargets(context);
+  if (intentCategory === 'option_configuration') {
+    const options = targets.filter((target) => target.type === 'option');
+    return options.length === 1 ? options : [];
+  }
+  const factors = targets.filter((target) => target.type === 'factor');
+  return factors.length === 1 ? factors : [];
+}
+
+function resolveAliasMatches(editDescription: string, context: ConversationContext): ResolvedEditTarget[] {
+  const normalisedMessage = normaliseMatchingText(editDescription);
+  const targets = getResolvedTargets(context);
+  const matches: ResolvedEditTarget[] = [];
+
+  for (const [alias, labels] of Object.entries(TARGET_ALIAS_MAP)) {
+    if (!normalisedMessage.includes(normaliseMatchingText(alias))) continue;
+    for (const label of labels) {
+      const target = targets.find((candidate) => normaliseMatchingText(candidate.label) === normaliseMatchingText(label));
+      if (target) matches.push(target);
+    }
+  }
+
+  return matches;
+}
+
+function resolveActiveEntityMatches(context: ConversationContext): ResolvedEditTarget[] {
+  const activeEntities = context.conversational_state?.active_entities ?? [];
+  const targets = getResolvedTargets(context);
+  return activeEntities
+    .map((entity) => targets.find((candidate) => normaliseMatchingText(candidate.label) === normaliseMatchingText(entity)) ?? null)
+    .filter((target): target is ResolvedEditTarget => target !== null);
+}
+
+export function resolveEditTarget(
+  editDescription: string,
+  context: ConversationContext,
+  intentCategory: EditIntentCategory = classifyEditIntent(editDescription),
+): EditTargetResolutionResult {
+  const normalisedMessage = normaliseMatchingText(editDescription);
+  const targets = getResolvedTargets(context);
+  const exactMatches = targets.filter((target) => normalisedMessage.includes(normaliseMatchingText(target.label)));
+  if (exactMatches.length > 0) {
+    return buildResolutionResult('exact_label', 'high', exactMatches);
+  }
+
+  const aliasMatches = resolveAliasMatches(editDescription, context);
+  if (aliasMatches.length > 0) {
+    return buildResolutionResult('alias', aliasMatches.length === 1 ? 'high' : 'medium', aliasMatches);
+  }
+
+  if (containsCoreferenceReference(editDescription)) {
+    const activeEntityMatches = resolveActiveEntityMatches(context);
+    if (activeEntityMatches.length > 0) {
+      return buildResolutionResult('active_entity', activeEntityMatches.length === 1 ? 'high' : 'medium', activeEntityMatches);
+    }
+  }
+
+  const graphLocalMatches = selectGraphLocalTarget(context, intentCategory);
+  if (graphLocalMatches.length > 0) {
+    return buildResolutionResult('graph_local', 'high', graphLocalMatches);
+  }
+
+  return {
+    match_type: 'none',
+    resolved_target: null,
+    confidence: 'low',
+    alternatives: [],
+    candidate_labels: [],
+  };
+}
+
+export function determineEditResolutionMode(
+  editDescription: string,
+  context: ConversationContext,
+  intentCategory: EditIntentCategory = classifyEditIntent(editDescription),
+  resolution: EditTargetResolutionResult = resolveEditTarget(editDescription, context, intentCategory),
+): EditResolutionMode {
+  const conversationalIntent = classifyUserIntent(editDescription);
+  if (conversationalIntent === 'explain' || conversationalIntent === 'recommend') {
+    return 'no_edit_answer';
+  }
+
+  if (intentCategory === 'structural') {
+    // Structural edits still pass through the full edit_graph validation flow.
+    return 'auto_apply';
+  }
+
+  if (resolution.match_type === 'ambiguous' || resolution.confidence === 'low') {
+    return 'clarify';
+  }
+
+  if (
+    resolution.confidence === 'high'
+    && resolution.resolved_target
+    && !isCompoundEditRequest(editDescription)
+    && isLowImpactEditRequest(editDescription, intentCategory)
+  ) {
+    return 'auto_apply';
+  }
+
+  return 'propose_and_confirm';
+}
+
+function formatClauseDescription(clause: string): string {
+  return clause.trim().replace(/\s+/g, ' ').replace(/^[a-z]/, (char) => char.toUpperCase());
+}
+
+function inferActionTypeFromClause(clause: string, intentCategory: EditIntentCategory): ProposedChangeActionType {
+  if (/\b(remove|delete)\b/i.test(clause)) return 'structural_remove';
+  if (/\b(add|create|insert)\b/i.test(clause)) return 'structural_add';
+  if (intentCategory === 'option_configuration' || /\b(option|intervention)\b/i.test(clause)) return 'option_config';
+  return 'value_update';
+}
+
+function inferElementLabel(clause: string, resolvedTarget: ResolvedEditTarget | null, candidateLabels: string[] = []): string {
+  if (resolvedTarget) return resolvedTarget.label;
+  // Try matching clause text against known graph labels before falling back to clause text.
+  // Handles compound requests where later clauses reference the same or a sibling entity.
+  const normClause = normaliseMatchingText(clause);
+  for (const label of candidateLabels) {
+    if (normClause.includes(normaliseMatchingText(label))) return label;
+  }
+  const structuralMatch = clause.match(/\b(?:add|create|remove|delete)\s+(?:a |an )?(.*)$/i);
+  if (structuralMatch?.[1]) {
+    return formatClauseDescription(structuralMatch[1]);
+  }
+  return formatClauseDescription(clause);
+}
+
+function buildProposedChanges(
+  editDescription: string,
+  resolution: EditTargetResolutionResult,
+  intentCategory: EditIntentCategory,
+): ProposedChangesPayload {
+  const clauses = editDescription
+    .split(/\band\b|,/i)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const changes = (clauses.length > 0 ? clauses : [editDescription]).map((clause, index) => ({
+    description: formatClauseDescription(clause),
+    element_label: index === 0
+      ? inferElementLabel(clause, resolution.resolved_target)
+      : inferElementLabel(clause, null, resolution.candidate_labels),
+    action_type: inferActionTypeFromClause(clause, intentCategory),
+  }));
+  return { changes };
+}
+
+function buildClarificationQuestion(intentCategory: EditIntentCategory, alternatives: string[]): string {
+  if (intentCategory === 'option_configuration') {
+    return `Which option should I update${alternatives.length > 0 ? ` — ${alternatives.join(' or ')}` : ''}?`;
+  }
+  return `Which one should I update${alternatives.length > 0 ? ` — ${alternatives.join(' or ')}` : ''}?`;
+}
+
+function buildClarificationActions(
+  editDescription: string,
+  resolution: EditTargetResolutionResult,
+): SuggestedAction[] {
+  return resolution.alternatives.map((alternative) => ({
+    label: alternative.label,
+    prompt: `Update ${alternative.label}.`,
+    role: 'facilitator',
+  }));
 }
 
 function buildInstructionPreview(effectiveInstruction: string | null): string | null {
@@ -417,7 +712,31 @@ export async function handleEditGraph(
   const plotClient = opts?.plotClient ?? null;
   const baseGraphHash = computeGraphHash(context.graph);
   const intentCategory = classifyEditIntent(editDescription);
-  const intentInstruction = buildIntentInstruction(intentCategory);
+  const targetResolution = resolveEditTarget(editDescription, context, intentCategory);
+  const resolutionMode = determineEditResolutionMode(editDescription, context, intentCategory, targetResolution);
+  const conversationalStateSummary = context.conversational_state
+    ? {
+        active_entities_count: context.conversational_state.active_entities.length,
+        stated_constraints_count: context.conversational_state.stated_constraints.length,
+        current_topic: context.conversational_state.current_topic,
+      }
+    : null;
+  const targetResolutionSummary = {
+    method: targetResolution.match_type,
+    confidence: targetResolution.confidence,
+    resolved_label: targetResolution.resolved_target?.label ?? null,
+    alternatives_count: targetResolution.alternatives.length,
+  };
+  let proposalReturned = false;
+  const resolvedTargetInstruction = targetResolution.resolved_target
+    ? `Apply this request to the existing ${targetResolution.resolved_target.label} ${targetResolution.resolved_target.type} only.`
+    : null;
+  const intentInstruction = [
+    buildIntentInstruction(intentCategory),
+    resolutionMode === 'auto_apply' ? resolvedTargetInstruction : null,
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+    .join(' ');
   const instructionModeApplied = resolveInstructionMode(intentCategory);
   const graphContextNodeCount = context.graph.nodes?.length ?? 0;
   const graphContextEdgeCount = context.graph.edges?.length ?? 0;
@@ -426,6 +745,7 @@ export async function handleEditGraph(
   let validationOutcome = 'not_evaluated';
   let validationViolationCodes: string[] = [];
   let recoveryPathChosen = 'none';
+  let initialEffectiveInstruction: string | null = null;
 
   const setViolationCodes = (codes: string[]): void => {
     validationViolationCodes = [...new Set(codes.filter((code) => code.length > 0))];
@@ -445,7 +765,36 @@ export async function handleEditGraph(
     validation_outcome: validationOutcome,
     validation_violation_codes: validationViolationCodes,
     recovery_path_chosen: recoveryPathChosen,
+    conversational_state_summary: conversationalStateSummary,
+    target_resolution: targetResolutionSummary,
+    resolution_mode: resolutionMode,
+    proposal_returned: proposalReturned,
   });
+
+  if (resolutionMode === 'clarify') {
+    return {
+      blocks: [],
+      assistantText: buildClarificationQuestion(intentCategory, targetResolution.alternatives.map((alternative) => alternative.label)),
+      latencyMs: Date.now() - startTime,
+      appliedGraph: null,
+      wasRejected: true,
+      suggestedActions: buildClarificationActions(editDescription, targetResolution),
+      diagnostics: diagnostics(),
+    };
+  }
+
+  if (resolutionMode === 'propose_and_confirm') {
+    proposalReturned = true;
+    return {
+      blocks: [],
+      assistantText: PROPOSE_AND_CONFIRM_ASSISTANT_TEXT,
+      latencyMs: Date.now() - startTime,
+      appliedGraph: null,
+      wasRejected: false,
+      proposedChanges: buildProposedChanges(editDescription, targetResolution, intentCategory),
+      diagnostics: diagnostics(),
+    };
+  }
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
   const systemPrompt = await getSystemPrompt('edit_graph');
@@ -476,7 +825,7 @@ export async function handleEditGraph(
 
   // Combine system prompt with serialised context
   const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
-  const initialEffectiveInstruction = fullSystemPrompt;
+  initialEffectiveInstruction = fullSystemPrompt;
 
   const callOpts: CallOpts = {
     requestId,

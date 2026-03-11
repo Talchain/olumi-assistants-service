@@ -91,5 +91,42 @@ describe("phase1-enrichment (index)", () => {
     expect(result.user_message).toBe("What about pricing?");
   });
 
+  it("builds compact conversational_state from recent turns", () => {
+    const result = phase1Enrich(
+      "Why did that fail?",
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Monthly Churn Rate" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+        messages: [
+          { role: "user", content: "Keep the budget under $500k and launch within 6 months." },
+          { role: "user", content: "Set onboarding time to 2 months." },
+          {
+            role: "assistant",
+            content: "I wasn't able to apply that change safely.",
+            tool_calls: [{ name: "edit_graph", input: { edit_description: "Set onboarding time to 2 months." } }],
+          },
+        ],
+      }),
+      "s1",
+    );
+
+    expect(result.conversational_state.active_entities).toEqual(["Onboarding Time"]);
+    expect(result.conversational_state.stated_constraints).toEqual([
+      "budget:$500k",
+      "timeline:6_month",
+      "timeline:2_month",
+    ]);
+    expect(result.conversational_state.current_topic).toBe("explaining");
+    expect(result.conversational_state.last_failed_action).toEqual({
+      tool: "edit_graph",
+      reason: "unsafe_change",
+    });
+  });
+
   it.todo("V2 pipeline: BIL should be injected during FRAME enrichment (tracked: A.4/F.2)");
 });

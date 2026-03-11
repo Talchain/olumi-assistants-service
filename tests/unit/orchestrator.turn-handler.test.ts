@@ -127,6 +127,7 @@ function makeXmlEnvelope(opts: {
   assistantText?: string;
   blocks?: string;
   suggestedActions?: string;
+  toolUse?: string;
 } = {}): string {
   const diag = opts.diagnostics !== undefined
     ? `<diagnostics>${opts.diagnostics}</diagnostics>\n`
@@ -134,11 +135,13 @@ function makeXmlEnvelope(opts: {
   const text = opts.assistantText ?? 'Here is a test response.';
   const blocks = opts.blocks ?? '';
   const actions = opts.suggestedActions ?? '';
+  const toolUse = opts.toolUse ?? '';
 
   return `${diag}<response>
   <assistant_text>${text}</assistant_text>
   <blocks>${blocks}</blocks>
   <suggested_actions>${actions}</suggested_actions>
+  ${toolUse}
 </response>`;
 }
 
@@ -482,9 +485,9 @@ describe('handleTurn — intent gate integration', () => {
     vi.mocked(isProduction).mockReturnValue(false);
   });
 
-  it('"brief" with prerequisites met → deterministic routing, chatWithTools NOT called', async () => {
+  it('"generate brief" with prerequisites met → deterministic routing, chatWithTools NOT called', async () => {
     const req = makeRequest({
-      message: 'brief',
+      message: 'generate brief',
       context: {
         graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D' }], edges: [] },
         analysis_response: {
@@ -769,7 +772,7 @@ describe('handleTurn — patch_accepted system event', () => {
         framing: { stage: 'frame' },
         messages: [PENDING_PATCH_MSG],
         scenario_id: 'test-scenario',
-      } as ConversationContext,
+      } as unknown as ConversationContext,
       scenario_id: 'test-scenario',
       client_turn_id: `patch-test-${turnCounter}-${Date.now()}`,
       // Brief C: graph_state required for Path B (no applied_graph_hash)
@@ -917,9 +920,12 @@ describe('handleTurn — patch_accepted system event', () => {
 describe('handleTurn — adapter task routing', () => {
   beforeEach(() => {
     _clearIdempotencyCache();
+    _resetPlotClient();
     mockChatWithTools.mockReset();
     mockChat.mockReset();
     vi.mocked(getAdapter).mockClear();
+    vi.mocked(createPLoTClient).mockReset();
+    vi.mocked(createPLoTClient).mockReturnValue(null);
     vi.mocked(isProduction).mockReturnValue(false);
   });
 

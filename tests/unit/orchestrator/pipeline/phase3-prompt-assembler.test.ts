@@ -73,6 +73,7 @@ function makeEnrichedContext(overrides: Partial<EnrichedContext> = {}): Enriched
     decision_archetype: { type: null, confidence: "low", evidence: "no keywords matched" },
     progress_markers: [],
     stuck: { detected: false, rescue_routes: [] },
+    conversational_state: { active_entities: [], stated_constraints: [], current_topic: "framing", last_failed_action: null },
     dsk: { claims: [], triggers: [], techniques: [], version_hash: null },
     user_profile: { coaching_style: "socratic", calibration_tendency: "unknown", challenge_tolerance: "medium" },
     scenario_id: "test-scenario",

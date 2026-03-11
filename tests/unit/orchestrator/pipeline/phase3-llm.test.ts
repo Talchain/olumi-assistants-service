@@ -49,6 +49,7 @@ function makeEnrichedContext(overrides?: Partial<EnrichedContext>): EnrichedCont
     decision_archetype: { type: null, confidence: "low", evidence: "no keywords matched" },
     progress_markers: [],
     stuck: { detected: false, rescue_routes: [] },
+    conversational_state: { active_entities: [], stated_constraints: [], current_topic: "framing", last_failed_action: null },
     dsk: { claims: [], triggers: [], techniques: [], version_hash: null },
     user_profile: { coaching_style: "socratic", calibration_tendency: "unknown", challenge_tolerance: "medium" },
     scenario_id: "test-scenario",
@@ -339,9 +340,8 @@ describe("phase3-llm", () => {
         "Why",
       );
 
-      expect(client.chatWithTools).not.toHaveBeenCalled();
-      expect(result.tool_invocations).toHaveLength(1);
-      expect(result.tool_invocations[0].name).toBe("edit_graph");
+      expect(client.chatWithTools).toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(0);
     });
 
     it("logs zone2_enabled from the runtime context-fabric flag", async () => {
