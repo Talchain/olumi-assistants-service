@@ -9,7 +9,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { ConversationBlock, ConversationContext, OrchestratorError, V2RunResponseEnvelope } from "../types.js";
+import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, V2RunResponseEnvelope } from "../types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { createPLoTClient } from "../plot-client.js";
 import { getAdapter } from "../../adapters/llm/router.js";
@@ -41,6 +41,7 @@ export interface ToolDispatchResult {
   suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
   /** edit_graph-only diagnostics for orchestrator turn trace. */
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
+  pendingClarification?: PendingClarificationState;
   proposedChanges?: import("../types.js").ProposedChangesPayload;
 }
 
@@ -202,6 +203,7 @@ export async function dispatchToolHandler(
         guidanceItems: editGuidance,
         suggestedActions: result.suggestedActions,
         editGraphDiagnostics: result.diagnostics,
+        pendingClarification: result.pendingClarification,
         proposedChanges: result.proposedChanges,
       };
     }

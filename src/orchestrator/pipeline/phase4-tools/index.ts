@@ -114,6 +114,7 @@ export async function phase4Execute(
   const executedTools: string[] = [];
   let stageFallbackInjected = false;
   let editGraphDiagnostics: ToolResult['edit_graph_diagnostics'];
+  let pendingClarification: ToolResult['pending_clarification'];
   let proposedChanges: ToolResult['proposed_changes'];
 
   for (const invocation of toExecute) {
@@ -170,20 +171,19 @@ export async function phase4Execute(
     if (invocation.name === 'edit_graph' && result.edit_graph_diagnostics) {
       editGraphDiagnostics = result.edit_graph_diagnostics;
     }
+    if (result.pending_clarification) {
+      pendingClarification = result.pending_clarification;
+    }
     if (result.proposed_changes) {
       proposedChanges = result.proposed_changes;
     }
 
-    // Accumulate side effects
-    if (invocation.name === 'draft_graph' || invocation.name === 'edit_graph') {
-      sideEffects.graph_updated = true;
-    }
-    if (invocation.name === 'run_analysis') {
-      sideEffects.analysis_ran = true;
-    }
-    if (invocation.name === 'generate_brief') {
-      sideEffects.brief_generated = true;
-    }
+    // Accumulate side effects from the actual tool result, not the tool name.
+    // This preserves the distinction between a successful model mutation and a
+    // clarification/proposal-only edit_graph turn.
+    sideEffects.graph_updated = sideEffects.graph_updated || result.side_effects.graph_updated;
+    sideEffects.analysis_ran = sideEffects.analysis_ran || result.side_effects.analysis_ran;
+    sideEffects.brief_generated = sideEffects.brief_generated || result.side_effects.brief_generated;
   }
 
   // Guaranteed fallback: all tools suppressed + blank/null LLM text → never emit silent response.
@@ -219,6 +219,7 @@ export async function phase4Execute(
     guidance_items: allGuidanceItems,
     ...(allSuggestedActions.length > 0 && { suggested_actions: allSuggestedActions }),
     ...(editGraphDiagnostics && { edit_graph_diagnostics: editGraphDiagnostics }),
+    ...(pendingClarification && { pending_clarification: pendingClarification }),
     ...(proposedChanges && { proposed_changes: proposedChanges }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
@@ -255,9 +256,9 @@ export function createProductionToolDispatcher(
 
       // Map handler result to ToolResult with side_effects
       const sideEffects = {
-        graph_updated: toolName === 'draft_graph' || toolName === 'edit_graph',
-        analysis_ran: toolName === 'run_analysis',
-        brief_generated: toolName === 'generate_brief',
+        graph_updated: result.blocks.some((block) => (block as { block_type?: string }).block_type === 'graph_patch'),
+        analysis_ran: toolName === 'run_analysis' && !!result.analysisResponse,
+        brief_generated: toolName === 'generate_brief' && result.blocks.length > 0,
       };
 
       return {
@@ -268,6 +269,7 @@ export function createProductionToolDispatcher(
         tool_latency_ms: result.toolLatencyMs,
         guidance_items: result.guidanceItems,
         edit_graph_diagnostics: result.editGraphDiagnostics,
+        pending_clarification: result.pendingClarification,
         proposed_changes: result.proposedChanges,
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,

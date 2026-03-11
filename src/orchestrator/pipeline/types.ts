@@ -14,6 +14,7 @@ import type {
   ConversationMessage,
   SuggestedAction,
   ConversationalState,
+  PendingClarificationState,
   ProposedChangesPayload,
   SystemEvent,
   DecisionStage,
@@ -206,6 +207,7 @@ export interface ToolResult {
   suggested_actions?: SuggestedAction[];
   /** edit_graph-only diagnostics for turn trace. */
   edit_graph_diagnostics?: EditGraphTraceDiagnostics;
+  pending_clarification?: PendingClarificationState;
   proposed_changes?: ProposedChangesPayload;
 }
 
@@ -224,6 +226,7 @@ export interface ScienceLedger {
 export interface OrchestratorResponseEnvelopeV2 {
   turn_id: string;
   assistant_text: string | null;
+  assistant_tool_calls?: Array<{ name: string; input: Record<string, unknown> }>;
   blocks: ConversationBlock[];
   suggested_actions: SuggestedAction[];
   proposed_changes?: ProposedChangesPayload;

@@ -228,6 +228,43 @@ describe("assembleV2Envelope", () => {
     expect(envelope.diagnostics).toBe("Debug info");
   });
 
+  it("emits assistant_tool_calls for structured edit_graph clarification carry-forward", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        tool_invocations: [{
+          id: "deterministic",
+          name: "edit_graph",
+          input: { edit_description: "Reduce it by 10%" },
+        }],
+      }),
+      toolResult: makeToolResult({
+        assistant_text: "Which one should I update — Onboarding Time or Hiring Delay?",
+        pending_clarification: {
+          tool: "edit_graph",
+          original_edit_request: "Reduce it by 10%",
+          candidate_labels: ["Onboarding Time", "Hiring Delay"],
+        },
+      }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.assistant_tool_calls).toEqual([{
+      name: "edit_graph",
+      input: {
+        edit_description: "Reduce it by 10%",
+        pending_clarification: {
+          tool: "edit_graph",
+          original_edit_request: "Reduce it by 10%",
+          candidate_labels: ["Onboarding Time", "Hiring Delay"],
+        },
+      },
+    }]);
+  });
+
   it("guidance_items survives JSON serialisation round-trip", () => {
     const guidanceItem = {
       item_id: 'gi_abc123',

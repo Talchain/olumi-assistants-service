@@ -26,13 +26,23 @@ function makeMessages(items: Array<{ role: "user" | "assistant"; content: string
 // ============================================================================
 
 describe("buildConversationalState — pending_clarification", () => {
-  it("extracts pending clarification from standard em-dash format", () => {
+  it("extracts pending clarification from structured tool state", () => {
     const messages = makeMessages([
       { role: "user", content: "Reduce it by 10%" },
       {
         role: "assistant",
         content: "Which one should I update — Onboarding Time or Hiring Delay?",
-        tool_calls: [{ name: "edit_graph", input: { edit_description: "Reduce it by 10%" } }],
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Reduce it by 10%",
+            pending_clarification: {
+              tool: "edit_graph",
+              original_edit_request: "Reduce it by 10%",
+              candidate_labels: ["Onboarding Time", "Hiring Delay"],
+            },
+          },
+        }],
       },
     ]);
     const state = buildConversationalState("Onboarding Time", makeContext({ messages }), "act");
@@ -42,21 +52,32 @@ describe("buildConversationalState — pending_clarification", () => {
     expect(state.pending_clarification?.candidate_labels).toEqual(["Onboarding Time", "Hiring Delay"]);
   });
 
-  it("extracts pending clarification with en-dash separator", () => {
+  it("trims and deduplicates structured candidate labels", () => {
     const messages = makeMessages([
       { role: "user", content: "Update the value" },
       {
         role: "assistant",
         content: "Which factor should I update – Demand or Supply?",
-        tool_calls: [{ name: "edit_graph", input: { edit_description: "Update the value" } }],
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Update the value",
+            pending_clarification: {
+              tool: "edit_graph",
+              original_edit_request: "  Update the value ",
+              candidate_labels: [" Demand ", "Supply", "Demand"],
+            },
+          },
+        }],
       },
     ]);
     const state = buildConversationalState("Demand", makeContext({ messages }), "act");
     expect(state.pending_clarification).not.toBeNull();
     expect(state.pending_clarification?.candidate_labels).toEqual(["Demand", "Supply"]);
+    expect(state.pending_clarification?.original_edit_request).toBe("Update the value");
   });
 
-  it("extracts candidate labels when LLM uses 'Which factor' phrasing", () => {
+  it("returns null for prose-only clarification with no structured state", () => {
     const messages = makeMessages([
       { role: "user", content: "Make it stronger" },
       {
@@ -66,20 +87,30 @@ describe("buildConversationalState — pending_clarification", () => {
       },
     ]);
     const state = buildConversationalState("Market Demand", makeContext({ messages }), "act");
-    expect(state.pending_clarification?.candidate_labels).toEqual(["Market Demand", "Pricing Power"]);
+    expect(state.pending_clarification).toBeNull();
   });
 
-  it("extracts candidate labels when LLM uses 'Which node' phrasing", () => {
+  it("returns null when structured candidate labels are missing", () => {
     const messages = makeMessages([
       { role: "user", content: "Remove the weak link" },
       {
         role: "assistant",
         content: "Which node should I update — Option A or Option B?",
-        tool_calls: [{ name: "edit_graph", input: { edit_description: "Remove the weak link" } }],
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Remove the weak link",
+            pending_clarification: {
+              tool: "edit_graph",
+              original_edit_request: "Remove the weak link",
+              candidate_labels: [],
+            },
+          },
+        }],
       },
     ]);
     const state = buildConversationalState("Option A", makeContext({ messages }), "act");
-    expect(state.pending_clarification?.candidate_labels).toEqual(["Option A", "Option B"]);
+    expect(state.pending_clarification).toBeNull();
   });
 
   it("returns null when most recent assistant message is not a clarification question", () => {
@@ -117,21 +148,27 @@ describe("buildConversationalState — pending_clarification", () => {
     expect(state.pending_clarification).toBeNull();
   });
 
-  it("strips trailing punctuation from candidate labels", () => {
+  it("returns null when pending_clarification shape is invalid", () => {
     const messages = makeMessages([
       { role: "user", content: "Update it" },
       {
         role: "assistant",
         content: "Which option should I update — Option A or Option B?",
-        tool_calls: [{ name: "edit_graph", input: { edit_description: "Update it" } }],
+        tool_calls: [{
+          name: "edit_graph",
+          input: {
+            edit_description: "Update it",
+            pending_clarification: {
+              tool: "edit_graph",
+              original_edit_request: "Update it",
+              candidate_labels: ["Option A", 42],
+            },
+          },
+        }],
       },
     ]);
     const state = buildConversationalState("Option A", makeContext({ messages }), "act");
-    // Labels must not have trailing '?'
-    expect(state.pending_clarification?.candidate_labels).toEqual(["Option A", "Option B"]);
-    for (const label of state.pending_clarification?.candidate_labels ?? []) {
-      expect(label).not.toMatch(/[?!.]$/);
-    }
+    expect(state.pending_clarification?.candidate_labels).toEqual(["Option A"]);
   });
 });
 
@@ -181,7 +218,11 @@ describe("buildConversationalState — current_topic classification", () => {
   it("returns 'explaining' (not 'configuring') when 'option' appears in an explain context", () => {
     const ctx = makeContext({
       graph: { nodes: [], edges: [] } as ConversationContext["graph"],
-      analysis_response: { analysis_status: "completed", results: [] } as ConversationContext["analysis_response"],
+      analysis_response: {
+        analysis_status: "completed",
+        meta: { response_hash: "hash-topic-test", seed_used: 1, n_samples: 1 },
+        results: [],
+      } as unknown as ConversationContext["analysis_response"],
     });
     const state = buildConversationalState("Which option looks best?", ctx, "recommend");
     // 'option' is in the message but 'recommended' is absent — fallback to 'explaining' (analysis present)

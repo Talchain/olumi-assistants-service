@@ -123,6 +123,20 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
 
   // Resolve assistant text: tool result text takes priority, then LLM text
   const assistantText = toolResult.assistant_text ?? llmResult.assistant_text;
+  const clarificationToolInvocation = (
+    toolResult.pending_clarification
+    && toolName === 'edit_graph'
+  )
+    ? {
+        name: 'edit_graph',
+        input: {
+          ...(llmResult.tool_invocations.find((invocation) => invocation.name === 'edit_graph')?.input ?? {
+            edit_description: toolResult.pending_clarification.original_edit_request,
+          }),
+          pending_clarification: toolResult.pending_clarification,
+        },
+      }
+    : null;
 
   // Stage indicator with optional transition
   const stageIndicator: OrchestratorResponseEnvelopeV2['stage_indicator'] = {
@@ -142,6 +156,7 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   const envelope: OrchestratorResponseEnvelopeV2 = {
     turn_id: enrichedContext.turn_id,
     assistant_text: assistantText,
+    ...(clarificationToolInvocation && { assistant_tool_calls: [clarificationToolInvocation] }),
     blocks: toolResult.blocks,
     suggested_actions: suggestedActions,
     ...(toolResult.proposed_changes && { proposed_changes: toolResult.proposed_changes }),

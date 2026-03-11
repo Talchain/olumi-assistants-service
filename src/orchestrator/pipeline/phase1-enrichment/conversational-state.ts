@@ -164,18 +164,31 @@ function extractLastFailedAction(messages: ConversationMessage[]): LastFailedAct
   return null;
 }
 
-function parseCandidateLabelsFromClarification(content: string): string[] {
-  // Match everything after an em-dash (—), regular dash surrounded by spaces, or colon+space separator,
-  // up to the trailing question mark.
-  const match = content.match(/(?:\s[—–-]\s|:\s)(.+)\??\s*$/);
-  if (!match?.[1]) return [];
+function toPendingClarificationState(value: unknown): PendingClarificationState | null {
+  if (!value || typeof value !== 'object') return null;
 
-  return uniqueStable(
-    match[1]
-      .split(/\s+or\s+|,\s*/i)
-      .map((label) => label.replace(/[?!.]+$/, '').trim())
+  const candidate = value as Record<string, unknown>;
+  if (candidate.tool !== 'edit_graph') return null;
+  if (typeof candidate.original_edit_request !== 'string') return null;
+  if (!Array.isArray(candidate.candidate_labels)) return null;
+
+  const originalEditRequest = candidate.original_edit_request.trim();
+  const candidateLabels = uniqueStable(
+    candidate.candidate_labels
+      .filter((label): label is string => typeof label === 'string')
+      .map((label) => label.trim())
       .filter((label) => label.length > 0),
   );
+
+  if (originalEditRequest.length === 0 || candidateLabels.length === 0) {
+    return null;
+  }
+
+  return {
+    tool: 'edit_graph',
+    original_edit_request: originalEditRequest,
+    candidate_labels: candidateLabels,
+  };
 }
 
 function extractPendingClarification(messages: ConversationMessage[]): PendingClarificationState | null {
@@ -191,18 +204,10 @@ function extractPendingClarification(messages: ConversationMessage[]): PendingCl
     );
     if (!editToolCall) continue;
 
-    const content = message.content.trim();
-    // Match any clarification-style question about which element to update/configure.
-    // Covers: "Which one", "Which option", "Which existing...", "Which factor/node/edge..."
-    if (!/^Which\b/i.test(content)) {
-      continue;
+    const structuredState = toPendingClarificationState(editToolCall.input.pending_clarification);
+    if (structuredState) {
+      return structuredState;
     }
-
-    return {
-      tool: 'edit_graph',
-      original_edit_request: (editToolCall.input.edit_description as string).trim(),
-      candidate_labels: parseCandidateLabelsFromClarification(content),
-    };
   }
 
   return null;

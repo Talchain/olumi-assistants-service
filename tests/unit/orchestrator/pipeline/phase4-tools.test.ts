@@ -97,6 +97,41 @@ describe("phase4-tools", () => {
     expect(result.side_effects.graph_updated).toBe(true);
   });
 
+  it("does not mark clarification-only edit_graph as graph_updated", async () => {
+    const dispatcher = makeMockDispatcher({
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Which one should I update — Onboarding Time or Hiring Delay?",
+      pending_clarification: {
+        tool: "edit_graph",
+        original_edit_request: "Reduce it by 10%",
+        candidate_labels: ["Onboarding Time", "Hiring Delay"],
+      },
+    });
+
+    const result = await phase4Execute(
+      makeLLMResult({
+        assistant_text: null,
+        tool_invocations: [
+          { id: "tool-1", name: "edit_graph", input: { edit_description: "Reduce it by 10%" } },
+        ],
+      }),
+      makeEnrichedContext({ stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" } }),
+      dispatcher,
+      "req-clarify",
+    );
+
+    expect(result.side_effects).toEqual({
+      graph_updated: false,
+      analysis_ran: false,
+      brief_generated: false,
+    });
+    expect(result.pending_clarification).toEqual({
+      tool: "edit_graph",
+      original_edit_request: "Reduce it by 10%",
+      candidate_labels: ["Onboarding Time", "Hiring Delay"],
+    });
+  });
+
   it("passes enriched context fields to dispatcher", async () => {
     const dispatcher = makeMockDispatcher();
     const ctx = makeEnrichedContext();

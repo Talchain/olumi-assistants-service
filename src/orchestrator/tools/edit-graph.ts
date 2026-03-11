@@ -36,6 +36,7 @@ import type {
   ConversationContext,
   GraphPatchBlockData,
   GraphV3T,
+  PendingClarificationState,
   PatchOperation,
   OrchestratorError,
   RepairEntry,
@@ -71,6 +72,7 @@ export interface EditGraphResult {
   wasRejected: boolean;
   /** Suggested actions (e.g. "Re-run analysis" when rerun_recommended). */
   suggestedActions?: SuggestedAction[];
+  pendingClarification?: PendingClarificationState;
   /** Lightweight proposal payload for propose_and_confirm mode. */
   proposedChanges?: ProposedChangesPayload;
   /** Edit-specific diagnostics for orchestrator turn trace (edit_graph turns only). */
@@ -772,6 +774,11 @@ export async function handleEditGraph(
   });
 
   if (resolutionMode === 'clarify') {
+    const pendingClarification: PendingClarificationState = {
+      tool: 'edit_graph',
+      original_edit_request: editDescription.trim(),
+      candidate_labels: targetResolution.alternatives.map((alternative) => alternative.label),
+    };
     return {
       blocks: [],
       assistantText: buildClarificationQuestion(intentCategory, targetResolution.alternatives.map((alternative) => alternative.label)),
@@ -779,6 +786,7 @@ export async function handleEditGraph(
       appliedGraph: null,
       wasRejected: true,
       suggestedActions: buildClarificationActions(editDescription, targetResolution),
+      pendingClarification,
       diagnostics: diagnostics(),
     };
   }
@@ -1098,7 +1106,11 @@ export async function handleEditGraph(
           latencyMs: Date.now() - startTime,
           appliedGraph: null,
           wasRejected: true,
-          suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+          suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
+            label: action.label,
+            prompt: action.prompt,
+            role: action.role,
+          })),
           diagnostics: diagnostics(),
         };
       }
@@ -1150,7 +1162,11 @@ export async function handleEditGraph(
             latencyMs: Date.now() - startTime,
             appliedGraph: null,
             wasRejected: true,
-            suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+            suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
+              label: action.label,
+              prompt: action.prompt,
+              role: action.role,
+            })),
             diagnostics: diagnostics(),
           };
         }
@@ -1203,7 +1219,11 @@ export async function handleEditGraph(
           latencyMs: Date.now() - startTime,
           appliedGraph: null,
           wasRejected: true,
-          suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+          suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
+            label: action.label,
+            prompt: action.prompt,
+            role: action.role,
+          })),
           diagnostics: diagnostics(),
         };
       }
