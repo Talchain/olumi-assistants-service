@@ -246,61 +246,6 @@ export async function executePipeline(
 // ============================================================================
 
 /**
- * Build a silent acknowledgement envelope for feedback_submitted events.
- *
- * System prompt contract: "feedback_submitted → Do not respond."
- * Returns a minimal envelope: null assistant_text, empty blocks, empty actions.
- * No LLM call is made.
- */
-function buildFeedbackAckEnvelope(enrichedContext: EnrichedContext): OrchestratorResponseEnvelopeV2 {
-  return {
-    turn_id: enrichedContext.turn_id,
-    assistant_text: null,
-    blocks: [],
-    suggested_actions: [],
-
-    lineage: {
-      context_hash: resolveContextHash(enrichedContext),
-      dsk_version_hash: enrichedContext.dsk.version_hash,
-    },
-
-    stage_indicator: {
-      stage: enrichedContext.stage_indicator.stage,
-      confidence: enrichedContext.stage_indicator.confidence,
-      source: enrichedContext.stage_indicator.source,
-    },
-
-    science_ledger: {
-      claims_used: [],
-      techniques_used: [],
-      scope_violations: [],
-      phrasing_violations: [],
-      rewrite_applied: false,
-    },
-
-    progress_marker: {
-      kind: 'none',
-    },
-
-    observability: {
-      triggers_fired: [],
-      triggers_suppressed: [],
-      intent_classification: enrichedContext.intent_classification,
-      specialist_contributions: [],
-      specialist_disagreement: null,
-    },
-
-    turn_plan: {
-      selected_tool: null,
-      routing: 'deterministic',
-      long_running: false,
-    },
-
-    guidance_items: [],
-  };
-}
-
-/**
  * Inject [system] sentinel strings into the enriched context's conversation history.
  * Returns a new EnrichedContext — does not mutate the input.
  */

@@ -390,6 +390,80 @@ describe("phase3-llm", () => {
       });
     });
 
+    it("resumes clarification with lowercase user reply (normalised match)", async () => {
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+          pending_clarification: {
+            tool: "edit_graph",
+            original_edit_request: "Reduce it by 10%",
+            candidate_labels: ["Onboarding Time", "Hiring Delay"],
+          },
+        },
+      });
+
+      // User replies with different capitalisation — should still match
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-clarify-lower",
+        "onboarding time",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+      // Preserved label must use the original casing from candidate_labels
+      expect(result.tool_invocations[0].input).toEqual({
+        edit_description: "Reduce it by 10% for Onboarding Time",
+      });
+    });
+
+    it("falls back to LLM when user reply does not match any candidate label", async () => {
+      const client = makeMockLLMClient();
+      // Use graph: null so edit_graph prerequisite fails; the only path to deterministic dispatch
+      // would be via clarification continuation, which must not fire for an unrecognised reply.
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        graph: null,
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+          pending_clarification: {
+            tool: "edit_graph",
+            original_edit_request: "Reduce it by 10%",
+            candidate_labels: ["Onboarding Time", "Hiring Delay"],
+          },
+        },
+      });
+
+      // User reply doesn't match either candidate label
+      await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-no-match",
+        "Never mind, do something else",
+      );
+
+      // No clarification match and no other deterministic path → LLM called
+      expect(client.chatWithTools).toHaveBeenCalled();
+    });
+
     it("logs zone2_enabled from the runtime context-fabric flag", async () => {
       const originalFlag = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED;
       process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = "1";

@@ -54,7 +54,9 @@ function classifyCurrentTopic(
   if (/\b(run|analyse|analyze|simulation|results|scenario)\b/.test(lower)) {
     return 'analysing';
   }
-  if (/\b(option|intervention|configure|configuration)\b/.test(lower)) {
+  // Check configuring only after explain/analyse — "what option is recommended?" must reach
+  // the 'explaining' branch above before hitting 'option' here.
+  if (/\b(intervention|configure|configuration)\b/.test(lower)) {
     return 'configuring';
   }
   if (!context.graph || /\b(goal|objective|frame|framing|constraint|decision)\b/.test(lower)) {
@@ -163,13 +165,15 @@ function extractLastFailedAction(messages: ConversationMessage[]): LastFailedAct
 }
 
 function parseCandidateLabelsFromClarification(content: string): string[] {
-  const match = content.match(/(?: — )(.+)\?$/);
+  // Match everything after an em-dash (—), regular dash surrounded by spaces, or colon+space separator,
+  // up to the trailing question mark.
+  const match = content.match(/(?:\s[—–-]\s|:\s)(.+)\??\s*$/);
   if (!match?.[1]) return [];
 
   return uniqueStable(
     match[1]
       .split(/\s+or\s+|,\s*/i)
-      .map((label) => label.trim())
+      .map((label) => label.replace(/[?!.]+$/, '').trim())
       .filter((label) => label.length > 0),
   );
 }
@@ -188,7 +192,9 @@ function extractPendingClarification(messages: ConversationMessage[]): PendingCl
     if (!editToolCall) continue;
 
     const content = message.content.trim();
-    if (!/^Which (?:one should I update|option should I update|existing option should I configure|existing factor or edge should I update)/i.test(content)) {
+    // Match any clarification-style question about which element to update/configure.
+    // Covers: "Which one", "Which option", "Which existing...", "Which factor/node/edge..."
+    if (!/^Which\b/i.test(content)) {
       continue;
     }
 

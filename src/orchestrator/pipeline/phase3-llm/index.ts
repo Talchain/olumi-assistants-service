@@ -71,14 +71,16 @@ export async function phase3Generate(
 ): Promise<LLMResult> {
   // 1. Check deterministic intent gate
   const intentGate = initialIntentGate ?? classifyIntent(userMessage);
+  // Build context once; reused for resolution-mode check, prerequisite check, and LLM assembly.
+  const context = buildConversationContext(enrichedContext);
   const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
   const freshTurnIntent = classifyUserIntent(userMessage);
   const editResolutionMode = (clarificationToolInput || intentGate.tool === 'edit_graph')
-    ? determineEditResolutionMode(userMessage, buildConversationContext(enrichedContext))
+    ? determineEditResolutionMode(userMessage, context)
     : null;
   const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
   const shouldPreferExplainResults = (
-    enrichedContext.analysis != null
+    isAnalysisExplainable(enrichedContext.analysis)
     && intentGate.tool === 'edit_graph'
     && (
       (
@@ -116,8 +118,7 @@ export async function phase3Generate(
   // and let the orchestrator LLM answer without executing a tool.
 
   if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
-    // Check prerequisites
-    const context = buildConversationContext(enrichedContext);
+    // Check prerequisites (reuses top-level `context`)
     const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveIntentGate.tool];
     const prerequisitesMet = checkPrereq ? checkPrereq(context) : true;
 
@@ -200,8 +201,6 @@ export async function phase3Generate(
     },
     'phase3.prompt_identity',
   );
-
-  const context = buildConversationContext(enrichedContext);
 
   // Filter [system] sentinel: when a system_event is present, replace with event context.
   // The '[system]' sentinel is sent by UI as a placeholder — it must never reach the LLM.
@@ -298,6 +297,11 @@ function buildEffectiveUserMessage(enriched: EnrichedContext, rawMessage: string
   return `[System event: ${systemEvent.event_type}${detailsSummary}]`;
 }
 
+/** Normalise a string for label matching: lowercase, collapse whitespace, strip punctuation. */
+function normaliseLabelText(value: string): string {
+  return value.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function buildClarificationContinuationInput(
   enrichedContext: EnrichedContext,
   userMessage: string,
@@ -308,7 +312,12 @@ function buildClarificationContinuationInput(
   const trimmed = userMessage.trim();
   if (trimmed.length === 0) return null;
 
-  const matchedLabel = pending.candidate_labels.find((label) => trimmed.toLowerCase() === label.toLowerCase());
+  const normalisedInput = normaliseLabelText(trimmed);
+  // Match using normalised comparison so minor capitalisation or punctuation differences
+  // ("onboarding time" vs "Onboarding Time", "Option A." vs "Option A") don't break continuation.
+  const matchedLabel = pending.candidate_labels.find(
+    (label) => normalisedInput === normaliseLabelText(label),
+  );
   if (!matchedLabel) return null;
 
   return {
