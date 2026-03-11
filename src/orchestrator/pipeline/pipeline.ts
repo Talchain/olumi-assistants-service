@@ -22,7 +22,10 @@ import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/enve
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { classifyIntent } from "../intent-gate.js";
+import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
+import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
+import { config } from "../../config/index.js";
 
 /**
  * Execute the five-phase pipeline.
@@ -211,6 +214,7 @@ export async function executePipeline(
       declaredMode: v2DeclaredMode,
       inferredMode: v2InferredMode,
       envelope,
+      editGraphDiagnostics: toolResult.edit_graph_diagnostics,
       stageFallbackInjected: toolResult.stage_fallback_injected,
     });
 
@@ -484,6 +488,8 @@ interface TurnTraceInput {
   declaredMode: string;
   inferredMode: string;
   envelope: OrchestratorResponseEnvelopeV2;
+  /** edit_graph-only diagnostics emitted by the tool handler. */
+  editGraphDiagnostics?: EditGraphTraceDiagnostics;
   /** True when Phase 4 injected the stage+tool-aware fallback message. */
   stageFallbackInjected?: boolean;
 }
@@ -497,6 +503,48 @@ function emitTurnTrace(input: TurnTraceInput): void {
   const graph = ec.graph;
   const analysis = ec.analysis as Record<string, unknown> | null;
   const brief = analysis?.decision_brief;
+  const freshTurnIntentRaw = classifyUserIntent(request.message ?? '');
+  const initialIntentGate = classifyIntent(request.message ?? '');
+  const explainOverrideApplied = (
+    ec.stage_indicator.stage === 'evaluate'
+    && analysis != null
+    && (freshTurnIntentRaw === 'explain' || freshTurnIntentRaw === 'recommend')
+    && initialIntentGate.tool === 'edit_graph'
+    && input.toolSelected === 'explain_results'
+  );
+  const explainOverrideReason = explainOverrideApplied
+    ? 'evaluate_with_analysis_explanation_followup'
+    : null;
+  const freshTurnIntentEffective = explainOverrideApplied ? 'explain' : freshTurnIntentRaw;
+  const editTrace = input.toolSelected === 'edit_graph'
+    ? (input.editGraphDiagnostics ?? null)
+    : null;
+  const narrowIntentGuardApplied = (
+    editTrace?.classified_intent !== undefined
+    && editTrace.classified_intent !== 'structural'
+    && (
+      editTrace.validation_outcome === 'intent_guard_failed'
+      || editTrace.recovery_path_chosen === 'narrow_intent_recovery_question'
+    )
+  );
+  const repeatedFailureEscalationApplied = editTrace?.recovery_path_chosen === 'narrow_intent_recovery_question';
+  const structuralOpsProposedAnyway = editTrace?.operations_proposed_types.some((opType) =>
+    opType === 'add_node'
+    || opType === 'remove_node'
+    || opType === 'add_edge'
+    || opType === 'remove_edge',
+  ) ?? false;
+  const effectivePromptComponents = {
+    v2_system_prompt: true,
+    zone2_structurally_included: true,
+    context_fabric_enabled: config.features.contextFabric,
+    narrow_edit_instruction_shaping_applied: editTrace?.instruction_mode_applied !== undefined
+      ? editTrace.instruction_mode_applied !== 'structural_default'
+      : false,
+  };
+  const editPathSummary = editTrace
+    ? `intent=${editTrace.classified_intent};mode=${editTrace.instruction_mode_applied};ops=${editTrace.operations_proposed_count};validation=${editTrace.validation_outcome};recovery=${editTrace.recovery_path_chosen}`
+    : null;
 
   log.info(
     {
@@ -523,6 +571,25 @@ function emitTurnTrace(input: TurnTraceInput): void {
       chips_count: envelope.suggested_actions.length,
       fallback_injected: input.stageFallbackInjected ?? false,
       contract_violations: envelope._contract_violation_codes ?? [],
+      fresh_turn_intent_raw: freshTurnIntentRaw,
+      fresh_turn_intent_effective: freshTurnIntentEffective,
+      explain_override_applied: explainOverrideApplied,
+      explain_override_reason: explainOverrideReason,
+      narrow_intent_guard_applied: narrowIntentGuardApplied,
+      repeated_failure_escalation_applied: repeatedFailureEscalationApplied,
+      effective_prompt_components: effectivePromptComponents,
+      edit_path_summary: editPathSummary,
+      classified_intent: editTrace?.classified_intent ?? null,
+      instruction_mode_applied: editTrace?.instruction_mode_applied ?? null,
+      edit_instruction_preview: editTrace?.edit_instruction_preview ?? null,
+      graph_context_node_count: editTrace?.graph_context_node_count ?? null,
+      graph_context_edge_count: editTrace?.graph_context_edge_count ?? null,
+      operations_proposed_count: editTrace?.operations_proposed_count ?? null,
+      operations_proposed_types: editTrace?.operations_proposed_types ?? null,
+      structural_ops_proposed_anyway: structuralOpsProposedAnyway,
+      validation_outcome: editTrace?.validation_outcome ?? null,
+      validation_violation_codes: editTrace?.validation_violation_codes ?? null,
+      recovery_path_chosen: editTrace?.recovery_path_chosen ?? null,
     },
     'orchestrator.turn.trace',
   );

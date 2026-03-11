@@ -243,6 +243,107 @@ describe("phase3-llm", () => {
       expect(client.chatWithTools).toHaveBeenCalled();
     });
 
+    it("prefers explain_results in evaluate for explanation follow-up even after prior failed edit context", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "edit_graph",
+        confidence: "exact",
+        matched_pattern: "change",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
+        analysis: {
+          analysis_status: "completed",
+          results: [],
+          meta: { response_hash: "hash-a" },
+          response_hash: "hash-a",
+        } as unknown as EnrichedContext["analysis"],
+        graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+        conversation_history: [
+          { role: "user", content: "Change" },
+          { role: "assistant", content: "I couldn't apply that edit safely." },
+        ] as EnrichedContext["conversation_history"],
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-1",
+        "Why was this recommended?",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("explain_results");
+    });
+
+    it("keeps genuine edit requests routed to edit_graph in evaluate after analysis", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "edit_graph",
+        confidence: "exact",
+        matched_pattern: "change",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
+        analysis: {
+          analysis_status: "completed",
+          results: [],
+          meta: { response_hash: "hash-b" },
+          response_hash: "hash-b",
+        } as unknown as EnrichedContext["analysis"],
+        graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-2",
+        "Change the model",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+    });
+
+    it("does not override edit_graph before analysis exists", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "edit_graph",
+        confidence: "exact",
+        matched_pattern: "change",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        analysis: null,
+        graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-3",
+        "Why",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+    });
+
     it("logs zone2_enabled from the runtime context-fabric flag", async () => {
       const originalFlag = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED;
       process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = "1";

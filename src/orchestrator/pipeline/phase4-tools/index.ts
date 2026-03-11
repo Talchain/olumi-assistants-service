@@ -112,6 +112,7 @@ export async function phase4Execute(
   let toolLatencyMs: number | undefined;
   const executedTools: string[] = [];
   let stageFallbackInjected = false;
+  let editGraphDiagnostics: ToolResult['edit_graph_diagnostics'];
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -161,6 +162,9 @@ export async function phase4Execute(
     if (result.tool_latency_ms !== undefined) {
       toolLatencyMs = (toolLatencyMs ?? 0) + result.tool_latency_ms;
     }
+    if (invocation.name === 'edit_graph' && result.edit_graph_diagnostics) {
+      editGraphDiagnostics = result.edit_graph_diagnostics;
+    }
 
     // Accumulate side effects
     if (invocation.name === 'draft_graph' || invocation.name === 'edit_graph') {
@@ -206,6 +210,7 @@ export async function phase4Execute(
     ...(toolLatencyMs !== undefined && { tool_latency_ms: toolLatencyMs }),
     guidance_items: allGuidanceItems,
     ...(allSuggestedActions.length > 0 && { suggested_actions: allSuggestedActions }),
+    ...(editGraphDiagnostics && { edit_graph_diagnostics: editGraphDiagnostics }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -253,6 +258,7 @@ export function createProductionToolDispatcher(
         analysis_response: result.analysisResponse,
         tool_latency_ms: result.toolLatencyMs,
         guidance_items: result.guidanceItems,
+        edit_graph_diagnostics: result.editGraphDiagnostics,
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,
         }),

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { executePipeline } from "../../../../src/orchestrator/pipeline/pipeline.js";
 import type { OrchestratorTurnRequest } from "../../../../src/orchestrator/types.js";
 import type { PipelineDeps, LLMClient, ToolDispatcher, ToolResult } from "../../../../src/orchestrator/pipeline/types.js";
+import { log } from "../../../../src/utils/telemetry.js";
 
 // Mock config for isProduction check
 vi.mock("../../../../src/config/index.js", () => ({
@@ -217,5 +218,125 @@ describe("pipeline", () => {
     expect(envelope.assistant_text).toBe("Here is what drove the analysis result.");
     const explainContext = (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][2];
     expect(explainContext.analysis_response?.response_hash).toBe("analysis-hash");
+  });
+
+  it("emits explanation override routing provenance in turn trace", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "edit_graph",
+      confidence: "exact",
+      matched_pattern: "change",
+    });
+
+    const infoSpy = vi.spyOn(log, "info").mockImplementation(() => log);
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Here is what drove the analysis result.",
+      guidance_items: [],
+    } as ToolResult);
+
+    await executePipeline(makeRequest({
+      message: "Why was this recommended?",
+      context: {
+        graph: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+        analysis_response: {
+          analysis_status: "completed",
+          meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 100 },
+          results: [],
+          response_hash: "analysis-hash",
+        } as any,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+    }), "req-trace-explain", deps);
+
+    const traceCall = infoSpy.mock.calls.find((call) => {
+      const payload = call[0] as Record<string, unknown> | undefined;
+      return call[1] === "orchestrator.turn.trace" || payload?.event === "orchestrator.turn.trace";
+    }) as [Record<string, unknown>, string?] | undefined;
+
+    expect(traceCall).toBeDefined();
+    expect(traceCall?.[0].tool_selected).toBe("explain_results");
+    expect(traceCall?.[0].fresh_turn_intent_raw).toBe("recommend");
+    expect(traceCall?.[0].fresh_turn_intent_effective).toBe("explain");
+    expect(traceCall?.[0].explain_override_applied).toBe(true);
+    expect(traceCall?.[0].explain_override_reason).toBe("evaluate_with_analysis_explanation_followup");
+    expect(traceCall?.[0].edit_path_summary).toBeNull();
+    infoSpy.mockRestore();
+  });
+
+  it("emits edit_graph-specific trace diagnostics on edit_graph turns", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "edit_graph",
+      confidence: "exact",
+      matched_pattern: "change",
+    });
+
+    const infoSpy = vi.spyOn(log, "info").mockImplementation(() => log);
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: true, analysis_ran: false, brief_generated: false },
+      assistant_text: "Updated the model.",
+      guidance_items: [],
+      edit_graph_diagnostics: {
+        classified_intent: "parameter_update",
+        instruction_mode_applied: "narrow_parameter_update",
+        edit_instruction_preview: "This is a narrow parameter/value update.",
+        graph_context_node_count: 2,
+        graph_context_edge_count: 1,
+        operations_proposed_count: 1,
+        operations_proposed_types: ["update_node"],
+        validation_outcome: "success",
+        validation_violation_codes: [],
+        recovery_path_chosen: "none",
+      },
+    } as ToolResult);
+
+    await executePipeline(makeRequest({
+      message: "Change",
+      context: {
+        graph: {
+          nodes: [{ id: "d1", kind: "decision", label: "Decision" }, { id: "f1", kind: "factor", label: "Price" }],
+          edges: [{ from: "f1", to: "d1", strength_mean: 0.2, strength_std: 0.1, exists_probability: 0.8, effect_direction: "positive" }],
+        } as any,
+        analysis_response: {
+          analysis_status: "completed",
+          meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 100 },
+          results: [],
+          response_hash: "analysis-hash",
+        } as any,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+    }), "req-trace-edit", deps);
+
+    const traceCall = infoSpy.mock.calls.find((call) => {
+      const payload = call[0] as Record<string, unknown> | undefined;
+      return call[1] === "orchestrator.turn.trace" || payload?.event === "orchestrator.turn.trace";
+    }) as [Record<string, unknown>, string?] | undefined;
+    expect(traceCall).toBeDefined();
+    expect(traceCall?.[0].tool_selected).toBe("edit_graph");
+    expect(traceCall?.[0].classified_intent).toBe("parameter_update");
+    expect(traceCall?.[0].instruction_mode_applied).toBe("narrow_parameter_update");
+    expect(traceCall?.[0].operations_proposed_types).toEqual(["update_node"]);
+    expect(traceCall?.[0].fresh_turn_intent_raw).toBe("act");
+    expect(traceCall?.[0].fresh_turn_intent_effective).toBe("act");
+    expect(traceCall?.[0].explain_override_applied).toBe(false);
+    expect(traceCall?.[0].narrow_intent_guard_applied).toBe(false);
+    expect(traceCall?.[0].repeated_failure_escalation_applied).toBe(false);
+    expect(traceCall?.[0].structural_ops_proposed_anyway).toBe(false);
+    expect(traceCall?.[0].edit_path_summary).toBe("intent=parameter_update;mode=narrow_parameter_update;ops=1;validation=success;recovery=none");
+    const effectivePromptComponents = traceCall?.[0].effective_prompt_components as Record<string, unknown>;
+    expect(effectivePromptComponents.zone2_structurally_included).toBe(true);
+    expect(effectivePromptComponents.narrow_edit_instruction_shaping_applied).toBe(true);
+    infoSpy.mockRestore();
   });
 });

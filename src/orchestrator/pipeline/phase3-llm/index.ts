@@ -18,6 +18,7 @@ import type { ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
+import { classifyUserIntent } from "../phase1-enrichment/intent-classifier.js";
 
 import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
 import { assembleV2SystemPrompt } from "./prompt-assembler.js";
@@ -67,11 +68,26 @@ export async function phase3Generate(
 ): Promise<LLMResult> {
   // 1. Check deterministic intent gate
   const intentGate = classifyIntent(userMessage);
+  const freshTurnIntent = classifyUserIntent(userMessage);
+  const shouldPreferExplainResults = (
+    enrichedContext.stage_indicator.stage === 'evaluate'
+    && enrichedContext.analysis != null
+    && (freshTurnIntent === 'explain' || freshTurnIntent === 'recommend')
+    && intentGate.tool === 'edit_graph'
+  );
+  const effectiveIntentGate = shouldPreferExplainResults
+    ? {
+        ...intentGate,
+        tool: 'explain_results' as const,
+        routing: 'deterministic' as const,
+        matched_pattern: intentGate.matched_pattern ?? '[fresh_turn_explain_override]',
+      }
+    : intentGate;
 
-  if (intentGate.routing === 'deterministic' && intentGate.tool) {
+  if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
     // Check prerequisites
     const context = buildConversationContext(enrichedContext);
-    const checkPrereq = DETERMINISTIC_PREREQUISITES[intentGate.tool];
+    const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveIntentGate.tool];
     const prerequisitesMet = checkPrereq ? checkPrereq(context) : true;
 
     if (!prerequisitesMet) {
@@ -79,7 +95,7 @@ export async function phase3Generate(
       log.info(
         {
           request_id: requestId,
-          tool: intentGate.tool,
+          tool: effectiveIntentGate.tool,
           routing: 'llm',
           reason: 'prerequisites_not_met',
         },
@@ -89,7 +105,7 @@ export async function phase3Generate(
       // Prerequisites met — check stage policy before dispatching.
       // Matches V1 behavior: fall through to LLM for a conversational response.
       const stageGuard = isToolAllowedAtStage(
-        intentGate.tool,
+        effectiveIntentGate.tool,
         enrichedContext.stage_indicator.stage,
         userMessage,
       );
@@ -97,7 +113,7 @@ export async function phase3Generate(
         log.info(
           {
             request_id: requestId,
-            tool: intentGate.tool,
+            tool: effectiveIntentGate.tool,
             stage: enrichedContext.stage_indicator.stage,
             reason: stageGuard.reason,
             routing: 'llm',
@@ -109,21 +125,23 @@ export async function phase3Generate(
         log.info(
           {
             request_id: requestId,
-            tool: intentGate.tool,
+            tool: effectiveIntentGate.tool,
             routing: 'deterministic',
-            matched_pattern: intentGate.matched_pattern,
+            matched_pattern: effectiveIntentGate.matched_pattern,
+            fresh_turn_intent: freshTurnIntent,
+            explain_override_applied: shouldPreferExplainResults,
           },
           "V2 pipeline: deterministic routing — skipping LLM",
         );
 
         // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
         let deterministicInput: Record<string, unknown> = {};
-        if (intentGate.tool === 'run_exercise' && intentGate.exercise) {
-          deterministicInput = { exercise: intentGate.exercise };
-        } else if (intentGate.tool === 'research_topic' && intentGate.research_query) {
-          deterministicInput = { query: intentGate.research_query };
+        if (effectiveIntentGate.tool === 'run_exercise' && effectiveIntentGate.exercise) {
+          deterministicInput = { exercise: effectiveIntentGate.exercise };
+        } else if (effectiveIntentGate.tool === 'research_topic' && effectiveIntentGate.research_query) {
+          deterministicInput = { query: effectiveIntentGate.research_query };
         }
-        return buildDeterministicLLMResult(intentGate.tool, deterministicInput);
+        return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput);
       }
     }
   }

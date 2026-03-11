@@ -17,6 +17,7 @@ import { handleRunAnalysis } from "./run-analysis.js";
 import { handleDraftGraph } from "./draft-graph.js";
 import { handleGenerateBrief } from "./generate-brief.js";
 import { handleEditGraph } from "./edit-graph.js";
+import type { EditGraphTraceDiagnostics } from "./edit-graph.js";
 import { handleExplainResults } from "./explain-results.js";
 import { handleUndoPatch } from "./undo-patch.js";
 import { generatePostDraftGuidance } from "../guidance/post-draft.js";
@@ -38,6 +39,8 @@ export interface ToolDispatchResult {
   guidanceItems: GuidanceItem[];
   /** Suggested follow-up actions from tool handler (e.g. "Re-run analysis" after edit_graph). */
   suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
+  /** edit_graph-only diagnostics for orchestrator turn trace. */
+  editGraphDiagnostics?: EditGraphTraceDiagnostics;
 }
 
 export interface ToolDispatchOpts {
@@ -197,6 +200,7 @@ export async function dispatchToolHandler(
         toolLatencyMs: result.latencyMs,
         guidanceItems: editGuidance,
         suggestedActions: result.suggestedActions,
+        editGraphDiagnostics: result.diagnostics,
       };
     }
 

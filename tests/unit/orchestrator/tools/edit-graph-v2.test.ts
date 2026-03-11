@@ -10,6 +10,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks — must be declared before imports
 // ============================================================================
 
+let patchPreValidationEnabledForTest = false;
+let patchBudgetEnabledForTest = false;
+
 vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
   getSystemPrompt: vi.fn().mockResolvedValue("You edit causal decision graphs"),
   getSystemPromptMeta: vi.fn().mockReturnValue({ source: 'default', prompt_version: 'v2' }),
@@ -25,8 +28,8 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(ceeTarget, ceeProp) {
               if (ceeProp === "maxRepairRetries") return 1;
-              if (ceeProp === "patchPreValidationEnabled") return false;
-              if (ceeProp === "patchBudgetEnabled") return false;
+              if (ceeProp === "patchPreValidationEnabled") return patchPreValidationEnabledForTest;
+              if (ceeProp === "patchBudgetEnabled") return patchBudgetEnabledForTest;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });
@@ -47,6 +50,11 @@ import {
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
+
+beforeEach(() => {
+  patchPreValidationEnabledForTest = false;
+  patchBudgetEnabledForTest = false;
+});
 
 // ============================================================================
 // Helpers
@@ -345,8 +353,8 @@ describe("operation mapping", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     const op = data.operations[0];
     // impact and rationale must NOT be on PatchOperation
-    expect((op as Record<string, unknown>).impact).toBeUndefined();
-    expect((op as Record<string, unknown>).rationale).toBeUndefined();
+    expect((op as unknown as Record<string, unknown>).impact).toBeUndefined();
+    expect((op as unknown as Record<string, unknown>).rationale).toBeUndefined();
     expect(op.op).toBe("add_node");
     expect(op.path).toBe("fac_new");
   });
@@ -611,8 +619,8 @@ describe("full round-trip", () => {
 
     // No impact/rationale on canonical PatchOperations
     for (const op of data.operations) {
-      expect((op as Record<string, unknown>).impact).toBeUndefined();
-      expect((op as Record<string, unknown>).rationale).toBeUndefined();
+      expect((op as unknown as Record<string, unknown>).impact).toBeUndefined();
+      expect((op as unknown as Record<string, unknown>).rationale).toBeUndefined();
     }
   });
 });
@@ -686,7 +694,7 @@ describe("prompt loading", () => {
       coaching: { summary: "Updated the factor value.", rerun_recommended: false },
     });
 
-    await handleEditGraph(
+    const result = await handleEditGraph(
       makeContext(),
       "Set customer willingness to pay high",
       adapter,
@@ -697,6 +705,159 @@ describe("prompt loading", () => {
     const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(firstCall.system).toContain("Prefer update_node or update_edge operations only.");
     expect(firstCall.system).not.toContain("Prefer the narrowest valid update to an existing option");
+    expect(result.diagnostics?.classified_intent).toBe("parameter_update");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("narrow_parameter_update");
+    expect(result.diagnostics?.operations_proposed_count).toBe(1);
+    expect(result.diagnostics?.operations_proposed_types).toEqual(["update_node"]);
+    expect(result.diagnostics?.validation_outcome).toBe("success");
+    expect(result.diagnostics?.edit_instruction_preview).toContain("Prefer update_node or update_edge operations only.");
+  });
+
+  it("uses option_configuration narrow instruction path for option updates", async () => {
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1/label",
+          value: "Premium Option Price",
+          old_value: "Price",
+          impact: "low",
+          rationale: "Adjust option configuration label",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated option configuration.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Revenue" },
+            { id: "factor_1", kind: "option", label: "Premium Option" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+      }),
+      "Configure the premium option to change pricing",
+      adapter,
+      "req-option-prompt",
+      "turn-option-prompt",
+    );
+
+    const firstCall = (adapter.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.system).toContain("This is an option/intervention configuration update.");
+    expect(firstCall.system).toContain("Prefer the narrowest valid update to an existing option or intervention field.");
+    expect(result.diagnostics?.classified_intent).toBe("option_configuration");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("narrow_option_configuration");
+    expect(result.diagnostics?.validation_outcome).toBe("success");
+  });
+
+  it("keeps structural intent on structural validation path", async () => {
+    const structuralInvalidResponse = {
+      operations: [
+        {
+          op: "add_edge",
+          path: "/edges/missing_factor->out_1",
+          value: {
+            from: "missing_factor",
+            to: "out_1",
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.8,
+            effect_direction: "positive",
+          },
+          impact: "high",
+          rationale: "Add missing structural edge",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added edge.", rerun_recommended: false },
+    };
+    const adapter = {
+      ...makeAdapter(structuralInvalidResponse),
+      chat: vi.fn()
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralInvalidResponse) })
+        .mockResolvedValueOnce({ content: JSON.stringify(structuralInvalidResponse) }),
+    } as unknown as LLMAdapter;
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add a competitor factor and connect it to sales",
+      adapter,
+      "req-structural",
+      "turn-structural",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.diagnostics?.classified_intent).toBe("structural");
+    expect(result.diagnostics?.instruction_mode_applied).toBe("structural_default");
+    expect(result.diagnostics?.validation_outcome).toBe("structural_validation_failed");
+    expect(result.diagnostics?.recovery_path_chosen).toBe("rejection_block");
+  });
+
+  it("includes diagnostics on budget_exceeded early exit", async () => {
+    patchBudgetEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price A", old_value: "Price", impact: "low", rationale: "A" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price B", old_value: "Price A", impact: "low", rationale: "B" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price C", old_value: "Price B", impact: "low", rationale: "C" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price D", old_value: "Price C", impact: "low", rationale: "D" },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated labels.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set customer willingness to pay higher",
+      adapter,
+      "req-budget",
+      "turn-budget",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.blocks).toEqual([]);
+    expect(result.diagnostics?.validation_outcome).toBe("budget_exceeded");
+    expect(result.diagnostics?.validation_violation_codes).toEqual(["budget_exceeded"]);
+    expect(result.diagnostics?.recovery_path_chosen).toBe("rejection_block");
+    expect(result.diagnostics?.operations_proposed_count).toBe(4);
+  });
+
+  it("includes diagnostics on graph_structure_invalid early exit", async () => {
+    patchPreValidationEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal node",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-struct-invalid",
+      "turn-struct-invalid",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.blocks).toEqual([]);
+    expect(result.diagnostics?.validation_outcome).toBe("graph_structure_invalid");
+    expect(result.diagnostics?.validation_violation_codes.length).toBeGreaterThan(0);
   });
 
   it("returns a concise recovery question after repeated structural outputs for a narrow request", async () => {

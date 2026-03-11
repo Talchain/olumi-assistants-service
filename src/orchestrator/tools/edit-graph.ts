@@ -67,6 +67,8 @@ export interface EditGraphResult {
   wasRejected: boolean;
   /** Suggested actions (e.g. "Re-run analysis" when rerun_recommended). */
   suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
+  /** Edit-specific diagnostics for orchestrator turn trace (edit_graph turns only). */
+  diagnostics?: EditGraphTraceDiagnostics;
 }
 
 export interface EditGraphOpts {
@@ -110,6 +112,19 @@ export interface EditGraphLLMResult {
 }
 
 export type EditIntentCategory = 'parameter_update' | 'option_configuration' | 'structural';
+
+export interface EditGraphTraceDiagnostics {
+  classified_intent: EditIntentCategory;
+  instruction_mode_applied: 'narrow_parameter_update' | 'narrow_option_configuration' | 'structural_default';
+  edit_instruction_preview: string | null;
+  graph_context_node_count: number;
+  graph_context_edge_count: number;
+  operations_proposed_count: number;
+  operations_proposed_types: string[];
+  validation_outcome: string;
+  validation_violation_codes: string[];
+  recovery_path_chosen: string;
+}
 
 // ============================================================================
 // Constants
@@ -159,6 +174,19 @@ function buildIntentInstruction(intentCategory: EditIntentCategory): string | nu
   return null;
 }
 
+function resolveInstructionMode(intentCategory: EditIntentCategory): EditGraphTraceDiagnostics['instruction_mode_applied'] {
+  if (intentCategory === 'parameter_update') return 'narrow_parameter_update';
+  if (intentCategory === 'option_configuration') return 'narrow_option_configuration';
+  return 'structural_default';
+}
+
+function buildInstructionPreview(effectiveInstruction: string | null): string | null {
+  if (!effectiveInstruction) return null;
+  const sanitised = effectiveInstruction.replace(/\s+/g, ' ').trim();
+  if (!sanitised) return null;
+  return sanitised.slice(0, 240);
+}
+
 function hasStructuralOperations(operations: PatchOperation[]): boolean {
   return operations.some((op) =>
     op.op === 'add_node'
@@ -191,6 +219,7 @@ function buildIntentRecoveryResult(
   editDescription: string,
   context: ConversationContext,
   startTime: number,
+  diagnostics?: EditGraphTraceDiagnostics,
 ): EditGraphResult {
   return {
     blocks: [],
@@ -198,6 +227,7 @@ function buildIntentRecoveryResult(
     latencyMs: Date.now() - startTime,
     appliedGraph: null,
     wasRejected: true,
+    diagnostics,
   };
 }
 
@@ -388,6 +418,34 @@ export async function handleEditGraph(
   const baseGraphHash = computeGraphHash(context.graph);
   const intentCategory = classifyEditIntent(editDescription);
   const intentInstruction = buildIntentInstruction(intentCategory);
+  const instructionModeApplied = resolveInstructionMode(intentCategory);
+  const graphContextNodeCount = context.graph.nodes?.length ?? 0;
+  const graphContextEdgeCount = context.graph.edges?.length ?? 0;
+  let operationsProposedCount = 0;
+  let operationsProposedTypes: string[] = [];
+  let validationOutcome = 'not_evaluated';
+  let validationViolationCodes: string[] = [];
+  let recoveryPathChosen = 'none';
+
+  const setViolationCodes = (codes: string[]): void => {
+    validationViolationCodes = [...new Set(codes.filter((code) => code.length > 0))];
+  };
+  const setOpsTelemetry = (ops: PatchOperation[]): void => {
+    operationsProposedCount = ops.length;
+    operationsProposedTypes = [...new Set(ops.map((op) => op.op))];
+  };
+  const diagnostics = (): EditGraphTraceDiagnostics => ({
+    classified_intent: intentCategory,
+    instruction_mode_applied: instructionModeApplied,
+    edit_instruction_preview: buildInstructionPreview(initialEffectiveInstruction),
+    graph_context_node_count: graphContextNodeCount,
+    graph_context_edge_count: graphContextEdgeCount,
+    operations_proposed_count: operationsProposedCount,
+    operations_proposed_types: operationsProposedTypes,
+    validation_outcome: validationOutcome,
+    validation_violation_codes: validationViolationCodes,
+    recovery_path_chosen: recoveryPathChosen,
+  });
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
   const systemPrompt = await getSystemPrompt('edit_graph');
@@ -418,6 +476,7 @@ export async function handleEditGraph(
 
   // Combine system prompt with serialised context
   const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
+  const initialEffectiveInstruction = fullSystemPrompt;
 
   const callOpts: CallOpts = {
     requestId,
@@ -462,11 +521,12 @@ export async function handleEditGraph(
     // LLM call
     let chatResult;
     try {
+      const effectiveInstruction = isRepair
+        ? (await getSystemPrompt('repair_edit_graph')) + '\n\n' + contextSection
+        : fullSystemPrompt;
       chatResult = await adapter.chat(
         {
-          system: isRepair
-            ? (await getSystemPrompt('repair_edit_graph')) + '\n\n' + contextSection
-            : fullSystemPrompt,
+          system: effectiveInstruction,
           userMessage,
           maxTokens: getMaxTokensFromConfig('edit_graph'),
         },
@@ -510,6 +570,9 @@ export async function handleEditGraph(
         { request_id: requestId, attempt, error: error instanceof Error ? error.message : String(error) },
         "edit_graph parse failed, will retry",
       );
+      validationOutcome = 'parse_failed';
+      setViolationCodes(['parse_error']);
+      recoveryPathChosen = 'repair_retry';
       lastRawOps = [];
       lastValidationResult = { valid: false, operations: [], zodErrors: undefined, referentialErrors: [{ index: 0, op: 'unknown', path: '', message: error instanceof Error ? error.message : String(error) }] };
       continue;
@@ -533,6 +596,11 @@ export async function handleEditGraph(
         { request_id: requestId, attempt, warnings: llmResult.warnings.length, has_coaching: !!llmResult.coaching },
         "edit_graph returned empty operations (no-op)",
       );
+      validationOutcome = 'no_operations';
+      setViolationCodes([]);
+      recoveryPathChosen = 'none';
+      operationsProposedCount = 0;
+      operationsProposedTypes = [];
 
       return {
         blocks: [],
@@ -540,16 +608,21 @@ export async function handleEditGraph(
         latencyMs,
         appliedGraph: null,
         wasRejected: false,
+        diagnostics: diagnostics(),
       };
     }
 
     // Strip impact/rationale from operations for the validation pipeline
     const { operations: strippedOps, meta: operationMeta } = stripOperationMeta(llmResult.operations);
+    setOpsTelemetry(strippedOps);
     const rawOps: unknown[] = strippedOps;
     lastRawOps = rawOps;
 
     if (intentCategory !== 'structural' && hasStructuralOperations(strippedOps)) {
       consecutiveNarrowStructuralFailures++;
+      validationOutcome = 'intent_guard_failed';
+      setViolationCodes(['intent_guard_structural_ops']);
+      recoveryPathChosen = 'repair_retry';
       lastValidationResult = {
         valid: false,
         operations: [],
@@ -561,7 +634,8 @@ export async function handleEditGraph(
         }],
       };
       if (consecutiveNarrowStructuralFailures >= 2) {
-        return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+        recoveryPathChosen = 'narrow_intent_recovery_question';
+        return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
       }
       continue;
     }
@@ -575,8 +649,14 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
-        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED', undefined, attempt);
+        validationOutcome = 'max_operations_exceeded';
+        setViolationCodes(['max_operations_exceeded']);
+        recoveryPathChosen = 'rejection_block';
+        return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED', undefined, attempt, diagnostics());
       }
+      validationOutcome = 'max_operations_exceeded';
+      setViolationCodes(['max_operations_exceeded']);
+      recoveryPathChosen = 'repair_retry';
       lastValidationResult = { valid: false, operations: [], referentialErrors: [{ index: 0, op: 'batch', path: '', message: msg }] };
       continue;
     }
@@ -587,10 +667,17 @@ export async function handleEditGraph(
     lastValidationResult = validationResult;
 
     if (!validationResult.valid) {
+      validationOutcome = 'structural_validation_failed';
+      setViolationCodes([
+        ...(validationResult.zodErrors?.issues.map((issue) => `zod:${issue.code}`) ?? []),
+        ...(validationResult.referentialErrors?.map((error) => error.op) ?? []),
+      ]);
+      recoveryPathChosen = 'repair_retry';
       if (intentCategory !== 'structural') {
         consecutiveNarrowStructuralFailures++;
         if (consecutiveNarrowStructuralFailures >= 2) {
-          return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+          recoveryPathChosen = 'narrow_intent_recovery_question';
+          return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
         }
       } else {
         consecutiveNarrowStructuralFailures = 0;
@@ -607,6 +694,7 @@ export async function handleEditGraph(
 
       if (attempt === totalAttempts) {
         // All attempts exhausted — return rejection block
+        recoveryPathChosen = 'rejection_block';
         return buildRejectionResult(
           `Structural validation failed after ${totalAttempts} attempts: ${formatPatchValidationErrors(validationResult)}`,
           rawOps as PatchOperation[],
@@ -616,6 +704,7 @@ export async function handleEditGraph(
           'STRUCTURAL_VALIDATION_FAILED',
           undefined,
           attempt,
+          diagnostics(),
         );
       }
       continue;
@@ -651,6 +740,9 @@ export async function handleEditGraph(
           ],
         };
         const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+        validationOutcome = 'budget_exceeded';
+        setViolationCodes(['budget_exceeded']);
+        recoveryPathChosen = 'rejection_block';
         return {
           blocks: [],
           assistantText: envelope.assistant_text,
@@ -658,6 +750,7 @@ export async function handleEditGraph(
           appliedGraph: null,
           wasRejected: true,
           suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+          diagnostics: diagnostics(),
         };
       }
     }
@@ -672,13 +765,17 @@ export async function handleEditGraph(
         if (applyErr instanceof PatchApplyError) {
           if (intentCategory !== 'structural') {
             consecutiveNarrowStructuralFailures++;
+            validationOutcome = 'patch_apply_error';
+            setViolationCodes([applyErr.code]);
+            recoveryPathChosen = 'repair_retry';
             lastValidationResult = {
               valid: false,
               operations: operations as unknown as import('../patch-validation.js').ValidatedPatchOperation[],
               referentialErrors: [{ index: 0, op: applyErr.code, path: '', message: applyErr.message }],
             };
             if (consecutiveNarrowStructuralFailures >= 2) {
-              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+              recoveryPathChosen = 'narrow_intent_recovery_question';
+              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
             }
             continue;
           }
@@ -695,6 +792,9 @@ export async function handleEditGraph(
             ],
           };
           const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+          validationOutcome = 'patch_apply_error';
+          setViolationCodes([applyErr.code]);
+          recoveryPathChosen = 'patch_rejection_envelope';
           return {
             blocks: [],
             assistantText: envelope.assistant_text,
@@ -702,6 +802,7 @@ export async function handleEditGraph(
             appliedGraph: null,
             wasRejected: true,
             suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+            diagnostics: diagnostics(),
           };
         }
         throw applyErr;
@@ -709,6 +810,9 @@ export async function handleEditGraph(
 
       const structResult = validateGraphStructure(candidateGraph);
       if (!structResult.valid) {
+        validationOutcome = 'graph_structure_invalid';
+        setViolationCodes(structResult.violations.map((violation) => violation.code));
+        recoveryPathChosen = 'repair_retry';
         if (intentCategory !== 'structural') {
           consecutiveNarrowStructuralFailures++;
           lastValidationResult = {
@@ -722,7 +826,8 @@ export async function handleEditGraph(
             })),
           };
           if (consecutiveNarrowStructuralFailures >= 2) {
-            return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+            recoveryPathChosen = 'narrow_intent_recovery_question';
+            return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
           }
           continue;
         }
@@ -750,6 +855,7 @@ export async function handleEditGraph(
           appliedGraph: null,
           wasRejected: true,
           suggestedActions: envelope.suggested_actions?.map((a) => ({ label: a.label, prompt: a.prompt, role: a.role })),
+          diagnostics: diagnostics(),
         };
       }
     }
@@ -785,10 +891,14 @@ export async function handleEditGraph(
           const reason = plotResult.message ?? 'Semantic validation rejected by PLoT';
           const plotCode = plotResult.code;
           const plotViolations = plotResult.violations;
+          validationOutcome = 'plot_semantic_rejected';
+          setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
+          recoveryPathChosen = 'repair_retry';
           if (intentCategory !== 'structural') {
             consecutiveNarrowStructuralFailures++;
             if (consecutiveNarrowStructuralFailures >= 2) {
-              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+              recoveryPathChosen = 'narrow_intent_recovery_question';
+              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
             }
           }
 
@@ -798,6 +908,7 @@ export async function handleEditGraph(
           );
 
           if (attempt === totalAttempts) {
+            recoveryPathChosen = 'rejection_block';
             return buildRejectionResult(
               reason,
               operations,
@@ -807,6 +918,7 @@ export async function handleEditGraph(
               'PLOT_SEMANTIC_REJECTED',
               { plot_code: plotCode, plot_violations: plotViolations },
               attempt,
+              diagnostics(),
             );
           }
 
@@ -823,10 +935,14 @@ export async function handleEditGraph(
             const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
             const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
             const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
+            validationOutcome = 'plot_semantic_rejected';
+            setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
+            recoveryPathChosen = 'repair_retry';
             if (intentCategory !== 'structural') {
               consecutiveNarrowStructuralFailures++;
               if (consecutiveNarrowStructuralFailures >= 2) {
-                return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime);
+                recoveryPathChosen = 'narrow_intent_recovery_question';
+                return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
               }
             }
 
@@ -836,6 +952,7 @@ export async function handleEditGraph(
             );
 
             if (attempt === totalAttempts) {
+              recoveryPathChosen = 'rejection_block';
               return buildRejectionResult(
                 reason,
                 operations,
@@ -845,6 +962,7 @@ export async function handleEditGraph(
                 'PLOT_SEMANTIC_REJECTED',
                 { plot_code: plotCode, plot_violations: plotViolations },
                 attempt,
+                diagnostics(),
               );
             }
 
@@ -896,6 +1014,9 @@ export async function handleEditGraph(
         );
 
         if (attempt === totalAttempts) {
+          validationOutcome = 'plot_unavailable';
+          setViolationCodes(['plot_unavailable']);
+          recoveryPathChosen = 'rejection_block';
           return buildRejectionResult(
             `PLoT semantic validation unavailable: ${errorMessage}`,
             operations,
@@ -905,9 +1026,13 @@ export async function handleEditGraph(
             'PLOT_UNAVAILABLE',
             undefined,
             attempt,
+            diagnostics(),
           );
         }
 
+        validationOutcome = 'plot_unavailable';
+        setViolationCodes(['plot_unavailable']);
+        recoveryPathChosen = 'repair_retry';
         lastPlotErrors = `PLoT unavailable: ${errorMessage}`;
         lastValidationResult = { valid: false, operations: validationResult.operations, referentialErrors: [{ index: 0, op: 'plot', path: '', message: `PLoT unavailable: ${errorMessage}` }] };
         continue;
@@ -929,6 +1054,9 @@ export async function handleEditGraph(
     }
 
     consecutiveNarrowStructuralFailures = 0;
+    validationOutcome = 'success';
+    setViolationCodes([]);
+    recoveryPathChosen = 'none';
 
     // Compute analysis_ready from post-patch graph (single candidate graph flow)
     const readinessGraph = appliedGraph ?? candidateGraph;
@@ -1019,6 +1147,7 @@ export async function handleEditGraph(
       appliedGraph: appliedGraph ?? null,
       wasRejected: false,
       ...(suggestedActions.length > 0 && { suggestedActions }),
+      diagnostics: diagnostics(),
     };
   }
 
@@ -1049,6 +1178,7 @@ function buildRejectionResult(
   code?: string,
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
   attempts?: number,
+  diagnostics?: EditGraphTraceDiagnostics,
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
@@ -1093,6 +1223,7 @@ function buildRejectionResult(
           { role: 'facilitator', label: 'Start fresh', prompt: 'Let\'s rebuild the model from the updated brief.' },
         ]
       : undefined,
+    diagnostics,
   };
 }
 

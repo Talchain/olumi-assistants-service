@@ -28,6 +28,7 @@ import type { ToolInvocation, ParsedLLMResponse } from "../response-parser.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import type { ChatWithToolsResult, ChatWithToolsArgs, CallOpts } from "../../adapters/llm/types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
+import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
 
 // ============================================================================
 // Shared Value Types
@@ -200,6 +201,8 @@ export interface ToolResult {
   guidance_items: GuidanceItem[];
   /** Suggested follow-up actions from tool handler (e.g. "Re-run analysis" after edit_graph). */
   suggested_actions?: SuggestedAction[];
+  /** edit_graph-only diagnostics for turn trace. */
+  edit_graph_diagnostics?: EditGraphTraceDiagnostics;
 }
 
 // ============================================================================
