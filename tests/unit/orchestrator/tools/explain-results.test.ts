@@ -12,6 +12,7 @@ import type { V2RunResponseEnvelope, ConversationContext } from "../../../../src
 
 function makeAnalysisResponse(overrides?: Partial<V2RunResponseEnvelope>): V2RunResponseEnvelope {
   return {
+    analysis_status: "completed",
     meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
     results: [{ option_label: "Option A", win_probability: 0.65 }],
     ...overrides,
@@ -280,9 +281,10 @@ describe("handleExplainResults handler", () => {
 
     const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
 
-    // Should still produce a valid block — buildAnalysisSummary won't crash
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe("commentary");
+    expect((result.blocks[0].data as { narrative: string }).narrative).toContain("completed, explainable analysis");
+    expect(adapter.chat).not.toHaveBeenCalled();
   });
 
   it("handles results missing win_probability without crashing", async () => {
@@ -317,6 +319,7 @@ describe("handleExplainResults handler", () => {
   it("returns Tier 2 generic fallback when LLM throws and no valid results for Tier 1", async () => {
     const analysisResponse = makeAnalysisResponse({
       results: [] as V2RunResponseEnvelope["results"],
+      factor_sensitivity: [{ label: "Market demand" }] as V2RunResponseEnvelope["factor_sensitivity"],
     });
     const context = makeContext({ analysis_response: analysisResponse });
     const adapter = {
@@ -328,7 +331,19 @@ describe("handleExplainResults handler", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe("commentary");
     const narrative = (result.blocks[0].data as { narrative: string }).narrative;
-    // Tier 2: no winner extractable → generic message
-    expect(narrative).toContain("unable to generate a detailed explanation");
+    expect(narrative).toContain("fuller explanation");
+  });
+
+  it("returns stale guidance when analysis is not current", async () => {
+    const context = makeContext({
+      framing: { stage: "ideate" },
+    });
+    const adapter = makeAdapter("Some explanation.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    expect(result.blocks).toHaveLength(1);
+    expect((result.blocks[0].data as { narrative: string }).narrative).toContain("graph has changed since that run");
+    expect(adapter.chat).not.toHaveBeenCalled();
   });
 });

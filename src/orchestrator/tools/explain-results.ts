@@ -22,6 +22,7 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type { ConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError, SupportingRef } from "../types.js";
 import { createCommentaryBlock } from "../blocks/factory.js";
+import { isAnalysisCurrent, isAnalysisExplainable } from "../analysis-state.js";
 
 // ============================================================================
 // Types
@@ -145,6 +146,33 @@ export async function handleExplainResults(
 
   const startTime = Date.now();
   const analysisResponse = context.analysis_response;
+  if (!isAnalysisExplainable(analysisResponse)) {
+    return {
+      blocks: [
+        createCommentaryBlock(
+          'I can only explain results from a completed, explainable analysis. Run the analysis again after the options are fully configured, then ask me to explain it.',
+          turnId,
+          'tool:explain_results:blocked',
+        ),
+      ],
+      assistantText: null,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  if (!isAnalysisCurrent(context.framing?.stage ?? null, analysisResponse)) {
+    return {
+      blocks: [
+        createCommentaryBlock(
+          'I can explain the latest completed analysis, but your graph has changed since that run. Re-run the analysis and I’ll explain the current results.',
+          turnId,
+          'tool:explain_results:stale',
+        ),
+      ],
+      assistantText: null,
+      latencyMs: Date.now() - startTime,
+    };
+  }
 
   try {
     // Build summary for LLM context (avoid injecting full response)
@@ -214,7 +242,7 @@ export async function handleExplainResults(
 
     const insight = extractFallbackInsight(analysisResponse);
     const fallbackText = insight
-      ?? 'I was unable to generate a detailed explanation of the analysis results. The analysis data may be incomplete. Try running the analysis again, or ask a more specific question.';
+      ?? 'I could not produce a fuller explanation from the current explainable analysis. Ask a more specific question about the drivers, trade-offs, or constraints.';
 
     const block = createCommentaryBlock(
       fallbackText,

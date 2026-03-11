@@ -116,9 +116,15 @@ describe("phase3-llm", () => {
       });
 
       const client = makeMockLLMClient();
-      // Provide graph so run_analysis prerequisites pass; use evaluate stage where run_analysis is allowed
+      // Provide graph + analysis_inputs so run_analysis prerequisites pass; use evaluate stage where run_analysis is allowed
       const ctx = makeEnrichedContext({
         graph: { nodes: [], edges: [], options: [] } as unknown as EnrichedContext["graph"],
+        analysis_inputs: {
+          options: [
+            { option_id: "opt_a", label: "Option A", interventions: { fac_1: { value: 1 } } },
+            { option_id: "opt_b", label: "Option B", interventions: { fac_1: { value: -1 } } },
+          ],
+        },
         stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
       });
 
@@ -258,7 +264,7 @@ describe("phase3-llm", () => {
         stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
         analysis: {
           analysis_status: "completed",
-          results: [],
+          results: [{ option_label: "Option A", win_probability: 0.7 }],
           meta: { response_hash: "hash-a" },
           response_hash: "hash-a",
         } as unknown as EnrichedContext["analysis"],
@@ -296,7 +302,7 @@ describe("phase3-llm", () => {
         stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" },
         analysis: {
           analysis_status: "completed",
-          results: [],
+          results: [{ option_label: "Option A", win_probability: 0.7 }],
           meta: { response_hash: "hash-b" },
           response_hash: "hash-b",
         } as unknown as EnrichedContext["analysis"],
@@ -342,6 +348,46 @@ describe("phase3-llm", () => {
 
       expect(client.chatWithTools).toHaveBeenCalled();
       expect(result.tool_invocations).toHaveLength(0);
+    });
+
+    it("resumes pending clarification follow-up into deterministic edit_graph when user replies with an exact visible label", async () => {
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        graph: {
+          nodes: [
+            { id: "f1", kind: "factor", label: "Onboarding Time" },
+            { id: "f2", kind: "factor", label: "Hiring Delay" },
+          ],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        conversational_state: {
+          active_entities: [],
+          stated_constraints: [],
+          current_topic: "editing",
+          last_failed_action: null,
+          pending_clarification: {
+            tool: "edit_graph",
+            original_edit_request: "Reduce it by 10%",
+            candidate_labels: ["Onboarding Time", "Hiring Delay"],
+          },
+        },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-clarify",
+        "Onboarding Time",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations).toHaveLength(1);
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+      expect(result.tool_invocations[0].input).toEqual({
+        edit_description: "Reduce it by 10% for Onboarding Time",
+      });
     });
 
     it("logs zone2_enabled from the runtime context-fabric flag", async () => {

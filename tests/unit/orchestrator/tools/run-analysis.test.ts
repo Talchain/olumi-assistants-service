@@ -151,20 +151,26 @@ describe("run_analysis Tool Handler", () => {
     ).rejects.toThrow("no graph");
   });
 
-  it("throws when no analysis_inputs in context", async () => {
+  it("returns blocked analysis result when no analysis_inputs in context", async () => {
     const client = makeMockClient(makePLoTResponse());
 
-    await expect(
-      handleRunAnalysis(
-        makeContext({ analysis_inputs: null }),
-        client,
-        "req-1",
-        "turn-1",
-      ),
-    ).rejects.toThrow("no analysis_inputs");
+    const result = await handleRunAnalysis(
+      makeContext({ analysis_inputs: null }),
+      client,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.analysisResponse.analysis_status).toBe("blocked");
+    expect(result.analysisResponse.retryable).toBe(false);
+    expect(result.analysisResponse.results).toBeUndefined();
+    expect(result.analysisResponse.status_reason).toContain("intervention values");
+    expect(result.analysisResponse.critiques).toEqual([
+      expect.objectContaining({ code: "missing_analysis_inputs" }),
+    ]);
   });
 
-  it("throws recoverable error when options have empty interventions (Task 6)", async () => {
+  it("returns blocked analysis result when options have empty interventions (Task 6)", async () => {
     const client = makeMockClient(makePLoTResponse());
     const ctx = makeContext({
       analysis_inputs: {
@@ -175,17 +181,16 @@ describe("run_analysis Tool Handler", () => {
       },
     });
 
-    await expect(
-      handleRunAnalysis(ctx, client, "req-1", "turn-1"),
-    ).rejects.toThrow(/intervention values/);
+    const result = await handleRunAnalysis(ctx, client, "req-1", "turn-1");
 
-    // Verify error is recoverable
-    try {
-      await handleRunAnalysis(ctx, client, "req-1", "turn-1");
-    } catch (err: unknown) {
-      const orchErr = (err as { orchestratorError: { recoverable: boolean; suggested_retry: string } }).orchestratorError;
-      expect(orchErr.recoverable).toBe(true);
-      expect(orchErr.suggested_retry).toBeTruthy();
-    }
+    expect(result.analysisResponse.analysis_status).toBe("blocked");
+    expect(result.analysisResponse.retryable).toBe(false);
+    expect(result.analysisResponse.status_reason).toContain('option "Option A" has no intervention values configured');
+    expect(result.analysisResponse.critiques).toEqual([
+      expect.objectContaining({
+        code: "missing_interventions",
+        labels: ["Option A"],
+      }),
+    ]);
   });
 });

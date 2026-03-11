@@ -25,6 +25,7 @@ import type { ConversationBlock, ConversationContext, V2RunResponseEnvelope, Orc
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
+import { isAnalysisRunnable } from "../analysis-state.js";
 
 // ============================================================================
 // Types
@@ -72,16 +73,10 @@ export async function handleRunAnalysis(
   }
 
   if (!context.analysis_inputs) {
-    // Safety net — prerequisite gate in turn-handler.ts should prevent reaching here.
-    // If called directly without analysis_inputs, throw so the caller can handle it.
-    const err: OrchestratorError = {
-      code: 'TOOL_EXECUTION_FAILED',
-      message: 'Cannot run analysis: no analysis_inputs in context. Options need intervention values — tell me what each option changes and I\'ll configure them, or set values directly on the canvas.',
-      tool: 'run_analysis',
-      recoverable: true,
-      suggested_retry: 'Configure option interventions first, then re-run.',
-    };
-    throw Object.assign(new Error(err.message), { orchestratorError: err });
+    return buildBlockedAnalysisResult(
+      requestId,
+      startTimedReason('Options need intervention values before the analysis can run. Tell me what each option changes and I\'ll configure them, or set values directly on the canvas.', 'missing_analysis_inputs'),
+    );
   }
 
   // Option-configuration recovery: check if options have configured interventions.
@@ -89,20 +84,20 @@ export async function handleRunAnalysis(
   const unconfigured = context.analysis_inputs.options.filter(
     (opt) => !opt.interventions || Object.keys(opt.interventions).length === 0,
   );
-  if (unconfigured.length > 0) {
+  if (!isAnalysisRunnable(context) || unconfigured.length > 0) {
     const labels = unconfigured.map((o) => o.label || o.option_id).join(', ');
     log.warn(
       { unconfigured_options: labels, turn_id: turnId },
       'run_analysis: options missing intervention values — returning recovery message',
     );
-    const err: OrchestratorError = {
-      code: 'TOOL_EXECUTION_FAILED',
-      message: `The analysis can't run yet — ${unconfigured.length === 1 ? `option "${labels}" has` : `options ${labels} have`} no intervention values configured. Each option needs to specify how it changes the model factors. You can set these on the canvas, or describe what each option changes and I'll configure them.`,
-      tool: 'run_analysis',
-      recoverable: true,
-      suggested_retry: 'Configure option interventions, then ask to run the analysis again.',
-    };
-    throw Object.assign(new Error(err.message), { orchestratorError: err });
+    return buildBlockedAnalysisResult(
+      requestId,
+      startTimedReason(
+        `The analysis can't run yet — ${unconfigured.length === 1 ? `option "${labels}" has` : `options ${labels} have`} no intervention values configured. Each option needs to specify how it changes the model factors. You can set these on the canvas, or describe what each option changes and I'll configure them.`,
+        'missing_interventions',
+        unconfigured.map((o) => o.label || o.option_id),
+      ),
+    );
   }
 
   // Build PLoT payload: full graph + analysis_inputs
@@ -218,4 +213,47 @@ function groupByFactType(factObjects: unknown[]): Map<string, unknown[]> {
   }
 
   return grouped;
+}
+
+function startTimedReason(
+  statusReason: string,
+  critiqueCode: string,
+  missingLabels: string[] = [],
+): {
+  statusReason: string;
+  critiques: Array<Record<string, unknown>>;
+} {
+  return {
+    statusReason,
+    critiques: [
+      {
+        code: critiqueCode,
+        message: statusReason,
+        ...(missingLabels.length > 0 ? { labels: missingLabels } : {}),
+      },
+    ],
+  };
+}
+
+function buildBlockedAnalysisResult(
+  requestId: string,
+  blocked: {
+    statusReason: string;
+    critiques: Array<Record<string, unknown>>;
+  },
+): RunAnalysisResult {
+  return {
+    blocks: [],
+    analysisResponse: {
+      analysis_status: 'blocked',
+      status_reason: blocked.statusReason,
+      retryable: false,
+      critiques: blocked.critiques,
+      meta: { request_id: requestId, seed_used: 0, n_samples: 0, response_hash: '' },
+    } as unknown as V2RunResponseEnvelope,
+    responseHash: undefined,
+    seedUsed: undefined,
+    nSamples: undefined,
+    latencyMs: 0,
+  };
 }

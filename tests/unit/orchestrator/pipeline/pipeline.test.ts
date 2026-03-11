@@ -204,7 +204,7 @@ describe("pipeline", () => {
         analysis_response: {
           analysis_status: "completed",
           meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 100 },
-          results: [],
+          results: [{ option_label: "Option A", win_probability: 0.7 }],
           response_hash: "analysis-hash",
         } as any,
         framing: null,
@@ -245,7 +245,7 @@ describe("pipeline", () => {
         analysis_response: {
           analysis_status: "completed",
           meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 100 },
-          results: [],
+          results: [{ option_label: "Option A", win_probability: 0.7 }],
           response_hash: "analysis-hash",
         } as any,
         framing: null,

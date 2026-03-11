@@ -5,6 +5,7 @@ import type {
   ConversationContext,
   ConversationMessage,
   LastFailedAction,
+  PendingClarificationState,
 } from "../../types.js";
 import type { IntentClassification } from "../types.js";
 
@@ -161,6 +162,46 @@ function extractLastFailedAction(messages: ConversationMessage[]): LastFailedAct
   return null;
 }
 
+function parseCandidateLabelsFromClarification(content: string): string[] {
+  const match = content.match(/(?: — )(.+)\?$/);
+  if (!match?.[1]) return [];
+
+  return uniqueStable(
+    match[1]
+      .split(/\s+or\s+|,\s*/i)
+      .map((label) => label.trim())
+      .filter((label) => label.length > 0),
+  );
+}
+
+function extractPendingClarification(messages: ConversationMessage[]): PendingClarificationState | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    if (!message.tool_calls || message.tool_calls.length === 0) continue;
+
+    const editToolCall = message.tool_calls.find((toolCall) =>
+      toolCall.name === 'edit_graph'
+      && typeof toolCall.input.edit_description === 'string'
+      && toolCall.input.edit_description.trim().length > 0,
+    );
+    if (!editToolCall) continue;
+
+    const content = message.content.trim();
+    if (!/^Which (?:one should I update|option should I update|existing option should I configure|existing factor or edge should I update)/i.test(content)) {
+      continue;
+    }
+
+    return {
+      tool: 'edit_graph',
+      original_edit_request: (editToolCall.input.edit_description as string).trim(),
+      candidate_labels: parseCandidateLabelsFromClarification(content),
+    };
+  }
+
+  return null;
+}
+
 export function buildConversationalState(
   message: string,
   context: ConversationContext,
@@ -173,5 +214,6 @@ export function buildConversationalState(
     stated_constraints: extractCanonicalConstraints(recentMessages),
     current_topic: classifyCurrentTopic(message, intentClassification, context),
     last_failed_action: extractLastFailedAction(recentMessages),
+    pending_clarification: extractPendingClarification(recentMessages),
   };
 }

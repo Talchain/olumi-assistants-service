@@ -19,6 +19,7 @@ import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly
 import { getToolDefinitions } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 import { determineEditResolutionMode } from "../../tools/edit-graph.js";
+import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisRunnable } from "../../analysis-state.js";
 import { classifyUserIntent } from "../phase1-enrichment/intent-classifier.js";
 
 import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext } from "../types.js";
@@ -36,11 +37,11 @@ import { config } from "../../../config/index.js";
  * Same as turn-handler.ts — shared logic, not duplicated definition.
  */
 const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationContext) => boolean>> = {
-  run_analysis: (ctx) => ctx.graph != null,
-  explain_results: (ctx) => ctx.analysis_response != null,
+  run_analysis: (ctx) => isAnalysisRunnable(ctx),
+  explain_results: (ctx) => isAnalysisExplainable(ctx.analysis_response),
   edit_graph: (ctx) => ctx.graph != null,
-  generate_brief: (ctx) => ctx.graph != null && ctx.analysis_response != null,
-  run_exercise: (ctx) => ctx.analysis_response != null,
+  generate_brief: (ctx) => ctx.graph != null && isAnalysisCurrent(ctx.framing?.stage ?? null, ctx.analysis_response),
+  run_exercise: (ctx) => isAnalysisCurrent(ctx.framing?.stage ?? null, ctx.analysis_response),
   draft_graph: (ctx) => {
     const f = ctx.framing;
     if (!f) return false;
@@ -70,8 +71,9 @@ export async function phase3Generate(
 ): Promise<LLMResult> {
   // 1. Check deterministic intent gate
   const intentGate = initialIntentGate ?? classifyIntent(userMessage);
+  const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
   const freshTurnIntent = classifyUserIntent(userMessage);
-  const editResolutionMode = intentGate.tool === 'edit_graph'
+  const editResolutionMode = (clarificationToolInput || intentGate.tool === 'edit_graph')
     ? determineEditResolutionMode(userMessage, buildConversationContext(enrichedContext))
     : null;
   const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
@@ -86,7 +88,14 @@ export async function phase3Generate(
       || shouldAvoidEditGraph
     )
   );
-  const effectiveIntentGate = shouldPreferExplainResults
+  const effectiveIntentGate = clarificationToolInput
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'edit_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[clarification_continuation]',
+      }
+    : shouldPreferExplainResults
     ? {
         ...intentGate,
         tool: 'explain_results' as const,
@@ -157,11 +166,13 @@ export async function phase3Generate(
         );
 
         // For run_exercise, pass the exercise type; for research_topic, pass the extracted query
-        let deterministicInput: Record<string, unknown> = {};
+        let deterministicInput: Record<string, unknown> = clarificationToolInput ?? {};
         if (effectiveIntentGate.tool === 'run_exercise' && effectiveIntentGate.exercise) {
           deterministicInput = { exercise: effectiveIntentGate.exercise };
         } else if (effectiveIntentGate.tool === 'research_topic' && effectiveIntentGate.research_query) {
           deterministicInput = { query: effectiveIntentGate.research_query };
+        } else if (effectiveIntentGate.tool === 'edit_graph' && clarificationToolInput) {
+          deterministicInput = clarificationToolInput;
         }
         return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput);
       }
@@ -254,6 +265,7 @@ function buildConversationContext(enriched: EnrichedContext): ConversationContex
     messages: filteredHistory,
     selected_elements: enriched.selected_elements,
     scenario_id: enriched.scenario_id,
+    analysis_inputs: enriched.analysis_inputs,
     conversational_state: enriched.conversational_state,
   };
 }
@@ -284,4 +296,22 @@ function buildEffectiveUserMessage(enriched: EnrichedContext, rawMessage: string
     : '';
 
   return `[System event: ${systemEvent.event_type}${detailsSummary}]`;
+}
+
+function buildClarificationContinuationInput(
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+): Record<string, unknown> | null {
+  const pending = enrichedContext.conversational_state?.pending_clarification;
+  if (!pending || pending.tool !== 'edit_graph') return null;
+
+  const trimmed = userMessage.trim();
+  if (trimmed.length === 0) return null;
+
+  const matchedLabel = pending.candidate_labels.find((label) => trimmed.toLowerCase() === label.toLowerCase());
+  if (!matchedLabel) return null;
+
+  return {
+    edit_description: `${pending.original_edit_request} for ${matchedLabel}`,
+  };
 }

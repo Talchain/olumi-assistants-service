@@ -26,6 +26,7 @@ import type { IntentGateResult } from "../intent-gate.js";
 import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
+import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable } from "../analysis-state.js";
 import { config } from "../../config/index.js";
 
 /**
@@ -505,13 +506,27 @@ export interface TurnTraceInput {
 function emitTurnTrace(input: TurnTraceInput): void {
   const { enrichedContext: ec, request, envelope } = input;
   const graph = ec.graph;
-  const analysis = ec.analysis as Record<string, unknown> | null;
-  const brief = analysis?.decision_brief;
+  const analysis = ec.analysis;
+  const analysisRecord = analysis as Record<string, unknown> | null;
+  const brief = analysisRecord?.decision_brief;
+  const analysisPresent = isAnalysisPresent(analysis);
+  const analysisExplainable = isAnalysisExplainable(analysis);
+  const analysisCurrent = isAnalysisCurrent(ec.stage_indicator.stage, analysis);
+  const analysisRunnable = isAnalysisRunnable({
+    graph: ec.graph,
+    analysis_response: ec.analysis,
+    framing: ec.framing,
+    messages: ec.conversation_history,
+    selected_elements: ec.selected_elements,
+    scenario_id: ec.scenario_id,
+    analysis_inputs: ec.analysis_inputs,
+    conversational_state: ec.conversational_state,
+  });
   const freshTurnIntentRaw = classifyUserIntent(request.message ?? '');
   const initialIntentGate = input.initialIntentGate ?? classifyIntent(request.message ?? '');
   const explainOverrideApplied = (
     ec.stage_indicator.stage === 'evaluate'
-    && analysis != null
+    && analysisExplainable
     && (freshTurnIntentRaw === 'explain' || freshTurnIntentRaw === 'recommend')
     && initialIntentGate.tool === 'edit_graph'
     && input.toolSelected === 'explain_results'
@@ -561,7 +576,11 @@ function emitTurnTrace(input: TurnTraceInput): void {
       stage_inferred: ec.stage_indicator.stage,
       has_graph: graph != null && (graph.nodes?.length ?? 0) > 0,
       graph_node_count: graph?.nodes?.length ?? 0,
-      has_analysis: analysis != null,
+      has_analysis: analysisPresent,
+      analysis_present: analysisPresent,
+      analysis_explainable: analysisExplainable,
+      analysis_current: analysisCurrent,
+      analysis_runnable: analysisRunnable,
       has_brief: brief != null,
       brief_length: typeof brief === 'string' ? brief.length : brief ? JSON.stringify(brief).length : 0,
       conversation_turns: ec.conversation_history?.length ?? 0,

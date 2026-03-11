@@ -119,11 +119,18 @@ export interface LastFailedAction {
   reason: string;
 }
 
+export interface PendingClarificationState {
+  tool: 'edit_graph';
+  original_edit_request: string;
+  candidate_labels: string[];
+}
+
 export interface ConversationalState {
   active_entities: string[];
   stated_constraints: CanonicalConstraint[];
   current_topic: ConversationalTopic;
   last_failed_action: LastFailedAction | null;
+  pending_clarification?: PendingClarificationState | null;
 }
 
 export type ProposedChangeActionType =
