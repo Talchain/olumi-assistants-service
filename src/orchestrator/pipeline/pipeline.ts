@@ -11,8 +11,15 @@
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { extractDeclaredMode, inferResponseMode } from "../response-parser.js";
 import { isToolAllowedAtStage } from "../tools/stage-policy.js";
-import type { OrchestratorTurnRequest } from "../types.js";
-import type { PipelineDeps, OrchestratorResponseEnvelopeV2, EnrichedContext } from "./types.js";
+import type { OrchestratorTurnRequest, PendingClarificationState, PendingProposalState } from "../types.js";
+import type {
+  PipelineDeps,
+  OrchestratorResponseEnvelopeV2,
+  EnrichedContext,
+  TurnDebugBundle,
+  Phase3RouteDebug,
+  RouteMetadata,
+} from "./types.js";
 import { phase1Enrich } from "./phase1-enrichment/index.js";
 import { phase2Route } from "./phase2-specialists/index.js";
 import { phase3Generate } from "./phase3-llm/index.js";
@@ -26,7 +33,7 @@ import type { IntentGateResult } from "../intent-gate.js";
 import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
-import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable } from "../analysis-state.js";
+import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable, isResultsExplanationEligible } from "../analysis-state.js";
 import { config } from "../../config/index.js";
 
 /**
@@ -69,14 +76,33 @@ export async function executePipeline(
 
       // Error from router (e.g. MISSING_GRAPH_STATE) → error envelope
       if (routerResult.error) {
-        return buildSystemEventErrorEnvelope(enrichedContext, routerResult.error.code, routerResult.error.message);
+        const envelope = buildSystemEventErrorEnvelope(enrichedContext, routerResult.error.code, routerResult.error.message);
+        attachSystemEventDebugBundle({
+          envelope,
+          enrichedContext,
+          request,
+          requestId,
+          failure: {
+            branch: `system_event:${request.system_event.event_type}`,
+            code: routerResult.error.code,
+            message: routerResult.error.message,
+          },
+          directAnalysis: request.system_event.event_type === 'direct_analysis_run'
+            ? {
+                source_context: 'missing_graph_state',
+                narration_branch: 'none',
+                stale_state_reused: false,
+              }
+            : null,
+        });
+        return envelope;
       }
 
       // direct_analysis_run Path B: delegate to run_analysis via regular pipeline
       if (routerResult.delegateToTool === 'run_analysis') {
         // Inject [system] entry into enriched context, then proceed through phases
         const updatedEnrichedContext = injectSystemEntries(enrichedContext, routerResult.systemContextEntries);
-        return await runAnalysisViaPipeline(updatedEnrichedContext, deps, requestId, request.system_event);
+        return await runAnalysisViaPipeline(updatedEnrichedContext, deps, requestId, request);
       }
 
       // Inject [system] context entries into the enriched conversation history
@@ -87,12 +113,15 @@ export async function executePipeline(
       let finalAssistantText = routerResult.assistantText;
       const narrationGraph = request.graph_state ?? updatedEnrichedContext.graph;
       const narrationAnalysis = routerResult.analysisResponse ?? updatedEnrichedContext.analysis;
-      const canNarrateResults = (
+      const shouldAttemptNarration = (
         routerResult.needsNarration
         && request.message.trim().length > 5
-        && isAnalysisExplainable(narrationAnalysis)
-        && isAnalysisCurrent(updatedEnrichedContext.stage_indicator.stage, narrationAnalysis)
       );
+      const canNarrateResults = shouldAttemptNarration && isResultsExplanationEligible(
+        updatedEnrichedContext.stage_indicator.stage,
+        narrationAnalysis,
+      );
+      let directAnalysisRouteMetadata: RouteMetadata | undefined;
       if (canNarrateResults) {
         const adapter = getAdapter('orchestrator');
         try {
@@ -115,13 +144,34 @@ export async function executePipeline(
           );
           finalBlocks = [...finalBlocks, ...explainResult.blocks];
           finalAssistantText = explainResult.assistantText;
+          directAnalysisRouteMetadata = {
+            outcome: 'direct_analysis_with_narration',
+            reasoning: 'completed_current_analysis_available',
+          };
         } catch {
-          // Non-fatal
+          directAnalysisRouteMetadata = {
+            outcome: 'direct_analysis_narration_skipped',
+            reasoning: 'explain_results_failed',
+          };
         }
+      }
+      if (!directAnalysisRouteMetadata) {
+        directAnalysisRouteMetadata = shouldAttemptNarration
+          ? {
+              outcome: 'direct_analysis_narration_skipped',
+              reasoning: 'analysis_not_current_or_not_explainable',
+            }
+          : {
+              outcome: 'direct_analysis_ack_only',
+              reasoning: 'no_followup_message_for_results_narration',
+            };
       }
 
       // Build a direct V2 ack envelope from router result (skips phases 3-5)
-      return buildSystemEventAckEnvelope(
+      const staleStateReused = request.system_event.event_type === 'direct_analysis_run'
+        ? hasStaleAnalysisState(request.analysis_state ?? null, request.graph_state ?? updatedEnrichedContext.graph)
+        : null;
+      const envelope = buildSystemEventAckEnvelope(
         updatedEnrichedContext,
         finalAssistantText,
         finalBlocks,
@@ -129,7 +179,32 @@ export async function executePipeline(
         request.system_event,
         routerResult.graphHash,
         routerResult.analysisResponse,
+        directAnalysisRouteMetadata,
       );
+      attachSystemEventDebugBundle({
+        envelope,
+        enrichedContext: updatedEnrichedContext,
+        request,
+        requestId,
+        directAnalysis: request.system_event.event_type === 'direct_analysis_run'
+          ? {
+              source_context: request.analysis_state
+                ? 'analysis_state'
+                : request.context.analysis_response
+                ? 'context.analysis_response'
+                : 'graph_only',
+              narration_branch: directAnalysisRouteMetadata.outcome === 'direct_analysis_with_narration'
+                ? 'explain_results'
+                : directAnalysisRouteMetadata.reasoning === 'explain_results_failed'
+                ? 'explain_results_failed'
+                : directAnalysisRouteMetadata.outcome === 'direct_analysis_narration_skipped'
+                ? 'skipped_not_explainable_or_not_current'
+                : 'none',
+              stale_state_reused: staleStateReused,
+            }
+          : null,
+      });
+      return envelope;
     }
 
     // Phase 2: Specialist Routing (stub)
@@ -230,6 +305,9 @@ export async function executePipeline(
       editGraphDiagnostics: toolResult.edit_graph_diagnostics,
       stageFallbackInjected: toolResult.stage_fallback_injected,
       initialIntentGate: intentGate,
+      llmRouteDebug: llmResult.route_debug,
+      pendingClarification: toolResult.pending_clarification,
+      pendingProposal: toolResult.pending_proposal,
     });
 
     return envelope;
@@ -282,6 +360,7 @@ function buildSystemEventAckEnvelope(
   event: import("../types.js").SystemEvent,
   graphHash?: string,
   analysisResponse?: import("../types.js").V2RunResponseEnvelope,
+  routeMetadata?: RouteMetadata,
 ): OrchestratorResponseEnvelopeV2 {
   const lineage: OrchestratorResponseEnvelopeV2['lineage'] = {
     context_hash: resolveContextHash(enrichedContext),
@@ -301,6 +380,7 @@ function buildSystemEventAckEnvelope(
     assistant_text: assistantText,
     blocks,
     suggested_actions: [],
+    ...(routeMetadata ? { _route_metadata: routeMetadata } : {}),
 
     lineage,
 
@@ -406,8 +486,9 @@ async function runAnalysisViaPipeline(
   enrichedContext: EnrichedContext,
   deps: PipelineDeps,
   requestId: string,
-  event: import("../types.js").SystemEvent,
+  request: OrchestratorTurnRequest,
 ): Promise<OrchestratorResponseEnvelopeV2> {
+  const event = request.system_event!;
   const specialistResult = phase2Route();
 
   // Synthetic deterministic LLM result: route directly to run_analysis
@@ -419,6 +500,52 @@ async function runAnalysisViaPipeline(
     suggested_actions: [],
     diagnostics: null,
     parse_warnings: [],
+    route_debug: {
+      initial_intent_gate: {
+        routing: 'deterministic',
+        tool: 'run_analysis',
+        matched_pattern: '[direct_analysis_run]',
+        confidence: 'exact',
+      },
+      final_intent_gate: {
+        routing: 'deterministic',
+        tool: 'run_analysis',
+        matched_pattern: '[direct_analysis_run]',
+        confidence: 'exact',
+      },
+      deterministic_override: {
+        applied: true,
+        reason: 'direct_analysis_run_delegate',
+      },
+      explicit_generate_override: {
+        considered: false,
+        applied: false,
+        reason: null,
+      },
+      explain_results_selection: {
+        considered: false,
+        selected: false,
+        reason: null,
+        explanation_path: null,
+      },
+      clarification_continuation: {
+        present: false,
+        grouped: false,
+      },
+      pending_proposal_followup: {
+        present: false,
+        action: null,
+      },
+      post_analysis_followup: {
+        triggered: false,
+        reason: null,
+      },
+      draft_graph_selection: {
+        considered: false,
+        selected: false,
+        reason: null,
+      },
+    },
   };
 
   const toolResult = await phase4Execute(llmResult, enrichedContext, deps.toolDispatcher, requestId);
@@ -429,6 +556,26 @@ async function runAnalysisViaPipeline(
     ...envelope.turn_plan,
     system_event: { type: event.event_type, event_id: event.event_id },
   };
+
+  emitTurnTrace({
+    enrichedContext,
+    requestId,
+    request,
+    toolSelected: 'run_analysis',
+    toolPermitted: true,
+    toolSuppressedReason: null,
+    declaredMode: 'ACT',
+    inferredMode: 'ACT',
+    envelope,
+    initialIntentGate: {
+      routing: 'deterministic',
+      tool: 'run_analysis',
+      confidence: 'exact',
+      matched_pattern: '[direct_analysis_run]',
+      normalised_message: '[direct_analysis_run]',
+    },
+    llmRouteDebug: llmResult.route_debug,
+  });
 
   return envelope;
 }
@@ -452,6 +599,9 @@ export interface TurnTraceInput {
   /** True when Phase 4 injected the stage+tool-aware fallback message. */
   stageFallbackInjected?: boolean;
   initialIntentGate?: IntentGateResult;
+  llmRouteDebug?: Phase3RouteDebug;
+  pendingClarification?: PendingClarificationState;
+  pendingProposal?: PendingProposalState;
 }
 
 /**
@@ -480,6 +630,7 @@ function emitTurnTrace(input: TurnTraceInput): void {
   const freshTurnIntentRaw = classifyUserIntent(request.message ?? '');
   const initialIntentGate = input.initialIntentGate ?? classifyIntent(request.message ?? '');
   const routeMetadata = envelope._route_metadata ?? null;
+  const routeDebug = input.llmRouteDebug ?? null;
   const explainOverrideApplied = routeMetadata?.outcome === 'results_explanation';
   const explainOverrideReason = explainOverrideApplied
     ? routeMetadata?.reasoning ?? 'results_explanation'
@@ -518,6 +669,24 @@ function emitTurnTrace(input: TurnTraceInput): void {
   const editPathSummary = editTrace
     ? `intent=${editTrace.classified_intent};mode=${editTrace.instruction_mode_applied};ops=${editTrace.operations_proposed_count};validation=${editTrace.validation_outcome};recovery=${editTrace.recovery_path_chosen}`
     : null;
+  const debugBundle = buildTurnDebugBundle({
+    enrichedContext: ec,
+    request,
+    requestId: input.requestId,
+    initialIntentGate,
+    routeMetadata,
+    routeDebug,
+    toolSelected: input.toolSelected,
+    analysisPresent,
+    analysisExplainable,
+    analysisCurrent,
+    analysisRunnable,
+    pendingClarification: input.pendingClarification,
+    pendingProposal: input.pendingProposal,
+    editTrace,
+    envelope,
+  });
+  attachDebugBundleToEnvelope(envelope, debugBundle);
 
   log.info(
     {
@@ -573,7 +742,258 @@ function emitTurnTrace(input: TurnTraceInput): void {
       target_resolution: editTrace?.target_resolution ?? null,
       resolution_mode: editTrace?.resolution_mode ?? null,
       proposal_returned: editTrace?.proposal_returned ?? null,
+      branch_taken: editTrace?.branch_taken ?? null,
+      branch_reason: editTrace?.branch_reason ?? null,
+      failure_branch: editTrace?.failure_branch ?? null,
+      failure_code: editTrace?.failure_code ?? null,
+      failure_message: editTrace?.failure_message ?? null,
+      trigger_source: debugBundle.trigger_source,
+      debug_bundle: debugBundle,
     },
     'orchestrator.turn.trace',
   );
+}
+
+interface BuildTurnDebugBundleInput {
+  enrichedContext: EnrichedContext;
+  request: OrchestratorTurnRequest;
+  requestId: string;
+  initialIntentGate: IntentGateResult;
+  routeMetadata: OrchestratorResponseEnvelopeV2['_route_metadata'] | null;
+  routeDebug: Phase3RouteDebug | null;
+  toolSelected: string | null;
+  analysisPresent: boolean;
+  analysisExplainable: boolean;
+  analysisCurrent: boolean;
+  analysisRunnable: boolean;
+  pendingClarification?: PendingClarificationState;
+  pendingProposal?: PendingProposalState;
+  editTrace: EditGraphTraceDiagnostics | null;
+  envelope: OrchestratorResponseEnvelopeV2;
+}
+
+function buildTurnDebugBundle(input: BuildTurnDebugBundleInput): TurnDebugBundle {
+  const {
+    enrichedContext,
+    request,
+    requestId,
+    initialIntentGate,
+    routeMetadata,
+    routeDebug,
+    toolSelected,
+    analysisPresent,
+    analysisExplainable,
+    analysisCurrent,
+    analysisRunnable,
+    pendingClarification,
+    pendingProposal,
+    editTrace,
+    envelope,
+  } = input;
+  const carriedClarification = pendingClarification ?? enrichedContext.conversational_state.pending_clarification ?? null;
+  const carriedProposal = pendingProposal ?? enrichedContext.conversational_state.pending_proposal ?? null;
+  const failure = {
+    branch: editTrace?.failure_branch ?? envelope.error?.code ?? null,
+    code: editTrace?.failure_code ?? envelope.error?.code ?? null,
+    message: editTrace?.failure_message ?? envelope.error?.message ?? null,
+  };
+  return {
+    request_id: requestId,
+    turn_id: enrichedContext.turn_id,
+    scenario_id: enrichedContext.scenario_id,
+    trigger_source: resolveTriggerSource(request, routeDebug),
+    processed_user_message: truncateText(request.message ?? '', 240),
+    recent_conversation: summariseConversationHistory(enrichedContext.conversation_history),
+    stage_from_ui: request.context.framing?.stage ?? null,
+    stage_inferred: enrichedContext.stage_indicator.stage,
+    intent_classification: enrichedContext.intent_classification,
+    initial_intent_gate: {
+      routing: initialIntentGate.routing,
+      tool: initialIntentGate.tool,
+      matched_pattern: initialIntentGate.matched_pattern ?? null,
+      confidence: initialIntentGate.confidence ?? null,
+    },
+    final_route: {
+      routing: envelope.turn_plan.routing,
+      selected_tool: toolSelected,
+      route_outcome: routeMetadata?.outcome ?? null,
+      route_reasoning: routeMetadata?.reasoning ?? null,
+    },
+    route_decisions: routeDebug,
+    analysis_state: {
+      present: analysisPresent,
+      explainable: analysisExplainable,
+      current: analysisCurrent,
+      runnable: analysisRunnable,
+    },
+    clarification_state: {
+      present: carriedClarification !== null,
+      candidate_labels: carriedClarification?.candidate_labels ?? [],
+    },
+    pending_proposal_state: {
+      present: carriedProposal !== null,
+      summary: carriedProposal ? summarisePendingProposal(carriedProposal) : null,
+    },
+    grouped_continuation_used: routeDebug?.clarification_continuation.grouped ?? false,
+    outcome: resolveTurnOutcome(envelope, editTrace, request),
+    failure,
+    direct_analysis_run: null,
+  };
+}
+
+function attachSystemEventDebugBundle(input: {
+  envelope: OrchestratorResponseEnvelopeV2;
+  enrichedContext: EnrichedContext;
+  request: OrchestratorTurnRequest;
+  requestId: string;
+  failure?: TurnDebugBundle['failure'];
+  directAnalysis?: TurnDebugBundle['direct_analysis_run'];
+}): void {
+  const { envelope, enrichedContext, request, requestId, failure, directAnalysis } = input;
+  const bundle: TurnDebugBundle = {
+    request_id: requestId,
+    turn_id: enrichedContext.turn_id,
+    scenario_id: enrichedContext.scenario_id,
+    trigger_source: request.system_event?.event_type === 'direct_analysis_run' ? 'direct_analysis_run' : 'system_event',
+    processed_user_message: truncateText(request.message ?? '', 240),
+    recent_conversation: summariseConversationHistory(enrichedContext.conversation_history),
+    stage_from_ui: request.context.framing?.stage ?? null,
+    stage_inferred: enrichedContext.stage_indicator.stage,
+    intent_classification: enrichedContext.intent_classification,
+    initial_intent_gate: {
+      routing: 'deterministic',
+      tool: envelope.turn_plan.selected_tool,
+      matched_pattern: request.system_event ? `[${request.system_event.event_type}]` : null,
+      confidence: 'exact',
+    },
+    final_route: {
+      routing: envelope.turn_plan.routing,
+      selected_tool: envelope.turn_plan.selected_tool,
+      route_outcome: envelope._route_metadata?.outcome ?? null,
+      route_reasoning: envelope._route_metadata?.reasoning ?? null,
+    },
+    route_decisions: null,
+    analysis_state: {
+      present: isAnalysisPresent(request.analysis_state ?? enrichedContext.analysis),
+      explainable: isAnalysisExplainable(request.analysis_state ?? enrichedContext.analysis),
+      current: isAnalysisCurrent(enrichedContext.stage_indicator.stage, request.analysis_state ?? enrichedContext.analysis),
+      runnable: isAnalysisRunnable({
+        graph: request.graph_state ?? enrichedContext.graph,
+        analysis_response: request.analysis_state ?? enrichedContext.analysis,
+        framing: enrichedContext.framing,
+        messages: enrichedContext.conversation_history,
+        selected_elements: enrichedContext.selected_elements,
+        scenario_id: enrichedContext.scenario_id,
+        analysis_inputs: enrichedContext.analysis_inputs,
+        conversational_state: enrichedContext.conversational_state,
+      }),
+    },
+    clarification_state: {
+      present: false,
+      candidate_labels: [],
+    },
+    pending_proposal_state: {
+      present: false,
+      summary: null,
+    },
+    grouped_continuation_used: false,
+    outcome: resolveTurnOutcome(envelope, null, request),
+    failure: failure ?? {
+      branch: null,
+      code: null,
+      message: null,
+    },
+    direct_analysis_run: directAnalysis ?? null,
+  };
+  attachDebugBundleToEnvelope(envelope, bundle);
+  log.info(
+    {
+      event: 'orchestrator.turn.trace',
+      turn_id: enrichedContext.turn_id,
+      request_id: requestId,
+      scenario_id: enrichedContext.scenario_id,
+      trigger_source: bundle.trigger_source,
+      debug_bundle: bundle,
+      failure_branch: bundle.failure.branch,
+      failure_code: bundle.failure.code,
+      failure_message: bundle.failure.message,
+    },
+    'orchestrator.turn.trace',
+  );
+}
+
+function attachDebugBundleToEnvelope(
+  envelope: OrchestratorResponseEnvelopeV2,
+  debugBundle: TurnDebugBundle,
+): void {
+  if (shouldExposeDebugBundleInEnvelope()) {
+    envelope._debug_bundle = debugBundle;
+    return;
+  }
+
+  delete envelope._debug_bundle;
+}
+
+function shouldExposeDebugBundleInEnvelope(): boolean {
+  return process.env.NODE_ENV !== 'production' || process.env.ORCHESTRATOR_DEBUG_BUNDLE === 'true';
+}
+
+function resolveTriggerSource(
+  request: OrchestratorTurnRequest,
+  routeDebug: Phase3RouteDebug | null,
+): TurnDebugBundle['trigger_source'] {
+  if (request.system_event?.event_type === 'direct_analysis_run') return 'direct_analysis_run';
+  if (request.system_event) return 'system_event';
+  if (routeDebug?.post_analysis_followup.triggered) return 'analysis_complete_followup';
+  return 'user_message';
+}
+
+function summariseConversationHistory(
+  history: EnrichedContext['conversation_history'],
+): TurnDebugBundle['recent_conversation'] {
+  return history.slice(-5).map((message) => ({
+    role: message.role,
+    text: truncateText(message.content, 120) ?? '',
+  }));
+}
+
+function summarisePendingProposal(pendingProposal: PendingProposalState): string {
+  const labels = pendingProposal.candidate_labels.slice(0, 3).join(', ');
+  const count = pendingProposal.proposed_changes.changes.length;
+  return truncateText(`${count} change(s) for ${labels || 'pending targets'}`, 120) ?? '';
+}
+
+function resolveTurnOutcome(
+  envelope: OrchestratorResponseEnvelopeV2,
+  editTrace: EditGraphTraceDiagnostics | null,
+  request: OrchestratorTurnRequest,
+): TurnDebugBundle['outcome'] {
+  if (envelope.error || editTrace?.failure_branch || editTrace?.branch_taken === 'rejection') return 'failed';
+  if (envelope.analysis_status === 'blocked') return 'blocked';
+  if (editTrace?.branch_taken === 'clarify' || editTrace?.branch_taken === 'recovery_question') return 'clarified';
+  if (editTrace?.branch_taken === 'propose') return 'proposed';
+  if (request.system_event?.event_type === 'direct_graph_edit' || request.system_event?.event_type === 'patch_accepted') return 'applied';
+  if (envelope._route_metadata?.outcome === 'results_explanation' || envelope._route_metadata?.outcome === 'rationale_explanation') return 'narrated';
+  if ((request.system_event?.event_type === 'direct_analysis_run') && ((envelope.assistant_text?.length ?? 0) > 0 || envelope.blocks.length > 0)) {
+    return 'narrated';
+  }
+  if (editTrace?.branch_taken === 'apply' || envelope.blocks.some((block) => block.block_type === 'graph_patch')) return 'applied';
+  return 'answered';
+}
+
+function truncateText(value: string | null | undefined, maxLength: number): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function hasStaleAnalysisState(
+  analysis: import("../types.js").V2RunResponseEnvelope | null | undefined,
+  graph: EnrichedContext['graph'],
+): boolean {
+  if (!analysis || !graph) return false;
+  const analysisHash = (analysis as Record<string, unknown>).graph_hash;
+  const graphHash = (graph as Record<string, unknown>).hash;
+  return typeof analysisHash === 'string' && typeof graphHash === 'string' && analysisHash !== graphHash;
 }

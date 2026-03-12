@@ -43,6 +43,13 @@ export function isAnalysisExplainable(response: V2RunResponseEnvelope | null | u
     || hasValidRobustness(response);
 }
 
+export function isResultsExplanationEligible(
+  stage: DecisionStage | null | undefined,
+  response: V2RunResponseEnvelope | null | undefined,
+): response is V2RunResponseEnvelope {
+  return isAnalysisExplainable(response) && isAnalysisCurrent(stage, response);
+}
+
 export function isAnalysisCurrent(
   stage: DecisionStage | null | undefined,
   response: V2RunResponseEnvelope | null | undefined,

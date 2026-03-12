@@ -19,10 +19,19 @@ import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly
 import { getToolDefinitions } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 import { computeGraphHash, determineEditResolutionMode } from "../../tools/edit-graph.js";
-import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisRunnable } from "../../analysis-state.js";
+import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisRunnable, isResultsExplanationEligible } from "../../analysis-state.js";
 import { classifyUserIntent } from "../phase1-enrichment/intent-classifier.js";
 
-import type { EnrichedContext, SpecialistResult, LLMResult, LLMClient, ConversationContext, RouteMetadata } from "../types.js";
+import type {
+  EnrichedContext,
+  SpecialistResult,
+  LLMResult,
+  LLMClient,
+  ConversationContext,
+  RouteMetadata,
+  Phase3RouteDebug,
+  IntentGateDebugSummary,
+} from "../types.js";
 import { assembleV2SystemPrompt } from "./prompt-assembler.js";
 import { parseV2Response, buildConversationalLLMResult, buildDeterministicLLMResult } from "./response-parser.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
@@ -84,13 +93,19 @@ export async function phase3Generate(
   const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
   const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
   const freshTurnIntent = classifyUserIntent(userMessage);
-  const hasExplainableCurrentAnalysis = (
-    isAnalysisExplainable(enrichedContext.analysis)
-    && isAnalysisCurrent(enrichedContext.stage_indicator.stage, enrichedContext.analysis)
+  const hasExplainableCurrentAnalysis = isResultsExplanationEligible(
+    enrichedContext.stage_indicator.stage,
+    enrichedContext.analysis,
   );
-  const rationaleOnlyFollowUp = shouldUseRationaleExplanation(enrichedContext, userMessage, freshTurnIntent, hasExplainableCurrentAnalysis);
+  const explanationRoute = determineExplanationRoute(
+    enrichedContext,
+    userMessage,
+    intentGate,
+    freshTurnIntent,
+    hasExplainableCurrentAnalysis,
+  );
   const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
-  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && !hasExplainableCurrentAnalysis;
+  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && explanationRoute.kind !== 'results';
   const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
     && hasStableModel(enrichedContext)
     && !isClearRegenerateRequest(userMessage);
@@ -98,46 +113,154 @@ export async function phase3Generate(
     ? determineEditResolutionMode(userMessage, context)
     : null;
   const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
-  const shouldPreferExplainResults = (
-    hasExplainableCurrentAnalysis
-    && intentGate.tool === 'edit_graph'
+  const shouldRedirectToResultsExplanation = hasExplainableCurrentAnalysis
+    && explanationRoute.kind === 'results'
     && (
-      (
-        enrichedContext.stage_indicator.stage === 'evaluate'
-        && (freshTurnIntent === 'explain' || freshTurnIntent === 'recommend')
-      )
+      intentGate.tool === 'explain_results'
+      || intentGate.tool === 'edit_graph'
+      || freshTurnIntent === 'explain'
+      || freshTurnIntent === 'recommend'
       || shouldAvoidEditGraph
-    )
+    );
+  const routeDebugBase = buildRouteDebugBase(
+    intentGate,
+    clarificationToolInput,
+    proposalFollowUp,
+    explicitGenerate,
+    shouldRedirectToResultsExplanation,
+    explanationRoute.kind === 'rationale',
+    hasExplainableCurrentAnalysis,
   );
   if (proposalFollowUp?.action === 'dismiss') {
     return buildConversationalLLMResult(
       'Okay — I won’t apply that change.',
       { outcome: 'proposal_dismissal', reasoning: 'dismissed_pending_proposal' },
+      {
+        ...routeDebugBase,
+        final_intent_gate: {
+          routing: 'llm',
+          tool: null,
+          matched_pattern: '[pending_proposal_dismissal]',
+          confidence: 'exact',
+        },
+        deterministic_override: {
+          applied: true,
+          reason: 'dismissed_pending_proposal',
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+      },
     );
   }
   if (proposalFollowUp?.action === 'stale') {
     return buildConversationalLLMResult(
       'That proposal is out of date because the model changed. If you still want it, ask me to apply it again and I’ll regenerate it from the current model.',
-      { outcome: 'proposal_dismissal', reasoning: 'pending_proposal_invalidated_by_graph_change' },
+      { outcome: 'proposal_stale_dismissal', reasoning: 'pending_proposal_invalidated_by_graph_change' },
+      {
+        ...routeDebugBase,
+        final_intent_gate: {
+          routing: 'llm',
+          tool: null,
+          matched_pattern: '[pending_proposal_stale]',
+          confidence: 'exact',
+        },
+        deterministic_override: {
+          applied: true,
+          reason: 'pending_proposal_invalidated_by_graph_change',
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+      },
     );
   }
   if (explicitGenerate.kind === 'clarify') {
     return buildConversationalLLMResult(
       explicitGenerate.assistantText,
       { outcome: 'generation_clarification', reasoning: explicitGenerate.reasoning },
+      {
+        ...routeDebugBase,
+        final_intent_gate: {
+          routing: 'llm',
+          tool: null,
+          matched_pattern: '[explicit_generate_clarification]',
+          confidence: 'exact',
+        },
+        deterministic_override: {
+          applied: true,
+          reason: explicitGenerate.reasoning,
+        },
+        draft_graph_selection: {
+          considered: true,
+          selected: false,
+          reason: explicitGenerate.reasoning,
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+      },
     );
   }
   if (shouldBlockStableModelRedraft) {
     return buildConversationalLLMResult(
       'You already have a model. If you want a fresh one, ask me to regenerate it. Otherwise tell me what to change.',
       { outcome: 'generation_clarification', reasoning: 'stable_model_exists_and_regenerate_not_requested' },
+      {
+        ...routeDebugBase,
+        final_intent_gate: {
+          routing: 'llm',
+          tool: null,
+          matched_pattern: '[stable_model_redraft_blocked]',
+          confidence: intentGate.confidence ?? null,
+        },
+        deterministic_override: {
+          applied: true,
+          reason: 'stable_model_exists_and_regenerate_not_requested',
+        },
+        draft_graph_selection: {
+          considered: true,
+          selected: false,
+          reason: 'stable_model_exists_and_regenerate_not_requested',
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+      },
     );
   }
-  if (rationaleOnlyFollowUp) {
+  if (explanationRoute.kind === 'rationale') {
     const rationaleText = await generateRationaleExplanation(llmClient, enrichedContext, userMessage, requestId);
     return buildConversationalLLMResult(
       rationaleText,
-      { outcome: 'rationale_explanation', reasoning: 'analysis_not_current_or_not_explainable' },
+      { outcome: 'rationale_explanation', reasoning: explanationRoute.reasoning ?? 'analysis_not_current_or_not_explainable' },
+      {
+        ...routeDebugBase,
+        final_intent_gate: {
+          routing: 'llm',
+          tool: null,
+          matched_pattern: '[rationale_explanation]',
+          confidence: intentGate.confidence ?? null,
+        },
+        deterministic_override: {
+          applied: true,
+          reason: explanationRoute.reasoning,
+        },
+        explain_results_selection: {
+          considered: explanationRoute.considered,
+          selected: false,
+          reason: explanationRoute.reasoning,
+          explanation_path: 'rationale_explanation',
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+      },
     );
   }
 
@@ -169,7 +292,7 @@ export async function phase3Generate(
         routing: 'llm' as const,
         matched_pattern: intentGate.matched_pattern ?? '[results_explanation_blocked]',
       }
-    : shouldPreferExplainResults
+    : shouldRedirectToResultsExplanation
     ? {
         ...intentGate,
         tool: 'explain_results' as const,
@@ -237,7 +360,7 @@ export async function phase3Generate(
             routing: 'deterministic',
             matched_pattern: effectiveIntentGate.matched_pattern,
             fresh_turn_intent: freshTurnIntent,
-            explain_override_applied: shouldPreferExplainResults,
+            explain_override_applied: shouldRedirectToResultsExplanation,
           },
           "V2 pipeline: deterministic routing — skipping LLM",
         );
@@ -262,10 +385,51 @@ export async function phase3Generate(
         } else if (effectiveIntentGate.tool === 'edit_graph' && clarificationToolInput) {
           deterministicInput = clarificationToolInput;
           routeMetadata = { outcome: 'clarification_continuation', reasoning: 'resolved_from_pending_clarification' };
-        } else if (effectiveIntentGate.tool === 'explain_results' && shouldPreferExplainResults) {
-          routeMetadata = { outcome: 'results_explanation', reasoning: 'completed_current_analysis_available' };
+        } else if (effectiveIntentGate.tool === 'explain_results' && explanationRoute.kind === 'results') {
+          routeMetadata = { outcome: 'results_explanation', reasoning: explanationRoute.reasoning ?? 'completed_current_analysis_available' };
         }
-        return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput, routeMetadata);
+        const routeDebug: Phase3RouteDebug = {
+          ...routeDebugBase,
+          final_intent_gate: summariseIntentGate(effectiveIntentGate),
+          deterministic_override: {
+            applied: effectiveIntentGate.tool !== intentGate.tool || effectiveIntentGate.routing !== intentGate.routing,
+            reason: routeMetadata?.reasoning ?? (
+              clarificationToolInput
+                ? 'resolved_from_pending_clarification'
+                : proposalFollowUp?.action === 'confirm'
+                ? 'confirmed_pending_proposal'
+                : explicitGenerate.kind === 'deterministic'
+                ? explicitGenerate.reasoning
+                : shouldRedirectToResultsExplanation
+                ? explanationRoute.reasoning
+                : null
+            ),
+          },
+          explain_results_selection: {
+            considered: explanationRoute.considered || shouldBlockExplainResults,
+            selected: effectiveIntentGate.tool === 'explain_results',
+            reason: effectiveIntentGate.tool === 'explain_results'
+              ? explanationRoute.reasoning
+              : shouldBlockExplainResults
+              ? 'analysis_not_current_or_not_explainable'
+              : null,
+            explanation_path: effectiveIntentGate.tool === 'explain_results' ? 'results_explanation' : null,
+          },
+          post_analysis_followup: {
+            triggered: shouldRedirectToResultsExplanation,
+            reason: shouldRedirectToResultsExplanation ? explanationRoute.reasoning : null,
+          },
+          draft_graph_selection: {
+            considered: explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph',
+            selected: effectiveIntentGate.tool === 'draft_graph',
+            reason: effectiveIntentGate.tool === 'draft_graph'
+              ? (routeMetadata?.reasoning ?? (explicitGenerate.kind === 'deterministic' ? explicitGenerate.reasoning : null))
+              : explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph'
+              ? 'explicit_generate_not_selected'
+              : null,
+          },
+        };
+        return buildDeterministicLLMResult(effectiveIntentGate.tool, deterministicInput, routeMetadata, routeDebug);
       }
     }
   }
@@ -317,6 +481,10 @@ export async function phase3Generate(
       suggested_actions: [],
       diagnostics: null,
       parse_warnings: [],
+      route_debug: {
+        ...routeDebugBase,
+        final_intent_gate: summariseIntentGate(effectiveIntentGate),
+      },
     };
   }
 
@@ -335,6 +503,43 @@ export async function phase3Generate(
   return {
     ...parsed,
     route_metadata: { outcome: 'default_llm', reasoning: 'no_deterministic_route_applied' },
+    route_debug: {
+      ...routeDebugBase,
+      final_intent_gate: summariseIntentGate(effectiveIntentGate),
+      deterministic_override: {
+        applied: effectiveIntentGate.tool !== intentGate.tool || effectiveIntentGate.routing !== intentGate.routing,
+        reason: !hasExplainableCurrentAnalysis && intentGate.tool === 'explain_results'
+          ? 'analysis_not_current_or_not_explainable'
+          : shouldAvoidEditGraph
+          ? 'edit_graph_bypassed_for_non_edit_answer'
+          : null,
+      },
+      explain_results_selection: {
+        considered: intentGate.tool === 'explain_results' || shouldRedirectToResultsExplanation || shouldBlockExplainResults,
+        selected: false,
+        reason: shouldBlockExplainResults
+          ? 'analysis_not_current_or_not_explainable'
+          : shouldRedirectToResultsExplanation
+          ? 'completed_current_analysis_available_but_llm_fell_through'
+          : null,
+        explanation_path: null,
+      },
+      post_analysis_followup: {
+        triggered: shouldRedirectToResultsExplanation,
+        reason: shouldRedirectToResultsExplanation ? 'completed_current_analysis_available' : null,
+      },
+      draft_graph_selection: {
+        considered: explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph',
+        selected: false,
+        reason: shouldBlockStableModelRedraft
+          ? 'stable_model_exists_and_regenerate_not_requested'
+          : explicitGenerate.kind === 'none' && intentGate.tool === 'draft_graph'
+          ? 'draft_graph_not_selected'
+          : explicitGenerate.kind === 'deterministic'
+          ? explicitGenerate.reasoning
+          : null,
+      },
+    },
   };
 }
 
@@ -362,6 +567,72 @@ function buildConversationContext(enriched: EnrichedContext): ConversationContex
     scenario_id: enriched.scenario_id,
     analysis_inputs: enriched.analysis_inputs,
     conversational_state: enriched.conversational_state,
+  };
+}
+
+function summariseIntentGate(intentGate: Pick<IntentGateResult, 'routing' | 'tool' | 'matched_pattern' | 'confidence'>): IntentGateDebugSummary {
+  return {
+    routing: intentGate.routing,
+    tool: intentGate.tool,
+    matched_pattern: intentGate.matched_pattern ?? null,
+    confidence: intentGate.confidence ?? null,
+  };
+}
+
+function buildRouteDebugBase(
+  intentGate: IntentGateResult,
+  clarificationToolInput: Record<string, unknown> | null,
+  proposalFollowUp: PendingProposalContinuation,
+  explicitGenerate: ExplicitGenerateRoute,
+  shouldRedirectToResultsExplanation: boolean,
+  rationaleOnlyFollowUp: boolean,
+  hasExplainableCurrentAnalysis: boolean,
+): Phase3RouteDebug {
+  return {
+    initial_intent_gate: summariseIntentGate(intentGate),
+    final_intent_gate: summariseIntentGate(intentGate),
+    deterministic_override: {
+      applied: false,
+      reason: null,
+    },
+    explicit_generate_override: {
+      considered: explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph',
+      applied: explicitGenerate.kind === 'deterministic',
+      reason: explicitGenerate.kind === 'none' ? null : explicitGenerate.reasoning,
+    },
+    explain_results_selection: {
+      considered: intentGate.tool === 'explain_results' || shouldRedirectToResultsExplanation || rationaleOnlyFollowUp,
+      selected: shouldRedirectToResultsExplanation,
+      reason: shouldRedirectToResultsExplanation
+        ? 'completed_current_analysis_available'
+        : rationaleOnlyFollowUp
+        ? 'analysis_not_current_or_not_explainable'
+        : !hasExplainableCurrentAnalysis && intentGate.tool === 'explain_results'
+        ? 'analysis_not_current_or_not_explainable'
+        : null,
+      explanation_path: rationaleOnlyFollowUp
+        ? 'rationale_explanation'
+        : shouldRedirectToResultsExplanation
+        ? 'results_explanation'
+        : null,
+    },
+    clarification_continuation: {
+      present: clarificationToolInput !== null,
+      grouped: Array.isArray(clarificationToolInput?.grouped_target_labels),
+    },
+    pending_proposal_followup: {
+      present: proposalFollowUp !== null,
+      action: proposalFollowUp?.action ?? null,
+    },
+    post_analysis_followup: {
+      triggered: false,
+      reason: null,
+    },
+    draft_graph_selection: {
+      considered: explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph',
+      selected: false,
+      reason: explicitGenerate.kind === 'none' ? null : explicitGenerate.reasoning,
+    },
   };
 }
 
@@ -422,11 +693,18 @@ function buildClarificationContinuationInput(
   // Substring fallback — only when no exact match exists.
   if (exactMatches.length === 0) {
     const substringMatches = pending.candidate_labels.filter(
-      (label) => normalisedInput.includes(normaliseLabelText(label)),
+      (label) =>
+        normalisedInput.includes(normaliseLabelText(label))
+        || normaliseLabelText(label).includes(normalisedInput),
     );
     if (substringMatches.length === 1) {
       return { edit_description: `${pending.original_edit_request} for ${substringMatches[0]}` };
     }
+  }
+
+  const tokenMatch = resolveSingleCandidateTokenMatch(normalisedInput, pending.candidate_labels);
+  if (tokenMatch) {
+    return { edit_description: `${pending.original_edit_request} for ${tokenMatch}` };
   }
 
   const groupedLabels = resolveGroupedContinuationLabels(
@@ -440,6 +718,26 @@ function buildClarificationContinuationInput(
     edit_description: pending.original_edit_request,
     grouped_target_labels: groupedLabels,
   };
+}
+
+function resolveSingleCandidateTokenMatch(
+  normalisedInput: string,
+  candidateLabels: string[],
+): string | null {
+  const informativeTokens = normalisedInput
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) =>
+      token.length >= 4
+      && !['that', 'this', 'with', 'from', 'option', 'factor', 'node'].includes(token),
+    );
+  if (informativeTokens.length === 0) return null;
+
+  const matches = candidateLabels.filter((label) => {
+    const candidate = normaliseLabelText(label);
+    return informativeTokens.every((token) => candidate.includes(token));
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function resolveGroupedContinuationLabels(
@@ -472,16 +770,44 @@ function resolveGroupedContinuationLabels(
   return null;
 }
 
-function shouldUseRationaleExplanation(
+function determineExplanationRoute(
   enrichedContext: EnrichedContext,
   userMessage: string,
+  intentGate: IntentGateResult,
   freshTurnIntent: ReturnType<typeof classifyUserIntent>,
   hasExplainableCurrentAnalysis: boolean,
-): boolean {
-  if (hasExplainableCurrentAnalysis) return false;
-  if (freshTurnIntent !== 'explain' && freshTurnIntent !== 'recommend') return false;
-  if (!enrichedContext.graph && !enrichedContext.framing) return false;
-  return /\bwhy\b|\brecommend(?:ed|ation)?\b|\bwalk me through\b|\bbreak it down\b/i.test(userMessage);
+): {
+  kind: 'none' | 'rationale' | 'results';
+  reasoning: string | null;
+  considered: boolean;
+} {
+  const isExplanationRequest = (
+    intentGate.tool === 'explain_results'
+    || freshTurnIntent === 'explain'
+    || freshTurnIntent === 'recommend'
+    || /\bwhy\b|\brecommend(?:ed|ation)?\b|\bwalk me through\b|\bbreak it down\b|\bexplain\b/i.test(userMessage)
+  );
+  if (!isExplanationRequest) {
+    return { kind: 'none', reasoning: null, considered: false };
+  }
+  if (hasExplainableCurrentAnalysis) {
+    return {
+      kind: 'results',
+      reasoning: 'completed_current_analysis_available',
+      considered: true,
+    };
+  }
+  if (!enrichedContext.graph && !enrichedContext.framing) {
+    return { kind: 'none', reasoning: null, considered: true };
+  }
+  if (/\bwhy\b|\brecommend(?:ed|ation)?\b|\bwalk me through\b|\bbreak it down\b/i.test(userMessage) || freshTurnIntent === 'recommend') {
+    return {
+      kind: 'rationale',
+      reasoning: 'analysis_not_current_or_not_explainable',
+      considered: true,
+    };
+  }
+  return { kind: 'none', reasoning: null, considered: true };
 }
 
 async function generateRationaleExplanation(
@@ -576,6 +902,7 @@ function hasStableModel(enrichedContext: EnrichedContext): boolean {
 
 function hasMinimumViableFramingContext(context: ConversationContext, userMessage: string): boolean {
   const framing = context.framing as Record<string, unknown> | null;
+  const conversationalState = context.conversational_state as unknown as Record<string, unknown> | null;
   const goal = typeof context.framing?.goal === 'string' ? context.framing.goal.trim() : '';
   const optionsCount = Array.isArray(framing?.options)
     ? framing.options.filter((option) => typeof option === 'string' && option.trim().length > 0).length
@@ -583,13 +910,23 @@ function hasMinimumViableFramingContext(context: ConversationContext, userMessag
   const constraintCount = Array.isArray(framing?.constraints)
     ? framing.constraints.filter((constraint) => typeof constraint === 'string' && constraint.trim().length > 0).length
     : 0;
+  const conversationalConstraintCount = Array.isArray(conversationalState?.stated_constraints)
+    ? conversationalState.stated_constraints.filter((constraint) => typeof constraint === 'string' && constraint.trim().length > 0).length
+    : 0;
   const userTurns = [...context.messages, { role: 'user' as const, content: userMessage }]
     .filter((message) => message.role === 'user')
     .map((message) => message.content.trim())
-    .filter((content) => content.length >= 20);
+    .filter((content) => content.length >= 8);
   const combinedLength = userTurns.join(' ').length;
+  const hasGoal = goal.length > 0;
+  const hasOptions = optionsCount > 0;
+  const hasConstraints = constraintCount > 0 || conversationalConstraintCount > 0;
+  const structuredSignals = [hasGoal, hasOptions, hasConstraints].filter(Boolean).length;
 
-  return goal.length > 0 || optionsCount > 0 || constraintCount > 0 || userTurns.length >= 2 || combinedLength >= 120;
+  return structuredSignals >= 2
+    || (hasGoal && userTurns.length >= 2 && combinedLength >= 80)
+    || (hasOptions && hasConstraints)
+    || combinedLength >= 140;
 }
 
 function buildDraftBriefFromConversation(enrichedContext: EnrichedContext, userMessage: string): string {
@@ -632,12 +969,15 @@ function buildGenerationClarificationMessage(enrichedContext: EnrichedContext): 
     ? framing.constraints.filter((constraint) => typeof constraint === 'string' && constraint.trim().length > 0).length
     : 0;
 
-  if (!goal) missing.push('what decision or outcome you want the model to optimise for');
-  if (optionsCount === 0) missing.push('the main options you want compared');
+  if (!goal) missing.push('the decision goal');
+  if (optionsCount === 0) missing.push('the main options to compare');
   if (constraintCount === 0) missing.push('the biggest constraint or trade-off');
 
-  const prompts = missing.slice(0, 3).map((item, index) => `${index + 1}. ${item}`);
-  return `I can draft it once I have a bit more framing:\n${prompts.join('\n')}`;
+  if (missing.length === 1) {
+    return `I can draft it once I have ${missing[0]}.`;
+  }
+  const prompts = missing.slice(0, 2).map((item, index) => `${index + 1}. ${item}`);
+  return `I can draft it once I have:\n${prompts.join('\n')}`;
 }
 
 type PendingProposalContinuation =

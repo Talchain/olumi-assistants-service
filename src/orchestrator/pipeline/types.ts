@@ -48,12 +48,117 @@ export type RouteOutcome =
   | 'proposal_created'
   | 'proposal_confirmation'
   | 'proposal_dismissal'
+  | 'proposal_stale_dismissal'
   | 'results_explanation'
-  | 'rationale_explanation';
+  | 'rationale_explanation'
+  | 'direct_analysis_ack_only'
+  | 'direct_analysis_with_narration'
+  | 'direct_analysis_narration_skipped';
 
 export interface RouteMetadata {
   outcome: RouteOutcome;
   reasoning: string;
+}
+
+export type TriggerSource =
+  | 'user_message'
+  | 'system_event'
+  | 'direct_analysis_run'
+  | 'analysis_complete_followup'
+  | 'chip'
+  | 'dock_action';
+
+export interface IntentGateDebugSummary {
+  routing: 'deterministic' | 'llm';
+  tool: string | null;
+  matched_pattern: string | null;
+  confidence?: string | null;
+}
+
+export interface Phase3RouteDebug {
+  initial_intent_gate: IntentGateDebugSummary;
+  final_intent_gate: IntentGateDebugSummary;
+  deterministic_override: {
+    applied: boolean;
+    reason: string | null;
+  };
+  explicit_generate_override: {
+    considered: boolean;
+    applied: boolean;
+    reason: string | null;
+  };
+  explain_results_selection: {
+    considered: boolean;
+    selected: boolean;
+    reason: string | null;
+    explanation_path: 'rationale_explanation' | 'results_explanation' | null;
+  };
+  clarification_continuation: {
+    present: boolean;
+    grouped: boolean;
+  };
+  pending_proposal_followup: {
+    present: boolean;
+    action: 'confirm' | 'dismiss' | 'stale' | null;
+  };
+  post_analysis_followup: {
+    triggered: boolean;
+    reason: string | null;
+  };
+  draft_graph_selection: {
+    considered: boolean;
+    selected: boolean;
+    reason: string | null;
+  };
+}
+
+export interface TurnDebugBundle {
+  request_id: string;
+  turn_id: string;
+  scenario_id: string;
+  trigger_source: TriggerSource;
+  processed_user_message: string | null;
+  recent_conversation: Array<{
+    role: 'user' | 'assistant';
+    text: string;
+  }>;
+  stage_from_ui: string | null;
+  stage_inferred: string | null;
+  intent_classification: string | null;
+  initial_intent_gate: IntentGateDebugSummary;
+  final_route: {
+    routing: 'deterministic' | 'llm';
+    selected_tool: string | null;
+    route_outcome: RouteOutcome | null;
+    route_reasoning: string | null;
+  };
+  route_decisions: Phase3RouteDebug | null;
+  analysis_state: {
+    present: boolean;
+    explainable: boolean;
+    current: boolean;
+    runnable: boolean;
+  };
+  clarification_state: {
+    present: boolean;
+    candidate_labels: string[];
+  };
+  pending_proposal_state: {
+    present: boolean;
+    summary: string | null;
+  };
+  grouped_continuation_used: boolean;
+  outcome: 'blocked' | 'clarified' | 'proposed' | 'applied' | 'narrated' | 'failed' | 'answered';
+  failure: {
+    branch: string | null;
+    code: string | null;
+    message: string | null;
+  };
+  direct_analysis_run: {
+    source_context: string | null;
+    narration_branch: string | null;
+    stale_state_reused: boolean | null;
+  } | null;
 }
 
 export interface StageIndicator {
@@ -202,6 +307,7 @@ export interface LLMResult {
   diagnostics: string | null;
   parse_warnings: string[];
   route_metadata?: RouteMetadata;
+  route_debug?: Phase3RouteDebug;
 }
 
 // ============================================================================
@@ -319,6 +425,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   /** Parse warnings from XML envelope extraction. Non-production only. */
   parse_warnings?: string[];
   _route_metadata?: RouteMetadata;
+  _debug_bundle?: TurnDebugBundle;
   /**
    * Contract violation codes from Phase 5 validation. Populated by phase5Validate
    * when violations are found; used by emitTurnTrace for structured log diagnostics.

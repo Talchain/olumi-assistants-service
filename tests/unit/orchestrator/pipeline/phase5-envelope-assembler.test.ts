@@ -515,6 +515,49 @@ describe("assembleV2Envelope", () => {
       expect(envelope.analysis_ready!.options).toHaveLength(2);
     });
 
+    it("includes envelope-level analysis_ready and model_receipt for full_draft blocks that carry applied_graph", () => {
+      const draftedGraph = makeReadyGraph();
+      const blocks = [
+        {
+          block_id: "blk-draft-1",
+          block_type: "graph_patch" as const,
+          data: {
+            patch_type: "full_draft" as const,
+            operations: [],
+            status: "proposed" as const,
+            auto_apply: true,
+            applied_graph: draftedGraph,
+            summary: "Option A currently looks strongest.",
+          },
+          provenance: { trigger: "tool:draft_graph", turn_id: "turn-1", timestamp: new Date().toISOString() },
+        },
+      ];
+
+      const envelope = assembleV2Envelope({
+        enrichedContext: makeEnrichedContext({ graph: null }),
+        specialistResult: makeSpecialistResult(),
+        llmResult: makeLLMResult({
+          tool_invocations: [{ name: "draft_graph", input: { brief: "Build a model" }, id: "deterministic" }],
+        }),
+        toolResult: makeToolResult({ blocks: blocks as any }),
+        progressKind: "changed_model",
+        stageTransition: null,
+        scienceLedger: makeScienceLedger(),
+      });
+
+      expect(envelope.analysis_ready).toBeDefined();
+      expect(envelope.analysis_ready!.status).toBe("ready");
+      expect(envelope.model_receipt).toEqual({
+        node_count: 4,
+        edge_count: 3,
+        option_labels: ["Option A", "Option B"],
+        goal_label: "Maximise ROI",
+        top_insight: "Option A currently looks strongest.",
+        readiness_status: "ready",
+        repairs_applied_count: 0,
+      });
+    });
+
     it("analysis_ready is absent when no graph exists", () => {
       const envelope = assembleV2Envelope({
         enrichedContext: makeEnrichedContext({ graph: null }),

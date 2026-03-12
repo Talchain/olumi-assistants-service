@@ -113,12 +113,14 @@ export async function handleDraftGraph(
 
   // Build full_draft patch: all nodes and edges as add operations
   const operations = buildFullDraftOps(graph);
+  const graphOutput = isGraphV3(graph) ? graph as GraphV3T : null;
 
   const patchData: GraphPatchBlockData = {
     patch_type: 'full_draft',
     operations,
     status: 'proposed',
     auto_apply: true,
+    ...(graphOutput && { applied_graph: graphOutput }),
   };
 
   // Extract analysis_ready from pipeline response (present in V3 schema responses)
@@ -150,9 +152,6 @@ export async function handleDraftGraph(
   if (warnings.length > 0) {
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
   }
-
-  // Extract the graph output for post-draft structural analysis
-  const graphOutput = isGraphV3(graph) ? graph as GraphV3T : null;
 
   const block = createGraphPatchBlock(patchData, turnId);
 

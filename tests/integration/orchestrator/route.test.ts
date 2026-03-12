@@ -135,7 +135,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
         client_turn_id: "turn-analysis-state",
         analysis_state: {
           analysis_status: "completed",
-          meta: { response_hash: "analysis-hash" },
+          meta: { response_hash: "analysis-hash", seed_used: 1, n_samples: 1000 },
           results: [],
         },
         graph_state: {
@@ -146,6 +146,35 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     });
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it("returns 400 when top-level analysis_state is missing required meta.response_hash", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/orchestrate/v1/turn",
+      payload: {
+        message: "",
+        scenario_id: "test",
+        client_turn_id: "turn-analysis-state-invalid",
+        system_event: {
+          event_type: "direct_analysis_run",
+          timestamp: new Date().toISOString(),
+          event_id: "evt-analysis-invalid-1",
+          details: {},
+        },
+        analysis_state: {
+          analysis_status: "completed",
+          meta: { seed_used: 1, n_samples: 1000 },
+          results: [],
+        },
+        graph_state: {
+          nodes: [{ id: "d1", kind: "decision", label: "Decision" }],
+          edges: [],
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it("returns 400 for missing client_turn_id", async () => {
@@ -293,7 +322,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       payload: makeValidRequest({
         context: {
           graph: { nodes: [{ id: "n1", kind: "decision", label: "D" }], edges: [] },
-          analysis_response: { meta: { seed_used: 1, n_samples: 100, response_hash: "h" }, results: [] },
+          analysis_response: { analysis_status: "completed", meta: { seed_used: 1, n_samples: 100, response_hash: "h" }, results: [] },
           framing: { stage: "evaluate" },
           messages: [],
           scenario_id: "test-scenario",
@@ -304,6 +333,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
 
+    // This assertion reflects the current envelope shape for this path.
+    // Revisit if/when this path moves to the V2 stage-indicator object form.
     expect(body.stage_indicator).toBe("evaluate");
     expect(body.stage_label).toBe("Evaluating options");
   });
@@ -491,7 +522,9 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // ---------------------------------------------------
 
   it("returns 502 for run_analysis without PLoT client", async () => {
-    // Provide graph + analysis_inputs so prerequisite passes — triggers run_analysis deterministically
+    // Provide graph + analysis_inputs so prerequisites pass.
+    // analysis_response is present specifically to anchor stage inference to evaluate,
+    // ensuring the deterministic run_analysis route is actually exercised.
     // PLoT client is null (mock), so tool execution fails
     const response = await app.inject({
       method: "POST",
@@ -500,7 +533,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
         message: "run analysis",
         context: {
           graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
-          analysis_response: null,
+          analysis_response: { analysis_status: "completed", results: [] },
           framing: { stage: "evaluate" },
           messages: [],
           scenario_id: "test-scenario",
@@ -718,7 +751,38 @@ describe("POST /orchestrate/v1/turn — integration", () => {
       expect(response.statusCode).toBe(200);
     });
 
-    it("validates direct_analysis_run system event with analysis_state (not rejected at schema level)", async () => {
+    it("accepts history with assistant_tool_calls alias on assistant messages", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn",
+        payload: {
+          message: "Apply it",
+          scenario_id: scenarioId,
+          client_turn_id: "assistant-tool-calls-hist",
+          conversation_history: [
+            { role: "user", content: "Reduce it by 10%" },
+            {
+              role: "assistant",
+              content: "Which one should I update — Onboarding Time or Hiring Delay?",
+              assistant_tool_calls: [{
+                name: "edit_graph",
+                input: {
+                  edit_description: "Reduce it by 10%",
+                  pending_clarification: {
+                    tool: "edit_graph",
+                    original_edit_request: "Reduce it by 10%",
+                    candidate_labels: ["Onboarding Time", "Hiring Delay"],
+                  },
+                },
+              }],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it("accepts valid direct_analysis_run system event with top-level analysis_state", async () => {
       const response = await app.inject({
         method: "POST",
         url: "/orchestrate/v1/turn",
@@ -738,6 +802,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
           },
           analysis_state: {
             analysis_status: "completed",
+            meta: { response_hash: "analysis-hash-1", seed_used: 1, n_samples: 1000 },
             has_results: true,
             results: [{ option_id: "opt1", score: 0.8 }],
           },
@@ -747,9 +812,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
           },
         },
       });
-      // Schema validation passes (not 400); handler may fail in test env (500)
-      // but critically this is NOT a validation rejection
-      expect(response.statusCode).not.toBe(400);
+      expect(response.statusCode).toBe(200);
     });
   });
 });

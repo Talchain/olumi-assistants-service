@@ -17,6 +17,39 @@ const AnalysisResponseSchema = z.object({
   analysis_status: z.string(),
 }).passthrough().nullable();
 
+const AnalysisStateSchema = z.object({
+  meta: z.object({
+    response_hash: z.string().min(1),
+    seed_used: z.number().optional(),
+    n_samples: z.number().optional(),
+  }).passthrough(),
+  results: z.array(z.unknown()),
+  analysis_status: z.string().optional(),
+  fact_objects: z.array(z.unknown()).optional(),
+  review_cards: z.array(z.unknown()).optional(),
+  response_hash: z.string().optional(),
+}).passthrough().nullable();
+
+const ToolCallSchema = z.object({
+  name: z.string(),
+  input: z.record(z.unknown()),
+});
+
+const ConversationMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().nullable().optional().transform((v) => v ?? ''),
+  tool_calls: z.array(ToolCallSchema).optional(),
+  assistant_tool_calls: z.array(ToolCallSchema).optional(),
+}).transform((message) => ({
+  role: message.role,
+  content: message.content,
+  ...(message.tool_calls
+    ? { tool_calls: message.tool_calls }
+    : message.assistant_tool_calls
+      ? { tool_calls: message.assistant_tool_calls }
+      : {}),
+}));
+
 // ── SystemEventSchema (from route.ts) ──────────────────────────────────────
 const SystemEventBase = {
   timestamp: z.string(),
@@ -63,7 +96,7 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
   z.object({
     event_type: z.literal('direct_analysis_run'),
     ...SystemEventBase,
-    details: z.object({}).strict(),
+    details: z.object({}).passthrough(),
   }),
   z.object({
     event_type: z.literal('feedback_submitted'),
@@ -213,6 +246,71 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect((result.data as any).custom_field).toBe("extra");
+      }
+    });
+  });
+
+  describe("AnalysisStateSchema", () => {
+    it("accepts top-level analysis_state with the minimum Path A shape", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "completed",
+        meta: { response_hash: "rh-1", seed_used: 1, n_samples: 1000 },
+        results: [],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects top-level analysis_state when meta is missing", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "completed",
+        results: [],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects top-level analysis_state when meta.response_hash is missing", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "completed",
+        meta: { seed_used: 1, n_samples: 1000 },
+        results: [],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects top-level analysis_state when results is missing", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "completed",
+        meta: { response_hash: "rh-1" },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("ConversationMessageSchema", () => {
+    it("accepts assistant_tool_calls as an ingress alias and normalises to tool_calls", () => {
+      const result = ConversationMessageSchema.safeParse({
+        role: "assistant",
+        content: null,
+        assistant_tool_calls: [{ name: "edit_graph", input: { edit_description: "Reduce it by 10%" } }],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.tool_calls).toEqual([{ name: "edit_graph", input: { edit_description: "Reduce it by 10%" } }]);
+        expect((result.data as Record<string, unknown>).assistant_tool_calls).toBeUndefined();
+        expect(result.data.content).toBe("");
+      }
+    });
+
+    it("prefers canonical tool_calls when both tool_calls and assistant_tool_calls are present", () => {
+      const result = ConversationMessageSchema.safeParse({
+        role: "assistant",
+        content: "ok",
+        tool_calls: [{ name: "edit_graph", input: { edit_description: "canonical" } }],
+        assistant_tool_calls: [{ name: "edit_graph", input: { edit_description: "alias" } }],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.tool_calls).toEqual([{ name: "edit_graph", input: { edit_description: "canonical" } }]);
       }
     });
   });
@@ -389,13 +487,13 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects direct_analysis_run with unexpected fields in details (strict)", () => {
+    it("accepts direct_analysis_run with unexpected fields in details (passthrough)", () => {
       const result = SystemEventSchema.safeParse({
         event_type: 'direct_analysis_run',
         ...VALID_BASE,
         details: { unexpected_field: 'oops' },
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     });
 
     it("accepts valid feedback_submitted", () => {

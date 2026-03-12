@@ -84,14 +84,25 @@ const SystemEventSchema = z.discriminatedUnion('event_type', [
   }),
 ]);
 
+const ToolCallSchema = z.object({
+  name: z.string(),
+  input: z.record(z.unknown()),
+});
+
 const ConversationMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().nullable().optional().transform((v) => v ?? ''),
-  tool_calls: z.array(z.object({
-    name: z.string(),
-    input: z.record(z.unknown()),
-  })).optional(),
-});
+  tool_calls: z.array(ToolCallSchema).optional(),
+  assistant_tool_calls: z.array(ToolCallSchema).optional(),
+}).transform((message) => ({
+  role: message.role,
+  content: message.content,
+  ...(message.tool_calls
+    ? { tool_calls: message.tool_calls }
+    : message.assistant_tool_calls
+      ? { tool_calls: message.assistant_tool_calls }
+      : {}),
+}));
 
 const FramingSchema = z.object({
   stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
@@ -120,6 +131,19 @@ const AnalysisResponseSchema = z.object({
   analysis_status: z.string(),
 }).passthrough().nullable();
 
+const AnalysisStateSchema = z.object({
+  meta: z.object({
+    response_hash: z.string().min(1),
+    seed_used: z.number().optional(),
+    n_samples: z.number().optional(),
+  }).passthrough(),
+  results: z.array(z.unknown()),
+  analysis_status: z.string().optional(),
+  fact_objects: z.array(z.unknown()).optional(),
+  review_cards: z.array(z.unknown()).optional(),
+  response_hash: z.string().optional(),
+}).passthrough().nullable();
+
 const ConversationContextSchema = z.object({
   graph: GraphSchema,
   analysis_response: AnalysisResponseSchema,
@@ -141,7 +165,7 @@ const TurnRequestSchema = z.object({
   /** Full graph state from UI — required when system_event.details.applied_graph_hash is set. */
   graph_state: GraphSchema.optional(),
   /** Full analysis response from UI — present for direct_analysis_run Path A. */
-  analysis_state: z.object({}).passthrough().nullable().optional(),
+  analysis_state: AnalysisStateSchema.optional(),
   /** Flat conversation history from UI — mapped to context.messages when context is absent. */
   conversation_history: z.array(ConversationMessageSchema).optional(),
   /** When true, fires draft_graph and orchestrator coaching in parallel. */

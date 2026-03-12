@@ -87,6 +87,17 @@ describe("handleDraftGraph", () => {
     const data = block.data as GraphPatchBlockData;
     expect(data.patch_type).toBe("full_draft");
     expect(data.status).toBe("proposed");
+    expect(data.applied_graph).toEqual({
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "opt_1", kind: "option", label: "Raise Prices" },
+        { id: "fac_1", kind: "factor", label: "Price Sensitivity" },
+      ],
+      edges: [
+        { from: "goal_1", to: "opt_1", strength_mean: 1, strength_std: 0.01 },
+        { from: "opt_1", to: "fac_1", strength_mean: 0.6, strength_std: 0.15 },
+      ],
+    });
 
     // 3 add_node + 2 add_edge = 5 operations
     expect(data.operations).toHaveLength(5);
@@ -225,6 +236,24 @@ describe("handleDraftGraph", () => {
 
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.auto_apply).toBe(true);
+  });
+
+  it("carries the canonical drafted graph on the full_draft block for downstream receipts", async () => {
+    const draftedGraph = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "opt_1", kind: "option", label: "Raise Prices" },
+      ],
+      edges: [
+        { from: "opt_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
+      ],
+    };
+    mockRunUnifiedPipeline.mockResolvedValueOnce(makePipelineSuccess(draftedGraph));
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-applied-graph");
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph).toEqual(draftedGraph);
   });
 
   it("extracts coaching.summary into narrationHint", async () => {
