@@ -679,7 +679,7 @@ describe("POST /assist/v1/decision-review — margin in LLM user message (P1-4)"
     expect(marginVal).toBeCloseTo(0.65 - 0.35, 10);
   });
 
-  it("margin is 'null (single-option decision)' when runner_up is null", async () => {
+  it("margin emits JSON null when runner_up is null", async () => {
     await app.inject({
       method: "POST",
       url: "/assist/v1/decision-review",
@@ -687,6 +687,34 @@ describe("POST /assist/v1/decision-review — margin in LLM user message (P1-4)"
     });
 
     expect(capturedUserMessage).toBeDefined();
-    expect(capturedUserMessage).toContain("margin: null (single-option decision)");
+    expect(capturedUserMessage).toContain("margin: null");
+  });
+
+  it("passes computed margin into performShapeCheck as reviewInput.margin (end-to-end wiring)", async () => {
+    // winner=0.65, runner_up=0.35 → expected margin ≈ 0.30
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload(),
+    });
+
+    expect(mockPerformShapeCheck).toHaveBeenCalledOnce();
+    const reviewInput = mockPerformShapeCheck.mock.calls[0][1];
+    expect(reviewInput).toBeDefined();
+    expect(typeof reviewInput.margin).toBe("number");
+    expect(reviewInput.margin).toBeCloseTo(0.65 - 0.35, 10);
+  });
+
+  it("passes margin: null into performShapeCheck for single-option decisions", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload({ runner_up: null }),
+    });
+
+    expect(mockPerformShapeCheck).toHaveBeenCalledOnce();
+    const reviewInput = mockPerformShapeCheck.mock.calls[0][1];
+    expect(reviewInput).toBeDefined();
+    expect(reviewInput.margin).toBeNull();
   });
 });

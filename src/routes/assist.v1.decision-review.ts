@@ -215,7 +215,7 @@ function checkDecisionReviewLimit(
 // User Message Builder
 // ============================================================================
 
-function buildUserMessage(input: DecisionReviewInput): string {
+function buildUserMessage(input: DecisionReviewInput, margin: number | null): string {
   const sections: string[] = [];
 
   // Brief (do NOT log raw brief - use brief_hash for tracing)
@@ -239,10 +239,6 @@ function buildUserMessage(input: DecisionReviewInput): string {
   sections.push("</DETERMINISTIC_COACHING>");
 
   // Decision Context
-  const margin =
-    input.runner_up !== null
-      ? input.winner.win_probability - input.runner_up.win_probability
-      : null;
   sections.push("<DECISION_CONTEXT>");
   sections.push(`winner: ${JSON.stringify(input.winner)}`);
   if (input.runner_up !== null) {
@@ -250,7 +246,7 @@ function buildUserMessage(input: DecisionReviewInput): string {
   } else {
     sections.push("runner_up: null (single-option decision)");
   }
-  sections.push(`margin: ${margin === null ? "null (single-option decision)" : margin}`);
+  sections.push(`margin: ${JSON.stringify(margin)}`);
   sections.push("</DECISION_CONTEXT>");
 
   // Flip Threshold Data (optional)
@@ -458,8 +454,13 @@ export default async function route(app: FastifyInstance) {
         prompt_source: promptMeta.source,
       });
 
+      // Compute margin once — reused in both the LLM prompt and the grounding corpus
+      const margin = input.runner_up !== null
+        ? input.winner.win_probability - input.runner_up.win_probability
+        : null;
+
       // Build user message
-      const userMessage = buildUserMessage(input);
+      const userMessage = buildUserMessage(input, margin);
 
       // Get adapter for provider/model info
       const adapter = getAdapter("decision_review");
@@ -503,9 +504,7 @@ export default async function route(app: FastifyInstance) {
       const reviewInputForGrounding: ReviewInputForGrounding = {
         winner: input.winner as ReviewInputForGrounding['winner'],
         runner_up: input.runner_up as ReviewInputForGrounding['runner_up'],
-        margin: input.runner_up !== null
-          ? input.winner.win_probability - input.runner_up.win_probability
-          : null,
+        margin,
         isl_results: input.isl_results as ReviewInputForGrounding['isl_results'],
         flip_threshold_data: input.flip_threshold_data as ReviewInputForGrounding['flip_threshold_data'],
       };
@@ -574,7 +573,7 @@ export default async function route(app: FastifyInstance) {
           '',
           '<CORRECTION>',
           `Your previous response contained numbers that do not appear in the input data: ${fabricatedNumbers.map((n) => `"${n}"`).join(', ')}.`,
-          'Rewrite the entire response using ONLY numbers that appear verbatim in the provided input fields (winner, runner_up, isl_results, flip_threshold_data).',
+          'Rewrite the entire response using ONLY numbers that appear verbatim in the provided input fields (winner, runner_up, margin, isl_results, flip_threshold_data).',
           'Every number in narrative_summary, robustness_explanation, readiness_rationale, scenario_contexts, flip_thresholds, pre_mortem, and bias_findings.description must be traceable to an input value (±10%).',
           'Return ONLY the corrected JSON object. No explanation.',
           '</CORRECTION>',
