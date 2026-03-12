@@ -248,6 +248,41 @@ function boundStrengthStd(
 }
 
 /**
+ * Classify a V1 edge as structural or causal based on the from/to node kinds.
+ * Structural edges (decision→option, option→factor/outcome/risk) have hard
+ * exists_probability = 1.0 because they are definitional, not probabilistic.
+ */
+function classifyEdge(
+  fromId: string,
+  toId: string,
+  nodes: V1Node[],
+): "structural" | "causal" {
+  let fromKind: string | undefined;
+  let toKind: string | undefined;
+  for (const n of nodes) {
+    if (n.id === fromId) fromKind = n.kind;
+    if (n.id === toId) toKind = n.kind;
+    if (fromKind && toKind) break;
+  }
+  if (fromKind === "decision" && toKind === "option") return "structural";
+  if (fromKind === "option" && (toKind === "factor" || toKind === "outcome" || toKind === "risk")) return "structural";
+  return "causal";
+}
+
+/**
+ * Default exists_probability when neither belief_exists nor belief is present on the edge.
+ *
+ * - Structural edges (decision→option, option→factor): 1.0 — definitional connections.
+ * - Causal edges: 0.8 — matches PLoT's normaliser default, making the assumption explicit
+ *   in CEE's output so PLoT receives an intentional value rather than an unset field.
+ *
+ * If the LLM explicitly emitted belief_exists or belief, that value is used as-is
+ * (subject only to the boundary repair for structural < 1.0).
+ */
+const STRUCTURAL_EXISTS_PROBABILITY_DEFAULT = 1.0;
+const CAUSAL_EXISTS_PROBABILITY_DEFAULT = 0.8;
+
+/**
  * Transform a V1 edge to V3 format.
  *
  * V3 Changes:
@@ -255,6 +290,7 @@ function boundStrengthStd(
  * - Uses signed coefficient model: range [-1, +1]
  * - effect_direction derived from strength_mean sign
  * - strength_std: floor 1e-6, cap max(0.5, 2×|mean|)
+ * - exists_probability: LLM value if present; else 1.0 for structural, 0.8 for causal
  */
 export function transformEdgeToV3(
   edge: V1Edge,
@@ -263,7 +299,17 @@ export function transformEdgeToV3(
 ): EdgeV3T {
   // V4 fields take precedence, fallback to legacy for backwards compatibility
   const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
-  const beliefExists = edge.belief_exists ?? edge.belief ?? 0.5;
+
+  // exists_probability: use LLM-emitted value if present; otherwise apply
+  // class-appropriate default rather than the old fixed 0.5 sentinel.
+  // Rationale: 0.5 is indistinguishable from "I know this edge exists with 50%
+  // confidence" vs "I forgot to emit the field", causing PLoT to override with 0.8.
+  // Using the class default makes the assumption explicit and auditable.
+  const beliefExists =
+    edge.belief_exists ?? edge.belief ??
+    (classifyEdge(edge.from, edge.to, _nodes) === "structural"
+      ? STRUCTURAL_EXISTS_PROBABILITY_DEFAULT
+      : CAUSAL_EXISTS_PROBABILITY_DEFAULT);
 
   // In V3, strength_mean is a signed coefficient
   // If effect_direction is negative, strength_mean should be negative

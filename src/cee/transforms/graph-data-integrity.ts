@@ -10,22 +10,27 @@
  *    Special case: percentage factors (unit: "%") use raw_value / 100.
  *    Apply the same correction to analysis_ready.options interventions for the affected factor.
  *
- * 2. Missing edge fields:
- *    exists_probability and effect_direction must be present on every edge.
- *    Structural edges (decision→option, option→factor): default to 1.0 / "positive".
- *    Causal edges: default to 0.8 / derive from strength.mean sign.
- *    Log every default applied.
+ * 2. Edge field safety net (post-V3-transform):
+ *    The primary fix for edge field defaults is in transformEdgeToV3() which now
+ *    applies class-aware defaults (1.0 structural, 0.8 causal) when the LLM does
+ *    not emit belief_exists or belief. This module is a safety net that catches:
+ *    - Edges from the legacy pipeline or other sources that bypassed the transform.
+ *    - Structural edges where the LLM explicitly emitted a value < 1.0 (wrong).
+ *    - Any edge still missing effect_direction after the transform.
+ *    Log every correction applied.
  *
  * Root cause commentary:
  *   Issue 1: The LLM emits raw_value:49 and cap:59 but encodes value:0.49
- *   (£49/£100 division) instead of value=49/59≈0.831. CEE has no consistency
- *   check, so the contradiction passes through to PLoT uncorrected.
+ *   (£49/£100 division) instead of value=49/59≈0.831. CEE had no consistency
+ *   check, so the contradiction passed through to PLoT uncorrected.
+ *   Intervention values used the same wrong convention and are corrected by the
+ *   same ratio (100/cap).
  *
- *   Issue 2: V4 edges may not emit belief_exists/belief or effect_direction.
- *   transformEdgeToV3() defaults belief_exists to 0.5, which conflicts with
- *   PLoT's normaliser default of 0.8 for structural edges (should be 1.0).
- *   This fix surfaces the defaulting in CEE's repair_summary instead of
- *   silently happening in PLoT's normaliser.
+ *   Issue 2: transformEdgeToV3() previously defaulted belief_exists to 0.5 when
+ *   the LLM omitted the field, resulting in causal edges arriving at PLoT with 0.5
+ *   (PLoT overrides with its own default 0.8) and structural edges also arriving
+ *   with 0.5 (should be 1.0). Fixed in transformEdgeToV3() — this module handles
+ *   remaining structural corrections and legacy pipeline edges.
  */
 
 import { log } from "../../utils/telemetry.js";
@@ -151,8 +156,9 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
     ? v3Body.analysis_ready.options
     : [];
 
-  // Build a map of factorId → correction factor for updating interventions later
+  // Build maps for updating interventions after factor repairs
   const factorCorrectionMap = new Map<string, number>(); // factorId → corrected value
+  const factorCorrectionRatioMap = new Map<string, number>(); // factorId → corrected/original ratio
 
   for (const node of nodes) {
     if (node?.kind !== "factor") continue;
@@ -189,6 +195,14 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
     // Apply correction to node
     node.observed_state = { ...observed, value: corrected };
     factorCorrectionMap.set(node.id, corrected);
+    // Correction ratio: how much was the original value off by?
+    // ratio = corrected / original. Any option intervention on this factor
+    // that used the same wrong encoding (÷100 instead of ÷cap) will be off
+    // by the same ratio, so multiply by ratio to correct.
+    // Example: raw_value:49, cap:59 → original:0.49, corrected:0.831
+    //   ratio = 0.831/0.49 = 100/59 ≈ 1.695
+    //   opt_increase_price: 0.59 → 0.59 × (100/59) = 1.0 ✓
+    factorCorrectionRatioMap.set(node.id, corrected / value);
     repairs.push(repair);
 
     log.info({
@@ -204,39 +218,46 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
   }
 
   // Repair analysis_ready intervention values for corrected factors.
-  // The intervention value for a factor represents the target value under each option.
-  // If the factor's baseline value was wrong, option interventions that matched it
-  // (e.g. status-quo option) may also be wrong.
   //
-  // Conservative approach: only correct option interventions that are numerically
-  // close to the WRONG baseline value (within 5% tolerance), meaning they were
-  // likely copied directly from the uncorrected baseline.
+  // When a factor's value was wrong by ratio R (corrected = original × R),
+  // every option intervention targeting that factor was encoded with the same
+  // wrong scale convention. Apply the same ratio to each intervention.
+  //
+  // Example from debug bundle c47e62a3:
+  //   factor raw_value:49, cap:59 → original:0.49, corrected:0.831
+  //   R = 0.831/0.49 = 100/59 ≈ 1.695
+  //   opt_status_quo: 0.49 × 1.695 ≈ 0.831  (£49/£59)
+  //   opt_increase_price: 0.59 × 1.695 ≈ 1.0  (£59/£59 = cap reached)
+  //
+  // Guard: clamp corrected interventions to [0, 1] since factor values are normalised.
   for (const option of analysisOptions) {
     const interventions: Record<string, number> = option?.interventions ?? {};
     for (const [factorId, interventionValue] of Object.entries(interventions)) {
-      const correctedBaseline = factorCorrectionMap.get(factorId);
-      if (correctedBaseline === undefined) continue;
+      const correctionRatio = factorCorrectionRatioMap.get(factorId);
+      if (correctionRatio === undefined) continue;
 
-      // Look up the original (wrong) value for this factor
-      const factorNode = nodes.find((n: any) => n.id === factorId);
-      const originalValue = repairs.find((r) => r.node_id === factorId)?.before;
-      if (originalValue === undefined || factorNode === undefined) continue;
+      const factorRepair = repairs.find((r) => r.node_id === factorId);
+      if (!factorRepair) continue;
 
-      // Only correct if the intervention value matches the wrong baseline closely
-      if (!isWithinTolerance(interventionValue as number, originalValue)) continue;
+      const rawInterventionValue = interventionValue as number;
+      const correctedIntervention = Number(
+        Math.max(0, Math.min(1, rawInterventionValue * correctionRatio)).toFixed(6)
+      );
 
-      const correctedIntervention = correctedBaseline;
+      // Skip if already correct (ratio effectively 1.0 — shouldn't happen but guard)
+      if (isWithinTolerance(rawInterventionValue, correctedIntervention)) continue;
+
       interventions[factorId] = correctedIntervention;
       option.interventions = interventions;
 
       repairs.push({
         node_id: `option:${option.id}`,
         field: `interventions.${factorId}`,
-        before: interventionValue as number,
+        before: rawInterventionValue,
         after: correctedIntervention,
-        raw_value: repairs.find((r) => r.node_id === factorId)!.raw_value,
-        cap: repairs.find((r) => r.node_id === factorId)!.cap,
-        reason: `option intervention corrected to match factor scale correction`,
+        raw_value: factorRepair.raw_value,
+        cap: factorRepair.cap,
+        reason: `option intervention rescaled by factor correction ratio ${correctionRatio.toFixed(4)} (same ÷100 encoding as factor)`,
       });
 
       log.info({
@@ -244,8 +265,9 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
         request_id: requestId,
         option_id: option.id,
         factor_id: factorId,
-        before: interventionValue,
+        before: rawInterventionValue,
         after: correctedIntervention,
+        correction_ratio: correctionRatio,
       }, `[graph-data-integrity] Option intervention corrected: ${option.id}.${factorId}`);
     }
   }

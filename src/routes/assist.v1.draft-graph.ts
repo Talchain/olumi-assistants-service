@@ -20,6 +20,7 @@ import {
   validateStrictModeV3,
 } from "../cee/transforms/index.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../cee/transforms/analysis-ready.js";
+import { runGraphDataIntegrityChecks } from "../cee/transforms/graph-data-integrity.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 
 // ============================================================================
@@ -630,6 +631,9 @@ export default async function route(app: FastifyInstance) {
           // CIL 0.2: simplified; include_debug already equals unsafeCaptureEnabled
           includeDebug: unsafeCaptureEnabled,
         });
+
+        // Graph data integrity checks (legacy pipeline path — mirrors unified boundary)
+        runGraphDataIntegrityChecks(v3Body, requestId);
 
         // Task 2C: Surface STRP/repair mutations as model_adjustments on analysis_ready
         const strpMutations = v1Trace?.strp?.mutations;
