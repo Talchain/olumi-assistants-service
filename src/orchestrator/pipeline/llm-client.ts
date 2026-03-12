@@ -25,5 +25,10 @@ export function createProductionLLMClient(): LLMClient {
       const adapter = getAdapter('orchestrator');
       return adapter.chat(options, config);
     },
+
+    getResolvedModel() {
+      const adapter = getAdapter('orchestrator');
+      return { model: adapter.model, provider: adapter.name };
+    },
   };
 }

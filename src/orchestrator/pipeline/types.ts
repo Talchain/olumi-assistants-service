@@ -28,6 +28,7 @@ import type {
 } from "../types.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
+import type { DecisionContinuity } from "../context/decision-continuity.js";
 import type { ToolInvocation, ParsedLLMResponse } from "../response-parser.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import type { ChatWithToolsResult, ChatWithToolsArgs, CallOpts } from "../../adapters/llm/types.js";
@@ -66,6 +67,9 @@ export interface RouteMetadata {
   has_graph?: boolean;
   has_analysis?: boolean;
   contract_version?: string;
+  // Model observability (populated by phase3-llm after LLM call)
+  resolved_model?: string | null;
+  resolved_provider?: string | null;
 }
 
 export type TriggerSource =
@@ -240,6 +244,29 @@ export interface DSKTechnique {
 }
 
 // ============================================================================
+// Entity Detail (for entity-aware context enrichment)
+// ============================================================================
+
+export interface ReferencedEntityEdgeSummary {
+  connected_label: string;
+  strength: number;
+  effect_direction: string | null;
+}
+
+export interface ReferencedEntityDetail {
+  id: string;
+  label: string;
+  kind: string;
+  category?: string;
+  value?: number;
+  raw_value?: number;
+  unit?: string;
+  cap?: number;
+  source?: string;
+  edges: ReferencedEntityEdgeSummary[];
+}
+
+// ============================================================================
 // Phase 1 Output — EnrichedContext
 // ============================================================================
 
@@ -260,6 +287,10 @@ export interface EnrichedContext {
   selected_edge_ids?: string[];                // from selected_elements (edge IDs)
   context_hash?: string;                       // from computeContextHash
   analysis_inputs?: AnalysisInputs | null;     // passed through from request for run_analysis tool
+  /** Decision continuity summary — populated by Phase 1 after compaction. */
+  decision_continuity?: DecisionContinuity;
+  /** Entity-aware detail blocks — populated by Phase 1 when message references graph entities. */
+  referenced_entities?: ReferencedEntityDetail[];
 
   // Inferred state
   stage_indicator: StageIndicator;
@@ -456,6 +487,12 @@ export interface LLMClient {
     options: { system: string; userMessage: string },
     config: { requestId: string; timeoutMs: number },
   ): Promise<{ content: string }>;
+
+  /**
+   * Return the resolved model ID and provider name for the last call.
+   * Optional — production client implements this; test mocks may omit it.
+   */
+  getResolvedModel?(): { model: string; provider: string } | null;
 }
 
 export interface ToolDispatcher {
@@ -505,4 +542,5 @@ export type {
   GraphV3Compact,
   AnalysisResponseSummary,
   GuidanceItem,
+  DecisionContinuity,
 };
