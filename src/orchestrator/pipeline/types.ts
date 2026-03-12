@@ -26,7 +26,9 @@ import type {
   AnalysisInputs,
   GraphPatchBlockData,
   AppliedChanges,
+  ModelReceipt,
 } from "../types.js";
+import type { PLoTClient } from "../plot-client.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
 import type { DecisionContinuity } from "../context/decision-continuity.js";
@@ -474,7 +476,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   };
 
   /** Server-constructed model receipt after draft_graph. */
-  model_receipt?: import("../types.js").ModelReceipt;
+  model_receipt?: ModelReceipt;
 
   /** Diagnostics content from LLM. Non-production only. */
   diagnostics?: string;
@@ -527,7 +529,7 @@ export interface PipelineDeps {
   llmClient: LLMClient;
   toolDispatcher: ToolDispatcher;
   /** PLoT client for system event routing (validate-patch). Optional — omit in tests that don't exercise PLoT. */
-  plotClient?: import("../plot-client.js").PLoTClient | null;
+  plotClient?: PLoTClient | null;
   /** PLoT call opts (turn budget, signal). Passed to system event router. */
   plotOpts?: PLoTClientRunOpts;
 }

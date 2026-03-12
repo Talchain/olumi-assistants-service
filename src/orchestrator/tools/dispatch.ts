@@ -147,6 +147,7 @@ export async function dispatchToolHandler(
 
       const blocks = [...result.blocks];
       let assistantText: string | null = null;
+      let deterministicAnswerTier: 1 | 2 | 3 | undefined;
 
       // Auto-chain explain_results when intent is 'explain' or 'recommend' (not pure 'act')
       const intent = opts?.intentClassification;
@@ -164,6 +165,7 @@ export async function dispatchToolHandler(
             turnId,
           );
           blocks.push(...explainResult.blocks);
+          deterministicAnswerTier = explainResult.deterministic_answer_tier;
         } catch {
           // Non-fatal: if explanation fails, still return analysis results
         }
@@ -182,6 +184,7 @@ export async function dispatchToolHandler(
         toolLatencyMs: result.latencyMs,
         guidanceItems: analysisGuidance,
         routeMetadata: buildToolRouteMetadata('run_analysis'),
+        ...(deterministicAnswerTier !== undefined && { deterministicAnswerTier }),
       };
     }
 

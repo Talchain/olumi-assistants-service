@@ -317,6 +317,63 @@ describe("phase4-tools", () => {
     expect(result.executed_tools).toEqual(["run_analysis", "explain_results"]);
   });
 
+  it("propagates applied_changes from dispatcher result to phase4 output", async () => {
+    const appliedChanges = {
+      summary: "Renamed 'Cost' to 'Price'",
+      rerun_recommended: false,
+      changes: [{ op: "relabel" as const, node_id: "node_cost", from: "Cost", to: "Price" }],
+    };
+
+    const dispatcher = makeMockDispatcher({
+      side_effects: { graph_updated: true, analysis_ran: false, brief_generated: false },
+      applied_changes: appliedChanges,
+    });
+
+    const result = await phase4Execute(
+      makeLLMResult({
+        tool_invocations: [{ id: "t1", name: "edit_graph", input: { edit_description: "Rename Cost to Price" } }],
+      }),
+      makeEnrichedContext({ stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" } }),
+      dispatcher,
+      "req-applied",
+    );
+
+    expect(result.applied_changes).toEqual(appliedChanges);
+  });
+
+  it("propagates deterministic_answer_tier from dispatcher result to phase4 output", async () => {
+    const dispatcher = makeMockDispatcher({
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      deterministic_answer_tier: 2,
+    });
+
+    const result = await phase4Execute(
+      makeLLMResult({
+        tool_invocations: [{ id: "t1", name: "explain_results", input: {} }],
+      }),
+      makeEnrichedContext(),
+      dispatcher,
+      "req-tier",
+    );
+
+    expect(result.deterministic_answer_tier).toBe(2);
+  });
+
+  it("applied_changes absent when dispatcher returns no applied_changes", async () => {
+    const dispatcher = makeMockDispatcher({
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+    });
+
+    const result = await phase4Execute(
+      makeLLMResult({ tool_invocations: [{ id: "t1", name: "edit_graph", input: {} }] }),
+      makeEnrichedContext({ stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" } }),
+      dispatcher,
+      "req-no-applied",
+    );
+
+    expect(result.applied_changes).toBeUndefined();
+  });
+
   it("emits OrchestratorToolSuppressed when stage policy blocks a tool", async () => {
     const events: Array<{ name: string; data: Record<string, unknown> }> = [];
     setTestSink((name, data) => events.push({ name, data }));

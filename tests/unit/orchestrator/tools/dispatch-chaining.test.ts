@@ -269,6 +269,53 @@ describe("dispatch chaining: run_analysis + explain_results", () => {
     expect(explainContext.analysis_response?.response_hash).toBe("top-hash");
   });
 
+  it("propagates deterministic_answer_tier from auto-chained explain_results", async () => {
+    mockExplainResults.mockResolvedValue({
+      blocks: [makeCommentaryBlock()],
+      assistantText: null,
+      latencyMs: 50,
+      deterministic_answer_tier: 2,
+    });
+
+    const result = await dispatchToolHandler(
+      "run_analysis",
+      {},
+      makeContext(),
+      "turn-1",
+      "req-1",
+      { intentClassification: "explain" },
+    );
+
+    expect(result.deterministicAnswerTier).toBe(2);
+  });
+
+  it("deterministicAnswerTier absent when explain_results returns no tier", async () => {
+    // Default mock has no deterministic_answer_tier
+    const result = await dispatchToolHandler(
+      "run_analysis",
+      {},
+      makeContext(),
+      "turn-1",
+      "req-1",
+      { intentClassification: "explain" },
+    );
+
+    expect(result.deterministicAnswerTier).toBeUndefined();
+  });
+
+  it("deterministicAnswerTier absent when explain_results is not chained (intent=act)", async () => {
+    const result = await dispatchToolHandler(
+      "run_analysis",
+      {},
+      makeContext(),
+      "turn-1",
+      "req-1",
+      { intentClassification: "act" },
+    );
+
+    expect(result.deterministicAnswerTier).toBeUndefined();
+  });
+
   it("analysisResponse is always returned in dispatch result", async () => {
     const result = await dispatchToolHandler(
       "run_analysis",
