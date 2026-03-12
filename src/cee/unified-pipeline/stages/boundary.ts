@@ -17,6 +17,7 @@ import { isAdminAuthorized } from "../../validation/pipeline.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../constants/versions.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
+import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
@@ -36,6 +37,30 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       strictMode: ctx.opts.strictMode,
       includeDebug: ctx.opts.includeDebug,
     });
+
+    // ── Graph data integrity checks (post-V3-transform, pre-validation) ─────
+    // Runs two deterministic corrections:
+    // 1. Factor scale consistency: assert value ≈ raw_value/cap (or raw_value/100 for "%").
+    //    Corrects observed_state.value and matching analysis_ready.options interventions.
+    // 2. Edge field defaults: ensure exists_probability and effect_direction are present.
+    //    Structural edges default to 1.0/"positive"; causal to 0.8/sign-inferred.
+    // Mutations are logged in trace.pipeline.repair_summary.graph_data_integrity.
+    const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId);
+    if (
+      integrityRepairs.scale_consistency_repairs.length > 0 ||
+      integrityRepairs.edge_field_repairs.length > 0
+    ) {
+      // Attach to pipeline trace so debug bundles capture the corrections.
+      const pipelineTrace = (v3Body as any)?.trace?.pipeline;
+      if (pipelineTrace && typeof pipelineTrace === "object") {
+        const repairSummary = (pipelineTrace as any).repair_summary;
+        if (repairSummary && typeof repairSummary === "object") {
+          (repairSummary as any).graph_data_integrity = integrityRepairs;
+        } else {
+          (pipelineTrace as any).repair_summary = { graph_data_integrity: integrityRepairs };
+        }
+      }
+    }
 
     // Surface STRP/repair mutations as model_adjustments (match route handler lines 500-519)
     const v1Trace = (ctx.ceeResponse as any).trace;
