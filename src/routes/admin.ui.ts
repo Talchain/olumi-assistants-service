@@ -16,8 +16,9 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
-import { verifyIPAllowed } from '../middleware/admin-auth.js';
+import { verifyIPAllowed, verifyAdminKey } from '../middleware/admin-auth.js';
 import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
+import { config } from '../config/index.js';
 
 /**
  * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
@@ -3488,6 +3489,314 @@ function generateAdminUI(): string {
 }
 
 /**
+ * Generate the admin dashboard HTML.
+ * Displays prompt status, model routing, and environment info.
+ * Calls /admin/prompts/verify and /admin/models/routing internally via fetch.
+ */
+function generateDashboardUI(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Olumi Admin Dashboard</title>
+  <script defer src="${ALPINE_CDN_URL}"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    header h1 { font-size: 1.5rem; }
+    header p { color: #aaa; font-size: 0.9rem; margin-top: 4px; }
+    header nav { margin-top: 12px; }
+    header nav a { color: #a5b4fc; font-size: 0.9rem; text-decoration: none; margin-right: 16px; }
+    header nav a:hover { color: white; }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin-bottom: 15px; color: #1a1a2e; font-size: 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f9fafb; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge-store { background: #dbeafe; color: #1e40af; }
+    .badge-default { background: #f3f4f6; color: #6b7280; }
+    .badge-env { background: #d1fae5; color: #065f46; }
+    .badge-openai { background: #fef3c7; color: #92400e; }
+    .badge-anthropic { background: #ede9fe; color: #5b21b6; }
+    .badge-unknown { background: #fee2e2; color: #dc2626; }
+    .badge-on { background: #d1fae5; color: #065f46; }
+    .badge-off { background: #f3f4f6; color: #6b7280; }
+    .form-row { display: flex; gap: 10px; margin-bottom: 15px; align-items: flex-end; }
+    input {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      flex: 1;
+    }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .error { color: #dc2626; font-size: 0.9rem; margin-top: 8px; }
+    .loading { color: #6b7280; font-size: 0.9rem; }
+    .meta { font-size: 0.78rem; color: #9ca3af; margin-top: 8px; }
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .env-item {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .env-item .label { font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; }
+    .env-item .value { font-size: 0.9rem; margin-top: 2px; }
+    code { font-family: monospace; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Olumi Admin Dashboard</h1>
+      <p>Prompt status &bull; Model routing &bull; Environment</p>
+      <nav>
+        <a href="/admin">Prompt Manager</a>
+        <a href="/admin/dashboard">Dashboard</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" x-data="dashboard()">
+
+    <!-- Auth -->
+    <div class="card" x-show="!loaded">
+      <h2>Admin Key</h2>
+      <div class="form-row">
+        <input type="password" x-model="apiKey" placeholder="X-Admin-Key" @keydown.enter="load()" />
+        <button class="btn btn-primary" @click="load()">Load</button>
+      </div>
+      <div class="error" x-show="authError" x-text="authError"></div>
+    </div>
+
+    <template x-if="loaded">
+      <div>
+
+        <!-- Environment info -->
+        <div class="card">
+          <h2>Environment</h2>
+          <div class="env-grid">
+            <div class="env-item">
+              <div class="label">NODE_ENV</div>
+              <div class="value"><code x-text="env.node_env || '—'"></code></div>
+            </div>
+            <template x-for="flag in env.feature_flags" :key="flag.name">
+              <div class="env-item">
+                <div class="label" x-text="flag.name"></div>
+                <div class="value">
+                  <span class="badge" :class="flag.enabled ? 'badge-on' : 'badge-off'" x-text="flag.enabled ? 'on' : 'off'"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="meta" x-text="'Loaded at ' + env.timestamp"></div>
+        </div>
+
+        <!-- Model routing -->
+        <div class="card">
+          <h2>Model Routing</h2>
+          <div x-show="modelsLoading" class="loading">Loading…</div>
+          <div x-show="modelsError" class="error" x-text="modelsError"></div>
+          <template x-if="!modelsLoading && !modelsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Model</th>
+                    <th>Provider</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in models.tasks" :key="row.task">
+                    <tr>
+                      <td><code x-text="row.task"></code></td>
+                      <td x-text="row.model"></td>
+                      <td>
+                        <span class="badge"
+                          :class="row.provider === 'anthropic' ? 'badge-anthropic' : row.provider === 'openai' ? 'badge-openai' : 'badge-unknown'"
+                          x-text="row.provider"></span>
+                      </td>
+                      <td>
+                        <span class="badge"
+                          :class="row.source === 'env_override' ? 'badge-env' : 'badge-default'"
+                          x-text="row.source === 'env_override' ? 'env override' : 'default'"></span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta">Default provider: <code x-text="models.default_provider"></code> &bull; <span x-text="models.timestamp"></span></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Prompt status -->
+        <div class="card">
+          <h2>Prompt Status</h2>
+          <div x-show="promptsLoading" class="loading">Loading…</div>
+          <div x-show="promptsError" class="error" x-text="promptsError"></div>
+          <template x-if="!promptsLoading && !promptsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Prompt ID</th>
+                    <th>Source</th>
+                    <th>Store Version</th>
+                    <th>Content Hash</th>
+                    <th>Length</th>
+                    <th>Loaded At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="p in prompts.prompts" :key="p.prompt_id">
+                    <tr>
+                      <td><code x-text="p.prompt_id"></code></td>
+                      <td>
+                        <span class="badge"
+                          :class="p.source === 'store' ? 'badge-store' : 'badge-default'"
+                          x-text="p.source"></span>
+                      </td>
+                      <td x-text="p.store_version ?? '—'"></td>
+                      <td><code x-text="p.content_hash ? p.content_hash.slice(0, 12) + '…' : '—'"></code></td>
+                      <td x-text="p.content_length ?? '—'"></td>
+                      <td x-text="p.loaded_at ? formatDate(p.loaded_at) : '—'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta" x-text="'Snapshot at ' + prompts.snapshot_at"></div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+    </template>
+  </div>
+
+  <script>
+    function dashboard() {
+      return {
+        apiKey: '',
+        loaded: false,
+        authError: '',
+
+        env: {},
+        models: {},
+        prompts: {},
+        modelsLoading: false,
+        modelsError: '',
+        promptsLoading: false,
+        promptsError: '',
+
+        async load() {
+          this.authError = '';
+          if (!this.apiKey) { this.authError = 'Enter admin key'; return; }
+          await Promise.all([this.loadEnv(), this.loadModels(), this.loadPrompts()]);
+          if (!this.authError) this.loaded = true;
+        },
+
+        async loadEnv() {
+          try {
+            const res = await fetch('/admin/dashboard/env', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.status === 401 || res.status === 403) {
+              this.authError = 'Invalid admin key';
+              return;
+            }
+            this.env = await res.json();
+          } catch (e) {
+            this.authError = 'Failed to load environment info';
+          }
+        },
+
+        async loadModels() {
+          this.modelsLoading = true;
+          this.modelsError = '';
+          try {
+            const res = await fetch('/admin/models/routing', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.modelsError = 'Failed to load model routing (' + res.status + ')'; return; }
+            this.models = await res.json();
+          } catch (e) {
+            this.modelsError = 'Network error loading models';
+          } finally {
+            this.modelsLoading = false;
+          }
+        },
+
+        async loadPrompts() {
+          this.promptsLoading = true;
+          this.promptsError = '';
+          try {
+            const res = await fetch('/admin/prompts/verify', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.promptsError = 'Failed to load prompt status (' + res.status + ')'; return; }
+            this.prompts = await res.json();
+          } catch (e) {
+            this.promptsError = 'Network error loading prompts';
+          } finally {
+            this.promptsLoading = false;
+          }
+        },
+
+        formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      };
+    }
+  </script>
+</body>
+</html>`;
+}
+
+/**
  * Admin UI routes
  */
 export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
@@ -3514,5 +3823,69 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
       .header('Referrer-Policy', 'strict-origin-when-cross-origin')
       .header('X-XSS-Protection', '1; mode=block')
       .send(generateAdminUI());
+  });
+
+  /**
+   * GET /admin/dashboard - Prompt & model status dashboard
+   *
+   * Visual dashboard showing active prompt metadata, model routing per task,
+   * and key feature flag status. Requires admin key via Alpine.js prompt.
+   */
+  app.get('/admin/dashboard', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyIPAllowed(request, reply)) return;
+
+    return reply
+      .type('text/html')
+      .header('Content-Security-Policy', CSP_HEADER)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('X-Frame-Options', 'DENY')
+      .header('Referrer-Policy', 'strict-origin-when-cross-origin')
+      .header('X-XSS-Protection', '1; mode=block')
+      .header('Cache-Control', 'no-store')
+      .send(generateDashboardUI());
+  });
+
+  /**
+   * GET /admin/dashboard/env - Environment info for dashboard
+   *
+   * Returns NODE_ENV and key feature flags read from config (not raw env).
+   * Requires admin key.
+   */
+  app.get('/admin/dashboard/env', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    let nodeEnv: string;
+    let orchestratorEnabled: boolean;
+    let dskEnabled: boolean;
+    let anthropicPromptCacheEnabled: boolean;
+    let zone2RegistryEnabled: boolean;
+
+    try {
+      nodeEnv = config.server.nodeEnv ?? 'unknown';
+      orchestratorEnabled = config.features.orchestrator ?? false;
+      dskEnabled = config.features.dskEnabled ?? false;
+      anthropicPromptCacheEnabled = config.promptCache.anthropicEnabled ?? false;
+      zone2RegistryEnabled = config.features.zone2Registry ?? false;
+    } catch {
+      nodeEnv = 'unknown';
+      orchestratorEnabled = false;
+      dskEnabled = false;
+      anthropicPromptCacheEnabled = false;
+      zone2RegistryEnabled = false;
+    }
+
+    return reply
+      .header('Cache-Control', 'no-store')
+      .status(200)
+      .send({
+      node_env: nodeEnv,
+      feature_flags: [
+        { name: 'CEE_ORCHESTRATOR_ENABLED', enabled: orchestratorEnabled },
+        { name: 'DSK_ENABLED', enabled: dskEnabled },
+        { name: 'ANTHROPIC_PROMPT_CACHE_ENABLED', enabled: anthropicPromptCacheEnabled },
+        { name: 'CEE_ZONE2_REGISTRY_ENABLED', enabled: zone2RegistryEnabled },
+      ],
+      timestamp: new Date().toISOString(),
+    });
   });
 }

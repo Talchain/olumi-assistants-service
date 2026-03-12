@@ -9,7 +9,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, PendingProposalState, V2RunResponseEnvelope } from "../types.js";
+import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, PendingProposalState, V2RunResponseEnvelope, ProposedChangesPayload, AppliedChanges } from "../types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { createPLoTClient } from "../plot-client.js";
 import { getAdapter } from "../../adapters/llm/router.js";
@@ -73,10 +73,10 @@ export interface ToolDispatchResult {
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
   pendingClarification?: PendingClarificationState;
   pendingProposal?: PendingProposalState;
-  proposedChanges?: import("../types.js").ProposedChangesPayload;
+  proposedChanges?: ProposedChangesPayload;
   routeMetadata?: RouteMetadata;
   /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
-  appliedChanges?: import("../types.js").AppliedChanges;
+  appliedChanges?: AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministicAnswerTier?: 1 | 2 | 3;
 }

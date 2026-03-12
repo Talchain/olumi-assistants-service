@@ -25,6 +25,7 @@ import type {
   GraphV3T,
   AnalysisInputs,
   GraphPatchBlockData,
+  AppliedChanges,
 } from "../types.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
@@ -374,7 +375,7 @@ export interface ToolResult {
   proposed_changes?: ProposedChangesPayload;
   route_metadata?: RouteMetadata;
   /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
-  applied_changes?: import("../types.js").AppliedChanges;
+  applied_changes?: AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministic_answer_tier?: 1 | 2 | 3;
 }
@@ -404,7 +405,7 @@ export interface OrchestratorResponseEnvelopeV2 {
    * Additive UI supplement — does not replace GraphPatchBlock.
    * Absent when edit was rejected or no edit occurred this turn.
    */
-  applied_changes?: import("../types.js").AppliedChanges;
+  applied_changes?: AppliedChanges;
   /**
    * Which explain_results tier resolved this turn.
    * 1 = cached deterministic, 2 = review data, 3 = LLM call.

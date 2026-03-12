@@ -67,6 +67,7 @@ import { adminUIRoutes } from "./routes/admin.ui.js";
 import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
 import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
+import { adminModelRoutes } from "./routes/admin.models.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
@@ -871,9 +872,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     const adminRoutesEnabled = config.prompts?.adminRoutesEnabled !== false;
     if (!adminRoutesEnabled) {
       app.log.info('Admin routes disabled via ADMIN_ROUTES_ENABLED=false');
-    } else if (config.prompts?.enabled || config.prompts?.adminApiKey) {
+    } else if (config.prompts?.enabled || config.prompts?.adminApiKey || config.prompts?.adminApiKeyRead) {
       await adminPromptRoutes(app);
       await adminUIRoutes(app);
+      await adminModelRoutes(app);
       await adminDraftFailureRoutes(app);
       await adminLLMOutputRoutes(app);
       await adminTestRoutes(app);
