@@ -74,6 +74,8 @@ export interface ReviewInputForGrounding {
     flip_value?: number | null;
     [key: string]: unknown;
   }>;
+  /** Pre-computed margin (winner.win_probability − runner_up.win_probability). Null for single-option decisions. */
+  margin?: number | null;
 }
 
 // Regex to extract numeric tokens from label strings (integers and decimals, incl. negatives).
@@ -124,6 +126,9 @@ export function extractGroundedNumbers(input: ReviewInputForGrounding): number[]
     push(input.runner_up.outcome_mean);
     nums.push(...extractNumbersFromLabel(input.runner_up.label));
   }
+
+  // Pre-computed margin is a legitimate citable number
+  if (input.margin != null) push(input.margin);
 
   for (const oc of input.isl_results?.option_comparison ?? []) {
     push(oc.win_probability);

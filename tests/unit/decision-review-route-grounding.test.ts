@@ -617,3 +617,76 @@ describe("POST /assist/v1/decision-review — _meta.model_used (P1-3)", () => {
     expect(body._meta.did_retry).toBe(true);
   });
 });
+
+// ============================================================================
+// Margin pre-computation in LLM user message (route-level, via adapter.chat spy)
+// ============================================================================
+
+describe("POST /assist/v1/decision-review — margin in LLM user message (P1-4)", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await route(app);
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedUserMessage = undefined;
+    setupDefaultMocks();
+    mockGetAdapter.mockReturnValue({
+      name: "test-adapter",
+      model: "test-model",
+      chat: vi.fn(async (args: { system: string; userMessage: string }) => {
+        capturedUserMessage = args.userMessage;
+        return makeChatResult(JSON.stringify(MOCK_REVIEW_JSON));
+      }),
+    });
+    mockPerformShapeCheck.mockReturnValue(SHAPE_CHECK_OK);
+  });
+
+  it("includes 'margin:' as a named field in the DECISION_CONTEXT block", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload(), // winner=0.65, runner_up=0.35 → margin=0.30
+    });
+
+    expect(capturedUserMessage).toBeDefined();
+    expect(capturedUserMessage).toContain("<DECISION_CONTEXT>");
+    expect(capturedUserMessage).toMatch(/margin:/);
+  });
+
+  it("margin value equals winner.win_probability minus runner_up.win_probability", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload(), // winner.win_probability=0.65, runner_up.win_probability=0.35
+    });
+
+    expect(capturedUserMessage).toBeDefined();
+    // 0.65 - 0.35 = 0.30 (floating point: may render as 0.30000000000000004 — check for the key prefix)
+    // We verify the margin line is present and contains a numeric value derived from subtraction
+    const marginLineMatch = capturedUserMessage!.match(/margin:\s*([^\n]+)/);
+    expect(marginLineMatch).not.toBeNull();
+    const marginStr = marginLineMatch![1].trim();
+    const marginVal = parseFloat(marginStr);
+    expect(marginVal).toBeCloseTo(0.65 - 0.35, 10);
+  });
+
+  it("margin is 'null (single-option decision)' when runner_up is null", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload({ runner_up: null }),
+    });
+
+    expect(capturedUserMessage).toBeDefined();
+    expect(capturedUserMessage).toContain("margin: null (single-option decision)");
+  });
+});

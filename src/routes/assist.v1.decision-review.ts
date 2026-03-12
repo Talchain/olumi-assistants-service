@@ -239,6 +239,10 @@ function buildUserMessage(input: DecisionReviewInput): string {
   sections.push("</DETERMINISTIC_COACHING>");
 
   // Decision Context
+  const margin =
+    input.runner_up !== null
+      ? input.winner.win_probability - input.runner_up.win_probability
+      : null;
   sections.push("<DECISION_CONTEXT>");
   sections.push(`winner: ${JSON.stringify(input.winner)}`);
   if (input.runner_up !== null) {
@@ -246,6 +250,7 @@ function buildUserMessage(input: DecisionReviewInput): string {
   } else {
     sections.push("runner_up: null (single-option decision)");
   }
+  sections.push(`margin: ${margin === null ? "null (single-option decision)" : margin}`);
   sections.push("</DECISION_CONTEXT>");
 
   // Flip Threshold Data (optional)
@@ -498,6 +503,9 @@ export default async function route(app: FastifyInstance) {
       const reviewInputForGrounding: ReviewInputForGrounding = {
         winner: input.winner as ReviewInputForGrounding['winner'],
         runner_up: input.runner_up as ReviewInputForGrounding['runner_up'],
+        margin: input.runner_up !== null
+          ? input.winner.win_probability - input.runner_up.win_probability
+          : null,
         isl_results: input.isl_results as ReviewInputForGrounding['isl_results'],
         flip_threshold_data: input.flip_threshold_data as ReviewInputForGrounding['flip_threshold_data'],
       };

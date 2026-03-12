@@ -428,3 +428,78 @@ describe("UNGROUNDED_NUMBER retry integration (unit level)", () => {
     expect(retryCheck.warnings.filter((w) => w.startsWith("UNGROUNDED_NUMBER"))).toHaveLength(0);
   });
 });
+
+// ============================================================================
+// Margin pre-computation: extractGroundedNumbers and grounding validator
+// ============================================================================
+
+describe("margin in extractGroundedNumbers", () => {
+  it("includes the pre-computed margin in the grounded corpus when runner_up is present", () => {
+    // winner.win_probability=0.77, runner_up.win_probability=0.70 → margin=0.07
+    const input = makeReviewInput();
+    const nums = extractGroundedNumbers({ ...input, margin: 0.07 });
+    expect(nums).toContain(0.07);
+  });
+
+  it("margin value equals winner.win_probability minus runner_up.win_probability", () => {
+    const winnerProb = 0.77;
+    const runnerUpProb = 0.70;
+    const expectedMargin = winnerProb - runnerUpProb;
+    const nums = extractGroundedNumbers({
+      ...makeReviewInput(),
+      margin: expectedMargin,
+    });
+    expect(nums.some((n) => Math.abs(n - expectedMargin) < 1e-10)).toBe(true);
+  });
+
+  it("does not push margin when runner_up is null (margin is null)", () => {
+    const input: ReviewInputForGrounding = {
+      winner: { win_probability: 0.77, outcome_mean: 59 },
+      runner_up: null,
+      margin: null,
+    };
+    const nums = extractGroundedNumbers(input);
+    // Corpus should still contain winner values but no null
+    expect(nums).toContain(0.77);
+    expect(nums.every((n) => n !== null)).toBe(true);
+  });
+
+  it("does not push margin when margin field is absent (backward compat)", () => {
+    const input = makeReviewInput(); // no margin field
+    expect(() => extractGroundedNumbers(input)).not.toThrow();
+    const nums = extractGroundedNumbers(input);
+    // 0.07 is NOT in the corpus when margin is not provided
+    expect(nums).not.toContain(0.07);
+  });
+});
+
+describe("margin grounding — pre-computed margin accepted as citable number", () => {
+  it("accepts the pre-computed margin value cited in narrative_summary", () => {
+    // winner=0.77, runner_up=0.70 → margin=0.07 (7 percentage points)
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      margin: 0.07,
+    };
+    const data = makeValidReviewOutput({
+      narrative_summary: "Option A leads with a 7 percentage point margin.",
+    });
+    const result = performShapeCheck(data, input);
+    // "7" is within ±10% of 7 (i.e., margin * 100 = 7) — must NOT flag as ungrounded
+    expect(result.warnings.filter((w) => w.includes('"7"') && w.startsWith("UNGROUNDED_NUMBER"))).toHaveLength(0);
+  });
+
+  it("flags a fabricated margin that does not match the pre-computed value", () => {
+    // winner=0.77, runner_up=0.70 → margin=0.07 (7 pp)
+    // LLM invents "25 percentage point margin" — clearly not in corpus
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      margin: 0.07,
+    };
+    const data = makeValidReviewOutput({
+      narrative_summary: "Option A leads with a 25 percentage point margin.",
+    });
+    const result = performShapeCheck(data, input);
+    const ungrounded = result.warnings.filter((w) => w.startsWith("UNGROUNDED_NUMBER"));
+    expect(ungrounded.some((w) => w.includes('"25"'))).toBe(true);
+  });
+});
