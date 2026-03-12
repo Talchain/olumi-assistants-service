@@ -554,11 +554,18 @@ describe("envelope and coaching wiring", () => {
     expect(result.assistantText).toContain("already in your model");
   });
 
-  // Test 11: coaching.rerun_recommended: true → suggested action chip
+  // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip
   it("includes 'Re-run analysis' chip when rerun_recommended is true", async () => {
     const adapter = makeAdapter(V2_GOOD_RESPONSE);
+    // rerun_recommended is now deterministic: requires prior analysis + substantive ops
+    const contextWithAnalysis = makeContext({
+      analysis_response: {
+        meta: { seed_used: 1, n_samples: 100, response_hash: "h" },
+        results: [{ option_label: "A", win_probability: 0.6 }],
+      } as never,
+    });
     const result = await handleEditGraph(
-      makeContext(),
+      contextWithAnalysis,
       "Add competitor",
       adapter,
       "req-1",
