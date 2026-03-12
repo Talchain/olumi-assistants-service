@@ -14,6 +14,7 @@ import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
 import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
+import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 
 // ============================================================================
@@ -131,9 +132,8 @@ export async function handleDraftGraph(
 
   // Extract coaching summary for narration hint (brief: include in assistantText)
   const coachingSummary = extractCoachingSummary(body);
-  if (coachingSummary) {
-    patchData.summary = coachingSummary;
-  }
+  // Always emit a summary: prefer coaching text, fall back to operation-derived description
+  patchData.summary = buildPatchSummary(operations, coachingSummary, 'full_draft');
 
   // Extract validation warnings if present (plain strings for assistantText / validation_warnings)
   const warnings = extractWarnings(body);

@@ -59,6 +59,7 @@ import { validateGraphStructure, VIOLATION_MESSAGES } from "../graph-structure-v
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
+import { buildPatchSummary } from "../patch-summary.js";
 
 // ============================================================================
 // Types
@@ -1569,6 +1570,7 @@ export async function handleEditGraph(
       status: 'proposed',
       auto_apply: false,
       base_graph_hash: baseGraphHash,
+      summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'edit'),
       ...(appliedGraph && { applied_graph: appliedGraph }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),

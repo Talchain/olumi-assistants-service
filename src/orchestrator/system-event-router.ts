@@ -31,6 +31,8 @@ import type { GuidanceItem } from "./types/guidance-item.js";
 import { generatePostDraftGuidance } from "./guidance/post-draft.js";
 import { buildAnalysisBlocksAndGuidance } from "./tools/analysis-blocks.js";
 import { createGraphPatchBlock } from "./blocks/factory.js";
+import { buildPatchSummary } from "./patch-summary.js";
+import type { PatchOperation } from "./types.js";
 
 // ============================================================================
 // Types
@@ -576,12 +578,14 @@ function buildGraphPatchBlock(
   graphHash: string | undefined,
   turnId: string,
 ): ConversationBlock {
+  // Cast to PatchOperation[] for summary derivation — formatter handles unknown ops gracefully.
+  const opsForSummary = operations as unknown as PatchOperation[];
   const data: GraphPatchBlockData = {
     patch_type: 'edit',
     operations: [],  // UI-provided ops are opaque — not mapped to PatchOperation[]
     status: 'accepted',
     applied_graph_hash: graphHash,
-    summary: `Patch ${patchId} applied.`,
+    summary: buildPatchSummary(opsForSummary, null, 'accepted'),
   };
 
   return createGraphPatchBlock(data, turnId, undefined, [
