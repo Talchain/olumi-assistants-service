@@ -206,8 +206,9 @@ export function buildDecisionContinuity(input: DecisionContinuityInput): Decisio
   // stage
   const stage = framing?.stage ?? 'explore';
 
-  // graph_version: context_hash if available (represents the logical context state)
-  const graph_version = input.context_hash ?? null;
+  // graph_version: the graph's own hash (structural identity), not the context hash.
+  // Falls back to null when the graph or its hash is absent.
+  const graph_version = typeof input.graph?.hash === 'string' ? input.graph.hash : null;
 
   // analysis_status
   const analysis_status = deriveAnalysisStatus(input.graph, input.analysis, analysisResponse);

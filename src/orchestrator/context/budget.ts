@@ -127,6 +127,68 @@ function getMaxTokens(): number {
 }
 
 /**
+ * Node trim helpers — applied in priority order.
+ * All helpers operate on a shallow copy; missing fields are silently skipped.
+ *
+ * Trim order (low-value first, user-visible state preserved as long as possible):
+ *   Pass 1: uncertainty_drivers, extractionType, factor_type  (no-op on CompactNode — dropped at compaction)
+ *   Pass 2: type, category
+ *   Pass 2b: raw_value, cap on external-factor nodes (prior-range representation)
+ *   Pass 3: source provenance
+ * Edge trim (separate pass after all node passes):
+ *   Pass 4: drop exists field from edges (preserve graph structure — never delete edges)
+ * Preserved throughout: label, value, unit
+ */
+function trimCompactNodeTier1(node: GraphV3Compact['nodes'][number]): GraphV3Compact['nodes'][number] {
+  const n = { ...node } as unknown as Record<string, unknown>;
+  // These fields were already dropped during compaction; kept explicit for forward-compat.
+  delete n['uncertainty_drivers'];
+  delete n['extractionType'];
+  delete n['factor_type'];
+  return n as unknown as GraphV3Compact['nodes'][number];
+}
+
+function trimCompactNodeTier2(node: GraphV3Compact['nodes'][number]): GraphV3Compact['nodes'][number] {
+  // Drop type, category (less user-visible than label/value)
+  const n = { ...node } as unknown as Record<string, unknown>;
+  delete n['type'];
+  delete n['category'];
+  return n as unknown as GraphV3Compact['nodes'][number];
+}
+
+/**
+ * Drop prior-range fields (raw_value, cap) from external factor nodes.
+ * External nodes have no controlled value — raw_value/cap represent range estimates only.
+ * Controllable/observable nodes keep their raw_value for context.
+ */
+function trimCompactNodePriorRanges(node: GraphV3Compact['nodes'][number]): GraphV3Compact['nodes'][number] {
+  if (node.category === 'external') {
+    const n = { ...node } as unknown as Record<string, unknown>;
+    delete n['raw_value'];
+    delete n['cap'];
+    return n as unknown as GraphV3Compact['nodes'][number];
+  }
+  return node;
+}
+
+function trimCompactNodeTier3(node: GraphV3Compact['nodes'][number]): GraphV3Compact['nodes'][number] {
+  // Drop source provenance (metadata, not user-visible state)
+  const n = { ...node } as unknown as Record<string, unknown>;
+  delete n['source'];
+  return n as unknown as GraphV3Compact['nodes'][number];
+}
+
+/**
+ * Drop the exists field from all edges (pass 4).
+ * Preserves graph structure (no edges deleted) while reducing token count.
+ */
+function trimCompactEdgeExists(edge: GraphV3Compact['edges'][number]): GraphV3Compact['edges'][number] {
+  const e = { ...edge } as unknown as Record<string, unknown>;
+  delete e['exists'];
+  return e as unknown as GraphV3Compact['edges'][number];
+}
+
+/**
  * Enforce context budget on an enriched context.
  *
  * Budget allocation (% of maxTokens):
@@ -137,10 +199,18 @@ function getMaxTokens(): number {
  * - Event log summary: included in conversation budget
  * - Buffer: ~10% reserved
  *
- * Trimming behaviour:
- * - Graph over budget: drop `value` from nodes, drop edges below exists < 0.5
- * - Analysis over budget: drop constraint_tensions, reduce top_drivers to 3
- * - Conversation over budget: reduce to 3 turns, then 1 turn (always keep latest)
+ * Trimming behaviour (graph — preserves user-visible state as long as possible):
+ * - Pass 1: drop uncertainty_drivers, extractionType, factor_type (no-op on compact nodes)
+ * - Pass 2: drop type, category from nodes
+ * - Pass 2b: drop raw_value, cap from external-factor nodes (prior ranges)
+ * - Pass 3: drop source provenance from nodes
+ * - Pass 4: drop exists field from edges (preserves graph structure — no edges deleted)
+ * - Preserve throughout: label, value, unit
+ *
+ * Analysis trimming:
+ * - Drop constraint_tensions, reduce top_drivers to 3
+ *
+ * Conversation trimming: reduce to 3 turns, then 1 turn (always keep latest)
  *
  * This function NEVER throws. On any error, it logs and returns the context unchanged.
  *
@@ -169,16 +239,65 @@ export function enforceContextBudget<T extends BudgetEnforcementContext>(
       if (graphTokens > budget.graph) {
         log.warn(
           { graphTokens, graphBudget: budget.graph },
-          'enforceContextBudget: graph over budget — trimming',
+          'enforceContextBudget: graph over budget — pass 1 trim (low-value metadata)',
         );
-        const trimmedGraph: GraphV3Compact = {
+        // Pass 1: drop low-value metadata fields (no-op on current CompactNode shape)
+        let trimmedGraph: GraphV3Compact = {
           ...result.graph_compact,
-          nodes: result.graph_compact.nodes.map(({ value: _value, ...rest }) => rest),
-          edges: result.graph_compact.edges.filter((e) => e.exists >= 0.5),
+          nodes: result.graph_compact.nodes.map(trimCompactNodeTier1),
+          edges: result.graph_compact.edges,
           _node_count: result.graph_compact._node_count,
-          _edge_count: 0, // will be updated below
+          _edge_count: result.graph_compact._edge_count,
         };
-        trimmedGraph._edge_count = trimmedGraph.edges.length;
+
+        // Pass 2: still over budget — drop type, category
+        if (estimateTokensForValue(trimmedGraph) > budget.graph) {
+          log.warn(
+            { graphBudget: budget.graph },
+            'enforceContextBudget: graph still over budget — pass 2 trim (type, category)',
+          );
+          trimmedGraph = {
+            ...trimmedGraph,
+            nodes: trimmedGraph.nodes.map(trimCompactNodeTier2),
+          };
+        }
+
+        // Pass 2b: still over budget — drop prior ranges from external nodes
+        if (estimateTokensForValue(trimmedGraph) > budget.graph) {
+          log.warn(
+            { graphBudget: budget.graph },
+            'enforceContextBudget: graph still over budget — pass 2b trim (prior ranges on external nodes)',
+          );
+          trimmedGraph = {
+            ...trimmedGraph,
+            nodes: trimmedGraph.nodes.map(trimCompactNodePriorRanges),
+          };
+        }
+
+        // Pass 3: still over budget — drop source provenance
+        if (estimateTokensForValue(trimmedGraph) > budget.graph) {
+          log.warn(
+            { graphBudget: budget.graph },
+            'enforceContextBudget: graph still over budget — pass 3 trim (source)',
+          );
+          trimmedGraph = {
+            ...trimmedGraph,
+            nodes: trimmedGraph.nodes.map(trimCompactNodeTier3),
+          };
+        }
+
+        // Pass 4: still over budget — drop exists field from edges (preserve graph structure)
+        if (estimateTokensForValue(trimmedGraph) > budget.graph) {
+          log.warn(
+            { graphBudget: budget.graph },
+            'enforceContextBudget: graph still over budget — pass 4 trim (edge exists field)',
+          );
+          trimmedGraph = {
+            ...trimmedGraph,
+            edges: trimmedGraph.edges.map(trimCompactEdgeExists),
+          };
+        }
+
         result = { ...result, graph_compact: trimmedGraph };
       }
     }

@@ -43,6 +43,13 @@ export interface Phase4Result extends ToolResult {
   deferred_tools: string[];
   /** True when the stage+tool-aware fallback message was injected (all tools suppressed, no LLM text). */
   stage_fallback_injected?: boolean;
+  /**
+   * True when run_analysis was suppressed but the user's intent is conversational/explain (not act).
+   * Pipeline should retry with a plain conversational LLM call instead of showing the stage fallback.
+   */
+  needs_conversational_retry?: boolean;
+  /** Name of the suppressed tool that triggered needs_conversational_retry. */
+  suppressed_tool_for_retry?: string;
 }
 
 /**
@@ -198,18 +205,43 @@ export async function phase4Execute(
   // Guaranteed fallback: all tools suppressed + blank/null LLM text → never emit silent response.
   // Check after the loop so we only fire when nothing executed AND there is no usable text.
   const allToolsSuppressed = toExecute.length > 0 && executedTools.length === 0;
+  let needsConversationalRetry = false;
+  let suppressedToolForRetry: string | undefined;
   if (allToolsSuppressed && !assistantText?.trim()) {
     const suppressedTool = toExecute[0]?.name;
-    const fallbackEntry = getStageAwareFallbackEntry(enrichedContext.stage_indicator.stage, suppressedTool);
-    assistantText = fallbackEntry.message;
-    stageFallbackInjected = true;
-    // Inject actionable chip so the user has an obvious next step
-    allGuidanceItems.length = 0; // clear any stale guidance
-    allSuggestedActions.push(fallbackEntry.chip);
-    log.info(
-      { stage: enrichedContext.stage_indicator.stage, suppressed_tool: suppressedTool, turn_id: enrichedContext.turn_id },
-      'Phase 4: all tools suppressed with no LLM text — stage+tool-aware fallback injected',
-    );
+
+    // Prerequisite-aware suppression: if the suppressed tool is run_analysis but the user did
+    // not explicitly request an action (act classification), signal the pipeline to retry with
+    // a plain conversational call. This covers: conversational ("what does X mean?"),
+    // explain ("why is Y high?"), recommend ("which option is better?") — none contain
+    // explicit action verbs like "run", "analyse", "add". Only act intent (e.g. "Run the
+    // analysis") means the user explicitly requested analysis → preserve the prerequisite fallback.
+    const intent = enrichedContext.intent_classification;
+    const isNotExplicitAction = intent !== 'act';
+    if (suppressedTool === 'run_analysis' && isNotExplicitAction) {
+      needsConversationalRetry = true;
+      suppressedToolForRetry = suppressedTool;
+      log.info(
+        {
+          stage: enrichedContext.stage_indicator.stage,
+          suppressed_tool: suppressedTool,
+          intent,
+          turn_id: enrichedContext.turn_id,
+        },
+        'Phase 4: run_analysis suppressed for non-action intent — signalling conversational retry',
+      );
+    } else {
+      const fallbackEntry = getStageAwareFallbackEntry(enrichedContext.stage_indicator.stage, suppressedTool);
+      assistantText = fallbackEntry.message;
+      stageFallbackInjected = true;
+      // Inject actionable chip so the user has an obvious next step
+      allGuidanceItems.length = 0; // clear any stale guidance
+      allSuggestedActions.push(fallbackEntry.chip);
+      log.info(
+        { stage: enrichedContext.stage_indicator.stage, suppressed_tool: suppressedTool, turn_id: enrichedContext.turn_id },
+        'Phase 4: all tools suppressed with no LLM text — stage+tool-aware fallback injected',
+      );
+    }
   }
 
   // Append deferred note if any long-running tools were skipped
@@ -235,6 +267,10 @@ export async function phase4Execute(
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
+    ...(needsConversationalRetry && {
+      needs_conversational_retry: true,
+      suppressed_tool_for_retry: suppressedToolForRetry,
+    }),
   };
 }
 

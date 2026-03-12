@@ -23,7 +23,9 @@ import type {
 import { phase1Enrich } from "./phase1-enrichment/index.js";
 import { phase2Route } from "./phase2-specialists/index.js";
 import { phase3Generate } from "./phase3-llm/index.js";
+import { assembleV2SystemPrompt } from "./phase3-llm/prompt-assembler.js";
 import { phase4Execute } from "./phase4-tools/index.js";
+import type { Phase4Result } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
 import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
@@ -280,6 +282,53 @@ export async function executePipeline(
       deps.toolDispatcher,
       requestId,
     );
+
+    // Conversational retry: run_analysis was suppressed for a non-action (question/explain) intent.
+    // The LLM selected a tool but the user asked a question — retry with a plain chat call
+    // so the user gets a conversational answer instead of "model needs configured options".
+    if (toolResult.needs_conversational_retry) {
+      log.info(
+        {
+          request_id: requestId,
+          suppressed_tool: toolResult.suppressed_tool_for_retry,
+          intent: enrichedContext.intent_classification,
+        },
+        'pipeline: conversational retry for suppressed non-action tool call',
+      );
+      try {
+        const conversationalSystemPrompt = await assembleV2SystemPrompt(enrichedContext);
+        const conversationalText = await deps.llmClient.chat(
+          { system: conversationalSystemPrompt, userMessage: request.message },
+          { requestId, timeoutMs: 30_000 },
+        );
+        // Capture model info after the chat call and emit structured telemetry.
+        const retryModelInfo = deps.llmClient.getResolvedModel?.() ?? null;
+        log.info(
+          {
+            request_id: requestId,
+            task: 'orchestrator_conversational_retry',
+            resolved_model: retryModelInfo?.model ?? null,
+            resolved_provider: retryModelInfo?.provider ?? null,
+          },
+          'pipeline.conversational_retry.resolved_model',
+        );
+        (toolResult as Phase4Result).assistant_text = conversationalText.content;
+        // Propagate model info to route_metadata so _route_metadata picks it up in phase5.
+        // This ensures the final envelope always carries the model that served the response.
+        if (retryModelInfo) {
+          (toolResult as Phase4Result).route_metadata = {
+            outcome: 'default_llm',
+            reasoning: 'conversational_retry',
+            resolved_model: retryModelInfo.model,
+            resolved_provider: retryModelInfo.provider,
+          };
+        }
+      } catch (err) {
+        log.warn({ request_id: requestId, err }, 'pipeline: conversational retry failed — using fallback text');
+        (toolResult as Phase4Result).assistant_text =
+          "I can help answer that. Could you tell me more about what you'd like to know?";
+      }
+    }
 
     // Phase 5: Validation + Envelope Assembly
     const envelope = phase5Validate(

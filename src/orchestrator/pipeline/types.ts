@@ -250,7 +250,7 @@ export interface DSKTechnique {
 export interface ReferencedEntityEdgeSummary {
   connected_label: string;
   strength: number;
-  effect_direction: string | null;
+  effect_direction?: string;
 }
 
 export interface ReferencedEntityDetail {

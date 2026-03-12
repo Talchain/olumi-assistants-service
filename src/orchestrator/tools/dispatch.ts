@@ -28,16 +28,33 @@ import { handleRunExercise } from "./run-exercise.js";
 import { handleResearchTopic } from "./research-topic.js";
 import type { RouteMetadata, RouteOutcome } from "../pipeline/types.js";
 import { isAnalysisExplainable } from "../analysis-state.js";
+import { log } from "../../utils/telemetry.js";
+import type { LLMAdapter } from "../../adapters/llm/types.js";
 
 // ============================================================================
 // Default route metadata for tools that don't produce their own
 // ============================================================================
 
-function buildToolRouteMetadata(toolName: string, outcome?: RouteOutcome): RouteMetadata {
+function buildToolRouteMetadata(toolName: string, outcome?: RouteOutcome, adapter?: LLMAdapter): RouteMetadata {
   return {
     outcome: outcome ?? 'default_llm',
     reasoning: `tool_dispatch:${toolName}`,
+    ...(adapter && {
+      resolved_model: adapter.model,
+      resolved_provider: adapter.name,
+    }),
   };
+}
+
+/**
+ * Log the resolved model and provider for an LLM adapter call.
+ * Called after getAdapter() to emit structured observability on every LLM dispatch.
+ */
+function logResolvedAdapter(task: string, adapter: LLMAdapter, requestId: string): void {
+  log.info(
+    { request_id: requestId, task, resolved_model: adapter.model, resolved_provider: adapter.name },
+    'dispatch.llm_call_resolved_model',
+  );
 }
 
 // ============================================================================
@@ -202,6 +219,7 @@ export async function dispatchToolHandler(
     case 'edit_graph': {
       const editDesc = (toolInput.edit_description as string) || '';
       const adapter = getAdapter('edit_graph');
+      logResolvedAdapter('edit_graph', adapter, requestId);
       const result = await handleEditGraph(
         context,
         editDesc,
@@ -224,12 +242,15 @@ export async function dispatchToolHandler(
         pendingClarification: result.pendingClarification,
         pendingProposal: result.pendingProposal,
         proposedChanges: result.proposedChanges,
-        routeMetadata: result.routeMetadata,
+        routeMetadata: result.routeMetadata
+          ? { ...result.routeMetadata, resolved_model: adapter.model, resolved_provider: adapter.name }
+          : buildToolRouteMetadata('edit_graph', undefined, adapter),
       };
     }
 
     case 'explain_results': {
       const adapter = getAdapter('orchestrator');
+      logResolvedAdapter('explain_results', adapter, requestId);
       const focus = toolInput.focus as string | undefined;
       const result = await handleExplainResults(context, adapter, requestId, turnId, focus);
       return {
@@ -237,7 +258,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
-        routeMetadata: buildToolRouteMetadata('explain_results', 'results_explanation'),
+        routeMetadata: buildToolRouteMetadata('explain_results', 'results_explanation', adapter),
       };
     }
 
@@ -263,13 +284,14 @@ export async function dispatchToolHandler(
         throw Object.assign(new Error(err.message), { orchestratorError: err });
       }
       const adapter = getAdapter('orchestrator');
+      logResolvedAdapter('run_exercise', adapter, requestId);
       const result = await handleRunExercise(exercise, context, adapter, requestId, turnId);
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
-        routeMetadata: buildToolRouteMetadata('run_exercise'),
+        routeMetadata: buildToolRouteMetadata('run_exercise', undefined, adapter),
       };
     }
 
@@ -277,6 +299,7 @@ export async function dispatchToolHandler(
       const query = (toolInput.query as string) || '';
       const targetFactor = toolInput.target_factor as string | undefined;
       const researchContext = toolInput.context as string | undefined;
+      // research_topic uses its own internal adapter — log from within handler
       const result = await handleResearchTopic(query, context, requestId, turnId, targetFactor, researchContext);
       return {
         blocks: result.blocks,

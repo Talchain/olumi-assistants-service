@@ -30,6 +30,8 @@ import { buildEventLogSummary } from "../../context/event-log-summary.js";
 import { enforceContextBudget } from "../../context/budget.js";
 import type { BudgetEnforcementContext } from "../../context/budget.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
+import { buildDecisionContinuity } from "../../context/decision-continuity.js";
+import { matchReferencedEntities } from "../../context/entity-matcher.js";
 import type { GraphV3T } from "../../types.js";
 import { log } from "../../../utils/telemetry.js";
 
@@ -157,7 +159,25 @@ export function phase1Enrich(
     preBudgetContext as unknown as BudgetEnforcementContext & EnrichedContext,
   ) as EnrichedContext;
 
-  // 6. Compute context hash (after budget enforcement so hash reflects actual sent context)
+  // 6. Build decision continuity (after budget enforcement — uses budgeted compact graph/analysis)
+  const decisionContinuity = buildDecisionContinuity({
+    framing: context.framing,
+    graph_compact: budgetedContext.graph_compact,
+    analysis_response: budgetedContext.analysis_response,
+    graph: context.graph as Record<string, unknown> | null,
+    analysis: context.analysis_response as Record<string, unknown> | null,
+    conversational_state: context.conversational_state,
+    conversation_history: context.messages as Array<{
+      role?: string;
+      content?: string;
+      blocks?: Array<{ type?: string; data?: { summary?: string; patch_type?: string } }>;
+    }>,
+  });
+
+  // 7. Entity-aware enrichment — match user message against compact graph nodes
+  const referencedEntities = matchReferencedEntities(message, budgetedContext.graph_compact);
+
+  // 8. Compute context hash (after budget enforcement so hash reflects actual sent context)
   const budgetedMessages = budgetedContext.messages ?? trimmedMessages;
   const contextHash = computeContextHash(toHashableContext({
     ...budgetedContext,
@@ -172,5 +192,7 @@ export function phase1Enrich(
   return {
     ...budgetedContext,
     context_hash: contextHash,
+    decision_continuity: decisionContinuity,
+    ...(referencedEntities.length > 0 ? { referenced_entities: referencedEntities } : {}),
   } as EnrichedContext;
 }

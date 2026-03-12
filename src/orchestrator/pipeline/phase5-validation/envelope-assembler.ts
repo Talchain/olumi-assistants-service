@@ -253,8 +253,18 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
 
   // Build _route_metadata with extended observability fields.
   // Base metadata comes from tool handler or LLM routing; we extend with context.
-  const baseMetadata = toolResult.route_metadata ?? llmResult.route_metadata;
+  // resolved_model/resolved_provider are set by phase3 on llmResult.route_metadata and by
+  // LLM-backed tool handlers on their own metadata. Non-LLM tools (run_analysis, draft_graph,
+  // generate_brief, research_topic) never touch an adapter, so they don't set these fields.
+  // We always preserve them from whichever source has them: tool metadata takes priority for
+  // all fields, but falls back to llmResult model fields if the tool didn't set them.
+  const toolMeta = toolResult.route_metadata;
+  const llmMeta = llmResult.route_metadata;
+  const baseMetadata = toolMeta ?? llmMeta;
   if (baseMetadata) {
+    // Preserve model observability fields from llmResult when tool metadata omits them.
+    const resolvedModel = toolMeta?.resolved_model ?? llmMeta?.resolved_model ?? null;
+    const resolvedProvider = toolMeta?.resolved_provider ?? llmMeta?.resolved_provider ?? null;
     // Compute tool_permitted from stage policy (same logic as pipeline telemetry)
     const attemptedTool = toolName;
     const toolPermitted = attemptedTool
@@ -284,6 +294,8 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
       has_graph: enrichedContext.graph !== null,
       has_analysis: enrichedContext.analysis !== null,
       contract_version: TURN_CONTRACT_VERSION,
+      resolved_model: resolvedModel,
+      resolved_provider: resolvedProvider,
     };
   }
 

@@ -10,9 +10,10 @@
  */
 
 import { getSystemPrompt } from "../../../adapters/llm/prompt-loader.js";
-import type { EnrichedContext } from "../types.js";
+import type { EnrichedContext, ReferencedEntityDetail } from "../types.js";
 import type { GraphV3Compact } from "../../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../../context/analysis-compact.js";
+import type { DecisionContinuity } from "../../context/decision-continuity.js";
 
 // ============================================================================
 // Section cap — prevents any single Zone 2 block from bloating the prompt
@@ -82,10 +83,109 @@ function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
     lines.push(`  Fragile edges: ${a.fragile_edge_count}`);
   }
 
+  if (a.top_fragile_edges && a.top_fragile_edges.length > 0) {
+    const edgeLines = a.top_fragile_edges
+      .map((e) => `    ${e.from_label} → ${e.to_label}`)
+      .join('\n');
+    lines.push(`  Fragile edge paths:\n${edgeLines}`);
+  }
+
   if (a.constraint_tensions && a.constraint_tensions.length > 0) {
     lines.push(`  Constraint tensions: ${a.constraint_tensions.join(', ')}`);
   }
 
+  if (a.flip_thresholds && a.flip_thresholds.length > 0) {
+    const ftLines = a.flip_thresholds
+      .map((ft) => {
+        const unit = ft.unit ? ` ${ft.unit}` : '';
+        return `    ${ft.factor_label}: current=${ft.current_value}${unit}, flip_at=${ft.flip_value}${unit}`;
+      })
+      .join('\n');
+    lines.push(`  Flip thresholds:\n${ftLines}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Serialise a DecisionContinuity object into the <decision_state> Zone 2 block.
+ * This is the preferred compact summary layer — do not duplicate info already here
+ * in other Zone 2 blocks.
+ *
+ * @param dc - The decision continuity object
+ * @param hasCompactGraph - When true, the compact graph block already contains full option labels;
+ *   emit a count reference instead of repeating them to avoid Zone 2 duplication.
+ */
+function serialiseDecisionContinuity(dc: DecisionContinuity, hasCompactGraph: boolean): string {
+  const lines: string[] = ['<decision_state>'];
+
+  if (dc.goal) lines.push(`Goal: ${dc.goal}`);
+
+  if (dc.options.length > 0) {
+    if (hasCompactGraph) {
+      // Compact graph already lists option labels — emit count only
+      lines.push(`Options: ${dc.options.length} (see graph below)`);
+    } else {
+      lines.push(`Options: ${dc.options.join(', ')}`);
+    }
+  }
+
+  if (dc.constraints.length > 0) {
+    lines.push(`Constraints: ${dc.constraints.join(', ')}`);
+  }
+
+  lines.push(`Stage: ${dc.stage}`);
+  lines.push(`Analysis: ${dc.analysis_status}`);
+
+  if (dc.top_drivers.length > 0) {
+    lines.push(`Top drivers: ${dc.top_drivers.join(', ')}`);
+  }
+
+  if (dc.top_uncertainties.length > 0) {
+    lines.push(`Top uncertainties: ${dc.top_uncertainties.join(', ')}`);
+  }
+
+  if (dc.assumption_count > 0) {
+    lines.push(`Assumptions: ${dc.assumption_count} inferred value${dc.assumption_count !== 1 ? 's' : ''}`);
+  }
+
+  if (dc.last_patch_summary) {
+    lines.push(`Last change: ${dc.last_patch_summary}`);
+  }
+
+  if (dc.active_proposal) {
+    lines.push(`Pending: ${dc.active_proposal}`);
+  }
+
+  lines.push('</decision_state>');
+  return lines.join('\n');
+}
+
+/**
+ * Serialise a referenced entity detail into a <referenced_entity> Zone 2 block.
+ */
+function serialiseReferencedEntity(entity: ReferencedEntityDetail): string {
+  const lines: string[] = [`<referenced_entity id="${entity.id}">`];
+  lines.push(`  Label: ${entity.label} [${entity.kind}${entity.category ? `/${entity.category}` : ''}]`);
+
+  const valueParts: string[] = [];
+  if (entity.value !== undefined) valueParts.push(`value=${entity.value}`);
+  if (entity.raw_value !== undefined && entity.raw_value !== entity.value) valueParts.push(`raw=${entity.raw_value}`);
+  if (entity.unit) valueParts.push(`unit=${entity.unit}`);
+  if (entity.cap !== undefined) valueParts.push(`cap=${entity.cap}`);
+  if (valueParts.length > 0) lines.push(`  State: ${valueParts.join(', ')}`);
+
+  if (entity.source) lines.push(`  Source: ${entity.source}`);
+
+  if (entity.edges.length > 0) {
+    lines.push('  Connections:');
+    for (const edge of entity.edges) {
+      const dir = edge.effect_direction ? ` [${edge.effect_direction}]` : '';
+      lines.push(`    → ${edge.connected_label} (strength=${edge.strength.toFixed(2)}${dir})`);
+    }
+  }
+
+  lines.push('</referenced_entity>');
   return lines.join('\n');
 }
 
@@ -109,35 +209,51 @@ export async function assembleV2SystemPrompt(
   // Zone 2: Dynamic enriched context
   const zone2Sections: string[] = [];
 
-  // Stage indicator
+  const hasContinuity = !!enrichedContext.decision_continuity;
+
+  // Decision continuity block (preferred compact summary — avoids duplicating stage/goal/options/constraints)
+  if (enrichedContext.decision_continuity) {
+    zone2Sections.push(capSection(serialiseDecisionContinuity(enrichedContext.decision_continuity, !!enrichedContext.graph_compact)));
+  }
+
+  // Stage indicator — include substate/confidence even when continuity block covers stage
   const si = enrichedContext.stage_indicator;
-  zone2Sections.push(`Current stage: ${si.stage}${si.substate ? ` (${si.substate})` : ''}`);
+  if (!hasContinuity) {
+    zone2Sections.push(`Current stage: ${si.stage}${si.substate ? ` (${si.substate})` : ''}`);
+  }
   zone2Sections.push(`Stage confidence: ${si.confidence} (${si.source})`);
 
-  // Decision goal
+  // Decision goal / framing — only when continuity block is absent (to avoid duplication)
   const framing = enrichedContext.framing;
-  if (framing?.goal) {
-    zone2Sections.push(`Decision goal: ${framing.goal}`);
+  if (!hasContinuity) {
+    if (framing?.goal) {
+      zone2Sections.push(`Decision goal: ${framing.goal}`);
+    }
+    // Framing constraints (bounded at API boundary: max 20 items × 200 chars each)
+    if (framing?.constraints && framing.constraints.length > 0) {
+      zone2Sections.push(capSection(`Constraints: ${framing.constraints.join(', ')}`));
+    }
+    // Framing options (bounded at API boundary: max 20 items × 200 chars each)
+    if (framing?.options && framing.options.length > 0) {
+      zone2Sections.push(capSection(`Options: ${framing.options.join(', ')}`));
+    }
   }
 
-  // Framing constraints (bounded at API boundary: max 20 items × 200 chars each)
-  if (framing?.constraints && framing.constraints.length > 0) {
-    zone2Sections.push(capSection(`Constraints: ${framing.constraints.join(', ')}`));
-  }
-
-  // Framing options (bounded at API boundary: max 20 items × 200 chars each)
-  if (framing?.options && framing.options.length > 0) {
-    zone2Sections.push(capSection(`Options: ${framing.options.join(', ')}`));
-  }
-
-  // Graph state (compact)
+  // Graph state (compact) — provides full node/edge detail not in continuity block
   if (enrichedContext.graph_compact) {
     zone2Sections.push(capSection(serialiseCompactGraph(enrichedContext.graph_compact)));
   }
 
-  // Analysis response (compact)
+  // Analysis response (compact) — provides per-option probabilities and driver detail
   if (enrichedContext.analysis_response) {
     zone2Sections.push(capSection(serialiseCompactAnalysis(enrichedContext.analysis_response)));
+  }
+
+  // Referenced entities — focused explanation-ready blocks for entities named in the user message
+  if (enrichedContext.referenced_entities && enrichedContext.referenced_entities.length > 0) {
+    for (const entity of enrichedContext.referenced_entities) {
+      zone2Sections.push(capSection(serialiseReferencedEntity(entity)));
+    }
   }
 
   // Event log summary (when populated — requires Supabase wiring in phase 1)

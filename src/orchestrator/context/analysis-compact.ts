@@ -30,6 +30,18 @@ export interface DriverSummary {
   direction: 'positive' | 'negative';
 }
 
+export interface FlipThreshold {
+  factor_label: string;
+  current_value: number;
+  flip_value: number;
+  unit: string | null;
+}
+
+export interface FragileEdge {
+  from_label: string;
+  to_label: string;
+}
+
 export interface AnalysisResponseSummary {
   winner: { option_id: string; option_label: string; win_probability: number };
   options: OptionSummary[];          // all options, sorted by win_probability descending
@@ -37,6 +49,10 @@ export interface AnalysisResponseSummary {
   robustness_level: string;
   fragile_edge_count: number;
   constraint_tensions?: string[];    // constraint IDs where joint < individual × 0.7
+  /** Top 3 flip thresholds when available in analysis response. */
+  flip_thresholds?: FlipThreshold[];
+  /** Top 3 fragile edges with labels when available in robustness data. */
+  top_fragile_edges?: FragileEdge[];
   analysis_status: string;
 }
 
@@ -192,6 +208,109 @@ function deriveConstraintTensions(response: V2RunResponseEnvelope): string[] | u
 }
 
 /**
+ * Derive top 3 flip thresholds from sensitivity analysis.
+ * Looks for flip_threshold field on factor_sensitivity entries.
+ * Returns up to 3 entries sorted by closest distance (flip_value - current_value ascending).
+ */
+function deriveFlipThresholds(
+  response: V2RunResponseEnvelope,
+  graphNodeLabels?: Map<string, string>,
+): FlipThreshold[] | undefined {
+  const results = (response.results ?? []) as unknown[];
+  const seen = new Map<string, FlipThreshold>();
+
+  for (const result of results) {
+    if (!isOptionResult(result)) continue;
+    const factorSensitivity = result.factor_sensitivity;
+    if (!Array.isArray(factorSensitivity)) continue;
+
+    for (const factor of factorSensitivity as FactorEntry[]) {
+      const factorId = (typeof factor.node_id === 'string' ? factor.node_id : null)
+        ?? (typeof factor.factor_id === 'string' ? factor.factor_id : null);
+      if (!factorId) continue;
+
+      const flipValue = typeof factor.flip_threshold === 'number' ? factor.flip_threshold
+        : typeof factor.flip_value === 'number' ? factor.flip_value
+        : null;
+      const currentValue = typeof factor.current_value === 'number' ? factor.current_value
+        : typeof factor.value === 'number' ? factor.value
+        : null;
+      if (flipValue === null || currentValue === null) continue;
+
+      const label = graphNodeLabels?.get(factorId)
+        ?? (typeof factor.label === 'string' ? factor.label : null)
+        ?? (typeof factor.factor_label === 'string' ? factor.factor_label : null)
+        ?? factorId;
+
+      const unit = typeof factor.unit === 'string' ? factor.unit : null;
+
+      // Deduplicate by factorId — keep first occurrence
+      if (!seen.has(factorId)) {
+        seen.set(factorId, {
+          factor_label: label as string,
+          current_value: currentValue,
+          flip_value: flipValue,
+          unit,
+        });
+      }
+    }
+  }
+
+  if (seen.size === 0) return undefined;
+
+  // Sort by absolute distance (closest to flip first — most actionable)
+  const sorted = Array.from(seen.values())
+    .sort((a, b) => Math.abs(a.flip_value - a.current_value) - Math.abs(b.flip_value - b.current_value))
+    .slice(0, 3);
+
+  return sorted;
+}
+
+/**
+ * Derive top 3 fragile edges with node labels.
+ * Collects fragile edges from robustness data, deduplicates, returns top 3.
+ */
+function deriveTopFragileEdges(
+  response: V2RunResponseEnvelope,
+  graphNodeLabels?: Map<string, string>,
+): FragileEdge[] | undefined {
+  const results = (response.results ?? []) as unknown[];
+  const seen = new Map<string, FragileEdge>();
+
+  for (const result of results) {
+    if (!isOptionResult(result)) continue;
+    const robustness = result.robustness as Record<string, unknown> | undefined;
+    if (!robustness) continue;
+    const fragileEdges = robustness.fragile_edges;
+    if (!Array.isArray(fragileEdges)) continue;
+
+    for (const edge of fragileEdges) {
+      const edgeObj = edge as Record<string, unknown>;
+      const fromId = typeof edgeObj.from_node_id === 'string' ? edgeObj.from_node_id
+        : typeof edgeObj.from === 'string' ? edgeObj.from
+        : null;
+      const toId = typeof edgeObj.to_node_id === 'string' ? edgeObj.to_node_id
+        : typeof edgeObj.to === 'string' ? edgeObj.to
+        : null;
+      if (!fromId || !toId) continue;
+
+      const edgeKey = `${fromId}→${toId}`;
+      if (!seen.has(edgeKey)) {
+        const fromLabel = graphNodeLabels?.get(fromId)
+          ?? (typeof edgeObj.from_label === 'string' ? edgeObj.from_label : fromId);
+        const toLabel = graphNodeLabels?.get(toId)
+          ?? (typeof edgeObj.to_label === 'string' ? edgeObj.to_label : toId);
+        seen.set(edgeKey, { from_label: fromLabel as string, to_label: toLabel as string });
+      }
+    }
+  }
+
+  if (seen.size === 0) return undefined;
+
+  return Array.from(seen.values()).slice(0, 3);
+}
+
+/**
  * Derive top drivers across all option results.
  * Collects unique factors by node_id (or factor_id), takes max absolute sensitivity,
  * sorts descending, returns top 5.
@@ -332,6 +451,8 @@ export function compactAnalysis(
     const fragileEdgeCount = deriveFragileEdgeCount(response);
     const topDrivers = deriveTopDrivers(response, graphNodeLabels);
     const constraintTensions = deriveConstraintTensions(response);
+    const flipThresholds = deriveFlipThresholds(response, graphNodeLabels);
+    const topFragileEdges = deriveTopFragileEdges(response, graphNodeLabels);
 
     const summary: AnalysisResponseSummary = {
       winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
@@ -344,6 +465,12 @@ export function compactAnalysis(
 
     if (constraintTensions !== undefined) {
       summary.constraint_tensions = constraintTensions;
+    }
+    if (flipThresholds !== undefined) {
+      summary.flip_thresholds = flipThresholds;
+    }
+    if (topFragileEdges !== undefined) {
+      summary.top_fragile_edges = topFragileEdges;
     }
 
     return summary;

@@ -18,6 +18,8 @@ import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 // Output Types
 // ============================================================================
 
+export type CompactNodeSource = 'user' | 'assumption' | 'system';
+
 export interface CompactNode {
   id: string;
   kind: string;
@@ -25,6 +27,11 @@ export interface CompactNode {
   type?: string;
   category?: string;
   value?: number;  // from observed_state.value
+  raw_value?: number;  // from observed_state.raw_value
+  unit?: string;       // from observed_state.unit
+  cap?: number;        // from observed_state.cap
+  /** Provenance: how this node's value was determined. */
+  source?: CompactNodeSource;
 }
 
 export interface CompactEdge {
@@ -52,10 +59,10 @@ export { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
  * Compact a V3 graph for LLM context.
  *
  * Kept per node: id, kind, label, type (if present), category (if present),
- * observed_state.value (if present).
+ * observed_state.value, raw_value, unit, cap (if present), source (derived from extractionType).
  *
  * Dropped per node: body, state_space, goal_threshold, observed_state.std,
- * observed_state.baseline, observed_state.unit, observed_state.source.
+ * observed_state.baseline, observed_state.extractionType (projected to source).
  *
  * Kept per edge: from, to, strength.mean, exists_probability (defaulted to 0.8).
  * Dropped per edge: strength.std, effect_direction, label.
@@ -82,12 +89,37 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         n.category = node.category;
       }
 
-      // observed_state.value only
+      // observed_state fields: value, raw_value, unit, cap, extractionType → source
       if (node.observed_state !== undefined && node.observed_state !== null) {
         const obsState = node.observed_state as Record<string, unknown>;
         if (typeof obsState.value === 'number') {
           n.value = obsState.value;
         }
+        if (typeof obsState.raw_value === 'number') {
+          n.raw_value = obsState.raw_value;
+        }
+        if (typeof obsState.unit === 'string') {
+          n.unit = obsState.unit;
+        }
+        if (typeof obsState.cap === 'number') {
+          n.cap = obsState.cap;
+        }
+
+        // Provenance: derive from extractionType
+        // explicit  → user      (value was stated directly by the user)
+        // inferred  → assumption (value was derived/estimated by the LLM)
+        // range/observed/absent → system (everything else is treated as system-provided)
+        const et = obsState.extractionType;
+        if (et === 'explicit') {
+          n.source = 'user';
+        } else if (et === 'inferred') {
+          n.source = 'assumption';
+        } else {
+          n.source = 'system';
+        }
+      } else {
+        // No observed_state — treat as system-derived
+        n.source = 'system';
       }
 
       return n;
