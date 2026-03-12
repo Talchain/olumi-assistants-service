@@ -7,7 +7,10 @@
 
 import { isProduction, config } from "../../../config/index.js";
 import { isLongRunningTool } from "../../tools/registry.js";
+import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 import { getDskVersionHash } from "../../dsk-loader.js";
+import { TURN_CONTRACT_VERSION, inferTurnType } from "../../turn-contract.js";
+import { extractDeclaredMode, inferResponseMode } from "../../response-parser.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
 import { computeStructuralReadiness } from "../../tools/analysis-ready-helper.js";
 import { buildModelReceipt } from "./model-receipt.js";
@@ -248,8 +251,40 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     }
   }
 
-  if (toolResult.route_metadata ?? llmResult.route_metadata) {
-    envelope._route_metadata = toolResult.route_metadata ?? llmResult.route_metadata;
+  // Build _route_metadata with extended observability fields.
+  // Base metadata comes from tool handler or LLM routing; we extend with context.
+  const baseMetadata = toolResult.route_metadata ?? llmResult.route_metadata;
+  if (baseMetadata) {
+    // Compute tool_permitted from stage policy (same logic as pipeline telemetry)
+    const attemptedTool = toolName;
+    const toolPermitted = attemptedTool
+      ? isToolAllowedAtStage(attemptedTool, enrichedContext.stage_indicator.stage, enrichedContext.user_message).allowed
+      : true;
+
+    // Infer response mode from LLM diagnostics
+    const declaredMode = extractDeclaredMode(llmResult.diagnostics);
+    const inferredMode = llmResult.tool_invocations.length > 0
+      ? 'ACT'
+      : inferResponseMode({ assistant_text: llmResult.assistant_text, tool_invocations: llmResult.tool_invocations } as never);
+    const responseMode = declaredMode !== 'unknown' ? declaredMode : inferredMode;
+
+    // Infer turn type from enriched context
+    const turnTypeBody: Record<string, unknown> = {
+      message: enrichedContext.user_message ?? '',
+      system_event: enrichedContext.system_event,
+      context: { conversational_state: enrichedContext.conversational_state },
+    };
+
+    envelope._route_metadata = {
+      ...baseMetadata,
+      tool_selected: attemptedTool ?? null,
+      tool_permitted: toolPermitted,
+      response_mode: responseMode,
+      turn_type: inferTurnType(turnTypeBody),
+      has_graph: enrichedContext.graph !== null,
+      has_analysis: enrichedContext.analysis !== null,
+      contract_version: TURN_CONTRACT_VERSION,
+    };
   }
 
   return envelope;

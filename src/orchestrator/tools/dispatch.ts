@@ -26,8 +26,19 @@ import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ExerciseType } from "../types/guidance-item.js";
 import { handleRunExercise } from "./run-exercise.js";
 import { handleResearchTopic } from "./research-topic.js";
-import type { RouteMetadata } from "../pipeline/types.js";
+import type { RouteMetadata, RouteOutcome } from "../pipeline/types.js";
 import { isAnalysisExplainable } from "../analysis-state.js";
+
+// ============================================================================
+// Default route metadata for tools that don't produce their own
+// ============================================================================
+
+function buildToolRouteMetadata(toolName: string, outcome?: RouteOutcome): RouteMetadata {
+  return {
+    outcome: outcome ?? 'default_llm',
+    reasoning: `tool_dispatch:${toolName}`,
+  };
+}
 
 // ============================================================================
 // Types
@@ -149,6 +160,7 @@ export async function dispatchToolHandler(
         analysisResponse: result.analysisResponse,
         toolLatencyMs: result.latencyMs,
         guidanceItems: analysisGuidance,
+        routeMetadata: buildToolRouteMetadata('run_analysis'),
       };
     }
 
@@ -173,6 +185,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: draftGuidance,
+        routeMetadata: buildToolRouteMetadata('draft_graph'),
       };
     }
 
@@ -182,6 +195,7 @@ export async function dispatchToolHandler(
         blocks: result.blocks,
         assistantText: result.assistantText,
         guidanceItems: [],
+        routeMetadata: buildToolRouteMetadata('generate_brief'),
       };
     }
 
@@ -223,6 +237,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
+        routeMetadata: buildToolRouteMetadata('explain_results', 'results_explanation'),
       };
     }
 
@@ -254,6 +269,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
+        routeMetadata: buildToolRouteMetadata('run_exercise'),
       };
     }
 
@@ -267,6 +283,7 @@ export async function dispatchToolHandler(
         assistantText: result.assistantText,
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
+        routeMetadata: buildToolRouteMetadata('research_topic'),
       };
     }
 

@@ -330,10 +330,14 @@ describe("assembleV2Envelope", () => {
       scienceLedger: makeScienceLedger(),
     });
 
-    expect(envelope._route_metadata).toEqual({
+    expect(envelope._route_metadata).toMatchObject({
       outcome: "proposal_created",
       reasoning: "returned_pending_proposal",
     });
+    // Extended observability fields (Task 3)
+    expect(envelope._route_metadata).toHaveProperty('contract_version');
+    expect(envelope._route_metadata).toHaveProperty('has_graph');
+    expect(envelope._route_metadata).toHaveProperty('has_analysis');
   });
 
   it("guidance_items survives JSON serialisation round-trip", () => {

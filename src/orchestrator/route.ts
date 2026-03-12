@@ -15,8 +15,9 @@ import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
 import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage, V2RunResponseEnvelope, ConversationBlock } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
-import { config } from "../config/index.js";
+import { config, isProduction } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
+import { inferTurnType, validateTurnContract } from "./turn-contract.js";
 import { handleParallelGenerate } from "./parallel-generate.js";
 import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
@@ -230,8 +231,12 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     const parsed = TurnRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       const errorDetail = parsed.error.flatten();
+      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      const inferredTurnType = inferTurnType(rawBody);
+      const contractCheck = validateTurnContract(inferredTurnType, rawBody);
+
       log.warn(
-        { request_id: requestId, errors: errorDetail },
+        { request_id: requestId, errors: errorDetail, inferred_turn_type: inferredTurnType },
         "Orchestrator turn request validation failed",
       );
 
@@ -245,11 +250,30 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
           message: 'Request validation failed',
           recoverable: false,
           validation_errors: errorDetail,
+          // Verbose diagnostics — non-production only
+          ...(!isProduction() && {
+            inferred_turn_type: contractCheck.inferred_turn_type,
+            contract_version: contractCheck.contract_version,
+            forbidden_fields_present: contractCheck.forbidden_fields_present,
+            missing_required_fields: contractCheck.missing_required_fields,
+            partial_fields: contractCheck.partial_fields,
+          }),
         },
       };
 
       reply.code(400);
       return reply.send(errorEnvelope);
+    }
+
+    // ── Boundary warning: analysis_state on non-analysis turns (non-production only) ──
+    if (!isProduction() && parsed.data.analysis_state) {
+      const turnType = inferTurnType(parsed.data as unknown as Record<string, unknown>);
+      if (turnType === 'conversation' || turnType === 'explicit_generate') {
+        log.warn(
+          { request_id: requestId, turn_type: turnType },
+          `[BOUNDARY WARNING] analysis_state present on ${turnType} turn — likely client-side request construction issue`,
+        );
+      }
     }
 
     // Normalise context: if absent, construct from flat UI fields

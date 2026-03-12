@@ -58,6 +58,14 @@ export type RouteOutcome =
 export interface RouteMetadata {
   outcome: RouteOutcome;
   reasoning: string;
+  // Extended observability fields (populated by envelope assembler)
+  tool_selected?: string | null;
+  tool_permitted?: boolean;
+  response_mode?: string | null;
+  turn_type?: string | null;
+  has_graph?: boolean;
+  has_analysis?: boolean;
+  contract_version?: string;
 }
 
 export type TriggerSource =
