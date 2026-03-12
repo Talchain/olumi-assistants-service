@@ -902,6 +902,7 @@ export async function handleEditGraph(
     log.info(
       {
         request_id: requestId,
+        prompt_id: promptMeta.taskId,
         prompt_source: promptMeta.source,
         prompt_version: promptMeta.prompt_version,
         prompt_hash: promptMeta.prompt_hash,

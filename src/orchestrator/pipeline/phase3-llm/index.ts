@@ -442,6 +442,7 @@ export async function phase3Generate(
   log.info(
     {
       request_id: requestId,
+      prompt_id: promptMeta.taskId,
       prompt_task_id: promptMeta.taskId,
       prompt_version: promptMeta.prompt_version,
       prompt_hash: promptMeta.prompt_hash ?? null,
@@ -461,9 +462,41 @@ export async function phase3Generate(
   const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
 
   const messages = assembleMessages(context, effectiveUserMessage);
-  const toolDefs = assembleToolDefinitions(getToolDefinitions()).filter((tool) =>
+  const currentStage = enrichedContext.stage_indicator.stage;
+  const allToolDefs = assembleToolDefinitions(getToolDefinitions()).filter((tool) =>
     hasExplainableCurrentAnalysis || tool.name !== 'explain_results',
   );
+
+  // Pre-LLM tool filtering: restrict tool definitions to stage-allowed tools only.
+  // Uses isToolAllowedAtStage (same logic as the post-LLM guard in phase4) so that
+  // intent-gated tools — research_topic in FRAME (requires explicit research intent)
+  // and draft_graph in IDEATE (requires explicit rebuild intent) — are filtered
+  // correctly before the LLM sees them. This prevents suppress-and-fallback turns
+  // when the LLM would have selected a tool that phase4 would block anyway.
+  // Unknown stage → isToolAllowedAtStage returns allowed:true (permissive fallback).
+  const toolDefs = allToolDefs.filter((tool) => {
+    const guard = isToolAllowedAtStage(tool.name, currentStage, userMessage);
+    if (!guard.allowed) {
+      log.debug(
+        { stage: currentStage, tool_filtered: tool.name, reason: guard.reason, request_id: requestId },
+        'phase3: tool filtered from LLM context by stage policy',
+      );
+    }
+    return guard.allowed;
+  });
+
+  if (allToolDefs.length !== toolDefs.length) {
+    log.info(
+      {
+        request_id: requestId,
+        stage: currentStage,
+        tools_before: allToolDefs.map(t => t.name),
+        tools_after: toolDefs.map(t => t.name),
+        filtered_count: allToolDefs.length - toolDefs.length,
+      },
+      'phase3: stage policy filtered tool definitions before LLM call',
+    );
+  }
 
   if (!llmClient.chatWithTools) {
     // Fallback: plain chat if adapter doesn't support tools
@@ -499,10 +532,27 @@ export async function phase3Generate(
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
 
+  // Resolve model observability after the call (adapter is selected lazily inside client).
+  const resolvedModelInfo = llmClient.getResolvedModel?.() ?? null;
+  log.info(
+    {
+      request_id: requestId,
+      task: 'orchestrator',
+      resolved_model: resolvedModelInfo?.model ?? null,
+      resolved_provider: resolvedModelInfo?.provider ?? null,
+    },
+    'phase3.llm_call_resolved_model',
+  );
+
   const parsed = parseV2Response(llmResult);
   return {
     ...parsed,
-    route_metadata: { outcome: 'default_llm', reasoning: 'no_deterministic_route_applied' },
+    route_metadata: {
+      outcome: 'default_llm',
+      reasoning: 'no_deterministic_route_applied',
+      resolved_model: resolvedModelInfo?.model ?? null,
+      resolved_provider: resolvedModelInfo?.provider ?? null,
+    },
     route_debug: {
       ...routeDebugBase,
       final_intent_gate: summariseIntentGate(effectiveIntentGate),

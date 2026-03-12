@@ -722,6 +722,81 @@ export function getPromptLoaderCacheDiagnostics(): {
   };
 }
 
+/**
+ * Snapshot of a single prompt's currently-cached state for the verify endpoint.
+ */
+export interface PromptVerifyEntry {
+  prompt_id: string;
+  source: 'store' | 'default';
+  store_version: number | null;
+  content_hash: string;        // SHA-256, first 16 hex chars
+  content_length: number;
+  first_100_chars: string;
+  last_100_chars: string;
+  loaded_at: string | null;    // ISO timestamp, or null if served from hardcoded default (not yet cached)
+}
+
+/**
+ * Return a verify snapshot for every registered prompt task ID.
+ *
+ * Coverage: enumerates ALL task IDs that have registered defaults (via
+ * getDefaultPrompts()), regardless of whether they are in the LLM adapter
+ * cache. For cached tasks the live cache entry is used (reflects store
+ * version if loaded). For uncached tasks the hardcoded default content is
+ * used to compute the hash.
+ */
+export function getPromptVerifySnapshot(): PromptVerifyEntry[] {
+  ensureDefaultsRegistered();
+  const entries: PromptVerifyEntry[] = [];
+
+  // Enumerate all registered default task IDs so nothing is omitted
+  const allRegisteredTaskIds = Object.keys(getDefaultPrompts()) as CeeTaskId[];
+
+  for (const taskId of allRegisteredTaskIds) {
+    const cached = promptCache.get(taskId);
+
+    if (cached) {
+      // Use live cache entry — may be store version or default
+      const content = cached.content;
+      const hash16 = cached.promptHash
+        ? cached.promptHash.slice(0, 16)
+        : createHash('sha256').update(content).digest('hex').slice(0, 16);
+
+      entries.push({
+        prompt_id: cached.promptId ?? taskId,
+        source: cached.source ?? 'default',
+        store_version: cached.version ?? null,
+        content_hash: hash16,
+        content_length: content.length,
+        first_100_chars: content.slice(0, 100),
+        last_100_chars: content.slice(-100),
+        loaded_at: new Date(cached.loadedAt).toISOString(),
+      });
+    } else {
+      // Not yet cached — fall back to registered default content
+      try {
+        const content = loadPromptSync(taskId);
+        const hash16 = createHash('sha256').update(content).digest('hex').slice(0, 16);
+
+        entries.push({
+          prompt_id: taskId,
+          source: 'default',
+          store_version: null,
+          content_hash: hash16,
+          content_length: content.length,
+          first_100_chars: content.slice(0, 100),
+          last_100_chars: content.slice(-100),
+          loaded_at: null,
+        });
+      } catch {
+        // Default not registered — skip silently (should not happen after ensureDefaultsRegistered)
+      }
+    }
+  }
+
+  return entries;
+}
+
 // ============================================================================
 // Staging and A/B Experiment Support
 // ============================================================================

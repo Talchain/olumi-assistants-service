@@ -7,6 +7,7 @@
  * **Security:** Requires admin API key via X-Admin-Key header
  *
  * Routes:
+ * - GET    /admin/prompts/verify  - Active prompt metadata snapshot (hash, source, version)
  * - GET    /admin/prompts         - List all prompts
  * - POST   /admin/prompts         - Create new prompt
  * - GET    /admin/prompts/:id     - Get prompt by ID
@@ -57,7 +58,7 @@ import {
 import type { ObservationType } from '../prompts/stores/supabase.js';
 import { SupabasePromptStore } from '../prompts/stores/supabase.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
-import { invalidatePromptCache } from '../adapters/llm/prompt-loader.js';
+import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { MODEL_REGISTRY } from '../config/models.js';
@@ -255,6 +256,30 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       error: 'rate_limit_exceeded',
       message: 'Too many requests. Please try again later.',
     }),
+  });
+
+  // =========================================================================
+  // Prompt Verification
+  // =========================================================================
+
+  /**
+   * GET /admin/prompts/verify - Return currently active prompt metadata for all cached prompts
+   * Permission: read
+   *
+   * Reports what each prompt task is serving right now: content hash, source,
+   * store version, and preview chars. Useful for confirming deployments and
+   * detecting cache/store drift without exposing full prompt text.
+   */
+  app.get('/admin/prompts/verify', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const prompts = getPromptVerifySnapshot();
+
+    return reply.status(200).send({
+      prompts,
+      environment: config.server.nodeEnv ?? 'unknown',
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // =========================================================================

@@ -394,7 +394,7 @@ export async function draftGraphWithAnthropic(
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for draft");
+  log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source }, "calling Anthropic for draft");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -718,10 +718,13 @@ export async function suggestOptionsWithAnthropic(args: {
   const prompt = await buildSuggestPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
+  const suggestPromptMeta = getSystemPromptMeta('suggest_options');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
+
+  log.info({ model, idempotency_key: idempotencyKey, prompt_id: suggestPromptMeta.taskId, prompt_hash: suggestPromptMeta.prompt_hash, prompt_source: suggestPromptMeta.source }, "calling Anthropic for suggest_options");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -1035,12 +1038,13 @@ export async function repairGraphWithAnthropic(
   const prompt = await buildRepairPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('repair_graph') ?? 4096;
+  const repairPromptMeta = getSystemPromptMeta('repair_graph');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ violation_count: args.violations.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for graph repair");
+  log.info({ violation_count: args.violations.length, model, idempotency_key: idempotencyKey, prompt_id: repairPromptMeta.taskId, prompt_hash: repairPromptMeta.prompt_hash, prompt_source: repairPromptMeta.source }, "calling Anthropic for graph repair");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -1346,12 +1350,13 @@ export async function clarifyBriefWithAnthropic(
   const prompt = await buildClarifyPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
+  const clarifyPromptMeta = getSystemPromptMeta('clarify_brief');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ brief_chars: args.brief.length, round: args.round, model, idempotency_key: idempotencyKey }, "calling Anthropic for clarification");
+  log.info({ brief_chars: args.brief.length, round: args.round, model, idempotency_key: idempotencyKey, prompt_id: clarifyPromptMeta.taskId, prompt_hash: clarifyPromptMeta.prompt_hash, prompt_source: clarifyPromptMeta.source }, "calling Anthropic for clarification");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
@@ -1559,12 +1564,13 @@ export async function critiqueGraphWithAnthropic(
   const prompt = await buildCritiquePrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
+  const critiquePromptMeta = getSystemPromptMeta('critique_graph');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
-  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model, idempotency_key: idempotencyKey }, "calling Anthropic for critique");
+  log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model, idempotency_key: idempotencyKey, prompt_id: critiquePromptMeta.taskId, prompt_hash: critiquePromptMeta.prompt_hash, prompt_source: critiquePromptMeta.source }, "calling Anthropic for critique");
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);

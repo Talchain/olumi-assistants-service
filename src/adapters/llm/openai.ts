@@ -559,7 +559,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const startTime = Date.now();
 
     log.info(
-      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey },
+      { brief_chars: brief.length, doc_count: docs.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source },
       "calling OpenAI for draft"
     );
 
@@ -1005,12 +1005,13 @@ export class OpenAIAdapter implements LLMAdapter {
     const { graph, violations, brief, docs } = args;
     const collector = opts.collector;
     const prompt = await buildRepairPrompt(graph, violations, { brief, docs: docs as any });
+    const repairPromptMeta = getSystemPromptMeta('repair_graph');
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
     const startTime = Date.now();
 
-    log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for repair");
+    log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey, prompt_id: repairPromptMeta.taskId, prompt_hash: repairPromptMeta.prompt_hash, prompt_source: repairPromptMeta.source }, "calling OpenAI for repair");
 
     const abortController = new AbortController();
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
