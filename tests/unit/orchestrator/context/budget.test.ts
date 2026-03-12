@@ -95,7 +95,7 @@ describe("enforceContextBudget", () => {
     expect(result.analysis_response).toBeDefined();
   });
 
-  it("drops node values and low-exists edges when graph exceeds budget", async () => {
+  it("drops low-value metadata (type/category/source) before value when graph exceeds budget", async () => {
     const enforceContextBudget = await getEnforceContextBudget();
     // Graph budget = 25% of maxTokens. Create a tiny maxTokens so graph exceeds it.
     const tinyMax = 100; // 25 tokens for graph = 100 chars — easily exceeded
@@ -105,10 +105,13 @@ describe("enforceContextBudget", () => {
         kind: "factor",
         label: `Factor with a fairly long label ${i}`,
         value: i * 100,
+        type: "some_type",
+        category: "controllable",
+        source: "user" as const,
       })),
       edges: [
         { from: "n0", to: "n1", strength: 0.5, exists: 0.9 },
-        { from: "n1", to: "n2", strength: 0.3, exists: 0.4 }, // below 0.5 — should be dropped
+        { from: "n1", to: "n2", strength: 0.3, exists: 0.4 }, // low exists — field may be stripped, edge preserved
         { from: "n2", to: "n3", strength: 0.7, exists: 0.6 },
       ],
       _node_count: 5,
@@ -117,16 +120,8 @@ describe("enforceContextBudget", () => {
     const context = makeContext({ graph_compact: bigGraph, messages: [makeMessage("user", "Hi")] });
     const result = enforceContextBudget(context, tinyMax);
 
-    // Should have dropped value from nodes
-    result.graph_compact?.nodes.forEach((n) => {
-      expect(n).not.toHaveProperty("value");
-    });
-
-    // Should have dropped edge with exists < 0.5
-    const existsValues = result.graph_compact?.edges.map((e) => e.exists) ?? [];
-    for (const ex of existsValues) {
-      expect(ex).toBeGreaterThanOrEqual(0.5);
-    }
+    // All edges must be preserved — pass 4 drops the exists *field*, not edges
+    expect(result.graph_compact?.edges).toHaveLength(bigGraph.edges.length);
   });
 
   it("drops constraint_tensions and reduces drivers to 3 when analysis exceeds budget", async () => {

@@ -90,7 +90,7 @@ describe("compactGraph", () => {
     expect(result.edges[0].exists).toBe(0.8);
   });
 
-  it("extracts observed_state.value into node.value", () => {
+  it("extracts observed_state.value, unit into node fields; drops baseline and std", () => {
     const node = makeNode("node_a", {
       observed_state: {
         value: 42,
@@ -102,9 +102,9 @@ describe("compactGraph", () => {
     });
     const result = compactGraph(makeGraph([node], []));
     expect(result.nodes[0].value).toBe(42);
-    // Other observed_state fields should not appear at node level
+    expect(result.nodes[0].unit).toBe("USD");
+    // Heavy observed_state fields must not appear at node level
     expect(result.nodes[0]).not.toHaveProperty("baseline");
-    expect(result.nodes[0]).not.toHaveProperty("unit");
     expect(result.nodes[0]).not.toHaveProperty("std");
   });
 
