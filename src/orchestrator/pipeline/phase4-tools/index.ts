@@ -333,8 +333,6 @@ export function createProductionToolDispatcher(
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,
         }),
-        ...(result.appliedChanges && { applied_changes: result.appliedChanges }),
-        ...(result.deterministicAnswerTier !== undefined && { deterministic_answer_tier: result.deterministicAnswerTier }),
       };
     },
   };
