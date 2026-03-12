@@ -374,7 +374,7 @@ export interface ToolResult {
   proposed_changes?: ProposedChangesPayload;
   route_metadata?: RouteMetadata;
   /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
-  applied_changes?: Record<string, unknown>;
+  applied_changes?: import("../types.js").AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministic_answer_tier?: 1 | 2 | 3;
 }
@@ -404,7 +404,7 @@ export interface OrchestratorResponseEnvelopeV2 {
    * Additive UI supplement — does not replace GraphPatchBlock.
    * Absent when edit was rejected or no edit occurred this turn.
    */
-  applied_changes?: Record<string, unknown>;
+  applied_changes?: import("../types.js").AppliedChanges;
   /**
    * Which explain_results tier resolved this turn.
    * 1 = cached deterministic, 2 = review data, 3 = LLM call.

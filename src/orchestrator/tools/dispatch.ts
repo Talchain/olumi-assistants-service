@@ -75,6 +75,10 @@ export interface ToolDispatchResult {
   pendingProposal?: PendingProposalState;
   proposedChanges?: import("../types.js").ProposedChangesPayload;
   routeMetadata?: RouteMetadata;
+  /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
+  appliedChanges?: import("../types.js").AppliedChanges;
+  /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
+  deterministicAnswerTier?: 1 | 2 | 3;
 }
 
 export interface ToolDispatchOpts {
@@ -245,6 +249,7 @@ export async function dispatchToolHandler(
         routeMetadata: result.routeMetadata
           ? { ...result.routeMetadata, resolved_model: adapter.model, resolved_provider: adapter.name }
           : buildToolRouteMetadata('edit_graph', undefined, adapter),
+        ...(result.appliedChanges && { appliedChanges: result.appliedChanges }),
       };
     }
 
@@ -259,6 +264,7 @@ export async function dispatchToolHandler(
         toolLatencyMs: result.latencyMs,
         guidanceItems: [],
         routeMetadata: buildToolRouteMetadata('explain_results', 'results_explanation', adapter),
+        ...(result.deterministic_answer_tier !== undefined && { deterministicAnswerTier: result.deterministic_answer_tier }),
       };
     }
 

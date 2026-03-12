@@ -545,3 +545,28 @@ export type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T };
 /** INT-3 convenience aliases */
 export type ToolDefinition = OrchestratorToolDefinition;
 export type V2RunResponse = V2RunResponseEnvelope;
+
+// ============================================================================
+// Applied Changes Receipt — returned on successful edit_graph
+// ============================================================================
+
+export interface AppliedChangeItem {
+  /** Human-readable element label. Never contains internal IDs. */
+  label: string;
+  /** Description of the change (old->new or new state if old unavailable). */
+  description: string;
+  /** Node/edge path for UI highlighting. Not shown to user. */
+  element_ref: string;
+}
+
+/**
+ * Structured receipt for a successful edit_graph operation.
+ * Additive supplement to GraphPatchBlock — does not replace it.
+ */
+export interface AppliedChanges {
+  /** One compact sentence describing the net change. No internal IDs. */
+  summary: string;
+  changes: AppliedChangeItem[];
+  /** True when an existing analysis would be materially affected by this change. */
+  rerun_recommended: boolean;
+}

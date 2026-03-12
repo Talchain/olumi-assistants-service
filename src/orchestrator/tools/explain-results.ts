@@ -32,6 +32,217 @@ export interface ExplainResultsResult {
   blocks: ConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
+  /** Which tier resolved this turn: 1 = cached deterministic, 2 = review data, 3 = LLM. */
+  deterministic_answer_tier?: 1 | 2 | 3;
+}
+
+// ============================================================================
+// Question Classification — Deterministic Tier Router
+// ============================================================================
+
+export type ExplainQuestionClass = 'tier1' | 'tier2' | 'tier2_recommendation' | 'tier3';
+
+/**
+ * Tier 1: Cache-safe factual reads — winner, scores, drivers, robustness.
+ * Conservative — false negatives (falling to Tier 3) are preferable.
+ */
+const TIER1_PATTERNS = [
+  /\bwho\s+(?:is\s+)?winning\b/i,
+  /\bwho\s+wins\b/i,
+  /\bwhat\s+(?:is\s+the\s+)?(?:top\s+)?recommendation\b/i,
+  /\bwhat\s+(?:are\s+(?:the\s+)?)?top\s+drivers\b/i,
+  /\bwhat\s+(?:matters|drives)\s+most\b/i,
+  /\bwhat\s+(?:are\s+(?:the\s+)?)?scores?\b/i,
+  /\bwhat\s+(?:are\s+(?:the\s+)?)?options?\b/i,
+  /\bhow\s+(?:robust|confident|stable|reliable|strong)\b/i,
+];
+
+/** Tier 3: Causal/counterfactual questions that need multi-step LLM reasoning. */
+const TIER3_CAUSAL_PATTERNS = [
+  /\bwhy\b/i,
+  /\bwhat\s+(?:would|could|might)\s+(?:change|affect|shift|flip|alter)\b/i,
+  /\bwhat\s+if\b/i,
+  /\bhow\s+does\s+\w+\s+affect\b/i,
+  /\bhow\s+would\b/i,
+  /\bwhat\s+caused?\b/i,
+  /\bwhat\s+drives?\b/i,
+];
+
+/** Tier 2: Summary/narrative questions served from review_cards. */
+const TIER2_PATTERNS = [
+  /\bsumm(?:arise|arize)\b/i,
+  /\bheadline\b/i,
+  /\bgive\s+me\s+(?:a\s+|an\s+)?(?:summary|overview|headline)\b/i,
+  /\bwhat\s+(?:did|does)\s+(?:the\s+)?analysis\s+(?:say|show|find)\b/i,
+];
+
+/** Tier 2 recommendation: explicit "what should I do / which should I choose". */
+const TIER2_RECOMMENDATION_PATTERNS = [
+  /\bwhat\s+should\s+I\s+(?:do|choose|pick|go\s+with)\b/i,
+  /\bwhich\s+(?:option\s+)?should\s+I\s+(?:choose|pick|go\s+with|select)\b/i,
+  /\bwhich\s+is\s+(?:better|best|recommended)\b/i,
+];
+
+/**
+ * Classify a user question/focus into a deterministic routing tier.
+ *
+ * Conservative: false negatives (falling through to Tier 3) are preferred
+ * over false positives (answering deterministically when the question needs LLM).
+ */
+export function classifyExplainQuestion(message: string): ExplainQuestionClass {
+  if (!message || message.trim().length === 0) return 'tier3';
+
+  // Check causal patterns first -- if present, always Tier 3
+  for (const pattern of TIER3_CAUSAL_PATTERNS) {
+    if (pattern.test(message)) return 'tier3';
+  }
+
+  // Tier 1: factual reads
+  for (const pattern of TIER1_PATTERNS) {
+    if (pattern.test(message)) return 'tier1';
+  }
+
+  // Tier 2 recommendation
+  for (const pattern of TIER2_RECOMMENDATION_PATTERNS) {
+    if (pattern.test(message)) return 'tier2_recommendation';
+  }
+
+  // Tier 2 summary/narrative
+  for (const pattern of TIER2_PATTERNS) {
+    if (pattern.test(message)) return 'tier2';
+  }
+
+  return 'tier3';
+}
+
+// ============================================================================
+// Tier 1 Deterministic Builders
+// ============================================================================
+
+interface CompactSummary {
+  winner: { label: string; probability: number } | null;
+  options: Array<{ label: string; probability: number }>;
+  topDrivers: string[];
+  robustnessLevel: string | null;
+}
+
+function buildCompactSummaryFromResponse(response: V2RunResponseEnvelope): CompactSummary | null {
+  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const validResults = results.filter(
+    (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
+  );
+  if (validResults.length === 0) return null;
+
+  const sorted = [...validResults].sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
+  const options = sorted.map(r => ({
+    label: r.option_label as string,
+    probability: (r.win_probability as number) * 100,
+  }));
+
+  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
+  const topDrivers = factors.slice(0, 3).filter(f => f.label != null).map(f => String(f.label));
+
+  const robustnessLevel = (response.robustness?.level as string | undefined) ?? null;
+
+  return {
+    winner: options[0] ?? null,
+    options,
+    topDrivers,
+    robustnessLevel,
+  };
+}
+
+function buildTier1Default(summary: CompactSummary, stalePrefix: string): string | null {
+  if (!summary.winner) return null;
+  const parts: string[] = [];
+  if (stalePrefix) parts.push(stalePrefix);
+  parts.push(`${summary.winner.label} leads with ${summary.winner.probability.toFixed(1)}% win probability.`);
+  if (summary.options.length > 1) {
+    const others = summary.options.slice(1).map(o => `${o.label} (${o.probability.toFixed(1)}%)`).join(', ');
+    parts.push(`Other options: ${others}.`);
+  }
+  return parts.join(' ');
+}
+
+function buildTier1DriversAnswer(summary: CompactSummary, stalePrefix: string): string | null {
+  if (summary.topDrivers.length === 0) return null;
+  const parts: string[] = [];
+  if (stalePrefix) parts.push(stalePrefix);
+  parts.push(`Top sensitivity drivers: ${summary.topDrivers.join(', ')}.`);
+  return parts.join(' ');
+}
+
+function buildTier1OptionsAnswer(summary: CompactSummary, stalePrefix: string): string | null {
+  if (summary.options.length === 0) return null;
+  const parts: string[] = [];
+  if (stalePrefix) parts.push(stalePrefix);
+  const optionList = summary.options.map(o => `${o.label} (${o.probability.toFixed(1)}%)`).join(', ');
+  parts.push(`Options analysed: ${optionList}.`);
+  return parts.join(' ');
+}
+
+function buildTier1RobustnessAnswer(summary: CompactSummary, stalePrefix: string): string | null {
+  if (!summary.robustnessLevel) return null;
+  const parts: string[] = [];
+  if (stalePrefix) parts.push(stalePrefix);
+  parts.push(`Model robustness is rated ${summary.robustnessLevel}.`);
+  return parts.join(' ');
+}
+
+/**
+ * Route a Tier 1 question to the appropriate sub-answer based on the focus text.
+ * Returns null if the relevant data is absent (falls through to Tier 3).
+ */
+function buildTier1Response(
+  questionText: string,
+  summary: CompactSummary,
+  stalePrefix: string,
+): string | null {
+  // Driver question
+  if (/\b(?:top\s+)?drivers?\b|\bmatters\s+most\b|\bdrives?\s+most\b/i.test(questionText)) {
+    return buildTier1DriversAnswer(summary, stalePrefix);
+  }
+  // Options/scores question
+  if (/\boptions?\b|\bscores?\b/i.test(questionText)) {
+    return buildTier1OptionsAnswer(summary, stalePrefix);
+  }
+  // Robustness question
+  if (/\bhow\s+(?:robust|confident|stable|reliable|strong)\b/i.test(questionText)) {
+    return buildTier1RobustnessAnswer(summary, stalePrefix);
+  }
+  // Winning / recommendation default
+  return buildTier1Default(summary, stalePrefix);
+}
+
+// ============================================================================
+// Tier 2 Review Data Builder
+// ============================================================================
+
+function buildTier2ReviewAnswer(
+  response: V2RunResponseEnvelope,
+  questionClass: ExplainQuestionClass,
+  stalePrefix: string,
+): string | null {
+  const reviewCards = Array.isArray(response.review_cards) ? response.review_cards as Array<Record<string, unknown>> : [];
+  if (reviewCards.length === 0) return null;
+
+  if (questionClass === 'tier2_recommendation') {
+    // Only answer if an explicit recommendation exists — otherwise fall to Tier 3
+    const recCard = reviewCards.find(c => typeof c.recommendation_summary === 'string' && c.recommendation_summary.trim());
+    if (!recCard) return null;
+    const parts: string[] = [];
+    if (stalePrefix) parts.push(stalePrefix);
+    parts.push(recCard.recommendation_summary as string);
+    return parts.join(' ');
+  }
+
+  // Tier 2 summary — use first narrative_summary
+  const summaryCard = reviewCards.find(c => typeof c.narrative_summary === 'string' && c.narrative_summary.trim());
+  if (!summaryCard) return null;
+  const parts: string[] = [];
+  if (stalePrefix) parts.push(stalePrefix);
+  parts.push(summaryCard.narrative_summary as string);
+  return parts.join(' ');
 }
 
 // ============================================================================
@@ -160,15 +371,61 @@ export async function handleExplainResults(
     };
   }
 
-  if (!isAnalysisCurrent(context.framing?.stage ?? null, analysisResponse)) {
+  // Determine stale state (graph changed since last analysis run)
+  const stale = !isAnalysisCurrent(context.framing?.stage ?? null, analysisResponse);
+  const stalePrefix = stale ? 'Based on the last analysis, before your recent changes:' : '';
+
+  // Classify the question for deterministic routing
+  const questionText = focus ?? '';
+  const questionClass = classifyExplainQuestion(questionText);
+
+  // ---- Tier 1: Cached deterministic read ----
+  if (questionClass === 'tier1' && context.analysis_response) {
+    const compactSummary = buildCompactSummaryFromResponse(analysisResponse);
+    if (compactSummary) {
+      const tier1Text = buildTier1Response(questionText, compactSummary, stalePrefix);
+      if (tier1Text) {
+        log.info(
+          { request_id: requestId, tier: 1, question_class: questionClass, stale },
+          'explain_results: deterministic_answer_tier=1',
+        );
+        return {
+          blocks: [createCommentaryBlock(tier1Text, turnId, 'tool:explain_results:tier1')],
+          assistantText: null,
+          latencyMs: Date.now() - startTime,
+          deterministic_answer_tier: 1,
+        };
+      }
+    }
+  }
+
+  // ---- Tier 2: Review data narrative ----
+  if ((questionClass === 'tier2' || questionClass === 'tier2_recommendation') && context.analysis_response) {
+    const tier2Text = buildTier2ReviewAnswer(analysisResponse, questionClass, stalePrefix);
+    if (tier2Text) {
+      log.info(
+        { request_id: requestId, tier: 2, question_class: questionClass, stale },
+        'explain_results: deterministic_answer_tier=2',
+      );
+      return {
+        blocks: [createCommentaryBlock(tier2Text, turnId, 'tool:explain_results:tier2')],
+        assistantText: null,
+        latencyMs: Date.now() - startTime,
+        deterministic_answer_tier: 2,
+      };
+    }
+  }
+
+  // ---- Tier 3: LLM explanation ----
+  // When analysis is stale and the question is causal/open (Tier 3), return a
+  // recovery message instead of calling the LLM — a stale explanation would be misleading.
+  if (stale) {
     return {
-      blocks: [
-        createCommentaryBlock(
-          'I can explain the latest completed analysis, but your graph has changed since that run. Re-run the analysis and I’ll explain the current results.',
-          turnId,
-          'tool:explain_results:stale',
-        ),
-      ],
+      blocks: [createCommentaryBlock(
+        'The graph has changed since that run — please re-run the analysis to get an up-to-date explanation.',
+        turnId,
+        'tool:explain_results:stale',
+      )],
       assistantText: null,
       latencyMs: Date.now() - startTime,
     };
@@ -226,15 +483,19 @@ export async function handleExplainResults(
       refs,
     );
 
+    log.info(
+      { request_id: requestId, tier: 3, question_class: questionClass, stale },
+      'explain_results: deterministic_answer_tier=3',
+    );
+
     return {
       blocks: [block],
       assistantText: null,
       latencyMs,
+      deterministic_answer_tier: 3,
     };
   } catch (error) {
-    // Tiered graceful degradation — never 500.
-    // Tier 1: if winner + top driver extractable, produce short explanation.
-    // Tier 2: generic fallback when even that's missing.
+    // Graceful degradation — never 500.
     log.warn(
       { request_id: requestId, error: error instanceof Error ? error.message : String(error) },
       'explain_results: falling back to graceful degradation',

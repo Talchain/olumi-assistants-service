@@ -44,6 +44,8 @@ import type {
   ProposedChangesPayload,
   ProposedChangeActionType,
   SuggestedAction,
+  AppliedChanges,
+  AppliedChangeItem,
 } from "../types.js";
 import type { RouteMetadata } from "../pipeline/types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
@@ -82,6 +84,8 @@ export interface EditGraphResult {
   /** Edit-specific diagnostics for orchestrator turn trace (edit_graph turns only). */
   diagnostics?: EditGraphTraceDiagnostics;
   routeMetadata?: RouteMetadata;
+  /** Structured receipt for successful edits. Absent on rejected edits. */
+  appliedChanges?: AppliedChanges;
 }
 
 export interface EditGraphOpts {
@@ -707,6 +711,129 @@ function resolveExplicitGroupedTargets(
   return groupedTargetLabels
     .map((label) => allTargets.find((target) => normaliseMatchingText(target.label) === normaliseMatchingText(label)) ?? null)
     .filter((target): target is ResolvedEditTarget => target !== null);
+}
+
+// ============================================================================
+// Applied Changes Receipt
+// ============================================================================
+
+/**
+ * Return true if this operation is substantive (affects model outputs).
+ * Label-only renames are cosmetic and do not warrant a rerun.
+ */
+function isSubstantiveOperation(op: PatchOperation): boolean {
+  if (op.op === 'add_node' || op.op === 'remove_node') return true;
+  if (op.op === 'add_edge' || op.op === 'remove_edge' || op.op === 'update_edge') return true;
+  if (op.op === 'update_node') {
+    const newVal = op.value as Record<string, unknown> | undefined;
+    if (!newVal) return false;
+    // If the only key changed is `label`, it is cosmetic
+    const keys = Object.keys(newVal);
+    if (keys.length === 1 && keys[0] === 'label') return false;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve a human-readable label for a node path from the graph.
+ * Falls back to the path if the node is not found.
+ */
+function resolveElementLabel(path: string, graph: GraphV3T, opValue?: unknown): string {
+  const nodes = (graph.nodes ?? []) as Array<{ id: string; label?: string }>;
+  const node = nodes.find(n => n.id === path);
+  if (node?.label) return node.label;
+  // For add_node, the label is in the value
+  if (opValue && typeof opValue === 'object') {
+    const v = opValue as Record<string, unknown>;
+    if (typeof v.label === 'string') return v.label;
+  }
+  return path;
+}
+
+/**
+ * Build a human-readable description for a single patch operation.
+ * Never contains internal node IDs.
+ */
+function buildOperationDescription(op: PatchOperation, graph: GraphV3T): string {
+  const label = resolveElementLabel(op.path, graph, op.value);
+
+  switch (op.op) {
+    case 'add_node':
+      return `Added ${label}`;
+    case 'remove_node':
+      return `Removed ${label}`;
+    case 'add_edge': {
+      const val = op.value as Record<string, unknown> | undefined;
+      const fromLabel = val?.from ? resolveElementLabel(String(val.from), graph) : op.path;
+      const toLabel = val?.to ? resolveElementLabel(String(val.to), graph) : '';
+      return toLabel ? `Added edge from ${fromLabel} to ${toLabel}` : `Added edge on ${fromLabel}`;
+    }
+    case 'remove_edge': {
+      const parts = op.path.split('::');
+      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph);
+      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph) : '';
+      return toLabel ? `Removed edge from ${fromLabel} to ${toLabel}` : `Removed edge on ${fromLabel}`;
+    }
+    case 'update_edge': {
+      const parts = op.path.split('::');
+      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph);
+      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph) : '';
+      return toLabel ? `Updated edge from ${fromLabel} to ${toLabel}` : `Updated edge on ${fromLabel}`;
+    }
+    case 'update_node': {
+      const newVal = op.value as Record<string, unknown> | undefined;
+      const oldVal = op.old_value as Record<string, unknown> | undefined;
+      if (!newVal) return `Updated ${label}`;
+      const keys = Object.keys(newVal);
+      if (keys.length === 1 && keys[0] === 'label') {
+        const oldLabel = typeof oldVal?.label === 'string' ? oldVal.label : label;
+        const newLabel = typeof newVal.label === 'string' ? newVal.label : label;
+        return `Renamed "${oldLabel}" to "${newLabel}"`;
+      }
+      if (typeof newVal.value === 'number') {
+        if (oldVal && typeof oldVal.value === 'number') {
+          return `${label}: ${oldVal.value} -> ${newVal.value}`;
+        }
+        return `${label}: set to ${newVal.value}`;
+      }
+      return `Updated ${label}`;
+    }
+    default:
+      return `Changed ${label}`;
+  }
+}
+
+/**
+ * Build a structured applied-change receipt from the patch operations.
+ *
+ * - Uses node labels (not internal IDs) in all user-facing fields.
+ * - rerun_recommended: true when hasExistingAnalysis AND at least one substantive op.
+ *   Edge/value/structural changes are substantive; label-only renames are not.
+ */
+export function buildAppliedChanges(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  hasExistingAnalysis: boolean,
+): AppliedChanges {
+  const changes: AppliedChangeItem[] = operations.map(op => {
+    const label = resolveElementLabel(op.path, graph, op.value);
+    const description = buildOperationDescription(op, graph);
+    return { label, description, element_ref: op.path };
+  });
+
+  const hasSubstantiveOp = operations.some(isSubstantiveOperation);
+  const rerun_recommended = hasExistingAnalysis && hasSubstantiveOp;
+
+  let summary: string;
+  if (changes.length === 1) {
+    summary = changes[0].description;
+  } else {
+    const labels = changes.map(c => c.label).join(', ');
+    summary = `${changes.length} model parameters updated: ${labels}`;
+  }
+
+  return { summary, changes, rerun_recommended };
 }
 
 // ============================================================================
@@ -1595,6 +1722,14 @@ export async function handleEditGraph(
       (block.provenance as unknown as Record<string, unknown>)._meta = debugMeta;
     }
 
+    // Build deterministic applied-changes receipt from actual ops + analysis presence.
+    // rerun_recommended is derived from ops (edge/value/structural = true, label-only = false)
+    // and whether prior analysis exists — not from LLM coaching output.
+    const hasExistingAnalysis = !!context.analysis_response;
+    // Use the original graph (pre-edit) for label resolution — it has the canonical labels.
+    const graphForReceipt = (context.graph ?? candidateGraph) as GraphV3T;
+    const appliedChangesReceipt = buildAppliedChanges(operations, graphForReceipt, hasExistingAnalysis);
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -1604,7 +1739,7 @@ export async function handleEditGraph(
         repairs_applied: repairsApplied?.length ?? 0,
         applied_graph_hash: appliedGraphHash,
         has_coaching: !!llmResult.coaching,
-        rerun_recommended: llmResult.coaching?.rerun_recommended ?? false,
+        rerun_recommended: appliedChangesReceipt.rerun_recommended,
         ...(promptMeta && {
           prompt_source: promptMeta.source,
           prompt_version: promptMeta.prompt_version,
@@ -1634,9 +1769,9 @@ export async function handleEditGraph(
       assistantText = textParts.join('\n\n');
     }
 
-    // Build suggested actions: "Re-run analysis" chip when rerun_recommended
+    // Build suggested actions: "Re-run analysis" chip driven by deterministic rerun_recommended
     const suggestedActions: EditGraphResult['suggestedActions'] = [];
-    if (llmResult.coaching?.rerun_recommended) {
+    if (appliedChangesReceipt.rerun_recommended) {
       suggestedActions.push({
         label: 'Re-run analysis',
         prompt: 'run the analysis again',
@@ -1650,6 +1785,7 @@ export async function handleEditGraph(
       latencyMs,
       appliedGraph: appliedGraph ?? null,
       wasRejected: false,
+      appliedChanges: appliedChangesReceipt,
       ...(suggestedActions.length > 0 && { suggestedActions }),
       diagnostics: diagnostics(),
       routeMetadata: routeMetadata(),
