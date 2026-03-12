@@ -167,7 +167,7 @@ const optionalUrl = z
 /**
  * Environment enum
  */
-const Environment = z.enum(["development", "test", "production"]);
+const Environment = z.enum(["development", "test", "staging", "production"]);
 
 /**
  * LLM Provider enum
