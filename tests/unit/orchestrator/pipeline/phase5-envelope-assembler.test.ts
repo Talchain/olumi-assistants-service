@@ -340,6 +340,119 @@ describe("assembleV2Envelope", () => {
     expect(envelope._route_metadata).toHaveProperty('has_analysis');
   });
 
+  // ==========================================================================
+  // Model observability: resolved_model / resolved_provider in _route_metadata
+  // P0-1: non-LLM tool turns (run_analysis etc.) fall back to llmResult model fields
+  // P0-2: conversational retry propagates model fields via toolResult.route_metadata
+  // ==========================================================================
+
+  it("P0-1: _route_metadata carries resolved_model/provider from llmResult when toolResult has none", () => {
+    // Simulates a run_analysis turn: tool has no LLM adapter → no model on route_metadata
+    // llmResult carries the model from the orchestrator phase3 LLM call
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        tool_invocations: [{ id: "deterministic", name: "run_analysis", input: {} }],
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "no_deterministic_route_applied",
+          resolved_model: "gpt-4o",
+          resolved_provider: "openai",
+        },
+      }),
+      toolResult: makeToolResult({
+        // run_analysis does not set resolved_model on its route_metadata
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "tool_dispatch:run_analysis",
+          // no resolved_model or resolved_provider
+        },
+        side_effects: { graph_updated: false, analysis_ran: true, brief_generated: false },
+      }),
+      progressKind: "ran_analysis",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope._route_metadata).toBeDefined();
+    // Tool metadata takes priority for base fields
+    expect(envelope._route_metadata!.outcome).toBe("default_llm");
+    // Model fields fall back to llmResult since tool didn't set them
+    expect(envelope._route_metadata!.resolved_model).toBe("gpt-4o");
+    expect(envelope._route_metadata!.resolved_provider).toBe("openai");
+  });
+
+  it("P0-1: toolResult resolved_model/provider overrides llmResult when both are present", () => {
+    // Simulates an edit_graph turn: LLM-backed tool sets its own model
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        tool_invocations: [{ id: "t1", name: "edit_graph", input: {} }],
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "no_deterministic_route_applied",
+          resolved_model: "gpt-4o",
+          resolved_provider: "openai",
+        },
+      }),
+      toolResult: makeToolResult({
+        // edit_graph sets its own model info (different from orchestrator)
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "tool_dispatch:edit_graph",
+          resolved_model: "claude-sonnet-4-5",
+          resolved_provider: "anthropic",
+        },
+      }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope._route_metadata).toBeDefined();
+    // Tool metadata takes priority for all fields
+    expect(envelope._route_metadata!.resolved_model).toBe("claude-sonnet-4-5");
+    expect(envelope._route_metadata!.resolved_provider).toBe("anthropic");
+  });
+
+  it("P0-2: _route_metadata carries resolved_model from conversational retry via toolResult", () => {
+    // Simulates pipeline.ts conversational retry: toolResult.route_metadata is set
+    // with the retry model info, llmResult has the original orchestrator model
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        tool_invocations: [{ id: "t1", name: "run_analysis", input: {} }],
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "no_deterministic_route_applied",
+          resolved_model: "gpt-4o",
+          resolved_provider: "openai",
+        },
+      }),
+      toolResult: makeToolResult({
+        assistant_text: "Great question — let me explain what that means.",
+        // pipeline.ts writes retry model info here after the chat() call
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "conversational_retry",
+          resolved_model: "gpt-4o-mini",
+          resolved_provider: "openai",
+        },
+      }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope._route_metadata).toBeDefined();
+    expect(envelope._route_metadata!.reasoning).toBe("conversational_retry");
+    expect(envelope._route_metadata!.resolved_model).toBe("gpt-4o-mini");
+    expect(envelope._route_metadata!.resolved_provider).toBe("openai");
+  });
+
   it("guidance_items survives JSON serialisation round-trip", () => {
     const guidanceItem = {
       item_id: 'gi_abc123',

@@ -201,6 +201,14 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     envelope.analysis_response = toolResult.analysis_response;
   }
 
+  if (toolResult.applied_changes) {
+    envelope.applied_changes = toolResult.applied_changes;
+  }
+
+  if (toolResult.deterministic_answer_tier !== undefined) {
+    envelope.deterministic_answer_tier = toolResult.deterministic_answer_tier;
+  }
+
   // Add analysis response hash to lineage if available
   if (toolResult.analysis_response) {
     const ar = toolResult.analysis_response;

@@ -373,6 +373,10 @@ export interface ToolResult {
   pending_proposal?: PendingProposalState;
   proposed_changes?: ProposedChangesPayload;
   route_metadata?: RouteMetadata;
+  /** Applied change receipt from a successful edit_graph. Absent on failed edits. */
+  applied_changes?: import("../types.js").AppliedChanges;
+  /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
+  deterministic_answer_tier?: 1 | 2 | 3;
 }
 
 // ============================================================================
@@ -395,6 +399,18 @@ export interface OrchestratorResponseEnvelopeV2 {
   suggested_actions: SuggestedAction[];
   proposed_changes?: ProposedChangesPayload;
   analysis_response?: V2RunResponseEnvelope;
+  /**
+   * Applied change receipt from a successful edit_graph operation.
+   * Additive UI supplement — does not replace GraphPatchBlock.
+   * Absent when edit was rejected or no edit occurred this turn.
+   */
+  applied_changes?: import("../types.js").AppliedChanges;
+  /**
+   * Which explain_results tier resolved this turn.
+   * 1 = cached deterministic, 2 = review data, 3 = LLM call.
+   * Absent when explain_results was not used.
+   */
+  deterministic_answer_tier?: 1 | 2 | 3;
 
   lineage: {
     context_hash: string;

@@ -126,6 +126,8 @@ export async function phase4Execute(
   let pendingProposal: ToolResult['pending_proposal'];
   let proposedChanges: ToolResult['proposed_changes'];
   let routeMetadata = llmResult.route_metadata;
+  let appliedChanges: ToolResult['applied_changes'];
+  let deterministicAnswerTier: ToolResult['deterministic_answer_tier'];
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -192,6 +194,12 @@ export async function phase4Execute(
     }
     if (result.route_metadata) {
       routeMetadata = result.route_metadata;
+    }
+    if (result.applied_changes) {
+      appliedChanges = result.applied_changes;
+    }
+    if (result.deterministic_answer_tier !== undefined) {
+      deterministicAnswerTier = result.deterministic_answer_tier;
     }
 
     // Accumulate side effects from the actual tool result, not the tool name.
@@ -264,6 +272,8 @@ export async function phase4Execute(
     ...(pendingProposal && { pending_proposal: pendingProposal }),
     ...(proposedChanges && { proposed_changes: proposedChanges }),
     ...(routeMetadata && { route_metadata: routeMetadata }),
+    ...(appliedChanges && { applied_changes: appliedChanges }),
+    ...(deterministicAnswerTier !== undefined && { deterministic_answer_tier: deterministicAnswerTier }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -323,6 +333,8 @@ export function createProductionToolDispatcher(
         ...(result.suggestedActions && result.suggestedActions.length > 0 && {
           suggested_actions: result.suggestedActions,
         }),
+        ...(result.appliedChanges && { applied_changes: result.appliedChanges }),
+        ...(result.deterministicAnswerTier !== undefined && { deterministic_answer_tier: result.deterministicAnswerTier }),
       };
     },
   };
