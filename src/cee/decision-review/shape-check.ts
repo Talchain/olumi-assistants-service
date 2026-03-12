@@ -12,6 +12,11 @@
  * - dsk_protocol_id not found in bundle → warning
  * - dsk_protocol_id's linked_claim_id mismatches dsk_claim_id → warning
  * - DSK disabled → all DSK fields ignored entirely
+ *
+ * Grounding rules:
+ * - Numbers in descriptive fields must appear in the input data (±10%)
+ * - Violations emit UNGROUNDED_NUMBER warnings (one per fabricated number)
+ * - Caller decides whether to retry on UNGROUNDED_NUMBER
  */
 
 import { config } from '../../config/index.js';
@@ -25,6 +30,260 @@ export interface ShapeCheckResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
+}
+
+// ============================================================================
+// Grounding helpers
+// ============================================================================
+
+/**
+ * The subset of the review input needed for grounding checks.
+ * All numeric fields the LLM is allowed to cite in descriptive text.
+ */
+export interface ReviewInputForGrounding {
+  winner: {
+    win_probability?: number;
+    outcome_mean?: number;
+    label?: string;
+    [key: string]: unknown;
+  };
+  runner_up?: {
+    win_probability?: number;
+    outcome_mean?: number;
+    label?: string;
+    [key: string]: unknown;
+  } | null;
+  isl_results?: {
+    option_comparison?: Array<{
+      win_probability?: number;
+      outcome?: { mean?: number; p10?: number; p90?: number };
+      option_label?: string;
+      [key: string]: unknown;
+    }>;
+    factor_sensitivity?: Array<{ elasticity?: number; [key: string]: unknown }>;
+    fragile_edges?: Array<{
+      switch_probability?: number;
+      marginal_switch_probability?: number;
+      [key: string]: unknown;
+    }>;
+    robustness?: { recommendation_stability?: number; overall_confidence?: number; [key: string]: unknown };
+    [key: string]: unknown;
+  };
+  flip_threshold_data?: Array<{
+    current_value?: number;
+    flip_value?: number | null;
+    [key: string]: unknown;
+  }>;
+}
+
+// Regex to extract numeric tokens from label strings (integers and decimals, incl. negatives).
+// Used to add label-embedded numbers (e.g. "£59" from "Increase Price to £59") to the corpus.
+const LABEL_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)/g;
+
+/**
+ * Extract numeric tokens from a label string (e.g. winner.label, option_label).
+ * Numbers appearing in labels are legitimately cited by the LLM and must be in the corpus.
+ */
+function extractNumbersFromLabel(label: unknown): number[] {
+  if (typeof label !== 'string' || label.length === 0) return [];
+  const nums: number[] = [];
+  let m: RegExpExecArray | null;
+  LABEL_NUMBER_PATTERN.lastIndex = 0;
+  while ((m = LABEL_NUMBER_PATTERN.exec(label)) !== null) {
+    const n = parseFloat(m[1]);
+    if (isFinite(n)) nums.push(n);
+  }
+  return nums;
+}
+
+/**
+ * Extract all numeric values from the input that the LLM is permitted to cite.
+ * Returns a flat array of numbers the validator uses for ±10% proximity checks.
+ *
+ * Includes:
+ * - All structured numeric fields (probabilities, outcomes, sensitivities, etc.)
+ * - Numeric tokens embedded in label strings (winner.label, runner_up.label,
+ *   option_comparison[].option_label) — so a label like "Increase Price to £59"
+ *   legitimises "59" in descriptive text.
+ */
+export function extractGroundedNumbers(input: ReviewInputForGrounding): number[] {
+  const nums: number[] = [];
+
+  const push = (v: unknown) => {
+    if (typeof v === 'number' && isFinite(v)) nums.push(v);
+  };
+
+  // Structured numeric fields
+  push(input.winner.win_probability);
+  push(input.winner.outcome_mean);
+  // Label-embedded numbers from winner
+  nums.push(...extractNumbersFromLabel(input.winner.label));
+
+  if (input.runner_up) {
+    push(input.runner_up.win_probability);
+    push(input.runner_up.outcome_mean);
+    nums.push(...extractNumbersFromLabel(input.runner_up.label));
+  }
+
+  for (const oc of input.isl_results?.option_comparison ?? []) {
+    push(oc.win_probability);
+    push(oc.outcome?.mean);
+    push(oc.outcome?.p10);
+    push(oc.outcome?.p90);
+    // Label-embedded numbers from option_label
+    nums.push(...extractNumbersFromLabel(oc.option_label));
+  }
+
+  for (const fs of input.isl_results?.factor_sensitivity ?? []) {
+    push(fs.elasticity);
+  }
+
+  for (const fe of input.isl_results?.fragile_edges ?? []) {
+    push(fe.switch_probability);
+    push(fe.marginal_switch_probability);
+  }
+
+  push(input.isl_results?.robustness?.recommendation_stability);
+  push(input.isl_results?.robustness?.overall_confidence);
+
+  for (const ft of input.flip_threshold_data ?? []) {
+    push(ft.current_value);
+    if (ft.flip_value !== null) push(ft.flip_value);
+  }
+
+  return nums;
+}
+
+/**
+ * Return true if `n` is within ±10% of any value in `groundedNums`.
+ * Handles the percentage ↔ decimal equivalence (0.77 ≈ 77%) by also checking
+ * whether n / 100 or n * 100 is within tolerance of a grounded value.
+ */
+function isGrounded(n: number, groundedNums: number[]): boolean {
+  if (groundedNums.length === 0) return true; // No corpus → can't check, skip
+  const candidates = [n, n / 100, n * 100];
+  for (const candidate of candidates) {
+    for (const g of groundedNums) {
+      if (g === 0 && candidate === 0) return true;
+      if (g === 0) continue;
+      if (Math.abs((candidate - g) / g) <= 0.10) return true;
+    }
+  }
+  return false;
+}
+
+// Regex that matches standalone numbers (integers and decimals, including negatives).
+// - Lookbehind excludes digits so "77 points" only captures "77" once.
+// - Lookahead excludes letters and digits so IDs like "opt-3", "edge_1" are skipped.
+// - % is NOT in the lookahead — percentages are handled by PERCENTAGE_PATTERN instead.
+const NUMBER_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)(?![a-zA-Z\d])/g;
+
+// Regex that captures the numeric part of percentage values (e.g. "99%" → "99").
+// Applied to a separate scan so percentages are validated against the corpus.
+const PERCENTAGE_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)%/g;
+
+/**
+ * Collect all ungrounded numbers from a string field.
+ *
+ * Two-pass scan:
+ * 1. PERCENTAGE_PATTERN: extract the numeric part of "N%" and check against corpus.
+ *    isGrounded() already handles decimal↔percentage equivalence (0.77 ≈ 77%).
+ * 2. NUMBER_PATTERN: extract standalone numbers (not followed by %) and check.
+ *
+ * Returns the fabricated number strings for logging. Deduplication is handled by callers.
+ */
+function findUngroundedNumbers(text: string, groundedNums: number[]): string[] {
+  const fabricated: string[] = [];
+
+  // Pass 1: percentages — extract numeric part of "N%"
+  PERCENTAGE_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = PERCENTAGE_PATTERN.exec(text)) !== null) {
+    const n = parseFloat(match[1]);
+    if (!isGrounded(n, groundedNums)) {
+      fabricated.push(`${match[1]}%`);
+    }
+  }
+
+  // Pass 2: standalone numbers (not followed by %)
+  NUMBER_PATTERN.lastIndex = 0;
+  while ((match = NUMBER_PATTERN.exec(text)) !== null) {
+    // Skip if immediately followed by % (already handled in pass 1)
+    if (text[match.index + match[0].length] === '%') continue;
+    const n = parseFloat(match[1]);
+    if (!isGrounded(n, groundedNums)) {
+      fabricated.push(match[1]);
+    }
+  }
+
+  return fabricated;
+}
+
+/**
+ * The descriptive fields the grounding rule applies to (per the prompt).
+ * We collect strings recursively from objects/arrays within these top-level keys.
+ */
+const DESCRIPTIVE_FIELD_KEYS: ReadonlyArray<string> = [
+  'narrative_summary',
+  'robustness_explanation',
+  'readiness_rationale',
+  'scenario_contexts',
+  'flip_thresholds',
+  'pre_mortem',
+];
+
+/** Recursively collect string values from an unknown value. */
+function collectStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value as Record<string, unknown>).flatMap(collectStrings);
+  }
+  return [];
+}
+
+/**
+ * Check all descriptive fields in the LLM output for ungrounded numbers.
+ * Returns warnings of the form: `UNGROUNDED_NUMBER: "<n>" in <field> is not within ±10% of any input value`.
+ */
+export function checkNumberGrounding(
+  data: Record<string, unknown>,
+  input: ReviewInputForGrounding,
+): string[] {
+  const groundedNums = extractGroundedNumbers(input);
+  const warnings: string[] = [];
+
+  for (const key of DESCRIPTIVE_FIELD_KEYS) {
+    if (!(key in data)) continue;
+    const strings = collectStrings(data[key]);
+    // Collect all fabricated numbers across all strings, deduplicated per field
+    const seen = new Set<string>();
+    for (const str of strings) {
+      for (const bad of findUngroundedNumbers(str, groundedNums)) {
+        if (!seen.has(bad)) {
+          seen.add(bad);
+          warnings.push(`UNGROUNDED_NUMBER: "${bad}" in ${key} is not within ±10% of any input value`);
+        }
+      }
+    }
+  }
+
+  // Also check bias_findings[].description separately (descriptive per prompt)
+  if (Array.isArray(data.bias_findings)) {
+    const seen = new Set<string>();
+    for (const bf of data.bias_findings as Record<string, unknown>[]) {
+      if (typeof bf.description === 'string') {
+        for (const bad of findUngroundedNumbers(bf.description, groundedNums)) {
+          if (!seen.has(bad)) {
+            seen.add(bad);
+            warnings.push(`UNGROUNDED_NUMBER: "${bad}" in bias_findings[].description is not within ±10% of any input value`);
+          }
+        }
+      }
+    }
+  }
+
+  return warnings;
 }
 
 // ============================================================================
@@ -56,8 +315,13 @@ export interface ShapeCheckResult {
  * - pre_mortem (object) - omit if fragile_edges is empty
  * - flip_thresholds (array, max 2)
  * - framing_check (object)
+ *
+ * @param reviewInput - When provided, enables UNGROUNDED_NUMBER grounding checks.
  */
-export function performShapeCheck(data: unknown): ShapeCheckResult {
+export function performShapeCheck(
+  data: unknown,
+  reviewInput?: ReviewInputForGrounding,
+): ShapeCheckResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -213,6 +477,18 @@ export function performShapeCheck(data: unknown): ShapeCheckResult {
         }
       }
     }
+  }
+
+  // =========================================================================
+  // Grounding check — enabled when reviewInput is provided and shape is valid
+  //
+  // Only run when the basic shape passed (object with the expected fields),
+  // because grounding checks against descriptive strings require those strings
+  // to be present and of the right type.
+  // =========================================================================
+  if (reviewInput && errors.length === 0) {
+    const groundingWarnings = checkNumberGrounding(obj, reviewInput);
+    warnings.push(...groundingWarnings);
   }
 
   return { valid: errors.length === 0, errors, warnings };

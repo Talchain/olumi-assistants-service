@@ -24,12 +24,12 @@ import { config } from "../config/index.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import { extractJsonFromResponse } from "../utils/json-extractor.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
-import type { LLMAdapter, CallOpts, ChatResult } from "../adapters/llm/types.js";
+import type { CallOpts } from "../adapters/llm/types.js";
 import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 import { buildLLMRawTrace } from "../cee/llm-output-store.js";
 import { buildScienceClaimsSection, injectScienceClaimsSection } from "../cee/decision-review/science-claims.js";
-import { performShapeCheck } from "../cee/decision-review/shape-check.js";
+import { performShapeCheck, type ReviewInputForGrounding } from "../cee/decision-review/shape-check.js";
 
 // ============================================================================
 // Feature Flag
@@ -477,20 +477,36 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
-      const llmResult = await adapter.chat(
-        {
-          system: assembledPrompt,
-          userMessage,
-          temperature: 0,
-          maxTokens,
-        },
-        {
-          requestId,
-          timeoutMs: HTTP_CLIENT_TIMEOUT_MS,
-        }
-      );
+      // -----------------------------------------------------------------------
+      // LLM call helper — extracted so the retry path reuses the same logic
+      // -----------------------------------------------------------------------
+      const callOpts: CallOpts = {
+        requestId,
+        timeoutMs: HTTP_CLIENT_TIMEOUT_MS,
+      };
 
-      // Observability: LLM call completed
+      const runLlmCall = async (systemPrompt: string, msg: string) =>
+        adapter.chat(
+          { system: systemPrompt, userMessage: msg, temperature: 0, maxTokens },
+          callOpts,
+        );
+
+      // -----------------------------------------------------------------------
+      // Build the grounding corpus from the validated input so the shape check
+      // can cross-reference numbers in descriptive fields.
+      // -----------------------------------------------------------------------
+      const reviewInputForGrounding: ReviewInputForGrounding = {
+        winner: input.winner as ReviewInputForGrounding['winner'],
+        runner_up: input.runner_up as ReviewInputForGrounding['runner_up'],
+        isl_results: input.isl_results as ReviewInputForGrounding['isl_results'],
+        flip_threshold_data: input.flip_threshold_data as ReviewInputForGrounding['flip_threshold_data'],
+      };
+
+      // -----------------------------------------------------------------------
+      // Attempt 1
+      // -----------------------------------------------------------------------
+      let llmResult = await runLlmCall(assembledPrompt, userMessage);
+
       emit(TelemetryEvents.CeeDecisionReviewLlmCallCompleted, {
         ...telemetryCtx,
         llm_latency_ms: llmResult.latencyMs,
@@ -499,19 +515,128 @@ export default async function route(app: FastifyInstance) {
         output_tokens: llmResult.usage.output_tokens,
       });
 
-      // Extract JSON from response
-      const extractionResult = extractJsonFromResponse(llmResult.content, {
+      let extractionResult = extractJsonFromResponse(llmResult.content, {
         task: "decision_review",
         model: llmResult.model,
         correlationId,
       });
 
-      // Observability: JSON extracted
       emit(TelemetryEvents.CeeDecisionReviewJsonExtracted, {
         ...telemetryCtx,
         was_extracted: extractionResult.wasExtracted,
         extraction_method: extractionResult.extractionMethod,
       });
+
+      let shapeCheck = performShapeCheck(extractionResult.json, reviewInputForGrounding);
+
+      // -----------------------------------------------------------------------
+      // Retry on UNGROUNDED_NUMBER (cap: 1 retry, no retry for shape errors)
+      // -----------------------------------------------------------------------
+      const ungroundedWarnings = shapeCheck.warnings.filter((w) =>
+        w.startsWith('UNGROUNDED_NUMBER'),
+      );
+      let didRetry = false;
+
+      if (shapeCheck.valid && ungroundedWarnings.length > 0) {
+        // Extract the specific fabricated numbers for a targeted correction prompt
+        const fabricatedNumbers = ungroundedWarnings.map((w) => {
+          const match = /UNGROUNDED_NUMBER: "([^"]+)"/.exec(w);
+          return match ? match[1] : 'unknown';
+        });
+
+        log.warn(
+          {
+            request_id: requestId,
+            brief_hash: input.brief_hash,
+            attempt: 1,
+            ungrounded_numbers: fabricatedNumbers,
+            warnings: ungroundedWarnings,
+          },
+          'Decision review attempt 1: UNGROUNDED_NUMBER detected — retrying with correction prompt',
+        );
+
+        emit(TelemetryEvents.CeeDecisionReviewShapeCheckWarnings, {
+          ...telemetryCtx,
+          warnings: ungroundedWarnings,
+          attempt: 1,
+        });
+
+        // Build correction message: append the original user message with a targeted instruction
+        const correctionSuffix = [
+          '',
+          '<CORRECTION>',
+          `Your previous response contained numbers that do not appear in the input data: ${fabricatedNumbers.map((n) => `"${n}"`).join(', ')}.`,
+          'Rewrite the entire response using ONLY numbers that appear verbatim in the provided input fields (winner, runner_up, isl_results, flip_threshold_data).',
+          'Every number in narrative_summary, robustness_explanation, readiness_rationale, scenario_contexts, flip_thresholds, pre_mortem, and bias_findings.description must be traceable to an input value (±10%).',
+          'Return ONLY the corrected JSON object. No explanation.',
+          '</CORRECTION>',
+        ].join('\n');
+
+        const retryUserMessage = userMessage + correctionSuffix;
+        const retryResult = await runLlmCall(assembledPrompt, retryUserMessage);
+
+        log.info(
+          {
+            request_id: requestId,
+            attempt: 2,
+            input_tokens: retryResult.usage.input_tokens,
+            output_tokens: retryResult.usage.output_tokens,
+          },
+          'Decision review attempt 2 (UNGROUNDED_NUMBER retry) completed',
+        );
+
+        const retryExtraction = extractJsonFromResponse(retryResult.content, {
+          task: "decision_review",
+          model: retryResult.model,
+          correlationId,
+        });
+        const retryShapeCheck = performShapeCheck(retryExtraction.json, reviewInputForGrounding);
+
+        const retryUngrounded = retryShapeCheck.warnings.filter((w) =>
+          w.startsWith('UNGROUNDED_NUMBER'),
+        );
+
+        if (retryUngrounded.length === 0 || !retryShapeCheck.valid) {
+          // Retry resolved grounding violations (or introduced shape errors — fall through to normal handling)
+          llmResult = retryResult;
+          extractionResult = retryExtraction;
+          shapeCheck = retryShapeCheck;
+          didRetry = true;
+
+          if (retryUngrounded.length === 0) {
+            log.info(
+              { request_id: requestId, attempt: 2, ungrounded_numbers: [] },
+              'Decision review retry resolved UNGROUNDED_NUMBER violations',
+            );
+          } else {
+            // Retry also had shape errors — accept it and let normal shape rejection handle it
+            log.warn(
+              { request_id: requestId, errors: retryShapeCheck.errors },
+              'Decision review retry introduced shape errors; proceeding with retry result',
+            );
+          }
+        } else {
+          // Retry still has ungrounded numbers — graceful degradation: use retry result but keep warnings
+          llmResult = retryResult;
+          extractionResult = retryExtraction;
+          shapeCheck = retryShapeCheck;
+          didRetry = true;
+
+          const retryFabricated = retryUngrounded.map((w) => {
+            const match = /UNGROUNDED_NUMBER: "([^"]+)"/.exec(w);
+            return match ? match[1] : 'unknown';
+          });
+
+          log.warn(
+            {
+              request_id: requestId,
+              attempt: 2,
+              ungrounded_numbers: retryFabricated,
+            },
+            'Decision review retry still has UNGROUNDED_NUMBER violations — degraded response will be returned',
+          );
+        }
+      }
 
       // Build llm_raw trace (same pattern as draft-graph)
       const llmRawTrace = buildLLMRawTrace(requestId, llmResult.content, extractionResult.json, {
@@ -520,15 +645,13 @@ export default async function route(app: FastifyInstance) {
         storeOutput: true,
       });
 
-      // Lightweight shape check
-      const shapeCheck = performShapeCheck(extractionResult.json);
-
       if (!shapeCheck.valid) {
         log.warn(
           {
             request_id: requestId,
             brief_hash: input.brief_hash,
             errors: shapeCheck.errors,
+            did_retry: didRetry,
           },
           "Decision review response failed shape check"
         );
@@ -575,6 +698,7 @@ export default async function route(app: FastifyInstance) {
             request_id: requestId,
             brief_hash: input.brief_hash,
             warnings: shapeCheck.warnings,
+            did_retry: didRetry,
           },
           "Decision review response has shape warnings"
         );
@@ -603,8 +727,10 @@ export default async function route(app: FastifyInstance) {
         },
         _meta: {
           model: llmResult.model,
+          model_used: llmResult.model,
           latency_ms: latencyMs,
           llm_latency_ms: llmResult.latencyMs,
+          did_retry: didRetry,
           token_usage: {
             input_tokens: llmResult.usage.input_tokens,
             output_tokens: llmResult.usage.output_tokens,
@@ -641,6 +767,7 @@ export default async function route(app: FastifyInstance) {
           : 0,
         has_pre_mortem: Boolean(reviewOutput.pre_mortem),
         has_flip_thresholds: Array.isArray(reviewOutput.flip_thresholds) && reviewOutput.flip_thresholds.length > 0,
+        did_retry: didRetry,
       });
 
       logCeeCall({
