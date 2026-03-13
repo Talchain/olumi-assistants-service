@@ -93,6 +93,8 @@ export interface OrchestratorTurnRequest {
    * When present, CEE skips PLoT /v2/run and uses this directly.
    */
   analysis_state?: V2RunResponseEnvelope | null;
+  /** When true, the UI explicitly requested model generation (Generate Model button). */
+  generate_model?: boolean;
 }
 
 // ============================================================================

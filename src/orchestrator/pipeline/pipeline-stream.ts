@@ -32,6 +32,7 @@ import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/enve
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { classifyIntent } from "../intent-gate.js";
+import type { IntentGateResult } from "../intent-gate.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { OrchestratorStreamEvent } from "./stream-events.js";
 import { STREAM_ERROR_CODES } from "./stream-events.js";
@@ -93,7 +94,9 @@ export async function* executePipelineStream(
     const specialistResult = phase2Route();
 
     // Analysis lookup — deterministic short-circuit
-    const intentGate = classifyIntent(request.message);
+    const intentGate: IntentGateResult = request.generate_model
+      ? { tool: 'draft_graph', routing: 'deterministic', confidence: 'exact', normalised_message: request.message.toLowerCase().trim(), matched_pattern: 'generate_model' }
+      : classifyIntent(request.message);
     if (!intentGate.tool) {
       const lookupResult = tryAnalysisLookup(
         request.message,

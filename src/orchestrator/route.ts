@@ -165,32 +165,14 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       client_turn_id: parsed.data.client_turn_id,
       graph_state: parsed.data.graph_state as unknown as typeof turnRequest.graph_state,
       analysis_state: parsed.data.analysis_state as unknown as V2RunResponseEnvelope | null | undefined,
+      generate_model: parsed.data.generate_model,
     };
 
     try {
-      // Parallel generation: draft_graph + orchestrator coaching concurrently
-      // Guard: parallel path produces V1 envelopes; block when V2 is active
-      // to prevent mixed-envelope contracts on the same endpoint.
-      if (parsed.data.generate_model && config.features.orchestratorV2) {
-        log.warn(
-          { request_id: requestId, scenario_id: turnRequest.scenario_id },
-          "generate_model rejected: parallel path not yet compatible with V2 envelope contract",
-        );
-        reply.code(501);
-        return reply.send({
-          turn_id: 'not-implemented',
-          assistant_text: null,
-          blocks: [],
-          lineage: { context_hash: '' },
-          error: {
-            code: 'NOT_IMPLEMENTED' as const,
-            message: 'generate_model is not yet supported when the V2 pipeline is active',
-            recoverable: false,
-          },
-        });
-      }
-
-      if (parsed.data.generate_model) {
+      // V1 parallel generate path — only used when V2 pipeline is NOT active.
+      // When V2 is active, generate_model flows through the V2 pipeline via
+      // intent gate override → buildExplicitGenerateRoute → draft_graph.
+      if (parsed.data.generate_model && !config.features.orchestratorV2) {
         const parallelResult = await handleParallelGenerate(
           turnRequest,
           req,

@@ -184,6 +184,45 @@ describe("executePipelineStream", () => {
       });
       expect(events[events.length - 1].type).toBe("turn_complete");
     });
+
+    it("overrides intent gate to draft_graph when generate_model is true", async () => {
+      const enriched = makeEnrichedContext();
+      const envelope = makeEnvelope();
+      const llmResult = {
+        assistant_text: "drafting",
+        tool_invocations: [],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as any).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as any).mockResolvedValue({
+        kind: "deterministic",
+        result: llmResult,
+      });
+      (phase4Execute as any).mockResolvedValue({
+        blocks: [],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+      });
+      (phase5Validate as any).mockReturnValue(envelope);
+
+      const events = await collectEvents(
+        executePipelineStream(makeRequest({ generate_model: true }), "req-1", deps),
+      );
+
+      expect(events[0]).toMatchObject({ type: "turn_start", routing: "deterministic" });
+      expect(events[events.length - 1].type).toBe("turn_complete");
+
+      // phase3PrepareForStreaming should have been called with intent gate overridden to draft_graph
+      const prepCall = (phase3PrepareForStreaming as any).mock.calls[0];
+      const intentGateArg = prepCall[5]; // 6th arg: initialIntentGate
+      expect(intentGateArg.tool).toBe("draft_graph");
+      expect(intentGateArg.matched_pattern).toBe("generate_model");
+    });
   });
 
   describe("LLM path with streaming", () => {

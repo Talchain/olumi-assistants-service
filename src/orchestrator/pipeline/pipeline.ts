@@ -215,7 +215,9 @@ export async function executePipeline(
     // Analysis lookup — deterministic short-circuit for factual analysis queries.
     // Fires AFTER the intent gate (if the gate matched a tool, skip lookup).
     // If matched, returns a minimal V2 envelope and skips the LLM call entirely.
-    const intentGate = classifyIntent(request.message);
+    const intentGate: IntentGateResult = request.generate_model
+      ? { tool: 'draft_graph', routing: 'deterministic', confidence: 'exact', normalised_message: request.message.toLowerCase().trim(), matched_pattern: 'generate_model' }
+      : classifyIntent(request.message);
     if (!intentGate.tool) {
       const lookupResult = tryAnalysisLookup(
         request.message,
