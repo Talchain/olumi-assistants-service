@@ -253,4 +253,127 @@ describe("compactAnalysis", () => {
     const summary = compactAnalysis(response, graphLabels);
     expect(summary!.top_drivers[0].factor_label).toBe("Revenue Growth");
   });
+
+  // =========================================================================
+  // Full option comparison — p10, p90, mean
+  // =========================================================================
+
+  describe("full option comparison", () => {
+    it("includes all options sorted by win_probability descending", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_c", option_label: "Status Quo", win_probability: 0.18, outcome_mean: 0.15, outcome_p10: -0.05, outcome_p90: 0.35 }),
+          makeOption({ option_id: "opt_a", option_label: "Hire Tech Lead", win_probability: 0.37, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Hire AI Contractor", win_probability: 0.24, outcome_mean: 0.31, outcome_p10: 0.09, outcome_p90: 0.54 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.options).toHaveLength(3);
+      expect(summary!.options[0].option_label).toBe("Hire Tech Lead");
+      expect(summary!.options[1].option_label).toBe("Hire AI Contractor");
+      expect(summary!.options[2].option_label).toBe("Status Quo");
+    });
+
+    it("includes mean, p10, p90 for each option", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[0].outcome_p90).toBe(0.67);
+    });
+
+    it("omits p10/p90 when not present in response", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBeUndefined();
+      expect(summary!.options[0].outcome_p90).toBeUndefined();
+    });
+
+    it("returns empty options array when no analysis exists (null input)", () => {
+      const summary = compactAnalysis(null);
+      expect(summary).toBeNull();
+    });
+
+    it("extracts from nested outcome.{mean,p10,p90} shape (ISL-style)", () => {
+      const response = makeResponse({
+        results: [
+          {
+            option_id: "opt_a",
+            option_label: "Hire Tech Lead",
+            win_probability: 0.37,
+            outcome: { mean: 0.42, p10: 0.18, p90: 0.67 },
+          },
+          {
+            option_id: "opt_b",
+            option_label: "Status Quo",
+            win_probability: 0.18,
+            outcome: { mean: 0.15, p10: -0.05, p90: 0.35 },
+          },
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      // Flat fields take precedence, nested is fallback — here only nested exists
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[0].outcome_p90).toBe(0.67);
+      expect(summary!.options[1].outcome_mean).toBe(0.15);
+      expect(summary!.options[1].outcome_p10).toBe(-0.05);
+      expect(summary!.options[1].outcome_p90).toBe(0.35);
+    });
+
+    it("populates option_results when p10/p90 available", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.4, outcome_mean: 0.31, outcome_p10: 0.09, outcome_p90: 0.54 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.option_results).toBeDefined();
+      expect(summary!.option_results).toHaveLength(2);
+      expect(summary!.option_results![0]).toEqual({
+        label: "Option A",
+        win_probability: 0.6,
+        mean: 0.42,
+        p10: 0.18,
+        p90: 0.67,
+      });
+    });
+
+    it("omits option_results when no p10/p90 available", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.option_results).toBeUndefined();
+    });
+
+    it("omits option_results when only some options have p10/p90 (all-or-nothing)", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.4, outcome_mean: 0.31 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      // All-or-nothing: because Option B lacks p10/p90, option_results is not populated
+      expect(summary!.option_results).toBeUndefined();
+      // But individual options still carry their p10/p90 where available
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[1].outcome_p10).toBeUndefined();
+    });
+  });
 });

@@ -20,7 +20,18 @@ export interface OptionSummary {
   option_label: string;
   win_probability: number;
   outcome_mean: number;
+  outcome_p10?: number;
+  outcome_p90?: number;
   probability_of_goal?: number;
+}
+
+/** Purpose-specific comparison entry for LLM context (Brief B contract). */
+export interface OptionComparisonEntry {
+  label: string;
+  win_probability: number;
+  mean: number;
+  p10: number;
+  p90: number;
 }
 
 export interface DriverSummary {
@@ -45,6 +56,10 @@ export interface FragileEdge {
 export interface AnalysisResponseSummary {
   winner: { option_id: string; option_label: string; win_probability: number };
   options: OptionSummary[];          // all options, sorted by win_probability descending
+  /** Dedicated comparison array for prompt serialisation (Brief B contract).
+   *  Sorted by win_probability descending. Only populated when p10/p90 are available
+   *  for at least one option; undefined otherwise. */
+  option_results?: OptionComparisonEntry[];
   top_drivers: DriverSummary[];      // top 5 by absolute sensitivity
   robustness_level: string;
   fragile_edge_count: number;
@@ -420,7 +435,14 @@ export function compactAnalysis(
           ? r.option_label
           : optionId;
         const winProb = typeof r.win_probability === 'number' ? r.win_probability : 0;
-        const outcomeMean = typeof r.outcome_mean === 'number' ? r.outcome_mean : 0;
+        // Support both flat (outcome_mean) and nested (outcome.mean) shapes
+        const outcomeObj = (r.outcome && typeof r.outcome === 'object') ? r.outcome as Record<string, unknown> : null;
+        const outcomeMean = typeof r.outcome_mean === 'number' ? r.outcome_mean
+          : (outcomeObj && typeof outcomeObj.mean === 'number' ? outcomeObj.mean : 0);
+        const outcomeP10 = typeof r.outcome_p10 === 'number' ? r.outcome_p10
+          : (outcomeObj && typeof outcomeObj.p10 === 'number' ? outcomeObj.p10 : undefined);
+        const outcomeP90 = typeof r.outcome_p90 === 'number' ? r.outcome_p90
+          : (outcomeObj && typeof outcomeObj.p90 === 'number' ? outcomeObj.p90 : undefined);
         const probOfGoal = typeof r.probability_of_goal === 'number' ? r.probability_of_goal : undefined;
 
         const summary: OptionSummary = {
@@ -429,6 +451,8 @@ export function compactAnalysis(
           win_probability: winProb,
           outcome_mean: outcomeMean,
         };
+        if (outcomeP10 !== undefined) summary.outcome_p10 = outcomeP10;
+        if (outcomeP90 !== undefined) summary.outcome_p90 = outcomeP90;
         if (probOfGoal !== undefined) {
           summary.probability_of_goal = probOfGoal;
         }
@@ -454,6 +478,21 @@ export function compactAnalysis(
     const flipThresholds = deriveFlipThresholds(response, graphNodeLabels);
     const topFragileEdges = deriveTopFragileEdges(response, graphNodeLabels);
 
+    // Build dedicated option_results comparison array (Brief B contract)
+    // All-or-nothing: only populated when EVERY option has p10/p90 data,
+    // so the comparison block never silently drops options.
+    const allHaveRange = options.length > 0
+      && options.every((o) => o.outcome_p10 !== undefined && o.outcome_p90 !== undefined);
+    const optionResults: OptionComparisonEntry[] = allHaveRange
+      ? options.map((o) => ({
+          label: o.option_label,
+          win_probability: o.win_probability,
+          mean: o.outcome_mean,
+          p10: o.outcome_p10!,
+          p90: o.outcome_p90!,
+        }))
+      : [];
+
     const summary: AnalysisResponseSummary = {
       winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
       options,
@@ -463,6 +502,9 @@ export function compactAnalysis(
       analysis_status: status,
     };
 
+    if (optionResults.length > 0) {
+      summary.option_results = optionResults;
+    }
     if (constraintTensions !== undefined) {
       summary.constraint_tensions = constraintTensions;
     }

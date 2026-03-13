@@ -12,7 +12,7 @@
 import { getSystemPrompt } from "../../../adapters/llm/prompt-loader.js";
 import type { EnrichedContext, ReferencedEntityDetail } from "../types.js";
 import type { GraphV3Compact } from "../../context/graph-compact.js";
-import type { AnalysisResponseSummary } from "../../context/analysis-compact.js";
+import type { AnalysisResponseSummary, OptionComparisonEntry } from "../../context/analysis-compact.js";
 import type { DecisionContinuity } from "../../context/decision-continuity.js";
 
 // ============================================================================
@@ -65,11 +65,25 @@ function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
   lines.push(`  Winner: ${a.winner.option_label} (${a.winner.option_id}) at ${Math.round(a.winner.win_probability * 100)}% win probability`);
   lines.push(`  Robustness: ${a.robustness_level}`);
 
-  if (a.options.length > 1) {
-    const optLines = a.options
-      .map((o) => `    ${o.option_label} (${o.option_id}): ${Math.round(o.win_probability * 100)}%`)
+  if (a.option_results && a.option_results.length > 0) {
+    // Prefer dedicated comparison array (has p10/p90 guaranteed)
+    const optLines = a.option_results
+      .map((o: OptionComparisonEntry) =>
+        `    ${o.label}: ${Math.round(o.win_probability * 100)}% win, mean=${o.mean.toFixed(2)}, range [${o.p10.toFixed(2)}, ${o.p90.toFixed(2)}]`)
       .join('\n');
-    lines.push(`  All options:\n${optLines}`);
+    lines.push(`  Option comparison:\n${optLines}`);
+  } else if (a.options.length > 0) {
+    // Fallback: render from options (may lack range)
+    const optLines = a.options
+      .map((o) => {
+        const winPct = `${Math.round(o.win_probability * 100)}% win`;
+        const mean = `mean=${o.outcome_mean.toFixed(2)}`;
+        const hasRange = o.outcome_p10 !== undefined && o.outcome_p90 !== undefined;
+        const range = hasRange ? `, range [${o.outcome_p10!.toFixed(2)}, ${o.outcome_p90!.toFixed(2)}]` : '';
+        return `    ${o.option_label}: ${winPct}, ${mean}${range}`;
+      })
+      .join('\n');
+    lines.push(`  Option comparison:\n${optLines}`);
   }
 
   if (a.top_drivers.length > 0) {
@@ -112,6 +126,11 @@ function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
  * This is the preferred compact summary layer — do not duplicate info already here
  * in other Zone 2 blocks.
  *
+ * Options line contract:
+ *   - Always emits "[count] options"
+ *   - When hasCompactGraph is false, appends "([label1], [label2], …)" after the count
+ *   - When hasCompactGraph is true, emits count only (labels already in graph block)
+ *
  * @param dc - The decision continuity object
  * @param hasCompactGraph - When true, the compact graph block already contains full option labels;
  *   emit a count reference instead of repeating them to avoid Zone 2 duplication.
@@ -123,10 +142,10 @@ function serialiseDecisionContinuity(dc: DecisionContinuity, hasCompactGraph: bo
 
   if (dc.options.length > 0) {
     if (hasCompactGraph) {
-      // Compact graph already lists option labels — emit count only
-      lines.push(`Options: ${dc.options.length} (see graph below)`);
+      // Compact graph already lists option labels — count only to avoid duplication
+      lines.push(`Options: ${dc.options.length} options`);
     } else {
-      lines.push(`Options: ${dc.options.join(', ')}`);
+      lines.push(`Options: ${dc.options.length} options (${dc.options.join(', ')})`);
     }
   }
 
@@ -161,31 +180,71 @@ function serialiseDecisionContinuity(dc: DecisionContinuity, hasCompactGraph: bo
   return lines.join('\n');
 }
 
+const MAX_REFERENCED_ENTITIES = 2;
+
 /**
  * Serialise a referenced entity detail into a <referenced_entity> Zone 2 block.
+ *
+ * Format (null/undefined fields omitted):
+ *   <referenced_entity>
+ *   Label: {label}
+ *   Kind: {kind} | Category: {category}          ← Category line omitted if absent
+ *   Value: {value} | Unit: {unit} | Source: {source}  ← only present fields included
+ *   Connected: {label1} (mean={s1}), {label2} (mean={s2})   ← omitted if no edges
+ *   </referenced_entity>
  */
 function serialiseReferencedEntity(entity: ReferencedEntityDetail): string {
-  const lines: string[] = [`<referenced_entity id="${entity.id}">`];
-  lines.push(`  Label: ${entity.label} [${entity.kind}${entity.category ? `/${entity.category}` : ''}]`);
+  const lines: string[] = ['<referenced_entity>'];
 
+  lines.push(`Label: ${entity.label}`);
+
+  // Kind + optional Category on one line
+  if (entity.category) {
+    lines.push(`Kind: ${entity.kind} | Category: ${entity.category}`);
+  } else {
+    lines.push(`Kind: ${entity.kind}`);
+  }
+
+  // Value line — only emit if at least one value field is present
   const valueParts: string[] = [];
-  if (entity.value !== undefined) valueParts.push(`value=${entity.value}`);
-  if (entity.raw_value !== undefined && entity.raw_value !== entity.value) valueParts.push(`raw=${entity.raw_value}`);
-  if (entity.unit) valueParts.push(`unit=${entity.unit}`);
-  if (entity.cap !== undefined) valueParts.push(`cap=${entity.cap}`);
-  if (valueParts.length > 0) lines.push(`  State: ${valueParts.join(', ')}`);
+  if (entity.value !== undefined) valueParts.push(`Value: ${entity.value}`);
+  if (entity.unit) valueParts.push(`Unit: ${entity.unit}`);
+  if (entity.source) valueParts.push(`Source: ${entity.source}`);
+  if (valueParts.length > 0) lines.push(valueParts.join(' | '));
 
-  if (entity.source) lines.push(`  Source: ${entity.source}`);
-
+  // Connected edges
   if (entity.edges.length > 0) {
-    lines.push('  Connections:');
-    for (const edge of entity.edges) {
-      const dir = edge.effect_direction ? ` [${edge.effect_direction}]` : '';
-      lines.push(`    → ${edge.connected_label} (strength=${edge.strength.toFixed(2)}${dir})`);
-    }
+    const edgeParts = entity.edges
+      .map((e) => `${e.connected_label} (mean=${e.strength.toFixed(1)})`)
+      .join(', ');
+    lines.push(`Connected: ${edgeParts}`);
   }
 
   lines.push('</referenced_entity>');
+  return lines.join('\n');
+}
+
+// ============================================================================
+// Pending Changes Block
+// ============================================================================
+
+/**
+ * Build a <pending_changes> block when analysis is stale relative to the current graph.
+ * Returns null when analysis is current, absent, or staleness cannot be determined.
+ */
+function buildPendingChangesBlock(enrichedContext: EnrichedContext): string | null {
+  const dc = enrichedContext.decision_continuity;
+  if (!dc || dc.analysis_status !== 'stale') return null;
+
+  const lines: string[] = ['<pending_changes>'];
+
+  if (dc.last_patch_summary) {
+    lines.push(`Since last analysis: ${dc.last_patch_summary}. Consider re-running the analysis.`);
+  } else {
+    lines.push('The graph has been modified since the last analysis. Results may not reflect current model values. Consider re-running the analysis.');
+  }
+
+  lines.push('</pending_changes>');
   return lines.join('\n');
 }
 
@@ -247,11 +306,19 @@ export async function assembleV2SystemPrompt(
   // Analysis response (compact) — provides per-option probabilities and driver detail
   if (enrichedContext.analysis_response) {
     zone2Sections.push(capSection(serialiseCompactAnalysis(enrichedContext.analysis_response)));
+
+    // Pending changes — surface staleness when graph has changed since last analysis
+    const pendingChanges = buildPendingChangesBlock(enrichedContext);
+    if (pendingChanges) {
+      zone2Sections.push(pendingChanges);
+    }
   }
 
   // Referenced entities — focused explanation-ready blocks for entities named in the user message
+  // Capped at MAX_REFERENCED_ENTITIES (2) to keep prompt size bounded.
   if (enrichedContext.referenced_entities && enrichedContext.referenced_entities.length > 0) {
-    for (const entity of enrichedContext.referenced_entities) {
+    const entitiesToRender = enrichedContext.referenced_entities.slice(0, MAX_REFERENCED_ENTITIES);
+    for (const entity of entitiesToRender) {
       zone2Sections.push(capSection(serialiseReferencedEntity(entity)));
     }
   }
