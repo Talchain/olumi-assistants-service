@@ -216,6 +216,85 @@ describe("enforceContextBudget", () => {
     expect((result.messages ?? []).length).toBeLessThan(10);
   });
 
+  it("pass 1 removes plain_interpretation while preserving node fields (isolated)", async () => {
+    const enforceContextBudget = await getEnforceContextBudget();
+    // Build a graph where plain_interpretation pushes it over budget,
+    // but without them it fits — so only Pass 1 fires, node fields survive.
+    const graph: GraphV3Compact = {
+      nodes: [
+        { id: "n0", kind: "factor", label: "F0", type: "t", category: "c", intervention_summary: "sets X=1" },
+        { id: "n1", kind: "factor", label: "F1", type: "t", category: "c" },
+      ],
+      edges: [
+        { from: "n0", to: "n1", strength: 0.5, exists: 0.9,
+          plain_interpretation: "F0 moderately increases F1 (high confidence)" },
+      ],
+      _node_count: 2,
+      _edge_count: 1,
+    };
+
+    // Graph with plain_interpretation: 343 chars ≈ 86 tokens
+    // Without plain_interpretation: 273 chars ≈ 69 tokens
+    // graph budget = 25% of maxTokens → pick maxTokens so budget is between 69 and 86
+    // maxTokens=320 → graph budget = 80 tokens. Without interpretation: fits. With: over.
+    const maxTokens = 320;
+    const context = makeContext({
+      graph_compact: graph,
+      messages: [],
+      analysis_response: null,
+    });
+    const result = enforceContextBudget(context, maxTokens);
+
+    // plain_interpretation must be stripped
+    expect(result.graph_compact?.edges[0]).not.toHaveProperty("plain_interpretation");
+    // Node fields (type, category, intervention_summary) must survive Pass 1
+    expect(result.graph_compact?.nodes[0].type).toBe("t");
+    expect(result.graph_compact?.nodes[0].category).toBe("c");
+    expect(result.graph_compact?.nodes[0].intervention_summary).toBe("sets X=1");
+  });
+
+  it("pass 2 removes intervention_summary along with type/category (isolated)", async () => {
+    const enforceContextBudget = await getEnforceContextBudget();
+    // Build a graph with no plain_interpretation on edges (already stripped or absent).
+    // Node fields (type, category, intervention_summary) push it over budget.
+    const graph: GraphV3Compact = {
+      nodes: Array.from({ length: 3 }, (_, i) => ({
+        id: `n${i}`,
+        kind: "option",
+        label: `Option ${i}`,
+        type: "some_type_value",
+        category: "controllable",
+        intervention_summary: "sets Factor A=0.9, Factor B=0.7, Factor C=0.8",
+      })),
+      edges: [
+        { from: "n0", to: "n1", strength: 0.5, exists: 0.9 },
+      ],
+      _node_count: 3,
+      _edge_count: 1,
+    };
+
+    // With type+category+intervention_summary: 612 chars ≈ 153 tokens
+    // Without those fields: 246 chars ≈ 62 tokens
+    // Pick maxTokens so graph budget (25%) is between 62 and 153
+    // maxTokens=400 → graph budget = 100 tokens. Without tier2 fields: fits. With: over.
+    const maxTokens = 400;
+    const context = makeContext({
+      graph_compact: graph,
+      messages: [],
+      analysis_response: null,
+    });
+    const result = enforceContextBudget(context, maxTokens);
+
+    // intervention_summary, type, category must all be stripped by Pass 2
+    for (const node of result.graph_compact?.nodes ?? []) {
+      expect(node).not.toHaveProperty("intervention_summary");
+      expect(node).not.toHaveProperty("type");
+      expect(node).not.toHaveProperty("category");
+    }
+    // But label must survive (never trimmed)
+    expect(result.graph_compact?.nodes[0].label).toBe("Option 0");
+  });
+
   it("returns a copy — does not mutate the original context", async () => {
     const enforceContextBudget = await getEnforceContextBudget();
     const originalMessages = [makeMessage("user", "Hello")];
