@@ -73,6 +73,9 @@ export interface RouteMetadata {
   // Model observability (populated by phase3-llm after LLM call)
   resolved_model?: string | null;
   resolved_provider?: string | null;
+  // Prompt observability (populated by phase3-llm from getSystemPromptMeta)
+  prompt_hash?: string | null;
+  prompt_version?: string | null;
 }
 
 export type TriggerSource =

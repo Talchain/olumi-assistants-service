@@ -355,7 +355,7 @@ describe("prompt identity log fields — orchestrator and edit_graph call sites"
 
     const calls = logSpy.mock.calls;
     const identityCall = calls.find(
-      ([obj]) => typeof obj === "object" && obj !== null && "prompt_id" in obj && (obj as Record<string, unknown>).prompt_id === "orchestrator"
+      ([obj]: [unknown, ...unknown[]]) => typeof obj === "object" && obj !== null && "prompt_id" in obj && (obj as Record<string, unknown>).prompt_id === "orchestrator"
     );
     expect(identityCall).toBeDefined();
     const logObj = identityCall![0] as Record<string, unknown>;
@@ -386,7 +386,7 @@ describe("prompt identity log fields — orchestrator and edit_graph call sites"
 
     const calls = logSpy.mock.calls;
     const editGraphCall = calls.find(
-      ([obj, msg]) =>
+      ([obj, msg]: [unknown, unknown, ...unknown[]]) =>
         typeof obj === "object" &&
         obj !== null &&
         "prompt_id" in obj &&
@@ -423,7 +423,7 @@ describe("prompt identity log fields — orchestrator and edit_graph call sites"
 
     const calls = logSpy.mock.calls;
     const draftCall = calls.find(
-      ([obj]) =>
+      ([obj]: [unknown, ...unknown[]]) =>
         typeof obj === "object" &&
         obj !== null &&
         "prompt_id" in obj &&

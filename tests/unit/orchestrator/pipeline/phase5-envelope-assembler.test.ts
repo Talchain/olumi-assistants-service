@@ -453,6 +453,52 @@ describe("assembleV2Envelope", () => {
     expect(envelope._route_metadata!.resolved_provider).toBe("openai");
   });
 
+  // ==========================================================================
+  // Prompt observability: prompt_hash / prompt_version in _route_metadata
+  // Phase 3 populates these from getSystemPromptMeta; envelope carries them
+  // through for debug bundle and operational tracing.
+  // ==========================================================================
+
+  it("P0-3: _route_metadata carries prompt_hash and prompt_version from llmResult", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        route_metadata: {
+          outcome: "default_llm",
+          reasoning: "no_deterministic_route_applied",
+          resolved_model: "gpt-4o",
+          resolved_provider: "openai",
+          prompt_hash: "abc123def456789012345678901234567890123456789012345678901234abcd",
+          prompt_version: "cf-v13",
+        },
+      }),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope._route_metadata).toBeDefined();
+    expect(envelope._route_metadata!.prompt_hash).toBe("abc123def456789012345678901234567890123456789012345678901234abcd");
+    expect(envelope._route_metadata!.prompt_version).toBe("cf-v13");
+  });
+
+  it("P0-3: prompt_hash absent when llmResult carries no route_metadata", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult(),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    // No route_metadata at all — _route_metadata should be absent
+    expect(envelope._route_metadata).toBeUndefined();
+  });
+
   it("guidance_items survives JSON serialisation round-trip", () => {
     const guidanceItem = {
       item_id: 'gi_abc123',

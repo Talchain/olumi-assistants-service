@@ -514,6 +514,12 @@ export async function phase3Generate(
       suggested_actions: [],
       diagnostics: null,
       parse_warnings: [],
+      route_metadata: {
+        outcome: 'default_llm',
+        reasoning: 'no_tool_support_fallback',
+        prompt_hash: promptMeta.prompt_hash ?? null,
+        prompt_version: promptMeta.prompt_version ?? null,
+      },
       route_debug: {
         ...routeDebugBase,
         final_intent_gate: summariseIntentGate(effectiveIntentGate),
@@ -552,6 +558,8 @@ export async function phase3Generate(
       reasoning: 'no_deterministic_route_applied',
       resolved_model: resolvedModelInfo?.model ?? null,
       resolved_provider: resolvedModelInfo?.provider ?? null,
+      prompt_hash: promptMeta.prompt_hash ?? null,
+      prompt_version: promptMeta.prompt_version ?? null,
     },
     route_debug: {
       ...routeDebugBase,

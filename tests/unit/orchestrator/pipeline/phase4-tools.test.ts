@@ -321,7 +321,7 @@ describe("phase4-tools", () => {
     const appliedChanges = {
       summary: "Renamed 'Cost' to 'Price'",
       rerun_recommended: false,
-      changes: [{ op: "relabel" as const, node_id: "node_cost", from: "Cost", to: "Price" }],
+      changes: [{ label: "Cost", description: "Renamed from 'Cost' to 'Price'", element_ref: "node_cost" }],
     };
 
     const dispatcher = makeMockDispatcher({

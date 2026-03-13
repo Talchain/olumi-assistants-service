@@ -1093,6 +1093,34 @@ describe("phase3-llm", () => {
   // These tests confirm the classifier contract that unlocks auto-chain.
   // ============================================================================
 
+  // ============================================================================
+  // P1.1: chat() fallback path — prompt_hash and prompt_version in route_metadata
+  // ============================================================================
+
+  describe("chat() fallback path — route_metadata.prompt_hash and prompt_version", () => {
+    it("includes prompt_hash and prompt_version from getSystemPromptMeta when chatWithTools is absent", async () => {
+      // Simulate an LLM client that only supports chat() — no chatWithTools
+      const client: LLMClient = {
+        chat: vi.fn().mockResolvedValue({ content: "Fallback response" }),
+        // chatWithTools deliberately absent (undefined) to trigger the fallback branch
+      };
+
+      const result = await phase3Generate(
+        makeEnrichedContext(),
+        makeSpecialistResult(),
+        client,
+        "req-fallback",
+        "Hello from chat fallback",
+      );
+
+      expect(result.route_metadata).toBeDefined();
+      expect(result.route_metadata?.prompt_hash).toBe("test-hash");
+      expect(result.route_metadata?.prompt_version).toBe("default:orchestrator");
+      expect(result.route_metadata?.outcome).toBe("default_llm");
+      expect(result.route_metadata?.reasoning).toBe("no_tool_support_fallback");
+    });
+  });
+
   describe("classifyUserIntent contract — values that trigger auto-chain", () => {
     it("returns 'explain' for explain-intent strings", async () => {
       const { classifyUserIntent } = await import("../../../../src/orchestrator/pipeline/phase1-enrichment/intent-classifier.js");

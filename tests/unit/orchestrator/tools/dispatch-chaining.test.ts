@@ -370,6 +370,84 @@ describe("dispatchToolHandler — edit_graph PLoT handoff", () => {
 });
 
 // ============================================================================
+// P1.3: Adapter-boundary naming contract
+//
+// The dispatch layer (ToolDispatchResult) uses camelCase field names:
+//   analysisResponse, deterministicAnswerTier, appliedChanges
+//
+// The pipeline layer (ToolResult, OrchestratorResponseEnvelopeV2) uses snake_case:
+//   analysis_response, deterministic_answer_tier, applied_changes
+//
+// Phase 4 (phase4-tools/index.ts) is the translation boundary.
+// These tests pin the camelCase contract on ToolDispatchResult so any
+// accidental rename to snake_case will be caught immediately.
+// ============================================================================
+
+describe("ToolDispatchResult — camelCase adapter-boundary contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetDispatchPlotClient();
+    mockGetAdapter.mockReturnValue({ chat: vi.fn() });
+
+    mockRunAnalysis.mockResolvedValue({
+      blocks: [makeAnalysisBlock()],
+      analysisResponse: makeAnalysisResponse(),
+      responseHash: "top-hash",
+      seedUsed: 42,
+      nSamples: 1000,
+      latencyMs: 100,
+    });
+
+    mockExplainResults.mockResolvedValue({
+      blocks: [makeCommentaryBlock()],
+      assistantText: null,
+      latencyMs: 50,
+      deterministic_answer_tier: 1,  // explain_results handler uses snake_case internally
+    });
+  });
+
+  it("run_analysis result carries analysisResponse (camelCase) — NOT analysis_response", async () => {
+    const result = await dispatchToolHandler(
+      "run_analysis",
+      {},
+      makeContext(),
+      "turn-1",
+      "req-boundary",
+      { intentClassification: "act" },
+    );
+
+    // camelCase field must be present
+    expect(result.analysisResponse).toBeDefined();
+    expect(result.analysisResponse?.response_hash).toBe("top-hash");
+    // snake_case must NOT appear on the dispatch result
+    expect((result as Record<string, unknown>)["analysis_response"]).toBeUndefined();
+  });
+
+  it("explain_results auto-chain result carries deterministicAnswerTier (camelCase) — NOT deterministic_answer_tier", async () => {
+    mockExplainResults.mockResolvedValue({
+      blocks: [makeCommentaryBlock()],
+      assistantText: null,
+      latencyMs: 50,
+      deterministic_answer_tier: 2,
+    });
+
+    const result = await dispatchToolHandler(
+      "run_analysis",
+      {},
+      makeContext(),
+      "turn-1",
+      "req-boundary",
+      { intentClassification: "explain" },
+    );
+
+    // camelCase field must be present
+    expect(result.deterministicAnswerTier).toBe(2);
+    // snake_case must NOT appear on the dispatch result
+    expect((result as Record<string, unknown>)["deterministic_answer_tier"]).toBeUndefined();
+  });
+});
+
+// ============================================================================
 // Tests: Registry startup validation
 // ============================================================================
 

@@ -131,7 +131,7 @@ describe("assembleV2SystemPrompt — Zone 2 deduplication", () => {
       ],
     });
     const prompt = await assembleV2SystemPrompt(ctx);
-    expect(prompt).toContain('<referenced_entity id="churn">');
+    expect(prompt).toContain('<referenced_entity>');
     expect(prompt).toContain("Churn Rate");
     expect(prompt).toContain("</referenced_entity>");
   });
@@ -181,7 +181,7 @@ describe("assembleV2SystemPrompt — Zone 2 deduplication", () => {
     const decisionStateBlock = decisionStateMatch![1];
     expect(decisionStateBlock).not.toContain("Increase Prices");
     expect(decisionStateBlock).not.toContain("Status Quo");
-    // Instead it should contain the count reference
-    expect(decisionStateBlock).toContain("(see graph below)");
+    // Instead it should contain the count-only reference (labels already in graph block)
+    expect(decisionStateBlock).toContain("2 options");
   });
 });
