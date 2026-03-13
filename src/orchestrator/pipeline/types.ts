@@ -34,7 +34,7 @@ import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
 import type { DecisionContinuity } from "../context/decision-continuity.js";
 import type { ToolInvocation, ParsedLLMResponse } from "../response-parser.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
-import type { ChatWithToolsResult, ChatWithToolsArgs, CallOpts } from "../../adapters/llm/types.js";
+import type { ChatWithToolsResult, ChatWithToolsArgs, ChatWithToolsStreamEvent, CallOpts } from "../../adapters/llm/types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
 
@@ -511,6 +511,15 @@ export interface LLMClient {
   ): Promise<{ content: string }>;
 
   /**
+   * Optional: Stream chat with tools for incremental SSE delivery.
+   * If not implemented, pipeline-stream falls back to chatWithTools().
+   */
+  streamChatWithTools?(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): AsyncIterable<ChatWithToolsStreamEvent>;
+
+  /**
    * Return the resolved model ID and provider name for the last call.
    * Optional — production client implements this; test mocks may omit it.
    */
@@ -560,6 +569,7 @@ export type {
   FastifyRequest,
   ChatWithToolsResult,
   ChatWithToolsArgs,
+  ChatWithToolsStreamEvent,
   CallOpts,
   GraphV3Compact,
   AnalysisResponseSummary,

@@ -9,7 +9,6 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
@@ -21,157 +20,17 @@ import { inferTurnType, validateTurnContract } from "./turn-contract.js";
 import { handleParallelGenerate } from "./parallel-generate.js";
 import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
+import { TurnRequestSchema, MAX_MESSAGE_LENGTH } from "./route-schemas.js";
+import { ceeOrchestratorStreamRouteV1 } from "./route-stream.js";
+import {
+  normalizeContext,
+  normalizeSystemEvent,
+  warnAnalysisStateOnNonAnalysisTurn,
+  warnDirectAnalysisRunDetails,
+} from "./request-normalization.js";
 
-// ============================================================================
-// Request Validation Schema
-// ============================================================================
-
-// Shared base fields for all system event shapes
-const SystemEventBase = {
-  timestamp: z.string(),
-  event_id: z.string().min(1),
-};
-
-const SystemEventSchema = z.discriminatedUnion('event_type', [
-  z.object({
-    event_type: z.literal('patch_accepted'),
-    ...SystemEventBase,
-    details: z.object({
-      patch_id: z.string().min(1).optional(),
-      block_id: z.string().min(1).optional(),
-      operations: z.array(z.record(z.unknown())),
-      applied_graph_hash: z.string().optional(),
-    }).superRefine((val, ctx) => {
-      if (!val.patch_id && !val.block_id) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['details'],
-          message: 'At least one of patch_id or block_id must be provided',
-        });
-      }
-    }),
-  }),
-  z.object({
-    event_type: z.literal('patch_dismissed'),
-    ...SystemEventBase,
-    details: z.object({
-      patch_id: z.string().optional(),
-      block_id: z.string().optional(),
-      reason: z.string().optional(),
-    }),
-  }),
-  z.object({
-    event_type: z.literal('direct_graph_edit'),
-    ...SystemEventBase,
-    details: z.object({
-      changed_node_ids: z.array(z.string()),
-      changed_edge_ids: z.array(z.string()),
-      operations: z.array(z.enum(['add', 'update', 'remove'])),
-    }),
-  }),
-  z.object({
-    event_type: z.literal('direct_analysis_run'),
-    ...SystemEventBase,
-    details: z.object({}).passthrough(),
-  }),
-  z.object({
-    event_type: z.literal('feedback_submitted'),
-    ...SystemEventBase,
-    details: z.object({
-      turn_id: z.string(),
-      rating: z.enum(['up', 'down']),
-      comment: z.string().optional(),
-    }),
-  }),
-]);
-
-const ToolCallSchema = z.object({
-  name: z.string(),
-  input: z.record(z.unknown()),
-});
-
-const ConversationMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string().nullable().optional().transform((v) => v ?? ''),
-  tool_calls: z.array(ToolCallSchema).optional(),
-  assistant_tool_calls: z.array(ToolCallSchema).optional(),
-}).transform((message) => ({
-  role: message.role,
-  content: message.content,
-  ...(message.tool_calls
-    ? { tool_calls: message.tool_calls }
-    : message.assistant_tool_calls
-      ? { tool_calls: message.assistant_tool_calls }
-      : {}),
-}));
-
-const FramingSchema = z.object({
-  stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
-  goal: z.string().optional(),
-  constraints: z.array(z.string().max(200)).max(20).optional(),
-  options: z.array(z.string().max(200)).max(20).optional(),
-}).nullable();
-
-const AnalysisInputsSchema = z.object({
-  options: z.array(z.object({
-    option_id: z.string(),
-    label: z.string(),
-    interventions: z.record(z.unknown()),
-  }).passthrough()),
-  constraints: z.array(z.unknown()).optional(),
-  seed: z.number().optional(),
-  n_samples: z.number().optional(),
-}).passthrough().nullable().optional();
-
-const GraphSchema = z.object({
-  nodes: z.array(z.object({ id: z.string(), kind: z.string() }).passthrough()),
-  edges: z.array(z.object({ from: z.string(), to: z.string() }).passthrough()),
-}).passthrough().nullable();
-
-const AnalysisResponseSchema = z.object({
-  analysis_status: z.string(),
-}).passthrough().nullable();
-
-const AnalysisStateSchema = z.object({
-  meta: z.object({
-    response_hash: z.string().min(1),
-    seed_used: z.number().optional(),
-    n_samples: z.number().optional(),
-  }).passthrough(),
-  results: z.array(z.unknown()),
-  analysis_status: z.string().optional(),
-  fact_objects: z.array(z.unknown()).optional(),
-  review_cards: z.array(z.unknown()).optional(),
-  response_hash: z.string().optional(),
-}).passthrough().nullable();
-
-const ConversationContextSchema = z.object({
-  graph: GraphSchema,
-  analysis_response: AnalysisResponseSchema,
-  framing: FramingSchema,
-  messages: z.array(ConversationMessageSchema),
-  event_log_summary: z.string().optional(),
-  selected_elements: z.array(z.string()).optional(),
-  scenario_id: z.string(),
-  analysis_inputs: AnalysisInputsSchema,
-});
-
-const TurnRequestSchema = z.object({
-  message: z.string().min(0).max(10_000).default(''),
-  context: ConversationContextSchema.optional(),
-  scenario_id: z.string().min(1).max(200),
-  system_event: SystemEventSchema.optional(),
-  client_turn_id: z.string().min(1).max(64),
-  turn_nonce: z.number().int().min(0).optional(),
-  /** Full graph state from UI — required when system_event.details.applied_graph_hash is set. */
-  graph_state: GraphSchema.optional(),
-  /** Full analysis response from UI — present for direct_analysis_run Path A. */
-  analysis_state: AnalysisStateSchema.optional(),
-  /** Flat conversation history from UI — mapped to context.messages when context is absent. */
-  conversation_history: z.array(ConversationMessageSchema).optional(),
-  /** When true, fires draft_graph and orchestrator coaching in parallel. */
-  generate_model: z.boolean().optional().default(false),
-});
+// Request validation schemas imported from route-schemas.ts
+// (shared with route-stream.ts for the streaming endpoint)
 
 // ============================================================================
 // Response-path diagnostics
@@ -265,59 +124,19 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       return reply.send(errorEnvelope);
     }
 
-    // ── Boundary warning: analysis_state on non-analysis turns (non-production only) ──
-    if (!isProduction() && parsed.data.analysis_state) {
-      const turnType = inferTurnType(parsed.data as unknown as Record<string, unknown>);
-      if (turnType === 'conversation' || turnType === 'explicit_generate') {
-        log.warn(
-          { request_id: requestId, turn_type: turnType },
-          `[BOUNDARY WARNING] analysis_state present on ${turnType} turn — likely client-side request construction issue`,
-        );
-      }
-    }
+    // Boundary diagnostics
+    warnAnalysisStateOnNonAnalysisTurn(parsed.data, requestId);
 
-    // Normalise context: if absent, construct from flat UI fields
-    const context = parsed.data.context ?? {
-      graph: parsed.data.graph_state ?? null,
-      analysis_response: parsed.data.analysis_state ?? null,
-      framing: null,
-      messages: (parsed.data.conversation_history ?? []) as z.infer<typeof ConversationMessageSchema>[],
-      scenario_id: parsed.data.scenario_id,
-      analysis_inputs: null,
-    };
+    // Normalise context and system event
+    const context = normalizeContext(parsed.data);
+    const systemEvent = normalizeSystemEvent(parsed.data.system_event as SystemEvent | undefined);
 
-    // Normalise system event: if only block_id is provided (no patch_id), copy it to patch_id
-    let systemEvent = parsed.data.system_event as SystemEvent | undefined;
-    if (
-      systemEvent &&
-      (systemEvent.event_type === 'patch_accepted' || systemEvent.event_type === 'patch_dismissed')
-    ) {
-      const det = systemEvent.details as { patch_id?: string; block_id?: string };
-      // Precedence: if both present, patch_id wins, block_id is ignored.
-      if (!det.patch_id && det.block_id) {
-        systemEvent = {
-          ...systemEvent,
-          details: { ...det, patch_id: det.block_id },
-        } as SystemEvent;
-      }
-    }
-
-    // Log extra fields in direct_analysis_run details (schema expects empty object;
-    // passthrough preserves them instead of 400ing, but we surface them for observability).
-    if (systemEvent?.event_type === 'direct_analysis_run') {
-      const detailKeys = Object.keys((systemEvent as Record<string, unknown>).details ?? {});
-      if (detailKeys.length > 0) {
-        log.warn(
-          { request_id: requestId, extra_keys: detailKeys },
-          'direct_analysis_run: details contains extra fields beyond empty-object contract',
-        );
-      }
-    }
+    // Boundary diagnostic for direct_analysis_run
+    warnDirectAnalysisRunDetails(systemEvent, requestId);
 
     // ── Message length guard (cf-v11.1) ────────────────────────────────────
     // Canonical check at route boundary — applies to V1, V2, and parallel paths.
     // Zod caps at 10,000 (schema); this enforces the friendly 4,000-char limit.
-    const MAX_MESSAGE_LENGTH = 4000;
     if (parsed.data.message.length > MAX_MESSAGE_LENGTH) {
       log.warn(
         { request_id: requestId, message_length: parsed.data.message.length, max: MAX_MESSAGE_LENGTH },
@@ -478,4 +297,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       });
     }
   });
+
+  // Register streaming endpoint alongside the non-streaming route
+  await ceeOrchestratorStreamRouteV1(app);
 }

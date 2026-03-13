@@ -7,7 +7,7 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -2205,6 +2205,235 @@ export async function chatWithToolsAnthropic(
   }
 }
 
+// ============================================================================
+// Streaming Tool Calling
+// ============================================================================
+
+/**
+ * Streaming chat with tools via Anthropic SDK.
+ * Yields text_delta events immediately, accumulates tool input JSON,
+ * and yields message_complete with the full ChatWithToolsResult on stream end.
+ */
+export async function* streamChatWithToolsAnthropic(
+  args: ChatWithToolsAnthropicArgs & { signal?: AbortSignal },
+): AsyncGenerator<ChatWithToolsStreamEvent> {
+  const model = args.model || "claude-3-5-sonnet-20241022";
+  const maxTokens = args.maxTokens ?? 4096;
+  const temperature = args.temperature ?? 0;
+  const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
+
+  const startTime = Date.now();
+
+  log.info(
+    {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system_chars: args.system.length,
+      message_count: args.messages.length,
+      tool_count: args.tools.length,
+      tool_names: args.tools.map(t => t.name),
+      streaming: true,
+    },
+    "calling Anthropic for streaming chat with tools",
+  );
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+  // Link external signal
+  if (args.signal) {
+    if (args.signal.aborted) {
+      clearTimeout(timeoutId);
+      return;
+    }
+    args.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+  }
+
+  try {
+    const apiClient = getClient();
+
+    // Convert messages — same logic as chatWithToolsAnthropic
+    const anthropicMessages: Anthropic.MessageParam[] = args.messages.map((msg) => {
+      if (typeof msg.content === 'string') {
+        return { role: msg.role, content: msg.content };
+      }
+      const blocks: Anthropic.ContentBlockParam[] = msg.content.map((block) => {
+        if (block.type === 'text') {
+          return { type: 'text' as const, text: block.text };
+        }
+        if (block.type === 'tool_use') {
+          return {
+            type: 'tool_use' as const,
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          };
+        }
+        return block as Anthropic.ContentBlockParam;
+      });
+      return { role: msg.role, content: blocks };
+    });
+
+    const anthropicTools: Anthropic.Tool[] = args.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.input_schema as Anthropic.Tool.InputSchema,
+    }));
+
+    let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
+    if (args.tool_choice) {
+      if (args.tool_choice.type === 'tool' && args.tool_choice.name) {
+        toolChoice = { type: 'tool', name: args.tool_choice.name };
+      } else if (args.tool_choice.type === 'any') {
+        toolChoice = { type: 'any' };
+      } else {
+        toolChoice = { type: 'auto' };
+      }
+    }
+
+    const stream = apiClient.messages.stream({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: args.system,
+      messages: anthropicMessages,
+      tools: anthropicTools,
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
+    }, {
+      signal: abortController.signal,
+    });
+
+    // Track tool input accumulation per content block index
+    const toolInputBuffers = new Map<number, { id: string; name: string; json: string }>();
+    const contentBlocks: ToolResponseBlock[] = [];
+
+    for await (const event of stream) {
+      if (abortController.signal.aborted) return;
+
+      if (event.type === 'content_block_start') {
+        const block = event.content_block;
+        if (block.type === 'tool_use') {
+          toolInputBuffers.set(event.index, { id: block.id, name: block.name, json: '' });
+          yield { type: 'tool_input_start', tool_id: block.id, tool_name: block.name };
+        }
+      } else if (event.type === 'content_block_delta') {
+        const delta = event.delta;
+        if (delta.type === 'text_delta') {
+          yield { type: 'text_delta', delta: delta.text };
+        } else if (delta.type === 'input_json_delta') {
+          const buf = toolInputBuffers.get(event.index);
+          if (buf) {
+            buf.json += delta.partial_json;
+          }
+        }
+      } else if (event.type === 'content_block_stop') {
+        const buf = toolInputBuffers.get(event.index);
+        if (buf) {
+          let input: Record<string, unknown> = {};
+          try {
+            input = JSON.parse(buf.json);
+          } catch {
+            log.warn({ tool_id: buf.id, tool_name: buf.name }, "failed to parse streamed tool input JSON");
+          }
+          contentBlocks.push({ type: 'tool_use', id: buf.id, name: buf.name, input });
+          yield { type: 'tool_input_complete', tool_id: buf.id, tool_name: buf.name, input };
+          toolInputBuffers.delete(event.index);
+        }
+      }
+    }
+
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    // Get the final message for usage and stop_reason
+    const finalMessage = await stream.finalMessage();
+
+    // Assemble text blocks from the final message
+    for (const block of finalMessage.content) {
+      if (block.type === 'text') {
+        contentBlocks.unshift({ type: 'text' as const, text: block.text });
+      }
+    }
+
+    // Sort: text blocks first, then tool_use blocks (matching non-streaming order)
+    const textBlocks = contentBlocks.filter(b => b.type === 'text');
+    const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use');
+    const orderedContent = [...textBlocks, ...toolBlocks];
+
+    const stopReason = finalMessage.stop_reason as 'end_turn' | 'tool_use' | 'max_tokens';
+
+    log.info(
+      {
+        provider: 'anthropic',
+        model,
+        latency_ms: latencyMs,
+        input_tokens: finalMessage.usage.input_tokens,
+        output_tokens: finalMessage.usage.output_tokens,
+        content_blocks: orderedContent.length,
+        tool_use_blocks: toolBlocks.length,
+        stop_reason: stopReason,
+        streaming: true,
+      },
+      "Anthropic streaming chat with tools successful",
+    );
+
+    yield {
+      type: 'message_complete',
+      result: {
+        content: orderedContent,
+        stop_reason: stopReason,
+        model,
+        latencyMs,
+        usage: {
+          input_tokens: finalMessage.usage.input_tokens,
+          output_tokens: finalMessage.usage.output_tokens,
+          cache_creation_input_tokens: finalMessage.usage.cache_creation_input_tokens ?? undefined,
+          cache_read_input_tokens: finalMessage.usage.cache_read_input_tokens ?? undefined,
+        },
+      },
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startTime;
+
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || abortController.signal.aborted) {
+        log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs, streaming: true }, "Anthropic streaming chat_with_tools timed out");
+        throw new UpstreamTimeoutError(
+          "Anthropic streaming chat_with_tools timed out",
+          "anthropic",
+          "stream_chat_with_tools",
+          "body",
+          elapsedMs,
+          error,
+        );
+      }
+
+      if ('status' in error && typeof error.status === 'number') {
+        const apiError = error as any;
+        const requestId = apiError.headers?.get?.('request-id') || apiError.request_id;
+        log.error(
+          { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs, streaming: true },
+          "Anthropic streaming API returned non-2xx status",
+        );
+        throw new UpstreamHTTPError(
+          `Anthropic streaming chat_with_tools failed: ${apiError.message || 'unknown error'}`,
+          "anthropic",
+          apiError.status,
+          apiError.code || apiError.type,
+          requestId,
+          elapsedMs,
+          error,
+        );
+      }
+    }
+
+    log.error({ error, streaming: true }, "Anthropic streaming chat_with_tools call failed");
+    throw error;
+  }
+}
+
 /**
  * Provider-agnostic adapter class for Anthropic that implements the LLMAdapter interface.
  * This wraps the existing functions to provide a consistent interface for the router.
@@ -2349,6 +2578,21 @@ export class AnthropicAdapter implements LLMAdapter {
       maxTokens: args.maxTokens,
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
+    });
+  }
+
+  async *streamChatWithTools(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent> {
+    yield* streamChatWithToolsAnthropic({
+      system: args.system,
+      messages: args.messages,
+      tools: args.tools,
+      tool_choice: args.tool_choice,
+      model: this.model,
+      temperature: args.temperature,
+      maxTokens: args.maxTokens,
+      requestId: opts.requestId,
+      timeoutMs: opts.timeoutMs,
+      signal: opts.signal ?? opts.abortSignal,
     });
   }
 }

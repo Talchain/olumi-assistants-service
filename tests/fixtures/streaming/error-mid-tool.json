@@ -1,0 +1,29 @@
+[
+  {
+    "type": "turn_start",
+    "seq": 0,
+    "turn_id": "turn-err-tool-001",
+    "routing": "llm",
+    "stage": "evaluate"
+  },
+  {
+    "type": "text_delta",
+    "seq": 1,
+    "delta": "I'll run the analysis now."
+  },
+  {
+    "type": "tool_start",
+    "seq": 2,
+    "tool_name": "run_analysis",
+    "long_running": true
+  },
+  {
+    "type": "error",
+    "seq": 3,
+    "error": {
+      "code": "TOOL_ERROR",
+      "message": "run_analysis failed: upstream service returned 502"
+    },
+    "recoverable": false
+  }
+]

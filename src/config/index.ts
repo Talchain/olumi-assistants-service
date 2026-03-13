@@ -264,6 +264,7 @@ const ConfigSchema = z.object({
     dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
     zone2Registry: booleanString.default(false), // CEE_ZONE2_REGISTRY_ENABLED — Zone 2 block registry prompt assembly
     moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
+    orchestratorStreaming: booleanString.default(false), // ENABLE_ORCHESTRATOR_STREAMING — SSE streaming for orchestrator turns
   }),
 
   // Prompt Cache Configuration
@@ -573,6 +574,7 @@ function parseConfig(): Config {
       dskCoachingEnabled: env.DSK_COACHING_ENABLED,
       zone2Registry: env.CEE_ZONE2_REGISTRY_ENABLED,
       moeSpikeEnabled: env.MOE_SPIKE_ENABLED,
+      orchestratorStreaming: env.ENABLE_ORCHESTRATOR_STREAMING,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

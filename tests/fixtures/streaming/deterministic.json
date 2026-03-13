@@ -1,0 +1,45 @@
+[
+  {
+    "type": "turn_start",
+    "seq": 0,
+    "turn_id": "turn-det-001",
+    "routing": "deterministic",
+    "stage": "evaluate"
+  },
+  {
+    "type": "turn_complete",
+    "seq": 1,
+    "envelope": {
+      "turn_id": "turn-det-001",
+      "assistant_text": "Based on the analysis results, Option A shows a 15% higher expected value under the base scenario. The key trade-off is between cost certainty (Option B) and upside potential (Option A).",
+      "blocks": [],
+      "suggested_actions": [],
+      "lineage": {
+        "context_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        "dsk_version_hash": null
+      },
+      "stage_indicator": {
+        "stage": "evaluate",
+        "confidence": "high",
+        "source": "explicit_event"
+      },
+      "science_ledger": {
+        "claims_used": [],
+        "techniques_used": [],
+        "scope_violations": [],
+        "phrasing_violations": [],
+        "rewrite_applied": false
+      },
+      "progress_marker": { "kind": "none" },
+      "observability": {
+        "triggers_fired": [],
+        "triggers_suppressed": [],
+        "intent_classification": "explain",
+        "specialist_contributions": [],
+        "specialist_disagreement": null
+      },
+      "turn_plan": { "planned_tools": [], "reasoning": "deterministic explain path" },
+      "guidance_items": []
+    }
+  }
+]

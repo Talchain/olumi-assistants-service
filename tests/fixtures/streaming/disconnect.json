@@ -1,0 +1,24 @@
+[
+  {
+    "type": "turn_start",
+    "seq": 0,
+    "turn_id": "turn-disc-001",
+    "routing": "llm",
+    "stage": "ideate"
+  },
+  {
+    "type": "text_delta",
+    "seq": 1,
+    "delta": "There are several approaches "
+  },
+  {
+    "type": "text_delta",
+    "seq": 2,
+    "delta": "to structuring this\ndecision model:\n\n"
+  },
+  {
+    "type": "text_delta",
+    "seq": 3,
+    "delta": "1. Cost-benefit with \u00a3/\u20ac multi-currency factors"
+  }
+]

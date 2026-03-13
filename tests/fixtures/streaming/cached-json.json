@@ -1,0 +1,32 @@
+{
+  "turn_id": "turn-cached-001",
+  "assistant_text": "Here are the results from your previous analysis run.",
+  "blocks": [],
+  "suggested_actions": [],
+  "lineage": {
+    "context_hash": "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+    "dsk_version_hash": null
+  },
+  "stage_indicator": {
+    "stage": "evaluate",
+    "confidence": "high",
+    "source": "inferred"
+  },
+  "science_ledger": {
+    "claims_used": [],
+    "techniques_used": [],
+    "scope_violations": [],
+    "phrasing_violations": [],
+    "rewrite_applied": false
+  },
+  "progress_marker": { "kind": "none" },
+  "observability": {
+    "triggers_fired": [],
+    "triggers_suppressed": [],
+    "intent_classification": "explain",
+    "specialist_contributions": [],
+    "specialist_disagreement": null
+  },
+  "turn_plan": { "planned_tools": [], "reasoning": "idempotency cache hit" },
+  "guidance_items": []
+}

@@ -6,6 +6,7 @@
  */
 
 import { getAdapter } from "../../adapters/llm/router.js";
+import type { ChatWithToolsStreamEvent } from "../../adapters/llm/types.js";
 import type { LLMClient } from "./types.js";
 
 /**
@@ -24,6 +25,20 @@ export function createProductionLLMClient(): LLMClient {
     async chat(options, config) {
       const adapter = getAdapter('orchestrator');
       return adapter.chat(options, config);
+    },
+
+    async *streamChatWithTools(args, opts): AsyncGenerator<ChatWithToolsStreamEvent> {
+      const adapter = getAdapter('orchestrator');
+      if (adapter.streamChatWithTools) {
+        yield* adapter.streamChatWithTools(args, opts);
+      } else {
+        // Fallback: call non-streaming, yield single message_complete
+        if (!adapter.chatWithTools) {
+          throw new Error('LLM adapter does not support chatWithTools');
+        }
+        const result = await adapter.chatWithTools(args, opts);
+        yield { type: 'message_complete', result };
+      }
     },
 
     getResolvedModel() {

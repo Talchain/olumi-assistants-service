@@ -38,6 +38,7 @@ import type {
   ChatResult,
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
   CallOpts,
   DraftStreamEvent,
   UsageMetrics,
@@ -188,6 +189,25 @@ class UsageTrackingAdapter implements LLMAdapter {
     for await (const event of this.adapter.streamDraftGraph(args, opts)) {
       if (event.type === 'complete' && event.result.usage) {
         logAndRecord('draft_graph_stream', this.name, this.model, event.result.usage, opts.requestId);
+      }
+      yield event;
+    }
+  }
+
+  /**
+   * Streaming tool calling — budget enforced before stream, usage logged on message_complete
+   */
+  async *streamChatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): AsyncIterable<ChatWithToolsStreamEvent> {
+    if (!this.adapter.streamChatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support streamChatWithTools`);
+    }
+    enforceBudget(opts.requestId);
+    for await (const event of this.adapter.streamChatWithTools(args, opts)) {
+      if (event.type === 'message_complete' && event.result.usage) {
+        logAndRecord('stream_chat_with_tools', this.name, this.model, event.result.usage, opts.requestId);
       }
       yield event;
     }

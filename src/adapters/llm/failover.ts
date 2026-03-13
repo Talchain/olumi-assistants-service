@@ -35,6 +35,7 @@ import type {
   ChatResult,
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
@@ -252,5 +253,25 @@ export class FailoverAdapter implements LLMAdapter {
     }
 
     return primary.chatWithTools(args, opts);
+  }
+
+  /**
+   * Streaming tool calling - delegates to primary adapter only
+   * (No mid-stream failover — let error propagate)
+   */
+  async *streamChatWithTools(
+    args: ChatWithToolsArgs,
+    opts: CallOpts,
+  ): AsyncIterable<ChatWithToolsStreamEvent> {
+    const primary = this.adapters[0];
+    if (!primary.streamChatWithTools) {
+      throw new UnsupportedOperationError(
+        `Primary adapter ${primary.name} does not support streamChatWithTools`,
+        primary.name,
+        "streamChatWithTools",
+      );
+    }
+
+    yield* primary.streamChatWithTools(args, opts);
   }
 }

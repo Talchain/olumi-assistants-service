@@ -412,6 +412,15 @@ export interface LLMAdapter {
    * @throws UnsupportedOperationError if adapter does not support tool calling
    */
   chatWithTools?(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult>;
+
+  /**
+   * Optional: Stream chat with tools for incremental SSE delivery.
+   * Text deltas emit immediately. Tool input accumulates until complete.
+   * Final message_complete carries the full ChatWithToolsResult.
+   *
+   * If not implemented, callers should fall back to chatWithTools().
+   */
+  streamChatWithTools?(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent>;
 }
 
 /**
@@ -464,6 +473,17 @@ export interface ChatWithToolsResult {
   /** Provider-side latency in milliseconds */
   latencyMs: number;
 }
+
+/**
+ * Stream event types for chat-with-tools streaming.
+ * Text deltas emit immediately. Tool input accumulates until content_block_stop.
+ * Final message_complete carries the full assembled ChatWithToolsResult.
+ */
+export type ChatWithToolsStreamEvent =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'tool_input_start'; tool_id: string; tool_name: string }
+  | { type: 'tool_input_complete'; tool_id: string; tool_name: string; input: Record<string, unknown> }
+  | { type: 'message_complete'; result: ChatWithToolsResult };
 
 /**
  * Stream event types for SSE-based draft generation.

@@ -1075,3 +1075,160 @@ function isDismissalMessage(normalised: string): boolean {
   return /\b(no|dont|don't|cancel|dismiss|not now|leave it)\b/.test(normalised);
 }
 
+// ============================================================================
+// Streaming Support
+// ============================================================================
+
+import type { ChatWithToolsArgs, CallOpts } from "../types.js";
+
+/**
+ * Prepare phase3 for streaming: run all deterministic routing, and if the
+ * LLM path is needed, return the prepared call args instead of making the call.
+ *
+ * Does NOT modify phase3Generate — this is a parallel entry point for streaming.
+ */
+export type Phase3StreamPrep =
+  | { kind: 'deterministic'; result: LLMResult }
+  | { kind: 'llm'; callArgs: ChatWithToolsArgs; callOpts: CallOpts; postProcess: (llmResult: import("../../../adapters/llm/types.js").ChatWithToolsResult) => LLMResult };
+
+export async function phase3PrepareForStreaming(
+  enrichedContext: EnrichedContext,
+  specialistResult: SpecialistResult,
+  llmClient: LLMClient,
+  requestId: string,
+  userMessage: string,
+  initialIntentGate?: IntentGateResult,
+): Promise<Phase3StreamPrep> {
+  // Replicate the same deterministic routing as phase3Generate
+  const intentGate = initialIntentGate ?? classifyIntent(userMessage);
+  const context = buildConversationContext(enrichedContext);
+  const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
+  const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
+  const freshTurnIntent = classifyUserIntent(userMessage);
+  const hasExplainableCurrentAnalysis = isResultsExplanationEligible(
+    enrichedContext.stage_indicator.stage,
+    enrichedContext.analysis,
+  );
+  const explanationRoute = determineExplanationRoute(
+    enrichedContext, userMessage, intentGate, freshTurnIntent, hasExplainableCurrentAnalysis,
+  );
+  const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
+  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && explanationRoute.kind !== 'results';
+  const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
+    && hasStableModel(enrichedContext)
+    && !isClearRegenerateRequest(userMessage);
+  const editResolutionMode = (clarificationToolInput || proposalFollowUp?.action === 'confirm' || intentGate.tool === 'edit_graph')
+    ? determineEditResolutionMode(userMessage, context)
+    : null;
+  const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
+  const shouldRedirectToResultsExplanation = hasExplainableCurrentAnalysis
+    && explanationRoute.kind === 'results'
+    && (
+      intentGate.tool === 'explain_results'
+      || intentGate.tool === 'edit_graph'
+      || freshTurnIntent === 'explain'
+      || freshTurnIntent === 'recommend'
+      || shouldAvoidEditGraph
+    );
+
+  // Try the same deterministic paths as phase3Generate — calling phase3Generate
+  // for all deterministic cases ensures exact behavioral parity.
+  // Deterministic detection: if phase3Generate would NOT reach the LLM call,
+  // just call it directly and return the result.
+  const isDeterministic = (
+    proposalFollowUp?.action === 'dismiss'
+    || proposalFollowUp?.action === 'stale'
+    || (explicitGenerate.kind === 'clarify')
+    || shouldBlockStableModelRedraft
+    || (explanationRoute.kind === 'rationale')
+    || shouldRedirectToResultsExplanation
+    || (explicitGenerate.kind === 'deterministic')
+    || (proposalFollowUp?.action === 'confirm')
+    || (clarificationToolInput !== null)
+    || (intentGate.tool && intentGate.routing === 'deterministic')
+  );
+
+  if (isDeterministic) {
+    const result = await phase3Generate(
+      enrichedContext, specialistResult, llmClient, requestId, userMessage, initialIntentGate,
+    );
+    return { kind: 'deterministic', result };
+  }
+
+  // LLM path: prepare the call args
+  const systemPrompt = await assembleV2SystemPrompt(enrichedContext);
+  const promptMeta = getSystemPromptMeta('orchestrator');
+  const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
+  const messages = assembleMessages(context, effectiveUserMessage);
+  const currentStage = enrichedContext.stage_indicator.stage;
+  const allToolDefs = assembleToolDefinitions(getToolDefinitions()).filter((tool) =>
+    hasExplainableCurrentAnalysis || tool.name !== 'explain_results',
+  );
+  const toolDefs = allToolDefs.filter((tool) => {
+    const guard = isToolAllowedAtStage(tool.name, currentStage, userMessage);
+    return guard.allowed;
+  });
+
+  const routeDebugBase = buildRouteDebugBase(
+    intentGate, clarificationToolInput, proposalFollowUp, explicitGenerate,
+    shouldRedirectToResultsExplanation, explanationRoute.kind === 'rationale',
+    hasExplainableCurrentAnalysis,
+  );
+
+  const effectiveIntentGate = intentGate;
+
+  const callArgs: ChatWithToolsArgs = {
+    system: systemPrompt,
+    messages,
+    tools: toolDefs,
+    tool_choice: { type: 'auto' },
+    maxTokens: getMaxTokensFromConfig('orchestrator'),
+  };
+
+  const callOpts: CallOpts = {
+    requestId,
+    timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
+  };
+
+  const postProcess = (llmResult: import("../../../adapters/llm/types.js").ChatWithToolsResult): LLMResult => {
+    const resolvedModelInfo = llmClient.getResolvedModel?.() ?? null;
+    const parsed = parseV2Response(llmResult);
+    return {
+      ...parsed,
+      route_metadata: {
+        outcome: 'default_llm',
+        reasoning: 'no_deterministic_route_applied',
+        resolved_model: resolvedModelInfo?.model ?? null,
+        resolved_provider: resolvedModelInfo?.provider ?? null,
+        prompt_hash: promptMeta.prompt_hash ?? null,
+        prompt_version: promptMeta.prompt_version ?? null,
+      },
+      route_debug: {
+        ...routeDebugBase,
+        final_intent_gate: summariseIntentGate(effectiveIntentGate),
+        deterministic_override: {
+          applied: false,
+          reason: shouldAvoidEditGraph ? 'edit_graph_bypassed_for_non_edit_answer' : null,
+        },
+        explain_results_selection: {
+          considered: false,
+          selected: false,
+          reason: null,
+          explanation_path: null,
+        },
+        post_analysis_followup: {
+          triggered: false,
+          reason: null,
+        },
+        draft_graph_selection: {
+          considered: explicitGenerate.kind !== 'none' || intentGate.tool === 'draft_graph',
+          selected: false,
+          reason: null,
+        },
+      },
+    };
+  };
+
+  return { kind: 'llm', callArgs, callOpts, postProcess };
+}
+

@@ -41,6 +41,7 @@ import type {
   ChatResult,
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
@@ -378,6 +379,16 @@ export class CachingAdapter implements LLMAdapter {
       throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools`);
     }
     return this.adapter.chatWithTools(args, opts);
+  }
+
+  /**
+   * Streaming tool calling - bypasses cache, delegates to underlying adapter
+   */
+  async *streamChatWithTools(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent> {
+    if (!this.adapter.streamChatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support streamChatWithTools`);
+    }
+    yield* this.adapter.streamChatWithTools(args, opts);
   }
 }
 

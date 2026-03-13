@@ -1,0 +1,109 @@
+[
+  {
+    "type": "turn_start",
+    "seq": 0,
+    "turn_id": "turn-tool-001",
+    "routing": "llm",
+    "stage": "evaluate"
+  },
+  {
+    "type": "text_delta",
+    "seq": 1,
+    "delta": "I'll run the analysis "
+  },
+  {
+    "type": "text_delta",
+    "seq": 2,
+    "delta": "to compare these pricing options."
+  },
+  {
+    "type": "tool_start",
+    "seq": 3,
+    "tool_name": "run_analysis",
+    "long_running": true
+  },
+  {
+    "type": "block",
+    "seq": 4,
+    "block": {
+      "block_type": "analysis_summary",
+      "data": {
+        "analysis_status": "completed",
+        "option_count": 3,
+        "sample_size": 1000,
+        "dominant_option": "Option A"
+      }
+    }
+  },
+  {
+    "type": "block",
+    "seq": 5,
+    "block": {
+      "block_type": "text",
+      "data": {
+        "content": "The analysis shows Option A dominates in 68% of scenarios."
+      }
+    }
+  },
+  {
+    "type": "tool_result",
+    "seq": 6,
+    "tool_name": "run_analysis",
+    "success": true,
+    "duration_ms": 4523
+  },
+  {
+    "type": "turn_complete",
+    "seq": 7,
+    "envelope": {
+      "turn_id": "turn-tool-001",
+      "assistant_text": "I'll run the analysis to compare these pricing options.",
+      "blocks": [
+        {
+          "block_type": "analysis_summary",
+          "data": {
+            "analysis_status": "completed",
+            "option_count": 3,
+            "sample_size": 1000,
+            "dominant_option": "Option A"
+          }
+        },
+        {
+          "block_type": "text",
+          "data": {
+            "content": "The analysis shows Option A dominates in 68% of scenarios."
+          }
+        }
+      ],
+      "suggested_actions": [
+        { "label": "Explain results", "action": "explain_results" }
+      ],
+      "lineage": {
+        "context_hash": "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+        "dsk_version_hash": null
+      },
+      "stage_indicator": {
+        "stage": "evaluate",
+        "confidence": "high",
+        "source": "explicit_event"
+      },
+      "science_ledger": {
+        "claims_used": [],
+        "techniques_used": [],
+        "scope_violations": [],
+        "phrasing_violations": [],
+        "rewrite_applied": false
+      },
+      "progress_marker": { "kind": "ran_analysis" },
+      "observability": {
+        "triggers_fired": ["run_analysis"],
+        "triggers_suppressed": [],
+        "intent_classification": "act",
+        "specialist_contributions": [],
+        "specialist_disagreement": null
+      },
+      "turn_plan": { "planned_tools": ["run_analysis"], "reasoning": "user requested analysis" },
+      "guidance_items": []
+    }
+  }
+]
