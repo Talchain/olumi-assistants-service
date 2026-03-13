@@ -254,6 +254,46 @@ describe("tryAnalysisLookup", () => {
     });
   });
 
+  describe("new lookup phrasings", () => {
+    it("matches 'who is winning' and returns option comparison", () => {
+      const result = tryAnalysisLookup("Who is winning?", makeAnalysis(), makeGraph());
+      expect(result.matched).toBe(true);
+      if (result.matched) {
+        expect(result.assistantText).toContain("Option A");
+        expect(result.assistantText).toContain("65%");
+      }
+    });
+
+    it("matches 'which option is best' and returns option comparison", () => {
+      const result = tryAnalysisLookup("Which option is best?", makeAnalysis(), makeGraph());
+      expect(result.matched).toBe(true);
+      if (result.matched) {
+        expect(result.assistantText).toContain("Option A");
+      }
+    });
+
+    it("matches 'what are the scores' and returns option comparison", () => {
+      const result = tryAnalysisLookup("What are the scores?", makeAnalysis(), makeGraph());
+      expect(result.matched).toBe(true);
+      if (result.matched) {
+        expect(result.assistantText).toContain("Option A");
+      }
+    });
+
+    it("matches 'how do the options compare' and returns option comparison", () => {
+      const result = tryAnalysisLookup("How do the options compare?", makeAnalysis(), makeGraph());
+      expect(result.matched).toBe(true);
+      if (result.matched) {
+        expect(result.assistantText).toContain("Option A");
+      }
+    });
+
+    it("excludes 'why did A win' (causal intent)", () => {
+      const result = tryAnalysisLookup("Why did A win?", makeAnalysis(), makeGraph());
+      expect(result.matched).toBe(false);
+    });
+  });
+
   describe("option name matching", () => {
     it("user asks about specific option by name — matches", () => {
       const result = tryAnalysisLookup("How often does Option A win?", makeAnalysis(), makeGraph());

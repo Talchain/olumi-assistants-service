@@ -68,6 +68,8 @@ export interface AnalysisResponseSummary {
   flip_thresholds?: FlipThreshold[];
   /** Top 3 fragile edges with labels when available in robustness data. */
   top_fragile_edges?: FragileEdge[];
+  /** Winner win_probability minus runner-up win_probability. Null when fewer than 2 options. */
+  margin: number | null;
   analysis_status: string;
 }
 
@@ -493,12 +495,18 @@ export function compactAnalysis(
         }))
       : [];
 
+    // Margin: winner.win_probability - runner_up.win_probability
+    const margin = options.length >= 2
+      ? options[0].win_probability - options[1].win_probability
+      : null;
+
     const summary: AnalysisResponseSummary = {
       winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
       options,
       top_drivers: topDrivers,
       robustness_level: robustnessLevel,
       fragile_edge_count: fragileEdgeCount,
+      margin,
       analysis_status: status,
     };
 

@@ -53,6 +53,7 @@ const COMPACT_ANALYSIS: AnalysisResponseSummary = {
   ],
   robustness_level: "moderate",
   fragile_edge_count: 1,
+  margin: 0.44,
   analysis_status: "ok",
 };
 
@@ -524,6 +525,48 @@ describe("assembleV2SystemPrompt", () => {
     it("omits option comparison when no analysis exists", async () => {
       const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ analysis_response: undefined }));
       expect(prompt).not.toContain("Option comparison:");
+    });
+  });
+
+  // =========================================================================
+  // Margin rendering in Zone 2
+  // =========================================================================
+
+  describe("Margin rendering", () => {
+    it("renders margin as percentage points when margin is non-null", async () => {
+      const analysis: AnalysisResponseSummary = {
+        ...COMPACT_ANALYSIS,
+        margin: 0.30,
+      };
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ analysis_response: analysis }));
+      expect(prompt).toContain("Margin: 30 percentage points");
+    });
+
+    it("omits margin line when margin is null", async () => {
+      const analysis: AnalysisResponseSummary = {
+        ...COMPACT_ANALYSIS,
+        margin: null,
+      };
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ analysis_response: analysis }));
+      expect(prompt).not.toContain("Margin:");
+    });
+
+    it("omits margin when value is NaN (non-finite guard)", async () => {
+      const analysis: AnalysisResponseSummary = {
+        ...COMPACT_ANALYSIS,
+        margin: NaN,
+      };
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ analysis_response: analysis }));
+      expect(prompt).not.toContain("Margin:");
+    });
+
+    it("omits margin when value is Infinity (non-finite guard)", async () => {
+      const analysis: AnalysisResponseSummary = {
+        ...COMPACT_ANALYSIS,
+        margin: Infinity,
+      };
+      const prompt = await assembleV2SystemPrompt(makeEnrichedContext({ analysis_response: analysis }));
+      expect(prompt).not.toContain("Margin:");
     });
   });
 

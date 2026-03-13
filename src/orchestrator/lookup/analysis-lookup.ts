@@ -61,6 +61,9 @@ const EXCLUDE_KEYWORDS = [
   'reason',
 ];
 
+/** Stop-words that legitimately follow "option" in generic questions (e.g. "which option is best"). */
+const OPTION_STOP_WORDS = new Set(['is', 'are', 'the', 'best', 'wins', 'winning', 'scores', 'comparison', 'compare', 'do']);
+
 function hasExcludedIntent(normalised: string): boolean {
   return EXCLUDE_KEYWORDS.some(kw => normalised.includes(kw));
 }
@@ -127,7 +130,16 @@ const LOOKUP_CATALOGUE: LookupEntry[] = [
 
   // Win probability / option comparison
   {
-    keywords: ['win probability', 'which option wins', 'how often does', 'what are the results', 'who wins'],
+    keywords: [
+      'win probability',
+      'which option wins', 'which option is winning', 'which is winning',
+      'how often does',
+      'what are the results',
+      'who wins', 'who is winning', "who's winning",
+      'what are the scores', 'show me the scores', 'option scores',
+      'how do the options compare', 'compare the options', 'option comparison',
+      'which option is best', 'which is best', "what's best",
+    ],
     format: (analysis, _graph, normalised) => {
       const results = analysis.results as Array<Record<string, unknown>> | undefined;
       if (!results || results.length === 0) return null;
@@ -145,11 +157,14 @@ const LOOKUP_CATALOGUE: LookupEntry[] = [
         // Check if user mentioned an option-like noun not in the results.
         // Heuristic: if the message contains "option" followed by a word that
         // doesn't match any known label, fall through.
+        // Skip common stop-words that follow "option" in generic questions.
         const optionMention = normalised.match(/option\s+([a-z0-9]+)/);
         if (optionMention) {
           const mentioned = optionMention[1];
-          const found = optionLabels.some(l => l.includes(mentioned));
-          if (!found) return SKIP_TO_LLM;
+          if (!OPTION_STOP_WORDS.has(mentioned)) {
+            const found = optionLabels.some(l => l.includes(mentioned));
+            if (!found) return SKIP_TO_LLM;
+          }
         }
       }
 

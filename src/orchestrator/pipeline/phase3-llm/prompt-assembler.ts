@@ -44,11 +44,15 @@ function serialiseCompactGraph(g: GraphV3Compact): string {
     if (node.type) parts.push(`type=${node.type}`);
     if (node.category) parts.push(`category=${node.category}`);
     if (node.value !== undefined) parts.push(`value=${node.value}`);
+    if (node.source) parts.push(`source=${node.source}`);
+    if (node.intervention_summary) parts.push(`interventions: ${node.intervention_summary}`);
     lines.push(parts.join(', '));
   }
 
   for (const edge of g.edges) {
-    lines.push(`  ${edge.from} → ${edge.to} (strength=${edge.strength}, exists_p=${edge.exists})`);
+    let edgeLine = `  ${edge.from} → ${edge.to} (strength=${edge.strength}, exists_p=${edge.exists})`;
+    if (edge.plain_interpretation) edgeLine += ` — ${edge.plain_interpretation}`;
+    lines.push(edgeLine);
   }
 
   return lines.join('\n');
@@ -64,6 +68,9 @@ function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
 
   lines.push(`  Winner: ${a.winner.option_label} (${a.winner.option_id}) at ${Math.round(a.winner.win_probability * 100)}% win probability`);
   lines.push(`  Robustness: ${a.robustness_level}`);
+  if (a.margin !== null && Number.isFinite(a.margin)) {
+    lines.push(`  Margin: ${Math.round(a.margin * 100)} percentage points`);
+  }
 
   if (a.option_results && a.option_results.length > 0) {
     // Prefer dedicated comparison array (has p10/p90 guaranteed)

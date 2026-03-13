@@ -99,6 +99,26 @@ describe("classifyExplainQuestion — Tier 1 routing", () => {
   it("classifies 'what are the options' as tier1", () => {
     expect(classifyExplainQuestion("what are the options?")).toBe("tier1");
   });
+
+  it("classifies 'who's winning' as tier1", () => {
+    expect(classifyExplainQuestion("who's winning?")).toBe("tier1");
+  });
+
+  it("classifies 'which option is best' as tier1", () => {
+    expect(classifyExplainQuestion("which option is best?")).toBe("tier1");
+  });
+
+  it("classifies 'which is best' as tier1", () => {
+    expect(classifyExplainQuestion("which is best?")).toBe("tier1");
+  });
+
+  it("classifies 'how do the options compare' as tier1", () => {
+    expect(classifyExplainQuestion("how do the options compare?")).toBe("tier1");
+  });
+
+  it("classifies 'option comparison' as tier1", () => {
+    expect(classifyExplainQuestion("show me the option comparison")).toBe("tier1");
+  });
 });
 
 describe("classifyExplainQuestion — Tier 2 routing", () => {

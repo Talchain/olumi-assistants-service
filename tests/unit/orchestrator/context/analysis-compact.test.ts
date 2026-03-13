@@ -255,6 +255,49 @@ describe("compactAnalysis", () => {
   });
 
   // =========================================================================
+  // Margin computation
+  // =========================================================================
+
+  describe("margin", () => {
+    it("computes margin as winner - runner_up when 2+ options", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.65 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.35 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      // 0.65 - 0.35 = 0.30
+      expect(summary!.margin).toBeCloseTo(0.30, 5);
+    });
+
+    it("returns margin=null when only 1 option", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.9 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.margin).toBeNull();
+    });
+
+    it("computes margin correctly with 3+ options (winner vs second place)", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", win_probability: 0.5 }),
+          makeOption({ option_id: "opt_b", win_probability: 0.3 }),
+          makeOption({ option_id: "opt_c", win_probability: 0.2 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      // 0.5 - 0.3 = 0.2
+      expect(summary!.margin).toBeCloseTo(0.2, 5);
+    });
+  });
+
+  // =========================================================================
   // Full option comparison — p10, p90, mean
   // =========================================================================
 

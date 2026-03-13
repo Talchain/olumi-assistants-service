@@ -47,14 +47,19 @@ export type ExplainQuestionClass = 'tier1' | 'tier2' | 'tier2_recommendation' | 
  * Conservative — false negatives (falling to Tier 3) are preferable.
  */
 const TIER1_PATTERNS = [
-  /\bwho\s+(?:is\s+)?winning\b/i,
+  /\bwho\s*(?:'s|is)\s+winning\b/i,
   /\bwho\s+wins\b/i,
-  /\bwhat\s+(?:is\s+the\s+)?(?:top\s+)?recommendation\b/i,
+  /\bwhich\s+(?:option\s+)?is\s+(?:winning|best)\b/i,
+  /\bwhich\s+is\s+(?:winning|best)\b/i,
+  /\bwhat\s*(?:'s|is)\s+(?:the\s+)?(?:top\s+)?(?:recommendation|best)\b/i,
   /\bwhat\s+(?:are\s+(?:the\s+)?)?top\s+drivers\b/i,
   /\bwhat\s+(?:matters|drives)\s+most\b/i,
   /\bwhat\s+(?:are\s+(?:the\s+)?)?scores?\b/i,
+  /\b(?:show\s+me\s+(?:the\s+)?)?option\s+(?:scores?|comparison)\b/i,
   /\bwhat\s+(?:are\s+(?:the\s+)?)?options?\b/i,
   /\bhow\s+(?:robust|confident|stable|reliable|strong)\b/i,
+  /\b(?:how\s+do\s+(?:the\s+)?options\s+)?compare\s+(?:the\s+)?options\b/i,
+  /\bhow\s+do\s+(?:the\s+)?options\s+compare\b/i,
 ];
 
 /** Tier 3: Causal/counterfactual questions that need multi-step LLM reasoning. */
