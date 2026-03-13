@@ -681,6 +681,46 @@ describe("phase3-llm", () => {
       });
     });
 
+    it("bypasses minimum-context check when generate_model intent gate is passed", async () => {
+      const client = makeMockLLMClient();
+      // Minimal context: no goal, no options, no constraints, short message
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+        framing: null,
+        conversation_history: [] as EnrichedContext["conversation_history"],
+      });
+
+      // Simulate the generate_model intent gate override from pipeline.ts
+      const generateModelGate = {
+        tool: 'draft_graph' as const,
+        routing: 'deterministic' as const,
+        confidence: 'exact' as const,
+        normalised_message: 'should i hire a tech lead or two developers?',
+        matched_pattern: 'generate_model',
+      };
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-generate-model-minimal",
+        "Should I hire a tech lead or two developers?",
+        generateModelGate,
+      );
+
+      // Should NOT fall back to clarification — should deterministically select draft_graph
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0].name).toBe("draft_graph");
+      expect(result.route_metadata).toEqual({
+        outcome: "explicit_generate",
+        reasoning: "explicit_generate_with_sufficient_context",
+      });
+      expect(result.route_debug?.explicit_generate_override).toMatchObject({
+        considered: true,
+        applied: true,
+      });
+    });
+
     it("dismisses a pending proposal without calling tools", async () => {
       const client = makeMockLLMClient();
       const ctx = makeEnrichedContext({

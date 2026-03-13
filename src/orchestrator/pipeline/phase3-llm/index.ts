@@ -315,7 +315,12 @@ export async function phase3Generate(
   if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
     // Check prerequisites (reuses top-level `context`)
     const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveIntentGate.tool];
-    const prerequisitesMet = checkPrereq ? checkPrereq(context) : true;
+    // generate_model button bypasses structured-framing prerequisites — the user
+    // message IS the brief and the user has explicitly requested generation.
+    const prerequisitesBypassed = effectiveIntentGate.tool === 'draft_graph'
+      && explicitGenerate.kind === 'deterministic'
+      && intentGate.matched_pattern === 'generate_model';
+    const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(context) : true);
 
     if (!prerequisitesMet) {
       // Prerequisites not met → fall through to LLM
@@ -929,7 +934,12 @@ function buildExplicitGenerateRoute(
   if (hasStableModel(enrichedContext) && !isClearRegenerateRequest(userMessage)) {
     return { kind: 'none' };
   }
-  if (!hasMinimumViableFramingContext(context, userMessage)) {
+
+  // When generate_model is explicitly set (UI "Generate Model" button), bypass the
+  // minimum-context check — the user has decided to draft NOW with whatever context
+  // exists. The user's message IS the brief; don't ask for more framing.
+  const isButtonTriggered = intentGate.matched_pattern === 'generate_model';
+  if (!isButtonTriggered && !hasMinimumViableFramingContext(context, userMessage)) {
     return {
       kind: 'clarify',
       assistantText: buildGenerationClarificationMessage(enrichedContext),
