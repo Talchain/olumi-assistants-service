@@ -711,6 +711,8 @@ describe("phase3-llm", () => {
       // Should NOT fall back to clarification — should deterministically select draft_graph
       expect(client.chatWithTools).not.toHaveBeenCalled();
       expect(result.tool_invocations[0].name).toBe("draft_graph");
+      // Brief should contain the user message as the only context (no framing available)
+      expect(result.tool_invocations[0].input.brief).toContain("Should I hire a tech lead or two developers?");
       expect(result.route_metadata).toEqual({
         outcome: "explicit_generate",
         reasoning: "explicit_generate_with_sufficient_context",

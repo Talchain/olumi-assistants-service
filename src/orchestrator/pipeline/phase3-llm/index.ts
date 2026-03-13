@@ -321,6 +321,12 @@ export async function phase3Generate(
       && explicitGenerate.kind === 'deterministic'
       && intentGate.matched_pattern === 'generate_model';
     const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(context) : true);
+    if (prerequisitesBypassed) {
+      log.info(
+        { request_id: requestId, tool: effectiveIntentGate.tool, matched_pattern: 'generate_model' },
+        'V2 pipeline: generate_model bypassed structured-framing prerequisites',
+      );
+    }
 
     if (!prerequisitesMet) {
       // Prerequisites not met → fall through to LLM
