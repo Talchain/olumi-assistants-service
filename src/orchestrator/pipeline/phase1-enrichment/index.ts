@@ -32,8 +32,10 @@ import type { BudgetEnforcementContext } from "../../context/budget.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
 import { buildDecisionContinuity } from "../../context/decision-continuity.js";
 import { matchReferencedEntities } from "../../context/entity-matcher.js";
+import { trackEntityStates } from "../../context/entity-state-tracker.js";
 import type { GraphV3T } from "../../types.js";
 import { log } from "../../../utils/telemetry.js";
+import { config } from "../../../config/index.js";
 
 /** Maximum conversation turns to keep in the enriched context */
 const MAX_CONVERSATION_TURNS = 5;
@@ -177,6 +179,11 @@ export function phase1Enrich(
   // 7. Entity-aware enrichment — match user message against compact graph nodes
   const referencedEntities = matchReferencedEntities(message, budgetedContext.graph_compact);
 
+  // 7b. Cross-turn entity memory (feature-flagged: CEE_ENTITY_MEMORY_ENABLED)
+  const entityStateMap = config.cee?.entityMemoryEnabled
+    ? trackEntityStates(trimmedMessages, budgetedContext.graph_compact)
+    : undefined;
+
   // 8. Compute context hash (after budget enforcement so hash reflects actual sent context)
   const budgetedMessages = budgetedContext.messages ?? trimmedMessages;
   const contextHash = computeContextHash(toHashableContext({
@@ -194,5 +201,6 @@ export function phase1Enrich(
     context_hash: contextHash,
     decision_continuity: decisionContinuity,
     ...(referencedEntities.length > 0 ? { referenced_entities: referencedEntities } : {}),
+    ...(entityStateMap ? { entity_state_map: entityStateMap } : {}),
   } as EnrichedContext;
 }

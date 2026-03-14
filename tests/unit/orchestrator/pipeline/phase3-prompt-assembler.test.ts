@@ -11,7 +11,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { assembleV2SystemPrompt } from "../../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js";
+import { assembleV2SystemPrompt as _assembleV2SystemPrompt } from "../../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js";
+
+// Wrapper: tests use the .text property of the new AssembledSystemPrompt return type
+const assembleV2SystemPrompt = async (...args: Parameters<typeof _assembleV2SystemPrompt>): Promise<string> =>
+  (await _assembleV2SystemPrompt(...args)).text;
 import { compactAnalysis } from "../../../../src/orchestrator/context/analysis-compact.js";
 import type { EnrichedContext, ReferencedEntityDetail, V2RunResponseEnvelope } from "../../../../src/orchestrator/pipeline/types.js";
 import type { GraphV3Compact } from "../../../../src/orchestrator/context/graph-compact.js";

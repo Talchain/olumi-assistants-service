@@ -428,6 +428,8 @@ const ConfigSchema = z.object({
     draftComplianceReminderEnabled: booleanString.default(true), // CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED
     // BriefSignals context header (appended to user message after compliance reminder)
     briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
+    // Cross-turn entity memory (tracks per-factor interaction state for Zone 2)
+    entityMemoryEnabled: booleanString.default(false), // CEE_ENTITY_MEMORY_ENABLED
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -739,6 +741,7 @@ function parseConfig(): Config {
       legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
+      entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

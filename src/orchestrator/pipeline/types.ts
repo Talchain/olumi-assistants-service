@@ -76,6 +76,10 @@ export interface RouteMetadata {
   // Prompt observability (populated by phase3-llm from getSystemPromptMeta)
   prompt_hash?: string | null;
   prompt_version?: string | null;
+  // Cache observability (populated from Anthropic usage metrics)
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_hit?: boolean;
 }
 
 export type TriggerSource =
@@ -297,6 +301,8 @@ export interface EnrichedContext {
   decision_continuity?: DecisionContinuity;
   /** Entity-aware detail blocks — populated by Phase 1 when message references graph entities. */
   referenced_entities?: ReferencedEntityDetail[];
+  /** Cross-turn entity interaction state — populated by Phase 1 when CEE_ENTITY_MEMORY_ENABLED. */
+  entity_state_map?: import("../context/entity-state-tracker.js").EntityStateMap;
 
   // Inferred state
   stage_indicator: StageIndicator;

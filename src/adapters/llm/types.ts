@@ -443,6 +443,16 @@ export type ToolResponseBlock =
 /**
  * Arguments for chat with native tool calling.
  */
+/**
+ * A system content block for prompt caching. The static prefix block is marked
+ * with cache_control so Anthropic can cache the KV vectors across turns.
+ */
+export interface SystemCacheBlock {
+  type: 'text';
+  text: string;
+  cache_control?: { type: 'ephemeral' };
+}
+
 export interface ChatWithToolsArgs {
   /** System prompt for the conversation */
   system: string;
@@ -456,6 +466,13 @@ export interface ChatWithToolsArgs {
   temperature?: number;
   /** Maximum tokens to generate (default: 4096) */
   maxTokens?: number;
+  /**
+   * Pre-split system blocks for prompt caching. When provided, the Anthropic adapter
+   * uses these blocks (with cache_control markers) instead of the plain `system` string.
+   * The first block should be the static prefix (Zone 1), marked with cache_control.
+   * Non-Anthropic adapters ignore this field and fall back to `system`.
+   */
+  system_cache_blocks?: SystemCacheBlock[];
 }
 
 /**

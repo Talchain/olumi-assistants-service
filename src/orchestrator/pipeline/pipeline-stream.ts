@@ -201,9 +201,9 @@ export async function* executePipelineStream(
     // Conversational retry
     if (toolResult.result.needs_conversational_retry) {
       try {
-        const conversationalSystemPrompt = await assembleV2SystemPrompt(enrichedContext);
+        const conversationalAssembled = await assembleV2SystemPrompt(enrichedContext);
         const conversationalText = await deps.llmClient.chat(
-          { system: conversationalSystemPrompt, userMessage: request.message },
+          { system: conversationalAssembled.text, userMessage: request.message },
           { requestId, timeoutMs: 30_000 },
         );
         (toolResult.result as Phase4Result).assistant_text = conversationalText.content;

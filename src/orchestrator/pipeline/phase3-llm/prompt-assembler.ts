@@ -14,12 +14,34 @@ import type { EnrichedContext, ReferencedEntityDetail } from "../types.js";
 import type { GraphV3Compact } from "../../context/graph-compact.js";
 import type { AnalysisResponseSummary, OptionComparisonEntry } from "../../context/analysis-compact.js";
 import type { DecisionContinuity } from "../../context/decision-continuity.js";
+import type { SystemCacheBlock } from "../../../adapters/llm/types.js";
+import type { EntityStateMap } from "../../context/entity-state-tracker.js";
+import { log } from "../../../utils/telemetry.js";
+
+/**
+ * Result from assembleV2SystemPrompt — includes both the full combined string
+ * and pre-split blocks for Anthropic prompt caching.
+ */
+export interface AssembledSystemPrompt {
+  /** Full system prompt (Zone 1 + Zone 2) — used by non-caching paths. */
+  text: string;
+  /** Pre-split system blocks for prompt caching. Block 0 = static prefix (Zone 1) with cache_control. */
+  cache_blocks: SystemCacheBlock[];
+}
 
 // ============================================================================
 // Section cap — prevents any single Zone 2 block from bloating the prompt
 // ============================================================================
 
 const SECTION_CHAR_CAP = 2000;
+
+/**
+ * Zone 2 total char budget. This is a character-count proxy for tokens, not
+ * an exact token count — assumes ~4 chars/token giving ~2000 tokens at 8000 chars.
+ * When exceeded, low-priority blocks are trimmed in priority order:
+ * entity_memory first, then event_log_summary.
+ */
+const ZONE2_CHAR_BUDGET = 8000;
 
 function capSection(text: string): string {
   if (text.length <= SECTION_CHAR_CAP) return text;
@@ -188,6 +210,7 @@ function serialiseDecisionContinuity(dc: DecisionContinuity, hasCompactGraph: bo
 }
 
 const MAX_REFERENCED_ENTITIES = 2;
+const MAX_ENTITY_MEMORY_FACTORS = 8;
 
 /**
  * Serialise a referenced entity detail into a <referenced_entity> Zone 2 block.
@@ -232,6 +255,74 @@ function serialiseReferencedEntity(entity: ReferencedEntityDetail): string {
 }
 
 // ============================================================================
+// Entity Memory Block
+// ============================================================================
+
+/**
+ * Serialise entity memory into an <entity_memory> Zone 2 block.
+ *
+ * Includes only factors with non-default state (calibrated, challenged, untouched
+ * where the factor is still relevant). Capped at MAX_ENTITY_MEMORY_FACTORS.
+ *
+ * Budget priority: lower than decision_state and referenced_entity.
+ * Trimmed first when Zone 2 exceeds budget.
+ */
+function serialiseEntityMemory(stateMap: EntityStateMap, currentTurn: number): string | null {
+  // Filter to non-default states, sort by recency (most recent first), cap at 8
+  const entries = Object.entries(stateMap)
+    .filter(([, entry]) => entry.state !== 'default' && entry.state !== 'untouched')
+    .sort((a, b) => b[1].last_action_turn - a[1].last_action_turn)
+    .slice(0, MAX_ENTITY_MEMORY_FACTORS);
+
+  // Also include 'default' state factors (AI assumption, not yet discussed) up to the cap
+  const defaultEntries = Object.entries(stateMap)
+    .filter(([, entry]) => entry.state === 'default')
+    .slice(0, MAX_ENTITY_MEMORY_FACTORS - entries.length);
+
+  const allEntries = [...entries, ...defaultEntries];
+  if (allEntries.length === 0) return null;
+
+  const lines: string[] = ['<entity_memory>'];
+
+  for (const [nodeId, entry] of allEntries) {
+    const attrs: string[] = [
+      `id="${nodeId}"`,
+      `state="${entry.state}"`,
+    ];
+
+    if (entry.last_action_turn >= 0) {
+      const turnsAgo = currentTurn - entry.last_action_turn;
+      attrs.push(`turns_ago="${turnsAgo}"`);
+    }
+
+    if (entry.value !== undefined) {
+      attrs.push(`value="${entry.value}"`);
+    }
+
+    // Human-readable description based on state
+    let description: string;
+    switch (entry.state) {
+      case 'calibrated':
+        description = `${entry.label} — set by user${entry.value !== undefined ? ` to ${entry.value}` : ''}`;
+        break;
+      case 'challenged':
+        description = `${entry.label} — user questioned this value`;
+        break;
+      case 'default':
+        description = `${entry.label} — AI assumption, not yet discussed`;
+        break;
+      default:
+        description = entry.label;
+    }
+
+    lines.push(`  <factor ${attrs.join(' ')}>${description}</factor>`);
+  }
+
+  lines.push('</entity_memory>');
+  return lines.join('\n');
+}
+
+// ============================================================================
 // Pending Changes Block
 // ============================================================================
 
@@ -267,7 +358,7 @@ function buildPendingChangesBlock(enrichedContext: EnrichedContext): string | nu
  */
 export async function assembleV2SystemPrompt(
   enrichedContext: EnrichedContext,
-): Promise<string> {
+): Promise<AssembledSystemPrompt> {
   // Zone 1: Static orchestrator prompt (from prompt store / cache / defaults)
   // F.2: Zone 1 will be replaced with science-powered prompt. Using existing cf-v4.0.5 for now.
   const zone1 = await getSystemPrompt('orchestrator');
@@ -330,8 +421,22 @@ export async function assembleV2SystemPrompt(
     }
   }
 
+  // Entity memory — cross-turn factor interaction state (lower priority than decision_state and referenced_entity)
+  // Tracked for budget trimming: entity_memory is the first block dropped when Zone 2 exceeds budget.
+  let entityMemoryIdx = -1;
+  if (enrichedContext.entity_state_map) {
+    const currentTurn = enrichedContext.conversation_history?.length ?? 0;
+    const entityMemoryBlock = serialiseEntityMemory(enrichedContext.entity_state_map, currentTurn);
+    if (entityMemoryBlock) {
+      entityMemoryIdx = zone2Sections.length;
+      zone2Sections.push(capSection(entityMemoryBlock));
+    }
+  }
+
   // Event log summary (when populated — requires Supabase wiring in phase 1)
+  let eventLogIdx = -1;
   if (enrichedContext.event_log_summary) {
+    eventLogIdx = zone2Sections.length;
     zone2Sections.push(capSection(`Decision history: ${enrichedContext.event_log_summary}`));
   }
 
@@ -355,7 +460,38 @@ export async function assembleV2SystemPrompt(
   // Specialist advice placeholder
   zone2Sections.push('<!-- Specialist advice will appear here when Phase 2 is active -->');
 
-  const zone2 = zone2Sections.join('\n');
+  // Budget enforcement: trim low-priority blocks if Zone 2 exceeds char budget.
+  // Priority order (first dropped): entity_memory → event_log_summary.
+  const blockNames: Record<number, string> = {};
+  if (entityMemoryIdx >= 0) blockNames[entityMemoryIdx] = 'entity_memory';
+  if (eventLogIdx >= 0) blockNames[eventLogIdx] = 'event_log_summary';
 
-  return `${zone1}\n\n${zone2}`;
+  const trimOrder = [entityMemoryIdx, eventLogIdx].filter((i) => i >= 0);
+  for (const idx of trimOrder) {
+    const totalChars = zone2Sections.reduce((sum, s) => sum + s.length, 0);
+    if (totalChars <= ZONE2_CHAR_BUDGET) break;
+    log.info(
+      {
+        event: 'zone2.budget_trim',
+        block_dropped: blockNames[idx],
+        zone2_chars_before: totalChars,
+        budget: ZONE2_CHAR_BUDGET,
+      },
+      'zone2.budget_trim: dropping low-priority block',
+    );
+    zone2Sections[idx] = ''; // drop this section
+  }
+
+  const zone2 = zone2Sections.filter((s) => s.length > 0).join('\n');
+  const text = `${zone1}\n\n${zone2}`;
+
+  // Pre-split blocks for Anthropic prompt caching:
+  // Block 0 = static Zone 1 (cache_control: ephemeral) — identical across turns
+  // Block 1 = dynamic Zone 2 — varies per turn, no cache marker
+  const cache_blocks: SystemCacheBlock[] = [
+    { type: 'text', text: zone1, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `\n\n${zone2}` },
+  ];
+
+  return { text, cache_blocks };
 }

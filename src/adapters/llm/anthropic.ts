@@ -2010,6 +2010,8 @@ interface ChatWithToolsAnthropicArgs {
   maxTokens?: number;
   requestId?: string;
   timeoutMs?: number;
+  /** Pre-split system blocks for prompt caching. When provided, replaces plain system string. */
+  system_cache_blocks?: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
 }
 
 /**
@@ -2091,11 +2093,21 @@ export async function chatWithToolsAnthropic(
       }
     }
 
+    // Use pre-split system cache blocks when provided (orchestrator path),
+    // otherwise fall back to plain system string wrapped in buildSystemBlocks.
+    const systemParam: Anthropic.MessageCreateParams['system'] = args.system_cache_blocks
+      ? args.system_cache_blocks.map((block) => ({
+          type: 'text' as const,
+          text: block.text,
+          ...(block.cache_control ? { cache_control: block.cache_control } : {}),
+        }))
+      : args.system;
+
     const createParams: Anthropic.MessageCreateParams = {
       model,
       max_tokens: maxTokens,
       temperature,
-      system: args.system,
+      system: systemParam,
       messages: anthropicMessages,
       tools: anthropicTools,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -2138,6 +2150,11 @@ export async function chatWithToolsAnthropic(
     // Map stop_reason
     const stopReason = response.stop_reason as 'end_turn' | 'tool_use' | 'max_tokens';
 
+    // Cache metrics (graceful — absent when no cache blocks or non-caching API version)
+    const cacheCreationTokens = response.usage.cache_creation_input_tokens ?? 0;
+    const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
+    const hasCacheMetrics = cacheCreationTokens > 0 || cacheReadTokens > 0;
+
     log.info(
       {
         provider: 'anthropic',
@@ -2148,6 +2165,12 @@ export async function chatWithToolsAnthropic(
         content_blocks: content.length,
         tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
         stop_reason: stopReason,
+        ...(hasCacheMetrics ? {
+          cache_creation_input_tokens: cacheCreationTokens,
+          cache_read_input_tokens: cacheReadTokens,
+          cache_hit: cacheReadTokens > 0,
+        } : {}),
+        has_cache_blocks: !!args.system_cache_blocks,
       },
       "Anthropic chat with tools successful"
     );
@@ -2292,11 +2315,20 @@ export async function* streamChatWithToolsAnthropic(
       }
     }
 
+    // Use pre-split system cache blocks when provided (orchestrator path)
+    const streamSystemParam: Anthropic.MessageCreateParams['system'] = args.system_cache_blocks
+      ? args.system_cache_blocks.map((block) => ({
+          type: 'text' as const,
+          text: block.text,
+          ...(block.cache_control ? { cache_control: block.cache_control } : {}),
+        }))
+      : args.system;
+
     const stream = apiClient.messages.stream({
       model,
       max_tokens: maxTokens,
       temperature,
-      system: args.system,
+      system: streamSystemParam,
       messages: anthropicMessages,
       tools: anthropicTools,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -2363,6 +2395,11 @@ export async function* streamChatWithToolsAnthropic(
 
     const stopReason = finalMessage.stop_reason as 'end_turn' | 'tool_use' | 'max_tokens';
 
+    // Cache metrics (graceful — absent when no cache blocks or non-caching API version)
+    const streamCacheCreationTokens = finalMessage.usage.cache_creation_input_tokens ?? 0;
+    const streamCacheReadTokens = finalMessage.usage.cache_read_input_tokens ?? 0;
+    const streamHasCacheMetrics = streamCacheCreationTokens > 0 || streamCacheReadTokens > 0;
+
     log.info(
       {
         provider: 'anthropic',
@@ -2374,6 +2411,12 @@ export async function* streamChatWithToolsAnthropic(
         tool_use_blocks: toolBlocks.length,
         stop_reason: stopReason,
         streaming: true,
+        ...(streamHasCacheMetrics ? {
+          cache_creation_input_tokens: streamCacheCreationTokens,
+          cache_read_input_tokens: streamCacheReadTokens,
+          cache_hit: streamCacheReadTokens > 0,
+        } : {}),
+        has_cache_blocks: !!args.system_cache_blocks,
       },
       "Anthropic streaming chat with tools successful",
     );
@@ -2578,6 +2621,7 @@ export class AnthropicAdapter implements LLMAdapter {
       maxTokens: args.maxTokens,
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
+      system_cache_blocks: args.system_cache_blocks,
     });
   }
 
@@ -2593,6 +2637,7 @@ export class AnthropicAdapter implements LLMAdapter {
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
       signal: opts.signal ?? opts.abortSignal,
+      system_cache_blocks: args.system_cache_blocks,
     });
   }
 }

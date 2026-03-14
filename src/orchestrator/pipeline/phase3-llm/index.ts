@@ -446,7 +446,8 @@ export async function phase3Generate(
   }
 
   // 2. LLM routing — full tool-calling flow
-  const systemPrompt = await assembleV2SystemPrompt(enrichedContext);
+  const assembled = await assembleV2SystemPrompt(enrichedContext);
+  const systemPrompt = assembled.text;
 
   // Task 7: Log prompt identity for every V2 LLM call
   const promptMeta = getSystemPromptMeta('orchestrator');
@@ -541,6 +542,7 @@ export async function phase3Generate(
   const llmResult = await llmClient.chatWithTools(
     {
       system: systemPrompt,
+      system_cache_blocks: assembled.cache_blocks,
       messages,
       tools: toolDefs,
       tool_choice: { type: 'auto' },
@@ -562,6 +564,17 @@ export async function phase3Generate(
   );
 
   const parsed = parseV2Response(llmResult);
+
+  // Cache metrics — include only when present (graceful degradation for non-Anthropic providers)
+  const llmUsage = llmResult.usage;
+  const cacheMetrics = llmUsage && (llmUsage.cache_read_input_tokens !== undefined || llmUsage.cache_creation_input_tokens !== undefined)
+    ? {
+        cache_creation_input_tokens: llmUsage.cache_creation_input_tokens ?? 0,
+        cache_read_input_tokens: llmUsage.cache_read_input_tokens ?? 0,
+        cache_hit: (llmUsage.cache_read_input_tokens ?? 0) > 0,
+      }
+    : {};
+
   return {
     ...parsed,
     route_metadata: {
@@ -571,6 +584,7 @@ export async function phase3Generate(
       resolved_provider: resolvedModelInfo?.provider ?? null,
       prompt_hash: promptMeta.prompt_hash ?? null,
       prompt_version: promptMeta.prompt_version ?? null,
+      ...cacheMetrics,
     },
     route_debug: {
       ...routeDebugBase,
@@ -1172,7 +1186,8 @@ export async function phase3PrepareForStreaming(
   }
 
   // LLM path: prepare the call args
-  const systemPrompt = await assembleV2SystemPrompt(enrichedContext);
+  const assembled2 = await assembleV2SystemPrompt(enrichedContext);
+  const systemPrompt = assembled2.text;
   const promptMeta = getSystemPromptMeta('orchestrator');
   const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
   const messages = assembleMessages(context, effectiveUserMessage);
@@ -1195,6 +1210,7 @@ export async function phase3PrepareForStreaming(
 
   const callArgs: ChatWithToolsArgs = {
     system: systemPrompt,
+    system_cache_blocks: assembled2.cache_blocks,
     messages,
     tools: toolDefs,
     tool_choice: { type: 'auto' },
@@ -1209,6 +1225,17 @@ export async function phase3PrepareForStreaming(
   const postProcess = (llmResult: import("../../../adapters/llm/types.js").ChatWithToolsResult): LLMResult => {
     const resolvedModelInfo = llmClient.getResolvedModel?.() ?? null;
     const parsed = parseV2Response(llmResult);
+
+    // Cache metrics — include only when present (graceful degradation for non-Anthropic providers)
+    const llmUsage = llmResult.usage;
+    const streamCacheMetrics = llmUsage && (llmUsage.cache_read_input_tokens !== undefined || llmUsage.cache_creation_input_tokens !== undefined)
+      ? {
+          cache_creation_input_tokens: llmUsage.cache_creation_input_tokens ?? 0,
+          cache_read_input_tokens: llmUsage.cache_read_input_tokens ?? 0,
+          cache_hit: (llmUsage.cache_read_input_tokens ?? 0) > 0,
+        }
+      : {};
+
     return {
       ...parsed,
       route_metadata: {
@@ -1218,6 +1245,7 @@ export async function phase3PrepareForStreaming(
         resolved_provider: resolvedModelInfo?.provider ?? null,
         prompt_hash: promptMeta.prompt_hash ?? null,
         prompt_version: promptMeta.prompt_version ?? null,
+        ...streamCacheMetrics,
       },
       route_debug: {
         ...routeDebugBase,

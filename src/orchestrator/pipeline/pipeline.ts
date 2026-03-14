@@ -298,9 +298,9 @@ export async function executePipeline(
         'pipeline: conversational retry for suppressed non-action tool call',
       );
       try {
-        const conversationalSystemPrompt = await assembleV2SystemPrompt(enrichedContext);
+        const conversationalAssembled = await assembleV2SystemPrompt(enrichedContext);
         const conversationalText = await deps.llmClient.chat(
-          { system: conversationalSystemPrompt, userMessage: request.message },
+          { system: conversationalAssembled.text, userMessage: request.message },
           { requestId, timeoutMs: 30_000 },
         );
         // Capture model info after the chat call and emit structured telemetry.

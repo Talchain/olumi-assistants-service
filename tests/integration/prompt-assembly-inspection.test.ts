@@ -185,7 +185,8 @@ let capturedPrompt = "";
 describe("Prompt Assembly Inspection", () => {
   it("assembles a complete Zone 1 + Zone 2 prompt from realistic context", async () => {
     const ctx = makeRealisticEnrichedContext();
-    const prompt = await assembleV2SystemPrompt(ctx);
+    const assembled = await assembleV2SystemPrompt(ctx);
+    const prompt = assembled.text;
 
     capturedPrompt = prompt;
 

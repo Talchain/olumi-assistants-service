@@ -13,7 +13,7 @@ vi.mock("../../../../src/orchestrator/pipeline/phase3-llm/index.js", () => ({
   phase3PrepareForStreaming: vi.fn(),
 }));
 vi.mock("../../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js", () => ({
-  assembleV2SystemPrompt: vi.fn(async () => "system prompt"),
+  assembleV2SystemPrompt: vi.fn(async () => ({ text: "system prompt", cache_blocks: [{ type: 'text', text: 'system prompt' }] })),
 }));
 vi.mock("../../../../src/orchestrator/pipeline/phase4-tools/index.js", () => ({
   phase4Execute: vi.fn(),

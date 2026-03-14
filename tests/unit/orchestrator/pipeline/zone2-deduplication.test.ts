@@ -12,8 +12,12 @@ vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
   getSystemPromptMeta: vi.fn().mockReturnValue({ prompt_id: "test", version: "1" }),
 }));
 
-import { assembleV2SystemPrompt } from "../../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js";
+import { assembleV2SystemPrompt as _assembleV2SystemPrompt } from "../../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js";
 import type { EnrichedContext } from "../../../../src/orchestrator/pipeline/types.js";
+
+// Wrapper: tests use the .text property of the new AssembledSystemPrompt return type
+const assembleV2SystemPrompt = async (...args: Parameters<typeof _assembleV2SystemPrompt>): Promise<string> =>
+  (await _assembleV2SystemPrompt(...args)).text;
 
 // ============================================================================
 // Fixtures
