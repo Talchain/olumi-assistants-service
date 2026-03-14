@@ -227,7 +227,7 @@ describe("boundary canary: transformEdgeToV3 field preservation", () => {
       belief_exists: 0.8,
       edge_type: "bidirected",
     };
-    const v3 = transformEdgeToV3(edge, 0, []);
+    const v3 = transformEdgeToV3(edge, 0, []).edge;
     expect(v3.edge_type).toBe("bidirected");
   });
 
@@ -240,7 +240,7 @@ describe("boundary canary: transformEdgeToV3 field preservation", () => {
       belief_exists: 0.8,
       edge_type: "directed",
     };
-    const v3 = transformEdgeToV3(edge, 0, []);
+    const v3 = transformEdgeToV3(edge, 0, []).edge;
     expect(v3.edge_type).toBe("directed");
   });
 
@@ -252,7 +252,7 @@ describe("boundary canary: transformEdgeToV3 field preservation", () => {
       strength_std: 0.1,
       belief_exists: 0.8,
     };
-    const v3 = transformEdgeToV3(edge, 0, []);
+    const v3 = transformEdgeToV3(edge, 0, []).edge;
     expect(v3).not.toHaveProperty("edge_type");
   });
 
@@ -265,7 +265,7 @@ describe("boundary canary: transformEdgeToV3 field preservation", () => {
       belief_exists: 0.8,
       origin: "user",
     };
-    const v3 = transformEdgeToV3(edge, 0, []);
+    const v3 = transformEdgeToV3(edge, 0, []).edge;
     expect(v3.origin).toBe("user");
   });
 });
@@ -412,7 +412,7 @@ describe("boundary canary: underscore canary field behavior", () => {
       belief_exists: 0.8,
     };
     (edge as any)._canary_edge = true;
-    const v3 = transformEdgeToV3(edge, 0, []);
+    const v3 = transformEdgeToV3(edge, 0, []).edge;
     expect(v3).not.toHaveProperty("_canary_edge");
   });
 

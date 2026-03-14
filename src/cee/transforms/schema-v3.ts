@@ -103,9 +103,11 @@ const V3_VALID_KINDS = new Set(["goal", "factor", "outcome", "decision", "risk",
  * Options remain in graph for connectivity; also extracted to options[] array.
  */
 function mapKindToV3(kind: string): NodeV3T["kind"] {
-  // constraint maps to factor
+  // "constraint" is normalised to "risk" in adapter normalisation (normalisation.ts:45).
+  // This function should never see "constraint" under normal flow, but if it does
+  // (e.g. rawOutput re-processing), align with the adapter mapping.
   if (kind === "constraint") {
-    return "factor";
+    return "risk";
   }
   // decision, action, goal, factor, outcome, risk, option are all valid V3 kinds
   if (V3_VALID_KINDS.has(kind)) {
@@ -282,6 +284,20 @@ function classifyEdge(
 const STRUCTURAL_EXISTS_PROBABILITY_DEFAULT = 1.0;
 const CAUSAL_EXISTS_PROBABILITY_DEFAULT = 0.8;
 
+/** Record of a single default applied during V3 edge transform. */
+export interface TransformDefaultRecord {
+  edge_id: string;
+  field: string;
+  default_value: number | string;
+  reason: string;
+}
+
+/** Result of transforming a V1 edge to V3, including any defaults applied. */
+export interface EdgeTransformResult {
+  edge: EdgeV3T;
+  defaults: TransformDefaultRecord[];
+}
+
 /**
  * Transform a V1 edge to V3 format.
  *
@@ -296,20 +312,30 @@ export function transformEdgeToV3(
   edge: V1Edge,
   _index: number,
   _nodes: V1Node[]
-): EdgeV3T {
+): EdgeTransformResult {
+  const defaults: TransformDefaultRecord[] = [];
+  const edgeId = `${edge.from}->${edge.to}`;
   // V4 fields take precedence, fallback to legacy for backwards compatibility
   const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
+  if (edge.strength_mean === undefined && edge.weight === undefined) {
+    defaults.push({ edge_id: edgeId, field: "strength_mean", default_value: DEFAULT_STRENGTH_MEAN, reason: "no LLM value" });
+  }
 
   // exists_probability: use LLM-emitted value if present; otherwise apply
   // class-appropriate default rather than the old fixed 0.5 sentinel.
   // Rationale: 0.5 is indistinguishable from "I know this edge exists with 50%
   // confidence" vs "I forgot to emit the field", causing PLoT to override with 0.8.
   // Using the class default makes the assumption explicit and auditable.
+  const isStructural = classifyEdge(edge.from, edge.to, _nodes) === "structural";
   const beliefExists =
     edge.belief_exists ?? edge.belief ??
-    (classifyEdge(edge.from, edge.to, _nodes) === "structural"
+    (isStructural
       ? STRUCTURAL_EXISTS_PROBABILITY_DEFAULT
       : CAUSAL_EXISTS_PROBABILITY_DEFAULT);
+  if (edge.belief_exists === undefined && edge.belief === undefined) {
+    const defaultVal = isStructural ? STRUCTURAL_EXISTS_PROBABILITY_DEFAULT : CAUSAL_EXISTS_PROBABILITY_DEFAULT;
+    defaults.push({ edge_id: edgeId, field: "exists_probability", default_value: defaultVal, reason: isStructural ? "structural edge default" : "causal edge default" });
+  }
 
   // In V3, strength_mean is a signed coefficient
   // If effect_direction is negative, strength_mean should be negative
@@ -343,6 +369,7 @@ export function transformEdgeToV3(
   let strengthStd = edge.strength_std;
   if (strengthStd === undefined) {
     strengthStd = deriveStrengthStd(Math.abs(rawStrength), beliefExists, edge.provenance);
+    defaults.push({ edge_id: edgeId, field: "strength_std", default_value: strengthStd, reason: "derived from mean/belief" });
   }
 
   // P1-CEE-2: Apply std bounds (floor 1e-6, cap max(0.5, 2×|mean|))
@@ -355,16 +382,19 @@ export function transformEdgeToV3(
   const provenance = extractProvenanceForV3(edge.provenance);
 
   return {
-    from: edge.from,
-    to: edge.to,
-    strength: { mean: strengthMean, std: strengthStd },
-    exists_probability: beliefExists,
-    effect_direction: effectDirection,
-    provenance,
-    // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
-    origin: edge.origin ?? "ai",
-    // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
-    ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
+    edge: {
+      from: edge.from,
+      to: edge.to,
+      strength: { mean: strengthMean, std: strengthStd },
+      exists_probability: beliefExists,
+      effect_direction: effectDirection,
+      provenance,
+      // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
+      origin: edge.origin ?? "ai",
+      // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
+      ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
+    },
+    defaults,
   };
 }
 
@@ -484,7 +514,14 @@ function getOptionIdMismatchSummary(
  * Keeps ALL nodes including options for graph connectivity (decision→option→factor).
  * Options are also extracted to the separate options[] array with intervention metadata.
  */
-export function transformGraphToV3(graph: V1Graph): GraphV3T {
+/** Result of transforming a V1 graph to V3, including aggregated defaults. */
+export interface GraphTransformResult {
+  graph: GraphV3T;
+  transform_defaults: TransformDefaultRecord[];
+  defaulted_edge_count: number;
+}
+
+export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   // Keep ALL nodes including options (for PLoT connectivity and canvas visualization)
   const allNodeIds = new Set(graph.nodes.map((n) => n.id));
 
@@ -497,14 +534,21 @@ export function transformGraphToV3(graph: V1Graph): GraphV3T {
     (edge) => allNodeIds.has(edge.from) && allNodeIds.has(edge.to)
   );
 
-  // Transform edges
-  const v3Edges = validEdges.map((edge, index) =>
+  // Transform edges, collecting defaults
+  const edgeResults = validEdges.map((edge, index) =>
     transformEdgeToV3(edge, index, graph.nodes)
   );
+  const v3Edges = edgeResults.map((r) => r.edge);
+  const allDefaults = edgeResults.flatMap((r) => r.defaults);
+  const edgesWithDefaults = new Set(allDefaults.map((d) => d.edge_id));
 
   return {
-    nodes: v3Nodes,
-    edges: v3Edges,
+    graph: {
+      nodes: v3Nodes,
+      edges: v3Edges,
+    },
+    transform_defaults: allDefaults,
+    defaulted_edge_count: edgesWithDefaults.size,
   };
 }
 
@@ -554,7 +598,7 @@ export function transformResponseToV3(
   const edgeHints = extractEdgeHints(graph);
 
   // Transform graph (without option nodes)
-  const v3Graph = transformGraphToV3(graph);
+  const { graph: v3Graph, transform_defaults: transformDefaults, defaulted_edge_count: defaultedEdgeCount } = transformGraphToV3(graph);
 
   // [V3-CAT-TRACE] Log category field status through V3 transform
   // Gated behind CEE_DEBUG_CATEGORY_TRACE feature flag
@@ -685,6 +729,12 @@ export function transformResponseToV3(
         (v1Response.trace as any)?.pipeline?.repair_summary
         ?? (v1Response.trace as any)?.repair_summary
         ?? { deterministic_repairs_count: 0, deterministic_repairs: [] },
+      // F6: Log all defaulted edge parameters applied during V3 transform
+      transform_defaults: {
+        defaulted_edge_count: defaultedEdgeCount,
+        total_defaults: transformDefaults.length,
+        defaults: transformDefaults,
+      },
     },
     draft_warnings: v1Response.draft_warnings,
   };

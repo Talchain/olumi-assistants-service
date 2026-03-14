@@ -43,7 +43,9 @@ ${ANSWER_INCORPORATION_SYSTEM_PROMPT}
 </CLARIFIER_REFINEMENT_INSTRUCTIONS>
 
 ORIGINAL BRIEF:
+[BEGIN_UNTRUSTED_USER_CONTENT]
 ${brief}
+[END_UNTRUSTED_USER_CONTENT]
 
 CURRENT GRAPH:
 ${JSON.stringify(graph, null, 2)}
@@ -113,7 +115,9 @@ export function buildQuestionGenerationPrompt(
       : "";
 
   return `DECISION BRIEF:
+[BEGIN_UNTRUSTED_USER_CONTENT]
 ${brief}
+[END_UNTRUSTED_USER_CONTENT]
 
 CURRENT GRAPH SUMMARY:
 - ${(graph.nodes ?? []).length} nodes

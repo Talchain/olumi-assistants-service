@@ -184,7 +184,7 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
         brief: ctx.effectiveBrief || undefined,
         docs: (ctx.input as any).docs || undefined,
       },
-      { requestId: `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs },
+      { requestId: `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs, signal: ctx.opts.signal },
     );
     ctx.llmRepairBriefIncluded = Boolean(ctx.effectiveBrief);
 
@@ -193,6 +193,27 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
       repairResult.usage.input_tokens,
       repairResult.usage.output_tokens,
     );
+
+    // ID preservation check: all input node IDs must be present in repair output.
+    // New IDs may be added (repair can create nodes), but no input ID may be missing.
+    const inputNodeIds = new Set(
+      ((candidate as any).nodes ?? []).map((n: any) => n.id),
+    );
+    const repairNodeIds = new Set(
+      (Array.isArray(repairResult.graph?.nodes) ? repairResult.graph.nodes : []).map((n: any) => n.id),
+    );
+    const missingIds = [...inputNodeIds].filter((id) => !repairNodeIds.has(id));
+    if (missingIds.length > 0) {
+      log.warn({
+        event: "cee.repair.id_preservation_failed",
+        missing_ids: missingIds,
+        input_count: inputNodeIds.size,
+        repair_count: repairNodeIds.size,
+        correlation_id: ctx.requestId,
+      }, `LLM repair removed ${missingIds.length} node ID(s) — rejecting repair`);
+      ctx.repairFallbackReason = "id_preservation_failed";
+      throw new Error(`LLM repair removed node IDs: ${missingIds.join(", ")}`);
+    }
 
     let repaired: any;
     try {

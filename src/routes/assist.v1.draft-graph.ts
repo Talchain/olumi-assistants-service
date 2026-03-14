@@ -9,7 +9,7 @@ import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
-import { config } from "../config/index.js";
+import { config, isProduction } from "../config/index.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
@@ -507,12 +507,19 @@ export default async function route(app: FastifyInstance) {
         socket.once("close", socketCloseHandler);
       }
 
+      // Gate raw_output: only honoured in non-production or with admin auth
+      const rawOutputRequested = (baseInput as any).raw_output === true;
+      const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(req));
+      if (rawOutputRequested && !rawOutputAllowed) {
+        log.warn({ requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
+      }
+
       try {
         const result = await runUnifiedPipeline(baseInput, req.body, req, {
           schemaVersion,
           strictMode,
           includeDebug: unsafeCaptureEnabled,
-          rawOutput: (baseInput as any).raw_output,
+          rawOutput: rawOutputAllowed,
           refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
           forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
           signal: pipelineAbortController.signal,

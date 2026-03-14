@@ -99,7 +99,7 @@ describe("3A-trust: bidirected edge pipeline preservation", () => {
     };
 
     // Step 3: V3 transform
-    const v3Edge = transformEdgeToV3(v1Edge, 0, v1Nodes);
+    const { edge: v3Edge } = transformEdgeToV3(v1Edge, 0, v1Nodes);
     expect(v3Edge.edge_type).toBe("bidirected");
 
     // Step 4: EdgeV3 Zod parse
@@ -125,7 +125,7 @@ describe("3A-trust: directed edges unaffected", () => {
       edge_type: "directed",
     };
 
-    const v3Edge = transformEdgeToV3(v1Edge, 0, v1Nodes);
+    const { edge: v3Edge } = transformEdgeToV3(v1Edge, 0, v1Nodes);
 
     expect(v3Edge.from).toBe("fac_a");
     expect(v3Edge.to).toBe("out_1");
@@ -148,8 +148,8 @@ describe("3A-trust: directed edges unaffected", () => {
       effect_direction: "positive",
     };
 
-    const v3With = transformEdgeToV3(withType, 0, v1Nodes);
-    const v3Without = transformEdgeToV3(withoutType, 0, v1Nodes);
+    const { edge: v3With } = transformEdgeToV3(withType, 0, v1Nodes);
+    const { edge: v3Without } = transformEdgeToV3(withoutType, 0, v1Nodes);
 
     // Core fields identical
     expect(v3With.strength.mean).toBe(v3Without.strength.mean);

@@ -37,7 +37,7 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
 
         const result = await repairAdapter.repairGraph(
           { graph: failedGraph, violations, brief, docs: [] },
-          { requestId: reqId || `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs },
+          { requestId: reqId || `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs, signal: ctx.opts.signal },
         );
 
         ctx.repairCost += calculateCost(

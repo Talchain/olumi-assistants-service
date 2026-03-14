@@ -14,6 +14,7 @@
 import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { ValidationIssue } from "../../../../validators/graph-validator.types.js";
+import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
@@ -98,8 +99,8 @@ function fixNanValues(
     }
     if (edge.strength_std !== undefined && (Number.isNaN(edge.strength_std) || !Number.isFinite(edge.strength_std))) {
       const old = edge.strength_std;
-      edge.strength_std = 0.1;
-      repairs.push({ code: "NAN_VALUE", path: `edges[${edge.from}→${edge.to}].strength_std`, action: `Replaced ${old} with 0.1` });
+      edge.strength_std = NAN_FIX_SIGNATURE_STD;
+      repairs.push({ code: "NAN_VALUE", path: `edges[${edge.from}→${edge.to}].strength_std`, action: `Replaced ${old} with ${NAN_FIX_SIGNATURE_STD}` });
     }
     if (edge.belief_exists !== undefined && (Number.isNaN(edge.belief_exists) || !Number.isFinite(edge.belief_exists))) {
       const old = edge.belief_exists;
@@ -697,6 +698,59 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
 }
 
 // ---------------------------------------------------------------------------
+// Proactive: disconnected observable/external pruning
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove observable or external factors with zero connected edges.
+ *
+ * These nodes carry no causal influence (no inbound or outbound edges) and
+ * trigger ORPHAN_NODE violations.  Controllable factors are never pruned —
+ * they represent actionable levers even when temporarily disconnected.
+ */
+export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; pruned: string[] } {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  const edgeNodes = new Set<string>();
+  for (const edge of edges) {
+    edgeNodes.add(edge.from);
+    edgeNodes.add(edge.to);
+  }
+
+  const pruned: string[] = [];
+  const keptNodes: NodeT[] = [];
+  for (const node of nodes) {
+    if (
+      node.kind === "factor" &&
+      (node.category === "observable" || node.category === "external") &&
+      !edgeNodes.has(node.id)
+    ) {
+      pruned.push(node.id);
+      repairs.push({
+        code: "DISCONNECTED_OBSERVABLE_PRUNED",
+        path: `nodes[${node.id}]`,
+        action: `Removed ${node.category} factor "${node.label ?? node.id}" with zero edges`,
+      });
+    } else {
+      keptNodes.push(node);
+    }
+  }
+
+  if (pruned.length > 0) {
+    (graph as any).nodes = keptNodes;
+    log.info({
+      event: "cee.deterministic_sweep.disconnected_observable_pruned",
+      pruned_ids: pruned,
+      count: pruned.length,
+    }, `Pruned ${pruned.length} disconnected observable/external factor(s)`);
+  }
+
+  return { repairs, pruned };
+}
+
+// ---------------------------------------------------------------------------
 // Main sweep
 // ---------------------------------------------------------------------------
 
@@ -870,6 +924,15 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const statusQuoResult = fixStatusQuoConnectivity(graph, violationCodes, format);
   allRepairs.push(...statusQuoResult.repairs);
 
+  // Step 6b: Proactive disconnected-observable pruning — ALWAYS run.
+  // Observable/external factors with zero edges (no inbound or outbound) contribute
+  // nothing to the causal model. LLMs (especially gpt-4o) emit these as context data
+  // without wiring them, causing ORPHAN_NODE violations. Pruning is safe because
+  // these nodes have no causal influence on any metric.
+  // Controllable factors are NEVER pruned — they represent actionable levers.
+  const disconnectedObservableResult = fixDisconnectedObservables(graph);
+  allRepairs.push(...disconnectedObservableResult.repairs);
+
   // Step 7: Re-validate using same validator (post-sweep authoritative pass)
   const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "post_sweep_authoritative" });
   const remainingErrors = revalidation.errors;
@@ -929,6 +992,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       goal_threshold_stripped: 0,
       goal_threshold_possibly_inferred: 0,
       factor_goal_splits: factorGoalResult.splitCount,
+      disconnected_observables_pruned: disconnectedObservableResult.pruned,
       status_quo: {
         fixed: statusQuoResult.fixed,
         marked_droppable: statusQuoResult.markedDroppable,
@@ -967,6 +1031,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     unreachable_droppable: unreachableResult.markedDroppable.length,
     disconnected_before: disconnectedBefore.length,
     disconnected_after: disconnectedAfter.length,
+    disconnected_observables_pruned: disconnectedObservableResult.pruned.length,
     edge_format: format,
   }, "Deterministic sweep completed");
 }

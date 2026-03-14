@@ -26,6 +26,7 @@ import { normaliseIdBase } from "../utils/id-normalizer.js";
 import {
   DEFAULT_STRENGTH_MEAN,
   DEFAULT_STRENGTH_STD,
+  NAN_FIX_SIGNATURE_STD,
   STRENGTH_MEAN_DOMINANT_THRESHOLD,
   STRENGTH_DEFAULT_THRESHOLD,
   STRENGTH_DEFAULT_MIN_EDGES,
@@ -400,6 +401,9 @@ export function runIntegrityChecks(
 // Strength Default Detection (CIL Phase 1)
 // ============================================================================
 
+/** Source classification for a defaulted edge. */
+export type DefaultSource = "v3_transform" | "nan_fix";
+
 /** Result of strength default detection. */
 export interface StrengthDefaultsResult {
   /** Whether uniform defaulting was detected (≥80% threshold met) */
@@ -414,13 +418,15 @@ export interface StrengthDefaultsResult {
   default_value: number | null;
   /** Array of edge IDs in "{from}->{to}" format that have default values */
   defaulted_edge_ids: string[];
+  /** Per-source breakdown: how many defaults came from V3 transform (std≈0.125) vs NaN-fix (std≈0.1) */
+  defaulted_by_source: { v3_transform: number; nan_fix: number };
 }
 
 /**
  * Detect uniform strength defaults in V3 edges.
  *
- * Checks if ≥80% of causal edges match the default signature:
- *   |strength_mean| === 0.5 AND strength_std === 0.125
+ * Checks if ≥80% of causal edges match a default signature:
+ *   |strength_mean| === 0.5 AND (strength_std === 0.125 OR strength_std === 0.1)
  *
  * This indicates the LLM did not output varied strength coefficients (strength data
  * was missing and fell back to defaults in schema-v3.ts, where mean defaults to 0.5
@@ -488,6 +494,7 @@ export function detectStrengthDefaults(
       defaulted_count: 0,
       default_value: null,
       defaulted_edge_ids: [],
+      defaulted_by_source: { v3_transform: 0, nan_fix: 0 },
     };
   }
 
@@ -498,18 +505,24 @@ export function detectStrengthDefaults(
 
   let defaultedCount = 0;
   const defaultedEdgeIds: string[] = [];
+  const bySource = { v3_transform: 0, nan_fix: 0 };
   for (const edge of causalEdges) {
     const edgeData = edge as { from: string; to: string; strength?: { mean?: number; std?: number }; [key: string]: unknown };
     const strengthMean = edgeData.strength?.mean;
     const strengthStd = edgeData.strength?.std;
 
-    // Match default signature: |mean| ≈ 0.5 (epsilon) AND std ≈ 0.125 (epsilon)
+    // Match default signature: |mean| ≈ 0.5 (epsilon) AND std matches EITHER:
+    //   - 0.125 (V3 transform default derived from deriveStrengthStd(0.5, 0.5, undefined))
+    //   - 0.1   (NaN-fix default from deterministic-sweep.ts)
     const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;
-    const stdMatchesDefault = strengthStd !== undefined && Math.abs(strengthStd - DEFAULT_STRENGTH_STD) < 1e-9;
+    const stdMatchesV3Default = strengthStd !== undefined && Math.abs(strengthStd - DEFAULT_STRENGTH_STD) < 1e-9;
+    const stdMatchesNanFix = strengthStd !== undefined && Math.abs(strengthStd - NAN_FIX_SIGNATURE_STD) < 1e-9;
+    const stdMatchesDefault = stdMatchesV3Default || stdMatchesNanFix;
 
     if (meanMatchesDefault && stdMatchesDefault) {
       defaultedCount++;
       defaultedEdgeIds.push(`${edgeData.from}->${edgeData.to}`);
+      if (stdMatchesNanFix) { bySource.nan_fix++; } else { bySource.v3_transform++; }
     }
   }
 
@@ -523,6 +536,7 @@ export function detectStrengthDefaults(
     defaulted_count: defaultedCount,
     default_value: detected ? DEFAULT_STRENGTH_MEAN : null,
     defaulted_edge_ids: defaultedEdgeIds,
+    defaulted_by_source: bySource,
   };
 }
 

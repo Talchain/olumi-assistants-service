@@ -1140,8 +1140,14 @@ export async function finaliseCeeDraftResponse(
 
   // === RAW OUTPUT MODE ===
   // When raw_output: true, skip all post-processing (factor enrichment, goal repair, etc.)
-  // and return LLM output directly after basic schema validation
-  if (input.raw_output === true) {
+  // and return LLM output directly after basic schema validation.
+  // Security gate: only honoured in non-production or with admin auth.
+  const rawOutputRequested = input.raw_output === true;
+  const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(request));
+  if (rawOutputRequested && !rawOutputAllowed) {
+    log.warn({ request_id: requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
+  }
+  if (rawOutputAllowed) {
     log.info({
       request_id: requestId,
       event: "cee.draft_graph.raw_output",

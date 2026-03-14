@@ -253,17 +253,20 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 
 async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const docContext = args.docs.length
-    ? `\n\n## Attached Documents\n${args.docs
+    ? `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.docs
         .map((d) => {
           const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
           return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
         })
-        .join("\n\n")}`
+        .join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`
     : "";
 
   const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
   const briefSignalsHeader = args.briefSignalsHeader ?? "";
-  const userContent = `## Brief\n${args.brief}${docContext}${complianceReminder}${briefSignalsHeader}`;
+  const userContent = `## Brief
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${args.brief}
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -375,7 +378,7 @@ export type UsageMetrics = {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
-  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean }
+  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
 
@@ -396,8 +399,19 @@ export async function draftGraphWithAnthropic(
 
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source }, "calling Anthropic for draft");
 
+  const effectiveTimeout = opts?.timeoutMs || TIMEOUT_MS;
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
+
+  // Wire external abort signal (e.g. client disconnect / budget cancellation)
+  const externalSignal = opts?.signal;
+  let onExternalAbort: (() => void) | undefined;
+  if (externalSignal && !externalSignal.aborted) {
+    onExternalAbort = () => abortController.abort();
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  } else if (externalSignal?.aborted) {
+    abortController.abort();
+  }
 
   try {
     const apiClient = getClient();
@@ -424,6 +438,9 @@ export async function draftGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
 
     const providerLatencyMs = Date.now() - startTime;
 
@@ -654,20 +671,25 @@ export async function draftGraphWithAnthropic(
     };
   } catch (error) {
     clearTimeout(timeoutId);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
     const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
       // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
+        const isExternalAbort = externalSignal?.aborted === true;
+        const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
         log.error(
-          { timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs, fallback_reason: "anthropic_timeout", quality_tier: "failed" },
-          "Anthropic call timed out and was aborted"
+          { timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, fallback_reason: isExternalAbort ? "external_abort" : "anthropic_timeout", quality_tier: "failed", phase },
+          isExternalAbort ? "Anthropic draft_graph aborted by external signal" : "Anthropic call timed out and was aborted"
         );
         throw new UpstreamTimeoutError(
-          "Anthropic draft_graph timed out",
+          isExternalAbort ? "Anthropic draft_graph aborted by external signal" : "Anthropic draft_graph timed out",
           "anthropic",
           "draft_graph",
-          "body", // Timeout occurred during response body
+          phase,
           elapsedMs,
           error
         );
@@ -1013,8 +1035,14 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
   const maxAttempts = (args as any).maxAttempts ?? 1;
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
-  const userContent = `Brief: ${briefText}
-Docs: ${docsText}
+  const userContent = `Brief:
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${briefText}
+[END_UNTRUSTED_USER_CONTENT]
+Docs:
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${docsText}
+[END_UNTRUSTED_USER_CONTENT]
 Attempt: ${attempt} of ${maxAttempts}
 ${escalationText}
 ## Violations Found
@@ -1033,7 +1061,8 @@ ${graphJson}`;
 }
 
 export async function repairGraphWithAnthropic(
-  args: RepairArgs
+  args: RepairArgs,
+  opts?: { signal?: AbortSignal; timeoutMs?: number }
 ): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
   const prompt = await buildRepairPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
@@ -1046,8 +1075,19 @@ export async function repairGraphWithAnthropic(
 
   log.info({ violation_count: args.violations.length, model, idempotency_key: idempotencyKey, prompt_id: repairPromptMeta.taskId, prompt_hash: repairPromptMeta.prompt_hash, prompt_source: repairPromptMeta.source }, "calling Anthropic for graph repair");
 
+  const effectiveTimeout = opts?.timeoutMs || TIMEOUT_MS;
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
+  const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
+
+  // Wire external abort signal (e.g. client disconnect / budget cancellation)
+  const externalSignal = opts?.signal;
+  let onExternalAbort: (() => void) | undefined;
+  if (externalSignal && !externalSignal.aborted) {
+    onExternalAbort = () => abortController.abort();
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  } else if (externalSignal?.aborted) {
+    abortController.abort();
+  }
 
   try {
     const apiClient = getClient();
@@ -1074,6 +1114,9 @@ export async function repairGraphWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
     const _elapsedMs = Date.now() - startTime;
 
     const content = response.content[0];
@@ -1215,20 +1258,25 @@ export async function repairGraphWithAnthropic(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
     const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
       // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
+        const isExternalAbort = externalSignal?.aborted === true;
+        const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
         log.error(
-          { timeout_ms: TIMEOUT_MS, elapsed_ms: elapsedMs, fallback_reason: "anthropic_repair_timeout", quality_tier: "failed" },
-          "Anthropic repair call timed out"
+          { timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, fallback_reason: isExternalAbort ? "external_abort" : "anthropic_repair_timeout", quality_tier: "failed", phase },
+          isExternalAbort ? "Anthropic repair_graph aborted by external signal" : "Anthropic repair call timed out"
         );
         throw new UpstreamTimeoutError(
-          "Anthropic repair_graph timed out",
+          isExternalAbort ? "Anthropic repair_graph aborted by external signal" : "Anthropic repair_graph timed out",
           "anthropic",
           "repair_graph",
-          "body",
+          phase,
           elapsedMs,
           error
         );
@@ -1332,7 +1380,9 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
     : "";
 
   const userContent = `## Brief
+[BEGIN_UNTRUSTED_USER_CONTENT]
 ${args.brief}
+[END_UNTRUSTED_USER_CONTENT]
 ${previousContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
@@ -1540,7 +1590,7 @@ async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: Anthro
     2
   );
 
-  const briefContext = args.brief ? `\n\n## Original Brief\n${args.brief}` : "";
+  const briefContext = args.brief ? `\n\n## Original Brief\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : "";
   const focusContext = args.focus_areas?.length
     ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
     : "";
@@ -1721,7 +1771,7 @@ export async function explainDiffWithAnthropic(
 Given this patch:
 ${JSON.stringify(args.patch, null, 2)}
 
-${args.brief ? `Context: ${args.brief}` : ""}
+${args.brief ? `Context:\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : ""}
 ${args.graph_summary ? `Graph has ${args.graph_summary.node_count} nodes and ${args.graph_summary.edge_count} edges.` : ""}
 
 Generate a JSON array of rationales explaining why each change was made. Each rationale should have:
@@ -2504,7 +2554,7 @@ export class AnthropicAdapter implements LLMAdapter {
         model: this.model,
         briefSignalsHeader: args.briefSignalsHeader,
       },
-      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault }
+      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
     );
 
     return {
@@ -2532,12 +2582,15 @@ export class AnthropicAdapter implements LLMAdapter {
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
     const { graph, violations } = args;
 
-    const result = await repairGraphWithAnthropic({
-      graph,
-      violations,
-      model: this.model,
-      requestId: opts.requestId,
-    });
+    const result = await repairGraphWithAnthropic(
+      {
+        graph,
+        violations,
+        model: this.model,
+        requestId: opts.requestId,
+      },
+      { signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
+    );
 
     return {
       graph: result.graph,

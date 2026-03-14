@@ -257,21 +257,21 @@ describe("Task 2: transformEdgeToV3 class-aware exists_probability defaults", ()
         // belief_exists and belief both absent
       };
       const nodes = mockNodes("decision", "option") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(1.0);
     });
 
     it("sets exists_probability:1.0 for option→factor edge without belief_exists", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5 };
       const nodes = mockNodes("option", "factor") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(1.0);
     });
 
     it("sets exists_probability:1.0 for option→outcome edge without belief_exists", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5 };
       const nodes = mockNodes("option", "outcome") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(1.0);
     });
   });
@@ -280,14 +280,14 @@ describe("Task 2: transformEdgeToV3 class-aware exists_probability defaults", ()
     it("sets exists_probability:0.8 for factor→goal edge without belief_exists", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5 };
       const nodes = mockNodes("factor", "goal") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(0.8);
     });
 
     it("sets exists_probability:0.8 for factor→factor edge without belief_exists", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5 };
       const nodes = mockNodes("factor", "factor") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(0.8);
     });
   });
@@ -296,7 +296,7 @@ describe("Task 2: transformEdgeToV3 class-aware exists_probability defaults", ()
     it("uses LLM-provided belief_exists:0.7 unchanged for causal edge", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5, belief_exists: 0.7 };
       const nodes = mockNodes("factor", "goal") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       expect(result.exists_probability).toBe(0.7);
     });
 
@@ -304,7 +304,7 @@ describe("Task 2: transformEdgeToV3 class-aware exists_probability defaults", ()
       // If LLM explicitly emits a belief value, respect it (even if suboptimal for structural)
       const edge = { from: "from_node", to: "to_node", weight: 0.5, belief: 0.6 };
       const nodes = mockNodes("decision", "option") as any;
-      const result = transformEdgeToV3(edge as any, 0, nodes);
+      const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
       // belief field respected — boundary module will correct structural < 1.0
       expect(result.exists_probability).toBe(0.6);
     });

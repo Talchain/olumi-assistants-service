@@ -301,8 +301,14 @@ async function buildRepairPrompt(
   const maxAttempts = options?.maxAttempts ?? 1;
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
-  const userContent = `Brief: ${briefText}
-Docs: ${docsText}
+  const userContent = `Brief:
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${briefText}
+[END_UNTRUSTED_USER_CONTENT]
+Docs:
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${docsText}
+[END_UNTRUSTED_USER_CONTENT]
 Attempt: ${attempt} of ${maxAttempts}
 ${escalationText}
 ## Violations Found
@@ -543,16 +549,19 @@ export class OpenAIAdapter implements LLMAdapter {
 
     // Build user content with brief and documents
     const docContext = docs.length
-      ? `\n\n## Attached Documents\n${docs
+      ? `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${docs
           .map((d) => {
             const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
             return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
           })
-          .join("\n\n")}`
+          .join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`
       : "";
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
     const briefSignalsHeader = args.briefSignalsHeader ?? "";
-    const userContent = `## Brief\n${brief}${docContext}${complianceReminder}${briefSignalsHeader}`;
+    const userContent = `## Brief
+[BEGIN_UNTRUSTED_USER_CONTENT]
+${brief}
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -1017,6 +1026,16 @@ export class OpenAIAdapter implements LLMAdapter {
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
+    // Wire external abort signal (e.g. client disconnect / budget cancellation)
+    const externalSignal = opts.signal ?? opts.abortSignal;
+    let onExternalAbort: (() => void) | undefined;
+    if (externalSignal && !externalSignal.aborted) {
+      onExternalAbort = () => abortController.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    } else if (externalSignal?.aborted) {
+      abortController.abort();
+    }
+
     try {
       const apiClient = getClient();
       const maxTokens = getMaxTokensFromConfig('repair_graph');
@@ -1060,6 +1079,9 @@ export class OpenAIAdapter implements LLMAdapter {
       );
 
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const _elapsedMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
@@ -1186,17 +1208,22 @@ export class OpenAIAdapter implements LLMAdapter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs }, "OpenAI repair call timed out");
+          const isExternalAbort = externalSignal?.aborted === true;
+          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, phase }, isExternalAbort ? "OpenAI repair_graph aborted by external signal" : "OpenAI repair call timed out");
           throw new UpstreamTimeoutError(
-            "OpenAI repair_graph timed out",
+            isExternalAbort ? "OpenAI repair_graph aborted by external signal" : "OpenAI repair_graph timed out",
             "openai",
             "repair_graph",
-            "body",
+            phase,
             elapsedMs,
             error
           );

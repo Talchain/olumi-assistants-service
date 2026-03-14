@@ -38,6 +38,13 @@ export const STRENGTH_MEAN_DOMINANT_THRESHOLD = STRENGTH_MEAN_DEFAULT_THRESHOLD;
  */
 export const EDGE_STRENGTH_LOW_THRESHOLD = _EDGE_STRENGTH_LOW_THRESHOLD;
 
+/**
+ * NaN-fix default std value applied in deterministic-sweep.ts when
+ * edge.strength_std is NaN. Distinct from DEFAULT_STRENGTH_STD (0.125)
+ * which is the V3 transform derivation default.
+ */
+export const NAN_FIX_SIGNATURE_STD = 0.1;
+
 // Re-export additional thresholds from shared package for direct use
 export {
   STRENGTH_DEFAULT_THRESHOLD,
