@@ -32,6 +32,10 @@ export interface PatchRejectionContext {
   node_ops?: number;
   /** Edge operation count (for budget_exceeded reason). */
   edge_ops?: number;
+  /** Effective node budget used for enforcement (for budget_exceeded reason). */
+  max_node_ops?: number;
+  /** Effective edge budget used for enforcement (for budget_exceeded reason). */
+  max_edge_ops?: number;
   /** 1–2 suggested follow-up actions. */
   suggested_actions: SuggestedAction[];
 }
@@ -81,10 +85,12 @@ export function buildPatchRejectionEnvelope(
 
 function buildAssistantText(ctx: PatchRejectionContext): string {
   if (ctx.reason === 'budget_exceeded') {
+    const maxNodes = ctx.max_node_ops ?? 3;
+    const maxEdges = ctx.max_edge_ops ?? 4;
     return (
       `I tried to make that change, but it would require ${ctx.node_ops ?? '?'} node operations ` +
       `and ${ctx.edge_ops ?? '?'} edge operations — more than is safe in a single edit ` +
-      `(limit: 3 node ops, 4 edge ops). ${ctx.detail}`
+      `(limit: ${maxNodes} node ops, ${maxEdges} edge ops). ${ctx.detail}`
     );
   }
 
@@ -95,5 +101,5 @@ function buildAssistantText(ctx: PatchRejectionContext): string {
     log.warn({ violations: ctx.violations }, 'edit_graph structural violations suppressed from user-facing text');
   }
 
-  return "I wasn't able to make that change safely. Let me try a simpler approach — which option should we configure first?";
+  return "I wasn't able to make that change safely — it was too complex for a single edit. You could try breaking it into smaller steps, or I can rebuild the model from an updated brief.";
 }

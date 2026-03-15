@@ -815,4 +815,115 @@ describe("pipeline", () => {
     expect(debugBundle.outcome).toBe("failed");
     infoSpy.mockRestore();
   });
+
+  // ============================================================================
+  // State normalization integration tests
+  // ============================================================================
+
+  it("analysis_state (top-level) is normalized into context — stage becomes evaluate and explain_results dispatches", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "explain_results",
+      confidence: "exact",
+      matched_pattern: "explain results",
+    });
+
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Here is the analysis explanation.",
+      guidance_items: [],
+    } as ToolResult);
+
+    // analysis_state is set at top-level, context.analysis_response is null — tests normalization
+    const envelope = await executePipeline(makeRequest({
+      message: "Explain the results",
+      context: {
+        graph: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+      analysis_state: {
+        analysis_status: "completed",
+        meta: { response_hash: "fresh-hash", seed_used: 1, n_samples: 100 },
+        results: [{ option_label: "Option A", win_probability: 0.7 }],
+        response_hash: "fresh-hash",
+      } as any,
+    }), "req-normalization-analysis", deps);
+
+    expect(envelope.stage_indicator.stage).toBe("evaluate");
+    expect((deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("explain_results");
+    expect(envelope.assistant_text).toBe("Here is the analysis explanation.");
+  });
+
+  it("analysis_state overrides stale context.analysis_response (freshness wins)", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "explain_results",
+      confidence: "exact",
+      matched_pattern: "explain results",
+    });
+
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Explanation from fresh analysis.",
+      guidance_items: [],
+    } as ToolResult);
+
+    const envelope = await executePipeline(makeRequest({
+      message: "Explain the results",
+      context: {
+        graph: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+        analysis_response: {
+          analysis_status: "completed",
+          meta: { response_hash: "stale-hash", seed_used: 1, n_samples: 50 },
+          results: [{ option_label: "Option A", win_probability: 0.5 }],
+          response_hash: "stale-hash",
+        } as any,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+      analysis_state: {
+        analysis_status: "completed",
+        meta: { response_hash: "fresh-hash", seed_used: 2, n_samples: 1000 },
+        results: [{ option_label: "Option A", win_probability: 0.8 }],
+        response_hash: "fresh-hash",
+      } as any,
+    }), "req-normalization-freshness", deps);
+
+    expect(envelope.stage_indicator.stage).toBe("evaluate");
+    // The fresh analysis should be what's passed to the tool dispatcher
+    const explainContext = (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(explainContext.analysis_response?.response_hash).toBe("fresh-hash");
+  });
+
+  it("graph_state (top-level) is normalized into context — stage becomes ideate (not frame)", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({ routing: "llm", tool: null });
+
+    const deps = makeMockDeps();
+    // context.graph is null but graph_state is set — normalization should fold it in
+    const envelope = await executePipeline(makeRequest({
+      message: "Tell me about the model",
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+      graph_state: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+    }), "req-normalization-graph", deps);
+
+    // Should be ideate (graph present), not frame (graph absent)
+    expect(envelope.stage_indicator.stage).toBe("ideate");
+  });
 });

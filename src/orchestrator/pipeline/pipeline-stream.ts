@@ -68,6 +68,18 @@ export async function* executePipelineStream(
   let enrichedContext: EnrichedContext | undefined;
 
   try {
+    // Normalize: fold request-level overrides into context (matches V1 turn-handler behavior).
+    // The UI sends analysis/graph via top-level fields after direct_analysis_run or patch_accepted;
+    // phase1Enrich only reads context.*, so we must merge here.
+    // Top-level fields (analysis_state, graph_state) always represent the latest UI-side state,
+    // so they win over potentially stale context fields when both are present.
+    if (request.analysis_state) {
+      request.context.analysis_response = request.analysis_state;
+    }
+    if (request.graph_state) {
+      request.context.graph = request.graph_state;
+    }
+
     // Phase 1: Enrichment (deterministic, <50ms)
     enrichedContext = phase1Enrich(
       request.message,

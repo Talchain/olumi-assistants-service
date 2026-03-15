@@ -1302,6 +1302,8 @@ export async function handleEditGraph(
           detail: 'Consider breaking this into smaller steps, or rebuilding the model from an updated brief.',
           node_ops: budgetResult.nodeOps,
           edge_ops: budgetResult.edgeOps,
+          max_node_ops: MAX_NODE_OPS,
+          max_edge_ops: budgetResult.effectiveMaxEdgeOps ?? MAX_EDGE_OPS,
           suggested_actions: [
             { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
@@ -1849,7 +1851,7 @@ function buildRejectionResult(
   const isStructuralRejection =
     code === 'STRUCTURAL_VALIDATION_FAILED' || code === 'PLOT_SEMANTIC_REJECTED';
   const userFacingText = isStructuralRejection
-    ? "I wasn't able to make that change safely. Let me try a simpler approach — which option should we configure first?"
+    ? "I wasn't able to make that change safely — it was too complex for a single edit. You could try breaking it into smaller steps, or I can rebuild the model from an updated brief."
     : `I wasn't able to apply that change. ${reason}`;
 
   return {
@@ -2094,11 +2096,69 @@ function stripOperationMeta(
 
 const MAX_NODE_OPS = 3;
 const MAX_EDGE_OPS = 4;
+/** Elevated edge budget for option-addition edits — adding an option naturally
+ *  requires connecting to multiple factors, so the default 4-edge limit is too tight. */
+const OPTION_ADD_MAX_EDGE_OPS = 8;
 
 interface PatchBudgetResult {
   allowed: boolean;
   nodeOps: number;
   edgeOps: number;
+  /** When option-addition is present, which limit was breached: 'incident' | 'unrelated' | 'node' | null */
+  breachedLimit?: 'incident' | 'unrelated' | 'node' | null;
+  /** The effective max edge ops that was applied for the breached category. */
+  effectiveMaxEdgeOps?: number;
+}
+
+/**
+ * Detect whether the operation set contains an option-addition (add_node with
+ * kind 'option' or 'intervention'). These edits inherently require multiple
+ * add_edge ops to wire the new option into the causal graph.
+ */
+export function hasOptionAddition(operations: PatchOperation[]): boolean {
+  return operations.some((op) => {
+    if (op.op !== 'add_node') return false;
+    const value = op.value as Record<string, unknown> | undefined;
+    if (!value || typeof value !== 'object') return false;
+    const kind = value.kind as string | undefined;
+    return kind === 'option' || kind === 'intervention';
+  });
+}
+
+/**
+ * Collect IDs of newly added option/intervention nodes.
+ */
+function collectNewOptionNodeIds(operations: PatchOperation[]): Set<string> {
+  const ids = new Set<string>();
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const value = op.value as Record<string, unknown> | undefined;
+    if (!value || typeof value !== 'object') continue;
+    const kind = value.kind as string | undefined;
+    if (kind === 'option' || kind === 'intervention') {
+      const id = value.id as string | undefined;
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Check whether an edge operation is incident to one of the given node IDs.
+ * Reads `from`/`to` from the operation's value, or parses the path as `from::to`.
+ */
+function isEdgeIncidentTo(op: PatchOperation, nodeIds: Set<string>): boolean {
+  const value = op.value as Record<string, unknown> | undefined;
+  const from = (value?.from as string) ?? null;
+  const to = (value?.to as string) ?? null;
+  if (from && nodeIds.has(from)) return true;
+  if (to && nodeIds.has(to)) return true;
+  // Fallback: parse path (format: "from::to")
+  if (typeof op.path === 'string' && op.path.includes('::')) {
+    const [pFrom, pTo] = op.path.split('::');
+    if (nodeIds.has(pFrom) || nodeIds.has(pTo)) return true;
+  }
+  return false;
 }
 
 /**
@@ -2109,10 +2169,21 @@ interface PatchBudgetResult {
  * - add_edge, remove_edge, update_edge → edge op
  *
  * Implicit edge removals from remove_node do NOT count.
+ *
+ * When the operation set includes an option-addition (add_node with kind
+ * 'option'/'intervention'), edge ops incident to the new option node(s) are
+ * budgeted at the elevated OPTION_ADD_MAX_EDGE_OPS limit, while unrelated
+ * edge ops stay under the standard MAX_EDGE_OPS cap. This prevents the
+ * elevated budget from masking unrelated high-impact edge rewires.
  */
 export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResult {
   let nodeOps = 0;
   let edgeOps = 0;
+
+  const newOptionIds = collectNewOptionNodeIds(operations);
+  const hasOptionAdd = newOptionIds.size > 0;
+  let incidentEdgeOps = 0;
+  let unrelatedEdgeOps = 0;
 
   for (const op of operations) {
     switch (op.op) {
@@ -2125,14 +2196,49 @@ export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResul
       case 'remove_edge':
       case 'update_edge':
         edgeOps++;
+        if (hasOptionAdd) {
+          if (isEdgeIncidentTo(op, newOptionIds)) {
+            incidentEdgeOps++;
+          } else {
+            unrelatedEdgeOps++;
+          }
+        }
         break;
     }
   }
 
+  // When option-addition is present, split budget: incident edges get elevated cap,
+  // unrelated edges keep the standard cap. Both must pass independently.
+  const nodeAllowed = nodeOps <= MAX_NODE_OPS;
+  let edgeAllowed: boolean;
+  let breachedLimit: PatchBudgetResult['breachedLimit'] = null;
+  let effectiveMaxEdgeOps = MAX_EDGE_OPS;
+
+  if (hasOptionAdd) {
+    const incidentOk = incidentEdgeOps <= OPTION_ADD_MAX_EDGE_OPS;
+    const unrelatedOk = unrelatedEdgeOps <= MAX_EDGE_OPS;
+    edgeAllowed = incidentOk && unrelatedOk;
+    if (!incidentOk) {
+      breachedLimit = 'incident';
+      effectiveMaxEdgeOps = OPTION_ADD_MAX_EDGE_OPS;
+    } else if (!unrelatedOk) {
+      breachedLimit = 'unrelated';
+      effectiveMaxEdgeOps = MAX_EDGE_OPS;
+    }
+  } else {
+    edgeAllowed = edgeOps <= MAX_EDGE_OPS;
+  }
+
+  if (!nodeAllowed && !breachedLimit) {
+    breachedLimit = 'node';
+  }
+
   return {
-    allowed: nodeOps <= MAX_NODE_OPS && edgeOps <= MAX_EDGE_OPS,
+    allowed: nodeAllowed && edgeAllowed,
     nodeOps,
     edgeOps,
+    breachedLimit,
+    effectiveMaxEdgeOps,
   };
 }
 

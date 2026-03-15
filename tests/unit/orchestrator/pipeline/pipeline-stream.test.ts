@@ -570,4 +570,121 @@ describe("executePipelineStream", () => {
       expect(errorEvent.recoverable).toBe(false);
     });
   });
+
+  describe("state normalization", () => {
+    it("folds analysis_state into context before calling phase1Enrich", async () => {
+      const enriched = makeEnrichedContext({ stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" } });
+      const envelope = makeEnvelope({ stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" } });
+      const llmResult = {
+        assistant_text: "Analysis explanation",
+        tool_invocations: [],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as ReturnType<typeof vi.fn>).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as ReturnType<typeof vi.fn>).mockResolvedValue(llmResult);
+      (phase5Validate as ReturnType<typeof vi.fn>).mockReturnValue(envelope);
+
+      const freshAnalysis = {
+        analysis_status: "completed",
+        meta: { response_hash: "fresh", seed_used: 1, n_samples: 100 },
+        results: [{ option_label: "A", win_probability: 0.7 }],
+      };
+
+      const request = makeRequest({
+        context: {
+          graph: { nodes: [{ id: "d1" }], edges: [] },
+          analysis_response: null, // stale: null
+          framing: null,
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+        analysis_state: freshAnalysis,
+      });
+
+      await collectEvents(executePipelineStream(request, "req-norm", deps));
+
+      // phase1Enrich should receive context with analysis_response set to freshAnalysis
+      const enrichCall = (phase1Enrich as ReturnType<typeof vi.fn>).mock.calls[0];
+      const passedContext = enrichCall[1];
+      expect(passedContext.analysis_response).toBe(freshAnalysis);
+    });
+
+    it("analysis_state overrides stale context.analysis_response (freshness wins)", async () => {
+      const enriched = makeEnrichedContext({ stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" } });
+      const envelope = makeEnvelope();
+      const llmResult = {
+        assistant_text: "test",
+        tool_invocations: [],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as ReturnType<typeof vi.fn>).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as ReturnType<typeof vi.fn>).mockResolvedValue(llmResult);
+      (phase5Validate as ReturnType<typeof vi.fn>).mockReturnValue(envelope);
+
+      const staleAnalysis = { analysis_status: "completed", meta: { response_hash: "stale" }, results: [] };
+      const freshAnalysis = { analysis_status: "completed", meta: { response_hash: "fresh" }, results: [] };
+
+      const request = makeRequest({
+        context: {
+          graph: { nodes: [{ id: "d1" }], edges: [] },
+          analysis_response: staleAnalysis,
+          framing: null,
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+        analysis_state: freshAnalysis,
+      });
+
+      await collectEvents(executePipelineStream(request, "req-freshness", deps));
+
+      const passedContext = (phase1Enrich as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(passedContext.analysis_response).toBe(freshAnalysis);
+    });
+
+    it("graph_state is folded into context before calling phase1Enrich", async () => {
+      const enriched = makeEnrichedContext();
+      const envelope = makeEnvelope();
+      const llmResult = {
+        assistant_text: "test",
+        tool_invocations: [],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as ReturnType<typeof vi.fn>).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as ReturnType<typeof vi.fn>).mockResolvedValue(llmResult);
+      (phase5Validate as ReturnType<typeof vi.fn>).mockReturnValue(envelope);
+
+      const freshGraph = { nodes: [{ id: "d1", kind: "decision" }], edges: [] };
+
+      const request = makeRequest({
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+        graph_state: freshGraph,
+      });
+
+      await collectEvents(executePipelineStream(request, "req-graph-norm", deps));
+
+      const passedContext = (phase1Enrich as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(passedContext.graph).toBe(freshGraph);
+    });
+  });
 });

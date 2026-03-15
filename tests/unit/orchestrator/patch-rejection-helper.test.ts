@@ -40,11 +40,11 @@ describe('buildPatchRejectionEnvelope', () => {
       mockContext,
     );
 
-    // Envelope shape
+    // Envelope shape — renders default limits (3/4) when max_*_ops not specified
     expect(envelope.turn_id).toBe('test-turn-id');
     expect(envelope.assistant_text).toBeTruthy();
     expect(envelope.assistant_text).toContain('5 node operations');
-    expect(envelope.assistant_text).toContain('limit');
+    expect(envelope.assistant_text).toContain('limit: 3 node ops, 4 edge ops');
 
     // No GraphPatchBlock
     expect(envelope.blocks).toHaveLength(0);
@@ -67,6 +67,47 @@ describe('buildPatchRejectionEnvelope', () => {
       }),
       expect.any(String),
     );
+  });
+
+  it('renders dynamic limits when max_node_ops / max_edge_ops are specified', async () => {
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'budget_exceeded',
+        detail: 'Too many edges for option addition.',
+        node_ops: 1,
+        edge_ops: 9,
+        max_node_ops: 3,
+        max_edge_ops: 8,
+        suggested_actions: [
+          { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
+        ],
+      },
+      'test-turn-id-dynamic',
+      mockContext,
+    );
+
+    expect(envelope.assistant_text).toContain('limit: 3 node ops, 8 edge ops');
+    expect(envelope.assistant_text).not.toContain('4 edge ops');
+  });
+
+  it('renders standard limit when unrelated edges breach during option-addition', async () => {
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'budget_exceeded',
+        detail: 'Too many unrelated edge changes.',
+        node_ops: 1,
+        edge_ops: 8,
+        max_node_ops: 3,
+        max_edge_ops: 4, // unrelated edges use standard cap
+        suggested_actions: [
+          { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
+        ],
+      },
+      'test-turn-id-unrelated',
+      mockContext,
+    );
+
+    expect(envelope.assistant_text).toContain('limit: 3 node ops, 4 edge ops');
   });
 
   it('produces valid envelope for structural_violation — no GraphPatchBlock, has suggested_actions', async () => {
@@ -95,8 +136,10 @@ describe('buildPatchRejectionEnvelope', () => {
     expect(envelope.assistant_text).not.toContain('invalid state');
     expect(envelope.assistant_text).not.toContain('no connections');
     expect(envelope.assistant_text).not.toContain('circular dependency');
-    // Safe fallback message is shown instead
+    // Safe fallback message is shown instead — actionable, not a confusing "which option" question
     expect(envelope.assistant_text).toContain("wasn't able to make that change safely");
+    expect(envelope.assistant_text).toContain("smaller steps");
+    expect(envelope.assistant_text).not.toContain("which option should we configure first");
 
     // No GraphPatchBlock
     expect(envelope.blocks).toHaveLength(0);
