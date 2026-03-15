@@ -463,6 +463,7 @@ describe("post-draft response quality (Task 5)", () => {
     const deps = makeDeps(
       makeLLMClient(llmText, "draft_graph"),
       makeToolDispatcher({
+        assistant_text: llmText,
         blocks: [
           {
             block_id: "blk_graph_patch_1",
@@ -476,7 +477,16 @@ describe("post-draft response quality (Task 5)", () => {
     );
 
     const envelope = await executePipeline(
-      makeRequest({ message: "Draft a model for my pricing decision" }),
+      makeRequest({
+        message: "Draft a model for my pricing decision",
+        context: makeContext({
+          framing: {
+            goal: "Maximize revenue growth",
+            options: ["Raise prices", "Keep current pricing"],
+            constraints: ["Must maintain customer retention above 90%"],
+          } as any,
+        }),
+      }),
       "req-post-draft",
       deps,
     );

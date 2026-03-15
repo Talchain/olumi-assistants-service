@@ -442,15 +442,15 @@ describe('Context Fabric wiring in turn handler', () => {
     expect(callArgs.system).toContain('goal_1');
   });
 
-  // ── run_analysis skips Context Fabric ───────────────────────────────────
+  // ── run_analysis with Context Fabric early assembly ─────────────────────
 
-  it('deterministic run_analysis does not invoke Context Fabric', async () => {
+  it('deterministic run_analysis invokes Context Fabric (early assembly) but fails on null PLoT client', async () => {
     process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED = 'true';
 
     // "run the analysis" routes deterministically to run_analysis.
     // Needs graph AND analysis_inputs so prerequisite passes.
-    // PLoT client is null (mock), so it will return an error envelope — that's fine,
-    // the assertion is that assembleContext was never called.
+    // PLoT client is null (mock), so it will return an error envelope — that's fine.
+    // Context Fabric runs before routing (early assembly), so assembleContext IS called.
     const req = makeRequest({
       message: 'run the analysis',
       context: {
@@ -469,10 +469,11 @@ describe('Context Fabric wiring in turn handler', () => {
     });
     const result = await handleTurn(req, mockFastifyRequest, 'req-run-analysis');
 
-    // run_analysis fails because PLoT client is null — expected
-    expect(result.httpStatus).toBe(502);
+    // run_analysis fails because PLoT client is null — expected (returns 500 per unified error handling)
+    expect(result.httpStatus).toBe(500);
 
-    // Context Fabric should NOT have been invoked (deterministic path skips dispatchViaLLM)
-    expect(mockAssembleContext).not.toHaveBeenCalled();
+    // Context Fabric runs before routing decision (early assembly), so it IS invoked
+    // even for deterministic paths when CEE_ORCHESTRATOR_CONTEXT_ENABLED=true.
+    expect(mockAssembleContext).toHaveBeenCalled();
   });
 });

@@ -322,7 +322,6 @@ const ConfigSchema = z.object({
     biasCheckFeatureVersion: z.string().optional(),
     biasStructuralEnabled: booleanString.default(false),
     biasMitigationPatchesEnabled: booleanString.default(false),
-    biasLlmDetectionEnabled: booleanString.default(false), // If true, use LLM for nuanced bias detection fallback
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
     reviewFeatureVersion: z.string().optional(),
@@ -421,8 +420,7 @@ const ConfigSchema = z.object({
     // Pipeline checkpoint settings
     pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
     // Unified pipeline (CIL Phase 3B)
-    unifiedPipelineEnabled: booleanString.default(false), // If true, use unified 6-stage pipeline instead of Pipeline A+B
-    legacyPipelineEnabled: booleanString.default(false), // If true, allow legacy Pipeline B; if false, throw on entry
+    unifiedPipelineEnabled: booleanString.default(true), // Unified 6-stage pipeline (always-on; legacy Pipeline A+B removed)
     // Boundary security (Stream F)
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
     // Draft compliance reminder (appended to user message for initial graph generation only)
@@ -625,7 +623,6 @@ function parseConfig(): Config {
       biasCheckFeatureVersion: env.CEE_BIAS_CHECK_FEATURE_VERSION,
       biasStructuralEnabled: env.CEE_BIAS_STRUCTURAL_ENABLED,
       biasMitigationPatchesEnabled: env.CEE_BIAS_MITIGATION_PATCHES_ENABLED,
-      biasLlmDetectionEnabled: env.CEE_BIAS_LLM_DETECTION_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
       reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
@@ -740,7 +737,6 @@ function parseConfig(): Config {
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
-      legacyPipelineEnabled: env.CEE_LEGACY_PIPELINE_ENABLED,
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
       entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,

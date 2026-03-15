@@ -19,6 +19,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { extractJwtSub, extractClientIp } from '../utils/jwt-extract.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
+import { LruTtlCache } from '../utils/cache.js';
 
 // ---------------------------------------------------------------------------
 // Configuration (env-driven with sensible defaults)
@@ -29,7 +30,7 @@ const MAX_REQUESTS_UNAUTHENTICATED = 10; // Stricter for IP-only
 const WINDOW_MS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_WINDOW_MS) || 60_000; // 1 minute
 
 // ---------------------------------------------------------------------------
-// In-memory store
+// In-memory store (bounded LRU, 10 000 entries, 5 min TTL)
 // ---------------------------------------------------------------------------
 
 interface RateLimitEntry {
@@ -37,12 +38,34 @@ interface RateLimitEntry {
   windowStart: number;
 }
 
+const STORE_CAPACITY = Number(process.env.CEE_RATE_LIMIT_STORE_CAPACITY) || 10_000;
+const STORE_TTL_MS = Number(process.env.CEE_RATE_LIMIT_STORE_TTL_MS) || 5 * 60_000; // 5 min
+
 /** Exported for testing — not for production use. */
-export const _store = new Map<string, RateLimitEntry>();
+export const _store = new LruTtlCache<string, RateLimitEntry>(STORE_CAPACITY, STORE_TTL_MS, (_key, _value, reason) => {
+  log.warn({ event: 'cache_eviction', store: 'rate_limit', reason }, 'Rate limit store entry evicted');
+});
 
 /** Reset the store (testing only). */
 export function _resetStore(): void {
   _store.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Fail-closed after consecutive errors
+// ---------------------------------------------------------------------------
+
+const FAIL_CLOSED_THRESHOLD = 3;
+let _consecutiveErrors = 0;
+
+/** Reset error counter (testing only). */
+export function _resetConsecutiveErrors(): void {
+  _consecutiveErrors = 0;
+}
+
+/** Get current error count (testing only). */
+export function _getConsecutiveErrors(): number {
+  return _consecutiveErrors;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,10 +92,12 @@ export function checkRateLimit(key: string, now: number = Date.now(), limit: num
   // Lazy reset if window has expired
   if (!entry || now >= entry.windowStart + WINDOW_MS) {
     entry = { count: 0, windowStart: now };
-    _store.set(key, entry);
   }
 
   entry.count += 1;
+
+  // Always write back (updates LRU position and refreshes TTL)
+  _store.set(key, entry);
 
   const resetAt = entry.windowStart + WINDOW_MS;
   const remaining = Math.max(0, limit - entry.count);
@@ -171,13 +196,41 @@ export function createOrchestratorRateLimitHook() {
         reply.code(429).send(responseBody);
         return;
       }
+
+      // Success — reset consecutive error counter
+      _consecutiveErrors = 0;
     } catch (err: unknown) {
-      // Fail open — log structured warning and allow the request through
+      _consecutiveErrors++;
       const requestId = getRequestId(request);
+
+      if (_consecutiveErrors >= FAIL_CLOSED_THRESHOLD) {
+        // Fail closed — deny the request after too many consecutive errors
+        log.error({
+          event: 'rate_limit_fail_closed',
+          request_id: requestId,
+          route: request.url,
+          consecutive_errors: _consecutiveErrors,
+          error: err instanceof Error ? err.message : String(err),
+        }, 'Rate limiter error — failing closed after consecutive failures');
+
+        reply.code(503).send({
+          schema: 'cee.error.v1',
+          code: 'CEE_RATE_LIMIT_UNAVAILABLE',
+          message: 'Rate limiting service temporarily unavailable. Please try again later.',
+          retryable: true,
+          source: 'cee',
+          request_id: requestId,
+          details: { retry_after_seconds: 5 },
+        });
+        return;
+      }
+
+      // Under threshold — fail open with warning
       log.warn({
         event: 'rate_limit_error',
         request_id: requestId,
         route: request.url,
+        consecutive_errors: _consecutiveErrors,
         error: err instanceof Error ? err.message : String(err),
       }, 'Rate limiter error — failing open');
     }

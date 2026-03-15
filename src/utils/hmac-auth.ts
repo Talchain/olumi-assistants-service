@@ -44,7 +44,9 @@ function getNonceCache(): LruTtlCache<string, boolean> {
   if (!memoryNonces) {
     const config = getHmacConfig();
     const ttlMs = config.maxSkewMs * 2; // Match Redis TTL behavior
-    memoryNonces = new LruTtlCache<string, boolean>(10000, ttlMs);
+    memoryNonces = new LruTtlCache<string, boolean>(10000, ttlMs, (_key, _value, reason) => {
+      log.warn({ event: 'cache_eviction', store: 'hmac_nonce', reason }, 'HMAC nonce store entry evicted');
+    });
   }
   return memoryNonces;
 }

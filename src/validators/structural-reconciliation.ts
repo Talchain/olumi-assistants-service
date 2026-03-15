@@ -165,7 +165,7 @@ function categoryOverrideRule(
     if (declared === inferred) continue;
 
     // Overwrite the node's declared category with the inferred one
-    (node as any).category = inferred;
+    node.category = inferred;
 
     // Update the factorCategories map so downstream checks see corrected state
     factorCategories.set(node.id, { ...info, explicitCategory: inferred });
@@ -185,7 +185,7 @@ function categoryOverrideRule(
           data.uncertainty_drivers = ["Estimation uncertainty"];
         }
         if (!node.data) {
-          (node as any).data = data;
+          node.data = data as unknown as NodeT["data"];
         }
       } else {
         // Reclassified FROM controllable to observable/external — strip extra fields
@@ -240,7 +240,7 @@ function controllableDataCompletenessRule(
 
     if (!data.factor_type) {
       data.factor_type = FACTOR_TYPE_DEFAULT;
-      if (!node.data) (node as any).data = data;
+      if (!node.data) node.data = data as unknown as NodeT["data"];
       mutations.push({
         rule: "controllable_data_completeness",
         code: "CONTROLLABLE_DATA_FILLED",
@@ -255,7 +255,7 @@ function controllableDataCompletenessRule(
 
     if (!data.uncertainty_drivers) {
       data.uncertainty_drivers = ["Estimation uncertainty"];
-      if (!node.data) (node as any).data = data;
+      if (!node.data) node.data = data as unknown as NodeT["data"];
       mutations.push({
         rule: "controllable_data_completeness",
         code: "CONTROLLABLE_DATA_FILLED",
@@ -321,7 +321,7 @@ function enumValidationRule(graph: GraphT): STRPMutation[] {
         const before = node.category;
         // Don't override here — Rule 1 handles category reconciliation.
         // Just strip invalid values so inference can fill correctly.
-        (node as any).category = undefined;
+        node.category = undefined;
         mutations.push({
           rule: "enum_validation",
           code: "ENUM_VALUE_CORRECTED",
@@ -341,7 +341,7 @@ function enumValidationRule(graph: GraphT): STRPMutation[] {
     if (edge.effect_direction !== undefined && !VALID_EFFECT_DIRECTIONS.has(edge.effect_direction as string)) {
       const before = edge.effect_direction;
       // Default to positive for invalid direction
-      (edge as any).effect_direction = "positive";
+      edge.effect_direction = "positive";
       mutations.push({
         rule: "enum_validation",
         code: "ENUM_VALUE_CORRECTED",
@@ -476,7 +476,7 @@ export function normaliseConstraintTargets(
     // Step 2: Label-based exact remap — if constraint has a label, try matching
     // it against normalised node labels before falling back to fuzzy matching
     if (nodeLabels && nodeLabels.size > 0) {
-      const constraintLabel = (constraint as any).label as string | undefined;
+      const constraintLabel = constraint.label as string | undefined;
       if (constraintLabel) {
         const normConstraintLabel = constraintLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")
           // strip common suffixes added by the extractor ("ceiling", "floor", "minimum", "maximum")
@@ -575,7 +575,7 @@ export function normaliseConstraintTargets(
       log.info({
         event: "CONSTRAINT_DROPPED",
         constraint_target_id: originalNodeId,
-        constraint_target_label: (constraint as any).label ?? null,
+        constraint_target_label: (constraint.label as string | undefined) ?? null,
         exact_match_found: false,
         fuzzy_candidates_top3: fuzzyCandidates.slice(0, 3),
         drop_reason: dropReason,
@@ -679,7 +679,7 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
       if (signIsPositive !== directionIsPositive) {
         const before = edge.effect_direction;
         const after = signIsPositive ? "positive" : "negative";
-        (edge as any).effect_direction = after;
+        edge.effect_direction = after;
 
         mutations.push({
           rule: "sign_reconciliation",

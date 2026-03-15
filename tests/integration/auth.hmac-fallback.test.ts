@@ -39,7 +39,7 @@ describe("HMAC + API Key Fallback", () => {
   it("falls back to API key when HMAC verification fails but API key is valid", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "fallback-key-1",
@@ -60,7 +60,7 @@ describe("HMAC + API Key Fallback", () => {
   it("returns 401 when HMAC fails and API key is missing", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         // Invalid HMAC signature with no API key header
@@ -108,7 +108,7 @@ describe("HMAC-only auth without API keys", () => {
   it("returns 403 with specific HMAC error code when verification fails and no API keys are configured", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Signature": "invalid-signature",

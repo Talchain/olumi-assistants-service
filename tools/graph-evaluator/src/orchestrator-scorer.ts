@@ -122,6 +122,19 @@ export function scoreOrchestrator(
     };
   }
 
+  // ── Bare tool-call detection ─────────────────────────────────────────────
+  // The prompt says "Tool-call-only turns: emit only the tool call, no
+  // narration."  When expected_tool is set and the response is a bare
+  // function-call (no <response> envelope), that is *correct* behaviour.
+  // We detect this and auto-pass envelope dimensions so the scorer does
+  // not penalise prompt-compliant responses.
+  const expectedTool = fixture.expected.expected_tool;
+  const hasResponseTag = /<response>/i.test(raw);
+  const isBareToolCall =
+    expectedTool !== null &&
+    !hasResponseTag &&
+    (raw.includes(`${expectedTool}(`) || raw.includes(`"name": "${expectedTool}"`));
+
   // ── Envelope structure ────────────────────────────────────────────────────
   const diagnosticsBlock = extractTag(raw, "diagnostics");
   const responseBlock = extractTag(raw, "response");
@@ -129,13 +142,14 @@ export function scoreOrchestrator(
   const blocksTag = extractTag(raw, "blocks");
   const actionsTag = extractTag(raw, "suggested_actions");
 
-  const diagnostics_present = diagnosticsBlock !== null;
-  const assistant_text_present = assistantText !== null && assistantText.trim().length > 0;
-  const blocks_tag_present = blocksTag !== null;
-  const actions_tag_present = actionsTag !== null;
+  const diagnostics_present = isBareToolCall ? true : diagnosticsBlock !== null;
+  const assistant_text_present = isBareToolCall ? true : assistantText !== null && assistantText.trim().length > 0;
+  const blocks_tag_present = isBareToolCall ? true : blocksTag !== null;
+  const actions_tag_present = isBareToolCall ? true : actionsTag !== null;
 
   // Valid envelope: diagnostics + response with all three child tags
-  const valid_envelope =
+  // Auto-pass for bare tool-call responses
+  const valid_envelope = isBareToolCall ? true :
     diagnostics_present &&
     responseBlock !== null &&
     assistant_text_present &&
@@ -143,29 +157,33 @@ export function scoreOrchestrator(
     actions_tag_present;
 
   // Check diagnostics comes before response
-  const diagnosticsFirst =
+  const diagnosticsFirst = isBareToolCall ? true :
     diagnostics_present &&
     responseBlock !== null &&
     raw.indexOf("<diagnostics>") < raw.indexOf("<response>");
 
   // ── Tool selection ────────────────────────────────────────────────────────
-  const expectedTool = fixture.expected.expected_tool;
   let tool_selection_correct = true;
 
   if (expectedTool !== null) {
-    // Check if the diagnostics or response mentions the tool
-    const diagnosticsContent = extractTagContent(raw, "diagnostics") ?? "";
-    const fullText = diagnosticsContent + " " + (assistantText ?? "");
-    const mentionsTool = fullText.toLowerCase().includes(expectedTool.toLowerCase());
+    // Bare tool-call: the call itself proves correct selection
+    if (isBareToolCall) {
+      tool_selection_correct = true;
+    } else {
+      // Check if the diagnostics or response mentions the tool
+      const diagnosticsContent = extractTagContent(raw, "diagnostics") ?? "";
+      const fullText = diagnosticsContent + " " + (assistantText ?? "");
+      const mentionsTool = fullText.toLowerCase().includes(expectedTool.toLowerCase());
 
-    // Also check for tool_call patterns or "Tool: <name>" in diagnostics
-    const toolCallPattern = new RegExp(
-      `tool[:\\s]+${expectedTool}|invoke[s]?\\s+${expectedTool}|select[s]?[:\\s]+${expectedTool}`,
-      "i"
-    );
-    const hasToolRef = mentionsTool || toolCallPattern.test(diagnosticsContent);
+      // Also check for tool_call patterns or "Tool: <name>" in diagnostics
+      const toolCallPattern = new RegExp(
+        `tool[:\\s]+${expectedTool}|invoke[s]?\\s+${expectedTool}|select[s]?[:\\s]+${expectedTool}`,
+        "i"
+      );
+      const hasToolRef = mentionsTool || toolCallPattern.test(diagnosticsContent);
 
-    tool_selection_correct = hasToolRef;
+      tool_selection_correct = hasToolRef;
+    }
   } else {
     // No tool expected — check that no tool is invoked
     // (Allow mentioning tools in diagnostics as "no tool needed")
@@ -183,9 +201,10 @@ export function scoreOrchestrator(
   }
 
   // ── Banned terms ──────────────────────────────────────────────────────────
+  // For bare tool calls, check the raw text (there is no <response> envelope)
   let no_banned_terms = true;
   if (fixture.expected.banned_terms_checked) {
-    const userFacing = getUserFacingText(raw).toLowerCase();
+    const userFacing = (isBareToolCall ? raw : getUserFacingText(raw)).toLowerCase();
     for (const term of BANNED_TERMS) {
       if (userFacing.includes(term.toLowerCase())) {
         no_banned_terms = false;
@@ -195,8 +214,11 @@ export function scoreOrchestrator(
   }
 
   // ── Uncertainty language ──────────────────────────────────────────────────
+  // Bare tool calls have no conversational text — auto-pass
   let uncertainty_language = true;
-  if (fixture.expected.expects_uncertainty_language) {
+  if (isBareToolCall) {
+    uncertainty_language = true;
+  } else if (fixture.expected.expects_uncertainty_language) {
     const text = (assistantText ?? "").toLowerCase();
     const blocksContent = (extractTagContent(raw, "blocks") ?? "").toLowerCase();
     const combined = text + " " + blocksContent;
@@ -229,16 +251,21 @@ export function scoreOrchestrator(
   }
 
   // ── Suggested actions ─────────────────────────────────────────────────────
+  // Bare tool calls have no suggested_actions — pass if min_actions allows 0
   let suggested_actions_valid = true;
   const actionsContent = extractTagContent(raw, "suggested_actions") ?? "";
   const actionBlocks = extractAllTagContents(actionsContent, "action");
   const actionCount = actionBlocks.length;
 
-  if (actionCount > fixture.expected.max_actions) {
-    suggested_actions_valid = false;
-  }
-  if (actionCount < fixture.expected.min_actions) {
-    suggested_actions_valid = false;
+  if (isBareToolCall) {
+    suggested_actions_valid = fixture.expected.min_actions === 0;
+  } else {
+    if (actionCount > fixture.expected.max_actions) {
+      suggested_actions_valid = false;
+    }
+    if (actionCount < fixture.expected.min_actions) {
+      suggested_actions_valid = false;
+    }
   }
 
   // Each action should have role, label, message
@@ -278,7 +305,7 @@ export function scoreOrchestrator(
   // ── Must-contain substrings ───────────────────────────────────────────────
   let must_contain_met = true;
   if (fixture.expected.must_contain && fixture.expected.must_contain.length > 0) {
-    const userFacing = getUserFacingText(raw).toLowerCase();
+    const userFacing = (isBareToolCall ? raw : getUserFacingText(raw)).toLowerCase();
     for (const substr of fixture.expected.must_contain) {
       if (!userFacing.includes(substr.toLowerCase())) {
         must_contain_met = false;
@@ -289,25 +316,30 @@ export function scoreOrchestrator(
 
   // ── XML well-formedness ───────────────────────────────────────────────────
   // Basic check: every opened tag has a matching close tag for the main envelope
-  const requiredPairs = [
-    ["<diagnostics>", "</diagnostics>"],
-    ["<response>", "</response>"],
-    ["<assistant_text>", "</assistant_text>"],
-    ["<blocks>", "</blocks>"],
-    ["<suggested_actions>", "</suggested_actions>"],
-  ];
+  // Bare tool-call responses auto-pass (no envelope expected)
   let xml_well_formed = true;
-  for (const [open, close] of requiredPairs) {
-    const openCount = raw.split(open).length - 1;
-    const closeCount = raw.split(close).length - 1;
-    if (openCount !== closeCount) {
-      xml_well_formed = false;
-      break;
+  if (isBareToolCall) {
+    xml_well_formed = true;
+  } else {
+    const requiredPairs = [
+      ["<diagnostics>", "</diagnostics>"],
+      ["<response>", "</response>"],
+      ["<assistant_text>", "</assistant_text>"],
+      ["<blocks>", "</blocks>"],
+      ["<suggested_actions>", "</suggested_actions>"],
+    ];
+    for (const [open, close] of requiredPairs) {
+      const openCount = raw.split(open).length - 1;
+      const closeCount = raw.split(close).length - 1;
+      if (openCount !== closeCount) {
+        xml_well_formed = false;
+        break;
+      }
     }
-  }
-  // Also check diagnostics comes first
-  if (!diagnosticsFirst) {
-    xml_well_formed = false;
+    // Also check diagnostics comes first
+    if (!diagnosticsFirst) {
+      xml_well_formed = false;
+    }
   }
 
   // ── Overall score ─────────────────────────────────────────────────────────

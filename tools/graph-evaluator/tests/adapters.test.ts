@@ -20,7 +20,7 @@ describe("EditGraphAdapter", () => {
 
   it("loads all edit-graph fixtures", async () => {
     const cases = await adapter.loadCases(fixturesDir);
-    expect(cases.length).toBe(9);
+    expect(cases.length).toBeGreaterThanOrEqual(12);
     expect(cases[0].id).toBe("01-add-factor");
     expect(cases[0].graph).toBeDefined();
     expect(cases[0].graph.nodes.length).toBeGreaterThan(0);

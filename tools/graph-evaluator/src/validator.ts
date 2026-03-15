@@ -173,7 +173,7 @@ export function buildInterventionSignature(
   interventions: Record<string, number>
 ): string {
   const entries = Object.entries(interventions)
-    .map(([factorId, value]) => `${factorId}:${value.toFixed(4)}`)
+    .map(([factorId, value]) => `${factorId}:${(typeof value === 'number' ? value : Number(value) || 0).toFixed(4)}`)
     .sort();
   return entries.join("|");
 }

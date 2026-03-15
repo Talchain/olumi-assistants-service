@@ -525,7 +525,80 @@ function buildCeeConfig() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// /healthz — minimal public probe (load balancers, readiness checks, CI)
+// ---------------------------------------------------------------------------
 app.get("/healthz", async () => {
+  const promptStoreStatus = getPromptStoreStatus();
+  const promptStoreHealthy = isPromptStoreHealthy();
+  const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
+  const hasHmacSecret = !!(env.CEE_HMAC_SECRET || env.HMAC_SECRET);
+  const adapter = getAdapter();
+  const llmProvider = adapter.name;
+  const hasLlmKey =
+    llmProvider === 'fixtures' ? true :
+    llmProvider === 'anthropic' ? !!env.ANTHROPIC_API_KEY :
+    llmProvider === 'openai' ? !!env.OPENAI_API_KEY :
+    false;
+
+  const warmingState = getCacheWarmingState();
+  const cacheWarmingHealthy = isCacheWarmingHealthy();
+
+  const degradationReasons: string[] = [];
+  if (promptStoreStatus.enabled && !promptStoreHealthy) {
+    degradationReasons.push('prompt_store_unhealthy');
+  }
+  if (promptStoreStatus.enabled && warmingState.completed && !cacheWarmingHealthy) {
+    degradationReasons.push('cache_warming_no_store_prompts');
+  }
+  if (!hasAuthKeys && !hasHmacSecret) {
+    degradationReasons.push('no_auth_configured');
+  }
+  if (!hasLlmKey) {
+    degradationReasons.push('no_llm_key_configured');
+  }
+
+  const isDegraded = degradationReasons.length > 0;
+
+  return {
+    ok: true,
+    build: GIT_COMMIT_SHORT,
+    degraded: isDegraded,
+    degraded_reasons: isDegraded ? degradationReasons : undefined,
+    service: "assistants",
+    version: SERVICE_VERSION,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// /healthz/detail — full diagnostics (admin auth required)
+// ---------------------------------------------------------------------------
+app.get("/healthz/detail", async (request, reply) => {
+  const providedKey = request.headers["x-admin-key"] as string | undefined;
+  if (!providedKey) {
+    return reply.code(401).send({
+      schema: "error.v1",
+      code: "UNAUTHENTICATED",
+      message: "X-Admin-Key header required for detailed health check.",
+    });
+  }
+
+  const adminKey = config.prompts?.adminApiKey;
+  const adminKeyRead = config.prompts?.adminApiKeyRead;
+  const { safeEqual: safeEq } = await import("./utils/hash.js");
+  const authorized = Boolean(
+    (adminKey && safeEq(providedKey, adminKey)) ||
+    (adminKeyRead && safeEq(providedKey, adminKeyRead))
+  );
+
+  if (!authorized) {
+    return reply.code(403).send({
+      schema: "error.v1",
+      code: "FORBIDDEN",
+      message: "Invalid admin key.",
+    });
+  }
+
   const adapter = getAdapter();
   const ceeConfig = buildCeeConfig();
 
@@ -647,7 +720,6 @@ app.get("/healthz", async () => {
     degradationReasons.push('prompt_store_unhealthy');
   }
   if (promptStoreStatus.enabled && warmingState.completed && !cacheWarmingHealthy) {
-    // Cache warming completed but no prompts from store - indicates store issues
     degradationReasons.push('cache_warming_no_store_prompts');
   }
   if (!hasAuthKeys && !hasHmacSecret) {

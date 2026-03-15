@@ -405,7 +405,7 @@ export function buildAnalysisReadyPayload(
     // Only controllable factors (or undefined category) trigger this blocker.
     // External and observable factors are contextual — they influence outcomes but
     // aren't intervention targets, so they're legitimate without option connections.
-    const category = (node as any).category;
+    const category = node.category;
     if (category === "external") continue;
     if (category === "observable") continue;
     // Only category === "controllable" or category === undefined triggers blocker
@@ -487,7 +487,8 @@ export function buildAnalysisReadyPayload(
 
   // F15: Attach fallback metadata for trace surfacing (only when fallbacks occurred)
   if (fallbackCount > 0) {
-    (payload as any)._fallback_meta = {
+    // AnalysisReadyPayload uses .passthrough() — _fallback_meta is a runtime-only trace field
+    (payload as Record<string, unknown>)._fallback_meta = {
       fallback_count: fallbackCount,
       fallback_sources: fallbackSources,
     };

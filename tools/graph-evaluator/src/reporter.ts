@@ -267,9 +267,9 @@ function compactGraphSummary(r: ScoredResult): string {
       )
   );
 
-  const means = causalEdges.map((e) => e.strength.mean.toFixed(2)).join(", ");
-  const stds = causalEdges.map((e) => e.strength.std.toFixed(2)).join(", ");
-  const probs = causalEdges.map((e) => e.exists_probability.toFixed(2)).join(", ");
+  const means = causalEdges.map((e) => (e.strength?.mean ?? 0).toFixed(2)).join(", ");
+  const stds = causalEdges.map((e) => (e.strength?.std ?? 0).toFixed(2)).join(", ");
+  const probs = causalEdges.map((e) => (e.exists_probability ?? 1.0).toFixed(2)).join(", ");
 
   const coaching = graph.coaching?.strengthen_items
     ?.map((c) => `  - ${c.label ?? ""}: ${c.detail ?? ""}`)

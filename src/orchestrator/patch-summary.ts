@@ -114,7 +114,7 @@ export function analyseOperations(operations: PatchOperation[]): OpAnalysis {
         break;
       }
       case 'update_edge': {
-        const path = op.path;
+        const path = op.path ?? '';
         // path like /edges/factor_1->goal_1 or edges/factor_1->goal_1
         const arrowMatch = path.match(/([^/]+)->([^/]+)$/);
         edgesUpdated.push({
@@ -141,7 +141,8 @@ export function analyseOperations(operations: PatchOperation[]): OpAnalysis {
  * Extract a human-readable identifier from a patch path (last segment, dashes → spaces).
  * e.g. "/nodes/technical_oversight" → "technical oversight"
  */
-function extractLabelFromPath(path: string): string {
+function extractLabelFromPath(path: string | undefined): string {
+  if (!path) return 'element';
   const segment = path.replace(/^\//, '').split('/').pop() ?? path;
   return segment.replace(/_/g, ' ');
 }

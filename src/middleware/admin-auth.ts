@@ -12,6 +12,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { log, emit, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
+import { safeEqual } from '../utils/hash.js';
 
 /**
  * Telemetry events for admin auth
@@ -134,13 +135,13 @@ export function verifyAdminKey(
     return false;
   }
 
-  // Check full access key
-  if (adminKey && providedKey === adminKey) {
+  // Check full access key (constant-time comparison to prevent timing attacks)
+  if (adminKey && safeEqual(providedKey, adminKey)) {
     return true;
   }
 
-  // Check read-only key
-  if (adminKeyRead && providedKey === adminKeyRead) {
+  // Check read-only key (constant-time comparison)
+  if (adminKeyRead && safeEqual(providedKey, adminKeyRead)) {
     // Read-only key provided - check if operation is read-only
     if (requiredPermission === 'write') {
       emit(AdminAuthTelemetryEvents.AdminAuthFailed, {

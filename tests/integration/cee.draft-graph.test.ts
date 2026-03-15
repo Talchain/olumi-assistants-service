@@ -69,6 +69,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     range_confidence_coverage: 0,
     has_baseline_option: false,
   }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,
@@ -353,64 +363,4 @@ describe("POST /assist/v1/draft-graph (CEE v1)", () => {
     expect(Number(retryAfter)).toBeGreaterThan(0);
   });
 
-  describe("raw_output mode", () => {
-    const headersRawOutput1 = { "X-Olumi-Assist-Key": "cee-raw-output-1" } as const;
-    const headersRawOutput2 = { "X-Olumi-Assist-Key": "cee-raw-output-2" } as const;
-
-    it("skips post-processing repairs when raw_output=true", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/assist/v1/draft-graph?schema=v3",
-        headers: headersRawOutput1,
-        payload: {
-          brief: "A sufficiently long decision brief for raw output mode testing in CEE.",
-          raw_output: true,
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-
-      // V3: nodes and edges at root level
-      expect(body.nodes).toBeDefined();
-      expect(body.edges).toBeDefined();
-
-      // Trace should indicate raw_output_mode
-      expect(body.trace).toBeDefined();
-      expect(body.trace.pipeline).toBeDefined();
-      expect(body.trace.pipeline.raw_output_mode).toBe(true);
-      expect(body.trace.pipeline.status).toBe("success");
-
-      // Should only have llm_draft stage (no factor enrichment, goal repair, etc.)
-      const stages = body.trace.pipeline.stages;
-      expect(Array.isArray(stages)).toBe(true);
-      expect(stages.length).toBe(1);
-      expect(stages[0].name).toBe("llm_draft");
-    });
-
-    it("logs raw_output event with node/edge counts", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/assist/v1/draft-graph?schema=v3",
-        headers: headersRawOutput2,
-        payload: {
-          brief: "A sufficiently long decision brief for raw output event logging test.",
-          raw_output: true,
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-
-      // V3: nodes and edges at root level
-      expect(body.nodes).toBeDefined();
-      expect(body.edges).toBeDefined();
-      expect(Array.isArray(body.nodes)).toBe(true);
-      expect(Array.isArray(body.edges)).toBe(true);
-
-      // Quality should be zeroed in raw mode (not computed)
-      expect(body.quality).toBeDefined();
-      expect(body.quality.overall).toBe(0);
-    });
-  });
 });

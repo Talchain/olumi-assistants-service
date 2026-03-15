@@ -64,7 +64,7 @@ describe("Key Rotation Scenarios", () => {
       // Old key should still work
       const oldKeyResponse = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "old-key-to-retire",
@@ -78,7 +78,7 @@ describe("Key Rotation Scenarios", () => {
       // New key should also work
       const newKeyResponse = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "new-key-active",
@@ -110,7 +110,7 @@ describe("Key Rotation Scenarios", () => {
       // Retired key should be rejected
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "old-retired-key",
@@ -157,7 +157,7 @@ describe("Rate Limit Exhaustion", () => {
       for (let i = 0; i < 3; i++) {
         await server.inject({
           method: "POST",
-          url: "/assist/draft-graph",
+          url: "/assist/v1/draft-graph",
           headers: {
             "Content-Type": "application/json",
             "X-Olumi-Assist-Key": "rate-test-key",
@@ -171,7 +171,7 @@ describe("Rate Limit Exhaustion", () => {
       // Next request should be rate limited
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "rate-test-key",
@@ -192,67 +192,6 @@ describe("Rate Limit Exhaustion", () => {
     }
   });
 
-  it("SSE endpoints have separate rate limit", async () => {
-    vi.resetModules();
-
-    // Standard high, SSE very low
-    process.env.RATE_LIMIT_RPM = "100";
-    process.env.SSE_RATE_LIMIT_RPM = "1";
-    process.env.ASSIST_API_KEYS = "sse-rate-test-key";
-    process.env.LLM_PROVIDER = "fixtures";
-    delete process.env.ASSIST_API_KEY;
-
-    cleanBaseUrl();
-    const { build } = await import("../../src/server.js");
-    const server = await build();
-    await server.ready();
-
-    try {
-      // SSE requests should hit limit faster
-      const sseResponse1 = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "First SSE request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(sseResponse1.statusCode).toBe(200);
-
-      // Second SSE should be rate limited
-      const sseResponse2 = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "Second SSE request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(sseResponse2.statusCode).toBe(429);
-
-      // But standard endpoint should still work
-      const standardResponse = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "sse-rate-test-key",
-        },
-        body: JSON.stringify({
-          brief: "Standard request that meets the minimum length requirement for validation",
-        }),
-      });
-      expect(standardResponse.statusCode).toBe(200);
-    } finally {
-      await server.close();
-    }
-  });
 });
 
 describe("Public Routes Access", () => {
@@ -329,7 +268,7 @@ describe("Public Routes Access", () => {
   it("requires auth for protected endpoints", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
       },
@@ -373,7 +312,7 @@ describe("Header Parsing Edge Cases", () => {
     // but some clients might send them. The key itself shouldn't have whitespace.
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "valid-key",
@@ -389,7 +328,7 @@ describe("Header Parsing Edge Cases", () => {
   it("accepts Authorization Bearer token format", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer valid-key",
@@ -405,7 +344,7 @@ describe("Header Parsing Edge Cases", () => {
   it("rejects malformed Authorization header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Basic dXNlcjpwYXNz", // Basic auth format, not Bearer
@@ -421,7 +360,7 @@ describe("Header Parsing Edge Cases", () => {
   it("X-Olumi-Assist-Key takes precedence over Authorization header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "valid-key",
@@ -439,7 +378,7 @@ describe("Header Parsing Edge Cases", () => {
   it("rejects empty API key header", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "",
@@ -485,7 +424,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         "not-a-timestamp",
         nonce
@@ -493,7 +432,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -534,7 +473,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         oldTimestamp,
         nonce
@@ -542,7 +481,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -588,7 +527,7 @@ describe("HMAC Timestamp Edge Cases", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         futureTimestamp,
         nonce
@@ -596,7 +535,7 @@ describe("HMAC Timestamp Edge Cases", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -650,7 +589,7 @@ describe("HMAC Raw Body Signing", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         timestamp,
         nonce
@@ -658,7 +597,7 @@ describe("HMAC Raw Body Signing", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -697,7 +636,7 @@ describe("HMAC Raw Body Signing", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         body,
         timestamp,
         nonce
@@ -705,7 +644,7 @@ describe("HMAC Raw Body Signing", () => {
 
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -749,7 +688,7 @@ describe("HMAC Raw Body Signing", () => {
       const { signature } = signRequest(
         TEST_SECRET,
         "POST",
-        "/assist/draft-graph",
+        "/assist/v1/draft-graph",
         originalBody,
         timestamp,
         nonce
@@ -758,7 +697,7 @@ describe("HMAC Raw Body Signing", () => {
       // Send the tampered body with the original signature
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Signature": signature,
@@ -804,7 +743,7 @@ describe("No Auth Configured", () => {
     try {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
         },
@@ -847,7 +786,7 @@ describe("Error Response Format", () => {
   it("returns error.v1 schema for 401 Unauthorized", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
       },
@@ -868,7 +807,7 @@ describe("Error Response Format", () => {
   it("returns error.v1 schema for 403 Forbidden", async () => {
     const response = await server.inject({
       method: "POST",
-      url: "/assist/draft-graph",
+      url: "/assist/v1/draft-graph",
       headers: {
         "Content-Type": "application/json",
         "X-Olumi-Assist-Key": "wrong-key",

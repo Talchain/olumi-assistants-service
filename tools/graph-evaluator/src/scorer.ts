@@ -79,24 +79,28 @@ function scoreParameterQuality(graph: ParsedGraph): number {
 
   if (causalEdges.length === 0) return 0;
 
+  // Guard: skip edges with missing strength
+  const validCausalEdges = causalEdges.filter((e) => e.strength?.mean != null && e.strength?.std != null);
+  if (validCausalEdges.length === 0) return 0;
+
   // Strength diversity: distinct |mean| rounded to 1dp
   const distinctMeans = new Set(
-    causalEdges.map((e) => Math.abs(e.strength.mean).toFixed(1))
+    validCausalEdges.map((e) => Math.abs(e.strength.mean).toFixed(1))
   );
   const strengthDiv = Math.min(distinctMeans.size / 3, 1.0);
 
   // Exists_probability diversity: distinct values rounded to 1dp
   const distinctProbs = new Set(
-    causalEdges.map((e) => e.exists_probability.toFixed(1))
+    validCausalEdges.map((e) => (e.exists_probability ?? 1.0).toFixed(1))
   );
   const existsDiv = Math.min(distinctProbs.size / 2, 1.0);
 
   // Std variation: binary — 1.0 if std values are not all identical
-  const stds = causalEdges.map((e) => e.strength.std);
+  const stds = validCausalEdges.map((e) => e.strength.std);
   const stdVar = stds.every((s) => s === stds[0]) ? 0.0 : 1.0;
 
   // Default takeover: |mean|===0.5 AND std===0.125
-  const defaultEdges = causalEdges.filter(
+  const defaultEdges = validCausalEdges.filter(
     (e) => Math.abs(e.strength.mean) === 0.5 && e.strength.std === 0.125
   );
   const defaultPct = (defaultEdges.length / causalEdges.length) * 100;

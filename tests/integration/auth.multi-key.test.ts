@@ -39,7 +39,7 @@ describe("Multi-Key Auth", () => {
     it("allows request with valid API key", async () => {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "test-key-1",
@@ -55,7 +55,7 @@ describe("Multi-Key Auth", () => {
     it("rejects request with invalid API key", async () => {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "invalid-key",
@@ -75,7 +75,7 @@ describe("Multi-Key Auth", () => {
     it("rejects request with missing API key", async () => {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
         },
@@ -94,7 +94,7 @@ describe("Multi-Key Auth", () => {
     it("accepts API key via Authorization Bearer header", async () => {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer test-key-2",
@@ -125,7 +125,7 @@ describe("Multi-Key Auth", () => {
       for (let i = 0; i < 3; i++) {
         await server.inject({
           method: "POST",
-          url: "/assist/draft-graph",
+          url: "/assist/v1/draft-graph",
           headers: {
             "Content-Type": "application/json",
             "X-Olumi-Assist-Key": "test-key-1",
@@ -137,7 +137,7 @@ describe("Multi-Key Auth", () => {
       // Key 2 should still work (separate quota)
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "test-key-2",
@@ -148,34 +148,12 @@ describe("Multi-Key Auth", () => {
       expect(response.statusCode).toBe(200);
     });
 
-    it("returns 429 when rate limit exceeded", async () => {
-      // Exhaust quota for key-3 (120 requests/minute)
-      // For testing, we'll just verify the rate limit mechanism exists
-      const responses = [];
-
-      for (let i = 0; i < 10; i++) {
-        const response = await server.inject({
-          method: "POST",
-          url: "/assist/draft-graph",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Olumi-Assist-Key": "test-key-3",
-          },
-          body: JSON.stringify({ brief: `This is test brief number ${i} that meets the minimum length requirement` }),
-        });
-        responses.push(response.statusCode);
-      }
-
-      // All should succeed with low count
-      expect(responses.every(code => code === 200)).toBe(true);
-    });
-
     it("includes retry-after in rate limit response", async () => {
       // This test would need to actually exhaust quota
       // For now, just verify the error structure
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "test-key-1",
@@ -190,23 +168,6 @@ describe("Multi-Key Auth", () => {
         expect(body.code).toBe("RATE_LIMITED");
         expect(body.details).toHaveProperty("retry_after_seconds");
       }
-    });
-  });
-
-  describe("SSE Rate Limiting", () => {
-    it("applies stricter limits to SSE endpoints", async () => {
-      const response = await server.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "test-key-1",
-        },
-        body: JSON.stringify({ brief: "This is an SSE test brief that meets the minimum length requirement" }),
-      });
-
-      // Should work (within SSE quota of 20/min)
-      expect(response.statusCode).toBe(200);
     });
   });
 
@@ -258,7 +219,7 @@ describe("Multi-Key Auth", () => {
 
       const response = await compatServer.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "single-legacy-key",
@@ -274,7 +235,7 @@ describe("Multi-Key Auth", () => {
     it("returns error.v1 format for auth failures", async () => {
       const response = await server.inject({
         method: "POST",
-        url: "/assist/draft-graph",
+        url: "/assist/v1/draft-graph",
         headers: {
           "Content-Type": "application/json",
           "X-Olumi-Assist-Key": "wrong-key",

@@ -53,9 +53,12 @@ function structuralBiasEnabled(): boolean {
   return config.cee.biasStructuralEnabled;
 }
 
-function getNodesByKind(graph: GraphV1 | undefined, kind: string): any[] {
-  if (!graph || !Array.isArray((graph as any).nodes)) return [];
-  return ((graph as any).nodes as any[]).filter((n) => n && (n as any).kind === kind);
+type GraphNode = GraphV1["nodes"][number];
+type GraphEdge = GraphV1["edges"][number];
+
+function getNodesByKind(graph: GraphV1 | undefined, kind: string): GraphNode[] {
+  if (!graph || !Array.isArray(graph.nodes)) return [];
+  return graph.nodes.filter((n) => n && n.kind === kind);
 }
 
 /**
@@ -75,12 +78,12 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   const factorNodes = getNodesByKind(graph, "factor");
   const actionNodes = getNodesByKind(graph, "action");
 
-  const optionIds = optionNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const riskIds = riskNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const outcomeIds = outcomeNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const goalIds = goalNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const _factorIds = factorNodes.map((n) => (n as any).id as string).filter(Boolean);
-  const actionIds = actionNodes.map((n) => (n as any).id as string).filter(Boolean);
+  const optionIds = optionNodes.map((n) => n.id).filter(Boolean);
+  const riskIds = riskNodes.map((n) => n.id).filter(Boolean);
+  const outcomeIds = outcomeNodes.map((n) => n.id).filter(Boolean);
+  const goalIds = goalNodes.map((n) => n.id).filter(Boolean);
+  const _factorIds = factorNodes.map((n) => n.id).filter(Boolean);
+  const actionIds = actionNodes.map((n) => n.id).filter(Boolean);
 
   const optionCount = optionNodes.length;
   const riskCount = riskNodes.length;
@@ -131,7 +134,7 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
     } as BiasAndingWithConfidence);
   }
 
-  const decisionType = (archetype as any)?.decision_type as string | undefined;
+  const decisionType = (archetype as ArchetypeMeta & { decision_type?: string } | null | undefined)?.decision_type;
 
   // Optimisation bias: pricing decisions with multiple options but no risks
   if (decisionType === "pricing_decision" && optionCount >= 2 && riskCount === 0) {
@@ -186,7 +189,7 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       }
     }
 
-    const edges = Array.isArray((graph as any).edges) ? ((graph as any).edges as any[]) : [];
+    const edges: GraphEdge[] = Array.isArray(graph.edges) ? graph.edges : [];
 
     // Structural confirmation bias: one option has explicit risks/outcomes while others have none.
     if (optionCount >= 2 && (riskCount > 0 || outcomeCount > 0) && edges.length > 0) {
@@ -199,8 +202,7 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
       }
 
       for (const edge of edges) {
-        const from = (edge as any).from as string | undefined;
-        const to = (edge as any).to as string | undefined;
+        const { from, to } = edge;
         if (!from || !to) continue;
 
         if (optionIdSet.has(from) && evidenceIdSet.has(to)) {

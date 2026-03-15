@@ -752,7 +752,7 @@ describe('handleTurn — patch_accepted system event', () => {
   });
 
   const GRAPH_STATE = { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Test' }], edges: [] };
-  const PATCH_OPERATIONS = [{ op: 'add_node', node: { id: 'fac_1', kind: 'factor', label: 'Cost' } }];
+  const PATCH_OPERATIONS = [{ op: 'add_node', path: '/nodes/fac_1', value: { id: 'fac_1', kind: 'factor', label: 'Cost' } }];
 
   // A pending patch in context.messages is required by the cf-v11.1 guard
   const PENDING_PATCH_MSG = {

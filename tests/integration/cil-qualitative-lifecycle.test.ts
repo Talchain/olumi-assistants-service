@@ -111,7 +111,7 @@ describe("CIL Step 12: Qualitative Lifecycle", () => {
       if (enrich) {
         expect(enrich.called_count).toBe(1);
         expect(typeof enrich.extraction_mode).toBe("string");
-        expect(enrich.source).toBe("pipeline_b");
+        expect(enrich.source).toBe("unified_pipeline");
       }
     });
   });

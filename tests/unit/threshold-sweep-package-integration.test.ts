@@ -178,6 +178,7 @@ function makeCtx() {
     constraintStrpResult: undefined,
     riskCoefficientCorrections: [],
     transforms: [],
+    nodeRenames: new Map(),
     enrichmentTrace: undefined,
     collector: { hasCorrections: vi.fn().mockReturnValue(false), getCorrections: vi.fn(), getSummary: vi.fn() },
     pipelineCheckpoints: [],

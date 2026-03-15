@@ -166,6 +166,7 @@ function makeCtx(graphOverride?: any, coachingOverride?: any): any {
     strpResult: undefined,
     constraintStrpResult: undefined,
     riskCoefficientCorrections: [],
+    nodeRenames: new Map(),
     transforms: [],
     enrichmentTrace: undefined,
     repairTrace: undefined,

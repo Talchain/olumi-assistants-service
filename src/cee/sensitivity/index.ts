@@ -43,13 +43,9 @@ export function buildSensitivitySuggestions(
     const suggestion: CEESensitivitySuggestionV1 = {
       driver_id: driver.node_id,
       rank: index + 1,
-    } as CEESensitivitySuggestionV1;
-
-    if (driver.contribution > 0) {
-      (suggestion as any).direction = "increase";
-    } else if (driver.contribution < 0) {
-      (suggestion as any).direction = "decrease";
-    }
+      ...(driver.contribution > 0 ? { direction: "increase" as const } :
+          driver.contribution < 0 ? { direction: "decrease" as const } : {}),
+    };
 
     // target_id is intentionally omitted in v1 (reserved for future structure-aware heuristics)
 

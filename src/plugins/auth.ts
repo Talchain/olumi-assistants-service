@@ -18,6 +18,7 @@ import { tryConsumeToken } from "../utils/quota.js";
 import { verifyHmacSignature } from "../utils/hmac-auth.js";
 import { attachCallerContext, getCallerContext, type CallerContext } from "../context/index.js";
 import { config } from "../config/index.js";
+import { safeEqual } from "../utils/hash.js";
 
 /**
  * Get valid API keys from centralized config
@@ -199,8 +200,15 @@ async function authPluginImpl(fastify: FastifyInstance) {
         });
       }
 
-      // Validate API key
-      if (!validKeys.has(extractedKey)) {
+      // Validate API key (constant-time comparison to prevent timing attacks)
+      let keyMatched = false;
+      for (const validKey of validKeys) {
+        if (safeEqual(extractedKey, validKey)) {
+          keyMatched = true;
+          break;
+        }
+      }
+      if (!keyMatched) {
         emit(TelemetryEvents.AuthFailed, {
           reason: "invalid_key",
           path: request.url,
@@ -308,7 +316,16 @@ async function authPluginImpl(fastify: FastifyInstance) {
 
       // Fall through to API key auth if available
       const extractedKey = extractApiKey(request);
-      if (!extractedKey || !validKeys.has(extractedKey)) {
+      let fallbackKeyMatched = false;
+      if (extractedKey) {
+        for (const validKey of validKeys) {
+          if (safeEqual(extractedKey, validKey)) {
+            fallbackKeyMatched = true;
+            break;
+          }
+        }
+      }
+      if (!extractedKey || !fallbackKeyMatched) {
         emit(TelemetryEvents.AuthFailed, {
           reason: extractedKey ? "invalid_key" : "missing_header",
           path: request.url,

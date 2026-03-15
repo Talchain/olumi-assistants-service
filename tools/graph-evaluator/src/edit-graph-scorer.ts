@@ -234,6 +234,66 @@ function checkTopologyCompliance(
 }
 
 // =============================================================================
+// Functional equivalence for operation types
+// =============================================================================
+
+/**
+ * Derives implied operation types from actual operations.
+ * - remove_edge + add_edge on the same entity → implies update_edge
+ * - remove_node + add_node on the same entity → implies update_node
+ */
+function deriveEquivalentTypes(ops: EditOperation[]): Set<string> {
+  const actual = new Set(ops.map((o) => o.op_type).filter(Boolean));
+
+  // Check for remove_edge + add_edge pairs targeting same edge path
+  if (actual.has("remove_edge") && actual.has("add_edge")) {
+    const removedPaths = new Set(
+      ops
+        .filter((o) => o.op_type === "remove_edge" && o.path)
+        .map((o) => o.path!)
+    );
+    const addedEdges = ops.filter(
+      (o) => o.op_type === "add_edge" && o.value
+    );
+    for (const addOp of addedEdges) {
+      const v = addOp.value as Record<string, unknown>;
+      if (typeof v.from === "string" && typeof v.to === "string") {
+        const impliedPath = `/edges/${v.from}->${v.to}`;
+        if (removedPaths.has(impliedPath)) {
+          actual.add("update_edge");
+          break;
+        }
+      }
+    }
+  }
+
+  // Check for remove_node + add_node pairs targeting same node path
+  if (actual.has("remove_node") && actual.has("add_node")) {
+    const removedIds = new Set(
+      ops
+        .filter((o) => o.op_type === "remove_node" && o.path)
+        .map((o) => {
+          const m = o.path!.match(/^\/nodes\/(.+)$/);
+          return m ? m[1] : null;
+        })
+        .filter(Boolean)
+    );
+    const addedNodes = ops.filter(
+      (o) => o.op_type === "add_node" && o.value
+    );
+    for (const addOp of addedNodes) {
+      const v = addOp.value as Record<string, unknown>;
+      if (typeof v.id === "string" && removedIds.has(v.id as string)) {
+        actual.add("update_node");
+        break;
+      }
+    }
+  }
+
+  return actual;
+}
+
+// =============================================================================
 // Main scoring function
 // =============================================================================
 
@@ -271,10 +331,10 @@ export function scoreEditGraph(
   const ops = response.operations ?? [];
   const warnings = response.warnings ?? [];
 
-  // 3. operation_types_correct
+  // 3. operation_types_correct (with functional equivalence)
   let operation_types_correct = false;
   if (fixture.expected.has_operations) {
-    const actualTypes = new Set(ops.map((o) => o.op_type).filter(Boolean));
+    const actualTypes = deriveEquivalentTypes(ops);
     const expectedPresent = (fixture.expected.expected_op_types ?? []).every(
       (t) => actualTypes.has(t)
     );

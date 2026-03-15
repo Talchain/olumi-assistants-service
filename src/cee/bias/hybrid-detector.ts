@@ -15,8 +15,6 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { BIAS_DEFINITIONS, applyBiasDefinition } from "./library.js";
-import { config } from "../../config/index.js";
-import { logger } from "../../utils/simple-logger.js";
 
 type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 
@@ -512,81 +510,6 @@ export function detectIllusionOfControlEnhanced(
 }
 
 // ============================================================================
-// LLM Fallback Detection
-// ============================================================================
-
-const _LLM_BIAS_DETECTION_PROMPT = `You are a cognitive bias expert analyzing a decision model.
-
-Analyze the following decision graph for subtle cognitive biases that rule-based detection might miss.
-
-Focus on:
-1. Hidden anchoring effects (not just first option, but any reference point bias)
-2. Subtle confirmation bias (asymmetric evidence quality, not just presence/absence)
-3. Framing effects (how options/outcomes are worded)
-4. Availability bias (over-reliance on recent or memorable examples)
-5. Authority bias (undue weight to certain sources)
-
-Graph structure:
-{{GRAPH_JSON}}
-
-{{BRIEF_SECTION}}
-
-Existing rule-based findings (already detected):
-{{EXISTING_FINDINGS}}
-
-Return a JSON array of additional bias findings NOT already covered by existing findings.
-Each finding should have:
-- bias_type: string (e.g., "ANCHORING", "CONFIRMATION_BIAS", "FRAMING_EFFECT")
-- severity: "low" | "medium" | "high"
-- explanation: string (2-3 sentences, plain language)
-- affected_nodes: string[] (node IDs)
-- confidence: number (0-1)
-
-Only return findings with confidence >= 0.6. If no additional biases detected, return an empty array.
-
-Return ONLY valid JSON array, no other text.`;
-
-interface _LlmBiasFinding {
-  bias_type: string;
-  severity: "low" | "medium" | "high";
-  explanation: string;
-  affected_nodes: string[];
-  confidence: number;
-}
-
-/**
- * Use LLM for nuanced bias detection when rules don't catch everything.
- *
- * Note: This is a placeholder for future LLM-based detection.
- * The LLMAdapter interface currently uses task-specific methods.
- * When enabled, this logs that LLM detection would be invoked.
- */
-async function detectBiasesWithLlm(
-  graph: GraphV1,
-  brief: string | undefined,
-  existingFindings: CEEBiasFindingV1[],
-): Promise<CEEBiasFindingV1[]> {
-  if (!config.cee.biasLlmDetectionEnabled) {
-    return [];
-  }
-
-  // Log that LLM detection is enabled
-  logger.info({
-    event: "cee.bias.llm_detection_enabled",
-    msg: "LLM bias detection enabled - prompt template ready for future integration",
-    existing_finding_count: existingFindings.length,
-    node_count: Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0,
-    edge_count: Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0,
-    has_brief: !!brief,
-  });
-
-  // Future: Implement LLM-based detection when raw completion is available
-  // The prompt template (LLM_BIAS_DETECTION_PROMPT) is defined above
-
-  return [];
-}
-
-// ============================================================================
 // Main Hybrid Detection Function
 // ============================================================================
 
@@ -616,23 +539,11 @@ export async function detectBiasesHybrid(
   const illusionFinding = detectIllusionOfControlEnhanced(graph);
   if (illusionFinding) ruleBasedFindings.push(illusionFinding);
 
-  // Run LLM detection if enabled
-  let llmFindings: CEEBiasFindingV1[] = [];
-  let llmUsed = false;
-
-  if (config.cee.biasLlmDetectionEnabled) {
-    llmFindings = await detectBiasesWithLlm(graph, brief, ruleBasedFindings);
-    llmUsed = true;
-  }
-
-  // Combine findings
-  const allFindings = [...ruleBasedFindings, ...llmFindings];
-
   return {
-    findings: allFindings,
-    llm_used: llmUsed,
+    findings: ruleBasedFindings,
+    llm_used: false,
     rule_based_count: ruleBasedFindings.length,
-    llm_detected_count: llmFindings.length,
+    llm_detected_count: 0,
   };
 }
 

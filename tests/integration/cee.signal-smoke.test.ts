@@ -34,6 +34,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectZeroExternalFactors: () => ({ detected: false, factorCount: 0, externalCount: 0 }),
   checkGoalConnectivity: () => ({ status: "full", disconnectedOptions: [], weakPaths: [] }),
   computeModelQualityFactors: () => ({ estimate_confidence: 0.5, strength_variation: 0, range_confidence_coverage: 0, has_baseline_option: false }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph, valid: true,

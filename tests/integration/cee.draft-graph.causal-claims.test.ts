@@ -44,7 +44,7 @@ const TEST_GRAPH = {
     { from: "fac_2", to: "out_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.8, effect_direction: "positive" },
     { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.15, belief_exists: 0.95, effect_direction: "positive" },
   ],
-  meta: { roots: ["dec_1"], leaves: ["goal_1"], suggested_positions: {}, source: "fixtures" },
+  meta: { roots: ["dec_1"], leaves: ["goal_1"], suggested_positions: {}, source: "assistant" },
 };
 
 const DEFAULT_META = {
@@ -79,6 +79,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectZeroExternalFactors: () => ({ detected: false, factorCount: 0, externalCount: 0 }),
   checkGoalConnectivity: () => ({ status: "full", disconnectedOptions: [], weakPaths: [] }),
   computeModelQualityFactors: () => ({ estimate_confidence: 0.5, strength_variation: 0, range_confidence_coverage: 0, has_baseline_option: false }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph, valid: true,

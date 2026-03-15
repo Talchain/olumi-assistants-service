@@ -25,6 +25,7 @@ import { getRedis } from "../platform/redis.js";
 import { log, emit } from "./telemetry.js";
 import { fastHash } from "./hash.js";
 import { config } from "../config/index.js";
+import { LruTtlCache } from "./cache.js";
 
 /**
  * Telemetry events for Redis fallback monitoring
@@ -118,8 +119,15 @@ export interface KeyQuota {
   lastUsed: number;
 }
 
-// In-memory fallback storage
-const memoryQuotas = new Map<string, KeyQuota>();
+// In-memory fallback storage (bounded LRU, 10 000 keys, 1 hour TTL)
+const QUOTA_STORE_CAPACITY = Number(process.env.CEE_QUOTA_STORE_CAPACITY) || 10_000;
+const QUOTA_STORE_TTL_MS = Number(process.env.CEE_QUOTA_STORE_TTL_MS) || 60 * 60_000; // 1 hour
+const memoryQuotas = new LruTtlCache<string, KeyQuota>(QUOTA_STORE_CAPACITY, QUOTA_STORE_TTL_MS, (_key, _value, reason) => {
+  log.warn({ event: 'cache_eviction', store: 'quota', reason }, 'Quota store entry evicted');
+});
+
+// Reverse lookup: keyId → apiKey (for snapshot queries that search by keyId)
+const keyIdToApiKey = new Map<string, string>();
 
 /**
  * Get Redis key for bucket state
@@ -218,18 +226,21 @@ export async function getKeyQuota(apiKey: string): Promise<KeyQuota> {
  * Get quota from in-memory storage
  */
 function getKeyQuotaFromMemory(apiKey: string, keyId: string): KeyQuota {
-  if (!memoryQuotas.has(apiKey)) {
+  let quota = memoryQuotas.get(apiKey);
+
+  if (!quota) {
     const limits = getRateLimits();
-    memoryQuotas.set(apiKey, {
+    quota = {
       keyId,
       bucket: createTokenBucket(limits.defaultRpm),
       sseBucket: createTokenBucket(limits.sseRpm),
       requestCount: 0,
       lastUsed: Date.now(),
-    });
+    };
+    memoryQuotas.set(apiKey, quota);
+    keyIdToApiKey.set(keyId, apiKey);
   }
 
-  const quota = memoryQuotas.get(apiKey)!;
   quota.lastUsed = Date.now();
   quota.requestCount++;
 
@@ -304,34 +315,35 @@ export async function getQuotaSnapshotByKeyId(
   }
 
   // Memory view (either backend=memory or Redis unavailable).
-  // We key in-memory quotas by raw API key but each KeyQuota carries a hashed
-  // keyId, so we can locate the bucket by scanning for the matching keyId.
-  for (const quota of memoryQuotas.values()) {
-    if (quota.keyId !== keyId) continue;
+  // Use reverse lookup to find the API key for this keyId.
+  const apiKey = keyIdToApiKey.get(keyId);
+  if (apiKey) {
+    const quota = memoryQuotas.get(apiKey);
+    if (quota) {
+      const bucket = isSse ? quota.sseBucket : quota.bucket;
 
-    const bucket = isSse ? quota.sseBucket : quota.bucket;
+      // Work on a shallow copy so we don't mutate the live bucket
+      const snapshotBucket: TokenBucket = { ...bucket };
+      refillBucket(snapshotBucket);
 
-    // Work on a shallow copy so we don't mutate the live bucket
-    const snapshotBucket: TokenBucket = { ...bucket };
-    refillBucket(snapshotBucket);
+      const capacity = snapshotBucket.capacity;
+      const tokens = snapshotBucket.tokens;
+      const refillRate = snapshotBucket.refillRate;
 
-    const capacity = snapshotBucket.capacity;
-    const tokens = snapshotBucket.tokens;
-    const refillRate = snapshotBucket.refillRate;
+      let retryAfterSeconds = 0;
+      if (tokens < 1) {
+        const tokensNeeded = 1 - tokens;
+        retryAfterSeconds = Math.ceil(tokensNeeded / refillRate);
+      }
 
-    let retryAfterSeconds = 0;
-    if (tokens < 1) {
-      const tokensNeeded = 1 - tokens;
-      retryAfterSeconds = Math.ceil(tokensNeeded / refillRate);
+      return {
+        backend: "memory",
+        capacity,
+        tokens,
+        refillRate,
+        retryAfterSeconds,
+      };
     }
-
-    return {
-      backend: "memory",
-      capacity,
-      tokens,
-      refillRate,
-      retryAfterSeconds,
-    };
   }
 
   // No existing quota for this key ID yet – treat as a fresh bucket at full
@@ -486,5 +498,6 @@ export async function clearAllQuotas(): Promise<void> {
   }
 
   memoryQuotas.clear();
+  keyIdToApiKey.clear();
   log.info("Cleared all quotas from memory");
 }

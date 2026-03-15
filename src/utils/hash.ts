@@ -9,7 +9,7 @@
  * - Non-cryptographic: Fast hashing for IDs, prefixes, telemetry grouping
  */
 
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * Fast non-cryptographic hash for IDs and prefixes
@@ -97,6 +97,24 @@ export function hmacSha256Object(
 ): string {
   const json = JSON.stringify(data);
   return hmacSha256(json, secret, outputFormat);
+}
+
+/**
+ * Constant-time string comparison to prevent timing side-channel attacks.
+ *
+ * Safe to use for API key and admin key comparisons. Returns false
+ * immediately when lengths differ (length is not secret), then uses
+ * crypto.timingSafeEqual for the byte comparison.
+ *
+ * @param a - First string (e.g., user-provided key)
+ * @param b - Second string (e.g., stored secret)
+ * @returns True if strings are identical
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf-8");
+  const bufB = Buffer.from(b, "utf-8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 /**

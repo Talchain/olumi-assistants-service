@@ -34,7 +34,7 @@ vi.mock('../../src/utils/telemetry.js', () => ({
 // Imports (after mocks)
 // ============================================================================
 
-import { checkRateLimit, _store, _resetStore, createOrchestratorRateLimitHook } from '../../src/middleware/rate-limit.js';
+import { checkRateLimit, _store, _resetStore, _resetConsecutiveErrors, _getConsecutiveErrors, createOrchestratorRateLimitHook } from '../../src/middleware/rate-limit.js';
 import { extractJwtSub, extractClientIp, resolveUserKey } from '../../src/utils/jwt-extract.js';
 
 // ============================================================================
@@ -44,7 +44,9 @@ import { extractJwtSub, extractClientIp, resolveUserKey } from '../../src/utils/
 describe('orchestrator rate limiting', () => {
   beforeEach(() => {
     _resetStore();
+    _resetConsecutiveErrors();
     mockLog.warn.mockClear();
+    mockLog.error.mockClear();
   });
 
   describe('extractJwtSub', () => {
@@ -203,7 +205,7 @@ describe('orchestrator rate limiting', () => {
       expect(reply.header).toHaveBeenCalledWith('Retry-After', expect.any(Number));
     });
 
-    it('fails open on error and logs structured warning', async () => {
+    it('fails open on first error and logs structured warning', async () => {
       const hook = createOrchestratorRateLimitHook();
       // Trigger an error by passing a request with a getter that throws
       const req = {
@@ -223,11 +225,76 @@ describe('orchestrator rate limiting', () => {
       await hook(req, reply);
 
       expect(mockLog.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ event: 'rate_limit_error' }),
+        expect.objectContaining({ event: 'rate_limit_error', consecutive_errors: 1 }),
         expect.any(String),
       );
-      // Request should be allowed through (no 429)
-      expect(reply.code).not.toHaveBeenCalledWith(429);
+      // Request should be allowed through (no 429/503)
+      expect(reply.code).not.toHaveBeenCalled();
+      expect(_getConsecutiveErrors()).toBe(1);
+    });
+
+    it('fails closed after 3 consecutive errors (returns 503)', async () => {
+      const hook = createOrchestratorRateLimitHook();
+      const makeErrorReq = () => ({
+        headers: { get authorization() { throw new Error('boom'); } },
+        get ip() { throw new Error('boom'); },
+        id: 'test-req',
+        requestId: 'test-req',
+        url: '/orchestrate/v1/turn',
+      } as any);
+      const makeReply = () => ({
+        header: vi.fn(),
+        code: vi.fn().mockReturnThis(),
+        send: vi.fn(),
+      } as any);
+
+      // First 2 errors: fail open
+      await hook(makeErrorReq(), makeReply());
+      await hook(makeErrorReq(), makeReply());
+      expect(_getConsecutiveErrors()).toBe(2);
+
+      // 3rd error: fail closed
+      const reply3 = makeReply();
+      await hook(makeErrorReq(), reply3);
+
+      expect(reply3.code).toHaveBeenCalledWith(503);
+      const body = reply3.send.mock.calls[0][0];
+      expect(body.schema).toBe('cee.error.v1');
+      expect(body.code).toBe('CEE_RATE_LIMIT_UNAVAILABLE');
+      expect(body.retryable).toBe(true);
+      expect(_getConsecutiveErrors()).toBe(3);
+    });
+
+    it('resets consecutive error counter on success', async () => {
+      const hook = createOrchestratorRateLimitHook();
+      const makeErrorReq = () => ({
+        headers: { get authorization() { throw new Error('boom'); } },
+        get ip() { throw new Error('boom'); },
+        id: 'test-req',
+        requestId: 'test-req',
+        url: '/orchestrate/v1/turn',
+      } as any);
+      const makeReply = () => ({
+        header: vi.fn(),
+        code: vi.fn().mockReturnThis(),
+        send: vi.fn(),
+      } as any);
+
+      // 2 errors
+      await hook(makeErrorReq(), makeReply());
+      await hook(makeErrorReq(), makeReply());
+      expect(_getConsecutiveErrors()).toBe(2);
+
+      // Successful request resets counter
+      const goodReq = {
+        headers: {},
+        ip: '1.2.3.4',
+        id: 'test-req',
+        requestId: 'test-req',
+        url: '/orchestrate/v1/turn',
+      } as any;
+      await hook(goodReq, makeReply());
+      expect(_getConsecutiveErrors()).toBe(0);
     });
   });
 });

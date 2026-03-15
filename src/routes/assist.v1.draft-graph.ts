@@ -1,8 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { DraftGraphInput, type DraftGraphInputT } from "../schemas/assist.js";
 import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
-import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -10,17 +10,13 @@ import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config, isProduction } from "../config/index.js";
+import { safeEqual } from "../utils/hash.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
 import {
   parseSchemaVersion,
-  transformResponseToV2,
-  transformResponseToV3,
-  validateStrictModeV3,
 } from "../cee/transforms/index.js";
-import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../cee/transforms/analysis-ready.js";
-import { runGraphDataIntegrityChecks } from "../cee/transforms/graph-data-integrity.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 
 // ============================================================================
@@ -156,32 +152,32 @@ export default async function route(app: FastifyInstance) {
   const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
-  function isUnsafeCaptureRequested(req: any): boolean {
+  function isUnsafeCaptureRequested(req: FastifyRequest): boolean {
     const query = (req.query as Record<string, unknown>) ?? {};
     const unsafeQuery = query.unsafe;
-    const unsafeHeader = req.headers?.["x-olumi-unsafe"];
+    const unsafeHeader = req.headers["x-olumi-unsafe"];
     return unsafeQuery === "1" || unsafeQuery === "true" || unsafeHeader === "1" || unsafeHeader === "true";
   }
 
-  function isAdminAuthorized(req: any): boolean {
-    const providedKey = req.headers?.["x-admin-key"] as string | undefined;
+  function isAdminAuthorized(req: FastifyRequest): boolean {
+    const providedKey = req.headers["x-admin-key"] as string | undefined;
     if (!providedKey) return false;
     const adminKey = config.prompts?.adminApiKey;
     const adminKeyRead = config.prompts?.adminApiKeyRead;
-    return Boolean((adminKey && providedKey === adminKey) || (adminKeyRead && providedKey === adminKeyRead));
+    return Boolean((adminKey && safeEqual(providedKey, adminKey)) || (adminKeyRead && safeEqual(providedKey, adminKeyRead)));
   }
 
   app.post("/assist/v1/draft-graph", async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 
-    const rawBody = req.body as any;
+    const rawBody = req.body as Record<string, unknown> | undefined;
     const hasSeed =
-      rawBody && typeof rawBody === "object" && typeof (rawBody as any).seed === "string";
+      rawBody && typeof rawBody === "object" && typeof rawBody.seed === "string";
     const hasArchetypeHint =
       rawBody &&
       typeof rawBody === "object" &&
-      typeof (rawBody as any).archetype_hint === "string";
+      typeof rawBody.archetype_hint === "string";
 
     const keyId = getRequestKeyId(req) || undefined;
     const apiKeyPresent = Boolean(keyId);
@@ -265,16 +261,21 @@ export default async function route(app: FastifyInstance) {
     const baseInput = sanitizeDraftGraphInput(parsed.data, req.body) as DraftGraphInputT & {
       seed?: string;
       archetype_hint?: string;
+      include_debug?: boolean;
+      flags?: Record<string, unknown>;
+      raw_output?: boolean;
+      briefSignalsHeader?: string;
+      bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
     };
 
     const unsafeCaptureEnabled = isUnsafeCaptureRequested(req) && isAdminAuthorized(req);
     // Override any client-provided include_debug. Unsafe capture is admin-only.
-    (baseInput as any).include_debug = unsafeCaptureEnabled;
+    baseInput.include_debug = unsafeCaptureEnabled;
     if (unsafeCaptureEnabled) {
-      const existingFlags = typeof (baseInput as any).flags === "object" && (baseInput as any).flags !== null
-        ? ((baseInput as any).flags as Record<string, unknown>)
+      const existingFlags = typeof baseInput.flags === "object" && baseInput.flags !== null
+        ? baseInput.flags
         : undefined;
-      (baseInput as any).flags = {
+      baseInput.flags = {
         ...(existingFlags ?? {}),
         unsafe_capture: true,
       };
@@ -322,7 +323,9 @@ export default async function route(app: FastifyInstance) {
           bias_signals: decision.briefSignals.bias_signals.map((b) => b.type),
           word_count: decision.briefSignals.word_count,
           numeric_anchor_count: decision.briefSignals.numeric_anchor_count,
-          questions_shown_count: (decision.payload as any)?.clarification_questions?.length ?? 0,
+          questions_shown_count: (decision.payload as unknown as Record<string, unknown>)?.clarification_questions
+            ? ((decision.payload as unknown as Record<string, unknown>).clarification_questions as unknown[]).length
+            : 0,
           readiness_score: decision.telemetry.readiness_score,
           action: decision.action,
         });
@@ -483,251 +486,95 @@ export default async function route(app: FastifyInstance) {
     // ── Thread BriefSignals into pipeline input ────────────────────────
     if (preflightDecision?.briefSignals) {
       if (config.cee.briefSignalsHeaderEnabled) {
-        (baseInput as any).briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
+        baseInput.briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
       }
       if (preflightDecision.briefSignals.bias_signals.length > 0) {
-        (baseInput as any).bias_signals = preflightDecision.briefSignals.bias_signals;
+        baseInput.bias_signals = preflightDecision.briefSignals.bias_signals;
       }
     }
 
-    // ── Unified pipeline (CIL Phase 3B) ──────────────────────────────
-    if (config.cee.unifiedPipelineEnabled) {
-      const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
-      const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
-
-      // Client disconnect detection — mirrors legacy pipeline (pipeline.ts:641-655).
-      // IMPORTANT: Check socket.destroyed, NOT req.raw.destroyed.
-      // req.raw (IncomingMessage) is always destroyed after Fastify reads the POST body.
-      // The TCP socket remains alive until the client actually disconnects.
-      const pipelineAbortController = new AbortController();
-      const socket = req.raw?.socket;
-      let socketCloseHandler: (() => void) | undefined;
-      if (socket && !socket.destroyed) {
-        socketCloseHandler = () => pipelineAbortController.abort();
-        socket.once("close", socketCloseHandler);
-      }
-
-      // Gate raw_output: only honoured in non-production or with admin auth
-      const rawOutputRequested = (baseInput as any).raw_output === true;
-      const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(req));
-      if (rawOutputRequested && !rawOutputAllowed) {
-        log.warn({ requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
-      }
-
-      try {
-        const result = await runUnifiedPipeline(baseInput, req.body, req, {
-          schemaVersion,
-          strictMode,
-          includeDebug: unsafeCaptureEnabled,
-          rawOutput: rawOutputAllowed,
-          refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
-          forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
-          signal: pipelineAbortController.signal,
-          requestStartMs: start,
-        });
-
-        reply.header("X-CEE-API-Version", schemaVersion);
-        reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
-        reply.header("X-CEE-Request-ID", requestId);
-        if (result.headers) {
-          for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
-        }
-        reply.code(result.statusCode);
-        return reply.send(result.body);
-      } finally {
-        if (socket && socketCloseHandler) {
-          socket.removeListener("close", socketCloseHandler);
-        }
-      }
-    }
-
-    // ── Legacy pipeline (Pipeline A + B) ─────────────────────────────
-    let statusCode: number;
-    let body: unknown;
-    let headers: Record<string, string> | undefined;
-    try {
-      const result = await finaliseCeeDraftResponse(baseInput, req.body, req);
-      statusCode = result.statusCode;
-      body = result.body;
-      headers = result.headers;
-    } catch (pipelineError) {
-      // Layer 1 safety net: guarantee JSON body even if pipeline throws unexpectedly
-      log.error(
-        { error: pipelineError, request_id: requestId, event: "cee.pipeline.unhandled" },
-        "Unhandled pipeline error — returning 500 with JSON body",
-      );
-      reply.header("X-CEE-API-Version", "v1");
-      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
-      reply.header("X-CEE-Request-ID", requestId);
-      reply.code(500);
-      return reply.send(
-        buildCeeErrorResponse("CEE_INTERNAL_ERROR", "unexpected pipeline error", {
-          retryable: false,
-          requestId,
-          stage: "route_handler",
-        }),
-      );
-    }
-
-    // Guard: never send an empty body (Layer 1 body-presence guarantee)
-    if (body === undefined || body === null) {
-      log.error(
-        { request_id: requestId, original_status: statusCode, event: "cee.empty_body" },
-        "Pipeline returned empty body — synthesizing fallback error body",
-      );
-      body = buildCeeErrorResponse("CEE_INTERNAL_ERROR", "empty response body", {
-        retryable: false,
-        requestId,
-      });
-      statusCode = 500;
-    }
-
-    // Check for schema version request via query parameter
-    // Default is V3 (includes analysis_ready) - V1/V2 are deprecated
+    // ── Unified pipeline ──────────────────────────────────────────────
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
     const strictMode = (req.query as Record<string, unknown>)?.strict === "true";
 
-    // Log deprecation warning for legacy schema versions
-    if (schemaVersion === "v1" || schemaVersion === "v2") {
-      log.warn({
-        request_id: requestId,
-        schema_version: schemaVersion,
-        event: "cee.deprecated_schema_requested",
-      }, `Deprecated schema ${schemaVersion} requested - consider upgrading to V3 for analysis_ready support`);
+    // Client disconnect detection.
+    // IMPORTANT: Check socket.destroyed, NOT req.raw.destroyed.
+    // req.raw (IncomingMessage) is always destroyed after Fastify reads the POST body.
+    // The TCP socket remains alive until the client actually disconnects.
+    const pipelineAbortController = new AbortController();
+    const socket = req.raw?.socket;
+    let socketCloseHandler: (() => void) | undefined;
+    if (socket && !socket.destroyed) {
+      socketCloseHandler = () => pipelineAbortController.abort();
+      socket.once("close", socketCloseHandler);
     }
 
-    reply.header("X-CEE-API-Version", schemaVersion);
-    reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
-    reply.header("X-CEE-Request-ID", requestId);
+    // Gate raw_output: only honoured in non-production or with admin auth
+    const rawOutputRequested = baseInput.raw_output === true;
+    const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(req));
+    if (rawOutputRequested && !rawOutputAllowed) {
+      log.warn({ requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
+    }
 
-    if (headers) {
-      for (const [key, value] of Object.entries(headers)) {
-        reply.header(key, value);
+    try {
+      const result = await runUnifiedPipeline(baseInput, req.body, req, {
+        schemaVersion,
+        strictMode,
+        includeDebug: unsafeCaptureEnabled,
+        rawOutput: rawOutputAllowed,
+        refreshPrompts: (req.query as Record<string, unknown>)?.supa === "1",
+        forceDefault: (req.query as Record<string, unknown>)?.forceDefault === "1",
+        signal: pipelineAbortController.signal,
+        requestStartMs: start,
+      });
+
+      reply.header("X-CEE-API-Version", schemaVersion);
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      if (result.headers) {
+        for (const [k, v] of Object.entries(result.headers)) reply.header(k, v);
       }
-    }
 
-    reply.code(statusCode);
-
-    // Log response delivery attempt for debugging premature close issues
-    log.info({
-      request_id: requestId,
-      returned_response: true,
-      status_code: statusCode,
-      latency_ms: Date.now() - start,
-      is_error: statusCode >= 400,
-      schema_version: schemaVersion,
-    }, "Draft-graph response ready for delivery");
-
-    // Transform to requested schema if response is successful
-    if (statusCode === 200 && body && typeof body === "object" && "graph" in body) {
-      if (schemaVersion === "v3") {
-        // DEBUG: Log V1 trace.pipeline before transform
-        const v1Trace = (body as any).trace;
-        log.info({
+      // Emit succeeded/failed telemetry for observability (previously in Pipeline B finaliser)
+      if (result.statusCode === 200) {
+        const body = result.body as Record<string, unknown>;
+        const graph = body.graph as Record<string, unknown> | undefined;
+        const trace = body.trace as Record<string, unknown> | undefined;
+        const quality = trace?.quality as Record<string, unknown> | undefined;
+        const llmQuality = trace?.llm_quality as Record<string, unknown> | undefined;
+        const graphNodes = graph?.nodes;
+        const graphEdges = graph?.edges;
+        emit(TelemetryEvents.CeeDraftGraphSucceeded, {
           request_id: requestId,
-          v1_trace_keys: v1Trace ? Object.keys(v1Trace) : [],
-          v1_has_pipeline: !!(v1Trace?.pipeline),
-          v1_pipeline_status: v1Trace?.pipeline?.status,
-          event: "cee.pipeline.debug.v1",
-        }, `[DEBUG] V1 trace before V3 transform`);
-
-        const v3Body = transformResponseToV3(body as any, {
-          brief: baseInput.brief,
-          requestId,
-          strictMode,
-          // CIL 0.2: simplified; include_debug already equals unsafeCaptureEnabled
-          includeDebug: unsafeCaptureEnabled,
+          latency_ms: Date.now() - start,
+          quality_overall: typeof quality?.overall === "number" ? quality.overall : 0,
+          graph_nodes: Array.isArray(graphNodes) ? graphNodes.length : 0,
+          graph_edges: Array.isArray(graphEdges) ? graphEdges.length : 0,
+          has_validation_issues: Array.isArray(body.validation_issues) && body.validation_issues.length > 0,
+          any_truncated: Boolean(trace?.any_truncated),
+          draft_warning_count: typeof trace?.draft_warning_count === "number" ? trace.draft_warning_count : 0,
+          uncertain_node_count: typeof trace?.uncertain_node_count === "number" ? trace.uncertain_node_count : 0,
+          simplification_applied: Boolean(trace?.simplification_applied),
+          cost_usd: typeof llmQuality?.cost_usd === "number" ? llmQuality.cost_usd : 0,
+          engine_provider: typeof llmQuality?.provider === "string" ? llmQuality.provider : "unknown",
+          engine_model: typeof llmQuality?.model === "string" ? llmQuality.model : "unknown",
         });
-
-        // Graph data integrity checks (legacy pipeline path — mirrors unified boundary)
-        runGraphDataIntegrityChecks(v3Body, requestId);
-
-        // Task 2C: Surface STRP/repair mutations as model_adjustments on analysis_ready
-        const strpMutations = v1Trace?.strp?.mutations;
-        const graphCorrections = v1Trace?.corrections;
-        if (v3Body.analysis_ready && (strpMutations?.length || graphCorrections?.length)) {
-          // Task 10A: Build node label lookup for adjustment enrichment
-          // V3 responses have nodes at root level (not nested under .graph)
-          const nodeLabels = new Map<string, string>();
-          const graphNodes = (v3Body as any)?.nodes;
-          if (Array.isArray(graphNodes)) {
-            for (const node of graphNodes) {
-              if (node?.id && node?.label) {
-                nodeLabels.set(node.id, node.label);
-              }
-            }
-          }
-          const adjustments = mapMutationsToAdjustments(strpMutations, graphCorrections, nodeLabels);
-          if (adjustments.length > 0) {
-            v3Body.analysis_ready.model_adjustments = adjustments;
-          }
-        }
-
-        // Surface STRP constraint drops as blockers on analysis_ready
-        if (v3Body.analysis_ready && strpMutations?.length) {
-          const constraintBlockers = extractConstraintDropBlockers(strpMutations);
-          if (constraintBlockers.length > 0) {
-            if (!v3Body.analysis_ready.blockers) v3Body.analysis_ready.blockers = [];
-            v3Body.analysis_ready.blockers.push(...constraintBlockers);
-          }
-        }
-
-        // DEBUG: Log V3 trace.pipeline after transform
-        log.info({
+      } else if (result.statusCode >= 400) {
+        const body = result.body as Record<string, unknown>;
+        emit(TelemetryEvents.CeeDraftGraphFailed, {
           request_id: requestId,
-          v3_trace_keys: v3Body.trace ? Object.keys(v3Body.trace) : [],
-          v3_has_pipeline: !!(v3Body.trace?.pipeline),
-          v3_pipeline_status: (v3Body.trace as any)?.pipeline?.status,
-          event: "cee.pipeline.debug.v3",
-        }, `[DEBUG] V3 trace after transform`);
-
-        // Validate in strict mode
-        if (strictMode) {
-          try {
-            validateStrictModeV3(v3Body);
-          } catch (err) {
-            log.warn({
-              request_id: requestId,
-              error: (err as Error).message,
-            }, "V3 strict mode validation failed");
-            // F12: Align with unified pipeline — return 200 with analysis_ready.status: "blocked"
-            // instead of 422 error envelope, so consumers have a single contract.
-            const blockedResponse: any = {
-              ...v3Body,
-              graph: null,
-              nodes: [],
-              edges: [],
-              analysis_ready: {
-                options: [],
-                goal_node_id: (v3Body as any)?.goal_node_id || "",
-                status: "blocked",
-                blockers: [
-                  {
-                    code: "strict_mode_validation_failure",
-                    severity: "error",
-                    message: (err as Error).message,
-                    details: {
-                      validation_warnings: v3Body.validation_warnings,
-                    },
-                  },
-                ],
-              },
-            };
-            return reply.send(blockedResponse);
-          }
-        }
-
-        log.debug({ request_id: requestId, schema_version: "v3" }, "Transformed response to v3 schema");
-        return reply.send(v3Body);
+          latency_ms: Date.now() - start,
+          error_code: typeof body.code === "string" ? body.code : "UNKNOWN",
+          http_status: result.statusCode,
+        });
       }
 
-      if (schemaVersion === "v2") {
-        const v2Body = transformResponseToV2(body as any);
-        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed response to v2 schema");
-        return reply.send(v2Body);
+      reply.code(result.statusCode);
+      return reply.send(result.body);
+    } finally {
+      if (socket && socketCloseHandler) {
+        socket.removeListener("close", socketCloseHandler);
       }
     }
-
-    return reply.send(body);
   });
 }

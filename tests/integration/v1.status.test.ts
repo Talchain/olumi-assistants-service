@@ -70,11 +70,12 @@ describe("GET /v1/status", () => {
     expect(body).toHaveProperty("llm");
     expect(body.llm).toHaveProperty("provider", "fixtures");
     expect(body.llm).toHaveProperty("model");
-    expect(body.llm).toHaveProperty("cache_enabled", true);
+    // Fixtures adapter does not support caching — cache_enabled is false regardless of env
+    expect(body.llm).toHaveProperty("cache_enabled", false);
     expect(body.llm).toHaveProperty("failover_enabled", false);
   });
 
-  it("should expose cache statistics when caching is enabled", async () => {
+  it("should not expose cache_stats for fixtures adapter (no caching support)", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/v1/status",
@@ -82,11 +83,8 @@ describe("GET /v1/status", () => {
 
     const body = JSON.parse(response.body);
 
-    expect(body.llm).toHaveProperty("cache_stats");
-    expect(body.llm.cache_stats).toHaveProperty("size");
-    expect(body.llm.cache_stats).toHaveProperty("capacity", 100);
-    expect(body.llm.cache_stats).toHaveProperty("ttlMs", 60000); // Note: camelCase from cache
-    expect(body.llm.cache_stats).toHaveProperty("enabled", true);
+    // Fixtures adapter has no stats() method, so cache_stats is undefined
+    expect(body.llm.cache_stats).toBeUndefined();
   });
 
   it("should expose share storage statistics", async () => {

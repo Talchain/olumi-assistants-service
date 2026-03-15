@@ -185,6 +185,7 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     strpResult: undefined,
     constraintStrpResult: undefined,
     riskCoefficientCorrections: [],
+    nodeRenames: new Map(),
     transforms: [],
     enrichmentTrace: undefined,
     repairTrace: undefined,

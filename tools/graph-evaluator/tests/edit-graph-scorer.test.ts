@@ -230,4 +230,74 @@ describe("edit-graph-scorer", () => {
     expect(result.valid_json).toBe(false);
     expect(result.overall).toBe(0);
   });
+
+  it("recognises remove_edge + add_edge as functional equivalent of update_edge", () => {
+    const fixture = makeFixture({
+      expected: {
+        has_operations: true,
+        expected_op_types: ["update_edge"],
+        topology_must_hold: true,
+        expect_rerun: true,
+      },
+    });
+
+    // Model uses remove_edge + add_edge on same path instead of update_edge
+    const parsed = {
+      operations: [
+        {
+          op_type: "remove_edge",
+          path: "/edges/fac_ctrl->out1",
+          impact: "Remove old edge",
+          rationale: "Replacing with stronger edge",
+        },
+        {
+          op_type: "add_edge",
+          path: "/edges/fac_ctrl->out1",
+          value: { from: "fac_ctrl", to: "out1", strength: { mean: 0.9, std: 0.05 }, exists_probability: 0.95, effect_direction: "positive" },
+          impact: "Strengthened edge",
+          rationale: "User requested stronger relationship",
+        },
+      ],
+      warnings: [],
+      coaching: { summary: "Strengthened the edge.", rerun_recommended: true },
+    };
+
+    const result = scoreEditGraph(fixture, parsed as Record<string, unknown>);
+    expect(result.operation_types_correct).toBe(true);
+  });
+
+  it("recognises remove_node + add_node as functional equivalent of update_node", () => {
+    const fixture = makeFixture({
+      expected: {
+        has_operations: true,
+        expected_op_types: ["update_node"],
+        topology_must_hold: true,
+        expect_rerun: false,
+      },
+    });
+
+    // Model uses remove_node + add_node on same id instead of update_node
+    const parsed = {
+      operations: [
+        {
+          op_type: "remove_node",
+          path: "/nodes/fac_ctrl",
+          impact: "Remove old node",
+          rationale: "Replacing with renamed node",
+        },
+        {
+          op_type: "add_node",
+          path: "/nodes/fac_ctrl",
+          value: { id: "fac_ctrl", kind: "factor", label: "Market Competition", category: "controllable" },
+          impact: "Renamed node",
+          rationale: "User requested rename",
+        },
+      ],
+      warnings: [],
+      coaching: { summary: "Renamed the factor.", rerun_recommended: false },
+    };
+
+    const result = scoreEditGraph(fixture, parsed as Record<string, unknown>);
+    expect(result.operation_types_correct).toBe(true);
+  });
 });

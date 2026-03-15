@@ -1,8 +1,8 @@
 /**
- * /healthz ISL Integration Tests
+ * /healthz/detail ISL Integration Tests
  *
- * Verifies that the real server's /healthz endpoint exposes the ISL section
- * correctly, using the centralized ISL config (getISLConfig).
+ * Verifies that the server's /healthz/detail endpoint (admin-auth) exposes the
+ * ISL section correctly, using the centralized ISL config (getISLConfig).
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -10,11 +10,14 @@ import type { FastifyInstance } from 'fastify';
 
 // Use fixtures provider so no real LLM keys are required
 vi.stubEnv('LLM_PROVIDER', 'fixtures');
+// Set an admin key so tests can authenticate to /healthz/detail
+const TEST_ADMIN_KEY = 'test-admin-key-healthz';
+vi.stubEnv('ADMIN_API_KEY', TEST_ADMIN_KEY);
 
 import { build } from '../../src/server.js';
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
-describe('GET /healthz (ISL integration)', () => {
+describe('GET /healthz/detail (ISL integration)', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -42,7 +45,8 @@ describe('GET /healthz (ISL integration)', () => {
   it('reports ISL disabled and defaults when not configured', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/healthz',
+      url: '/healthz/detail',
+      headers: { 'x-admin-key': TEST_ADMIN_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -76,7 +80,8 @@ describe('GET /healthz (ISL integration)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/healthz',
+      url: '/healthz/detail',
+      headers: { 'x-admin-key': TEST_ADMIN_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -99,7 +104,7 @@ describe('GET /healthz (ISL integration)', () => {
     });
   });
 
-  it('applies clamping/defaults for invalid timeout and retries and exposes them in /healthz', async () => {
+  it('applies clamping/defaults for invalid timeout and retries and exposes them in /healthz/detail', async () => {
     process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
     process.env.ISL_BASE_URL = 'http://localhost:9999';
     process.env.ISL_TIMEOUT_MS = '999999'; // too large -> clamp to 30000
@@ -107,7 +112,8 @@ describe('GET /healthz (ISL integration)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/healthz',
+      url: '/healthz/detail',
+      headers: { 'x-admin-key': TEST_ADMIN_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -126,5 +132,24 @@ describe('GET /healthz (ISL integration)', () => {
       timeout: 'clamped',     // Value was clamped from 999999 to 30000
       max_retries: 'default', // Invalid -5 fell back to default 1
     });
+  });
+
+  it('returns 401 without admin key', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/healthz/detail',
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 403 with wrong admin key', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/healthz/detail',
+      headers: { 'x-admin-key': 'wrong-key' },
+    });
+
+    expect(res.statusCode).toBe(403);
   });
 });

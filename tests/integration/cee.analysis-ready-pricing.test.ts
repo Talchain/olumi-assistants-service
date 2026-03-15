@@ -67,6 +67,16 @@ vi.mock("../../src/cee/structure/index.js", () => ({
     range_confidence_coverage: 0,
     has_baseline_option: false,
   }),
+  detectOptionSimilarity: () => ({
+    detected: false,
+    critiques: [],
+    warnings: [],
+    validationIssues: [],
+  }),
+  detectMissingCounterfactual: () => ({
+    detected: false,
+    hasCounterfactual: false,
+  }),
   normaliseDecisionBranchBeliefs: (graph: unknown) => graph,
   validateAndFixGraph: (graph: unknown) => ({
     graph,

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { fastHash, hmacSha256, hmacSha256Object, verifyHmacSha256 } from "../../src/utils/hash.js";
+import { fastHash, hmacSha256, hmacSha256Object, verifyHmacSha256, safeEqual } from "../../src/utils/hash.js";
 
 describe("fastHash (non-cryptographic)", () => {
   it("should generate consistent hashes for same input", () => {
@@ -241,6 +241,48 @@ describe("verifyHmacSha256 (signature verification)", () => {
     const signature = hmacSha256("", secret);
     expect(verifyHmacSha256("", signature, secret)).toBe(true);
     expect(verifyHmacSha256("non-empty", signature, secret)).toBe(false);
+  });
+});
+
+describe("safeEqual (constant-time comparison)", () => {
+  it("should return true for identical strings", () => {
+    expect(safeEqual("api_key_123", "api_key_123")).toBe(true);
+  });
+
+  it("should return false for different strings of same length", () => {
+    expect(safeEqual("api_key_123", "api_key_456")).toBe(false);
+  });
+
+  it("should return false for different lengths", () => {
+    expect(safeEqual("short", "longer_string")).toBe(false);
+  });
+
+  it("should return false for empty vs non-empty", () => {
+    expect(safeEqual("", "something")).toBe(false);
+  });
+
+  it("should return true for two empty strings", () => {
+    expect(safeEqual("", "")).toBe(true);
+  });
+
+  it("should handle unicode correctly", () => {
+    expect(safeEqual("héllo", "héllo")).toBe(true);
+    expect(safeEqual("héllo", "hello")).toBe(false);
+  });
+
+  it("should be usable for API key comparison", () => {
+    const storedKey = "sk_live_abc123def456ghi789";
+    const correctKey = "sk_live_abc123def456ghi789";
+    const wrongKey = "sk_live_abc123def456ghi000";
+
+    expect(safeEqual(correctKey, storedKey)).toBe(true);
+    expect(safeEqual(wrongKey, storedKey)).toBe(false);
+  });
+
+  it("should be usable for admin key comparison", () => {
+    const adminKey = "admin_secret_key_12345";
+    expect(safeEqual("admin_secret_key_12345", adminKey)).toBe(true);
+    expect(safeEqual("admin_secret_key_99999", adminKey)).toBe(false);
   });
 });
 
