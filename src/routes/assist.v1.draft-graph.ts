@@ -690,15 +690,30 @@ export default async function route(app: FastifyInstance) {
               request_id: requestId,
               error: (err as Error).message,
             }, "V3 strict mode validation failed");
-            // In strict mode, return 422 with validation errors
-            reply.code(422);
-            return reply.send({
-              error: {
-                code: "CEE_V3_VALIDATION_FAILED",
-                message: (err as Error).message,
-                validation_warnings: v3Body.validation_warnings,
+            // F12: Align with unified pipeline — return 200 with analysis_ready.status: "blocked"
+            // instead of 422 error envelope, so consumers have a single contract.
+            const blockedResponse: any = {
+              ...v3Body,
+              graph: null,
+              nodes: [],
+              edges: [],
+              analysis_ready: {
+                options: [],
+                goal_node_id: (v3Body as any)?.goal_node_id || "",
+                status: "blocked",
+                blockers: [
+                  {
+                    code: "strict_mode_validation_failure",
+                    severity: "error",
+                    message: (err as Error).message,
+                    details: {
+                      validation_warnings: v3Body.validation_warnings,
+                    },
+                  },
+                ],
               },
-            });
+            };
+            return reply.send(blockedResponse);
           }
         }
 

@@ -18,7 +18,7 @@
 
 import type { ToolResponseBlock, ChatWithToolsResult } from "../adapters/llm/types.js";
 import type { SuggestedAction } from "./types.js";
-import { log } from "../utils/telemetry.js";
+import { log, emit } from "../utils/telemetry.js";
 
 // ============================================================================
 // Parsed Response Types
@@ -306,6 +306,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
   // Path 6: empty or whitespace-only input → generic fallback message
   if (!trimmed) {
     warnings.push('Empty or whitespace-only input — returning generic fallback');
+    emit("orchestrator.xml_parse_fallback", { path: "empty_input" });
     return {
       diagnostics: null,
       assistant_text: "I had trouble processing that. Could you rephrase your question?",
@@ -335,6 +336,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
     const standaloneAssistantText = extractTag(withoutDiagnostics, 'assistant_text');
     if (standaloneAssistantText !== null) {
       warnings.push('No <response> envelope but <assistant_text> found — extracting directly');
+      emit("orchestrator.xml_parse_fallback", { path: "standalone_tag" });
       return {
         diagnostics,
         assistant_text: unescapeXmlEntities(standaloneAssistantText),
@@ -346,6 +348,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
 
     // Path 5 (plain text): nothing structured — treat entire text as plain assistant_text
     warnings.push('No <response> envelope found — treating as plain text');
+    emit("orchestrator.xml_parse_fallback", { path: "plain_text" });
     return {
       diagnostics,
       assistant_text: unescapeXmlEntities(withoutDiagnostics),

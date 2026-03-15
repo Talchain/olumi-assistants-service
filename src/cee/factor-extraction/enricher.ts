@@ -432,6 +432,7 @@ export function enrichGraphWithFactors(
         strength_std: 0.2,
         effect_direction: "positive",
         origin: "enrichment",
+        defaulted: true,
         provenance: {
           source: "hypothesis",
           quote: `Extracted from brief: "${factor.matchedText}"`,
@@ -841,6 +842,7 @@ export async function enrichGraphWithFactorsAsync(
           strength_std: 0.2,
           effect_direction: "positive",
           origin: "enrichment",
+          defaulted: true,
           provenance: {
             source: "hypothesis",
             quote: `Extracted from brief: "${factor.matchedText}"`,

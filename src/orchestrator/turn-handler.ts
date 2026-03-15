@@ -72,7 +72,7 @@ import type {
 } from "./context-fabric/types.js";
 import { getSystemPrompt } from "../adapters/llm/prompt-loader.js";
 import { assembleFullPrompt } from "./prompt-zones/assemble.js";
-import { validateAssembly } from "./prompt-zones/validate.js";
+import { validateAssembly, PromptValidationError } from "./prompt-zones/validate.js";
 import { ZONE2_BLOCKS } from "./prompt-zones/zone2-blocks.js";
 import type { TurnContext } from "./prompt-zones/zone2-blocks.js";
 import { compactGraph } from "./context/graph-compact.js";
@@ -537,7 +537,8 @@ async function dispatchViaLLM(
       const turnContext = buildTurnContext(turnRequest, bilEnabled, bilContextStr, bil, currentStage);
       const zone1 = await getSystemPrompt('orchestrator');
       const assembled = assembleFullPrompt(zone1, 'cf-v13', turnContext, ZONE2_BLOCKS);
-      const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length);
+      const strictPromptValidation = config.features.strictPromptValidation;
+      const warnings = validateAssembly(assembled, ZONE2_BLOCKS, zone1.length, strictPromptValidation);
       if (warnings.length > 0) {
         log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings');
       }
@@ -554,6 +555,8 @@ async function dispatchViaLLM(
       );
       zone2SystemPrompt = assembled.system_prompt;
     } catch (err) {
+      // Re-throw PromptValidationError so strict mode violations are not silently swallowed
+      if (err instanceof PromptValidationError) throw err;
       log.warn(
         { request_id: requestId, error: err instanceof Error ? err.message : String(err) },
         'Zone 2 registry assembly failed, falling back',

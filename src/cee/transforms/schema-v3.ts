@@ -393,6 +393,8 @@ export function transformEdgeToV3(
       origin: edge.origin ?? "ai",
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
+      // F5: Preserve enrichment defaulted flag through V3 transform
+      ...((edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
     },
     defaults,
   };
@@ -708,7 +710,11 @@ export function transformResponseToV3(
     edges: v3Graph.edges,
     options: v3Options,
     goal_node_id: goalNodeId,
-    analysis_ready: analysisReady,
+    analysis_ready: (() => {
+      // Strip internal _fallback_meta before sending to client
+      const { _fallback_meta, ...cleanPayload } = analysisReady as any;
+      return cleanPayload;
+    })(),
     quality: v1Response.quality,
     trace: {
       request_id: context.requestId ?? v1Response.trace?.request_id,
@@ -735,6 +741,10 @@ export function transformResponseToV3(
         total_defaults: transformDefaults.length,
         defaults: transformDefaults,
       },
+      // F15: Surface analysis_ready fallback count when fallbacks occurred
+      ...((analysisReady as any)._fallback_meta && {
+        analysis_ready_fallbacks: (analysisReady as any)._fallback_meta,
+      }),
     },
     draft_warnings: v1Response.draft_warnings,
   };

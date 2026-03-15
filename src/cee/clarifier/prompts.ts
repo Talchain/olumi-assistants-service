@@ -17,6 +17,10 @@ CONSTRAINTS:
 - Maintain causal coherence between nodes
 - Keep node/edge count within limits (max 30 nodes, max 50 edges)
 - Use only these allowed node kinds: goal, decision, option, outcome, risk, action
+  (Note: "factor" is intentionally excluded — factors are created through the
+  enrichment pipeline with proper data scaffolding, not via clarifier refinement.
+  Allowing factors here would bypass factor-extraction provenance and produce
+  nodes missing required controllable/observable data fields.)
 
 OUTPUT:
 Return ONLY a valid JSON object with the refined graph in GraphV1 format.`;

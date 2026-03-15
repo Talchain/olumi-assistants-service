@@ -380,6 +380,17 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
         edges_before: 0,
         edges_after: Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0,
       },
+      // F8: Per-edge risk coefficient corrections (sign flips on risk→goal/outcome edges)
+      risk_coefficient_corrections: ctx.riskCoefficientCorrections.map((c) => ({
+        source: c.source,
+        target: c.target,
+        original_sign: c.original >= 0 ? "positive" : "negative",
+        corrected_sign: c.corrected >= 0 ? "positive" : "negative",
+      })),
+      // F9: Goal merge node renames — only present when goals were merged
+      ...(ctx.nodeRenames.size > 0 ? {
+        goal_merge_renames: Object.fromEntries(ctx.nodeRenames),
+      } : {}),
     };
   }
 

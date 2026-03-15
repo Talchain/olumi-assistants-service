@@ -342,7 +342,8 @@ async function runCoachingCall(
       turnContext,
       ZONE2_BLOCKS,
     );
-    const warnings = validateAssembly(assembled, ZONE2_BLOCKS, PARALLEL_COACHING_INSTRUCTION.length);
+    const strictPromptValidation = config.features.strictPromptValidation;
+    const warnings = validateAssembly(assembled, ZONE2_BLOCKS, PARALLEL_COACHING_INSTRUCTION.length, strictPromptValidation);
     if (warnings.length > 0) {
       log.warn({ request_id: requestId, warnings: warnings.map((w) => w.code) }, 'Zone 2 validation warnings (parallel coaching)');
     }

@@ -268,7 +268,9 @@ const EdgeInput = z.object({
   // Edge origin: tracks whether edge was created by user, AI, or system defaults
   origin: EdgeOrigin.optional(),
   // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.
-  edge_type: EdgeType.optional()
+  edge_type: EdgeType.optional(),
+  // F5: Whether edge parameters are pipeline-defaulted (true for enrichment-created edges)
+  defaulted: z.boolean().optional(),
 }).passthrough().refine(
   (edge) => (edge.from && edge.to) || (edge.source && edge.target),
   { message: "Edge must have either from/to or source/target fields" }

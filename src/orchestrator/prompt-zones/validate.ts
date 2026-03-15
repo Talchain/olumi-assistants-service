@@ -23,6 +23,20 @@ export interface ValidationWarning {
   severity: 'warn' | 'error';
 }
 
+/**
+ * Thrown when strict prompt validation is enabled and error-severity
+ * warnings are found. Gated by CEE_STRICT_PROMPT_VALIDATION env var.
+ */
+export class PromptValidationError extends Error {
+  public readonly warnings: ValidationWarning[];
+  constructor(warnings: ValidationWarning[]) {
+    const errorWarnings = warnings.filter((w) => w.severity === "error");
+    super(`Prompt validation failed: ${errorWarnings.length} error(s) — ${errorWarnings.map((w) => w.code).join(", ")}`);
+    this.name = "PromptValidationError";
+    this.warnings = warnings;
+  }
+}
+
 // ============================================================================
 // Banned terms from cf-v7/v8 lines 366-370
 // ============================================================================
@@ -230,18 +244,24 @@ function checkXmlBalance(assembled: AssembledPrompt): ValidationWarning[] {
 // ============================================================================
 
 /**
- * Validate an assembled prompt. Returns warnings, never throws.
+ * Validate an assembled prompt. Returns warnings.
+ *
+ * When `strict` is true (gated by CEE_STRICT_PROMPT_VALIDATION),
+ * throws PromptValidationError if any warning has severity "error".
+ * Warn-severity warnings are always returned without throwing.
  *
  * @param assembled - The assembled prompt output
  * @param registry - The block registry (for scope/tag lookups)
  * @param zone1Length - Length of Zone 1 content (to isolate Zone 2 checks)
+ * @param strict - When true, throw on error-severity warnings
  */
 export function validateAssembly(
   assembled: AssembledPrompt,
   registry: readonly Zone2Block[],
   zone1Length: number = 0,
+  strict: boolean = false,
 ): ValidationWarning[] {
-  return [
+  const warnings = [
     ...checkBannedTerms(assembled, zone1Length),
     ...checkToolInstructions(assembled, zone1Length),
     ...checkImperatives(assembled, registry),
@@ -250,4 +270,10 @@ export function validateAssembly(
     ...checkHintLength(assembled, registry),
     ...checkXmlBalance(assembled),
   ];
+
+  if (strict && warnings.some((w) => w.severity === "error")) {
+    throw new PromptValidationError(warnings);
+  }
+
+  return warnings;
 }

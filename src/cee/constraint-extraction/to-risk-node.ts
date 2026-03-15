@@ -185,6 +185,7 @@ export function constraintToRiskNode(
       weight: edgeWeight,
       belief: constraint.confidence,
       origin: "enrichment" as const,
+      defaulted: true,
       provenance: {
         source: "constraint_extraction",
         quote: constraint.sourceQuote.substring(0, 100),

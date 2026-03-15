@@ -31,6 +31,14 @@ import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 // ============================================================================
 
 /**
+ * F15: Fallback metadata from analysis-ready building — surfaced in trace.
+ */
+export interface AnalysisReadyFallbackMeta {
+  fallback_count: number;
+  fallback_sources: Array<{ optionId: string; factorId: string; source: string }>;
+}
+
+/**
  * Validation error for analysis-ready payload.
  */
 export interface AnalysisReadyValidationError {
@@ -175,7 +183,7 @@ export function buildAnalysisReadyPayload(
   goalNodeId: string,
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
-): AnalysisReadyPayloadT {
+): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
   // Transform all options
   const analysisOptions = options.map(transformOptionToAnalysisReady);
 
@@ -476,6 +484,14 @@ export function buildAnalysisReadyPayload(
     fallbackCount,
     blockerCount: dedupedBlockers.length,
   });
+
+  // F15: Attach fallback metadata for trace surfacing (only when fallbacks occurred)
+  if (fallbackCount > 0) {
+    (payload as any)._fallback_meta = {
+      fallback_count: fallbackCount,
+      fallback_sources: fallbackSources,
+    };
+  }
 
   return payload;
 }
