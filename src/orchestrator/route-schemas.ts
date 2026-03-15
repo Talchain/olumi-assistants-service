@@ -110,8 +110,13 @@ export const GraphSchema = z.object({
 }).passthrough().nullable();
 
 const AnalysisResponseSchema = z.object({
-  analysis_status: z.string(),
-}).passthrough().nullable();
+  analysis_status: z.string().optional(),
+  results: z.array(z.unknown()).optional(),
+  meta: z.object({ response_hash: z.string() }).passthrough().optional(),
+}).passthrough().refine(
+  (val) => val.analysis_status || val.results || val.meta,
+  { message: 'analysis_response must include at least one of: analysis_status, results, meta' },
+).nullable();
 
 export const AnalysisStateSchema = z.object({
   meta: z.object({

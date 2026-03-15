@@ -2089,7 +2089,10 @@ export async function chatWithToolsAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
-      system_chars: args.system.length,
+      system_chars: args.system_cache_blocks
+        ? args.system_cache_blocks.reduce((sum: number, b: { text: string }) => sum + b.text.length, 0)
+        : args.system.length,
+      system_source: args.system_cache_blocks ? 'cache_blocks' : 'plain',
       message_count: args.messages.length,
       tool_count: args.tools.length,
       tool_names: args.tools.map(t => t.name),
@@ -2306,7 +2309,10 @@ export async function* streamChatWithToolsAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
-      system_chars: args.system.length,
+      system_chars: args.system_cache_blocks
+        ? args.system_cache_blocks.reduce((sum: number, b: { text: string }) => sum + b.text.length, 0)
+        : args.system.length,
+      system_source: args.system_cache_blocks ? 'cache_blocks' : 'plain',
       message_count: args.messages.length,
       tool_count: args.tools.length,
       tool_names: args.tools.map(t => t.name),

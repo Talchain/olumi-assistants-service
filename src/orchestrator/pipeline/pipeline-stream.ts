@@ -38,6 +38,7 @@ import type { OrchestratorStreamEvent } from "./stream-events.js";
 import { STREAM_ERROR_CODES } from "./stream-events.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DailyBudgetExceededError } from "../../adapters/llm/errors.js";
+import { normalizeAnalysisEnvelope } from "../analysis-state.js";
 
 // Long-running tools that warrant a tool_start event with long_running: true
 const LONG_RUNNING_TOOLS = new Set(['run_analysis', 'draft_graph']);
@@ -73,8 +74,18 @@ export async function* executePipelineStream(
     // phase1Enrich only reads context.*, so we must merge here.
     // Top-level fields (analysis_state, graph_state) always represent the latest UI-side state,
     // so they win over potentially stale context fields when both are present.
+    log.debug({
+      has_top_level_analysis_state: !!request.analysis_state,
+      has_context_analysis_response: !!request.context?.analysis_response,
+      context_analysis_status: (request.context?.analysis_response as Record<string, unknown> | null)?.analysis_status ?? null,
+    }, 'pipeline-stream: analysis normalization input');
+
     if (request.analysis_state) {
-      request.context.analysis_response = request.analysis_state;
+      request.context.analysis_response = normalizeAnalysisEnvelope(request.analysis_state);
+    } else if (request.context.analysis_response) {
+      request.context.analysis_response = normalizeAnalysisEnvelope(
+        request.context.analysis_response as import("../types.js").V2RunResponseEnvelope,
+      );
     }
     if (request.graph_state) {
       request.context.graph = request.graph_state;

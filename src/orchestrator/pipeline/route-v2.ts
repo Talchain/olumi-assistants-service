@@ -165,17 +165,24 @@ export async function handleTurnV2(
     // 5. Execute pipeline
     const envelope = await executePipeline(turnRequest, requestId, deps);
 
-    // 6. Update nonce counter
-    if (turnNonce !== undefined) {
-      setNonce(turnRequest.scenario_id, turnNonce);
+    // 6-7. Post-pipeline bookkeeping — cache BEFORE nonce to preserve replay safety.
+    // If cache write fails, skip nonce advance so retries aren't rejected as stale.
+    try {
+      setIdempotentResponse(
+        turnRequest.scenario_id,
+        turnRequest.client_turn_id,
+        envelope as unknown as import("../types.js").OrchestratorResponseEnvelope,
+      );
+      // Only advance nonce after cache write succeeds
+      if (turnNonce !== undefined) {
+        setNonce(turnRequest.scenario_id, turnNonce);
+      }
+    } catch (postError) {
+      log.warn(
+        { error: postError instanceof Error ? postError.message : String(postError), request_id: requestId },
+        'V2 turn handler: post-pipeline bookkeeping failed (non-fatal)',
+      );
     }
-
-    // 7. Cache response for idempotency
-    setIdempotentResponse(
-      turnRequest.scenario_id,
-      turnRequest.client_turn_id,
-      envelope as unknown as import("../types.js").OrchestratorResponseEnvelope,
-    );
     resolveInflight(envelope);
 
     const httpStatus = envelope.error

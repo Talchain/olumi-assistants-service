@@ -35,7 +35,7 @@ import type { IntentGateResult } from "../intent-gate.js";
 import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
-import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable, isResultsExplanationEligible } from "../analysis-state.js";
+import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable, isResultsExplanationEligible, normalizeAnalysisEnvelope } from "../analysis-state.js";
 import { config } from "../../config/index.js";
 
 /**
@@ -62,8 +62,19 @@ export async function executePipeline(
     // phase1Enrich only reads context.*, so we must merge here.
     // Top-level fields (analysis_state, graph_state) always represent the latest UI-side state,
     // so they win over potentially stale context fields when both are present.
+    log.debug({
+      has_top_level_analysis_state: !!request.analysis_state,
+      has_context_analysis_response: !!request.context?.analysis_response,
+      context_analysis_status: (request.context?.analysis_response as Record<string, unknown> | null)?.analysis_status ?? null,
+    }, 'pipeline: analysis normalization input');
+
     if (request.analysis_state) {
-      request.context.analysis_response = request.analysis_state;
+      request.context.analysis_response = normalizeAnalysisEnvelope(request.analysis_state);
+    } else if (request.context.analysis_response) {
+      // UI may send analysis under context directly — normalize it too
+      request.context.analysis_response = normalizeAnalysisEnvelope(
+        request.context.analysis_response as import("../types.js").V2RunResponseEnvelope,
+      );
     }
     if (request.graph_state) {
       request.context.graph = request.graph_state;
@@ -378,15 +389,22 @@ export async function executePipeline(
     const turnId = enrichedContext?.turn_id ?? 'pipeline-error';
     const message = error instanceof Error ? error.message : String(error);
 
+    // Preserve specific error codes from tool dispatch / LLM errors
+    const orchError = (error != null && typeof error === 'object' && 'orchestratorError' in error)
+      ? (error as { orchestratorError: { code?: string; message?: string; recoverable?: boolean } }).orchestratorError
+      : undefined;
+    const errorCode = orchError?.code ?? 'PIPELINE_ERROR';
+    const userMessage = orchError?.message ?? 'Something went wrong.';
+
     log.error(
-      { error: message, turn_id: turnId, request_id: requestId },
+      { error: message, error_code: errorCode, turn_id: turnId, request_id: requestId },
       "V2 pipeline error",
     );
 
     return buildErrorEnvelope(
       turnId,
-      'PIPELINE_ERROR',
-      'Something went wrong.',
+      errorCode,
+      userMessage,
       enrichedContext,
     );
   }

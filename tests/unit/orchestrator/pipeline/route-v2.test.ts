@@ -257,4 +257,68 @@ describe("route-v2", () => {
     const callArg = (executePipeline as ReturnType<typeof vi.fn>).mock.calls[0][0] as typeof request;
     expect(callArg.system_event?.event_type).toBe("feedback_submitted");
   });
+
+  it("returns successful envelope when setIdempotentResponse throws (non-fatal)", async () => {
+    const { setIdempotentResponse } = await import("../../../../src/orchestrator/idempotency.js");
+    (setIdempotentResponse as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("cache write failed");
+    });
+
+    const result = await handleTurnV2(makeRequest(), mockFastifyRequest, "req-cache-fail", 1);
+
+    // Pipeline succeeded — response must still be 200
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_id).toBe("mock-turn");
+    expect(result.envelope.error).toBeUndefined();
+  });
+
+  it("does not advance nonce when setIdempotentResponse fails", async () => {
+    const { setIdempotentResponse } = await import("../../../../src/orchestrator/idempotency.js");
+    (setIdempotentResponse as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("cache write failed");
+    });
+
+    // First request — cache write fails, nonce should NOT advance
+    await handleTurnV2(makeRequest(), mockFastifyRequest, "req-fail", 5);
+
+    // Retry with same nonce should succeed (not rejected as stale)
+    // since the nonce was never advanced
+    const result = await handleTurnV2(
+      makeRequest({ client_turn_id: "client-retry" }),
+      mockFastifyRequest,
+      "req-retry",
+      5,
+    );
+    expect(result.httpStatus).toBe(200);
+  });
+
+  it("cache write before nonce advance preserves replay safety", async () => {
+    // Normal first request succeeds (nonce 5)
+    await handleTurnV2(makeRequest(), mockFastifyRequest, "req-1", 5);
+
+    // Second request (nonce 6) — cache write fails
+    const { setIdempotentResponse } = await import("../../../../src/orchestrator/idempotency.js");
+    (setIdempotentResponse as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("cache write failed");
+    });
+
+    const r2 = await handleTurnV2(
+      makeRequest({ client_turn_id: "client-2" }),
+      mockFastifyRequest,
+      "req-2",
+      6,
+    );
+    // Response still succeeds
+    expect(r2.httpStatus).toBe(200);
+
+    // A retry with nonce 6 should NOT be rejected as stale
+    // because nonce was not advanced past 5
+    const r3 = await handleTurnV2(
+      makeRequest({ client_turn_id: "client-3" }),
+      mockFastifyRequest,
+      "req-3",
+      6,
+    );
+    expect(r3.httpStatus).toBe(200);
+  });
 });

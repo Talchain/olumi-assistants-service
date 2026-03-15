@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { phase1Enrich } from "../../../../src/orchestrator/pipeline/phase1-enrichment/index.js";
+import { normalizeAnalysisEnvelope, isAnalysisExplainable } from "../../../../src/orchestrator/analysis-state.js";
 import type { ConversationContext } from "../../../../src/orchestrator/pipeline/types.js";
 import type { OrchestratorTurnRequest, V2RunResponseEnvelope, GraphV3T } from "../../../../src/orchestrator/types.js";
 
@@ -28,10 +29,15 @@ function makeContext(overrides?: Partial<ConversationContext>): ConversationCont
 /**
  * Mirrors the normalization logic in pipeline.ts and pipeline-stream.ts.
  * Top-level fields always win when present (freshness rule).
+ * Applies normalizeAnalysisEnvelope to infer analysis_status when missing.
  */
 function normalizeRequest(request: OrchestratorTurnRequest): void {
   if (request.analysis_state) {
-    request.context.analysis_response = request.analysis_state;
+    request.context.analysis_response = normalizeAnalysisEnvelope(request.analysis_state);
+  } else if (request.context.analysis_response) {
+    request.context.analysis_response = normalizeAnalysisEnvelope(
+      request.context.analysis_response as V2RunResponseEnvelope,
+    );
   }
   if (request.graph_state) {
     request.context.graph = request.graph_state;
@@ -188,5 +194,115 @@ describe("analysis_state normalization", () => {
 
     expect(enriched.analysis).toBeNull();
     expect(enriched.stage_indicator.stage).toBe("ideate"); // Wrong! Should be evaluate
+  });
+});
+
+describe("normalizeAnalysisEnvelope", () => {
+  it("infers analysis_status = completed when meta.response_hash and results are present", () => {
+    const envelope = {
+      results: [{ option_label: "A", win_probability: 0.6 }],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBe("completed");
+    // Original envelope is not mutated
+    expect(envelope.analysis_status).toBeUndefined();
+  });
+
+  it("preserves existing analysis_status when already set", () => {
+    const envelope = {
+      analysis_status: "running",
+      results: [],
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBe("running");
+  });
+
+  it("does not infer when meta.response_hash is missing", () => {
+    const envelope = {
+      results: [{ option_label: "A", win_probability: 0.6 }],
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBeUndefined();
+  });
+
+  it("does not infer when results is missing", () => {
+    const envelope = {
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBeUndefined();
+  });
+
+  it("does not infer when results is empty", () => {
+    const envelope = {
+      results: [],
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBeUndefined();
+  });
+
+  it("does not infer when results lack valid option_label/win_probability", () => {
+    const envelope = {
+      results: [{ some_other_field: "not an option result" }],
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+
+    expect(normalized.analysis_status).toBeUndefined();
+  });
+});
+
+describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => {
+  it("envelope without analysis_status becomes explainable after normalization", () => {
+    const envelope = {
+      results: [{ option_label: "A", win_probability: 0.6 }],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+      factor_sensitivity: [{ label: "Factor", elasticity: 0.8 }],
+    } as unknown as V2RunResponseEnvelope;
+
+    // Before normalization — not explainable (missing analysis_status)
+    expect(isAnalysisExplainable(envelope)).toBe(false);
+
+    // After normalization — explainable
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect(isAnalysisExplainable(normalized)).toBe(true);
+  });
+
+  it("analysis from context.analysis_response path is normalized and explainable", () => {
+    const context = makeContext({
+      graph: STUB_GRAPH,
+      analysis_response: {
+        results: [{ option_label: "A", win_probability: 0.6 }],
+        meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+        factor_sensitivity: [{ label: "Factor", elasticity: 0.8 }],
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const request: OrchestratorTurnRequest = {
+      message: "explain the analysis results",
+      context,
+      scenario_id: "s1",
+      client_turn_id: "t1",
+      // No top-level analysis_state — analysis comes via context only
+    };
+
+    normalizeRequest(request);
+
+    const enriched = phase1Enrich(request.message, request.context, request.scenario_id);
+    expect(enriched.analysis).not.toBeNull();
+    expect(isAnalysisExplainable(enriched.analysis as V2RunResponseEnvelope)).toBe(true);
   });
 });

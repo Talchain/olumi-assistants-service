@@ -1188,6 +1188,9 @@ export async function phase3PrepareForStreaming(
   // LLM path: prepare the call args
   const assembled2 = await assembleV2SystemPrompt(enrichedContext);
   const systemPrompt = assembled2.text;
+  if (systemPrompt.length < 1000) {
+    log.warn({ system_prompt_length: systemPrompt.length }, 'phase3: suspiciously short system prompt for streaming');
+  }
   const promptMeta = getSystemPromptMeta('orchestrator');
   const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
   const messages = assembleMessages(context, effectiveUserMessage);

@@ -686,5 +686,48 @@ describe("executePipelineStream", () => {
       const passedContext = (phase1Enrich as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(passedContext.graph).toBe(freshGraph);
     });
+
+    it("normalizes context.analysis_response when no top-level analysis_state is present", async () => {
+      const enriched = makeEnrichedContext({ stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" } });
+      const envelope = makeEnvelope({ stage_indicator: { stage: "evaluate", confidence: "high", source: "inferred" } });
+      const llmResult = {
+        assistant_text: "test",
+        tool_invocations: [],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as ReturnType<typeof vi.fn>).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as ReturnType<typeof vi.fn>).mockResolvedValue(llmResult);
+      (phase5Validate as ReturnType<typeof vi.fn>).mockReturnValue(envelope);
+
+      // Analysis without analysis_status but with valid results + meta
+      const contextAnalysis = {
+        meta: { response_hash: "ctx-hash", seed_used: 1, n_samples: 100 },
+        results: [{ option_label: "A", win_probability: 0.7 }],
+      };
+
+      const request = makeRequest({
+        context: {
+          graph: { nodes: [{ id: "d1" }], edges: [] },
+          analysis_response: contextAnalysis,
+          framing: null,
+          messages: [],
+          scenario_id: "test-scenario",
+        },
+        // No top-level analysis_state
+      });
+
+      await collectEvents(executePipelineStream(request, "req-ctx-analysis", deps));
+
+      const passedContext = (phase1Enrich as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      // Should be normalized with inferred analysis_status
+      expect(passedContext.analysis_response).not.toBe(contextAnalysis); // new object via spread
+      expect(passedContext.analysis_response.analysis_status).toBe("completed");
+      expect(passedContext.analysis_response.meta.response_hash).toBe("ctx-hash");
+    });
   });
 });

@@ -33,6 +33,24 @@ export function isAnalysisPresent(response: V2RunResponseEnvelope | null | undef
   return response != null;
 }
 
+/**
+ * Normalize an analysis envelope that may be missing analysis_status.
+ * PLoT responses always include meta.response_hash and results[] when complete,
+ * but may omit analysis_status. Infer it when possible.
+ */
+export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2RunResponseEnvelope {
+  if (
+    !response.analysis_status
+    && response.meta?.response_hash
+    && Array.isArray(response.results)
+    && response.results.length > 0
+    && hasValidOptionResults(response)
+  ) {
+    return { ...response, analysis_status: 'completed' };
+  }
+  return response;
+}
+
 export function isAnalysisExplainable(response: V2RunResponseEnvelope | null | undefined): response is V2RunResponseEnvelope {
   if (!response) return false;
   if (response.analysis_status !== "completed") return false;

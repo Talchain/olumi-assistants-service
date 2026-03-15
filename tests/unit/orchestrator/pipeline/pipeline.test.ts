@@ -926,4 +926,57 @@ describe("pipeline", () => {
     // Should be ideate (graph present), not frame (graph absent)
     expect(envelope.stage_indicator.stage).toBe("ideate");
   });
+
+  it("preserves orchestratorError.code from tool dispatch errors instead of PIPELINE_ERROR", async () => {
+    const deps = makeMockDeps();
+    const toolError = Object.assign(
+      new Error("PLoT timed out"),
+      {
+        orchestratorError: {
+          code: "TOOL_EXECUTION_FAILED",
+          message: "The analysis tool timed out. Please try again.",
+          recoverable: true,
+        },
+      },
+    );
+    (deps.llmClient.chatWithTools as ReturnType<typeof vi.fn>).mockRejectedValue(toolError);
+
+    const envelope = await executePipeline(makeRequest(), "req-tool-error", deps);
+
+    expect(envelope.error).toBeDefined();
+    expect(envelope.error!.code).toBe("TOOL_EXECUTION_FAILED");
+    expect(envelope.error!.message).toBe("The analysis tool timed out. Please try again.");
+  });
+
+  it("preserves LLM_TIMEOUT error code from upstream timeout errors", async () => {
+    const deps = makeMockDeps();
+    const timeoutError = Object.assign(
+      new Error("Anthropic chat timed out"),
+      {
+        orchestratorError: {
+          code: "LLM_TIMEOUT",
+          message: "The AI took too long to respond. Please try again.",
+          recoverable: true,
+        },
+      },
+    );
+    (deps.llmClient.chatWithTools as ReturnType<typeof vi.fn>).mockRejectedValue(timeoutError);
+
+    const envelope = await executePipeline(makeRequest(), "req-timeout", deps);
+
+    expect(envelope.error).toBeDefined();
+    expect(envelope.error!.code).toBe("LLM_TIMEOUT");
+  });
+
+  it("falls back to PIPELINE_ERROR when thrown error has no orchestratorError", async () => {
+    const deps = makeMockDeps();
+    (deps.llmClient.chatWithTools as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("unexpected null"),
+    );
+
+    const envelope = await executePipeline(makeRequest(), "req-generic-error", deps);
+
+    expect(envelope.error).toBeDefined();
+    expect(envelope.error!.code).toBe("PIPELINE_ERROR");
+  });
 });
