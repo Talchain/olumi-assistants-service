@@ -1,0 +1,50 @@
+{
+  "brief_id": "07-forbidden-refused",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "07-forbidden-refused",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [],\n  \"warnings\": [\n    \"goal→decision edges are not allowed under the topology rules — goals are terminal nodes and cannot feed into decisions. This would create a cycle, which is forbidden.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Goals in this causal graph must remain terminal (no outbound edges). If you want decisions to reflect goal achievement, that is modeled via the outcome pathways. Consider adjusting decision logic or review if the current goal setup meets your needs.\",\n    \"rerun_recommended\": false\n  }\n}",
+    "parsed_graph": {
+      "operations": [],
+      "warnings": [
+        "goal→decision edges are not allowed under the topology rules — goals are terminal nodes and cannot feed into decisions. This would create a cycle, which is forbidden."
+      ],
+      "coaching": {
+        "summary": "Goals in this causal graph must remain terminal (no outbound edges). If you want decisions to reflect goal achievement, that is modeled via the outcome pathways. Consider adjusting decision logic or review if the current goal setup meets your needs.",
+        "rerun_recommended": false
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 1905,
+    "input_tokens": 5388,
+    "output_tokens": 116,
+    "est_cost_usd": 0.011704,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [],
+      "warnings": [
+        "goal→decision edges are not allowed under the topology rules — goals are terminal nodes and cannot feed into decisions. This would create a cycle, which is forbidden."
+      ],
+      "coaching": {
+        "summary": "Goals in this causal graph must remain terminal (no outbound edges). If you want decisions to reflect goal achievement, that is modeled via the outcome pathways. Consider adjusting decision logic or review if the current goal setup meets your needs.",
+        "rerun_recommended": false
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": true,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": true
+  },
+  "overall": 1,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

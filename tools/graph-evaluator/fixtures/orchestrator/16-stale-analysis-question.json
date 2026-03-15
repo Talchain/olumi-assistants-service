@@ -1,0 +1,40 @@
+{
+  "id": "orch-16-stale-analysis-question",
+  "name": "Stale Analysis — Graph Edited Since Last Run",
+  "description": "User asks if results are still valid after editing the graph. The orchestrator should explain staleness, reference the change, suggest re-running analysis — but not auto-run it.",
+  "stage": "evaluate",
+  "user_message": "I changed the pricing option — are the results still valid?",
+  "canonical_state": {
+    "winner": { "id": "opt_raise", "label": "Raise Prices (old £59)", "win_probability": 0.54 },
+    "runner_up": { "id": "opt_volume", "label": "Volume Growth", "win_probability": 0.46 },
+    "margin": 0.04,
+    "robustness": "fragile",
+    "top_drivers": [
+      { "factor_id": "fac_conversion", "factor_label": "Conversion Rate", "sensitivity_pct": 38 },
+      { "factor_id": "fac_churn", "factor_label": "Churn Rate", "sensitivity_pct": 27 }
+    ]
+  },
+  "graph_context": {
+    "nodes": [
+      { "id": "goal_mrr", "kind": "goal", "label": "£20k MRR" },
+      { "id": "fac_conversion", "kind": "factor", "label": "Conversion Rate", "category": "observable" },
+      { "id": "fac_churn", "kind": "factor", "label": "Churn Rate", "category": "observable" },
+      { "id": "opt_raise", "kind": "option", "label": "Raise Prices to £69" },
+      { "id": "opt_volume", "kind": "option", "label": "Volume Growth" }
+    ],
+    "edges": [
+      { "from": "fac_conversion", "to": "goal_mrr", "strength": { "mean": 0.5, "std": 0.15 }, "exists_probability": 0.9 },
+      { "from": "fac_churn", "to": "goal_mrr", "strength": { "mean": -0.4, "std": 0.1 }, "exists_probability": 0.95 }
+    ]
+  },
+  "expected": {
+    "expected_tool": null,
+    "expects_coaching": false,
+    "min_actions": 1,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": true,
+    "must_contain": ["analysis"],
+    "forbidden_phrases": ["I'll run the analysis now", "Running the analysis", "Let me run"]
+  }
+}

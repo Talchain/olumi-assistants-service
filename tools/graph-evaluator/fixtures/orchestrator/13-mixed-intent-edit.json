@@ -1,0 +1,30 @@
+{
+  "id": "orch-13-mixed-intent-edit",
+  "name": "Mixed Intent — Value Update + Structural Add",
+  "description": "User requests both a value update (increase price) and a structural addition (add competitor response factor) in one message. The orchestrator should handle both in a single edit_graph call, not split across turns.",
+  "stage": "ideate",
+  "user_message": "Increase the price to £69 and add a competitor response factor — I think competitors might undercut us if we raise prices.",
+  "graph_context": {
+    "nodes": [
+      { "id": "goal_mrr", "kind": "goal", "label": "£20k MRR" },
+      { "id": "fac_conversion", "kind": "factor", "label": "Conversion Rate", "category": "observable" },
+      { "id": "fac_churn", "kind": "factor", "label": "Churn Rate", "category": "observable" },
+      { "id": "opt_raise", "kind": "option", "label": "Raise Prices to £59" },
+      { "id": "opt_volume", "kind": "option", "label": "Volume Growth" }
+    ],
+    "edges": [
+      { "from": "fac_conversion", "to": "goal_mrr", "strength": { "mean": 0.5, "std": 0.15 }, "exists_probability": 0.9 },
+      { "from": "fac_churn", "to": "goal_mrr", "strength": { "mean": -0.4, "std": 0.1 }, "exists_probability": 0.95 },
+      { "from": "opt_raise", "to": "fac_conversion", "strength": { "mean": -0.3, "std": 0.1 }, "exists_probability": 0.85 }
+    ]
+  },
+  "expected": {
+    "expected_tool": "edit_graph",
+    "expects_coaching": false,
+    "min_actions": 0,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": false,
+    "must_contain": ["competitor"]
+  }
+}

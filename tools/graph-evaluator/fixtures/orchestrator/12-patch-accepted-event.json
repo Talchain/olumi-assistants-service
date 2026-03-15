@@ -1,0 +1,31 @@
+{
+  "id": "orch-12-patch-accepted-event",
+  "name": "System Event — Patch Accepted with User Comment",
+  "description": "System event patch_accepted fires while user also asks what changed. The orchestrator should acknowledge the patch in one clause, note causal implications, and not invoke any tool.",
+  "stage": "ideate",
+  "user_message": "[system:patch_accepted] The user accepted the proposed graph edit. User says: \"looks good, what changed?\"",
+  "graph_context": {
+    "nodes": [
+      { "id": "goal_mrr", "kind": "goal", "label": "£20k MRR" },
+      { "id": "fac_conversion", "kind": "factor", "label": "Conversion Rate", "category": "observable" },
+      { "id": "fac_churn", "kind": "factor", "label": "Churn Rate", "category": "observable" },
+      { "id": "fac_competitor", "kind": "factor", "label": "Competitor Response", "category": "external" },
+      { "id": "opt_raise", "kind": "option", "label": "Raise Prices" },
+      { "id": "opt_volume", "kind": "option", "label": "Volume Growth" }
+    ],
+    "edges": [
+      { "from": "fac_conversion", "to": "goal_mrr", "strength": { "mean": 0.5, "std": 0.15 }, "exists_probability": 0.9 },
+      { "from": "fac_churn", "to": "goal_mrr", "strength": { "mean": -0.4, "std": 0.1 }, "exists_probability": 0.95 },
+      { "from": "fac_competitor", "to": "goal_mrr", "strength": { "mean": -0.3, "std": 0.2 }, "exists_probability": 0.7 }
+    ]
+  },
+  "expected": {
+    "expected_tool": null,
+    "expects_coaching": false,
+    "min_actions": 0,
+    "max_actions": 2,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": false,
+    "must_contain": ["change"]
+  }
+}

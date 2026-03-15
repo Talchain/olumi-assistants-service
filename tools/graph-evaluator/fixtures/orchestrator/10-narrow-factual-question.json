@@ -1,0 +1,39 @@
+{
+  "id": "orch-10-narrow-factual-question",
+  "name": "Narrow Factual Question — No Tool",
+  "description": "User asks a narrow factual question about a specific factor in the graph. The orchestrator should answer directly in 1-2 sentences without invoking any tool and without routing to explain_results.",
+  "stage": "evaluate",
+  "user_message": "What does the conversion rate factor mean?",
+  "canonical_state": {
+    "winner": { "id": "opt_raise", "label": "Raise Prices", "win_probability": 0.54 },
+    "runner_up": { "id": "opt_volume", "label": "Volume Growth", "win_probability": 0.46 },
+    "margin": 0.04,
+    "robustness": "fragile",
+    "top_drivers": [
+      { "factor_id": "fac_conversion", "factor_label": "Conversion Rate", "sensitivity_pct": 38 },
+      { "factor_id": "fac_churn", "factor_label": "Churn Rate", "sensitivity_pct": 27 }
+    ]
+  },
+  "graph_context": {
+    "nodes": [
+      { "id": "goal_mrr", "kind": "goal", "label": "£20k MRR" },
+      { "id": "fac_conversion", "kind": "factor", "label": "Conversion Rate", "category": "observable" },
+      { "id": "fac_churn", "kind": "factor", "label": "Churn Rate", "category": "observable" },
+      { "id": "opt_raise", "kind": "option", "label": "Raise Prices" },
+      { "id": "opt_volume", "kind": "option", "label": "Volume Growth" }
+    ],
+    "edges": [
+      { "from": "fac_conversion", "to": "goal_mrr", "strength": { "mean": 0.5, "std": 0.15 }, "exists_probability": 0.9 },
+      { "from": "fac_churn", "to": "goal_mrr", "strength": { "mean": -0.4, "std": 0.1 }, "exists_probability": 0.95 }
+    ]
+  },
+  "expected": {
+    "expected_tool": null,
+    "expects_coaching": false,
+    "min_actions": 0,
+    "max_actions": 1,
+    "banned_terms_checked": true,
+    "expects_uncertainty_language": false,
+    "must_contain": ["conversion"]
+  }
+}

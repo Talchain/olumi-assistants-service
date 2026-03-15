@@ -1,0 +1,88 @@
+{
+  "brief_id": "04-forbidden-edge",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "04-forbidden-edge",
+    "status": "success",
+    "raw_text": "{\n  \"topology_plan\": {\n    \"requested_edge\": {\n      \"from\": \"fac_investment\",\n      \"to\": \"goal_growth\",\n      \"type\": \"factor→goal\"\n    },\n    \"allowed_patterns\": [\n      \"decision→option\",\n      \"option→factor\",\n      \"factor→factor\",\n      \"factor→outcome\",\n      \"factor→risk\",\n      \"outcome→goal\",\n      \"risk→goal\",\n      \"factor→factor (bidirected)\"\n    ],\n    \"assessment\": \"The requested edge fac_investment→goal_growth is not permitted: factor→goal edges are forbidden by topology rules. Only outcome→goal or risk→goal edges are allowed. Current model already supports fac_investment influencing goal_growth via existing pathways (e.g., fac_investment→out_revenue→goal_growth and fac_investment→risk_financial→goal_growth).\"\n  },\n  \"operations\": [],\n  \"removed_edges\": [],\n  \"warnings\": [\n    \"Direct edges from factor (fac_investment) to goal (goal_growth) are not allowed by model topology rules. The model already transmits investment effects to the goal via intermediate outcomes and risks.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Direct causal links from a controllable factor to a goal node would bypass necessary outcomes or risks, and are not permitted. If you want to strengthen the influence of Expansion Investment on reaching 800 Pro Customers, consider increasing its effect on intermediate nodes (e.g., out_revenue or risk_financial) instead.\",\n    \"rerun_recommended\": false\n  }\n}",
+    "parsed_graph": {
+      "topology_plan": {
+        "requested_edge": {
+          "from": "fac_investment",
+          "to": "goal_growth",
+          "type": "factor→goal"
+        },
+        "allowed_patterns": [
+          "decision→option",
+          "option→factor",
+          "factor→factor",
+          "factor→outcome",
+          "factor→risk",
+          "outcome→goal",
+          "risk→goal",
+          "factor→factor (bidirected)"
+        ],
+        "assessment": "The requested edge fac_investment→goal_growth is not permitted: factor→goal edges are forbidden by topology rules. Only outcome→goal or risk→goal edges are allowed. Current model already supports fac_investment influencing goal_growth via existing pathways (e.g., fac_investment→out_revenue→goal_growth and fac_investment→risk_financial→goal_growth)."
+      },
+      "operations": [],
+      "removed_edges": [],
+      "warnings": [
+        "Direct edges from factor (fac_investment) to goal (goal_growth) are not allowed by model topology rules. The model already transmits investment effects to the goal via intermediate outcomes and risks."
+      ],
+      "coaching": {
+        "summary": "Direct causal links from a controllable factor to a goal node would bypass necessary outcomes or risks, and are not permitted. If you want to strengthen the influence of Expansion Investment on reaching 800 Pro Customers, consider increasing its effect on intermediate nodes (e.g., out_revenue or risk_financial) instead.",
+        "rerun_recommended": false
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 3665,
+    "input_tokens": 5390,
+    "output_tokens": 336,
+    "est_cost_usd": 0.013467999999999999,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "topology_plan": {
+        "requested_edge": {
+          "from": "fac_investment",
+          "to": "goal_growth",
+          "type": "factor→goal"
+        },
+        "allowed_patterns": [
+          "decision→option",
+          "option→factor",
+          "factor→factor",
+          "factor→outcome",
+          "factor→risk",
+          "outcome→goal",
+          "risk→goal",
+          "factor→factor (bidirected)"
+        ],
+        "assessment": "The requested edge fac_investment→goal_growth is not permitted: factor→goal edges are forbidden by topology rules. Only outcome→goal or risk→goal edges are allowed. Current model already supports fac_investment influencing goal_growth via existing pathways (e.g., fac_investment→out_revenue→goal_growth and fac_investment→risk_financial→goal_growth)."
+      },
+      "operations": [],
+      "removed_edges": [],
+      "warnings": [
+        "Direct edges from factor (fac_investment) to goal (goal_growth) are not allowed by model topology rules. The model already transmits investment effects to the goal via intermediate outcomes and risks."
+      ],
+      "coaching": {
+        "summary": "Direct causal links from a controllable factor to a goal node would bypass necessary outcomes or risks, and are not permitted. If you want to strengthen the influence of Expansion Investment on reaching 800 Pro Customers, consider increasing its effect on intermediate nodes (e.g., out_revenue or risk_financial) instead.",
+        "rerun_recommended": false
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": true,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": true
+  },
+  "overall": 1,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}
