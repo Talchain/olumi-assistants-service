@@ -20,6 +20,7 @@ coverage/
 # Test output
 playwright-report/
 test-results/
+test-diagnostics/
 
 # Editor/IDE
 .idea/
