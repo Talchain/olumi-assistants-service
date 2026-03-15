@@ -40,10 +40,11 @@ export const EDGE_STRENGTH_LOW_THRESHOLD = _EDGE_STRENGTH_LOW_THRESHOLD;
 
 /**
  * NaN-fix default std value applied in deterministic-sweep.ts when
- * edge.strength_std is NaN. Distinct from DEFAULT_STRENGTH_STD (0.125)
- * which is the V3 transform derivation default.
+ * edge.strength_std is NaN. Aligned with DEFAULT_STRENGTH_STD (0.125)
+ * so the integrity sentinel detects both transform defaults and NaN-fix
+ * repairs with a single signature.
  */
-export const NAN_FIX_SIGNATURE_STD = 0.1;
+export const NAN_FIX_SIGNATURE_STD = DEFAULT_STRENGTH_STD;
 
 // Re-export additional thresholds from shared package for direct use
 export {

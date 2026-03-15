@@ -276,15 +276,15 @@ describe("Wave 2 Integration — Wave 1 regression: Default signature detection"
     { id: "goal", kind: "goal" },
   ];
 
-  it("classifies V3 transform defaults separately from NaN-fix defaults", () => {
+  it("attributes all defaults to v3_transform (NaN-fix and V3 now aligned at 0.125)", () => {
     const edges = [
       makeV3Edge("f_a", "goal", DEFAULT_STRENGTH_MEAN, DEFAULT_STRENGTH_STD),
       makeV3Edge("f_b", "goal", DEFAULT_STRENGTH_MEAN, NAN_FIX_SIGNATURE_STD),
       makeV3Edge("f_c", "goal", DEFAULT_STRENGTH_MEAN, DEFAULT_STRENGTH_STD),
     ];
     const result = detectStrengthDefaults(baseNodes, edges);
-    expect(result.defaulted_by_source.v3_transform).toBe(2);
-    expect(result.defaulted_by_source.nan_fix).toBe(1);
+    expect(result.defaulted_by_source.v3_transform).toBe(3);
+    expect(result.defaulted_by_source.nan_fix).toBe(0);
     expect(result.defaulted_count).toBe(3);
   });
 

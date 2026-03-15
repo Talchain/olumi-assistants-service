@@ -138,7 +138,7 @@ describe("Wave 1 — Task 2: NaN-fix detector widened + source classification", 
     expect(result.defaulted_by_source.nan_fix).toBe(0);
   });
 
-  it("detects NaN-fix default signature (mean=0.5, std=0.1)", () => {
+  it("detects NaN-fix default signature (mean=0.5, std=0.125 — aligned with V3 transform)", () => {
     const edges = [
       makeV3Edge("factor_a", "goal", 0.5, NAN_FIX_SIGNATURE_STD),
       makeV3Edge("factor_b", "goal", 0.5, NAN_FIX_SIGNATURE_STD),
@@ -147,20 +147,21 @@ describe("Wave 1 — Task 2: NaN-fix detector widened + source classification", 
     const result = detectStrengthDefaults(baseNodes, edges);
     expect(result.detected).toBe(true);
     expect(result.defaulted_count).toBe(3);
-    expect(result.defaulted_by_source.nan_fix).toBe(3);
-    expect(result.defaulted_by_source.v3_transform).toBe(0);
+    // NaN-fix and V3 transform now use the same std (0.125); all attributed to v3_transform
+    expect(result.defaulted_by_source.v3_transform).toBe(3);
+    expect(result.defaulted_by_source.nan_fix).toBe(0);
   });
 
-  it("classifies mixed defaults correctly", () => {
+  it("classifies all defaults as v3_transform (NaN-fix and V3 now aligned)", () => {
     const edges = [
-      makeV3Edge("factor_a", "goal", 0.5, DEFAULT_STRENGTH_STD),   // V3 transform
-      makeV3Edge("factor_b", "goal", 0.5, NAN_FIX_SIGNATURE_STD),  // NaN-fix
-      makeV3Edge("factor_c", "goal", 0.5, DEFAULT_STRENGTH_STD),   // V3 transform
+      makeV3Edge("factor_a", "goal", 0.5, DEFAULT_STRENGTH_STD),
+      makeV3Edge("factor_b", "goal", 0.5, NAN_FIX_SIGNATURE_STD),
+      makeV3Edge("factor_c", "goal", 0.5, DEFAULT_STRENGTH_STD),
     ];
     const result = detectStrengthDefaults(baseNodes, edges);
     expect(result.defaulted_count).toBe(3);
-    expect(result.defaulted_by_source.v3_transform).toBe(2);
-    expect(result.defaulted_by_source.nan_fix).toBe(1);
+    expect(result.defaulted_by_source.v3_transform).toBe(3);
+    expect(result.defaulted_by_source.nan_fix).toBe(0);
   });
 
   it("does NOT flag non-default edges (mean=0.5 but std=0.2)", () => {
@@ -181,12 +182,12 @@ describe("Wave 1 — Task 2: NaN-fix detector widened + source classification", 
 // ---------------------------------------------------------------------------
 
 describe("Wave 1 — P1-2: NAN_FIX_SIGNATURE_STD centralized constant", () => {
-  it("is exported from cee/constants and equals 0.1", () => {
-    expect(NAN_FIX_SIGNATURE_STD).toBe(0.1);
+  it("is exported from cee/constants and equals 0.125 (aligned with DEFAULT_STRENGTH_STD)", () => {
+    expect(NAN_FIX_SIGNATURE_STD).toBe(0.125);
   });
 
-  it("differs from DEFAULT_STRENGTH_STD (the V3 transform default)", () => {
-    expect(NAN_FIX_SIGNATURE_STD).not.toBe(DEFAULT_STRENGTH_STD);
+  it("equals DEFAULT_STRENGTH_STD so detector and repair cannot drift", () => {
+    expect(NAN_FIX_SIGNATURE_STD).toBe(DEFAULT_STRENGTH_STD);
   });
 });
 

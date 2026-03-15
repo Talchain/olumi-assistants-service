@@ -79,7 +79,7 @@ interface Repair {
 // Bucket A fixes
 // ---------------------------------------------------------------------------
 
-function fixNanValues(
+export function fixNanValues(
   graph: GraphT,
   violations: ValidationIssue[],
 ): Repair[] {
@@ -698,6 +698,135 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
 }
 
 // ---------------------------------------------------------------------------
+// Proactive: option→outcome shortcut removal (whitelisted FORBIDDEN_EDGE fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * Allowed edge patterns for reachability BFS.
+ * Only edges matching these (fromKind → toKind) pairs are traversed,
+ * ensuring the outcome reaches goal via a valid causal chain — not through
+ * another forbidden shortcut.
+ */
+const REACHABILITY_ALLOWED: Array<[string, string]> = [
+  ["factor", "outcome"],
+  ["factor", "risk"],
+  ["factor", "factor"],
+  ["outcome", "goal"],
+  ["risk", "goal"],
+];
+
+/**
+ * Check if a node can reach a goal node following only allowed edge patterns.
+ * @param excludeEdge - optional edge to exclude from traversal (the candidate for removal)
+ */
+function canReachGoalViaAllowed(
+  startId: string,
+  nodeKindMap: Map<string, string>,
+  edges: EdgeT[],
+  excludeEdge?: EdgeT,
+): boolean {
+  const visited = new Set<string>();
+  const queue = [startId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    if (nodeKindMap.get(current) === "goal") return true;
+
+    const currentKind = nodeKindMap.get(current);
+    if (!currentKind) continue;
+
+    for (const edge of edges) {
+      if (edge === excludeEdge) continue;
+      if (edge.from !== current) continue;
+      const toKind = nodeKindMap.get(edge.to);
+      if (!toKind) continue;
+
+      // Only traverse via allowed edge patterns
+      const isAllowed = REACHABILITY_ALLOWED.some(
+        ([fk, tk]) => fk === currentKind && tk === toKind,
+      );
+      if (isAllowed && !visited.has(edge.to)) {
+        queue.push(edge.to);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Remove option→outcome shortcut edges when the outcome already has a valid
+ * path to goal via allowed edge patterns (outcome→goal or outcome→factor→...→goal).
+ *
+ * Only handles the option→outcome pattern. All other forbidden patterns
+ * (option→goal, option→risk, decision→outcome, etc.) remain Bucket C for LLM repair.
+ *
+ * Returns repair records for removed edges plus a count of non-eligible
+ * forbidden edges that were skipped (flagged for LLM repair).
+ */
+export function fixOptionOutcomeShortcut(graph: GraphT): {
+  repairs: Repair[];
+  removedCount: number;
+  skippedCount: number;
+} {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  const keptEdges: EdgeT[] = [];
+  let removedCount = 0;
+  let skippedCount = 0;
+
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    if (fromKind === "option" && toKind === "outcome") {
+      // Check if the outcome already reaches goal via allowed patterns
+      // (excluding the current edge, which we're considering removing)
+      if (canReachGoalViaAllowed(edge.to, nodeKindMap, edges, edge)) {
+        removedCount++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Removed option→outcome shortcut (outcome already reaches goal via valid chain)`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          pattern: "option_outcome_shortcut",
+        }, `Auto-fixed forbidden edge: option→outcome shortcut ${edge.from}→${edge.to}`);
+        continue; // Skip — don't keep this edge
+      } else {
+        // Outcome has no valid path to goal without this edge — leave for LLM
+        skippedCount++;
+        keptEdges.push(edge);
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_deferred",
+          from: edge.from,
+          to: edge.to,
+          pattern: "option_outcome_no_goal_path",
+          reason: "outcome has no valid path to goal via allowed edge patterns; deferred to LLM repair",
+        }, `Deferred forbidden edge to LLM: option→outcome ${edge.from}→${edge.to} (no goal path)`);
+      }
+    } else {
+      keptEdges.push(edge);
+    }
+  }
+
+  if (removedCount > 0) {
+    (graph as any).edges = keptEdges;
+  }
+
+  return { repairs, removedCount, skippedCount };
+}
+
+// ---------------------------------------------------------------------------
 // Proactive: disconnected observable/external pruning
 // ---------------------------------------------------------------------------
 
@@ -733,6 +862,13 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
         path: `nodes[${node.id}]`,
         action: `Removed ${node.category} factor "${node.label ?? node.id}" with zero edges`,
       });
+      // Per-node structured log (brief contract)
+      log.info({
+        event: "cee.deterministic_sweep.observable_pruned",
+        node_id: node.id,
+        label: node.label ?? node.id,
+        category: node.category,
+      }, `Pruned disconnected ${node.category} factor "${node.label ?? node.id}"`);
     } else {
       keptNodes.push(node);
     }
@@ -740,11 +876,24 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
 
   if (pruned.length > 0) {
     (graph as any).nodes = keptNodes;
-    log.info({
-      event: "cee.deterministic_sweep.disconnected_observable_pruned",
-      pruned_ids: pruned,
-      count: pruned.length,
-    }, `Pruned ${pruned.length} disconnected observable/external factor(s)`);
+
+    // Clean up intervention references on option nodes that point to pruned factors
+    const prunedSet = new Set(pruned);
+    for (const node of keptNodes) {
+      if (node.kind !== "option") continue;
+      const data = (node as any).data;
+      if (!data?.interventions || typeof data.interventions !== "object") continue;
+      for (const factorId of Object.keys(data.interventions)) {
+        if (prunedSet.has(factorId)) {
+          delete data.interventions[factorId];
+          repairs.push({
+            code: "DISCONNECTED_OBSERVABLE_PRUNED",
+            path: `nodes[${node.id}].data.interventions[${factorId}]`,
+            action: `Removed intervention reference to pruned factor "${factorId}"`,
+          });
+        }
+      }
+    }
   }
 
   return { repairs, pruned };
@@ -902,6 +1051,21 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }, `Split ${factorGoalResult.splitCount} factor→goal edge(s) via synthetic outcome nodes`);
   }
 
+  // Step 4d: Option→outcome shortcut removal — ALWAYS run.
+  // Removes option→outcome edges when the outcome already reaches goal via valid chain.
+  // Other forbidden patterns (option→goal, option→risk, etc.) stay Bucket C for LLM.
+  const optionOutcomeResult = fixOptionOutcomeShortcut(graph);
+  allRepairs.push(...optionOutcomeResult.repairs);
+
+  if (optionOutcomeResult.removedCount > 0) {
+    log.info({
+      event: "cee.deterministic_sweep.option_outcome_shortcut",
+      request_id: ctx.requestId,
+      removed_count: optionOutcomeResult.removedCount,
+      skipped_count: optionOutcomeResult.skippedCount,
+    }, `Removed ${optionOutcomeResult.removedCount} option→outcome shortcut(s)`);
+  }
+
   // Step 5: Proactive unreachable factor handling — ALWAYS run regardless of violations.
   // simpleRepair (Stage 3) preserves unreachable factors but doesn't reclassify them.
   // The sweep must detect and reclassify them so model_adjustments gets populated.
@@ -992,6 +1156,8 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       goal_threshold_stripped: 0,
       goal_threshold_possibly_inferred: 0,
       factor_goal_splits: factorGoalResult.splitCount,
+      option_outcome_shortcuts_removed: optionOutcomeResult.removedCount,
+      option_outcome_shortcuts_skipped: optionOutcomeResult.skippedCount,
       disconnected_observables_pruned: disconnectedObservableResult.pruned,
       status_quo: {
         fixed: statusQuoResult.fixed,
