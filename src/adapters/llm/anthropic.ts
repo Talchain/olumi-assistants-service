@@ -35,6 +35,7 @@ export type DraftArgs = {
   model?: string;
   includeDebug?: boolean;
   briefSignalsHeader?: string;
+  currencyInstruction?: string;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -263,10 +264,11 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
 
   const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
   const briefSignalsHeader = args.briefSignalsHeader ?? "";
+  const currencyInstruction = args.currencyInstruction ?? "";
   const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${args.brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}`;
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -1035,6 +1037,7 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
   const maxAttempts = (args as any).maxAttempts ?? 1;
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
+  const currencyInstruction = (args as any).currencyInstruction ?? "";
   const userContent = `Brief:
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${briefText}
@@ -1049,7 +1052,7 @@ ${escalationText}
 ${violationsText}
 
 ## Current Graph (INVALID)${truncatedNote}
-${graphJson}`;
+${graphJson}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   const systemPrompt = await getSystemPrompt('repair_graph');
@@ -1379,11 +1382,12 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
     ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
     : "";
 
+  const currencyInstruction = (args as any).currencyInstruction ?? "";
   const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${args.brief}
 [END_UNTRUSTED_USER_CONTENT]
-${previousContext}`;
+${previousContext}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   const systemPrompt = await getSystemPrompt('clarify_brief');
@@ -2553,6 +2557,7 @@ export class AnthropicAdapter implements LLMAdapter {
         seed,
         model: this.model,
         briefSignalsHeader: args.briefSignalsHeader,
+        currencyInstruction: args.currencyInstruction,
       },
       { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
     );
@@ -2580,7 +2585,7 @@ export class AnthropicAdapter implements LLMAdapter {
   }
 
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    const { graph, violations } = args;
+    const { graph, violations, brief, docs, currencyInstruction } = args;
 
     const result = await repairGraphWithAnthropic(
       {
@@ -2588,7 +2593,10 @@ export class AnthropicAdapter implements LLMAdapter {
         violations,
         model: this.model,
         requestId: opts.requestId,
-      },
+        brief,
+        docs,
+        currencyInstruction,
+      } as any,
       { signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
     );
 
@@ -2600,7 +2608,7 @@ export class AnthropicAdapter implements LLMAdapter {
   }
 
   async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
-    const { brief, round, previous_answers, seed } = args;
+    const { brief, round, previous_answers, seed, currencyInstruction } = args;
 
     const result = await clarifyBriefWithAnthropic({
       brief,
@@ -2608,7 +2616,8 @@ export class AnthropicAdapter implements LLMAdapter {
       previous_answers,
       seed,
       model: this.model,
-    });
+      currencyInstruction,
+    } as any);
 
     return {
       questions: result.questions,

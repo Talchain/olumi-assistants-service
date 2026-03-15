@@ -13,6 +13,7 @@ import {
   findWeakestFactor,
   compressPreviousAnswers,
 } from "../cee/validation/readiness.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 
 export default async function route(app: FastifyInstance) {
   app.post("/assist/clarify-brief", async (req, reply) => {
@@ -74,12 +75,16 @@ export default async function route(app: FastifyInstance) {
         weakest_factor: weakestFactor,
       });
 
+      // Currency context signal — lightweight string scan
+      const currencySignal = detectCurrency(input.brief);
+
       const result = await adapter.clarifyBrief(
         {
           brief: input.brief,
           round: input.round,
           previous_answers: input.previous_answers,
           seed: input.seed,
+          currencyInstruction: buildCurrencyInstruction(currencySignal),
         },
         {
           requestId: `clarify_${Date.now()}`,

@@ -14,6 +14,7 @@ import { config } from "../config/index.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
 import { createResumeToken } from "../utils/sse-resume-token.js";
 import {
@@ -421,6 +422,10 @@ export default async function route(app: FastifyInstance) {
         (input as any).bias_signals = preflightDecision.briefSignals.bias_signals;
       }
     }
+
+    // ── Currency context signal ──────────────────────────────────────
+    const currencySignal = detectCurrency(input.brief);
+    (input as any).currencyInstruction = buildCurrencyInstruction(currencySignal);
 
     // Initialize SSE response
     reply.raw.setHeader("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");

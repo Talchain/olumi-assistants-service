@@ -16,6 +16,7 @@ import type { ConversationBlock, GraphPatchBlockData, PatchOperation, Orchestrat
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
+import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 
 // ============================================================================
 // Types
@@ -67,9 +68,11 @@ export async function handleDraftGraph(
   const startTime = Date.now();
 
   // Build pipeline input — compose briefSignalsHeader with any existing value (fix #10)
+  const currencySignal = detectCurrency(brief);
   const input: DraftInputWithCeeExtras = {
     brief,
     ...(draftOpts?.briefSignalsHeader ? { briefSignalsHeader: draftOpts.briefSignalsHeader } : {}),
+    currencyInstruction: buildCurrencyInstruction(currencySignal),
   };
 
   const opts: UnifiedPipelineOpts = {

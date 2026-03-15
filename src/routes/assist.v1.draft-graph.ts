@@ -14,6 +14,7 @@ import { safeEqual } from "../utils/hash.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 import {
   parseSchemaVersion,
 } from "../cee/transforms/index.js";
@@ -266,6 +267,7 @@ export default async function route(app: FastifyInstance) {
       raw_output?: boolean;
       briefSignalsHeader?: string;
       bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
+      currencyInstruction?: string;
     };
 
     const unsafeCaptureEnabled = isUnsafeCaptureRequested(req) && isAdminAuthorized(req);
@@ -492,6 +494,12 @@ export default async function route(app: FastifyInstance) {
         baseInput.bias_signals = preflightDecision.briefSignals.bias_signals;
       }
     }
+
+    // ── Currency context signal ──────────────────────────────────────
+    // Detect currency from brief and build instruction for LLM prompts.
+    // Always runs — lightweight string scan (<5ms).
+    const currencySignal = detectCurrency(baseInput.brief);
+    baseInput.currencyInstruction = buildCurrencyInstruction(currencySignal);
 
     // ── Unified pipeline ──────────────────────────────────────────────
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);

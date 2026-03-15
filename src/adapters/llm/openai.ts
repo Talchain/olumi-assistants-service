@@ -279,7 +279,7 @@ function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated
 async function buildRepairPrompt(
   graph: GraphT,
   violations: string[],
-  options?: { brief?: string; docs?: Array<{ title?: string; content?: string }>; attempt?: number; maxAttempts?: number },
+  options?: { brief?: string; docs?: Array<{ title?: string; content?: string }>; attempt?: number; maxAttempts?: number; currencyInstruction?: string },
 ): Promise<{ system: string; userContent: string }> {
   const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(graph);
   const graphJson = JSON.stringify(
@@ -301,6 +301,7 @@ async function buildRepairPrompt(
   const maxAttempts = options?.maxAttempts ?? 1;
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
+  const currencyInstruction = options?.currencyInstruction ?? "";
   const userContent = `Brief:
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${briefText}
@@ -315,7 +316,7 @@ ${escalationText}
 ${violationsText}
 
 ## Current Graph (INVALID)${truncatedNote}
-${graphJson}`;
+${graphJson}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   const systemPrompt = await getSystemPrompt('repair_graph');
@@ -371,7 +372,8 @@ Return ONLY the JSON object, no markdown formatting`;
 function buildClarifyBriefPrompt(
   brief: string,
   round: number,
-  previousAnswers?: Array<{ question: string; answer: string }>
+  previousAnswers?: Array<{ question: string; answer: string }>,
+  currencyInstruction?: string,
 ): string {
   const previousContext = previousAnswers?.length
     ? `\n\n## Previous Q&A (Round ${round - 1})\n${previousAnswers
@@ -383,11 +385,13 @@ function buildClarifyBriefPrompt(
     ? `This is clarification round ${round}. Build on previous answers to deepen understanding.`
     : "This is the first round of clarification.";
 
+  const currencyContext = currencyInstruction ?? "";
+
   return `You are an expert decision coach helping to clarify a decision brief before drafting a decision graph.
 
 ## User's Brief
 ${brief}
-${previousContext}
+${previousContext}${currencyContext}
 
 ## Context
 ${roundContext}
@@ -558,10 +562,11 @@ export class OpenAIAdapter implements LLMAdapter {
       : "";
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
     const briefSignalsHeader = args.briefSignalsHeader ?? "";
+    const currencyInstruction = args.currencyInstruction ?? "";
     const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}`;
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -1011,9 +1016,9 @@ ${brief}
   }
 
   async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    const { graph, violations, brief, docs } = args;
+    const { graph, violations, brief, docs, currencyInstruction } = args;
     const collector = opts.collector;
-    const prompt = await buildRepairPrompt(graph, violations, { brief, docs: docs as any });
+    const prompt = await buildRepairPrompt(graph, violations, { brief, docs: docs as any, currencyInstruction });
     const repairPromptMeta = getSystemPromptMeta('repair_graph');
 
     // V04: Generate idempotency key for request traceability
@@ -1255,13 +1260,13 @@ ${brief}
   }
 
   async clarifyBrief(args: import("./types.js").ClarifyBriefArgs, opts: CallOpts): Promise<import("./types.js").ClarifyBriefResult> {
-    const { brief, round, previous_answers, seed } = args;
+    const { brief, round, previous_answers, seed, currencyInstruction } = args;
     const requestId = opts.requestId || `clarify-${Date.now()}`;
     const start = Date.now();
 
     log.info({ request_id: requestId, round, previous_answers_count: previous_answers?.length ?? 0 }, "Starting OpenAI clarify brief");
 
-    const prompt = buildClarifyBriefPrompt(brief, round, previous_answers);
+    const prompt = buildClarifyBriefPrompt(brief, round, previous_answers, currencyInstruction);
 
     const client = getClient();
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);

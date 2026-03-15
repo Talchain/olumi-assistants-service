@@ -183,6 +183,7 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
         violations: issues,
         brief: ctx.effectiveBrief || undefined,
         docs: (ctx.input as any).docs || undefined,
+        currencyInstruction: ctx.input.currencyInstruction,
       },
       { requestId: `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs, signal: ctx.opts.signal },
     );

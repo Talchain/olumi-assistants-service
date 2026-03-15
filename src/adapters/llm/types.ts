@@ -38,6 +38,13 @@ export interface DraftGraphArgs {
    * undefined when signals are unavailable (rejected briefs, flag disabled).
    */
   briefSignalsHeader?: string;
+  /**
+   * Pre-formatted currency context instruction (e.g. `[CURRENCY_CONTEXT] ...`).
+   * Includes leading newlines. Appended after briefSignalsHeader in the user message.
+   * Built by `buildCurrencyInstruction()` from the detected currency signal;
+   * undefined when currency detection is disabled.
+   */
+  currencyInstruction?: string;
 }
 
 /**
@@ -168,6 +175,8 @@ export interface RepairGraphArgs {
   violations: string[];
   brief?: string;
   docs?: DocPreview[];
+  /** Pre-formatted currency context instruction to append to repair prompt. */
+  currencyInstruction?: string;
 }
 
 /**
@@ -197,6 +206,8 @@ export interface ClarifyBriefArgs {
   round: number;
   previous_answers?: Array<{ question: string; answer: string }>;
   seed?: number;
+  /** Pre-formatted currency context instruction to append to clarify prompt. */
+  currencyInstruction?: string;
 }
 
 /**

@@ -118,23 +118,81 @@ function mapKindToV3(kind: string): NodeV3T["kind"] {
 }
 
 // ============================================================================
+// Label Cleaning
+// ============================================================================
+
+/**
+ * Normalisation annotations injected by the LLM into factor labels.
+ * Stripped at the V3 boundary so the UI receives clean display labels.
+ *
+ * LABEL_NORMALISATION_RE matches patterns that start with `(0` + separator
+ * AND contain normalisation-specific tokens (scale, normali[sz]ed, share,
+ * cap, proportion, ratio, index, score, bounded, capped) or are exactly
+ * a bare range like `(0–1)`, `(0/1)`, `(0-1)`.
+ *
+ * LABEL_SCALE_RE matches `(normalised)`, `(normalized)`, `(scale 0 to 1)` etc.
+ *
+ * Legitimate parentheticals like `(0-100 range)`, `(Q4)`, `(UK)` survive.
+ */
+const LABEL_NORMALISATION_RE = /\s*\(0[–\-\/]1(?:\s*(?:,\s*)?(?:scale|normali[sz]ed|share|cap|proportion|ratio|index|score|bounded|capped)[^)]*|)\)\s*/gi;
+const LABEL_SCALE_RE = /\s*\((normali[sz]ed|scale\s+\d[^)]*)\)\s*/gi;
+
+export interface LabelCleaningEntry {
+  node_id: string;
+  original: string;
+  cleaned: string;
+}
+
+/**
+ * Strip normalisation annotations from a node label.
+ * Returns the cleaned label and, if stripping occurred, the before/after pair.
+ */
+export function cleanNodeLabel(
+  nodeId: string,
+  rawLabel: string,
+): { label: string; entry: LabelCleaningEntry | null } {
+  let cleaned = rawLabel.replace(LABEL_NORMALISATION_RE, " ").trim();
+  cleaned = cleaned.replace(LABEL_SCALE_RE, " ").trim();
+
+  // Collapse any double internal whitespace left after stripping
+  cleaned = cleaned.replace(/\s{2,}/g, " ");
+
+  // Guard: never produce an empty label
+  if (cleaned.length === 0) cleaned = rawLabel;
+
+  if (cleaned !== rawLabel) {
+    return { label: cleaned, entry: { node_id: nodeId, original: rawLabel, cleaned } };
+  }
+  return { label: rawLabel, entry: null };
+}
+
+// ============================================================================
 // Node Transformation
 // ============================================================================
 
 /**
  * Transform a V1 node to V3 format.
+ *
+ * @param labelCleaningTrace - Optional array; cleaning entries are pushed when annotations are stripped.
  */
 export function transformNodeToV3(
   node: V1Node,
-  existingIds: Set<string> = new Set()
+  existingIds: Set<string> = new Set(),
+  labelCleaningTrace?: LabelCleaningEntry[],
 ): NodeV3T {
   const id = normalizeToId(node.id, existingIds);
   existingIds.add(id);
 
+  const rawLabel = node.label ?? node.id;
+  const { label: cleanedLabel, entry: cleaningEntry } = cleanNodeLabel(id, rawLabel);
+  if (cleaningEntry && labelCleaningTrace) {
+    labelCleaningTrace.push(cleaningEntry);
+  }
+
   const v3Node: NodeV3T = {
     id,
     kind: mapKindToV3(node.kind),
-    label: node.label ?? node.id,
+    label: cleanedLabel,
     description: node.body,
     // Preserve category field (V12.4+) for factor nodes
     category: node.category,
@@ -522,15 +580,17 @@ export interface GraphTransformResult {
   graph: GraphV3T;
   transform_defaults: TransformDefaultRecord[];
   defaulted_edge_count: number;
+  label_cleaning: LabelCleaningEntry[];
 }
 
 export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   // Keep ALL nodes including options (for PLoT connectivity and canvas visualization)
   const allNodeIds = new Set(graph.nodes.map((n) => n.id));
 
-  // Transform all nodes
+  // Transform all nodes, collecting label cleaning trace
   const usedNodeIds = new Set<string>();
-  const v3Nodes = graph.nodes.map((node) => transformNodeToV3(node, usedNodeIds));
+  const labelCleaningTrace: LabelCleaningEntry[] = [];
+  const v3Nodes = graph.nodes.map((node) => transformNodeToV3(node, usedNodeIds, labelCleaningTrace));
 
   // Keep ALL valid edges (including decision→option and option→factor)
   const validEdges = graph.edges.filter(
@@ -545,6 +605,15 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   const allDefaults = edgeResults.flatMap((r) => r.defaults);
   const edgesWithDefaults = new Set(allDefaults.map((d) => d.edge_id));
 
+  // Log label cleaning trace if any annotations were stripped
+  if (labelCleaningTrace.length > 0) {
+    log.info({
+      event: "cee.v3_transform.label_cleaning",
+      count: labelCleaningTrace.length,
+      entries: labelCleaningTrace,
+    }, `Stripped normalisation annotations from ${labelCleaningTrace.length} node label(s)`);
+  }
+
   return {
     graph: {
       nodes: v3Nodes,
@@ -552,6 +621,7 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
     },
     transform_defaults: allDefaults,
     defaulted_edge_count: edgesWithDefaults.size,
+    label_cleaning: labelCleaningTrace,
   };
 }
 
@@ -601,7 +671,7 @@ export function transformResponseToV3(
   const edgeHints = extractEdgeHints(graph);
 
   // Transform graph (without option nodes)
-  const { graph: v3Graph, transform_defaults: transformDefaults, defaulted_edge_count: defaultedEdgeCount } = transformGraphToV3(graph);
+  const { graph: v3Graph, transform_defaults: transformDefaults, defaulted_edge_count: defaultedEdgeCount, label_cleaning: labelCleaning } = transformGraphToV3(graph);
 
   // [V3-CAT-TRACE] Log category field status through V3 transform
   // Gated behind CEE_DEBUG_CATEGORY_TRACE feature flag
@@ -743,6 +813,10 @@ export function transformResponseToV3(
         total_defaults: transformDefaults.length,
         defaults: transformDefaults,
       },
+      // Label cleaning: normalisation annotations stripped at V3 boundary
+      ...(labelCleaning.length > 0 ? {
+        label_cleaning: labelCleaning,
+      } : {}),
       // F15: Surface analysis_ready fallback count when fallbacks occurred
       // AnalysisReadyPayload uses .passthrough() — _fallback_meta is a runtime-only trace field
       ...((analysisReady as Record<string, unknown>)._fallback_meta

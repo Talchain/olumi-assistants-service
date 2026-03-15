@@ -43,6 +43,8 @@ type DraftInputWithCeeExtras = DraftGraphInputT & {
   briefSignalsHeader?: string;
   /** Deterministic bias signals from BriefSignals v1 — persisted in response payload + trace. */
   bias_signals?: Array<{ type: string; confidence: string; evidence: string }>;
+  /** Pre-formatted currency context instruction to append to LLM prompts. */
+  currencyInstruction?: string;
 };
 
 export function isAdminAuthorized(request: FastifyRequest): boolean {
