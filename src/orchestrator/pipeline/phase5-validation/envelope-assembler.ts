@@ -6,6 +6,7 @@
  */
 
 import { isProduction, config } from "../../../config/index.js";
+import { checkFeatureHealth } from "../../../diagnostics/feature-health.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
 import { getDskVersionHash } from "../../dsk-loader.js";
@@ -259,6 +260,19 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     }
   }
 
+  // Build per-turn feature activation status (always present, independent of route metadata).
+  const featureReport = checkFeatureHealth();
+  const features: Record<string, { enabled: boolean; healthy: boolean; reason?: string }> = {};
+  for (const check of featureReport.checks) {
+    if (check.enabled) {
+      features[check.name] = {
+        enabled: true,
+        healthy: check.healthy,
+        ...(check.reason ? { reason: check.reason } : {}),
+      };
+    }
+  }
+
   // Build _route_metadata with extended observability fields.
   // Base metadata comes from tool handler or LLM routing; we extend with context.
   // resolved_model/resolved_provider are set by phase3 on llmResult.route_metadata and by
@@ -304,7 +318,11 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
       contract_version: TURN_CONTRACT_VERSION,
       resolved_model: resolvedModel,
       resolved_provider: resolvedProvider,
+      features,
     };
+  } else {
+    // No route metadata from tool or LLM — still attach feature diagnostics
+    envelope._route_metadata = { features } as typeof envelope._route_metadata;
   }
 
   return envelope;

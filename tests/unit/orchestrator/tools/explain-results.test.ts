@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   stripUngroundedNumerics,
+  buildGroundedValues,
   detectConstraintTension,
   handleExplainResults,
 } from "../../../../src/orchestrator/tools/explain-results.js";
@@ -84,6 +85,199 @@ describe("explain_results — numeric freehand stripping", () => {
     const { cleaned, strippedCount } = stripUngroundedNumerics("No numbers here.");
     expect(cleaned).toBe("No numbers here.");
     expect(strippedCount).toBe(0);
+  });
+});
+
+describe("explain_results — grounded-set numeric stripping", () => {
+  const analysisWithData = makeAnalysisResponse({
+    results: [
+      { option_label: "Option A", win_probability: 0.62 },
+      { option_label: "Option B", win_probability: 0.38, goal_value: { mean: 18500, p10: 14200, p90: 22800 } },
+    ] as unknown as V2RunResponseEnvelope["results"],
+    factor_sensitivity: [
+      { label: "Market demand", elasticity: 0.85, direction: "positive" },
+    ] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    meta: { seed_used: 42, n_samples: 10000, response_hash: "hash-1" },
+    constraint_analysis: {
+      joint_probability: 0.45,
+      per_constraint: [{ probability: 0.8 }, { probability: 0.7 }],
+    },
+  });
+
+  it("preserves grounded percentage (62%) from win_probability 0.62", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads with 62% win probability.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("62%");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("preserves grounded decimal (0.62)", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Win probability is 0.62 for Option A.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("0.62");
+  });
+
+  it("preserves rounded percentage (63%) from 0.625-like rounding", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Option A has approximately 62% probability.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("62%");
+  });
+
+  it("preserves grounded currency (£18,500) from goal_value.mean", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "The expected outcome is £18,500.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("£18,500");
+  });
+
+  it("preserves grounded range (14,200-22,800) from p10/p90", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Range is between 14200 and 22800.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("14200");
+    expect(cleaned).toContain("22800");
+  });
+
+  it("preserves grounded elasticity (0.85)", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Market demand has an elasticity of 0.85.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("0.85");
+  });
+
+  it("preserves grounded sample count (10,000)", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Based on 10,000 simulations.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("10,000");
+  });
+
+  it("strips ungrounded numbers that do not appear in analysis", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "There is a 87% chance this saves $50,000 annually.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("[value]");
+    expect(strippedCount).toBe(2);
+  });
+
+  it("preserves grounded while stripping ungrounded in the same text", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads with 62% probability. This could save approximately 150 units.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("62%");
+    expect(cleaned).toContain("[value]");
+    expect(strippedCount).toBe(1);
+  });
+
+  it("preserves constraint joint probability (45%)", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Joint constraint probability is 45%.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("45%");
+  });
+
+  it("backward compatible: strips all when no analysis provided", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads with 62% probability.",
+    );
+    expect(cleaned).toContain("[value]");
+    expect(strippedCount).toBeGreaterThan(0);
+  });
+
+  it("preserves grounded 'percent' word form (62 percent)", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads with 62 percent win probability.",
+      analysisWithData,
+    );
+    expect(cleaned).toContain("62 percent");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("preserves grounded negative elasticity (-0.4)", () => {
+    const analysisWithNeg = makeAnalysisResponse({
+      results: [{ option_label: "A", win_probability: 0.5 }] as unknown as V2RunResponseEnvelope["results"],
+      factor_sensitivity: [
+        { label: "Cost", elasticity: -0.4, direction: "negative" },
+      ] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    });
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Cost has a negative elasticity of -0.4.",
+      analysisWithNeg,
+    );
+    expect(cleaned).toContain("-0.4");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("preserves absolute value of negative grounded number (0.4 from -0.4)", () => {
+    const analysisWithNeg = makeAnalysisResponse({
+      results: [{ option_label: "A", win_probability: 0.5 }] as unknown as V2RunResponseEnvelope["results"],
+      factor_sensitivity: [
+        { label: "Cost", elasticity: -0.4, direction: "negative" },
+      ] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    });
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Cost elasticity magnitude is 0.4.",
+      analysisWithNeg,
+    );
+    expect(cleaned).toContain("0.4");
+    expect(strippedCount).toBe(0);
+  });
+});
+
+describe("explain_results — buildGroundedValues", () => {
+  it("includes percentage forms of win_probability", () => {
+    const response = makeAnalysisResponse({
+      results: [{ option_label: "A", win_probability: 0.625 }] as unknown as V2RunResponseEnvelope["results"],
+    });
+    const values = buildGroundedValues(response);
+    expect(values.has("62")).toBe(true);  // floor
+    expect(values.has("63")).toBe(true);  // ceil
+    expect(values.has("62.5")).toBe(true); // exact
+    expect(values.has("0.625")).toBe(true); // raw
+  });
+
+  it("includes n_samples from meta", () => {
+    const response = makeAnalysisResponse();
+    const values = buildGroundedValues(response);
+    expect(values.has("1000")).toBe(true);
+    expect(values.has("1,000")).toBe(true);
+  });
+
+  it("includes goal_value fields", () => {
+    const response = makeAnalysisResponse({
+      results: [{ option_label: "A", win_probability: 0.5, goal_value: { mean: 18500, p10: 14200, p90: 22800 } }] as unknown as V2RunResponseEnvelope["results"],
+    });
+    const values = buildGroundedValues(response);
+    expect(values.has("18500")).toBe(true);
+    expect(values.has("18,500")).toBe(true);
+    expect(values.has("18.5k")).toBe(true);
+    expect(values.has("14200")).toBe(true);
+    expect(values.has("22800")).toBe(true);
+  });
+
+  it("includes both signed and absolute forms for negative elasticity", () => {
+    const response = makeAnalysisResponse({
+      factor_sensitivity: [
+        { label: "Cost", elasticity: -0.4, direction: "negative" },
+      ] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    });
+    const values = buildGroundedValues(response);
+    expect(values.has("-0.4")).toBe(true);  // signed
+    expect(values.has("0.4")).toBe(true);   // absolute
+    expect(values.has("40")).toBe(true);    // percentage of abs
   });
 });
 

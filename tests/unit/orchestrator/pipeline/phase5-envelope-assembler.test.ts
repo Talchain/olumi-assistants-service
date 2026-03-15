@@ -495,8 +495,9 @@ describe("assembleV2Envelope", () => {
       scienceLedger: makeScienceLedger(),
     });
 
-    // No route_metadata at all — _route_metadata should be absent
-    expect(envelope._route_metadata).toBeUndefined();
+    // No base route_metadata — _route_metadata still present with features-only
+    expect(envelope._route_metadata).toBeDefined();
+    expect(envelope._route_metadata!.features).toBeDefined();
   });
 
   it("guidance_items survives JSON serialisation round-trip", () => {

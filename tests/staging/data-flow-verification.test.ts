@@ -217,9 +217,16 @@ function assertAnalysisVisible(body: unknown, label: string): void {
     console.warn(`[${label}] _route_metadata absent — cannot verify has_analysis`);
   }
 
-  // assistant_text should not claim analysis is missing
-  const text = ((b.assistant_text as string) ?? "").toLowerCase();
-  expect(text).not.toMatch(/no analysis|hasn't been run|not been run|no results available/);
+  // Neither assistant_text nor block content should claim analysis is missing
+  const blocks = (b.blocks as Array<Record<string, unknown>> | undefined) ?? [];
+  const blockTexts = blocks
+    .map((blk) => {
+      const data = blk.data as Record<string, unknown> | undefined;
+      return (data?.narrative as string) ?? (data?.text as string) ?? "";
+    })
+    .join(" ");
+  const allText = (((b.assistant_text as string) ?? "") + " " + blockTexts).toLowerCase();
+  expect(allText).not.toMatch(/no analysis|hasn't been run|not been run|no results available/);
 }
 
 function assertGraphVisible(body: unknown, label: string): void {
@@ -466,28 +473,37 @@ describe("Data-flow verification: cross-service boundary checks", { timeout: 300
       const b = result.body as Record<string, unknown>;
       assertAnalysisVisible(b, "Step 3");
 
-      // assistant_text should reference analysis data
-      const text = ((b.assistant_text as string) ?? "").toLowerCase();
-      expect(text).not.toMatch(/no analysis|hasn't been run|not been run|no results/);
+      // Collect all text content: assistant_text + block narratives
+      // (explain_results tool puts content in commentary blocks, not assistant_text)
+      const blocks = b.blocks as Array<Record<string, unknown>>;
+      const blockTexts = blocks
+        .map((blk) => {
+          const data = blk.data as Record<string, unknown> | undefined;
+          return (data?.narrative as string) ?? (data?.text as string) ?? "";
+        })
+        .join(" ");
+      const allText = (((b.assistant_text as string) ?? "") + " " + blockTexts).toLowerCase();
+
+      expect(allText).not.toMatch(/no analysis|hasn't been run|not been run|no results/);
 
       // Positive check: response should mention something from the analysis
       // (option names, probability-like numbers, driver names, or general analysis terms)
       const mentionsAnalysisContent =
-        text.includes("senior") ||
-        text.includes("junior") ||
-        text.includes("62") ||
-        text.includes("0.62") ||
-        text.includes("win") ||
-        text.includes("probability") ||
-        text.includes("cost") ||
-        text.includes("productivity") ||
-        text.includes("moderate") ||
-        text.includes("robust") ||
-        text.includes("option") ||
-        text.includes("result");
+        allText.includes("senior") ||
+        allText.includes("junior") ||
+        allText.includes("62") ||
+        allText.includes("0.62") ||
+        allText.includes("win") ||
+        allText.includes("probability") ||
+        allText.includes("cost") ||
+        allText.includes("productivity") ||
+        allText.includes("moderate") ||
+        allText.includes("robust") ||
+        allText.includes("option") ||
+        allText.includes("result");
       expect(
         mentionsAnalysisContent,
-        `Expected response to reference analysis data. Text: ${text.slice(0, 300)}`,
+        `Expected response to reference analysis data. Text: ${allText.slice(0, 300)}`,
       ).toBe(true);
     },
   );
@@ -601,6 +617,76 @@ describe("Data-flow verification: cross-service boundary checks", { timeout: 300
         // Should still have turn_id
         expect(typeof b.turn_id).toBe("string");
       }
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Step 6: Feature activation check
+  // Verifies that _route_metadata.features is populated and no enabled
+  // feature reports unhealthy status.
+  // --------------------------------------------------------------------------
+
+  it(
+    "Step 6: Feature activation — enabled features report healthy status",
+    { timeout: TIMEOUT_EXPLAIN_MS + 10_000, skip: !!SKIP_REASON },
+    async () => {
+      if (SKIP_REASON) {
+        console.log(SKIP_REASON);
+        return;
+      }
+
+      // Use the explain turn (analysis present) since it exercises the most features
+      const syntheticAnalysis = buildSyntheticAnalysisState();
+      const requestBody = buildTurnRequest({
+        message: "Summarise the results briefly.",
+        scenarioId,
+        graph: graphState,
+        analysisState: syntheticAnalysis,
+        framing: { stage: "evaluate", goal: "Maximise engineering output" },
+      });
+
+      const result = await makeRequest(TURN_URL, requestBody);
+      saveArtifact(ARTIFACT_DIR, 6, "feature-activation", requestBody, result);
+      logTrace("Step 6: Feature activation", result);
+
+      expect(result.status).toBe(200);
+      assertValidEnvelope(result.body, "Step 6");
+
+      const b = result.body as Record<string, unknown>;
+      const meta = b._route_metadata as Record<string, unknown> | undefined;
+
+      expect(
+        meta,
+        "[Step 6] _route_metadata must be present on every response envelope",
+      ).toBeDefined();
+
+      const features = meta!.features as Record<string, { enabled: boolean; healthy: boolean; reason?: string }> | undefined;
+
+      expect(
+        features,
+        "[Step 6] _route_metadata.features must be present — feature diagnostics are required",
+      ).toBeDefined();
+
+      console.log(`[Step 6] Feature activation: ${JSON.stringify(features)}`);
+
+      // Every enabled feature should be healthy (dependencies satisfied)
+      for (const [name, status] of Object.entries(features)) {
+        if (status.enabled && !status.healthy) {
+          console.warn(
+            `[Step 6] Feature "${name}" is enabled but unhealthy: ${status.reason ?? 'unknown'}`,
+          );
+        }
+      }
+
+      // Assert: no enabled feature has an unsatisfied dependency
+      const unhealthyFeatures = Object.entries(features)
+        .filter(([, s]) => s.enabled && !s.healthy)
+        .map(([name, s]) => `${name}: ${s.reason ?? 'unknown'}`);
+
+      expect(
+        unhealthyFeatures,
+        `Enabled features with unsatisfied dependencies: ${unhealthyFeatures.join(', ')}`,
+      ).toHaveLength(0);
     },
   );
 });

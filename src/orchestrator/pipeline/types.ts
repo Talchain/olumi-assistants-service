@@ -80,6 +80,8 @@ export interface RouteMetadata {
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
   cache_hit?: boolean;
+  // Feature health diagnostics (populated by envelope assembler)
+  features?: Record<string, { enabled: boolean; healthy: boolean; reason?: string }>;
 }
 
 export type TriggerSource =

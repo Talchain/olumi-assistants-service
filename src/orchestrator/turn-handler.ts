@@ -545,14 +545,27 @@ async function dispatchViaLLM(
       log.info(
         {
           request_id: requestId,
+          event: 'zone2_assembly',
           profile: assembled.profile,
           reason: assembled.selection_reason,
-          blocks: assembled.active_blocks.map((b) => `${b.name}@${b.version}`),
-          chars: assembled.total_chars,
+          blocks: assembled.active_blocks.map((b) => ({ name: b.name, chars: b.chars_rendered })),
+          total_chars: assembled.total_chars,
           trimmed: assembled.trimmed_blocks,
+          empty_blocks: assembled.empty_blocks,
         },
         'Prompt assembled via Zone 2 registry',
       );
+      // Warn on blocks that activated but rendered empty content
+      if (assembled.empty_blocks.length > 0) {
+        log.warn(
+          {
+            request_id: requestId,
+            event: 'zone2_block_empty',
+            empty_blocks: assembled.empty_blocks,
+          },
+          `Zone 2: ${assembled.empty_blocks.length} block(s) activated but rendered empty: ${assembled.empty_blocks.join(', ')}`,
+        );
+      }
       zone2SystemPrompt = assembled.system_prompt;
     } catch (err) {
       // Re-throw PromptValidationError so strict mode violations are not silently swallowed

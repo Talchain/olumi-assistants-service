@@ -43,6 +43,8 @@ export interface AssembledPrompt {
   total_chars: number;
   trimmed_blocks: string[];
   selection_reason: string;
+  /** Blocks that activated but rendered empty content. */
+  empty_blocks: string[];
 }
 
 // ============================================================================
@@ -93,12 +95,15 @@ export function assembleFullPrompt(
     .filter((block) => profileBlocks.includes(block.name) && block.activation(ctx))
     .sort((a, b) => a.order - b.order);
 
-  // Render each block
+  // Render each block — track empty renders for diagnostics
   const rendered: Array<{ block: Zone2Block; content: string }> = [];
+  const emptyBlocks: string[] = [];
   for (const block of activeBlocks) {
     const content = block.render(ctx);
     if (content.length > 0) {
       rendered.push({ block, content });
+    } else {
+      emptyBlocks.push(block.name);
     }
   }
 
@@ -169,6 +174,7 @@ export function assembleFullPrompt(
     active_blocks: activeBlocksMeta,
     total_chars: totalChars,
     trimmed_blocks: trimmedBlocks,
+    empty_blocks: emptyBlocks,
     selection_reason: reason,
   };
 }

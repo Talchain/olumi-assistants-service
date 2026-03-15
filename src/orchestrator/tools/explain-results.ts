@@ -251,33 +251,162 @@ function buildTier2ReviewAnswer(
 }
 
 // ============================================================================
-// Numeric Freehand Stripping
+// Numeric Freehand Stripping (Grounded-Set Aware)
 // ============================================================================
 
 /**
- * Pattern matching ungrounded numeric tokens:
+ * Pattern matching numeric tokens in LLM output:
  * - Integers: "42", "1000"
- * - Decimals: "3.14", "0.5"
- * - Percentages: "42%", "99.9%"
- * - Currency: "$20", "£20k", "$1.5M"
+ * - Decimals: "3.14", "0.5", "-0.4"
+ * - Percentages: "42%", "99.9%", "62 percent"
+ * - Currency: "$20", "£20k", "$1.5M", "-$500"
  * - Ranges: "10-12", "10–12"
  * - Approximations: "~10", "approximately 10", "about 10"
  * - K/M/B suffixes: "10k", "1.5M", "2B"
- *
- * Exemptions: 4-digit years (1900-2099) unless preceded by analysis-context words.
  */
-const NUMERIC_PATTERN = /(?:approximately |about |around |roughly |~)?(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|k|m|b)?(?:\s*[-–]\s*(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|k|m|b)?)?/gi;
+const NUMERIC_PATTERN = /(?:approximately |about |around |roughly |~)?-?(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?(?:\s*[-–]\s*-?(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?)?/gi;
+
+/**
+ * Build a set of grounded numeric values from analysis data.
+ * These are numbers the LLM is expected to cite and must NOT be stripped.
+ *
+ * For each raw value we generate multiple surface forms:
+ *   0.62 → "62", "62.0", "0.62"
+ *   18500 → "18500", "18,500", "18.5k"
+ */
+export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Set<string> {
+  const values = new Set<string>();
+
+  function addNumber(n: number): void {
+    if (!Number.isFinite(n)) return;
+
+    // Raw value and common formatting variants
+    values.add(String(n));
+    values.add(n.toFixed(1));
+
+    // For negative numbers, also ground the absolute value
+    // (LLM may write "0.4" when citing elasticity of -0.4)
+    if (n < 0) {
+      addNumber(-n);
+    }
+
+    // Integer form (for things like 18500)
+    if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.001) {
+      const rounded = Math.round(n);
+      values.add(String(rounded));
+      // Comma-separated (18,500) — manual formatting for determinism
+      if (Math.abs(rounded) >= 1000) {
+        values.add(Math.abs(rounded).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+      }
+    }
+
+    // Percentage form (0.62 → "62", "62.0", also rounded like "63" for 0.625)
+    if (n >= 0 && n <= 1) {
+      const pct = n * 100;
+      values.add(String(Math.round(pct)));
+      values.add(pct.toFixed(1));
+      // Handle LLM rounding: floor and ceil
+      values.add(String(Math.floor(pct)));
+      values.add(String(Math.ceil(pct)));
+    }
+
+    // Already a percentage-scale number (65.0 → "65")
+    if (n > 1 && n <= 100) {
+      values.add(String(Math.round(n)));
+      values.add(n.toFixed(1));
+    }
+
+    // K/M suffixes for large numbers
+    if (Math.abs(n) >= 1000) {
+      const k = n / 1000;
+      values.add(`${Number.isInteger(k) ? k : k.toFixed(1)}k`);
+    }
+    if (Math.abs(n) >= 1_000_000) {
+      const m = n / 1_000_000;
+      values.add(`${Number.isInteger(m) ? m : m.toFixed(1)}m`);
+    }
+  }
+
+  // Option win probabilities
+  const results = Array.isArray(analysisResponse.results) ? analysisResponse.results as Array<Record<string, unknown>> : [];
+  for (const r of results) {
+    if (typeof r.win_probability === 'number') addNumber(r.win_probability);
+    // Goal values (mean, p10, p50, p90)
+    const gv = r.goal_value as Record<string, unknown> | undefined;
+    if (gv && typeof gv === 'object') {
+      for (const k of ['mean', 'p10', 'p50', 'p90', 'min', 'max'] as const) {
+        if (typeof gv[k] === 'number') addNumber(gv[k] as number);
+      }
+    }
+  }
+
+  // Factor sensitivities (elasticity values)
+  const factors = Array.isArray(analysisResponse.factor_sensitivity) ? analysisResponse.factor_sensitivity as Array<Record<string, unknown>> : [];
+  for (const f of factors) {
+    if (typeof f.elasticity === 'number') addNumber(f.elasticity);
+  }
+
+  // Robustness
+  if (analysisResponse.robustness) {
+    const fragileEdges = Array.isArray(analysisResponse.robustness.fragile_edges) ? analysisResponse.robustness.fragile_edges : [];
+    values.add(String(fragileEdges.length));
+  }
+
+  // Constraint analysis
+  if (analysisResponse.constraint_analysis) {
+    const ca = analysisResponse.constraint_analysis;
+    if (typeof ca.joint_probability === 'number') addNumber(ca.joint_probability);
+    const perConstraint = Array.isArray(ca.per_constraint) ? ca.per_constraint as Array<Record<string, unknown>> : [];
+    for (const c of perConstraint) {
+      if (typeof c.probability === 'number') addNumber(c.probability);
+    }
+  }
+
+  // Meta: samples count
+  if (typeof analysisResponse.meta?.n_samples === 'number') {
+    addNumber(analysisResponse.meta.n_samples);
+  }
+
+  // Option count and factor count (structural numbers)
+  values.add(String(results.length));
+  values.add(String(factors.length));
+
+  return values;
+}
+
+/**
+ * Extract the core numeric value from a matched token.
+ * Strips currency symbols, commas, whitespace, prefix words, and suffix chars.
+ * Returns lowercase for case-insensitive matching.
+ */
+function extractCoreNumeric(match: string): string {
+  return match
+    .trim()
+    .replace(/^(?:approximately|about|around|roughly|~)\s*/i, '')
+    .replace(/^(-?)[\$£€]/, '$1')
+    .replace(/,/g, '')
+    .replace(/\s*percent/gi, '%')
+    .toLowerCase();
+}
 
 /**
  * Strip ungrounded numeric tokens from commentary text.
- * Returns { cleaned, strippedCount }.
+ *
+ * When analysisResponse is provided, numbers matching grounded analysis values
+ * are preserved. Numbers not in the grounded set are stripped to '[value]'.
+ *
+ * When no analysisResponse is provided (legacy call), ALL non-exempt numbers
+ * are stripped (backward-compatible behaviour).
  */
-export function stripUngroundedNumerics(text: string): { cleaned: string; strippedCount: number } {
+export function stripUngroundedNumerics(
+  text: string,
+  analysisResponse?: V2RunResponseEnvelope | null,
+): { cleaned: string; strippedCount: number } {
+  const groundedValues = analysisResponse ? buildGroundedValues(analysisResponse) : null;
   let strippedCount = 0;
 
   const cleaned = text.replace(NUMERIC_PATTERN, (match) => {
-    // Strip commas and whitespace for pattern checking
-    const core = match.trim().replace(/,/g, '');
+    const core = extractCoreNumeric(match);
 
     // Preserve 4-digit years (1900-2099)
     if (/^(?:19|20)\d{2}$/.test(core)) {
@@ -287,6 +416,28 @@ export function stripUngroundedNumerics(text: string): { cleaned: string; stripp
     // Preserve single-digit references like "3 options" (likely structural)
     if (/^\d$/.test(core)) {
       return match;
+    }
+
+    // When grounded set is available, check if this number is grounded
+    if (groundedValues) {
+      if (groundedValues.has(core)) {
+        return match;
+      }
+
+      // Check without suffix (e.g., "65%" → "65")
+      const withoutSuffix = core.replace(/%$/, '');
+      if (withoutSuffix !== core && groundedValues.has(withoutSuffix)) {
+        return match;
+      }
+
+      // Check range endpoints individually (e.g., "14200-22800" → "14200", "22800")
+      const rangeMatch = core.match(/^(-?[\d.]+[km]?)\s*[-–]\s*(-?[\d.]+[km]?)$/);
+      if (rangeMatch) {
+        const [, left, right] = rangeMatch;
+        if (groundedValues.has(left) || groundedValues.has(right)) {
+          return match;
+        }
+      }
     }
 
     strippedCount++;
@@ -468,8 +619,8 @@ export async function handleExplainResults(
 
     const latencyMs = Date.now() - startTime;
 
-    // Strip ungrounded numerics
-    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content);
+    // Strip ungrounded numerics — pass analysis data so grounded values are preserved
+    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse);
 
     if (strippedCount > 0) {
       log.info(

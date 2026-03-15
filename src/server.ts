@@ -76,6 +76,7 @@ import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
 import { loadDskBundle } from "./orchestrator/dsk-loader.js";
+import { logFeatureHealth } from "./diagnostics/feature-health.js";
 import { initSentry, setSentryRequestTag, setupSentryFastify } from "./middleware/sentry.js";
 import { createContextRegistrationHook, createContextCleanupHook } from "./middleware/token-budget.js";
 
@@ -208,6 +209,9 @@ export async function build() {
 
   // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true
   loadDskBundle();
+
+  // Feature health check — log which enabled features have satisfied dependencies
+  logFeatureHealth();
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
