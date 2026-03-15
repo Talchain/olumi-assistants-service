@@ -21,6 +21,7 @@ coverage/
 playwright-report/
 test-results/
 test-diagnostics/
+tests/staging/artifacts/
 
 # Editor/IDE
 .idea/
