@@ -266,6 +266,37 @@ describe("normalizeAnalysisEnvelope", () => {
   });
 });
 
+describe("isAnalysisExplainable", () => {
+  it("accepts analysis_status 'computed' (PLoT v2/run returns this)", () => {
+    const envelope = {
+      analysis_status: "computed",
+      results: [{ option_label: "Option A", win_probability: 0.65 }],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("accepts 'computed' with sensitivity but no results (PLoT option_comparison shape)", () => {
+    const envelope = {
+      analysis_status: "computed",
+      factor_sensitivity: [{ label: "Cost", elasticity: 0.8 }],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("rejects 'computed' with no valid data at all", () => {
+    const envelope = {
+      analysis_status: "computed",
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(false);
+  });
+});
+
 describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => {
   it("envelope without analysis_status becomes explainable after normalization", () => {
     const envelope = {

@@ -53,7 +53,7 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
 
 export function isAnalysisExplainable(response: V2RunResponseEnvelope | null | undefined): response is V2RunResponseEnvelope {
   if (!response) return false;
-  if (response.analysis_status !== "completed") return false;
+  if (response.analysis_status !== "completed" && response.analysis_status !== "computed") return false;
 
   return hasValidOptionResults(response)
     || hasValidSensitivity(response)
