@@ -174,7 +174,11 @@ export async function executePipeline(
             outcome: 'direct_analysis_with_narration',
             reasoning: 'completed_current_analysis_available',
           };
-        } catch {
+        } catch (err) {
+          log.warn(
+            { request_id: requestId, err: err instanceof Error ? err.message : String(err) },
+            'direct_analysis_run: explain_results narration failed',
+          );
           directAnalysisRouteMetadata = {
             outcome: 'direct_analysis_narration_skipped',
             reasoning: 'explain_results_failed',

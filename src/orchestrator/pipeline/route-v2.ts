@@ -191,6 +191,19 @@ export async function handleTurnV2(
     return { envelope, httpStatus };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const isAbort = error instanceof Error &&
+      (error.name === 'AbortError' || message.includes('aborted'));
+
+    if (isAbort) {
+      log.warn(
+        { request_id: requestId },
+        "V2 turn handler budget timeout (AbortError)",
+      );
+      const envelope = buildErrorEnvelope('error', 'TURN_BUDGET_EXCEEDED', 'Turn budget exceeded.');
+      resolveInflight(envelope);
+      return { envelope, httpStatus: 504 };
+    }
+
     log.error(
       { error: message, request_id: requestId },
       "V2 turn handler unhandled error",
