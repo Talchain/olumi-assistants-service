@@ -23,12 +23,16 @@ const AnalysisStateSchema = z.object({
     seed_used: z.number().optional(),
     n_samples: z.number().optional(),
   }).passthrough(),
-  results: z.array(z.unknown()),
+  results: z.array(z.unknown()).optional(),
   analysis_status: z.string().optional(),
   fact_objects: z.array(z.unknown()).optional(),
   review_cards: z.array(z.unknown()).optional(),
   response_hash: z.string().optional(),
-}).passthrough().nullable();
+  option_comparison: z.array(z.unknown()).optional(),
+}).passthrough().refine(
+  (val) => val.results || val.option_comparison,
+  { message: 'analysis_state must include results or option_comparison' },
+).nullable();
 
 const ToolCallSchema = z.object({
   name: z.string(),
@@ -277,12 +281,31 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
       expect(result.success).toBe(false);
     });
 
-    it("rejects top-level analysis_state when results is missing", () => {
+    it("rejects top-level analysis_state when both results and option_comparison are missing", () => {
       const result = AnalysisStateSchema.safeParse({
         analysis_status: "completed",
         meta: { response_hash: "rh-1" },
       });
       expect(result.success).toBe(false);
+    });
+
+    it("accepts analysis_state with option_comparison instead of results (UI/PLoT v2 shape)", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "computed",
+        meta: { response_hash: "test" },
+        option_comparison: [
+          { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts analysis_state with results but no option_comparison", () => {
+      const result = AnalysisStateSchema.safeParse({
+        meta: { response_hash: "rh-1" },
+        results: [{ option_id: "opt_1" }],
+      });
+      expect(result.success).toBe(true);
     });
   });
 

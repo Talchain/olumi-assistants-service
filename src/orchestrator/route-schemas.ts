@@ -124,12 +124,18 @@ export const AnalysisStateSchema = z.object({
     seed_used: z.number().optional(),
     n_samples: z.number().optional(),
   }).passthrough(),
-  results: z.array(z.unknown()),
+  results: z.array(z.unknown()).optional(),
   analysis_status: z.string().optional(),
   fact_objects: z.array(z.unknown()).optional(),
   review_cards: z.array(z.unknown()).optional(),
   response_hash: z.string().optional(),
-}).passthrough().nullable();
+  // UI sends option_comparison at top level (PLoT v2 shape); downstream code
+  // in analysis-state.ts already reads both results and option_comparison.
+  option_comparison: z.array(z.unknown()).optional(),
+}).passthrough().refine(
+  (val) => val.results || val.option_comparison,
+  { message: 'analysis_state must include results or option_comparison' },
+).nullable();
 
 const ConversationContextSchema = z.object({
   graph: GraphSchema,
