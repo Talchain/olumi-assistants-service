@@ -1192,6 +1192,26 @@ export async function phase3PrepareForStreaming(
     log.warn({ system_prompt_length: systemPrompt.length }, 'phase3: suspiciously short system prompt for streaming');
   }
   const promptMeta = getSystemPromptMeta('orchestrator');
+
+  // Prompt identity log — parity with phase3Generate (non-streaming path)
+  log.info(
+    {
+      request_id: requestId,
+      prompt_id: promptMeta.taskId,
+      prompt_task_id: promptMeta.taskId,
+      prompt_version: promptMeta.prompt_version,
+      prompt_hash: promptMeta.prompt_hash ?? null,
+      prompt_source: promptMeta.source,
+      prompt_instance_id: promptMeta.instance_id ?? null,
+      zone2_enabled: config.features.contextFabric,
+      v2_prompt_zone2_included: true,
+      context_fabric_config_enabled: config.features.contextFabric,
+      system_prompt_chars: systemPrompt.length,
+      pipeline: 'v2_stream',
+    },
+    'phase3.prompt_identity',
+  );
+
   const effectiveUserMessage = buildEffectiveUserMessage(enrichedContext, userMessage);
   const messages = assembleMessages(context, effectiveUserMessage);
   const currentStage = enrichedContext.stage_indicator.stage;
@@ -1200,8 +1220,27 @@ export async function phase3PrepareForStreaming(
   );
   const toolDefs = allToolDefs.filter((tool) => {
     const guard = isToolAllowedAtStage(tool.name, currentStage, userMessage);
+    if (!guard.allowed) {
+      log.debug(
+        { stage: currentStage, tool_filtered: tool.name, reason: guard.reason, request_id: requestId },
+        'phase3: tool filtered from LLM context by stage policy (stream)',
+      );
+    }
     return guard.allowed;
   });
+
+  if (allToolDefs.length !== toolDefs.length) {
+    log.info(
+      {
+        request_id: requestId,
+        stage: currentStage,
+        tools_before: allToolDefs.map(t => t.name),
+        tools_after: toolDefs.map(t => t.name),
+        filtered_count: allToolDefs.length - toolDefs.length,
+      },
+      'phase3: stage policy filtered tool definitions before LLM call (stream)',
+    );
+  }
 
   const routeDebugBase = buildRouteDebugBase(
     intentGate, clarificationToolInput, proposalFollowUp, explicitGenerate,

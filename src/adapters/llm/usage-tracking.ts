@@ -195,22 +195,35 @@ class UsageTrackingAdapter implements LLMAdapter {
   }
 
   /**
-   * Streaming tool calling — budget enforced before stream, usage logged on message_complete
+   * Streaming tool calling — budget enforced before stream, usage logged on message_complete.
+   * Falls back to non-streaming chatWithTools when inner adapter lacks stream support,
+   * yielding a single message_complete event to maintain streaming contract.
    */
   async *streamChatWithTools(
     args: ChatWithToolsArgs,
     opts: CallOpts,
   ): AsyncIterable<ChatWithToolsStreamEvent> {
-    if (!this.adapter.streamChatWithTools) {
-      throw new Error(`Adapter ${this.adapter.name} does not support streamChatWithTools`);
-    }
     enforceBudget(opts.requestId);
-    for await (const event of this.adapter.streamChatWithTools(args, opts)) {
-      if (event.type === 'message_complete' && event.result.usage) {
-        logAndRecord('stream_chat_with_tools', this.name, this.model, event.result.usage, opts.requestId);
+
+    if (this.adapter.streamChatWithTools) {
+      for await (const event of this.adapter.streamChatWithTools(args, opts)) {
+        if (event.type === 'message_complete' && event.result.usage) {
+          logAndRecord('stream_chat_with_tools', this.name, this.model, event.result.usage, opts.requestId);
+        }
+        yield event;
       }
-      yield event;
+      return;
     }
+
+    // Fallback: inner adapter doesn't support streaming — use non-streaming path
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools or streamChatWithTools`);
+    }
+    const result = await this.adapter.chatWithTools(args, opts);
+    if (result.usage) {
+      logAndRecord('stream_chat_with_tools', this.name, this.model, result.usage, opts.requestId);
+    }
+    yield { type: 'message_complete' as const, result };
   }
 }
 

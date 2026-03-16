@@ -382,13 +382,21 @@ export class CachingAdapter implements LLMAdapter {
   }
 
   /**
-   * Streaming tool calling - bypasses cache, delegates to underlying adapter
+   * Streaming tool calling - bypasses cache, delegates to underlying adapter.
+   * Falls back to non-streaming chatWithTools when inner adapter lacks stream support,
+   * yielding a single message_complete event to maintain streaming contract.
    */
   async *streamChatWithTools(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent> {
-    if (!this.adapter.streamChatWithTools) {
-      throw new Error(`Adapter ${this.adapter.name} does not support streamChatWithTools`);
+    if (this.adapter.streamChatWithTools) {
+      yield* this.adapter.streamChatWithTools(args, opts);
+      return;
     }
-    yield* this.adapter.streamChatWithTools(args, opts);
+    // Fallback: inner adapter doesn't support streaming — use non-streaming path
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools or streamChatWithTools`);
+    }
+    const result = await this.adapter.chatWithTools(args, opts);
+    yield { type: 'message_complete' as const, result };
   }
 }
 
