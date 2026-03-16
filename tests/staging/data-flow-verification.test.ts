@@ -29,6 +29,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
+import { rateLimitGuard } from "./helpers/rate-limit-guard.js";
 
 // ============================================================================
 // Gating
@@ -100,6 +101,7 @@ async function makeRequest(
   url: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: unknown; elapsed_ms: number }> {
+  await rateLimitGuard();
   const t0 = Date.now();
   let response: Response;
   try {

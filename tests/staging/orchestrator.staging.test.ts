@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
+import { rateLimitGuard } from "./helpers/rate-limit-guard.js";
 
 // ============================================================================
 // Gating — skip entire suite if conditions not met
@@ -49,6 +50,7 @@ async function makeRequest(
   url: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: unknown; elapsed_ms: number }> {
+  await rateLimitGuard();
   const t0 = Date.now();
   let response: Response;
   try {

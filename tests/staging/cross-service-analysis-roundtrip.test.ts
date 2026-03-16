@@ -37,6 +37,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
+import { rateLimitGuard } from "./helpers/rate-limit-guard.js";
 
 // ============================================================================
 // Gating
@@ -160,6 +161,7 @@ async function makeRequest(
   apiKey: string,
   timeoutMs?: number,
 ): Promise<RequestResult> {
+  await rateLimitGuard();
   const t0 = Date.now();
   const controller = timeoutMs ? new AbortController() : undefined;
   const timer = controller
