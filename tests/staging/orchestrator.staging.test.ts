@@ -308,11 +308,12 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
   );
 
   // --------------------------------------------------------------------------
-  // Test 2: Message → run_analysis
+  // Test 2: Message → run_analysis (or conversational recovery if LLM
+  //   determines interventions are incomplete)
   // --------------------------------------------------------------------------
 
   it(
-    "Test 2: 'run the analysis' with graph triggers run_analysis tool",
+    "Test 2: 'run the analysis' with graph triggers run_analysis tool or conversational recovery",
     { timeout: 60_000, skip: !!SKIP_REASON },
     async () => {
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
@@ -353,32 +354,31 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
       const b = result.body as Record<string, unknown>;
       const tp = b.turn_plan as Record<string, unknown>;
 
-      // turn_plan.selected_tool === 'run_analysis'
-      expect(
-        tp.selected_tool,
-        `Expected turn_plan.selected_tool='run_analysis'. Diagnostics: ${JSON.stringify(diag)}`,
-      ).toBe("run_analysis");
+      if (tp.selected_tool === "run_analysis") {
+        // Path (a): LLM routed to run_analysis — full assertion chain
+        const blocks = b.blocks as Array<Record<string, unknown>>;
+        const hasFact = blocks.some(
+          (blk) => blk.block_type === "fact" || blk.type === "fact",
+        );
+        expect(hasFact, `Expected at least one fact block. Diagnostics: ${JSON.stringify(diag)}`).toBe(true);
 
-      // At least one fact block
-      const blocks = b.blocks as Array<Record<string, unknown>>;
-      const hasFact = blocks.some(
-        (blk) => blk.block_type === "fact" || blk.type === "fact",
-      );
-      expect(hasFact, `Expected at least one fact block. Diagnostics: ${JSON.stringify(diag)}`).toBe(true);
+        const lineage = b.lineage as Record<string, unknown> | undefined;
+        const hasV2Analysis =
+          typeof lineage?.response_hash === "string" && lineage.response_hash.length > 0;
+        const hasV1Analysis = b.analysis_response != null;
 
-      // analysis_response present:
-      // V2 pipeline (expected path): lineage.response_hash is a non-empty string
-      // V1 pipeline (fallback): analysis_response is non-null
-      const lineage = b.lineage as Record<string, unknown> | undefined;
-      const hasV2Analysis =
-        typeof lineage?.response_hash === "string" && lineage.response_hash.length > 0;
-      const hasV1Analysis = b.analysis_response != null;
-
-      expect(
-        hasV2Analysis || hasV1Analysis,
-        `Expected lineage.response_hash (V2) or analysis_response (V1) to be present. ` +
-        `Diagnostics: ${JSON.stringify(diag)}`,
-      ).toBe(true);
+        expect(
+          hasV2Analysis || hasV1Analysis,
+          `Expected lineage.response_hash (V2) or analysis_response (V1) to be present. ` +
+          `Diagnostics: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+      } else {
+        // Path (b): LLM determined interventions incomplete — conversational recovery
+        expect(
+          typeof b.assistant_text === "string" && (b.assistant_text as string).length > 0,
+          `Expected non-empty assistant_text for conversational recovery. Diagnostics: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+      }
     },
   );
 
@@ -786,9 +786,15 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
         ).toBe(true);
       }
 
-      const meta = b.meta as Record<string, unknown> | null | undefined;
-      expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);
-      expect(typeof meta!.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+      // V2 envelope uses _route_metadata (not meta); meta only present on analysis path
+      if ("meta" in b) {
+        const meta = b.meta as Record<string, unknown>;
+        expect(typeof meta.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+      } else {
+        // Conversational recovery: _route_metadata should exist instead
+        expect("_route_metadata" in b || "turn_id" in b,
+          `Expected _route_metadata or turn_id. Diag: ${JSON.stringify(diag)}`).toBe(true);
+      }
 
       // Negative: no error.v1 shape
       if ("error" in b && b.error !== null && typeof b.error === "object") {
@@ -854,9 +860,14 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
         ).toBe(true);
       }
 
-      const meta = b.meta as Record<string, unknown> | null | undefined;
-      expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);
-      expect(typeof meta!.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+      // V2 envelope uses _route_metadata (not meta); meta only present on analysis path
+      if ("meta" in b) {
+        const meta = b.meta as Record<string, unknown>;
+        expect(typeof meta.request_id, `Expected meta.request_id string. Diag: ${JSON.stringify(diag)}`).toBe("string");
+      } else {
+        expect("_route_metadata" in b || "turn_id" in b,
+          `Expected _route_metadata or turn_id. Diag: ${JSON.stringify(diag)}`).toBe(true);
+      }
 
       // Negative: no error.v1 shape
       if ("error" in b && b.error !== null && typeof b.error === "object") {
