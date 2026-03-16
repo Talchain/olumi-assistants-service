@@ -6,8 +6,16 @@ function hasConfiguredInterventions(value: unknown): boolean {
   return Object.keys(interventions).length > 0;
 }
 
+function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
+  // PLoT /v2/run returns option_comparison; the UI normalizer copies it to results.
+  // Check both fields so functions work with raw PLoT responses.
+  if (Array.isArray(response.results) && response.results.length > 0) return response.results;
+  const oc = (response as Record<string, unknown>).option_comparison;
+  return Array.isArray(oc) ? oc : [];
+}
+
 function hasValidOptionResults(response: V2RunResponseEnvelope): boolean {
-  return Array.isArray(response.results) && response.results.some((result) => {
+  return getOptionResultCandidates(response).some((result) => {
     const candidate = result as Record<string, unknown>;
     return typeof candidate.option_label === "string" && typeof candidate.win_probability === "number";
   });
@@ -42,8 +50,7 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
   if (
     !response.analysis_status
     && response.meta?.response_hash
-    && Array.isArray(response.results)
-    && response.results.length > 0
+    && getOptionResultCandidates(response).length > 0
     && hasValidOptionResults(response)
   ) {
     return { ...response, analysis_status: 'completed' };

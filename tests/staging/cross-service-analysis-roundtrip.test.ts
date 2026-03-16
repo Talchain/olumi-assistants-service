@@ -962,16 +962,12 @@ describe("Cross-service analysis round-trip: CEE → PLoT → ISL → explain", 
         /no analysis|hasn't been run|not been run|no results available|analysis has not/,
       );
 
-      // WARN: [value] placeholder tokens indicate the explain-results grounded-value
-      // stripping logic (explain-results.ts) replaced numbers not in its grounded set.
-      // This is a pre-existing behavior, not caused by the analysis round-trip.
-      // Downgraded from hard assertion to warning — the core round-trip is validated above.
-      if (/\[value\]/i.test(allText)) {
-        console.warn(
-          "[WARN] Step 3: LLM response contains [value] placeholder tokens — " +
-          "explain-results value-stripping fired. This is a known pre-existing behavior.",
-        );
-      }
+      // [value] placeholder tokens indicate the explain-results grounded-value
+      // stripping logic replaced numbers not in its grounded set.
+      // With the option_comparison fallback fix, PLoT values should be grounded.
+      expect(allText).not.toMatch(
+        /\[value\]/i,
+      );
 
       // Positive: response should reference specific computed data.
       // With isAnalysisExplainable accepting "computed", expect detailed explanation.

@@ -189,6 +189,28 @@ describe("explain_results — grounded-set numeric stripping", () => {
     expect(cleaned).toContain("45%");
   });
 
+  it("preserves grounded values from option_comparison (raw PLoT shape)", () => {
+    const plotResponse = {
+      analysis_status: "computed",
+      meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
+      results: [],
+      option_comparison: [
+        { option_label: "Option A", win_probability: 0.62 },
+        { option_label: "Option B", win_probability: 0.38 },
+      ],
+      factor_sensitivity: [
+        { label: "Market demand", elasticity: 0.85, direction: "positive" },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads with 62% win probability. This could save $50,000.",
+      plotResponse,
+    );
+    expect(cleaned).toContain("62%");
+    expect(cleaned).toContain("[value]"); // $50,000 is ungrounded
+    expect(strippedCount).toBe(1);
+  });
+
   it("backward compatible: strips all when no analysis provided", () => {
     const { cleaned, strippedCount } = stripUngroundedNumerics(
       "Option A leads with 62% probability.",
@@ -278,6 +300,22 @@ describe("explain_results — buildGroundedValues", () => {
     expect(values.has("-0.4")).toBe(true);  // signed
     expect(values.has("0.4")).toBe(true);   // absolute
     expect(values.has("40")).toBe(true);    // percentage of abs
+  });
+
+  it("reads option_comparison when results is empty (raw PLoT shape)", () => {
+    const response = {
+      analysis_status: "computed",
+      meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
+      results: [],
+      option_comparison: [
+        { option_label: "Option A", win_probability: 0.65 },
+        { option_label: "Option B", win_probability: 0.35 },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+    const values = buildGroundedValues(response);
+    expect(values.has("65")).toBe(true);
+    expect(values.has("35")).toBe(true);
+    expect(values.has("0.65")).toBe(true);
   });
 });
 

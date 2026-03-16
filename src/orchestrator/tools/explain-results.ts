@@ -132,7 +132,7 @@ interface CompactSummary {
 }
 
 function buildCompactSummaryFromResponse(response: V2RunResponseEnvelope): CompactSummary | null {
-  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const results = getOptionResults(response);
   const validResults = results.filter(
     (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
   );
@@ -251,6 +251,24 @@ function buildTier2ReviewAnswer(
 }
 
 // ============================================================================
+// PLoT Response Normalization
+// ============================================================================
+
+/**
+ * Resolve option results from a V2RunResponseEnvelope.
+ * PLoT /v2/run returns data under `option_comparison`, but the typed interface
+ * and UI normalizer use `results`. This helper checks both fields.
+ */
+function getOptionResults(response: V2RunResponseEnvelope): Array<Record<string, unknown>> {
+  const fromResults = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  if (fromResults.length > 0) return fromResults;
+
+  // Fallback: PLoT returns option_comparison instead of results
+  const oc = (response as Record<string, unknown>).option_comparison;
+  return Array.isArray(oc) ? oc as Array<Record<string, unknown>> : [];
+}
+
+// ============================================================================
 // Numeric Freehand Stripping (Grounded-Set Aware)
 // ============================================================================
 
@@ -327,8 +345,8 @@ export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Se
     }
   }
 
-  // Option win probabilities
-  const results = Array.isArray(analysisResponse.results) ? analysisResponse.results as Array<Record<string, unknown>> : [];
+  // Option win probabilities (results or option_comparison)
+  const results = getOptionResults(analysisResponse);
   for (const r of results) {
     if (typeof r.win_probability === 'number') addNumber(r.win_probability);
     // Goal values (mean, p10, p50, p90)
@@ -687,7 +705,7 @@ function buildAnalysisSummary(response: V2RunResponseEnvelope): string {
   const parts: string[] = [];
 
   // Results summary (option comparison) — filter to entries with valid label + probability
-  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const results = getOptionResults(response);
   const validResults = results.filter(
     (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
   );
@@ -737,7 +755,7 @@ function buildAnalysisSummary(response: V2RunResponseEnvelope): string {
  * Returns null if neither can be extracted.
  */
 function extractFallbackInsight(response: V2RunResponseEnvelope): string | null {
-  const results = Array.isArray(response.results) ? response.results as Array<Record<string, unknown>> : [];
+  const results = getOptionResults(response);
   const validResults = results.filter(
     (r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number',
   );

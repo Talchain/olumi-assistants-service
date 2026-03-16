@@ -295,6 +295,35 @@ describe("isAnalysisExplainable", () => {
 
     expect(isAnalysisExplainable(envelope)).toBe(false);
   });
+
+  it("accepts 'computed' with option_comparison instead of results (raw PLoT shape)", () => {
+    const envelope = {
+      analysis_status: "computed",
+      results: [],
+      option_comparison: [
+        { option_label: "Option A", win_probability: 0.65 },
+        { option_label: "Option B", win_probability: 0.35 },
+      ],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+});
+
+describe("normalizeAnalysisEnvelope with option_comparison", () => {
+  it("infers analysis_status from option_comparison when results is empty", () => {
+    const envelope = {
+      results: [],
+      option_comparison: [
+        { option_label: "A", win_probability: 0.6 },
+      ],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect(normalized.analysis_status).toBe("completed");
+  });
 });
 
 describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => {
