@@ -218,8 +218,10 @@ export interface ContractDiagnostic {
 /**
  * Required nested keys for analysis_state when present.
  * Used to detect partial payloads.
+ * Note: 'results' is not required — the PLoT v2 shape uses 'option_comparison'
+ * at the top level instead. The Zod schema accepts either.
  */
-const ANALYSIS_STATE_REQUIRED_KEYS: readonly string[] = ['meta', 'results'];
+const ANALYSIS_STATE_REQUIRED_KEYS: readonly string[] = ['meta'];
 const ANALYSIS_STATE_META_REQUIRED_KEYS: readonly string[] = ['response_hash'];
 
 /**

@@ -300,6 +300,37 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
       expect(result.success).toBe(true);
     });
 
+    it("option_comparison-only analysis_state produces non-null analysis_response (feeds has_analysis: true)", async () => {
+      // Import the real schema and normalizer to prove end-to-end data flow
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const { normalizeContext } = await import("../../../src/orchestrator/request-normalization.js");
+
+      const payload = {
+        message: "What does the analysis show?",
+        scenario_id: "test-scenario",
+        client_turn_id: "test-turn-001",
+        analysis_state: {
+          analysis_status: "computed",
+          meta: { response_hash: "test" },
+          option_comparison: [
+            { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
+          ],
+        },
+      };
+
+      // Step 1: Zod accepts the payload
+      const parsed = TurnRequestSchema.safeParse(payload);
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+
+      // Step 2: normalizeContext maps analysis_state to analysis_response (non-null)
+      const context = normalizeContext(parsed.data);
+      expect(context.analysis_response).not.toBeNull();
+      expect((context.analysis_response as Record<string, unknown>).option_comparison).toEqual([
+        { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
+      ]);
+    });
+
     it("accepts analysis_state with results but no option_comparison", () => {
       const result = AnalysisStateSchema.safeParse({
         meta: { response_hash: "rh-1" },

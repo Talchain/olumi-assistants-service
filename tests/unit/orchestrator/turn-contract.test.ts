@@ -250,16 +250,17 @@ describe("validateTurnContract — partial_fields", () => {
     expect(result.partial_fields.analysis_state!.missing).toContain('meta.response_hash');
   });
 
-  it("detects partial analysis_state with missing results", () => {
+  it("analysis_state with meta.response_hash but no results/option_comparison is not flagged as partial (schema refine handles this)", () => {
     const body = makeBaseBody({
       analysis_state: {
         meta: { response_hash: 'rh-1' },
-        // results missing
+        // results and option_comparison both missing — Zod refine rejects,
+        // but turn-contract diagnostic only checks structural keys (meta).
       },
     });
     const result = validateTurnContract('conversation', body);
-    expect(result.partial_fields).toHaveProperty('analysis_state');
-    expect(result.partial_fields.analysis_state!.missing).toContain('results');
+    // meta is present and complete → no partial diagnostic (Zod is authoritative)
+    expect(result.partial_fields).not.toHaveProperty('analysis_state');
   });
 
   it("detects partial analysis_state with meta present but missing response_hash", () => {
@@ -272,7 +273,6 @@ describe("validateTurnContract — partial_fields", () => {
     const result = validateTurnContract('conversation', body);
     expect(result.partial_fields).toHaveProperty('analysis_state');
     expect(result.partial_fields.analysis_state!.missing).toContain('meta.response_hash');
-    expect(result.partial_fields.analysis_state!.present).toContain('results');
     expect(result.partial_fields.analysis_state!.present).toContain('meta');
   });
 
