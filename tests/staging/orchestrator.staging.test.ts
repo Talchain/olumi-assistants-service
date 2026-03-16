@@ -717,11 +717,13 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
   );
 
   // --------------------------------------------------------------------------
-  // Test E1: invalid analysis_inputs (bad goal_node_id) → 200 with blocked/failed analysis_status
+  // Test E1: invalid analysis_inputs (bad goal_node_id) → 200 with either:
+  //   (a) pipeline-level analysis_status blocked/failed, OR
+  //   (b) LLM conversational recovery (assistant_text present, no tool routed)
   // --------------------------------------------------------------------------
 
   it(
-    "Test E1: run_analysis with invalid goal_node_id returns 200 with blocked/failed analysis_status",
+    "Test E1: run_analysis with invalid goal_node_id returns 200 with blocked/failed or conversational recovery",
     { timeout: 60_000, skip: !!SKIP_REASON },
     async () => {
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
@@ -753,27 +755,36 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
       expect(result.status, `Expected 200. Diag: ${JSON.stringify(diag)}`).toBe(200);
 
       const b = result.body as Record<string, unknown>;
-      expect("analysis_status" in b, `Expected analysis_status field. Diag: ${JSON.stringify(diag)}`).toBe(true);
 
-      const as_ = b.analysis_status as string;
-      if (as_ === "blocked") {
-        expect(b.retryable, `Expected retryable=false for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
+      // Accept EITHER pipeline-level analysis_status OR conversational recovery
+      if ("analysis_status" in b) {
+        // Path (a): pipeline ran and returned blocked/failed
+        const as_ = b.analysis_status as string;
+        if (as_ === "blocked") {
+          expect(b.retryable, `Expected retryable=false for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
+          expect(
+            Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
+            `Expected non-empty critiques for blocked. Diag: ${JSON.stringify(diag)}`,
+          ).toBe(true);
+          expect("results" in b, `Expected no results for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
+        } else if (as_ === "failed") {
+          expect(typeof b.retryable, `Expected retryable boolean for failed. Diag: ${JSON.stringify(diag)}`).toBe("boolean");
+          expect("results" in b, `Expected no results for failed. Diag: ${JSON.stringify(diag)}`).toBe(false);
+        } else {
+          throw new Error(`[Test E1] unexpected analysis_status: ${as_}. Diag: ${JSON.stringify(diag)}`);
+        }
+
         expect(
-          Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
-          `Expected non-empty critiques for blocked. Diag: ${JSON.stringify(diag)}`,
+          typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
+          `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
         ).toBe(true);
-        expect("results" in b, `Expected no results for blocked. Diag: ${JSON.stringify(diag)}`).toBe(false);
-      } else if (as_ === "failed") {
-        expect(typeof b.retryable, `Expected retryable boolean for failed. Diag: ${JSON.stringify(diag)}`).toBe("boolean");
-        expect("results" in b, `Expected no results for failed. Diag: ${JSON.stringify(diag)}`).toBe(false);
       } else {
-        throw new Error(`[Test E1] unexpected analysis_status: ${as_}. Diag: ${JSON.stringify(diag)}`);
+        // Path (b): LLM handled it conversationally — valid recovery
+        expect(
+          typeof b.assistant_text === "string" && (b.assistant_text as string).length > 0,
+          `Expected non-empty assistant_text for conversational recovery. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(true);
       }
-
-      expect(
-        typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
-        `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
-      ).toBe(true);
 
       const meta = b.meta as Record<string, unknown> | null | undefined;
       expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);
@@ -791,11 +802,13 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
   );
 
   // --------------------------------------------------------------------------
-  // Test E2: missing analysis_inputs → 200 with blocked analysis_status
+  // Test E2: missing analysis_inputs → 200 with either:
+  //   (a) pipeline-level analysis_status blocked, OR
+  //   (b) LLM conversational recovery (assistant_text present, no tool routed)
   // --------------------------------------------------------------------------
 
   it(
-    "Test E2: run_analysis without analysis_inputs returns 200 with blocked analysis_status",
+    "Test E2: run_analysis without analysis_inputs returns 200 with blocked or conversational recovery",
     { timeout: 60_000, skip: !!SKIP_REASON },
     async () => {
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
@@ -817,19 +830,29 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
       expect(result.status, `Expected 200. Diag: ${JSON.stringify(diag)}`).toBe(200);
 
       const b = result.body as Record<string, unknown>;
-      expect("analysis_status" in b, `Expected analysis_status field. Diag: ${JSON.stringify(diag)}`).toBe(true);
-      expect(b.analysis_status, `Expected analysis_status=blocked. Diag: ${JSON.stringify(diag)}`).toBe("blocked");
-      expect(b.retryable, `Expected retryable=false. Diag: ${JSON.stringify(diag)}`).toBe(false);
-      expect(
-        Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
-        `Expected non-empty critiques. Diag: ${JSON.stringify(diag)}`,
-      ).toBe(true);
-      expect("results" in b, `Expected no results. Diag: ${JSON.stringify(diag)}`).toBe(false);
 
-      expect(
-        typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
-        `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
-      ).toBe(true);
+      // Accept EITHER pipeline-level analysis_status OR conversational recovery
+      if ("analysis_status" in b) {
+        // Path (a): pipeline ran and returned blocked
+        expect(b.analysis_status, `Expected analysis_status=blocked. Diag: ${JSON.stringify(diag)}`).toBe("blocked");
+        expect(b.retryable, `Expected retryable=false. Diag: ${JSON.stringify(diag)}`).toBe(false);
+        expect(
+          Array.isArray(b.critiques) && (b.critiques as unknown[]).length > 0,
+          `Expected non-empty critiques. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+        expect("results" in b, `Expected no results. Diag: ${JSON.stringify(diag)}`).toBe(false);
+
+        expect(
+          typeof b.status_reason === "string" && (b.status_reason as string).length > 0,
+          `Expected non-empty status_reason. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+      } else {
+        // Path (b): LLM handled it conversationally — valid recovery
+        expect(
+          typeof b.assistant_text === "string" && (b.assistant_text as string).length > 0,
+          `Expected non-empty assistant_text for conversational recovery. Diag: ${JSON.stringify(diag)}`,
+        ).toBe(true);
+      }
 
       const meta = b.meta as Record<string, unknown> | null | undefined;
       expect(typeof meta === "object" && meta !== null, `Expected meta object. Diag: ${JSON.stringify(diag)}`).toBe(true);

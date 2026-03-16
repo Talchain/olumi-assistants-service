@@ -20,6 +20,7 @@ import { getOrchestratorPrompt, ORCHESTRATOR_PROMPT_CF_V4 } from './orchestrator
 import { ORCHESTRATOR_PROMPT_CF_V11 } from './orchestrator-cf-v11.js';
 import { getOrchestratorPromptV12, ORCHESTRATOR_PROMPT_CF_V12 } from './orchestrator-cf-v12.js';
 import { getOrchestratorPromptV13, ORCHESTRATOR_PROMPT_CF_V13 } from './orchestrator-cf-v13.js';
+import { getOrchestratorPromptV19, ORCHESTRATOR_PROMPT_CF_V19 } from './orchestrator-cf-v19.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -2076,7 +2077,7 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
   registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
-  registerDefaultPrompt('orchestrator', getOrchestratorPromptV13());
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV19());
 
   // Log orchestrator prompt version at registration
   const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V13.match(/Version:\s*([\S]+)/);

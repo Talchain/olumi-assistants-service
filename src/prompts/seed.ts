@@ -16,6 +16,9 @@ import {
   getPromptRepository,
   initializePromptRepository,
 } from './repository.js';
+import { computeContentHash } from './schema.js';
+import { getDefaultPrompts } from './loader.js';
+import { shouldUseStagingPrompts } from '../config/index.js';
 import { log } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
@@ -79,6 +82,11 @@ export async function initializeAndSeedPrompts(force = false): Promise<SeedResul
     }
 
     const result = await repo.seedDefaults(force);
+
+    // Step 3b: Ensure orchestrator staging version matches registered default
+    if (shouldUseStagingPrompts()) {
+      await ensureOrchestratorStagingVersion(repo);
+    }
 
     // Step 4: Warm cache
     await repo.warmCache();
@@ -163,4 +171,90 @@ export async function checkSeedStatus(): Promise<{
     databaseSeeded,
     missingTasks,
   };
+}
+
+// ============================================================================
+// Orchestrator staging version migration
+// ============================================================================
+
+/**
+ * Ensure the orchestrator prompt in the store has a staging version whose
+ * content matches the registered default (cf-v19).
+ *
+ * If the current staging version's content hash differs from the default,
+ * creates a new version and sets it as the staging version. This allows
+ * prompt updates to be deployed via code without manual admin API calls.
+ *
+ * Non-destructive: never modifies the active (production) version.
+ */
+async function ensureOrchestratorStagingVersion(
+  repo: ReturnType<typeof getPromptRepository>,
+): Promise<void> {
+  const PROMPT_ID = 'orchestrator_default';
+
+  try {
+    const defaults = getDefaultPrompts();
+    const defaultContent = defaults.orchestrator;
+    if (!defaultContent) return;
+
+    const defaultHash = computeContentHash(defaultContent);
+
+    // Get the existing prompt from the store
+    const existing = await repo.get(PROMPT_ID);
+    if (!existing) {
+      log.debug({ prompt_id: PROMPT_ID }, 'Orchestrator prompt not in store, skipping staging migration');
+      return;
+    }
+
+    // Check if staging version already matches
+    if (existing.stagingVersion) {
+      const stagingVer = existing.versions.find(v => v.version === existing.stagingVersion);
+      if (stagingVer?.contentHash === defaultHash) {
+        log.debug(
+          { prompt_id: PROMPT_ID, staging_version: existing.stagingVersion, hash: defaultHash.slice(0, 16) },
+          'Orchestrator staging version already matches default — no migration needed',
+        );
+        return;
+      }
+    }
+
+    // Also check if the active version already matches (no staging version needed)
+    const activeVer = existing.versions.find(v => v.version === existing.activeVersion);
+    if (activeVer?.contentHash === defaultHash) {
+      log.debug(
+        { prompt_id: PROMPT_ID, active_version: existing.activeVersion },
+        'Orchestrator active version already matches default — no staging migration needed',
+      );
+      return;
+    }
+
+    // Create a new version with the default content
+    const updated = await repo.createVersion(PROMPT_ID, {
+      content: defaultContent,
+      createdBy: 'system-migration',
+      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v19)',
+    });
+
+    // Find the newly created version number (highest)
+    const newVersionNum = Math.max(...updated.versions.map(v => v.version));
+
+    // Set it as the staging version
+    await repo.update(PROMPT_ID, { stagingVersion: newVersionNum });
+
+    log.info(
+      {
+        prompt_id: PROMPT_ID,
+        new_version: newVersionNum,
+        hash: defaultHash.slice(0, 16),
+        event: 'prompt.staging_migration.complete',
+      },
+      'Orchestrator staging version migrated to cf-v19',
+    );
+  } catch (err) {
+    // Non-fatal — staging migration failure should not block startup
+    log.warn(
+      { prompt_id: PROMPT_ID, error: String(err) },
+      'Orchestrator staging version migration failed — will use existing store version',
+    );
+  }
 }
