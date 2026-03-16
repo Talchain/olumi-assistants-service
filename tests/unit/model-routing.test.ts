@@ -194,8 +194,8 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("assigns optimized models to complex reasoning tasks", () => {
-      // draft_graph uses gpt-4o (best performance in testing)
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4o");
+      // draft_graph uses gpt-4.1 (v184 benchmark pass, 2026-03-16)
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4.1-2025-04-14");
       // bias_check uses Claude Sonnet 4 (excellent reasoning)
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
       // repair_graph uses gpt-4o (quality tier for graph repair)
@@ -236,7 +236,7 @@ describe("Task-to-Model Routing", () => {
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
       expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
-      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4o");
+      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4.1-2025-04-14");
       expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
   });

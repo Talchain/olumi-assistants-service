@@ -274,7 +274,7 @@ describe("LLM Router", () => {
   });
 
   describe("TASK_MODEL_DEFAULTS integration", () => {
-    it("uses gpt-4o for draft_graph when no CEE_MODEL_DRAFT override", () => {
+    it("uses gpt-4.1 for draft_graph when no CEE_MODEL_DRAFT override", () => {
       delete process.env.CEE_MODEL_DRAFT;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "openai";
@@ -282,7 +282,7 @@ describe("LLM Router", () => {
       const adapter = getAdapter("draft_graph");
 
       expect(adapter.name).toBe("openai");
-      expect(adapter.model).toBe("gpt-4o"); // Updated default (best performance in testing)
+      expect(adapter.model).toBe("gpt-4.1-2025-04-14"); // v184 benchmark pass (2026-03-16)
     });
 
     it("uses gpt-4.1 for clarification when no CEE_MODEL_CLARIFICATION override", () => {
@@ -404,7 +404,7 @@ describe("LLM Router", () => {
       process.env.LLM_PROVIDER = "openai";
       delete process.env.LLM_MODEL;
 
-      // draft_graph has default gpt-4o, but override with gpt-5-mini
+      // draft_graph has default gpt-4.1, but override with gpt-5-mini
       const adapter = getAdapter("draft_graph", "gpt-5-mini");
 
       expect(adapter.name).toBe("openai");

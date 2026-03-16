@@ -42,7 +42,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   evidence_helper: "gpt-4.1-2025-04-14",
   sensitivity_coach: "gpt-4.1-2025-04-14",
   // Quality tier - optimized for specific tasks
-  draft_graph: "gpt-4o",  // Reverted - gpt-4.1 has JSON mode compatibility issues
+  draft_graph: "gpt-4.1-2025-04-14",  // Switched from gpt-4o after v184 benchmark pass (2026-03-16)
   edit_graph: "gpt-4o",  // Quality tier - graph editing (override via CEE_MODEL_EDIT_GRAPH)
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
   orchestrator: "gpt-4o",  // Orchestrator Phase 3 + tool-calling (override via CEE_MODEL_ORCHESTRATOR)
