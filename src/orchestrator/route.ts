@@ -25,6 +25,7 @@ import { ceeOrchestratorStreamRouteV1 } from "./route-stream.js";
 import {
   normalizeContext,
   normalizeSystemEvent,
+  normalizeGenerateModel,
   warnAnalysisStateOnNonAnalysisTurn,
   warnDirectAnalysisRunDetails,
 } from "./request-normalization.js";
@@ -157,6 +158,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     }
 
     // Map validated data to turn request
+    const generateModel = normalizeGenerateModel(parsed.data);
     const turnRequest: OrchestratorTurnRequest = {
       message: parsed.data.message,
       context,
@@ -165,14 +167,14 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       client_turn_id: parsed.data.client_turn_id,
       graph_state: parsed.data.graph_state as OrchestratorTurnRequest['graph_state'],
       analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
-      generate_model: parsed.data.generate_model,
+      generate_model: generateModel,
     };
 
     try {
       // V1 parallel generate path — only used when V2 pipeline is NOT active.
       // When V2 is active, generate_model flows through the V2 pipeline via
       // intent gate override → buildExplicitGenerateRoute → draft_graph.
-      if (parsed.data.generate_model && !config.features.orchestratorV2) {
+      if (generateModel && !config.features.orchestratorV2) {
         const parallelResult = await handleParallelGenerate(
           turnRequest,
           req,

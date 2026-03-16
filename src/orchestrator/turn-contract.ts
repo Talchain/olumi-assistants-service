@@ -156,8 +156,8 @@ export function inferTurnType(body: Record<string, unknown>): TurnType {
     return 'system_event';
   }
 
-  // 2. Explicit generate
-  if (body.generate_model === true) {
+  // 2. Explicit generate (accept both field names — UI sends explicit_generate)
+  if (body.generate_model === true || body.explicit_generate === true) {
     return 'explicit_generate';
   }
 

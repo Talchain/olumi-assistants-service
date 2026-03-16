@@ -18,6 +18,7 @@ import { TurnRequestSchema, MAX_MESSAGE_LENGTH } from "./route-schemas.js";
 import {
   normalizeContext,
   normalizeSystemEvent,
+  normalizeGenerateModel,
   warnAnalysisStateOnNonAnalysisTurn,
   warnDirectAnalysisRunDetails,
 } from "./request-normalization.js";
@@ -133,7 +134,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         client_turn_id: parsed.data.client_turn_id,
         graph_state: parsed.data.graph_state as OrchestratorTurnRequest['graph_state'],
         analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
-        generate_model: parsed.data.generate_model,
+        generate_model: normalizeGenerateModel(parsed.data),
       };
 
       // Idempotency check — cache hit returns JSON, not SSE

@@ -56,6 +56,18 @@ export function normalizeSystemEvent(event: SystemEvent | undefined): SystemEven
 }
 
 /**
+ * Normalise generate-model flag: accept both `generate_model` and `explicit_generate`
+ * from the request. The UI historically sends `explicit_generate` while the internal
+ * pipeline uses `generate_model`. Either flag being true activates the override.
+ */
+export function normalizeGenerateModel(parsed: {
+  generate_model?: boolean;
+  explicit_generate?: boolean;
+}): boolean {
+  return parsed.generate_model === true || parsed.explicit_generate === true;
+}
+
+/**
  * Boundary warning: analysis_state present on non-analysis turns.
  * Non-production diagnostic only.
  */

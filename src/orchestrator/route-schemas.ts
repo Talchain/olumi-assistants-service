@@ -157,6 +157,8 @@ export const TurnRequestSchema = z.object({
   conversation_history: z.array(ConversationMessageSchema).optional(),
   /** When true, fires draft_graph and orchestrator coaching in parallel. */
   generate_model: z.boolean().optional().default(false),
+  /** UI alias for generate_model — accepted for backward compatibility. */
+  explicit_generate: z.boolean().optional(),
 });
 
 /** Maximum user message length (friendly limit below Zod's 10,000 cap). */
