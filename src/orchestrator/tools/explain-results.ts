@@ -282,7 +282,7 @@ function getOptionResults(response: V2RunResponseEnvelope): Array<Record<string,
  * - Approximations: "~10", "approximately 10", "about 10"
  * - K/M/B suffixes: "10k", "1.5M", "2B"
  */
-const NUMERIC_PATTERN = /(?:approximately |about |around |roughly |~)?-?(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?(?:\s*[-–]\s*-?(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?)?/gi;
+const NUMERIC_PATTERN = /(?:approximately |about |around |roughly |~)?-?(?:\$|£|€)?\d[\d,]*(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?(?:\s*[-–]\s*-?(?:\$|£|€)?\d[\d,]*(?:\.\d+)?(?:%|\s*percent\b|k|m|b)?)?/gi;
 
 /**
  * Build a set of grounded numeric values from analysis data.

@@ -991,3 +991,235 @@ describe("stripUngroundedNumerics — graph label grounding", () => {
     expect(cleaned).toContain("65%");
   });
 });
+
+// ============================================================================
+// Strengthened assertions: no [value] adjacent to preserved numbers
+// ============================================================================
+
+describe("stripUngroundedNumerics — adjacency & completeness guards", () => {
+  const analysis = makeAnalysisResponse({
+    results: [
+      { option_label: "Option A", win_probability: 0.834 },
+      { option_label: "Option B", win_probability: 0.155 },
+      { option_label: "Option C", win_probability: 0.012 },
+    ] as unknown as V2RunResponseEnvelope["results"],
+    factor_sensitivity: [
+      { label: "Price elasticity", elasticity: -0.72, direction: "negative" },
+    ] as unknown as V2RunResponseEnvelope["factor_sensitivity"],
+    meta: { seed_used: 42, n_samples: 5000, response_hash: "hash-2" },
+  });
+
+  it("no [value] token appears adjacent to a preserved percentage", () => {
+    const text = "Option A leads at 83.4%, followed by B at 15.5% and C at 1.2%.";
+    const { cleaned } = stripUngroundedNumerics(text, analysis, null, null);
+    // All three percentages should be preserved, no [value] at all
+    expect(cleaned).toContain("83.4%");
+    expect(cleaned).toContain("15.5%");
+    expect(cleaned).toContain("1.2%");
+    expect(cleaned).not.toContain("[value]");
+    // Adjacent artifact check: no [value] immediately before/after %
+    expect(cleaned).not.toMatch(/\[value\]\s*%/);
+    expect(cleaned).not.toMatch(/%\s*\[value\]/);
+  });
+
+  it("no [value] token appears adjacent to a preserved currency amount", () => {
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Keep at £49" },
+        { id: "opt2", kind: "option", label: "Raise to £59" },
+      ],
+      edges: [],
+    };
+    const text = "keeping the price at £49 (15.5%) versus raising to £59 (1.2%)";
+    const { cleaned } = stripUngroundedNumerics(text, analysis, null, graph);
+    expect(cleaned).toContain("£49");
+    expect(cleaned).toContain("£59");
+    // No [value] adjacent to £ sign
+    expect(cleaned).not.toMatch(/£\s*\[value\]/);
+    expect(cleaned).not.toMatch(/\[value\]\s*£/);
+  });
+
+  it("all analysis win probabilities are fully preserved (not partially stripped)", () => {
+    const text = "A: 83.4%, B: 15.5%, C: 1.2%. Based on 5,000 simulations.";
+    const { cleaned, strippedCount } = stripUngroundedNumerics(text, analysis, null, null);
+    expect(cleaned).toContain("83.4%");
+    expect(cleaned).toContain("15.5%");
+    expect(cleaned).toContain("1.2%");
+    expect(cleaned).toContain("5,000");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("all brief-grounded numbers are fully preserved alongside analysis numbers", () => {
+    const briefText = "We have a budget of £50,000 and a 12 month timeline.";
+    const text = "With a £50,000 budget over 12 months, Option A leads at 83.4%.";
+    const { cleaned, strippedCount } = stripUngroundedNumerics(text, analysis, briefText, null);
+    expect(cleaned).toContain("£50,000");
+    expect(cleaned).toContain("12");
+    expect(cleaned).toContain("83.4%");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("all graph-grounded prices are fully preserved alongside analysis numbers", () => {
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Keep at £49" },
+        { id: "opt2", kind: "option", label: "Raise to £59" },
+      ],
+      edges: [],
+    };
+    const text = "Option A (£49) leads at 83.4%, Option B (£59) at 15.5%.";
+    const { cleaned, strippedCount } = stripUngroundedNumerics(text, analysis, null, graph);
+    expect(cleaned).toContain("£49");
+    expect(cleaned).toContain("£59");
+    expect(cleaned).toContain("83.4%");
+    expect(cleaned).toContain("15.5%");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("negative elasticity is preserved without adjacent artifacts", () => {
+    const text = "Price elasticity is -0.72, meaning a negative impact.";
+    const { cleaned, strippedCount } = stripUngroundedNumerics(text, analysis, null, null);
+    expect(cleaned).toContain("-0.72");
+    expect(strippedCount).toBe(0);
+    expect(cleaned).not.toMatch(/\[value\]\s*-0\.72/);
+    expect(cleaned).not.toMatch(/-0\.72\s*\[value\]/);
+  });
+});
+
+// ============================================================================
+// Grounding scope contract: explicit category verification
+// ============================================================================
+
+describe("stripUngroundedNumerics — grounding scope contract", () => {
+  /**
+   * This test suite codifies the explicit grounding scope:
+   *
+   * GROUNDED (preserved):
+   *   1. Analysis numbers: win probabilities, goal values, elasticities,
+   *      n_samples, constraint probabilities, robustness metrics
+   *   2. Brief numbers: currency, percentages, and decision-relevant noun-adjacent
+   *      numbers from the user's brief text
+   *   3. Graph numbers: currency, percentages, and decision-relevant noun-adjacent
+   *      numbers from graph node labels
+   *
+   * NOT GROUNDED (stripped to [value]):
+   *   - Numbers without decision-relevant context (IDs, arbitrary references)
+   *   - Numbers from sources outside the three categories above
+   *   - LLM-hallucinated numbers not present in any grounding source
+   */
+
+  const analysis = makeAnalysisResponse({
+    results: [
+      { option_label: "Option A", win_probability: 0.62 },
+    ] as unknown as V2RunResponseEnvelope["results"],
+    meta: { seed_used: 42, n_samples: 1000, response_hash: "hash-1" },
+  });
+
+  describe("category: analysis — numbers from V2RunResponseEnvelope are preserved", () => {
+    it("win_probability percentage form", () => {
+      const { cleaned } = stripUngroundedNumerics("leads at 62%", analysis, null, null);
+      expect(cleaned).toContain("62%");
+      expect(cleaned).not.toContain("[value]");
+    });
+
+    it("win_probability decimal form", () => {
+      const { cleaned } = stripUngroundedNumerics("probability 0.62", analysis, null, null);
+      expect(cleaned).toContain("0.62");
+      expect(cleaned).not.toContain("[value]");
+    });
+
+    it("n_samples with comma formatting", () => {
+      const { cleaned } = stripUngroundedNumerics("based on 1,000 simulations", analysis, null, null);
+      expect(cleaned).toContain("1,000");
+      expect(cleaned).not.toContain("[value]");
+    });
+  });
+
+  describe("category: brief — decision-relevant numbers from brief text are preserved", () => {
+    it("currency in brief is preserved", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "The £50,000 target is achievable.", analysis, "MRR target of £50,000", null,
+      );
+      expect(cleaned).toContain("£50,000");
+      expect(cleaned).not.toContain("[value]");
+    });
+
+    it("percentage in brief is preserved", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "growth of 15% is feasible", analysis, "revenue growth of 15%", null,
+      );
+      expect(cleaned).toContain("15%");
+    });
+
+    it("decision-noun-adjacent number in brief is preserved", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "within 6 months", analysis, "timeline of 6 months", null,
+      );
+      expect(cleaned).toContain("6");
+      expect(cleaned).not.toContain("[value]");
+    });
+
+    it("non-decision-relevant number in brief is still stripped", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "reference ID 4829", analysis, "internal reference ID 4829", null,
+      );
+      expect(cleaned).toContain("[value]");
+    });
+  });
+
+  describe("category: graph — decision-relevant numbers from node labels are preserved", () => {
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Keep at £49" },
+        { id: "opt2", kind: "option", label: "Raise to £59" },
+      ],
+      edges: [],
+    };
+
+    it("currency from graph labels is preserved", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "price at £49 vs £59", analysis, null, graph,
+      );
+      expect(cleaned).toContain("£49");
+      expect(cleaned).toContain("£59");
+      expect(cleaned).not.toContain("[value]");
+    });
+
+    it("numbers from node IDs are NOT preserved", () => {
+      const graphWithIds = {
+        nodes: [{ id: "node_4829", kind: "option", label: "Option A" }],
+        edges: [],
+      };
+      const { cleaned } = stripUngroundedNumerics(
+        "node 4829 shows results", analysis, null, graphWithIds,
+      );
+      expect(cleaned).toContain("[value]");
+    });
+  });
+
+  describe("category: ungrounded — LLM-hallucinated numbers are stripped", () => {
+    it("hallucinated percentage is stripped", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "This could yield 95% improvement.", analysis, null, null,
+      );
+      expect(cleaned).toContain("[value]");
+      expect(cleaned).not.toContain("95%");
+    });
+
+    it("hallucinated currency is stripped", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "saving $999,000 annually.", analysis, null, null,
+      );
+      expect(cleaned).toContain("[value]");
+      expect(cleaned).not.toContain("$999,000");
+    });
+
+    it("hallucinated count is stripped", () => {
+      const { cleaned } = stripUngroundedNumerics(
+        "affecting approximately 150 units.", analysis, null, null,
+      );
+      expect(cleaned).toContain("[value]");
+      expect(cleaned).not.toContain("150");
+    });
+  });
+});
