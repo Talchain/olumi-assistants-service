@@ -136,7 +136,7 @@ describe("PLoTClient", () => {
     it("attaches Authorization: Bearer header when authToken configured", async () => {
       fetchSpy.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [] }),
+        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
       });
 
       const client = createPLoTClient()!;
@@ -151,7 +151,7 @@ describe("PLoTClient", () => {
     it("does not leak auth token in log output", async () => {
       fetchSpy.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [] }),
+        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
       });
 
       const client = createPLoTClient()!;

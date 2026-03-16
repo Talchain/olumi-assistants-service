@@ -181,7 +181,7 @@ describe("Outbound Structural Validation (H.5)", () => {
     it("run: valid payload → HTTP call made normally", async () => {
       fetchSpy.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [] }),
+        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
       });
 
       const client = createPLoTClient()!;
@@ -255,7 +255,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
     it("retries once on 503 and succeeds on retry", async () => {
       const successResponse = {
         meta: { seed_used: 42, n_samples: 100, response_hash: "h" },
-        results: [],
+        results: [{ option_id: "a" }],
       };
 
       fetchSpy
@@ -386,7 +386,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [] }),
+          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
         });
 
       const client = createPLoTClient()!;
@@ -410,7 +410,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [] }),
+          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
         });
 
       const client = createPLoTClient()!;

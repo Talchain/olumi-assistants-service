@@ -161,7 +161,7 @@ export interface ProposedChangesPayload {
 }
 
 export interface OrchestratorError {
-  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'MISSING_GRAPH_STATE' | 'INTERNAL_PAYLOAD_ERROR' | 'PIPELINE_ERROR' | 'UNKNOWN';
+  code: 'LLM_TIMEOUT' | 'TOOL_EXECUTION_FAILED' | 'VALIDATION_REJECTED' | 'CONTEXT_TOO_LARGE' | 'INVALID_REQUEST' | 'MISSING_GRAPH_STATE' | 'INTERNAL_PAYLOAD_ERROR' | 'PLOT_RESPONSE_MALFORMED' | 'PIPELINE_ERROR' | 'UNKNOWN';
   message: string;
   tool?: string;
   recoverable: boolean;
@@ -533,6 +533,7 @@ export function getHttpStatusForError(error: OrchestratorError): number {
     case 'INVALID_REQUEST': return 400;
     case 'MISSING_GRAPH_STATE': return 400;
     case 'INTERNAL_PAYLOAD_ERROR': return 500;
+    case 'PLOT_RESPONSE_MALFORMED': return 502;
     case 'PIPELINE_ERROR': return 500;
     case 'UNKNOWN':
     default: return 500;

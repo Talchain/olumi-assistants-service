@@ -11,7 +11,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log, emit } from "../utils/telemetry.js";
-import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, V2RunResponseEnvelope } from "./types.js";
+import type { OrchestratorTurnRequest, SystemEvent } from "./types.js";
 import { config } from "../config/index.js";
 import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
 import { TurnRequestSchema, MAX_MESSAGE_LENGTH } from "./route-schemas.js";
@@ -127,12 +127,12 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
 
       const turnRequest: OrchestratorTurnRequest = {
         message: parsed.data.message,
-        context: context as unknown as ConversationContext,
+        context,
         scenario_id: parsed.data.scenario_id,
         system_event: systemEvent,
         client_turn_id: parsed.data.client_turn_id,
-        graph_state: parsed.data.graph_state as unknown as typeof turnRequest.graph_state,
-        analysis_state: parsed.data.analysis_state as unknown as V2RunResponseEnvelope | null | undefined,
+        graph_state: parsed.data.graph_state as OrchestratorTurnRequest['graph_state'],
+        analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
         generate_model: parsed.data.generate_model,
       };
 

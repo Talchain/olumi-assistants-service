@@ -12,7 +12,7 @@ import type { FastifyInstance } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
-import type { OrchestratorTurnRequest, ConversationContext, SystemEvent, DecisionStage, V2RunResponseEnvelope, ConversationBlock } from "./types.js";
+import type { OrchestratorTurnRequest, SystemEvent, ConversationBlock } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { config, isProduction } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
@@ -159,12 +159,12 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     // Map validated data to turn request
     const turnRequest: OrchestratorTurnRequest = {
       message: parsed.data.message,
-      context: context as unknown as ConversationContext,
+      context,
       scenario_id: parsed.data.scenario_id,
       system_event: systemEvent,
       client_turn_id: parsed.data.client_turn_id,
-      graph_state: parsed.data.graph_state as unknown as typeof turnRequest.graph_state,
-      analysis_state: parsed.data.analysis_state as unknown as V2RunResponseEnvelope | null | undefined,
+      graph_state: parsed.data.graph_state as OrchestratorTurnRequest['graph_state'],
+      analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
       generate_model: parsed.data.generate_model,
     };
 

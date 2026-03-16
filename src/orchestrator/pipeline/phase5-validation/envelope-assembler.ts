@@ -55,17 +55,6 @@ export function resolveContextHash(enrichedContext: EnrichedContext | undefined)
 // ============================================================================
 
 /**
- * Map Zone 2 block owners to feature health check names.
- * Used to cross-reference empty blocks with feature health.
- */
-const ZONE2_OWNER_TO_FEATURE: Record<string, string> = {
-  bil: 'BIL',
-  analysis: 'zone2_registry',
-  events: 'zone2_registry',
-  orchestrator: 'zone2_registry',
-};
-
-/**
  * Build a compact feature health map from checkFeatureHealth().
  * Shared factory so all envelope paths (_route_metadata) use identical shape.
  *
@@ -89,11 +78,10 @@ export function buildFeatureHealthMap(
 
   // Cross-reference Zone 2 empty blocks with feature ownership
   if (zone2EmptyBlocks && zone2EmptyBlocks.length > 0) {
-    // Import block registry to resolve ownership
-    // (lazy import avoided — use static mapping instead)
     const emptySet = new Set(zone2EmptyBlocks);
 
-    // Group empty blocks by feature
+    // Group empty blocks by feature.
+    // SYNC: Must match owner field in src/orchestrator/prompt-zones/zone2-blocks.ts registry.
     const BLOCK_OWNERSHIP: Record<string, string> = {
       bil_context: 'BIL',
       bil_hint: 'BIL',

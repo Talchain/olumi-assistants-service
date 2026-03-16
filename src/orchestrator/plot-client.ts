@@ -28,10 +28,34 @@
  * - Validation failures throw OrchestratorError with code INTERNAL_PAYLOAD_ERROR
  */
 
+import { z } from "zod";
 import { config } from "../config/index.js";
 import { PLOT_RUN_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
+
+// ============================================================================
+// Inbound Response Validation (P0-2)
+// ============================================================================
+
+/**
+ * Minimal Zod schema for PLoT /v2/run responses.
+ * Validates structural liveness — required fields exist with correct types.
+ * Uses .passthrough() so unknown fields are preserved, not stripped.
+ */
+const V2RunResponseMinimal = z.object({
+  results: z.array(z.unknown()).min(1),
+  meta: z.object({ response_hash: z.string().min(1) }).passthrough(),
+}).passthrough();
+
+/**
+ * Minimal Zod schema for PLoT /v1/validate-patch success responses.
+ * Validates structural liveness: response must be an object with optional
+ * graph_hash (the only field consumed downstream by system-event-router).
+ */
+const ValidatePatchResponseMinimal = z.object({
+  graph_hash: z.string().optional(),
+}).passthrough();
 
 // ============================================================================
 // Constants
@@ -427,7 +451,35 @@ class PLoTClientImpl implements PLoTClient {
       const elapsedMs = Date.now() - startTime;
 
       if (response.ok) {
-        const data = await response.json() as V2RunResponseEnvelope;
+        const raw = await response.json();
+        // P0-2: Validate response structure before accepting
+        const parsed = V2RunResponseMinimal.safeParse(raw);
+        if (!parsed.success) {
+          log.warn(
+            {
+              request_id: requestId,
+              elapsed_ms: elapsedMs,
+              validation_errors: parsed.error.flatten(),
+              response_keys: raw != null && typeof raw === 'object' ? Object.keys(raw) : [],
+            },
+            'PLoT /v2/run response failed structural validation',
+          );
+          const plotErr = new PLoTError(
+            `PLoT /v2/run returned malformed response: ${parsed.error.issues.map(i => i.message).join('; ')}`,
+            200,
+            'run',
+            elapsedMs,
+            requestId,
+          );
+          plotErr.orchestratorErrorOverride = {
+            code: 'PLOT_RESPONSE_MALFORMED',
+            message: 'Analysis service returned an unexpected response shape. Try again.',
+            tool: 'run_analysis',
+            recoverable: true,
+          };
+          throw plotErr;
+        }
+        const data = raw as V2RunResponseEnvelope;
         log.info({ elapsed_ms: elapsedMs, request_id: requestId }, "PLoT run success");
         return data;
       }
@@ -523,7 +575,34 @@ class PLoTClientImpl implements PLoTClient {
 
       // 2xx → success
       if (response.ok) {
-        const data = await response.json() as Record<string, unknown>;
+        const raw = await response.json();
+        // P0-2: Validate response structure before accepting
+        const parsed = ValidatePatchResponseMinimal.safeParse(raw);
+        if (!parsed.success) {
+          log.warn(
+            {
+              request_id: requestId,
+              elapsed_ms: elapsedMs,
+              validation_errors: parsed.error.flatten(),
+            },
+            'PLoT /v1/validate-patch response failed structural validation',
+          );
+          const plotErr = new PLoTError(
+            `PLoT /v1/validate-patch returned malformed response: ${parsed.error.issues.map(i => i.message).join('; ')}`,
+            200,
+            'validate_patch',
+            elapsedMs,
+            requestId,
+          );
+          plotErr.orchestratorErrorOverride = {
+            code: 'PLOT_RESPONSE_MALFORMED',
+            message: 'Patch validation service returned an unexpected response shape. Try again.',
+            tool: 'edit_graph',
+            recoverable: true,
+          };
+          throw plotErr;
+        }
+        const data = raw as Record<string, unknown>;
         log.info({ elapsed_ms: elapsedMs, request_id: requestId }, "PLoT validate_patch success");
         return { kind: 'success', data };
       }

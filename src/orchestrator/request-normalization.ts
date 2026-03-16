@@ -5,16 +5,17 @@
  * Extracted to guarantee parity and prevent drift between routes.
  */
 
-import { z } from "zod";
 import { log } from "../utils/telemetry.js";
 import { isProduction } from "../config/index.js";
 import { inferTurnType } from "./turn-contract.js";
-import type { SystemEvent } from "./types.js";
-import { ConversationMessageSchema } from "./route-schemas.js";
+import type { SystemEvent, ConversationContext } from "./types.js";
 
 /**
  * Normalise context from parsed request data.
  * If the `context` field is absent, construct from flat UI fields.
+ *
+ * Returns ConversationContext — the Zod output shape is structurally compatible
+ * because TurnRequestSchema uses .passthrough() on all nested objects.
  */
 export function normalizeContext(parsed: {
   context?: unknown;
@@ -22,15 +23,15 @@ export function normalizeContext(parsed: {
   analysis_state?: unknown;
   conversation_history?: unknown[];
   scenario_id: string;
-}): unknown {
-  return parsed.context ?? {
+}): ConversationContext {
+  return (parsed.context ?? {
     graph: parsed.graph_state ?? null,
     analysis_response: parsed.analysis_state ?? null,
     framing: null,
-    messages: (parsed.conversation_history ?? []) as z.infer<typeof ConversationMessageSchema>[],
+    messages: (parsed.conversation_history ?? []),
     scenario_id: parsed.scenario_id,
     analysis_inputs: null,
-  };
+  }) as ConversationContext;
 }
 
 /**

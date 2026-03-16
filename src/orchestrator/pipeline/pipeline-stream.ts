@@ -39,6 +39,7 @@ import { STREAM_ERROR_CODES } from "./stream-events.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DailyBudgetExceededError } from "../../adapters/llm/errors.js";
 import { normalizeAnalysisEnvelope } from "../analysis-state.js";
+import { emitTurnTrace } from "./pipeline.js";
 
 // Long-running tools that warrant a tool_start event with long_running: true
 const LONG_RUNNING_TOOLS = new Set(['run_analysis', 'draft_graph']);
@@ -191,6 +192,41 @@ export async function* executePipelineStream(
 
     if (signal?.aborted) return;
 
+    // V2 mode consistency telemetry (P0-1 Task 1: streaming parity)
+    const v2DeclaredMode = extractDeclaredMode(llmResult.diagnostics);
+    const v2InferredMode = llmResult.tool_invocations.length > 0
+      ? 'ACT' as const
+      : inferResponseMode({ assistant_text: llmResult.assistant_text, tool_invocations: llmResult.tool_invocations } as never);
+    const v2ToolAttempted = llmResult.tool_invocations[0]?.name ?? null;
+    const v2ToolPermitted = v2ToolAttempted
+      ? isToolAllowedAtStage(v2ToolAttempted, enrichedContext.stage_indicator.stage, request.message).allowed
+      : true;
+    const v2ModeDisagreement = v2DeclaredMode !== 'unknown' && v2DeclaredMode !== v2InferredMode;
+
+    log.info(
+      {
+        response_mode_declared: v2DeclaredMode,
+        response_mode_inferred: v2InferredMode,
+        tool_selected: v2ToolAttempted,
+        tool_permitted: v2ToolPermitted,
+        stage: enrichedContext.stage_indicator.stage,
+        mode_disagreement: v2ModeDisagreement,
+      },
+      'orchestrator.v2.turn.telemetry',
+    );
+
+    if (v2ModeDisagreement) {
+      emit(TelemetryEvents.OrchestratorModeDisagreement, {
+        declared: v2DeclaredMode,
+        inferred: v2InferredMode,
+        tool_selected: v2ToolAttempted,
+        stage: enrichedContext.stage_indicator.stage,
+        scenario_id: enrichedContext.scenario_id,
+        pipeline: 'v2',
+        streaming: true,
+      });
+    }
+
     // Phase 4: Tool Execution — yield events per tool
     let toolResult: { result: Phase4Result; events: OrchestratorStreamEvent[] } | null;
     try {
@@ -221,7 +257,7 @@ export async function* executePipelineStream(
 
     if (signal?.aborted) return;
 
-    // Conversational retry
+    // Conversational retry (P0-1 Task 3: streaming retry metadata propagation)
     if (toolResult.result.needs_conversational_retry) {
       try {
         const conversationalAssembled = await assembleV2SystemPrompt(enrichedContext);
@@ -229,8 +265,27 @@ export async function* executePipelineStream(
           { system: conversationalAssembled.text, userMessage: request.message },
           { requestId, timeoutMs: 30_000 },
         );
+        const retryModelInfo = deps.llmClient.getResolvedModel?.() ?? null;
+        log.info(
+          {
+            request_id: requestId,
+            task: 'orchestrator_conversational_retry',
+            resolved_model: retryModelInfo?.model ?? null,
+            resolved_provider: retryModelInfo?.provider ?? null,
+          },
+          'pipeline_stream.conversational_retry.resolved_model',
+        );
         (toolResult.result as Phase4Result).assistant_text = conversationalText.content;
-      } catch {
+        if (retryModelInfo) {
+          (toolResult.result as Phase4Result).route_metadata = {
+            outcome: 'default_llm',
+            reasoning: 'conversational_retry',
+            resolved_model: retryModelInfo.model,
+            resolved_provider: retryModelInfo.provider,
+          };
+        }
+      } catch (err) {
+        log.warn({ request_id: requestId, err }, 'pipeline-stream: conversational retry failed — using fallback text');
         (toolResult.result as Phase4Result).assistant_text =
           "I can help answer that. Could you tell me more about what you'd like to know?";
       }
@@ -238,6 +293,27 @@ export async function* executePipelineStream(
 
     // Phase 5: Validation + Envelope Assembly
     const envelope = phase5Validate(llmResult, toolResult.result, enrichedContext, specialistResult);
+
+    // Per-turn diagnostic trace (P0-1 Task 2: streaming turn trace parity)
+    emitTurnTrace({
+      enrichedContext,
+      requestId,
+      request,
+      toolSelected: v2ToolAttempted,
+      toolPermitted: v2ToolPermitted,
+      toolSuppressedReason: !v2ToolPermitted && v2ToolAttempted
+        ? `${v2ToolAttempted} not allowed at stage '${enrichedContext.stage_indicator.stage}'`
+        : null,
+      declaredMode: v2DeclaredMode,
+      inferredMode: v2InferredMode,
+      envelope,
+      stageFallbackInjected: toolResult.result.stage_fallback_injected,
+      initialIntentGate: intentGate,
+      llmRouteDebug: llmResult.route_debug,
+      pendingClarification: toolResult.result.pending_clarification,
+      pendingProposal: toolResult.result.pending_proposal,
+    });
+
     yield { type: 'turn_complete', seq: seq++, envelope };
 
   } catch (error) {

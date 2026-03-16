@@ -485,6 +485,39 @@ export async function assembleV2SystemPrompt(
   const zone2 = zone2Sections.filter((s) => s.length > 0).join('\n');
   const text = `${zone1}\n\n${zone2}`;
 
+  // Track budget-trimmed sections as the V2 pipeline equivalent of "activated but empty" Zone 2 blocks.
+  // In the V2 assembler, sections are only pushed when data exists, so the only way a section
+  // becomes empty is through budget trimming (zone2Sections[idx] = '').
+  const emptyBlocks: string[] = [];
+  if (entityMemoryIdx >= 0 && zone2Sections[entityMemoryIdx] === '') emptyBlocks.push('entity_memory');
+  if (eventLogIdx >= 0 && zone2Sections[eventLogIdx] === '') emptyBlocks.push('event_log');
+
+  // Persist empty blocks to enrichedContext for feature-health cross-referencing in Phase 5
+  if (emptyBlocks.length > 0) {
+    enrichedContext.zone2_empty_blocks = emptyBlocks;
+  }
+
+  // Per-turn Zone 2 assembly diagnostic log (V2 pipeline path)
+  const totalChars = text.length;
+  const activeSectionCount = zone2Sections.filter((s) => s.length > 0).length;
+  log.info(
+    {
+      event: 'zone2_assembly_complete',
+      pipeline: 'v2',
+      total_chars: totalChars,
+      zone2_chars: zone2.length,
+      section_count: activeSectionCount,
+      has_continuity: hasContinuity,
+      has_graph: !!enrichedContext.graph_compact,
+      has_analysis: !!enrichedContext.analysis_response,
+      has_entities: (enrichedContext.referenced_entities?.length ?? 0) > 0,
+      has_entity_memory: !!enrichedContext.entity_state_map,
+      has_event_log: !!enrichedContext.event_log_summary,
+      empty_blocks: emptyBlocks.length > 0 ? emptyBlocks : undefined,
+    },
+    `Zone 2 assembled (V2): ${activeSectionCount} sections, ${totalChars} chars${emptyBlocks.length > 0 ? `, empty: ${emptyBlocks.join(',')}` : ''}`,
+  );
+
   // Pre-split blocks for Anthropic prompt caching:
   // Block 0 = static Zone 1 (cache_control: ephemeral) — identical across turns
   // Block 1 = dynamic Zone 2 — varies per turn, no cache marker

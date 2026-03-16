@@ -27,6 +27,28 @@ import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
 import { isAnalysisRunnable } from "../analysis-state.js";
 
+/**
+ * Build a synthetic V2RunResponseEnvelope for blocked/failed analysis results.
+ * Avoids `as unknown as V2RunResponseEnvelope` boundary casts by constructing
+ * the minimal shape that satisfies downstream consumers.
+ */
+function buildSyntheticAnalysisEnvelope(fields: {
+  analysis_status: string;
+  status_reason?: string;
+  retryable: boolean;
+  critiques: Array<Record<string, unknown>>;
+  request_id: string;
+}): V2RunResponseEnvelope {
+  return {
+    analysis_status: fields.analysis_status,
+    status_reason: fields.status_reason,
+    retryable: fields.retryable,
+    critiques: fields.critiques,
+    meta: { request_id: fields.request_id, seed_used: 0, n_samples: 0, response_hash: '' },
+    results: [],
+  };
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -118,14 +140,13 @@ export async function handleRunAnalysis(
         const v2 = error.v2RunError;
         return {
           blocks: [],
-          analysisResponse: {
+          analysisResponse: buildSyntheticAnalysisEnvelope({
             analysis_status: v2.analysis_status,
             status_reason: v2.status_reason,
             retryable: false,
             critiques: v2.critiques ?? [],
-            meta: { request_id: error.requestId ?? requestId, seed_used: 0, n_samples: 0, response_hash: '' },
-            results: [],
-          } as unknown as V2RunResponseEnvelope,
+            request_id: error.requestId ?? requestId,
+          }),
           responseHash: undefined,
           seedUsed: undefined,
           nSamples: undefined,
@@ -244,13 +265,13 @@ function buildBlockedAnalysisResult(
 ): RunAnalysisResult {
   return {
     blocks: [],
-    analysisResponse: {
+    analysisResponse: buildSyntheticAnalysisEnvelope({
       analysis_status: 'blocked',
       status_reason: blocked.statusReason,
       retryable: false,
       critiques: blocked.critiques,
-      meta: { request_id: requestId, seed_used: 0, n_samples: 0, response_hash: '' },
-    } as unknown as V2RunResponseEnvelope,
+      request_id: requestId,
+    }),
     responseHash: undefined,
     seedUsed: undefined,
     nSamples: undefined,

@@ -11,6 +11,7 @@
  * Never trimmed: Zone 1, stage_context, analysis_state, hints.
  */
 
+import { log } from "../../utils/telemetry.js";
 import type { TurnContext, Zone2Block } from "./zone2-blocks.js";
 import type { TurnProfile } from "./profiles.js";
 import { selectProfile, getProfileBlocks } from "./profiles.js";
@@ -166,6 +167,24 @@ export function assembleFullPrompt(
     owner: block.owner,
     chars_rendered: content.length,
   }));
+
+  // Per-turn Zone 2 assembly diagnostic log
+  const blockCharMap: Record<string, number> = {};
+  for (const meta of activeBlocksMeta) {
+    blockCharMap[meta.name] = meta.chars_rendered;
+  }
+  log.info(
+    {
+      event: 'zone2_assembly_complete',
+      profile,
+      total_chars: totalChars,
+      block_count: activeBlocksMeta.length,
+      block_chars: blockCharMap,
+      trimmed_blocks: trimmedBlocks.length > 0 ? trimmedBlocks : undefined,
+      empty_blocks: emptyBlocks.length > 0 ? emptyBlocks : undefined,
+    },
+    `Zone 2 assembled: ${activeBlocksMeta.length} blocks, ${totalChars} chars${trimmedBlocks.length > 0 ? `, trimmed: ${trimmedBlocks.join(',')}` : ''}${emptyBlocks.length > 0 ? `, empty: ${emptyBlocks.join(',')}` : ''}`,
+  );
 
   return {
     system_prompt: systemPrompt,

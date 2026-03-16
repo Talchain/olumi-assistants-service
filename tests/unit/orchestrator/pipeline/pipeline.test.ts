@@ -372,7 +372,7 @@ describe("pipeline", () => {
     expect(deps.llmClient.chat).not.toHaveBeenCalled();
     expect(deps.llmClient.chatWithTools).not.toHaveBeenCalled();
     expect(envelope.assistant_text).toBeNull();
-    expect(envelope._route_metadata).toEqual({
+    expect(envelope._route_metadata).toMatchObject({
       outcome: "direct_analysis_narration_skipped",
       reasoning: "analysis_not_current_or_not_explainable",
     });
@@ -451,7 +451,7 @@ describe("pipeline", () => {
       } as any,
     }), "req-direct-analysis-ack", deps);
 
-    expect(envelope._route_metadata).toEqual({
+    expect(envelope._route_metadata).toMatchObject({
       outcome: "direct_analysis_ack_only",
       reasoning: "no_followup_message_for_results_narration",
     });
@@ -477,7 +477,7 @@ describe("pipeline", () => {
       } as any,
     }), "req-direct-analysis-narrated", deps);
 
-    expect(envelope._route_metadata).toEqual({
+    expect(envelope._route_metadata).toMatchObject({
       outcome: "direct_analysis_with_narration",
       reasoning: "completed_current_analysis_available",
     });
@@ -505,7 +505,7 @@ describe("pipeline", () => {
       } as any,
     }), "req-direct-analysis-failed-narration", deps);
 
-    expect(envelope._route_metadata).toEqual({
+    expect(envelope._route_metadata).toMatchObject({
       outcome: "direct_analysis_narration_skipped",
       reasoning: "explain_results_failed",
     });

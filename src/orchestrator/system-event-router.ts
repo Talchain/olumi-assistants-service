@@ -112,9 +112,33 @@ export async function routeSystemEvent(
 
   // ── System event validation (cf-v11.1) ──────────────────────────────────
 
+  // Context guard: events that read turnRequest.context require it to be present.
+  // TurnRequestSchema marks context as optional, so it can be undefined at runtime
+  // despite the TypeScript type saying ConversationContext.
+  const contextDependentEvents: SystemEvent['event_type'][] = [
+    'patch_accepted', 'patch_dismissed', 'direct_graph_edit', 'direct_analysis_run',
+  ];
+  if (contextDependentEvents.includes(event.event_type) && !turnRequest.context) {
+    log.warn(
+      { event_type: event.event_type, request_id: requestId, reason: 'missing_context' },
+      'System event requires context but turnRequest.context is absent',
+    );
+    return {
+      assistantText: null,
+      blocks: [],
+      guidanceItems: [],
+      systemContextEntries: [],
+      httpStatus: 400,
+      error: {
+        code: 'MISSING_CONTEXT',
+        message: `System event '${event.event_type}' requires conversation context in the request.`,
+      },
+    };
+  }
+
   // patch_accepted / patch_dismissed: verify a pending patch exists in context
   if (event.event_type === 'patch_accepted' || event.event_type === 'patch_dismissed') {
-    if (!hasPendingPatch(turnRequest.context.messages)) {
+    if (!hasPendingPatch(turnRequest.context?.messages ?? [])) {
       log.warn(
         { event_type: event.event_type, session_id: turnRequest.scenario_id, reason: 'no_pending_patch' },
         'System event ignored — no pending patch in conversation context',
@@ -132,7 +156,7 @@ export async function routeSystemEvent(
 
   // direct_analysis_run: verify graph exists in context
   if (event.event_type === 'direct_analysis_run') {
-    if (!turnRequest.graph_state && !turnRequest.context.graph) {
+    if (!turnRequest.graph_state && !turnRequest.context?.graph) {
       log.info(
         { event_type: event.event_type, session_id: turnRequest.scenario_id },
         'direct_analysis_run — no graph in context, returning guidance',
@@ -230,7 +254,7 @@ async function handlePatchAccepted(
     const graphHash = details.applied_graph_hash;
 
     // Regenerate post-draft guidance from the new graph state.
-    const framing = turnRequest.context.framing ?? null;
+    const framing = turnRequest.context?.framing ?? null;
     const guidanceItems = generatePostDraftGuidance(
       turnRequest.graph_state,
       [],
@@ -366,7 +390,7 @@ async function handlePatchAccepted(
   const contextEntry = `[system] User accepted patch ${patchId}. Applied (graph_hash: ${graphHash ?? 'unknown'}).`;
 
   // Refresh guidance from the provided graph_state after successful validation.
-  const framing = turnRequest.context.framing ?? null;
+  const framing = turnRequest.context?.framing ?? null;
   const guidanceItems = generatePostDraftGuidance(turnRequest.graph_state, [], framing);
 
   const block = buildGraphPatchBlock(
@@ -444,7 +468,7 @@ function handleDirectGraphEdit(
   // Refresh guidance only when graph_state is present and non-null.
   let guidanceItems: GuidanceItem[] = [];
   if (turnRequest.graph_state) {
-    const framing = turnRequest.context.framing ?? null;
+    const framing = turnRequest.context?.framing ?? null;
     guidanceItems = generatePostDraftGuidance(turnRequest.graph_state, [], framing);
   }
 
@@ -473,7 +497,7 @@ function handleDirectAnalysisRun(
   if (turnRequest.analysis_state) {
     // ── Path A: UI already ran analysis ───────────────────────────────────
     const analysisState = turnRequest.analysis_state;
-    const graphState = turnRequest.graph_state ?? turnRequest.context.graph ?? null;
+    const graphState = turnRequest.graph_state ?? turnRequest.context?.graph ?? null;
 
     // Consistency warning: if analysis metadata graph_hash differs from graph_state
     const analysisGraphHash = (analysisState as Record<string, unknown>).graph_hash;

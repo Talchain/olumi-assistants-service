@@ -163,7 +163,7 @@ describe("run_analysis Tool Handler", () => {
 
     expect(result.analysisResponse.analysis_status).toBe("blocked");
     expect(result.analysisResponse.retryable).toBe(false);
-    expect(result.analysisResponse.results).toBeUndefined();
+    expect(result.analysisResponse.results).toEqual([]);
     expect(result.analysisResponse.status_reason).toContain("intervention values");
     expect(result.analysisResponse.critiques).toEqual([
       expect.objectContaining({ code: "missing_analysis_inputs" }),
