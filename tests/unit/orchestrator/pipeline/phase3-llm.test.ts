@@ -723,6 +723,47 @@ describe("phase3-llm", () => {
       });
     });
 
+    it("explicit_generate via generate_model is NOT overridden by rationale_explanation", async () => {
+      const client = makeMockLLMClient();
+      // Context: no analysis (triggers rationale_explanation), framing present (triggers explicit_generate)
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+        analysis: null,
+        framing: {
+          goal: "Increase revenue",
+          options: ["Raise prices", "Expand market"],
+          constraints: ["Budget limit"],
+        } as EnrichedContext["framing"],
+        conversation_history: [
+          { role: "user", content: "We need to decide whether to raise prices or expand." },
+        ] as EnrichedContext["conversation_history"],
+      });
+
+      // Simulate generate_model button press — the message contains "why" which
+      // would normally trigger rationale_explanation, but explicit_generate must win.
+      const generateModelGate = {
+        tool: 'draft_graph' as const,
+        routing: 'deterministic' as const,
+        confidence: 'exact' as const,
+        normalised_message: 'why should we raise prices or expand? build a model',
+        matched_pattern: 'generate_model',
+      };
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-generate-not-rationale",
+        "Why should we raise prices or expand? Build a model",
+        generateModelGate,
+      );
+
+      // Must route to draft_graph, NOT rationale_explanation
+      expect(result.tool_invocations[0]?.name).toBe("draft_graph");
+      expect(result.route_metadata?.outcome).toBe("explicit_generate");
+      expect(result.route_metadata?.outcome).not.toBe("rationale_explanation");
+    });
+
     it("dismisses a pending proposal without calling tools", async () => {
       const client = makeMockLLMClient();
       const ctx = makeEnrichedContext({

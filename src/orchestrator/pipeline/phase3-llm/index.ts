@@ -233,7 +233,11 @@ export async function phase3Generate(
       },
     );
   }
-  if (explanationRoute.kind === 'rationale') {
+  // Guard: explicit generate is the highest-priority deterministic route.
+  // When the user clicks "Generate Model" (generate_model flag), the explicit
+  // generate route must NOT be overridden by a rationale explanation triggered
+  // by explanation-like words in the user's message.
+  if (explanationRoute.kind === 'rationale' && explicitGenerate.kind !== 'deterministic') {
     const rationaleText = await generateRationaleExplanation(llmClient, enrichedContext, userMessage, requestId);
     return buildConversationalLLMResult(
       rationaleText,
