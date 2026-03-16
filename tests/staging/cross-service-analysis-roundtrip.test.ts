@@ -962,13 +962,13 @@ describe("Cross-service analysis round-trip: CEE → PLoT → ISL → explain", 
         /no analysis|hasn't been run|not been run|no results available|analysis has not/,
       );
 
-      // The explain-results grounded-value stripping replaces non-analysis numbers
-      // with [value]. Analysis-derived numbers (win probabilities) must survive.
-      // Framing-context numbers (MRR targets, prices, months) are correctly stripped.
+      // Grounded-value stripping: analysis-derived numbers (win probabilities) must survive.
+      // Brief-context numbers (MRR targets, prices, months) should also survive when
+      // brief_text is available in framing context.
       const valueTokenCount = (allText.match(/\[value\]/gi) ?? []).length;
       if (valueTokenCount > 0) {
         console.log(
-          `[Step 3] [value] tokens found: ${valueTokenCount} (framing/brief numbers — expected)`,
+          `[Step 3] [value] tokens found: ${valueTokenCount}`,
         );
       }
       // Analysis win probabilities must be present as real numbers, not [value]

@@ -392,6 +392,79 @@ export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Se
   return values;
 }
 
+// ============================================================================
+// Brief-Context Number Extraction
+// ============================================================================
+
+/**
+ * Decision-relevant nouns that, when adjacent to a number, indicate the number
+ * is grounded in the user's brief and should NOT be stripped.
+ */
+const DECISION_RELEVANT_NOUNS = /\b(?:revenue|cost|price|target|goal|budget|timeline|months?|years?|quarters?|customers?|users?|mrr|arr|churn|conversion|headcount|salary|salaries|margin|roi|profit|turnover|spend|income|growth|rate|fee|subscription|deal|contract|wage|unit|volume|capacity)\b/i;
+
+/**
+ * Extract decision-relevant numbers from the user's original brief text.
+ *
+ * Only extracts numbers that appear alongside:
+ * - Currency indicators (£, $, €, GBP, USD, etc.)
+ * - Percentage expressions ("15%", "15 percent")
+ * - Decision-relevant nouns (revenue, cost, MRR, target, etc.)
+ *
+ * Numbers in casual context ("I've been thinking about this for 3 weeks") are
+ * excluded unless they match the above patterns.
+ */
+export function extractBriefNumbers(briefText: string): Set<string> {
+  const values = new Set<string>();
+  if (!briefText) return values;
+
+  // Strategy: find all numbers in the brief, then check their surrounding
+  // context (±40 chars) for decision-relevant signals.
+  const NUMBER_IN_BRIEF = /(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b)?/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = NUMBER_IN_BRIEF.exec(briefText)) !== null) {
+    const raw = m[0];
+    const start = Math.max(0, m.index - 40);
+    const end = Math.min(briefText.length, m.index + raw.length + 40);
+    const vicinity = briefText.slice(start, end);
+
+    // Check for decision-relevant context
+    const hasCurrency = /[\$£€]|GBP|USD|EUR/i.test(vicinity);
+    const hasPercent = /%/.test(raw) || /\bpercent\b/i.test(raw);
+    const hasRelevantNoun = DECISION_RELEVANT_NOUNS.test(vicinity);
+
+    if (!hasCurrency && !hasPercent && !hasRelevantNoun) continue;
+
+    // Normalise to core numeric form (strip currency, commas)
+    const core = raw
+      .replace(/^[\$£€]/, '')
+      .replace(/,/g, '')
+      .replace(/\s*percent$/i, '%')
+      .replace(/%$/, '');
+
+    if (!core || !/\d/.test(core)) continue;
+
+    values.add(core);
+
+    // Also add common surface forms for matching
+    const n = parseFloat(core);
+    if (Number.isFinite(n)) {
+      values.add(String(n));
+      if (Number.isInteger(n) && n >= 1000) {
+        values.add(n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+        const k = n / 1000;
+        values.add(`${Number.isInteger(k) ? k : k.toFixed(1)}k`);
+      }
+      if (n >= 1_000_000) {
+        const mil = n / 1_000_000;
+        values.add(`${Number.isInteger(mil) ? mil : mil.toFixed(1)}m`);
+      }
+    }
+  }
+
+  return values;
+}
+
 /**
  * Extract the core numeric value from a matched token.
  * Strips currency symbols, commas, whitespace, prefix words, and suffix chars.
@@ -419,8 +492,16 @@ function extractCoreNumeric(match: string): string {
 export function stripUngroundedNumerics(
   text: string,
   analysisResponse?: V2RunResponseEnvelope | null,
+  briefText?: string | null,
 ): { cleaned: string; strippedCount: number } {
   const groundedValues = analysisResponse ? buildGroundedValues(analysisResponse) : null;
+
+  // Merge brief-context numbers into the grounded set
+  if (groundedValues && briefText) {
+    for (const v of extractBriefNumbers(briefText)) {
+      groundedValues.add(v);
+    }
+  }
   let strippedCount = 0;
 
   const cleaned = text.replace(NUMERIC_PATTERN, (match) => {
@@ -637,8 +718,9 @@ export async function handleExplainResults(
 
     const latencyMs = Date.now() - startTime;
 
-    // Strip ungrounded numerics — pass analysis data so grounded values are preserved
-    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse);
+    // Strip ungrounded numerics — pass analysis data + brief text so grounded values are preserved
+    const briefText = (context.framing as Record<string, unknown> | null)?.brief_text as string | undefined;
+    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText);
 
     if (strippedCount > 0) {
       log.info(

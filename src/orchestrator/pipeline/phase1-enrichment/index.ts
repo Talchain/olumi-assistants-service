@@ -22,6 +22,7 @@ import { detectArchetype } from "./archetype-detector.js";
 import { trackProgress } from "./progress-tracker.js";
 import { detectStuck } from "./stuck-detector.js";
 import { loadDSK } from "./dsk-loader.js";
+import { getDskVersionHash } from "../../dsk-loader.js";
 import { loadUserProfile } from "./user-profile-loader.js";
 import { buildConversationalState } from "./conversational-state.js";
 import { compactGraph } from "../../context/graph-compact.js";
@@ -80,8 +81,12 @@ export function phase1Enrich(
   // Conversational state
   const conversationalState = buildConversationalState(message, context, intentClassification);
 
-  // DSK (stub)
+  // DSK — use stub structure but overlay production hash when available
   const dsk = loadDSK();
+  const productionHash = getDskVersionHash();
+  if (productionHash) {
+    dsk.version_hash = productionHash;
+  }
 
   // User profile (stub)
   const userProfile = loadUserProfile();

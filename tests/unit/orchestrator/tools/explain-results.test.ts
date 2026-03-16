@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   stripUngroundedNumerics,
   buildGroundedValues,
+  extractBriefNumbers,
   detectConstraintTension,
   handleExplainResults,
 } from "../../../../src/orchestrator/tools/explain-results.js";
@@ -577,5 +578,120 @@ describe("handleExplainResults handler", () => {
     expect(result.blocks).toHaveLength(1);
     expect((result.blocks[0].data as { narrative: string }).narrative).toContain("graph has changed since that run");
     expect(adapter.chat).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Tests: extractBriefNumbers
+// ============================================================================
+
+describe("extractBriefNumbers", () => {
+  it("extracts currency-adjacent numbers (£50,000)", () => {
+    const values = extractBriefNumbers("MRR target of £50,000 within 6 months");
+    expect(values.has("50000")).toBe(true);
+    expect(values.has("50,000")).toBe(true);
+    expect(values.has("50k")).toBe(true);
+  });
+
+  it("extracts timeline numbers adjacent to 'months'", () => {
+    const values = extractBriefNumbers("MRR target of £50,000 within 6 months");
+    expect(values.has("6")).toBe(true);
+  });
+
+  it("extracts percentage numbers", () => {
+    const values = extractBriefNumbers("revenue growth of 15%");
+    expect(values.has("15")).toBe(true);
+  });
+
+  it("does NOT extract casual context numbers without decision-relevant nouns", () => {
+    const values = extractBriefNumbers("I spent 3 weeks thinking about this");
+    expect(values.has("3")).toBe(false);
+  });
+
+  it("does NOT extract 'team of 12 engineers' without headcount noun", () => {
+    const values = extractBriefNumbers("my team of 12 engineers built the prototype");
+    expect(values.has("12")).toBe(false);
+  });
+
+  it("extracts 'headcount of 12' with decision-relevant noun", () => {
+    const values = extractBriefNumbers("headcount of 12 people in the department");
+    expect(values.has("12")).toBe(true);
+  });
+
+  it("extracts dollar amounts ($200)", () => {
+    const values = extractBriefNumbers("subscription price of $200 per month");
+    expect(values.has("200")).toBe(true);
+  });
+
+  it("extracts large currency values with k/m forms", () => {
+    const values = extractBriefNumbers("budget of $1,500,000 for the project");
+    expect(values.has("1500000")).toBe(true);
+    expect(values.has("1.5m")).toBe(true);
+  });
+
+  it("extracts multiple numbers from a complex brief", () => {
+    const brief = "We want to reach £50,000 MRR within 6 months. Current churn is 5% and we charge $99 per user.";
+    const values = extractBriefNumbers(brief);
+    expect(values.has("50000")).toBe(true);
+    expect(values.has("6")).toBe(true);
+    expect(values.has("5")).toBe(true);
+    expect(values.has("99")).toBe(true);
+  });
+
+  it("returns empty set for empty/null brief", () => {
+    expect(extractBriefNumbers("").size).toBe(0);
+  });
+});
+
+// ============================================================================
+// Tests: stripUngroundedNumerics with brief context
+// ============================================================================
+
+describe("stripUngroundedNumerics — brief-context grounding", () => {
+  const analysisWithData = makeAnalysisResponse({
+    results: [
+      { option_label: "Option A", win_probability: 0.62 },
+    ] as unknown as V2RunResponseEnvelope["results"],
+  });
+
+  it("preserves brief-context MRR target (£50,000) in LLM output", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "The goal of £50,000 MRR within 6 months is achievable.",
+      analysisWithData,
+      "MRR target of £50,000 within 6 months",
+    );
+    expect(cleaned).toContain("£50,000");
+    expect(cleaned).toContain("6");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("preserves brief percentage (15%) in LLM output", () => {
+    const { cleaned } = stripUngroundedNumerics(
+      "Revenue growth of 15% is within reach.",
+      analysisWithData,
+      "revenue growth of 15%",
+    );
+    expect(cleaned).toContain("15%");
+  });
+
+  it("still strips numbers not in analysis or brief", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "This could generate $999,000 in savings.",
+      analysisWithData,
+      "MRR target of £50,000",
+    );
+    expect(cleaned).toContain("[value]");
+    expect(strippedCount).toBe(1);
+  });
+
+  it("preserves both analysis and brief numbers in the same text", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads at 62% — well on track for the £50,000 MRR target.",
+      analysisWithData,
+      "MRR target of £50,000 within 6 months",
+    );
+    expect(cleaned).toContain("62%");
+    expect(cleaned).toContain("£50,000");
+    expect(strippedCount).toBe(0);
   });
 });
