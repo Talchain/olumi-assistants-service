@@ -469,7 +469,7 @@ describe("scorer — option differentiation", () => {
 // =============================================================================
 
 describe("scorer — completeness", () => {
-  it("loses 0.20 when no external factors present", () => {
+  it("loses 0.15 when no external factors present", () => {
     const graph = minimalValidGraph();
     // Remove external factor
     graph.nodes = graph.nodes.filter((n) => n.id !== "fac_ext");
@@ -481,10 +481,10 @@ describe("scorer — completeness", () => {
     const withoutExt = score(makeResponse(graph), makeBrief());
 
     expect(withoutExt.completeness!).toBeLessThan(withExt.completeness! + 0.01);
-    expect(withExt.completeness! - withoutExt.completeness!).toBeCloseTo(0.2, 1);
+    expect(withExt.completeness! - withoutExt.completeness!).toBeCloseTo(0.15, 1);
   });
 
-  it("awards 0.20 for non-empty coaching", () => {
+  it("awards 0.15 for non-empty coaching", () => {
     const graphWithCoaching = minimalValidGraph(); // already has coaching
     const graphNoCoaching = minimalValidGraph();
     graphNoCoaching.coaching = undefined;
@@ -493,7 +493,7 @@ describe("scorer — completeness", () => {
     const noCoaching = score(makeResponse(graphNoCoaching), makeBrief());
 
     expect(withCoaching.completeness!).toBeGreaterThan(noCoaching.completeness! - 0.01);
-    expect(withCoaching.completeness! - noCoaching.completeness!).toBeCloseTo(0.2, 1);
+    expect(withCoaching.completeness! - noCoaching.completeness!).toBeCloseTo(0.15, 1);
   });
 
   it("awards goal threshold point when has_numeric_target and threshold present", () => {
@@ -561,6 +561,139 @@ describe("scorer — completeness", () => {
     const resultSmall = score(makeResponse(graphSmall), makeBrief());
     // 25 nodes: readability = 0, so completeness should be lower
     expect(result.completeness!).toBeLessThan(resultSmall.completeness! + 0.01);
+  });
+});
+
+// =============================================================================
+// Scorer — currency preservation (completeness sub-dimension)
+// =============================================================================
+
+describe("scorer — currency preservation", () => {
+  it("awards 0.10 when brief has £ and goal node has matching unit", () => {
+    const graph = minimalValidGraph();
+    const goalNode = graph.nodes.find((n) => n.kind === "goal")!;
+    goalNode.goal_threshold_unit = "£";
+
+    const brief = makeBrief();
+    brief.body = "Budget is £50,000 for expansion.";
+
+    const result = score(makeResponse(graph), brief);
+    // Should get full currency score (0.10)
+    const graphNoCurrency = minimalValidGraph();
+    const briefNoCurrency = makeBrief();
+    briefNoCurrency.body = "No currency mentioned here.";
+    const resultNoCurrency = score(makeResponse(graphNoCurrency), briefNoCurrency);
+
+    // Both should include currency points (either matched or N/A = full marks)
+    expect(result.completeness).not.toBeNull();
+    expect(resultNoCurrency.completeness).not.toBeNull();
+  });
+
+  it("awards 0.05 when brief has $ but graph has non-matching unit", () => {
+    const graph = minimalValidGraph();
+    // Add a unit that doesn't match $
+    const factor = graph.nodes.find((n) => n.kind === "factor" && n.id === "fac_ctrl")!;
+    factor.data = { ...factor.data, unit: "units" };
+
+    const brief = makeBrief();
+    brief.body = "Revenue target of $1M.";
+
+    const result = score(makeResponse(graph), brief);
+
+    // Compare with a graph that has matching unit
+    const graphMatch = minimalValidGraph();
+    const factorMatch = graphMatch.nodes.find((n) => n.kind === "factor" && n.id === "fac_ctrl")!;
+    factorMatch.data = { ...factorMatch.data, unit: "$" };
+
+    const resultMatch = score(makeResponse(graphMatch), brief);
+
+    // Matching unit should score higher
+    expect(resultMatch.completeness!).toBeGreaterThan(result.completeness!);
+  });
+
+  it("awards 0.00 when brief has € but graph has no units at all", () => {
+    const graph = minimalValidGraph();
+    const brief = makeBrief();
+    brief.body = "Budget is €500k.";
+
+    const result = score(makeResponse(graph), brief);
+
+    // Compare with graph that has matching unit
+    const graphMatch = minimalValidGraph();
+    const goalNode = graphMatch.nodes.find((n) => n.kind === "goal")!;
+    goalNode.goal_threshold_unit = "€";
+
+    const resultMatch = score(makeResponse(graphMatch), brief);
+
+    expect(resultMatch.completeness!).toBeGreaterThan(result.completeness!);
+  });
+
+  it("gives full marks for currency dimension when no currency in brief", () => {
+    const graph = minimalValidGraph();
+    const brief = makeBrief();
+    brief.body = "We need to decide between three options for team growth.";
+
+    const result = score(makeResponse(graph), brief);
+    // No currency → null → full marks (0.10)
+    expect(result.completeness).not.toBeNull();
+  });
+});
+
+// =============================================================================
+// Scorer — pairwise option differentiation
+// =============================================================================
+
+describe("scorer — pairwise option differentiation", () => {
+  it("awards full marks when options share factors but have different values", () => {
+    // Simulates e.g. 3 CRM platforms all setting cost/onboarding to different values
+    const graph = minimalValidGraph();
+    const optA = graph.nodes.find((n) => n.id === "opt_a")!;
+    const optB = graph.nodes.find((n) => n.id === "opt_b")!;
+    const optSQ = graph.nodes.find((n) => n.id === "opt_sq")!;
+    // All three set the same factor but to different values
+    optA.data = { interventions: { fac_ctrl: 0.9 } };
+    optB.data = { interventions: { fac_ctrl: 0.3 } };
+    optSQ.data = { interventions: { fac_ctrl: 0.5 } };
+
+    const result = score(makeResponse(graph), makeBrief());
+    // Should still get full option_diff since pairwise values differ
+    expect(result.option_diff!).toBe(1.0);
+  });
+
+  it("awards partial marks when some option pairs are identical", () => {
+    const graph = minimalValidGraph();
+    const optA = graph.nodes.find((n) => n.id === "opt_a")!;
+    const optB = graph.nodes.find((n) => n.id === "opt_b")!;
+    const optSQ = graph.nodes.find((n) => n.id === "opt_sq")!;
+    // A and B are identical, SQ differs
+    optA.data = { interventions: { fac_ctrl: 0.8 } };
+    optB.data = { interventions: { fac_ctrl: 0.8 } };
+    optSQ.data = { interventions: { fac_ctrl: 0.5 } };
+
+    const result = score(makeResponse(graph), makeBrief());
+    // Identical signatures → loses 0.25 (uniqueness check)
+    // Pairwise: A-B identical, A-SQ distinct, B-SQ distinct = 2/3 distinct
+    // Check A fails (A and B have no unique factor), so falls through to Check B
+    // Check B: pairwiseScore = 2/3 → 0.25 * 2/3 ≈ 0.167
+    expect(result.option_diff!).toBeLessThan(1.0);
+    expect(result.option_diff!).toBeGreaterThan(0.5);
+  });
+
+  it("awards 0 for differentiation when all options are identical", () => {
+    const graph = minimalValidGraph();
+    const optA = graph.nodes.find((n) => n.id === "opt_a")!;
+    const optB = graph.nodes.find((n) => n.id === "opt_b")!;
+    const optSQ = graph.nodes.find((n) => n.id === "opt_sq")!;
+    optA.data = { interventions: { fac_ctrl: 0.5 } };
+    optB.data = { interventions: { fac_ctrl: 0.5 } };
+    optSQ.data = { interventions: { fac_ctrl: 0.5 } };
+
+    const result = score(makeResponse(graph), makeBrief());
+    // Identical sigs → loses 0.25
+    // All pairs identical → pairwiseScore = 0 → loses 0.25
+    // Status quo present → gets 0.25
+    // All set factors → gets 0.25
+    expect(result.option_diff!).toBe(0.5);
   });
 });
 

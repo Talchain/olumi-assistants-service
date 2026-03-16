@@ -17,7 +17,7 @@ import { config as loadDotenv } from "dotenv";
 import { Command } from "commander";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile, access } from "node:fs/promises";
+import { readFile, writeFile, access } from "node:fs/promises";
 
 import { run } from "./runner.js";
 import { score } from "./scorer.js";
@@ -153,6 +153,7 @@ async function main(): Promise<void> {
     .option("--judge", "Run LLM-as-judge scoring after structural eval (orchestrator only)", false)
     .option("--profile <fixture_id>", "Use assembled prompt from a profile fixture (Zone 2 registry)")
     .option("--zone1-only", "Use Zone 1 prompt only for baseline regression", false)
+    .option("--runs <n>", "Number of independent runs for variance measurement (default: 1)", "1")
     .parse(process.argv);
 
   const opts = program.opts<{
@@ -169,7 +170,10 @@ async function main(): Promise<void> {
     judge: boolean;
     profile?: string;
     zone1Only: boolean;
+    runs: string;
   }>();
+
+  const numRuns = Math.max(1, parseInt(opts.runs, 10) || 1);
 
   const promptType = opts.type as PromptType;
   if (!["draft_graph", "edit_graph", "decision_review", "research", "orchestrator"].includes(promptType)) {
@@ -256,6 +260,7 @@ async function main(): Promise<void> {
       casesDir,
       resultsDir,
       caseFilter,
+      numRuns,
       opts,
     });
   } else if (promptType === "research") {
@@ -281,6 +286,7 @@ async function main(): Promise<void> {
       resultsDir,
       caseFilter,
       dskEnabled: opts.dskEnabled,
+      numRuns,
       opts,
     });
   }
@@ -299,6 +305,7 @@ interface DraftGraphRunArgs {
   casesDir: string;
   resultsDir: string;
   caseFilter: string[];
+  numRuns: number;
   opts: {
     prompt: string;
     force: boolean;
@@ -309,7 +316,7 @@ interface DraftGraphRunArgs {
 }
 
 async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
-  const { promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, opts } = args;
+  const { promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, numRuns, opts } = args;
 
   let briefs;
   try {
@@ -396,83 +403,134 @@ async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
   await saveManifest(resultsDir, runId, manifest);
 
   // Run LLM calls
-  console.log(`\nStarting run: ${runId}`);
+  console.log(`\nStarting run: ${runId}${numRuns > 1 ? ` (${numRuns} runs)` : ""}`);
   console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
   console.log(`Briefs: ${briefs.map((b) => b.id).join(", ")}`);
   console.log();
 
-  const responses = await run({
-    models,
-    briefs,
-    promptContent,
-    reminderContent,
-    promptFile: opts.prompt,
-    runId,
-    resultsDir,
-    force: opts.force,
-    resume: opts.resume,
-    dryRun: false,
-    loadCached: async (modelId, briefId) =>
-      loadResponse(resultsDir, runId, modelId, briefId),
-    saveResult: async (modelId, briefId, result) =>
-      saveResponse(resultsDir, runId, modelId, briefId, result),
-  });
+  // Collect per-run scores for variance analysis
+  const allRunScored: ScoredResult[][] = [];
 
-  if (responses.length === 0) {
-    console.log("No responses to score. Run complete.");
-    return;
+  for (let runIdx = 0; runIdx < numRuns; runIdx++) {
+    const runSubdir = numRuns > 1 ? join(runId, `run_${runIdx + 1}`) : runId;
+    if (numRuns > 1) {
+      console.log(`\n── Run ${runIdx + 1}/${numRuns} ──`);
+      await ensureDir(join(resultsDir, runSubdir));
+    }
+
+    const responses = await run({
+      models,
+      briefs,
+      promptContent,
+      reminderContent,
+      promptFile: opts.prompt,
+      runId: runSubdir,
+      resultsDir,
+      force: numRuns > 1 ? true : opts.force, // Force re-run for multi-run
+      resume: opts.resume,
+      dryRun: false,
+      loadCached: async (modelId, briefId) =>
+        loadResponse(resultsDir, runSubdir, modelId, briefId),
+      saveResult: async (modelId, briefId, result) =>
+        saveResponse(resultsDir, runSubdir, modelId, briefId, result),
+    });
+
+    if (responses.length === 0) {
+      console.log("No responses to score for this run.");
+      continue;
+    }
+
+    // Score all responses
+    console.log("\nScoring results...");
+
+    const scored: ScoredResult[] = responses.map((response) => {
+      const brief = briefs.find((b) => b.id === response.brief_id)!;
+      const model = models.find((m) => m.id === response.model_id)!;
+      return {
+        response,
+        score: score(response, brief),
+        brief,
+        model,
+      };
+    });
+
+    allRunScored.push(scored);
+
+    // Generate per-run reports
+    console.log("Generating reports...");
+
+    const reports = generate({
+      results: scored,
+      config,
+      models,
+      briefs,
+      promptHash,
+    });
+
+    await saveReports(resultsDir, runSubdir, reports);
+
+    // Print per-run summary
+    const successCount = scored.filter((r) => r.score.overall_score != null).length;
+    const failCount = scored.filter((r) => r.response.failure_code).length;
+    const invalidCount = scored.filter(
+      (r) => !r.score.structural_valid && !r.response.failure_code
+    ).length;
+
+    console.log(`\n✓ Run ${runIdx + 1} complete: ${runSubdir}`);
+    console.log(`  ${successCount} scored | ${invalidCount} invalid | ${failCount} failed`);
+    console.log(`  Results: ${join(resultsDir, runSubdir)}`);
+
+    const topResults = scored
+      .filter((r) => r.score.overall_score != null)
+      .sort((a, b) => (b.score.overall_score ?? 0) - (a.score.overall_score ?? 0))
+      .slice(0, 3);
+
+    if (topResults.length > 0) {
+      console.log("\nTop results:");
+      for (const r of topResults) {
+        console.log(
+          `  ${r.model.id.padEnd(20)} × ${r.brief.id.padEnd(30)} — overall: ${r.score.overall_score!.toFixed(3)}`
+        );
+      }
+    }
   }
 
-  // Score all responses
-  console.log("\nScoring results...");
+  // Generate variance report for multi-run
+  if (numRuns > 1 && allRunScored.length > 1) {
+    const varianceLines: string[] = [
+      `# Variance Report — ${runId}`,
+      "",
+      `Runs: ${allRunScored.length}`,
+      "",
+      "| Model | Brief | Mean | StdDev | Min | Max |",
+      "|-------|-------|------|--------|-----|-----|",
+    ];
 
-  const scored: ScoredResult[] = responses.map((response) => {
-    const brief = briefs.find((b) => b.id === response.brief_id)!;
-    const model = models.find((m) => m.id === response.model_id)!;
-    return {
-      response,
-      score: score(response, brief),
-      brief,
-      model,
-    };
-  });
+    // Group by model×brief
+    const combos = new Map<string, number[]>();
+    for (const runScored of allRunScored) {
+      for (const r of runScored) {
+        const key = `${r.model.id}|${r.brief.id}`;
+        if (!combos.has(key)) combos.set(key, []);
+        if (r.score.overall_score != null) combos.get(key)!.push(r.score.overall_score);
+      }
+    }
 
-  // Generate reports
-  console.log("Generating reports...");
-
-  const reports = generate({
-    results: scored,
-    config,
-    models,
-    briefs,
-    promptHash,
-  });
-
-  await saveReports(resultsDir, runId, reports);
-
-  // Print summary
-  const successCount = scored.filter((r) => r.score.overall_score != null).length;
-  const failCount = scored.filter((r) => r.response.failure_code).length;
-  const invalidCount = scored.filter(
-    (r) => !r.score.structural_valid && !r.response.failure_code
-  ).length;
-
-  console.log(`\n✓ Run complete: ${runId}`);
-  console.log(`  ${successCount} scored | ${invalidCount} invalid | ${failCount} failed`);
-  console.log(`  Results: ${join(resultsDir, runId)}`);
-
-  const topResults = scored
-    .filter((r) => r.score.overall_score != null)
-    .sort((a, b) => (b.score.overall_score ?? 0) - (a.score.overall_score ?? 0))
-    .slice(0, 3);
-
-  if (topResults.length > 0) {
-    console.log("\nTop results:");
-    for (const r of topResults) {
-      console.log(
-        `  ${r.model.id.padEnd(20)} × ${r.brief.id.padEnd(30)} — overall: ${r.score.overall_score!.toFixed(3)}`
+    for (const [key, scores] of combos) {
+      if (scores.length === 0) continue;
+      const [modelId, briefId] = key.split("|");
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+      const variance = scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length;
+      const stddev = Math.sqrt(variance);
+      const min = Math.min(...scores);
+      const max = Math.max(...scores);
+      varianceLines.push(
+        `| ${modelId} | ${briefId} | ${mean.toFixed(4)} | ${stddev.toFixed(4)} | ${min.toFixed(4)} | ${max.toFixed(4)} |`
       );
     }
+
+    await writeFile(join(resultsDir, runId, "variance.md"), varianceLines.join("\n") + "\n", "utf-8");
+    console.log(`\nVariance report: ${join(resultsDir, runId, "variance.md")}`);
   }
 }
 
@@ -491,6 +549,7 @@ interface GenericRunArgs {
   resultsDir: string;
   caseFilter: string[];
   dskEnabled: boolean;
+  numRuns: number;
   opts: {
     prompt: string;
     force: boolean;
@@ -501,7 +560,7 @@ interface GenericRunArgs {
 }
 
 async function runGenericType(args: GenericRunArgs): Promise<void> {
-  const { promptType, promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, dskEnabled, opts } = args;
+  const { promptType, promptContent, reminderContent, models, modelsDir, casesDir, resultsDir, caseFilter, dskEnabled, numRuns, opts } = args;
 
   const adapter = getAdapter(promptType);
 
@@ -617,159 +676,209 @@ async function runGenericType(args: GenericRunArgs): Promise<void> {
 
   // For decision_review with DSK injection, we need per-fixture system prompts
   // The runner doesn't support this, so we run fixtures sequentially
-  console.log(`\nStarting run: ${runId} (type: ${promptType})`);
+  console.log(`\nStarting run: ${runId} (type: ${promptType})${numRuns > 1 ? ` (${numRuns} runs)` : ""}`);
   console.log(`Models: ${models.map((m) => m.id).join(", ")}`);
   console.log(`Cases: ${fixtures.map((f) => f.id).join(", ")}`);
   console.log();
 
-  const allResults: GenericScoredResult[] = [];
+  // Collect per-run results for variance analysis
+  const allRunResults: GenericScoredResult[][] = [];
 
-  for (const model of models) {
-    for (const fixture of fixtures) {
-      const fixtureId = fixture.id;
-
-      // Check cache
-      if (!opts.force) {
-        const cached = await loadResponse(resultsDir, runId, model.id, fixtureId);
-        if (cached !== null && !opts.resume) {
-          console.log(`  [cache]  Skipping ${model.id} × ${fixtureId}`);
-          const parsed = cached.parsed_json ?? (cached.parsed_graph as unknown as Record<string, unknown>) ?? null;
-          const scoreResult = adapter.score(fixture, parsed, cached);
-          allResults.push({
-            response: cached,
-            score: scoreResult,
-            fixture_id: fixtureId,
-            model,
-            prompt_type: promptType,
-          });
-          continue;
-        }
-      }
-
-      // Build request via adapter
-      const { system, user } = adapter.buildRequest(fixture, promptContent);
-
-      // Run via the runner's single-call path
-      const responses = await run({
-        models: [model],
-        briefs: [{ id: fixtureId, meta: { expect_status_quo: false, has_numeric_target: false, complexity: "simple" }, body: user }],
-        promptContent: system,
-        reminderContent,
-        promptFile: opts.prompt,
-        runId,
-        resultsDir,
-        force: opts.force,
-        resume: opts.resume,
-        dryRun: false,
-        loadCached: async () => null, // Already handled above
-        saveResult: async (_modelId, _briefId, result) => {
-          // Also store parsed_json for non-draft_graph types
-          if (result.status === "success" && result.raw_text) {
-            const parseResult = adapter.parseResponse(result.raw_text);
-            if (parseResult.parsed) {
-              result.parsed_json = parseResult.parsed;
-            }
-          }
-          await saveResponse(resultsDir, runId, model.id, fixtureId, result);
-        },
-      });
-
-      const response = responses[0];
-      if (!response) continue;
-
-      // Parse and score
-      let parsed: Record<string, unknown> | null = null;
-      if (response.status === "success" && response.raw_text) {
-        const parseResult = adapter.parseResponse(response.raw_text);
-        parsed = parseResult.parsed;
-        if (parseResult.parsed) {
-          response.parsed_json = parseResult.parsed;
-        }
-      }
-
-      const scoreResult = adapter.score(fixture, parsed, response);
-
-      // Runner already printed "Done: ... latency/cost". Append the score on a new line.
-      console.log(`  Score:   ${model.id} × ${fixtureId} — ${scoreResult.overall?.toFixed(3) ?? "—"}`);
-
-      allResults.push({
-        response,
-        score: scoreResult,
-        fixture_id: fixtureId,
-        model,
-        prompt_type: promptType,
-      });
+  for (let runIdx = 0; runIdx < numRuns; runIdx++) {
+    const runSubdir = numRuns > 1 ? join(runId, `run_${runIdx + 1}`) : runId;
+    if (numRuns > 1) {
+      console.log(`\n── Run ${runIdx + 1}/${numRuns} ──`);
+      await ensureDir(join(resultsDir, runSubdir));
     }
-  }
 
-  if (allResults.length === 0) {
-    console.log("No responses to score. Run complete.");
-    return;
-  }
+    const allResults: GenericScoredResult[] = [];
 
-  // Generate generic CSV report
-  const csvLines = [
-    [
-      "run_id", "prompt_type", "provider", "model_id", "case_id", "target_mode",
-      "overall_score", "latency_ms", "input_tokens", "output_tokens",
-      "reasoning_tokens", "est_cost_usd", "failure_code", "parse_error",
-      ...Object.keys(allResults[0]?.score.dimensions ?? {}),
-    ].join(","),
-  ];
+    for (const model of models) {
+      for (const fixture of fixtures) {
+        const fixtureId = fixture.id;
 
-  for (const r of allResults) {
-    const dims = Object.values(r.score.dimensions).map((v) =>
-      v === null ? "" : typeof v === "boolean" ? (v ? "1" : "0") : String(v)
-    );
-    csvLines.push(
+        // Check cache (skip for multi-run)
+        if (!opts.force && numRuns === 1) {
+          const cached = await loadResponse(resultsDir, runSubdir, model.id, fixtureId);
+          if (cached !== null && !opts.resume) {
+            console.log(`  [cache]  Skipping ${model.id} × ${fixtureId}`);
+            const parsed = cached.parsed_json ?? (cached.parsed_graph as unknown as Record<string, unknown>) ?? null;
+            const scoreResult = adapter.score(fixture, parsed, cached);
+            allResults.push({
+              response: cached,
+              score: scoreResult,
+              fixture_id: fixtureId,
+              model,
+              prompt_type: promptType,
+            });
+            continue;
+          }
+        }
+
+        // Build request via adapter
+        const { system, user } = adapter.buildRequest(fixture, promptContent);
+
+        // Run via the runner's single-call path
+        const responses = await run({
+          models: [model],
+          briefs: [{ id: fixtureId, meta: { expect_status_quo: false, has_numeric_target: false, complexity: "simple" }, body: user }],
+          promptContent: system,
+          reminderContent,
+          promptFile: opts.prompt,
+          runId: runSubdir,
+          resultsDir,
+          force: numRuns > 1 ? true : opts.force,
+          resume: opts.resume,
+          dryRun: false,
+          loadCached: async () => null, // Already handled above
+          saveResult: async (_modelId, _briefId, result) => {
+            // Also store parsed_json for non-draft_graph types
+            if (result.status === "success" && result.raw_text) {
+              const parseResult = adapter.parseResponse(result.raw_text);
+              if (parseResult.parsed) {
+                result.parsed_json = parseResult.parsed;
+              }
+            }
+            await saveResponse(resultsDir, runSubdir, model.id, fixtureId, result);
+          },
+        });
+
+        const response = responses[0];
+        if (!response) continue;
+
+        // Parse and score
+        let parsed: Record<string, unknown> | null = null;
+        if (response.status === "success" && response.raw_text) {
+          const parseResult = adapter.parseResponse(response.raw_text);
+          parsed = parseResult.parsed;
+          if (parseResult.parsed) {
+            response.parsed_json = parseResult.parsed;
+          }
+        }
+
+        const scoreResult = adapter.score(fixture, parsed, response);
+
+        // Runner already printed "Done: ... latency/cost". Append the score on a new line.
+        console.log(`  Score:   ${model.id} × ${fixtureId} — ${scoreResult.overall?.toFixed(3) ?? "—"}`);
+
+        allResults.push({
+          response,
+          score: scoreResult,
+          fixture_id: fixtureId,
+          model,
+          prompt_type: promptType,
+        });
+      }
+    }
+
+    allRunResults.push(allResults);
+
+    if (allResults.length === 0) {
+      console.log("No responses to score for this run.");
+      continue;
+    }
+
+    // Generate generic CSV report
+    const csvLines = [
       [
-        config.run_id,
-        promptType,
-        r.model.provider,
-        r.model.id,
-        r.fixture_id,
-        r.model.target_mode ?? "",
-        r.score.overall?.toFixed(4) ?? "",
-        String(r.response.latency_ms),
-        String(r.response.input_tokens ?? ""),
-        String(r.response.output_tokens ?? ""),
-        String(r.response.reasoning_tokens ?? ""),
-        (r.response.est_cost_usd ?? 0).toFixed(6),
-        r.response.failure_code ?? "",
-        r.score.parse_error ?? "",
-        ...dims,
-      ].join(",")
-    );
-  }
+        "run_id", "prompt_type", "provider", "model_id", "case_id", "target_mode",
+        "overall_score", "latency_ms", "input_tokens", "output_tokens",
+        "reasoning_tokens", "est_cost_usd", "failure_code", "parse_error",
+        ...Object.keys(allResults[0]?.score.dimensions ?? {}),
+      ].join(","),
+    ];
 
-  const scoresCsv = csvLines.join("\n") + "\n";
-  const summaryMd = generateGenericSummary(allResults, config, promptHash);
-
-  await ensureDir(join(resultsDir, runId));
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(join(resultsDir, runId, "scores.csv"), scoresCsv, "utf-8");
-  await writeFile(join(resultsDir, runId, "summary.md"), summaryMd, "utf-8");
-
-  // Print summary
-  const successCount = allResults.filter((r) => r.score.overall != null).length;
-  const failCount = allResults.filter((r) => r.response.failure_code).length;
-
-  console.log(`\n✓ Run complete: ${runId}`);
-  console.log(`  ${successCount} scored | ${failCount} failed`);
-  console.log(`  Results: ${join(resultsDir, runId)}`);
-
-  const topResults = allResults
-    .filter((r) => r.score.overall != null)
-    .sort((a, b) => (b.score.overall ?? 0) - (a.score.overall ?? 0))
-    .slice(0, 3);
-
-  if (topResults.length > 0) {
-    console.log("\nTop results:");
-    for (const r of topResults) {
-      console.log(
-        `  ${r.model.id.padEnd(20)} × ${r.fixture_id.padEnd(30)} — overall: ${r.score.overall!.toFixed(3)}`
+    for (const r of allResults) {
+      const dims = Object.values(r.score.dimensions).map((v) =>
+        v === null ? "" : typeof v === "boolean" ? (v ? "1" : "0") : String(v)
+      );
+      csvLines.push(
+        [
+          config.run_id,
+          promptType,
+          r.model.provider,
+          r.model.id,
+          r.fixture_id,
+          r.model.target_mode ?? "",
+          r.score.overall?.toFixed(4) ?? "",
+          String(r.response.latency_ms),
+          String(r.response.input_tokens ?? ""),
+          String(r.response.output_tokens ?? ""),
+          String(r.response.reasoning_tokens ?? ""),
+          (r.response.est_cost_usd ?? 0).toFixed(6),
+          r.response.failure_code ?? "",
+          r.score.parse_error ?? "",
+          ...dims,
+        ].join(",")
       );
     }
+
+    const scoresCsv = csvLines.join("\n") + "\n";
+    const summaryMd = generateGenericSummary(allResults, config, promptHash);
+
+    await ensureDir(join(resultsDir, runSubdir));
+    await writeFile(join(resultsDir, runSubdir, "scores.csv"), scoresCsv, "utf-8");
+    await writeFile(join(resultsDir, runSubdir, "summary.md"), summaryMd, "utf-8");
+
+    // Print per-run summary
+    const successCount = allResults.filter((r) => r.score.overall != null).length;
+    const failCount = allResults.filter((r) => r.response.failure_code).length;
+
+    console.log(`\n✓ Run ${runIdx + 1} complete: ${runSubdir}`);
+    console.log(`  ${successCount} scored | ${failCount} failed`);
+    console.log(`  Results: ${join(resultsDir, runSubdir)}`);
+
+    const topResults = allResults
+      .filter((r) => r.score.overall != null)
+      .sort((a, b) => (b.score.overall ?? 0) - (a.score.overall ?? 0))
+      .slice(0, 3);
+
+    if (topResults.length > 0) {
+      console.log("\nTop results:");
+      for (const r of topResults) {
+        console.log(
+          `  ${r.model.id.padEnd(20)} × ${r.fixture_id.padEnd(30)} — overall: ${r.score.overall!.toFixed(3)}`
+        );
+      }
+    }
+  }
+
+  // Generate variance report for multi-run
+  if (numRuns > 1 && allRunResults.length > 1) {
+    const varianceLines: string[] = [
+      `# Variance Report — ${runId}`,
+      "",
+      `Runs: ${allRunResults.length}`,
+      "",
+      "| Model | Case | Mean | StdDev | Min | Max |",
+      "|-------|------|------|--------|-----|-----|",
+    ];
+
+    // Group by model×fixture
+    const combos = new Map<string, number[]>();
+    for (const runResults of allRunResults) {
+      for (const r of runResults) {
+        const key = `${r.model.id}|${r.fixture_id}`;
+        if (!combos.has(key)) combos.set(key, []);
+        if (r.score.overall != null) combos.get(key)!.push(r.score.overall);
+      }
+    }
+
+    for (const [key, scores] of combos) {
+      if (scores.length === 0) continue;
+      const [modelId, fixtureId] = key.split("|");
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+      const variance = scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length;
+      const stddev = Math.sqrt(variance);
+      const min = Math.min(...scores);
+      const max = Math.max(...scores);
+      varianceLines.push(
+        `| ${modelId} | ${fixtureId} | ${mean.toFixed(4)} | ${stddev.toFixed(4)} | ${min.toFixed(4)} | ${max.toFixed(4)} |`
+      );
+    }
+
+    await writeFile(join(resultsDir, runId, "variance.md"), varianceLines.join("\n") + "\n", "utf-8");
+    console.log(`\nVariance report: ${join(resultsDir, runId, "variance.md")}`);
   }
 }
 

@@ -170,9 +170,20 @@ function scoreOptionDifferentiation(graph: ParsedGraph, brief: Brief): number {
   );
   if (allSetFactors) score += 0.25;
 
-  // 0.25: Each option affects at least one unique controllable factor that
-  // is NOT set by ALL other options — i.e., options don't all touch exactly
-  // the same factor set.
+  // 0.25: Options are meaningfully differentiated (intervention distinctness).
+  //
+  // Evaluates distinctness without penalizing valid shared-factor structures
+  // (e.g. 4 CRM platforms all setting cost/onboarding/integration to
+  // different values). Two complementary checks, best score wins:
+  //
+  // Check A (structural uniqueness): each option has ≥1 factor NOT shared
+  //   by all others → 0.25
+  //
+  // Check B (intervention value spread): measures pairwise intervention
+  //   distinctness across all option pairs. Each pair must differ on ≥1
+  //   shared factor's value. Score = proportion of distinct pairs.
+  //   This correctly awards full marks when options act on the same levers
+  //   with different magnitudes.
   const factorSets = options.map(
     (o) => new Set(Object.keys(o.data?.interventions ?? {}))
   );
@@ -183,18 +194,114 @@ function scoreOptionDifferentiation(graph: ParsedGraph, brief: Brief): number {
     factorSets[0] ?? new Set()
   );
 
-  // Each option must have at least one factor NOT in the intersection
-  // (i.e., a factor unique to this option's path or combination)
-  const allHaveUnique = factorSets.every((set) => {
+  // Check A: structural uniqueness
+  const allHaveUniqueFactor = factorSets.every((set) => {
     for (const f of set) {
       if (!intersection.has(f)) return true;
     }
     return false;
   });
 
-  if (allHaveUnique) score += 0.25;
+  // Check B: pairwise intervention distinctness
+  // For every pair of options, at least one shared factor must have a
+  // different intervention value. This evaluates intervention distinctness
+  // without requiring structurally unique factor sets.
+  const interventionMaps = options.map(
+    (o) => o.data?.interventions ?? {}
+  );
+
+  // Collect all factors across all options (union)
+  const allFactors = new Set<string>();
+  for (const set of factorSets) {
+    for (const f of set) allFactors.add(f);
+  }
+
+  let distinctPairs = 0;
+  let totalPairs = 0;
+  for (let i = 0; i < options.length; i++) {
+    for (let j = i + 1; j < options.length; j++) {
+      totalPairs++;
+      // Check if this pair differs on at least one factor they both set
+      const sharedFactors = [...allFactors].filter(
+        (f) => f in interventionMaps[i] && f in interventionMaps[j]
+      );
+      const hasDifference = sharedFactors.some(
+        (f) => interventionMaps[i][f] !== interventionMaps[j][f]
+      );
+      // Also count as distinct if they set different factor sets
+      const setsDiffer = factorSets[i].size !== factorSets[j].size ||
+        [...factorSets[i]].some((f) => !factorSets[j].has(f));
+
+      if (hasDifference || setsDiffer) distinctPairs++;
+    }
+  }
+
+  const pairwiseScore = totalPairs > 0 ? distinctPairs / totalPairs : 0;
+
+  // Award the best of the two checks
+  if (allHaveUniqueFactor) {
+    score += 0.25;
+  } else {
+    score += pairwiseScore * 0.25;
+  }
 
   return score;
+}
+
+// =============================================================================
+// Currency detection & preservation scoring
+// =============================================================================
+
+/** Currency symbols/codes detected in brief text. */
+const CURRENCY_PATTERNS: Array<{ symbol: string; regex: RegExp }> = [
+  { symbol: "£", regex: /£/ },
+  { symbol: "$", regex: /\$/ },
+  { symbol: "€", regex: /€/ },
+  { symbol: "GBP", regex: /\bGBP\b/i },
+  { symbol: "USD", regex: /\bUSD\b/i },
+  { symbol: "EUR", regex: /\bEUR\b/i },
+];
+
+function detectBriefCurrency(briefBody: string): string | null {
+  for (const { symbol, regex } of CURRENCY_PATTERNS) {
+    if (regex.test(briefBody)) return symbol;
+  }
+  return null;
+}
+
+function scoreCurrencyPreservation(graph: ParsedGraph, briefBody: string): number | null {
+  const briefCurrency = detectBriefCurrency(briefBody);
+  if (!briefCurrency) return null;
+
+  const normalised = new Set<string>();
+  normalised.add(briefCurrency.toLowerCase());
+  if (briefCurrency === "£" || briefCurrency.toUpperCase() === "GBP") {
+    normalised.add("£"); normalised.add("gbp");
+  }
+  if (briefCurrency === "$" || briefCurrency.toUpperCase() === "USD") {
+    normalised.add("$"); normalised.add("usd");
+  }
+  if (briefCurrency === "€" || briefCurrency.toUpperCase() === "EUR") {
+    normalised.add("€"); normalised.add("eur");
+  }
+
+  const goalNode = graph.nodes.find((n) => n.kind === "goal");
+  const goalUnit = goalNode?.goal_threshold_unit?.toLowerCase() ?? goalNode?.data?.unit?.toLowerCase();
+  if (goalUnit && normalised.has(goalUnit)) return 1.0;
+
+  let hasAnyUnit = false;
+  let hasMatchingUnit = false;
+  for (const node of graph.nodes) {
+    const unit = node.data?.unit?.toLowerCase();
+    if (unit) {
+      hasAnyUnit = true;
+      if (normalised.has(unit)) { hasMatchingUnit = true; break; }
+    }
+  }
+
+  if (hasMatchingUnit) return 1.0;
+  if (hasAnyUnit) return 0.5;
+  return 0.0;
 }
 
 // =============================================================================
@@ -207,16 +314,16 @@ function scoreCompleteness(graph: ParsedGraph, brief: Brief): number {
   const factors = graph.nodes.filter((n) => n.kind === "factor");
   const goalNode = graph.nodes.find((n) => n.kind === "goal");
 
-  // 0.20: Has ≥1 external factor
+  // 0.15: Has ≥1 external factor
   const hasExternal = factors.some((f) => f.category === "external");
-  if (hasExternal) score += 0.20;
+  if (hasExternal) score += 0.15;
 
-  // 0.20: Coaching array is non-empty
+  // 0.15: Coaching array is non-empty
   const coachingItems = graph.coaching?.strengthen_items ?? [];
   const hasCoaching =
     coachingItems.length > 0 ||
     (graph.coaching?.summary?.trim().length ?? 0) > 0;
-  if (hasCoaching) score += 0.20;
+  if (hasCoaching) score += 0.15;
 
   // 0.20: Goal threshold extracted when brief has numeric target
   if (!brief.meta.has_numeric_target) {
@@ -244,6 +351,15 @@ function scoreCompleteness(graph: ParsedGraph, brief: Brief): number {
     score += 0.10;
   }
   // >20 nodes = 0 points for readability
+
+  // 0.10: Currency preservation — when brief mentions currency, graph should
+  // preserve it in node unit metadata (goal_threshold_unit, data.unit).
+  const currencyScore = scoreCurrencyPreservation(graph, brief.body);
+  if (currencyScore === null) {
+    score += 0.10; // Not applicable — full marks for this sub-dimension
+  } else {
+    score += currencyScore * 0.10;
+  }
 
   return score;
 }
