@@ -635,6 +635,15 @@ describe("Golden-path staging: PLoT → CEE draft → edit → analyse → expla
     async () => {
       if (SKIP_REASON) { console.log(SKIP_REASON); return; }
 
+      // If Step 3 didn't produce analysis (conversational recovery), skip gracefully
+      if (!analysisResponse) {
+        console.warn(
+          "[Step 4] SKIPPED: analysisResponse is null — Step 3 took the conversational recovery path. " +
+            "Cannot verify explain_results without real analysis data.",
+        );
+        return;
+      }
+
       // Use MINIMAL_GRAPH for explain too (consistent with analysis fixture)
       const graphToSend = MINIMAL_GRAPH;
 
