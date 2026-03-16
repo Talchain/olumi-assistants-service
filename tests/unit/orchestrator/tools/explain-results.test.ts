@@ -3,6 +3,7 @@ import {
   stripUngroundedNumerics,
   buildGroundedValues,
   extractBriefNumbers,
+  extractGraphNumbers,
   detectConstraintTension,
   handleExplainResults,
 } from "../../../../src/orchestrator/tools/explain-results.js";
@@ -579,6 +580,38 @@ describe("handleExplainResults handler", () => {
     expect((result.blocks[0].data as { narrative: string }).narrative).toContain("graph has changed since that run");
     expect(adapter.chat).not.toHaveBeenCalled();
   });
+
+  it("preserves graph-label-only grounded numeric via context.graph at call site", async () => {
+    // The core numerics "59" and "49" (from £59, £49) do NOT appear in
+    // buildGroundedValues output — win_probabilities 0.012/0.155 only produce
+    // percentage forms like "1.2", "15.5". So £59/£49 can only be preserved
+    // if graph node labels are forwarded to the grounding pipeline.
+    const analysisResponse = makeAnalysisResponse({
+      results: [
+        { option_label: "Raise to £59", win_probability: 0.012 },
+        { option_label: "Keep at £49", win_probability: 0.155 },
+      ],
+    });
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Raise to £59" },
+        { id: "opt2", kind: "option", label: "Keep at £49" },
+      ],
+      edges: [],
+    };
+    const context = makeContext({
+      analysis_response: analysisResponse,
+      graph: graph as unknown as ConversationContext["graph"],
+      framing: { stage: "explain", goal: "pick best price" },
+    });
+    const adapter = makeAdapter("Raising the price to £59 yields 1.2% win probability while keeping at £49 yields 15.5%.");
+
+    const result = await handleExplainResults(context, adapter as never, "req-1", "turn-1");
+
+    const narrative = (result.blocks[0].data as { narrative: string }).narrative;
+    expect(narrative).toContain("£59");
+    expect(narrative).toContain("£49");
+  });
 });
 
 // ============================================================================
@@ -741,11 +774,11 @@ describe("stripUngroundedNumerics — brief-context grounding", () => {
 });
 
 // ============================================================================
-// Call-site inventory regression: ensure all production call sites thread briefText
+// Call-site inventory regression: ensure all production call sites thread briefText + graphState
 // ============================================================================
 
 describe("stripUngroundedNumerics — call-site inventory guard", () => {
-  it("all production call sites in src/ pass briefText (3 args)", async () => {
+  it("all production call sites in src/ pass briefText and graphState (4 args)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
 
@@ -802,13 +835,159 @@ describe("stripUngroundedNumerics — call-site inventory guard", () => {
           }
           const argCount = commaCount + 1;
 
-          if (argCount < 3) {
-            violations.push(`${relPath}:${i + 1} — only ${argCount} arg(s), briefText not threaded`);
+          if (argCount < 4) {
+            violations.push(`${relPath}:${i + 1} — only ${argCount} arg(s), expected 4 (text, analysisResponse, briefText, graphState)`);
           }
         }
       }
     }
 
     expect(violations).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Tests: extractGraphNumbers
+// ============================================================================
+
+describe("extractGraphNumbers", () => {
+  it("extracts currency numbers from option labels ('Raise to £59')", () => {
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Raise to £59" },
+        { id: "opt2", kind: "option", label: "Keep at £49" },
+      ],
+      edges: [],
+    };
+    const values = extractGraphNumbers(graph);
+    expect(values.has("59")).toBe(true);
+    expect(values.has("49")).toBe(true);
+  });
+
+  it("does NOT extract numbers from factor labels without decision-relevant context", () => {
+    const graph = {
+      nodes: [
+        { id: "f1", kind: "factor", label: "Churn rate" },
+      ],
+      edges: [],
+    };
+    const values = extractGraphNumbers(graph);
+    expect(values.size).toBe(0);
+  });
+
+  it("does NOT extract numbers from node IDs or internal fields", () => {
+    const graph = {
+      nodes: [
+        {
+          id: "node_4829",
+          kind: "option",
+          label: "Option A",
+          observed_state: { value: 99.5 },
+        },
+      ],
+      edges: [{ id: "edge_123", source: "node_4829", target: "goal" }],
+    };
+    const values = extractGraphNumbers(graph);
+    expect(values.has("4829")).toBe(false);
+    expect(values.has("99.5")).toBe(false);
+    expect(values.has("123")).toBe(false);
+  });
+
+  it("handles graph_state: null gracefully", () => {
+    const values = extractGraphNumbers(null);
+    expect(values.size).toBe(0);
+  });
+
+  it("handles graph_state: undefined gracefully", () => {
+    const values = extractGraphNumbers(undefined);
+    expect(values.size).toBe(0);
+  });
+
+  it("handles graph with no nodes array gracefully", () => {
+    const values = extractGraphNumbers({ edges: [] });
+    expect(values.size).toBe(0);
+  });
+
+  it("extracts percentage from label ('15% growth target')", () => {
+    const graph = {
+      nodes: [{ id: "g1", kind: "goal", label: "15% growth target" }],
+      edges: [],
+    };
+    const values = extractGraphNumbers(graph);
+    expect(values.has("15")).toBe(true);
+  });
+
+  it("extracts decision-relevant noun-adjacent numbers from labels (with currency)", () => {
+    const graph = {
+      nodes: [{ id: "f1", kind: "factor", label: "Budget of £50,000" }],
+      edges: [],
+    };
+    const values = extractGraphNumbers(graph);
+    expect(values.has("50000")).toBe(true);
+    expect(values.has("50,000")).toBe(true);
+  });
+
+  it("extracts decision-noun-adjacent numerics without currency or percent (e.g., 'Price 59')", () => {
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Price 59" },
+        { id: "opt2", kind: "option", label: "Target revenue 120" },
+        { id: "opt3", kind: "option", label: "Headcount 25" },
+      ],
+      edges: [],
+    };
+    const values = extractGraphNumbers(graph);
+    // "price", "revenue", "headcount" are decision-relevant nouns
+    expect(values.has("59")).toBe(true);
+    expect(values.has("120")).toBe(true);
+    expect(values.has("25")).toBe(true);
+  });
+});
+
+// ============================================================================
+// Tests: stripUngroundedNumerics with graph grounding
+// ============================================================================
+
+describe("stripUngroundedNumerics — graph label grounding", () => {
+  it("preserves graph-label prices in explain output", () => {
+    const analysis = makeAnalysisResponse({
+      results: [
+        { option_label: "Raise to £59", win_probability: 0.012 },
+        { option_label: "Keep at £49", win_probability: 0.155 },
+      ],
+    });
+    const graph = {
+      nodes: [
+        { id: "opt1", kind: "option", label: "Raise to £59" },
+        { id: "opt2", kind: "option", label: "Keep at £49" },
+      ],
+      edges: [],
+    };
+    const text = "keeping the price at £49 (15.5%) and raising it to £59 (1.2%)";
+    const { cleaned, strippedCount } = stripUngroundedNumerics(text, analysis, null, graph);
+
+    expect(cleaned).toContain("£49");
+    expect(cleaned).toContain("£59");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("still strips ungrounded numbers even with graph present", () => {
+    const analysis = makeAnalysisResponse();
+    const graph = {
+      nodes: [{ id: "opt1", kind: "option", label: "Raise to £59" }],
+      edges: [],
+    };
+    const text = "reference ID 4829 is important";
+    const { cleaned } = stripUngroundedNumerics(text, analysis, null, graph);
+    expect(cleaned).toContain("[value]");
+    expect(cleaned).not.toContain("4829");
+  });
+
+  it("works with null graph (no crash, existing behaviour)", () => {
+    const analysis = makeAnalysisResponse();
+    const text = "Win probability is 65%.";
+    const { cleaned } = stripUngroundedNumerics(text, analysis, null, null);
+    // 65 is grounded from analysis (win_probability 0.65)
+    expect(cleaned).toContain("65%");
   });
 });

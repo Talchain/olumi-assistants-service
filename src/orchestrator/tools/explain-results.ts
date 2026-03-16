@@ -476,6 +476,35 @@ export function extractBriefNumbers(briefText: string): Set<string> {
 }
 
 /**
+ * Extract numbers from graph node labels (option labels like "Raise to £59").
+ * Uses the same decision-relevant context filter as extractBriefNumbers so that
+ * only numbers appearing alongside currency, percentage, or decision-relevant
+ * nouns are preserved. Only reads node.label — not IDs, edges, or internal fields.
+ */
+export function extractGraphNumbers(graphState: object | null | undefined): Set<string> {
+  const values = new Set<string>();
+  if (!graphState || typeof graphState !== 'object') return values;
+
+  const g = graphState as Record<string, unknown>;
+  const nodes = g.nodes;
+  if (!Array.isArray(nodes)) return values;
+
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const label = (node as Record<string, unknown>).label;
+    if (typeof label !== 'string' || !label) continue;
+
+    // Reuse extractBriefNumbers which already applies the decision-relevant
+    // context filter (currency, percentage, decision nouns).
+    for (const v of extractBriefNumbers(label)) {
+      values.add(v);
+    }
+  }
+
+  return values;
+}
+
+/**
  * Extract the core numeric value from a matched token.
  * Strips currency symbols, commas, whitespace, prefix words, and suffix chars.
  * Returns lowercase for case-insensitive matching.
@@ -503,12 +532,20 @@ export function stripUngroundedNumerics(
   text: string,
   analysisResponse?: V2RunResponseEnvelope | null,
   briefText?: string | null,
+  graphState?: object | null,
 ): { cleaned: string; strippedCount: number } {
   const groundedValues = analysisResponse ? buildGroundedValues(analysisResponse) : null;
 
   // Merge brief-context numbers into the grounded set
   if (groundedValues && briefText) {
     for (const v of extractBriefNumbers(briefText)) {
+      groundedValues.add(v);
+    }
+  }
+
+  // Merge graph-label numbers into the grounded set
+  if (groundedValues && graphState) {
+    for (const v of extractGraphNumbers(graphState)) {
       groundedValues.add(v);
     }
   }
@@ -733,7 +770,7 @@ export async function handleExplainResults(
     if (!briefText) {
       log.info({ request_id: requestId }, 'explain-results: brief_text not available, brief numbers will not be preserved');
     }
-    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText);
+    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText, context.graph);
 
     if (strippedCount > 0) {
       log.info(
