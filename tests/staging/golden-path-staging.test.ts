@@ -18,12 +18,12 @@
  *
  * Gating:
  *   - RUN_STAGING_SMOKE=1   (explicit opt-in)
- *   - PLOT_BASE_URL         (staging PLoT URL, e.g. https://plot-lite-service-staging.onrender.com)
- *   - CEE_API_KEY           (X-Olumi-Assist-Key header — passed through by PLoT)
+ *   - CEE_BASE_URL          (staging CEE URL, e.g. https://cee-staging.onrender.com)
+ *   - CEE_API_KEY           (X-Olumi-Assist-Key header)
  *
  * Run with:
  *   RUN_STAGING_SMOKE=1 \
- *   PLOT_BASE_URL=https://plot-lite-service-staging.onrender.com \
+ *   CEE_BASE_URL=https://cee-staging.onrender.com \
  *   CEE_API_KEY=<key> \
  *   pnpm test:staging
  */
@@ -39,13 +39,13 @@ import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
 // ============================================================================
 
 const RUN_STAGING_SMOKE = process.env.RUN_STAGING_SMOKE === "1";
-const PLOT_BASE_URL = process.env.PLOT_BASE_URL;
+const CEE_BASE_URL = process.env.CEE_BASE_URL;
 const CEE_API_KEY = process.env.CEE_API_KEY;
 
 const SKIP_REASON = !RUN_STAGING_SMOKE
   ? "Skipping: RUN_STAGING_SMOKE not set"
-  : !PLOT_BASE_URL
-    ? "Skipping: PLOT_BASE_URL not configured"
+  : !CEE_BASE_URL
+    ? "Skipping: CEE_BASE_URL not configured"
     : !CEE_API_KEY
       ? "Skipping: CEE_API_KEY not configured"
       : null;
@@ -290,7 +290,7 @@ const ANALYSIS_INPUTS = {
 // ============================================================================
 
 describe("Golden-path staging: PLoT → CEE draft → edit → analyse → explain", { timeout: 180_000 }, () => {
-  const TURN_URL = `${PLOT_BASE_URL ?? ""}/orchestrate/v1/turn`;
+  const TURN_URL = `${CEE_BASE_URL ?? ""}/orchestrate/v1/turn`;
 
   const scenarioId = `golden-${randomUUID()}`;
 

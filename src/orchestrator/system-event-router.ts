@@ -136,8 +136,45 @@ export async function routeSystemEvent(
     };
   }
 
-  // patch_accepted / patch_dismissed: verify a pending patch exists in context
-  if (event.event_type === 'patch_accepted' || event.event_type === 'patch_dismissed') {
+  // patch_accepted with applied_graph_hash: graph_state is mandatory (Path A).
+  // This guard must run BEFORE hasPendingPatch — Path A doesn't require a pending
+  // patch in context (the UI already applied it), but it always needs graph_state
+  // for guidance refresh and context update.
+  if (
+    event.event_type === 'patch_accepted' &&
+    event.details.applied_graph_hash &&
+    !turnRequest.graph_state
+  ) {
+    log.warn(
+      {
+        event_type: event.event_type,
+        request_id: requestId,
+        reason: 'missing_graph_state',
+        applied_graph_hash: event.details.applied_graph_hash,
+      },
+      'patch_accepted Path A: applied_graph_hash present but graph_state missing',
+    );
+    return {
+      assistantText: null,
+      blocks: [],
+      guidanceItems: [],
+      systemContextEntries: [],
+      httpStatus: 400,
+      error: {
+        code: 'MISSING_GRAPH_STATE',
+        message: 'applied_graph_hash is present but graph_state is missing from the request. ' +
+          'CEE cannot refresh guidance or update context without the graph.',
+      },
+    };
+  }
+
+  // patch_accepted / patch_dismissed: verify a pending patch exists in context.
+  // Skip for patch_accepted Path A (applied_graph_hash present) — the UI already
+  // applied the patch, so there's no "pending" block to find in conversation
+  // messages (which are string-typed at the route boundary anyway).
+  const skipPendingPatchCheck =
+    event.event_type === 'patch_accepted' && event.details.applied_graph_hash;
+  if ((event.event_type === 'patch_accepted' || event.event_type === 'patch_dismissed') && !skipPendingPatchCheck) {
     if (!hasPendingPatch(turnRequest.context?.messages ?? [])) {
       log.warn(
         { event_type: event.event_type, session_id: turnRequest.scenario_id, reason: 'no_pending_patch' },
