@@ -694,4 +694,121 @@ describe("stripUngroundedNumerics — brief-context grounding", () => {
     expect(cleaned).toContain("£50,000");
     expect(strippedCount).toBe(0);
   });
+
+  it("preserves £50,000 and 12 from brief 'MRR target of £50,000 within 12 months'", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "The £50,000 MRR target within 12 months is feasible based on Option A at 62%.",
+      analysisWithData,
+      "MRR target of £50,000 within 12 months",
+    );
+    expect(cleaned).toContain("£50,000");
+    expect(cleaned).toContain("12");
+    expect(cleaned).toContain("62%");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("strips ungrounded 'internal reference ID 4829' — not decision-relevant", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Per internal reference ID 4829, the analysis shows 62% for Option A.",
+      analysisWithData,
+      "internal reference ID 4829",
+    );
+    // 4829 has no decision-relevant context (no currency, percent, or relevant noun)
+    expect(cleaned).toContain("[value]");
+    expect(cleaned).toContain("62%");
+    expect(strippedCount).toBe(1);
+  });
+
+  it("brief_text: null → no crash, analysis numbers still preserved", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads at 62% probability.",
+      analysisWithData,
+      null,
+    );
+    expect(cleaned).toContain("62%");
+    expect(strippedCount).toBe(0);
+  });
+
+  it("brief_text: undefined → no crash, analysis numbers still preserved", () => {
+    const { cleaned, strippedCount } = stripUngroundedNumerics(
+      "Option A leads at 62% probability.",
+      analysisWithData,
+      undefined,
+    );
+    expect(cleaned).toContain("62%");
+    expect(strippedCount).toBe(0);
+  });
+});
+
+// ============================================================================
+// Call-site inventory regression: ensure all production call sites thread briefText
+// ============================================================================
+
+describe("stripUngroundedNumerics — call-site inventory guard", () => {
+  it("all production call sites in src/ pass briefText (3 args)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+
+    const srcRoot = path.resolve(__dirname, "../../../../src");
+
+    // Recursively find all .ts files under src/
+    function walk(dir: string): string[] {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const files: string[] = [];
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) files.push(...walk(full));
+        else if (entry.name.endsWith(".ts")) files.push(full);
+      }
+      return files;
+    }
+
+    const files = walk(srcRoot);
+    const violations: string[] = [];
+
+    for (const file of files) {
+      const content = fs.readFileSync(file, "utf-8");
+      const lines = content.split("\n");
+      const relPath = path.relative(srcRoot, file);
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Skip the function definition itself
+        if (/export function stripUngroundedNumerics/.test(line)) continue;
+        // Skip imports
+        if (/import/.test(line)) continue;
+
+        if (/stripUngroundedNumerics\s*\(/.test(line)) {
+          // Collect the full call (may span multiple lines)
+          let call = "";
+          let parenDepth = 0;
+          for (let j = i; j < Math.min(i + 10, lines.length); j++) {
+            call += lines[j];
+            for (const ch of lines[j]) {
+              if (ch === "(") parenDepth++;
+              if (ch === ")") parenDepth--;
+            }
+            if (parenDepth <= 0) break;
+          }
+
+          // Count comma-separated arguments (rough heuristic: count top-level commas)
+          const argsStr = call.slice(call.indexOf("(") + 1, call.lastIndexOf(")"));
+          let depth = 0;
+          let commaCount = 0;
+          for (const ch of argsStr) {
+            if (ch === "(" || ch === "[" || ch === "{") depth++;
+            if (ch === ")" || ch === "]" || ch === "}") depth--;
+            if (ch === "," && depth === 0) commaCount++;
+          }
+          const argCount = commaCount + 1;
+
+          if (argCount < 3) {
+            violations.push(`${relPath}:${i + 1} — only ${argCount} arg(s), briefText not threaded`);
+          }
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });

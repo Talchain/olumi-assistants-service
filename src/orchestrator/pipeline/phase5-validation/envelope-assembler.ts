@@ -9,7 +9,7 @@ import { isProduction, config } from "../../../config/index.js";
 import { checkFeatureHealth } from "../../../diagnostics/feature-health.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
-import { getDskVersionHash } from "../../dsk-loader.js";
+import { resolveDskHash } from "../../dsk-loader.js";
 import { TURN_CONTRACT_VERSION, inferTurnType } from "../../turn-contract.js";
 import { extractDeclaredMode, inferResponseMode } from "../../response-parser.js";
 import { computeContextHash, toHashableContext } from "../../context/context-hash.js";
@@ -48,6 +48,84 @@ export function resolveContextHash(enrichedContext: EnrichedContext | undefined)
 
   // Tier 2: project to HashableContext via canonical helper (same projection as Phase 1)
   return computeContextHash(toHashableContext(enrichedContext));
+}
+
+// ============================================================================
+// Shared feature health map (used by success, error, and ack envelopes)
+// ============================================================================
+
+/**
+ * Map Zone 2 block owners to feature health check names.
+ * Used to cross-reference empty blocks with feature health.
+ */
+const ZONE2_OWNER_TO_FEATURE: Record<string, string> = {
+  bil: 'BIL',
+  analysis: 'zone2_registry',
+  events: 'zone2_registry',
+  orchestrator: 'zone2_registry',
+};
+
+/**
+ * Build a compact feature health map from checkFeatureHealth().
+ * Shared factory so all envelope paths (_route_metadata) use identical shape.
+ *
+ * When zone2EmptyBlocks is provided, cross-references block ownership to
+ * downgrade features whose Zone 2 blocks all rendered empty.
+ */
+export function buildFeatureHealthMap(
+  zone2EmptyBlocks?: string[],
+): Record<string, { enabled: boolean; healthy: boolean; reason?: string }> {
+  const featureReport = checkFeatureHealth();
+  const features: Record<string, { enabled: boolean; healthy: boolean; reason?: string }> = {};
+  for (const check of featureReport.checks) {
+    if (check.enabled) {
+      features[check.name] = {
+        enabled: true,
+        healthy: check.healthy,
+        ...(check.reason ? { reason: check.reason } : {}),
+      };
+    }
+  }
+
+  // Cross-reference Zone 2 empty blocks with feature ownership
+  if (zone2EmptyBlocks && zone2EmptyBlocks.length > 0) {
+    // Import block registry to resolve ownership
+    // (lazy import avoided — use static mapping instead)
+    const emptySet = new Set(zone2EmptyBlocks);
+
+    // Group empty blocks by feature
+    const BLOCK_OWNERSHIP: Record<string, string> = {
+      bil_context: 'BIL',
+      bil_hint: 'BIL',
+      primary_gap_hint: 'BIL',
+      analysis_state: 'zone2_registry',
+      analysis_hint: 'zone2_registry',
+      event_log: 'zone2_registry',
+      stage_context: 'zone2_registry',
+      graph_state: 'zone2_registry',
+      conversation_summary: 'zone2_registry',
+      recent_turns: 'zone2_registry',
+    };
+
+    // Count total and empty blocks per feature
+    const featureBlockCounts = new Map<string, { total: number; empty: number }>();
+    for (const [blockName, featureName] of Object.entries(BLOCK_OWNERSHIP)) {
+      const entry = featureBlockCounts.get(featureName) ?? { total: 0, empty: 0 };
+      entry.total++;
+      if (emptySet.has(blockName)) entry.empty++;
+      featureBlockCounts.set(featureName, entry);
+    }
+
+    // Downgrade features where ALL blocks rendered empty
+    for (const [featureName, counts] of featureBlockCounts) {
+      if (counts.empty > 0 && counts.empty === counts.total && features[featureName]) {
+        features[featureName].healthy = false;
+        features[featureName].reason = 'all zone2 blocks rendered empty';
+      }
+    }
+  }
+
+  return features;
 }
 
 // ============================================================================
@@ -157,6 +235,9 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     stageIndicator.stage = stageTransition.to;
   }
 
+  // Resolve DSK hash once — used in both lineage and _route_metadata.
+  const resolvedDskHash = resolveDskHash(enrichedContext.dsk.version_hash);
+
   const envelope: OrchestratorResponseEnvelopeV2 = {
     turn_id: enrichedContext.turn_id,
     assistant_text: assistantText,
@@ -172,11 +253,7 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
 
     lineage: {
       context_hash: contextHash,
-      // When DSK v0 is active, prefer the loaded bundle hash over any in-context stub value.
-      // When DSK v0 is OFF, always emit null — no DSK presence regardless of context state.
-      dsk_version_hash: config.features.dskV0
-        ? (getDskVersionHash() ?? enrichedContext.dsk.version_hash)
-        : null,
+      dsk_version_hash: resolvedDskHash,
     },
 
     stage_indicator: stageIndicator,
@@ -261,17 +338,8 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
   }
 
   // Build per-turn feature activation status (always present, independent of route metadata).
-  const featureReport = checkFeatureHealth();
-  const features: Record<string, { enabled: boolean; healthy: boolean; reason?: string }> = {};
-  for (const check of featureReport.checks) {
-    if (check.enabled) {
-      features[check.name] = {
-        enabled: true,
-        healthy: check.healthy,
-        ...(check.reason ? { reason: check.reason } : {}),
-      };
-    }
-  }
+  // Cross-reference Zone 2 empty blocks to detect dark features at runtime.
+  const features = buildFeatureHealthMap(enrichedContext.zone2_empty_blocks);
 
   // Build _route_metadata with extended observability fields.
   // Base metadata comes from tool handler or LLM routing; we extend with context.
@@ -318,11 +386,12 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
       contract_version: TURN_CONTRACT_VERSION,
       resolved_model: resolvedModel,
       resolved_provider: resolvedProvider,
+      dsk_version_hash: resolvedDskHash,
       features,
     };
   } else {
     // No route metadata from tool or LLM — still attach feature diagnostics
-    envelope._route_metadata = { features } as typeof envelope._route_metadata;
+    envelope._route_metadata = { features, dsk_version_hash: resolvedDskHash } as typeof envelope._route_metadata;
   }
 
   return envelope;
@@ -339,6 +408,9 @@ export function buildErrorEnvelope(
   errorMessage: string,
   enrichedContext?: EnrichedContext,
 ): OrchestratorResponseEnvelopeV2 {
+  // P0-3 Task 4: Error envelopes include _route_metadata with feature health
+  const features = buildFeatureHealthMap();
+
   return {
     turn_id: turnId,
     assistant_text: 'I ran into a problem processing that. Could you try again?',
@@ -381,6 +453,13 @@ export function buildErrorEnvelope(
       selected_tool: null,
       routing: 'llm',
       long_running: false,
+    },
+
+    _route_metadata: {
+      outcome: 'default_llm' as const,
+      reasoning: `pipeline_error:${errorCode}`,
+      dsk_version_hash: resolveDskHash(),
+      features,
     },
 
     error: {

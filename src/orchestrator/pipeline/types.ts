@@ -80,6 +80,8 @@ export interface RouteMetadata {
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
   cache_hit?: boolean;
+  // DSK version hash (populated by envelope assembler for canonical assertion target)
+  dsk_version_hash?: string | null;
   // Feature health diagnostics (populated by envelope assembler)
   features?: Record<string, { enabled: boolean; healthy: boolean; reason?: string }>;
 }
@@ -305,6 +307,8 @@ export interface EnrichedContext {
   referenced_entities?: ReferencedEntityDetail[];
   /** Cross-turn entity interaction state — populated by Phase 1 when CEE_ENTITY_MEMORY_ENABLED. */
   entity_state_map?: import("../context/entity-state-tracker.js").EntityStateMap;
+  /** Zone 2 blocks that activated but rendered empty — populated by Phase 3 prompt assembly. */
+  zone2_empty_blocks?: string[];
 
   // Inferred state
   stage_indicator: StageIndicator;

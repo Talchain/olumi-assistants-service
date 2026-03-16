@@ -204,13 +204,17 @@ describe("DSK Loader", () => {
       expect(ids).not.toContain('DSK-T-002');
     });
 
-    it("rejects bundle with hash mismatch — throws with both hashes in message", async () => {
+    it("degrades gracefully on hash mismatch — logs error with both hashes", async () => {
       const hashModule = await import("../../../src/dsk/hash.js");
       vi.mocked(hashModule.computeDSKHash).mockReturnValue('different-hash-xyz');
       _resetDskBundle();
 
-      expect(() => loadDskBundle()).toThrow(/hash mismatch/);
-      expect(() => loadDskBundle()).toThrow(/different-hash-xyz/);
+      loadDskBundle(); // should not throw
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ expected: 'abc123hash', computed: 'different-hash-xyz' }),
+        expect.stringContaining('hash mismatch'),
+      );
     });
   });
 
@@ -222,8 +226,13 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("throws with file-not-found message", () => {
-      expect(() => loadDskBundle()).toThrow(/not found/);
+    it("degrades gracefully — returns null hash and logs error", () => {
+      loadDskBundle(); // should not throw
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ resolved_path: expect.any(String) }),
+        expect.stringContaining('not found'),
+      );
     });
   });
 
@@ -234,8 +243,13 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("throws with not-valid-JSON message", () => {
-      expect(() => loadDskBundle()).toThrow(/not valid JSON/);
+    it("degrades gracefully — returns null hash and logs error", () => {
+      loadDskBundle(); // should not throw
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ resolved_path: expect.any(String) }),
+        expect.stringContaining('not valid JSON'),
+      );
     });
   });
 
@@ -245,24 +259,102 @@ describe("DSK Loader", () => {
       _resetDskBundle();
     });
 
-    it("missing version — throws with shape error details", () => {
+    it("missing version — degrades gracefully with shape error log", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ objects: [], dsk_version_hash: 'abc' }));
-      expect(() => loadDskBundle()).toThrow(/shape invalid.*version/);
+      loadDskBundle();
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ shape_errors: expect.arrayContaining([expect.stringContaining('version')]) }),
+        expect.stringContaining('shape invalid'),
+      );
     });
 
-    it("objects is not an array — throws with shape error details", () => {
+    it("objects is not an array — degrades gracefully with shape error log", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: null, dsk_version_hash: 'abc', generated_at: '2026-01-01T00:00:00Z' }));
-      expect(() => loadDskBundle()).toThrow(/shape invalid.*objects/);
+      loadDskBundle();
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ shape_errors: expect.arrayContaining([expect.stringContaining('objects')]) }),
+        expect.stringContaining('shape invalid'),
+      );
     });
 
-    it("empty dsk_version_hash — throws with shape error details", () => {
+    it("empty dsk_version_hash — degrades gracefully with shape error log", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: [], dsk_version_hash: '', generated_at: '2026-01-01T00:00:00Z' }));
-      expect(() => loadDskBundle()).toThrow(/shape invalid.*dsk_version_hash/);
+      loadDskBundle();
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ shape_errors: expect.arrayContaining([expect.stringContaining('dsk_version_hash')]) }),
+        expect.stringContaining('shape invalid'),
+      );
     });
 
-    it("missing generated_at — throws with shape error details", () => {
+    it("missing generated_at — degrades gracefully with shape error log", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0', objects: [], dsk_version_hash: 'abc' }));
-      expect(() => loadDskBundle()).toThrow(/shape invalid.*generated_at/);
+      loadDskBundle();
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ shape_errors: expect.arrayContaining([expect.stringContaining('generated_at')]) }),
+        expect.stringContaining('shape invalid'),
+      );
+    });
+  });
+
+  // ============================================================================
+  // DSK_ENABLED flag path (staging uses DSK_ENABLED, not ENABLE_DSK_V0)
+  // ============================================================================
+
+  describe("DSK_ENABLED flag path", () => {
+    it("DSK_ENABLED=true + valid bundle → returns concrete hash", async () => {
+      configModule.config.features.dskV0 = false;
+      configModule.config.features.dskEnabled = true;
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(TEST_BUNDLE));
+      const hashModule = await import("../../../src/dsk/hash.js");
+      vi.mocked(hashModule.computeDSKHash).mockImplementation(
+        (bundle: { dsk_version_hash: string }) => bundle.dsk_version_hash,
+      );
+      _resetDskBundle();
+
+      loadDskBundle();
+      expect(getDskVersionHash()).toBe('abc123hash');
+    });
+
+    it("DSK_ENABLED=false + dskV0=false → returns null", () => {
+      configModule.config.features.dskV0 = false;
+      configModule.config.features.dskEnabled = false;
+      _resetDskBundle();
+
+      loadDskBundle();
+      expect(getDskVersionHash()).toBeNull();
+    });
+
+    it("DSK_ENABLED=true + file missing → degrades gracefully, logs error", () => {
+      configModule.config.features.dskV0 = false;
+      configModule.config.features.dskEnabled = true;
+      const enoentError = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      vi.mocked(fs.readFileSync).mockImplementation(() => { throw enoentError; });
+      _resetDskBundle();
+
+      loadDskBundle(); // should not throw
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ resolved_path: expect.any(String) }),
+        expect.stringContaining('not found'),
+      );
+    });
+
+    it("DSK_ENABLED=true + malformed JSON → degrades gracefully, logs error", () => {
+      configModule.config.features.dskV0 = false;
+      configModule.config.features.dskEnabled = true;
+      vi.mocked(fs.readFileSync).mockReturnValue('not json');
+      _resetDskBundle();
+
+      loadDskBundle(); // should not throw
+      expect(getDskVersionHash()).toBeNull();
+      expect(logModule.log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ resolved_path: expect.any(String) }),
+        expect.stringContaining('not valid JSON'),
+      );
     });
   });
 });

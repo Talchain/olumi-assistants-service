@@ -366,8 +366,11 @@ export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Se
 
   // Robustness
   if (analysisResponse.robustness) {
-    const fragileEdges = Array.isArray(analysisResponse.robustness.fragile_edges) ? analysisResponse.robustness.fragile_edges : [];
+    const rob = analysisResponse.robustness;
+    const fragileEdges = Array.isArray(rob.fragile_edges) ? rob.fragile_edges : [];
     values.add(String(fragileEdges.length));
+    if (typeof rob.recommendation_stability === 'number') addNumber(rob.recommendation_stability);
+    if (typeof rob.confidence === 'number') addNumber(rob.confidence);
   }
 
   // Constraint analysis
@@ -419,7 +422,7 @@ export function extractBriefNumbers(briefText: string): Set<string> {
 
   // Strategy: find all numbers in the brief, then check their surrounding
   // context (±40 chars) for decision-relevant signals.
-  const NUMBER_IN_BRIEF = /(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b)?/gi;
+  const NUMBER_IN_BRIEF = /(?:\$|£|€)?[\d,]+(?:\.\d+)?(?:%|\s*percent\b|[kmb]\b)?/gi;
   let m: RegExpExecArray | null;
 
   while ((m = NUMBER_IN_BRIEF.exec(briefText)) !== null) {
@@ -446,8 +449,15 @@ export function extractBriefNumbers(briefText: string): Set<string> {
 
     values.add(core);
 
+    // Resolve k/m/b suffix to full numeric value
+    const suffixMatch = core.match(/^([\d.]+)([kmb])$/i);
+    const multiplier = suffixMatch
+      ? { k: 1_000, m: 1_000_000, b: 1_000_000_000 }[suffixMatch[2].toLowerCase()] ?? 1
+      : 1;
+    const baseNum = suffixMatch ? parseFloat(suffixMatch[1]) : parseFloat(core);
+    const n = baseNum * multiplier;
+
     // Also add common surface forms for matching
-    const n = parseFloat(core);
     if (Number.isFinite(n)) {
       values.add(String(n));
       if (Number.isInteger(n) && n >= 1000) {
@@ -718,8 +728,11 @@ export async function handleExplainResults(
 
     const latencyMs = Date.now() - startTime;
 
-    // Strip ungrounded numerics — pass analysis data + brief text so grounded values are preserved
-    const briefText = (context.framing as Record<string, unknown> | null)?.brief_text as string | undefined;
+    // Strip ungrounded numerics — pass analysis data + all user-provided text so grounded values are preserved
+    const briefText = buildBriefTextForGrounding(context);
+    if (!briefText) {
+      log.info({ request_id: requestId }, 'explain-results: brief_text not available, brief numbers will not be preserved');
+    }
     const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText);
 
     if (strippedCount > 0) {
@@ -906,6 +919,43 @@ function buildExplanationPrompt(
   );
 
   return sections.join('\n');
+}
+
+/**
+ * Build a combined brief text string from all user-provided text in the framing:
+ * brief_text, goal, constraints, and option labels.
+ * This ensures numbers in constraints (e.g., "£50k budget") and option labels
+ * are preserved by the grounding filter.
+ */
+export function buildBriefTextForGrounding(context: ConversationContext): string | null {
+  const framing = context.framing as Record<string, unknown> | null;
+  if (!framing) return null;
+
+  const parts: string[] = [];
+
+  if (typeof framing.brief_text === 'string' && framing.brief_text) {
+    parts.push(framing.brief_text);
+  }
+  if (typeof framing.goal === 'string' && framing.goal) {
+    parts.push(framing.goal);
+  }
+  if (Array.isArray(framing.constraints)) {
+    for (const c of framing.constraints) {
+      if (typeof c === 'string' && c) parts.push(c);
+    }
+  }
+  if (Array.isArray(framing.options)) {
+    for (const o of framing.options) {
+      if (typeof o === 'string' && o) {
+        parts.push(o);
+      } else if (o && typeof o === 'object') {
+        const label = (o as Record<string, unknown>).label ?? (o as Record<string, unknown>).option_label;
+        if (typeof label === 'string' && label) parts.push(label);
+      }
+    }
+  }
+
+  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 function buildSupportingRefs(response: V2RunResponseEnvelope): SupportingRef[] {

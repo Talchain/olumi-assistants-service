@@ -6,9 +6,9 @@
  *
  * When OFF: all exports are no-ops / return null / return [].
  * When ON:  reads data/dsk/v1.json, parses, validates hash, caches in memory.
- *           Fail-fast: throws on ENOENT, parse error, shape mismatch, or hash
- *           mismatch when the flag is explicitly ON — a corrupt or missing bundle
- *           must not silently degrade to an empty DSK surface.
+ *           Graceful degradation: logs error and returns (dsk_version_hash = null)
+ *           on ENOENT, parse error, shape mismatch, or hash mismatch.
+ *           Service startup is never blocked by a missing or corrupt bundle.
  *
  * Call order:
  *   1. loadDskBundle() at server startup (once)
@@ -56,17 +56,19 @@ export function loadDskBundle(): void {
   try {
     raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
-    const msg = (err as NodeJS.ErrnoException).code === 'ENOENT'
+    const reason = (err as NodeJS.ErrnoException).code === 'ENOENT'
       ? `DSK bundle file not found: ${filePath}`
       : `DSK bundle read error: ${(err as Error).message}`;
-    throw new Error(msg);
+    log.error({ resolved_path: filePath, error: (err as Error).message }, reason);
+    return; // Degrade gracefully — dsk_version_hash will be null
   }
 
   let parsed: DSKBundle;
   try {
     parsed = JSON.parse(raw) as DSKBundle;
   } catch {
-    throw new Error(`DSK bundle is not valid JSON: ${filePath}`);
+    log.error({ resolved_path: filePath }, `DSK bundle is not valid JSON: ${filePath}`);
+    return; // Degrade gracefully
   }
 
   // Shape guard: all required top-level fields
@@ -80,15 +82,18 @@ export function loadDskBundle(): void {
     if (!Array.isArray(parsed.objects)) shapeErrors.push('missing/invalid objects[]');
   }
   if (shapeErrors.length > 0) {
-    throw new Error(`DSK bundle shape invalid (${shapeErrors.join(', ')}): ${filePath}`);
+    log.error({ resolved_path: filePath, shape_errors: shapeErrors }, `DSK bundle shape invalid (${shapeErrors.join(', ')}): ${filePath}`);
+    return; // Degrade gracefully
   }
 
   // Verify hash integrity
   const computed = computeDSKHash(parsed);
   if (computed !== parsed.dsk_version_hash) {
-    throw new Error(
+    log.error(
+      { resolved_path: filePath, expected: parsed.dsk_version_hash, computed },
       `DSK bundle hash mismatch — expected ${parsed.dsk_version_hash}, computed ${computed}: ${filePath}`,
     );
+    return; // Degrade gracefully
   }
 
   _bundle = parsed;
@@ -149,6 +154,19 @@ export function queryDsk(stage: string, contextTags: string[], detectionCodes: s
  */
 export function getDskVersionHash(): string | null {
   return _bundle?.dsk_version_hash ?? null;
+}
+
+/**
+ * Resolve the DSK version hash for envelope construction.
+ *
+ * Flag-gated: returns null when both DSK flags are OFF.
+ * When ON, prefers the loaded bundle hash, falling back to the enriched context value.
+ *
+ * All envelope builders should use this single function to ensure consistent resolution.
+ */
+export function resolveDskHash(enrichedContextDskHash?: string | null): string | null {
+  if (!config.features.dskV0 && !config.features.dskEnabled) return null;
+  return getDskVersionHash() ?? enrichedContextDskHash ?? null;
 }
 
 // ============================================================================

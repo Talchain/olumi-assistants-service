@@ -75,7 +75,7 @@ import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
-import { loadDskBundle } from "./orchestrator/dsk-loader.js";
+import { loadDskBundle, getDskVersionHash } from "./orchestrator/dsk-loader.js";
 import { logFeatureHealth } from "./diagnostics/feature-health.js";
 import { initSentry, setSentryRequestTag, setupSentryFastify } from "./middleware/sentry.js";
 import { createContextRegistrationHook, createContextCleanupHook } from "./middleware/token-budget.js";
@@ -207,8 +207,10 @@ export async function build() {
   // This must happen before routes are registered so prompts are available
   registerAllDefaultPrompts();
 
-  // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true
+  // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true or DSK_ENABLED=true
   loadDskBundle();
+  const dskHash = getDskVersionHash();
+  log.info({ dsk_version_hash: dskHash }, dskHash ? `DSK loaded: ${dskHash}` : 'DSK not loaded: flag OFF or bundle missing');
 
   // Feature health check — log which enabled features have satisfied dependencies
   logFeatureHealth();

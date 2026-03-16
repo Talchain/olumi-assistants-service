@@ -18,9 +18,10 @@ vi.mock("../../../../src/config/index.js", () => ({
   config: { features: { orchestratorV2: false, dskV0: false } },
 }));
 
-// Stub dsk-loader so envelope assembler doesn't call getDskVersionHash() against the FS
+// Stub dsk-loader so envelope assembler doesn't call getDskVersionHash()/resolveDskHash() against the FS
 vi.mock("../../../../src/orchestrator/dsk-loader.js", () => ({
   getDskVersionHash: () => null,
+  resolveDskHash: () => null,
 }));
 
 function makeEnrichedContext(overrides?: Partial<EnrichedContext>): EnrichedContext {
@@ -586,6 +587,7 @@ describe("assembleV2Envelope", () => {
     }));
     vi.doMock("../../../../src/orchestrator/dsk-loader.js", () => ({
       getDskVersionHash: () => 'test-bundle-hash-abc123',
+      resolveDskHash: () => 'test-bundle-hash-abc123',
     }));
 
     const modulePath = "../../../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js?dsk-on";

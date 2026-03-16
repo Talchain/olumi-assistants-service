@@ -17,8 +17,7 @@ import type { V2RunResponseEnvelope, SuggestedAction, ConversationBlock } from "
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { EnrichedContext, OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
 import { resolveContextHash } from "../pipeline/phase5-validation/envelope-assembler.js";
-import { config } from "../../config/index.js";
-import { getDskVersionHash } from "../dsk-loader.js";
+import { resolveDskHash } from "../dsk-loader.js";
 
 // ============================================================================
 // Types
@@ -387,6 +386,8 @@ export function buildLookupEnvelope(
     text += "\n\nNote: this is from the last analysis run, which doesn't reflect your recent edits.";
   }
 
+  const resolvedDsk = resolveDskHash(enrichedContext.dsk.version_hash);
+
   return {
     turn_id: enrichedContext.turn_id,
     assistant_text: text,
@@ -396,9 +397,7 @@ export function buildLookupEnvelope(
 
     lineage: {
       context_hash: resolveContextHash(enrichedContext),
-      dsk_version_hash: config.features.dskV0
-        ? (getDskVersionHash() ?? enrichedContext.dsk.version_hash)
-        : null,
+      dsk_version_hash: resolvedDsk,
     },
 
     stage_indicator: {

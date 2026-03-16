@@ -27,7 +27,7 @@ import { assembleV2SystemPrompt } from "./phase3-llm/prompt-assembler.js";
 import { phase4Execute } from "./phase4-tools/index.js";
 import type { Phase4Result } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
-import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
+import { buildErrorEnvelope, resolveContextHash, buildFeatureHealthMap } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { classifyIntent } from "../intent-gate.js";
@@ -37,6 +37,7 @@ import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-looku
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
 import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable, isResultsExplanationEligible, normalizeAnalysisEnvelope } from "../analysis-state.js";
 import { config } from "../../config/index.js";
+import { resolveDskHash } from "../dsk-loader.js";
 
 /**
  * Execute the five-phase pipeline.
@@ -297,6 +298,7 @@ export async function executePipeline(
         stage: enrichedContext.stage_indicator.stage,
         scenario_id: enrichedContext.scenario_id,
         pipeline: 'v2',
+        streaming: false,
       });
     }
 
@@ -443,9 +445,10 @@ function buildSystemEventAckEnvelope(
   analysisResponse?: import("../types.js").V2RunResponseEnvelope,
   routeMetadata?: RouteMetadata,
 ): OrchestratorResponseEnvelopeV2 {
+  const resolvedDsk = resolveDskHash(enrichedContext.dsk.version_hash);
   const lineage: OrchestratorResponseEnvelopeV2['lineage'] = {
     context_hash: resolveContextHash(enrichedContext),
-    dsk_version_hash: enrichedContext.dsk.version_hash,
+    dsk_version_hash: resolvedDsk,
   };
 
   if (analysisResponse) {
@@ -461,7 +464,14 @@ function buildSystemEventAckEnvelope(
     assistant_text: assistantText,
     blocks,
     suggested_actions: [],
-    ...(routeMetadata ? { _route_metadata: routeMetadata } : {}),
+    _route_metadata: routeMetadata
+      ? { ...routeMetadata, dsk_version_hash: resolvedDsk, features: buildFeatureHealthMap() }
+      : {
+          outcome: 'default_llm' as const,
+          reasoning: `system_event:${event.event_type}`,
+          dsk_version_hash: resolvedDsk,
+          features: buildFeatureHealthMap(),
+        },
 
     lineage,
 
@@ -510,6 +520,7 @@ function buildSystemEventErrorEnvelope(
   code: string,
   message: string,
 ): OrchestratorResponseEnvelopeV2 {
+  const resolvedDsk = resolveDskHash(enrichedContext.dsk.version_hash);
   return {
     turn_id: enrichedContext.turn_id,
     assistant_text: null,
@@ -518,7 +529,7 @@ function buildSystemEventErrorEnvelope(
 
     lineage: {
       context_hash: resolveContextHash(enrichedContext),
-      dsk_version_hash: enrichedContext.dsk.version_hash,
+      dsk_version_hash: resolvedDsk,
     },
 
     stage_indicator: {
@@ -665,6 +676,7 @@ async function runAnalysisViaPipeline(
 // Per-turn Diagnostic Trace (Task 1)
 // ============================================================================
 
+/** Exported for streaming pipeline parity (P0-1). */
 export interface TurnTraceInput {
   enrichedContext: EnrichedContext;
   requestId: string;
@@ -689,7 +701,8 @@ export interface TurnTraceInput {
  * Emit a structured trace log at the end of every V2 pipeline turn.
  * Captures the full diagnostic picture: stage, tools, context, response shape.
  */
-function emitTurnTrace(input: TurnTraceInput): void {
+/** Exported for streaming pipeline parity (P0-1). */
+export function emitTurnTrace(input: TurnTraceInput): void {
   const { enrichedContext: ec, request, envelope } = input;
   const graph = ec.graph;
   const analysis = ec.analysis;

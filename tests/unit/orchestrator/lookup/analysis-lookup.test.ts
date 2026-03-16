@@ -17,6 +17,7 @@ vi.mock("../../../../src/config/index.js", () => ({
 
 vi.mock("../../../../src/orchestrator/dsk-loader.js", () => ({
   getDskVersionHash: () => null,
+  resolveDskHash: () => null,
 }));
 
 // ============================================================================
