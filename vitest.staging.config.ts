@@ -15,5 +15,9 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
     ],
+    // Run test files sequentially to avoid saturating the staging rate limiter.
+    // Each file's internal rateLimitGuard() handles per-request spacing, but
+    // parallel files would exceed the global CEE_RATE_LIMIT bucket.
+    fileParallelism: false,
   },
 });

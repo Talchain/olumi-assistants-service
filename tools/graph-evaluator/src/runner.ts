@@ -116,6 +116,7 @@ async function callModel(
       latency_ms: result.latency_ms,
       input_tokens: result.input_tokens,
       output_tokens: result.output_tokens,
+      reasoning_tokens: result.reasoning_tokens,
       est_cost_usd: cost,
       pricing_source: "api_usage",
     };
@@ -138,6 +139,7 @@ async function callModel(
       latency_ms: result.latency_ms,
       input_tokens: result.input_tokens,
       output_tokens: result.output_tokens,
+      reasoning_tokens: result.reasoning_tokens,
       est_cost_usd: cost,
       pricing_source: "api_usage",
       error_message: "No extractable JSON found in response",
@@ -155,6 +157,7 @@ async function callModel(
     latency_ms: result.latency_ms,
     input_tokens: result.input_tokens,
     output_tokens: result.output_tokens,
+    reasoning_tokens: result.reasoning_tokens,
     est_cost_usd: cost,
     pricing_source: "api_usage",
   };

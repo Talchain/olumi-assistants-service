@@ -329,7 +329,7 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     });
     const body = res.json();
 
-    // draft_graph defaults to gpt-4.1 (openai) — should be skipped when provider=anthropic
+    // draft_graph defaults to o4-mini (openai) — should be skipped when provider=anthropic
     const draftRow = body.tasks.find((t: { task: string }) => t.task === "draft_graph");
     expect(draftRow).toBeDefined();
     expect(draftRow.source).toBe("provider_mismatch");

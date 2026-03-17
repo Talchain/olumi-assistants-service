@@ -205,7 +205,23 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   },
 
   // ============================================================
-  // OpenAI o3 Reasoning Family (Latest)
+  // OpenAI o4 Reasoning Family
+  // ============================================================
+  "o4-mini": {
+    id: "o4-mini",
+    provider: "openai",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 65536,
+    costPer1kTokens: 1.10,
+    averageLatencyMs: 75000,
+    qualityScore: 0.93,
+    description: "o4 Mini - reasoning model, zero structural invalids on draft graph",
+    reasoning: true,
+  },
+
+  // ============================================================
+  // OpenAI o3 Reasoning Family
   // ============================================================
   "o3": {
     id: "o3",
@@ -392,6 +408,7 @@ export function getModelProvider(modelId: string): ModelProvider | undefined {
 const REASONING_MODEL_PATTERNS = [
   /^o1(-|$)/,       // o1, o1-mini, o1-preview, o1-2025-01, etc.
   /^o3(-|$)/,       // o3, o3-mini, etc.
+  /^o4(-|$)/,       // o4, o4-mini, etc.
   /^gpt-5\.2(-|$)/, // gpt-5.2, gpt-5.2-preview, etc.
 ];
 

@@ -5,6 +5,7 @@
   "model": "gpt-5-mini",
   "api_key_env": "OPENAI_API_KEY",
   "params": {},
+  "timeout_ms": 120000,
   "target_mode": "normal",
   "pricing": {
     "input_per_1m": 1.10,

@@ -68,6 +68,11 @@ export class OpenAIProvider implements LLMProvider {
         "";
 
       const usageData = response.usage ?? {};
+      // Reasoning tokens are reported in output_tokens_details for o-series models
+      const reasoningTokens =
+        usageData.output_tokens_details?.reasoning_tokens ??
+        usageData.completion_tokens_details?.reasoning_tokens ??
+        0;
       return {
         ok: true,
         text: text.trim(),
@@ -77,6 +82,7 @@ export class OpenAIProvider implements LLMProvider {
         latency_ms,
         input_tokens: usageData.input_tokens ?? usageData.prompt_tokens ?? 0,
         output_tokens: usageData.output_tokens ?? usageData.completion_tokens ?? 0,
+        reasoning_tokens: reasoningTokens > 0 ? reasoningTokens : undefined,
       };
     } catch (err) {
       clearTimeout(timer);

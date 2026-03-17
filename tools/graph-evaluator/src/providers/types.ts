@@ -37,6 +37,7 @@ export interface LLMResult {
   latency_ms: number;
   input_tokens?: number;
   output_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export interface LLMProvider {
