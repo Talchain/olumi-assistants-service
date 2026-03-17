@@ -20,19 +20,8 @@ const AnalysisResponseSchema = z.object({
 const AnalysisStateSchema = z.object({
   meta: z.object({
     response_hash: z.string().min(1),
-    seed_used: z.number().optional(),
-    n_samples: z.number().optional(),
-  }).passthrough(),
-  results: z.array(z.unknown()).optional(),
-  analysis_status: z.string().optional(),
-  fact_objects: z.array(z.unknown()).optional(),
-  review_cards: z.array(z.unknown()).optional(),
-  response_hash: z.string().optional(),
-  option_comparison: z.array(z.unknown()).optional(),
-}).passthrough().refine(
-  (val) => val.results || val.option_comparison,
-  { message: 'analysis_state must include results or option_comparison' },
-).nullable();
+  }).passthrough().optional(),
+}).passthrough().nullable();
 
 const ToolCallSchema = z.object({
   name: z.string(),
@@ -255,53 +244,80 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
   });
 
   describe("AnalysisStateSchema", () => {
-    it("accepts top-level analysis_state with the minimum Path A shape", () => {
+    it("accepts the exact UI payload shape (option_comparison + robustness + factor_sensitivity)", () => {
       const result = AnalysisStateSchema.safeParse({
-        analysis_status: "completed",
-        meta: { response_hash: "rh-1", seed_used: 1, n_samples: 1000 },
-        results: [],
+        analysis_status: "complete",
+        meta: { response_hash: "rh-abc123" },
+        option_comparison: [
+          { option_id: "opt_1", option_label: "Option A", win_probability: 0.65 },
+          { option_id: "opt_2", option_label: "Option B", win_probability: 0.35 },
+        ],
+        robustness: { level: "moderate", fragile_edges: [] },
+        factor_sensitivity: [{ factor_id: "f1", factor_label: "Price", sensitivity: 0.3 }],
       });
       expect(result.success).toBe(true);
     });
 
-    it("rejects top-level analysis_state when meta is missing", () => {
+    it("accepts analysis_state with results array (legacy PLoT shape)", () => {
       const result = AnalysisStateSchema.safeParse({
-        analysis_status: "completed",
-        results: [],
+        meta: { response_hash: "rh-1", seed_used: 1, n_samples: 1000 },
+        results: [{ option_id: "opt_1" }],
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     });
 
-    it("rejects top-level analysis_state when meta.response_hash is missing", () => {
+    it("accepts analysis_state with results as object (UI variant)", () => {
+      const result = AnalysisStateSchema.safeParse({
+        meta: { response_hash: "rh-1" },
+        results: { option_comparison: [{ option_id: "opt_1" }] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts analysis_state without meta (meta is optional)", () => {
+      const result = AnalysisStateSchema.safeParse({
+        analysis_status: "completed",
+        results: [{ option_id: "opt_1" }],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects analysis_state when meta.response_hash is missing", () => {
       const result = AnalysisStateSchema.safeParse({
         analysis_status: "completed",
         meta: { seed_used: 1, n_samples: 1000 },
-        results: [],
+        results: [{ option_id: "opt_1" }],
       });
       expect(result.success).toBe(false);
     });
 
-    it("rejects top-level analysis_state when both results and option_comparison are missing", () => {
+    it("accepts analysis_state with only meta (no results/option_comparison)", () => {
       const result = AnalysisStateSchema.safeParse({
-        analysis_status: "completed",
         meta: { response_hash: "rh-1" },
-      });
-      expect(result.success).toBe(false);
-    });
-
-    it("accepts analysis_state with option_comparison instead of results (UI/PLoT v2 shape)", () => {
-      const result = AnalysisStateSchema.safeParse({
-        analysis_status: "computed",
-        meta: { response_hash: "test" },
-        option_comparison: [
-          { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
-        ],
       });
       expect(result.success).toBe(true);
     });
 
-    it("option_comparison-only analysis_state produces non-null analysis_response (feeds has_analysis: true)", async () => {
-      // Import the real schema and normalizer to prove end-to-end data flow
+    it("accepts null analysis_state (nullable)", () => {
+      const result = AnalysisStateSchema.safeParse(null);
+      expect(result.success).toBe(true);
+    });
+
+    it("passes through unknown fields via passthrough", () => {
+      const result = AnalysisStateSchema.safeParse({
+        meta: { response_hash: "rh-1" },
+        edge_sensitivity: [{ edge_id: "e1" }],
+        flip_thresholds: { threshold: 0.5 },
+        some_future_field: "whatever",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect((result.data as Record<string, unknown>).edge_sensitivity).toBeDefined();
+        expect((result.data as Record<string, unknown>).some_future_field).toBe("whatever");
+      }
+    });
+
+    it("end-to-end: analysis_state flows through normalizeContext to non-null analysis_response", async () => {
       const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
       const { normalizeContext } = await import("../../../src/orchestrator/request-normalization.js");
 
@@ -310,33 +326,25 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
         scenario_id: "test-scenario",
         client_turn_id: "test-turn-001",
         analysis_state: {
-          analysis_status: "computed",
-          meta: { response_hash: "test" },
+          analysis_status: "complete",
+          meta: { response_hash: "test-hash" },
           option_comparison: [
             { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
           ],
+          robustness: { level: "moderate" },
+          factor_sensitivity: [{ factor_id: "f1", sensitivity: 0.3 }],
         },
       };
 
-      // Step 1: Zod accepts the payload
       const parsed = TurnRequestSchema.safeParse(payload);
       expect(parsed.success).toBe(true);
       if (!parsed.success) return;
 
-      // Step 2: normalizeContext maps analysis_state to analysis_response (non-null)
       const context = normalizeContext(parsed.data);
       expect(context.analysis_response).not.toBeNull();
       expect((context.analysis_response as Record<string, unknown>).option_comparison).toEqual([
         { option_id: "opt_1", option_label: "A", win_probability: 0.65 },
       ]);
-    });
-
-    it("accepts analysis_state with results but no option_comparison", () => {
-      const result = AnalysisStateSchema.safeParse({
-        meta: { response_hash: "rh-1" },
-        results: [{ option_id: "opt_1" }],
-      });
-      expect(result.success).toBe(true);
     });
   });
 

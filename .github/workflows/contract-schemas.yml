@@ -1,0 +1,16 @@
+name: Contract schemas
+on: [push, pull_request]
+jobs:
+  check-schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: npx tsx scripts/export-schemas.ts
+      - name: Verify committed schemas match generated output
+        run: git diff --exit-code contracts/

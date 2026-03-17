@@ -1,0 +1,555 @@
+{
+  "$ref": "#/definitions/TurnRequestSchema",
+  "definitions": {
+    "TurnRequestSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 10000,
+          "default": ""
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "graph": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind"
+                        ],
+                        "additionalProperties": true
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "from",
+                          "to"
+                        ],
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "nodes",
+                    "edges"
+                  ],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "analysis_response": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "analysis_status": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "response_hash": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "response_hash"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "framing": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "frame",
+                        "ideate",
+                        "evaluate",
+                        "decide",
+                        "optimise"
+                      ]
+                    },
+                    "goal": {
+                      "type": "string"
+                    },
+                    "constraints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "maxItems": 20
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "maxItems": 20
+                    }
+                  },
+                  "required": [
+                    "stage"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tool_calls": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "input"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "assistant_tool_calls": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/messages/items/properties/tool_calls/items"
+                    }
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "event_log_summary": {
+              "type": "string"
+            },
+            "selected_elements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scenario_id": {
+              "type": "string"
+            },
+            "analysis_inputs": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "option_id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "interventions": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "required": [
+                          "option_id",
+                          "label",
+                          "interventions"
+                        ],
+                        "additionalProperties": true
+                      }
+                    },
+                    "constraints": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "seed": {
+                      "type": "number"
+                    },
+                    "n_samples": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "options"
+                  ],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "graph",
+            "analysis_response",
+            "framing",
+            "messages",
+            "scenario_id"
+          ],
+          "additionalProperties": false
+        },
+        "scenario_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "system_event": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "const": "patch_accepted"
+                },
+                "timestamp": {
+                  "type": "string"
+                },
+                "event_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "details": {
+                  "type": "object",
+                  "properties": {
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "block_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    },
+                    "applied_graph_hash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "operations"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "event_type",
+                "timestamp",
+                "event_id",
+                "details"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "const": "patch_dismissed"
+                },
+                "timestamp": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/timestamp"
+                },
+                "event_id": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/event_id"
+                },
+                "details": {
+                  "type": "object",
+                  "properties": {
+                    "patch_id": {
+                      "type": "string"
+                    },
+                    "block_id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "event_type",
+                "timestamp",
+                "event_id",
+                "details"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "const": "direct_graph_edit"
+                },
+                "timestamp": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/timestamp"
+                },
+                "event_id": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/event_id"
+                },
+                "details": {
+                  "type": "object",
+                  "properties": {
+                    "changed_node_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "changed_edge_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "add",
+                          "update",
+                          "remove"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "changed_node_ids",
+                    "changed_edge_ids",
+                    "operations"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "event_type",
+                "timestamp",
+                "event_id",
+                "details"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "const": "direct_analysis_run"
+                },
+                "timestamp": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/timestamp"
+                },
+                "event_id": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/event_id"
+                },
+                "details": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "event_type",
+                "timestamp",
+                "event_id",
+                "details"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "const": "feedback_submitted"
+                },
+                "timestamp": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/timestamp"
+                },
+                "event_id": {
+                  "$ref": "#/definitions/TurnRequestSchema/properties/system_event/anyOf/0/properties/event_id"
+                },
+                "details": {
+                  "type": "object",
+                  "properties": {
+                    "turn_id": {
+                      "type": "string"
+                    },
+                    "rating": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ]
+                    },
+                    "comment": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "turn_id",
+                    "rating"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "event_type",
+                "timestamp",
+                "event_id",
+                "details"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "client_turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "turn_nonce": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "graph_state": {
+          "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/graph"
+        },
+        "analysis_state": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "meta": {
+                  "type": "object",
+                  "properties": {
+                    "response_hash": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "response_hash"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversation_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/messages/items"
+          }
+        },
+        "generate_model": {
+          "type": "boolean",
+          "default": false
+        },
+        "explicit_generate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "client_turn_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

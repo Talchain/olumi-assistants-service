@@ -173,6 +173,42 @@ describe("ceeOrchestratorStreamRouteV1", () => {
       expect(body.error.code).toBe("INVALID_REQUEST");
       expect(body.error.recoverable).toBe(true);
     });
+
+    it("accepts post-analysis payload with analysis_state (regression guard)", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn/stream",
+        payload: makeBody({
+          message: "Explain the analysis results",
+          analysis_state: {
+            analysis_status: "complete",
+            meta: { response_hash: "rh-abc123" },
+            option_comparison: [
+              { option_id: "opt_1", option_label: "Option A", win_probability: 0.65 },
+              { option_id: "opt_2", option_label: "Option B", win_probability: 0.35 },
+            ],
+            robustness: { is_robust: false, level: "low", recommendation_stability: 0.69 },
+            factor_sensitivity: [{ factor_id: "fac_1", label: "Factor A", sensitivity: 0.45 }],
+          },
+        }),
+      });
+
+      // Must not be 400 — schema must accept this shape. Downstream pipeline
+      // may 500 in unit tests due to mocked dependencies; that's fine here.
+      expect(res.statusCode).not.toBe(400);
+    });
+
+    it("rejects analysis_state as top-level array", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/orchestrate/v1/turn/stream",
+        payload: makeBody({
+          analysis_state: [{ option_id: "opt_1", win_probability: 0.65 }],
+        }),
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   describe("idempotency", () => {

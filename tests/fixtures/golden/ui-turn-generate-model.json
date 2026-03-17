@@ -1,0 +1,9 @@
+{
+  "message": "Build me a decision model for choosing between cloud providers",
+  "scenario_id": "scn-gen-001",
+  "client_turn_id": "ct-gen-001",
+  "generate_model": true,
+  "explicit_generate": true,
+  "conversation_history": [],
+  "graph_state": null
+}

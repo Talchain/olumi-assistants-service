@@ -1,0 +1,254 @@
+{
+  "$ref": "#/definitions/OrchestratorStreamEventSchema",
+  "definitions": {
+    "OrchestratorStreamEventSchema": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "turn_start"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turn_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "routing": {
+              "type": "string",
+              "enum": [
+                "deterministic",
+                "llm"
+              ]
+            },
+            "stage": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "turn_id",
+            "routing",
+            "stage"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "text_delta"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "delta": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "delta"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "tool_start"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "long_running": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "tool_name",
+            "long_running"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "block"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "block": {
+              "type": "object",
+              "properties": {
+                "block_type": {
+                  "type": "string"
+                },
+                "data": {}
+              },
+              "required": [
+                "block_type"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "block"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "tool_result"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "success": {
+              "type": "boolean"
+            },
+            "duration_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "tool_name",
+            "success"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "turn_complete"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "envelope": {
+              "type": "object",
+              "properties": {
+                "turn_id": {
+                  "type": "string"
+                },
+                "assistant_text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "blocks": {
+                  "type": "array",
+                  "items": {}
+                },
+                "lineage": {
+                  "type": "object",
+                  "properties": {
+                    "context_hash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "context_hash"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "turn_id",
+                "assistant_text",
+                "blocks",
+                "lineage"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "envelope"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "error"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            "recoverable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "error",
+            "recoverable"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

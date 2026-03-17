@@ -1,0 +1,539 @@
+{
+  "$ref": "#/definitions/OrchestratorResponseEnvelopeV2Schema",
+  "definitions": {
+    "OrchestratorResponseEnvelopeV2Schema": {
+      "type": "object",
+      "properties": {
+        "turn_id": {
+          "type": "string"
+        },
+        "assistant_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assistant_tool_calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "input": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "input"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "block_id": {
+                "type": "string"
+              },
+              "block_type": {
+                "type": "string"
+              },
+              "data": {}
+            },
+            "required": [
+              "block_id",
+              "block_type"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "suggested_actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "facilitator",
+                  "challenger"
+                ]
+              }
+            },
+            "required": [
+              "label",
+              "prompt",
+              "role"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "proposed_changes": {},
+        "analysis_response": {},
+        "applied_changes": {},
+        "deterministic_answer_tier": {
+          "type": "number",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "lineage": {
+          "type": "object",
+          "properties": {
+            "context_hash": {
+              "type": "string"
+            },
+            "plan_hash": {
+              "type": "string"
+            },
+            "response_hash": {
+              "type": "string"
+            },
+            "dsk_version_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "context_hash",
+            "dsk_version_hash"
+          ],
+          "additionalProperties": false
+        },
+        "stage_indicator": {
+          "type": "object",
+          "properties": {
+            "stage": {
+              "type": "string",
+              "enum": [
+                "frame",
+                "ideate",
+                "evaluate",
+                "decide",
+                "optimise"
+              ]
+            },
+            "substate": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "explicit_event",
+                "inferred"
+              ]
+            },
+            "transition": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "enum": [
+                    "frame",
+                    "ideate",
+                    "evaluate",
+                    "decide",
+                    "optimise"
+                  ]
+                },
+                "to": {
+                  "type": "string",
+                  "enum": [
+                    "frame",
+                    "ideate",
+                    "evaluate",
+                    "decide",
+                    "optimise"
+                  ]
+                },
+                "trigger": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "trigger"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "stage",
+            "confidence",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "science_ledger": {
+          "type": "object",
+          "properties": {
+            "claims_used": {
+              "type": "array",
+              "items": {}
+            },
+            "techniques_used": {
+              "type": "array",
+              "items": {}
+            },
+            "scope_violations": {
+              "type": "array",
+              "items": {}
+            },
+            "phrasing_violations": {
+              "type": "array",
+              "items": {}
+            },
+            "rewrite_applied": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "claims_used",
+            "techniques_used",
+            "scope_violations",
+            "phrasing_violations",
+            "rewrite_applied"
+          ],
+          "additionalProperties": true
+        },
+        "progress_marker": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "changed_model",
+                "ran_analysis",
+                "added_evidence",
+                "committed",
+                "none"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "observability": {
+          "type": "object",
+          "properties": {
+            "triggers_fired": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "triggers_suppressed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "intent_classification": {
+              "type": "string"
+            },
+            "specialist_contributions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "specialist_id": {
+                    "type": "string"
+                  },
+                  "recommendation": {
+                    "type": "string"
+                  },
+                  "confidence": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "specialist_id",
+                  "recommendation",
+                  "confidence"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "specialist_disagreement": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "triggers_fired",
+            "triggers_suppressed",
+            "intent_classification",
+            "specialist_contributions",
+            "specialist_disagreement"
+          ],
+          "additionalProperties": false
+        },
+        "turn_plan": {
+          "type": "object",
+          "properties": {
+            "selected_tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "routing": {
+              "type": "string",
+              "enum": [
+                "deterministic",
+                "llm"
+              ]
+            },
+            "long_running": {
+              "type": "boolean"
+            },
+            "tool_latency_ms": {
+              "type": "number"
+            },
+            "executed_tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deferred_tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "system_event": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "event_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "event_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "selected_tool",
+            "routing",
+            "long_running"
+          ],
+          "additionalProperties": true
+        },
+        "guidance_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item_id": {
+                "type": "string"
+              },
+              "signal_code": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "primary_action": {
+                "type": "string"
+              },
+              "target_object": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "node",
+                      "edge",
+                      "option",
+                      "graph",
+                      "framing"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": true
+              },
+              "valid_while": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string"
+                  },
+                  "max_turns": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "item_id",
+              "signal_code",
+              "category",
+              "source",
+              "title",
+              "primary_action"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "analysis_ready": {},
+        "analysis_status": {
+          "type": "string"
+        },
+        "status_reason": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "critiques": {
+          "type": "array",
+          "items": {}
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "model_receipt": {
+          "type": "object",
+          "properties": {
+            "node_count": {
+              "type": "number"
+            },
+            "edge_count": {
+              "type": "number"
+            },
+            "option_labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "goal_label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "top_insight": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "readiness_status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repairs_applied_count": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "node_count",
+            "edge_count",
+            "option_labels",
+            "goal_label",
+            "top_insight",
+            "readiness_status",
+            "repairs_applied_count"
+          ],
+          "additionalProperties": true
+        },
+        "diagnostics": {
+          "type": "string"
+        },
+        "parse_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "turn_id",
+        "assistant_text",
+        "blocks",
+        "suggested_actions",
+        "lineage",
+        "stage_indicator",
+        "science_ledger",
+        "progress_marker",
+        "observability",
+        "turn_plan",
+        "guidance_items"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
