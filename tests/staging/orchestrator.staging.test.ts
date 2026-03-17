@@ -16,7 +16,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
-import { rateLimitGuard } from "./helpers/rate-limit-guard.js";
+import { makeAuthedRequest } from "./helpers/make-request.js";
+import { ensureServerWarmed } from "./helpers/warmup.js";
 
 // ============================================================================
 // Gating — skip entire suite if conditions not met
@@ -50,34 +51,7 @@ async function makeRequest(
   url: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: unknown; elapsed_ms: number }> {
-  await rateLimitGuard();
-  const t0 = Date.now();
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Olumi-Assist-Key": CEE_API_KEY!,
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    throw new Error(
-      `fetch() network error — server unreachable:\n` +
-      `  url: ${url}\n` +
-      `  error: ${err instanceof Error ? err.message : String(err)}\n` +
-      `  request_snippet: ${JSON.stringify(body).slice(0, 300)}`,
-    );
-  }
-  const elapsed_ms = Date.now() - t0;
-  let responseBody: unknown = null;
-  try {
-    responseBody = await response.json();
-  } catch {
-    // non-JSON body (rare — leave as null)
-  }
-  return { status: response.status, body: responseBody, elapsed_ms };
+  return makeAuthedRequest(url, CEE_API_KEY!, body);
 }
 
 /**
@@ -234,23 +208,9 @@ describe("Orchestrator /orchestrate/v1/turn staging smoke", { timeout: 60_000 },
     process.env.CEE_BASE_URL = CEE_BASE_URL!;
     // No _resetConfigCache() — pure HTTP tests, no src/ config Proxy used
 
-    // Warmup: fire a request so the server is awake before the timed tests.
-    // Result intentionally ignored — failure is non-fatal.
-    const wId = randomUUID();
-    await fetch(ORCHESTRATE_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Olumi-Assist-Key": CEE_API_KEY!,
-      },
-      body: JSON.stringify({
-        message: "",
-        scenario_id: wId,
-        client_turn_id: randomUUID(),
-        context: makeContext(wId),
-      }),
-    }).catch(() => {/* non-fatal */});
-  }, 60_000);
+    // Warmup: poll /healthz until the server is awake (handles Render cold-start).
+    await ensureServerWarmed(CEE_BASE_URL!);
+  }, 90_000);
 
   afterAll(() => {
     if (SKIP_REASON) return;

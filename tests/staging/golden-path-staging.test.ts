@@ -33,7 +33,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll } from "vitest";
 import { MINIMAL_GRAPH } from "./fixtures/minimal-graph.js";
-import { rateLimitGuard } from "./helpers/rate-limit-guard.js";
+import { makeAuthedRequest } from "./helpers/make-request.js";
 
 // ============================================================================
 // Gating
@@ -123,29 +123,7 @@ async function makeRequest(
   url: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: unknown; elapsed_ms: number }> {
-  await rateLimitGuard();
-  const t0 = Date.now();
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Olumi-Assist-Key": CEE_API_KEY!,
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    throw new Error(
-      `fetch() network error — server unreachable:\n` +
-      `  url: ${url}\n` +
-      `  error: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  const elapsed_ms = Date.now() - t0;
-  let responseBody: unknown = null;
-  try { responseBody = await response.json(); } catch { /* non-JSON */ }
-  return { status: response.status, body: responseBody, elapsed_ms };
+  return makeAuthedRequest(url, CEE_API_KEY!, body);
 }
 
 /**

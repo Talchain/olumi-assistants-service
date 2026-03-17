@@ -160,47 +160,62 @@ async function makeRequest(
   body: Record<string, unknown>,
   apiKey: string,
   timeoutMs?: number,
+  maxRetries = 2,
 ): Promise<RequestResult> {
-  await rateLimitGuard();
-  const t0 = Date.now();
-  const controller = timeoutMs ? new AbortController() : undefined;
-  const timer = controller
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await rateLimitGuard();
+    const t0 = Date.now();
+    const controller = timeoutMs ? new AbortController() : undefined;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : undefined;
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Olumi-Assist-Key": apiKey,
-      },
-      body: JSON.stringify(body),
-      signal: controller?.signal,
-    });
-  } catch (err) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Olumi-Assist-Key": apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller?.signal,
+      });
+    } catch (err) {
+      const elapsed_ms = Date.now() - t0;
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new AnalysisTimeoutError(url, timeoutMs!, elapsed_ms);
+      }
+      if (isServiceUnreachable(err as Error)) {
+        throw new ServiceUnreachableError(url, err as Error);
+      }
+      throw new Error(
+        `fetch() error:\n  url: ${url}\n  elapsed: ${elapsed_ms}ms\n  error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    // Retry on 429 with server-specified backoff
+    if (response.status === 429 && attempt < maxRetries) {
+      const retryBody = await response.json().catch(() => null) as Record<string, unknown> | null;
+      const retryAfter = (retryBody?.details as Record<string, unknown>)?.retry_after_seconds;
+      const waitMs = (typeof retryAfter === "number" ? retryAfter : 30) * 1000;
+      console.warn(`[makeRequest] 429 rate-limited, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
     const elapsed_ms = Date.now() - t0;
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new AnalysisTimeoutError(url, timeoutMs!, elapsed_ms);
+    let responseBody: unknown = null;
+    try {
+      responseBody = await response.json();
+    } catch {
+      /* non-JSON */
     }
-    if (isServiceUnreachable(err as Error)) {
-      throw new ServiceUnreachableError(url, err as Error);
-    }
-    throw new Error(
-      `fetch() error:\n  url: ${url}\n  elapsed: ${elapsed_ms}ms\n  error: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  } finally {
-    if (timer) clearTimeout(timer);
+    return { status: response.status, body: responseBody, elapsed_ms };
   }
-  const elapsed_ms = Date.now() - t0;
-  let responseBody: unknown = null;
-  try {
-    responseBody = await response.json();
-  } catch {
-    /* non-JSON */
-  }
-  return { status: response.status, body: responseBody, elapsed_ms };
+  throw new Error("makeRequest: exhausted retries");
 }
 
 // ============================================================================
