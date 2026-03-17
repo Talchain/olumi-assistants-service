@@ -2,7 +2,7 @@
  * Intent Gate — Deterministic Routing with LLM Fallback
  *
  * Strict whole-message equality matching against a frozen pattern table,
- * plus verb-prefix matching for research_topic (extracts query from remainder).
+ * plus verb-prefix matching for research_topic and edit_graph.
  *
  * Pure function — no side effects, no logging, no async, no dependencies.
  *
@@ -12,7 +12,7 @@
  * | draft_graph      | draft, draft a model, build the model, start over, new model, ...  |
  * | generate_brief   | generate brief, generate the brief, write the brief, create brief, decision brief, ... |
  * | explain_results  | explain, why, break it down, explain the results, ...              |
- * | edit_graph       | edit, modify, change, update the model, edit model, ...            |
+ * | edit_graph       | edit, modify, change, update the model, update the {X}, add a factor for {X}, ... |
  * | run_exercise     | pre-mortem, devil's advocate, disconfirmation, ...                  |
  * | research_topic   | research {topic}, look up {topic}, find data on {topic}, ...       |
  *
@@ -210,30 +210,36 @@ export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
  * Ordered longest-first to avoid partial prefix matches.
  */
 export const EDIT_PREFIXES: readonly string[] = Object.freeze([
-  // "please <verb> the …" — polite imperative with determiner signals graph mutation
+  // Sorted strictly longest-first to prevent a shorter prefix consuming a match
+  // before a longer, more specific prefix has a chance.
+  // 18 chars
   'please update the ',
   'please change the ',
   'please modify the ',
-  'please set the ',
   'please remove the ',
-  // "please <verb> a …" — polite imperative adding a graph element
-  'please add a ',
+  'add an option for ',
+  // 17 chars
+  'add a factor for ',
+  // 15 chars
+  'please set the ',
+  // 14 chars
   'please add an ',
-  // "<verb> the …" — bare imperative with determiner (anchored to a specific element)
+  'add an option ',
+  'remove factor ',
+  'remove option ',
+  // 13 chars
+  'please add a ',
+  'add a factor ',
+  // 12 chars
+  'add an edge ',
+  // 11 chars
   'update the ',
   'change the ',
   'modify the ',
   'remove the ',
-  'set the ',
-  // Graph-object-qualified patterns — explicit factor/option/edge/node targets
-  'add a factor for ',
-  'add a factor ',
-  'add an option for ',
-  'add an option ',
   'add a node ',
-  'add an edge ',
-  'remove factor ',
-  'remove option ',
+  // 8 chars
+  'set the ',
 ]);
 
 // ============================================================================
@@ -243,7 +249,7 @@ export const EDIT_PREFIXES: readonly string[] = Object.freeze([
 /**
  * Get all unique tool names referenced in the intent gate pattern table.
  * Used by startup validation to check against the tool registry.
- * Includes research_topic from prefix patterns.
+ * Includes research_topic from prefix patterns (edit_graph already in exact-match table).
  */
 export function getGateToolNames(): string[] {
   return [...new Set([..._patterns.map(([, tool]) => tool), 'research_topic'])];
@@ -255,7 +261,7 @@ export function getGateToolNames(): string[] {
 
 /**
  * Classify user intent via strict whole-message equality matching,
- * then verb-prefix matching for research_topic.
+ * then verb-prefix matching for research_topic and edit_graph.
  *
  * Pure function — no side effects, no async, no external dependencies.
  * Returns { tool, routing: 'deterministic', confidence: 'exact' } on match,
