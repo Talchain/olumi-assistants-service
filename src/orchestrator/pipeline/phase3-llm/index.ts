@@ -86,42 +86,14 @@ export async function phase3Generate(
   userMessage: string,
   initialIntentGate?: IntentGateResult,
 ): Promise<LLMResult> {
-  // 1. Check deterministic intent gate
-  const intentGate = initialIntentGate ?? classifyIntent(userMessage);
-  // Build context once; reused for resolution-mode check, prerequisite check, and LLM assembly.
-  const context = buildConversationContext(enrichedContext);
-  const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
-  const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
-  const freshTurnIntent = classifyUserIntent(userMessage);
-  const hasExplainableCurrentAnalysis = isResultsExplanationEligible(
-    enrichedContext.stage_indicator.stage,
-    enrichedContext.analysis,
-  );
-  const explanationRoute = determineExplanationRoute(
-    enrichedContext,
-    userMessage,
-    intentGate,
-    freshTurnIntent,
-    hasExplainableCurrentAnalysis,
-  );
-  const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
-  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && explanationRoute.kind !== 'results';
-  const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
-    && hasStableModel(enrichedContext)
-    && !isClearRegenerateRequest(userMessage);
-  const editResolutionMode = (clarificationToolInput || proposalFollowUp?.action === 'confirm' || intentGate.tool === 'edit_graph')
-    ? determineEditResolutionMode(userMessage, context)
-    : null;
-  const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
-  const shouldRedirectToResultsExplanation = hasExplainableCurrentAnalysis
-    && explanationRoute.kind === 'results'
-    && (
-      intentGate.tool === 'explain_results'
-      || intentGate.tool === 'edit_graph'
-      || freshTurnIntent === 'explain'
-      || freshTurnIntent === 'recommend'
-      || shouldAvoidEditGraph
-    );
+  // 1. Compute routing signals (shared with phase3PrepareForStreaming)
+  const signals = computeRoutingSignals(enrichedContext, userMessage, initialIntentGate);
+  const {
+    intentGate, context, clarificationToolInput, proposalFollowUp, freshTurnIntent,
+    hasExplainableCurrentAnalysis, explanationRoute, explicitGenerate,
+    shouldBlockExplainResults, shouldBlockStableModelRedraft, shouldAvoidEditGraph,
+    shouldRedirectToResultsExplanation,
+  } = signals;
   const routeDebugBase = buildRouteDebugBase(
     intentGate,
     clarificationToolInput,
@@ -268,49 +240,7 @@ export async function phase3Generate(
     );
   }
 
-  const effectiveIntentGate = proposalFollowUp?.action === 'confirm'
-    ? {
-        routing: 'deterministic' as const,
-        tool: 'edit_graph' as const,
-        confidence: 'exact' as const,
-        matched_pattern: '[pending_proposal_confirmation]',
-      }
-    : clarificationToolInput
-    ? {
-        routing: 'deterministic' as const,
-        tool: 'edit_graph' as const,
-        confidence: 'exact' as const,
-        matched_pattern: '[clarification_continuation]',
-      }
-    : explicitGenerate.kind === 'deterministic'
-    ? {
-        routing: 'deterministic' as const,
-        tool: 'draft_graph' as const,
-        confidence: 'exact' as const,
-        matched_pattern: '[explicit_generate_override]',
-      }
-    : shouldBlockExplainResults
-    ? {
-        ...intentGate,
-        tool: null,
-        routing: 'llm' as const,
-        matched_pattern: intentGate.matched_pattern ?? '[results_explanation_blocked]',
-      }
-    : shouldRedirectToResultsExplanation
-    ? {
-        ...intentGate,
-        tool: 'explain_results' as const,
-        routing: 'deterministic' as const,
-        matched_pattern: intentGate.matched_pattern ?? '[fresh_turn_explain_override]',
-      }
-    : shouldAvoidEditGraph
-      ? {
-          ...intentGate,
-          tool: null,
-          routing: 'llm' as const,
-          matched_pattern: intentGate.matched_pattern ?? '[edit_graph_bypass]',
-        }
-    : intentGate;
+  const effectiveIntentGate = computeEffectiveIntentGate(signals);
 
   // `no_edit_answer` is a routing-only outcome. With evaluation-stage analysis we
   // deterministically narrate via explain_results; otherwise we bypass edit_graph
@@ -631,6 +561,193 @@ export async function phase3Generate(
 }
 
 // ============================================================================
+// Shared Routing Decision
+// ============================================================================
+
+/**
+ * Routing signals computed from enriched context + intent gate.
+ * Used by both phase3Generate (to decide early returns) and
+ * phase3PrepareForStreaming (to decide deterministic vs LLM path).
+ */
+interface RoutingSignals {
+  intentGate: IntentGateResult;
+  context: ConversationContext;
+  clarificationToolInput: Record<string, unknown> | null;
+  proposalFollowUp: ReturnType<typeof buildPendingProposalContinuation>;
+  freshTurnIntent: ReturnType<typeof classifyUserIntent>;
+  hasExplainableCurrentAnalysis: boolean;
+  explanationRoute: { kind: 'none' | 'rationale' | 'results'; reasoning: string | null; considered: boolean };
+  explicitGenerate: ExplicitGenerateRoute;
+  shouldBlockExplainResults: boolean;
+  shouldBlockStableModelRedraft: boolean;
+  shouldAvoidEditGraph: boolean;
+  shouldRedirectToResultsExplanation: boolean;
+  editResolutionMode: string | null;
+}
+
+/**
+ * Compute all routing signals from enriched context and intent gate.
+ * Shared by phase3Generate and phase3PrepareForStreaming to guarantee identical
+ * routing decisions — single source of truth.
+ */
+function computeRoutingSignals(
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+  initialIntentGate?: IntentGateResult,
+): RoutingSignals {
+  const intentGate = initialIntentGate ?? classifyIntent(userMessage);
+  const context = buildConversationContext(enrichedContext);
+  const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
+  const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
+  const freshTurnIntent = classifyUserIntent(userMessage);
+  const hasExplainableCurrentAnalysis = isResultsExplanationEligible(
+    enrichedContext.stage_indicator.stage,
+    enrichedContext.analysis,
+  );
+  const explanationRoute = determineExplanationRoute(
+    enrichedContext, userMessage, intentGate, freshTurnIntent, hasExplainableCurrentAnalysis,
+  );
+  const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
+  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && explanationRoute.kind !== 'results';
+  const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
+    && hasStableModel(enrichedContext)
+    && !isClearRegenerateRequest(userMessage);
+  const editResolutionMode = (clarificationToolInput || proposalFollowUp?.action === 'confirm' || intentGate.tool === 'edit_graph')
+    ? determineEditResolutionMode(userMessage, context)
+    : null;
+  const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
+  const shouldRedirectToResultsExplanation = hasExplainableCurrentAnalysis
+    && explanationRoute.kind === 'results'
+    && (
+      intentGate.tool === 'explain_results'
+      || intentGate.tool === 'edit_graph'
+      || freshTurnIntent === 'explain'
+      || freshTurnIntent === 'recommend'
+      || shouldAvoidEditGraph
+    );
+  return {
+    intentGate, context, clarificationToolInput, proposalFollowUp, freshTurnIntent,
+    hasExplainableCurrentAnalysis, explanationRoute, explicitGenerate,
+    shouldBlockExplainResults, shouldBlockStableModelRedraft, shouldAvoidEditGraph,
+    shouldRedirectToResultsExplanation, editResolutionMode,
+  };
+}
+
+/**
+ * Compute the effective intent gate after override transforms.
+ * Same logic as phase3Generate lines 271-313 — extracted here so
+ * phase3PrepareForStreaming can derive the same routing decision.
+ */
+function computeEffectiveIntentGate(
+  signals: RoutingSignals,
+): IntentGateResult {
+  const {
+    intentGate, clarificationToolInput, proposalFollowUp, explicitGenerate,
+    shouldBlockExplainResults, shouldRedirectToResultsExplanation, shouldAvoidEditGraph,
+  } = signals;
+
+  return proposalFollowUp?.action === 'confirm'
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'edit_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[pending_proposal_confirmation]',
+        normalised_message: intentGate.normalised_message,
+      }
+    : clarificationToolInput
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'edit_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[clarification_continuation]',
+        normalised_message: intentGate.normalised_message,
+      }
+    : explicitGenerate.kind === 'deterministic'
+    ? {
+        routing: 'deterministic' as const,
+        tool: 'draft_graph' as const,
+        confidence: 'exact' as const,
+        matched_pattern: '[explicit_generate_override]',
+        normalised_message: intentGate.normalised_message,
+      }
+    : shouldBlockExplainResults
+    ? {
+        ...intentGate,
+        tool: null,
+        routing: 'llm' as const,
+        matched_pattern: intentGate.matched_pattern ?? '[results_explanation_blocked]',
+      }
+    : shouldRedirectToResultsExplanation
+    ? {
+        ...intentGate,
+        tool: 'explain_results' as const,
+        routing: 'deterministic' as const,
+        matched_pattern: intentGate.matched_pattern ?? '[fresh_turn_explain_override]',
+      }
+    : shouldAvoidEditGraph
+      ? {
+          ...intentGate,
+          tool: null,
+          routing: 'llm' as const,
+          matched_pattern: intentGate.matched_pattern ?? '[edit_graph_bypass]',
+        }
+    : intentGate;
+}
+
+/**
+ * Determine whether phase3Generate would skip the LLM call for the given signals.
+ *
+ * Returns true if phase3Generate would return before reaching assembleV2SystemPrompt.
+ * This is the SINGLE SOURCE OF TRUTH for the streaming vs non-streaming path split.
+ *
+ * Accounts for:
+ * - Early deterministic returns (dismiss, stale, clarify, stable-model-block, rationale)
+ * - effectiveIntentGate transforms (shouldBlockExplainResults, shouldAvoidEditGraph → routing:'llm')
+ * - Prerequisite failures (e.g. run_analysis without graph)
+ * - Stage-policy rejections (e.g. run_analysis in FRAME stage)
+ */
+function wouldSkipLLM(
+  signals: RoutingSignals,
+  enrichedContext: EnrichedContext,
+  userMessage: string,
+): boolean {
+  const { proposalFollowUp, explicitGenerate, shouldBlockStableModelRedraft, explanationRoute } = signals;
+
+  // Early deterministic returns (no effectiveIntentGate needed)
+  if (proposalFollowUp?.action === 'dismiss') return true;
+  if (proposalFollowUp?.action === 'stale') return true;
+  if (explicitGenerate.kind === 'clarify') return true;
+  if (shouldBlockStableModelRedraft) return true;
+  if (explanationRoute.kind === 'rationale' && explicitGenerate.kind !== 'deterministic') return true;
+
+  // effectiveIntentGate-based deterministic routing
+  const effectiveGate = computeEffectiveIntentGate(signals);
+  if (!(effectiveGate.routing === 'deterministic' && effectiveGate.tool)) return false;
+
+  // Prerequisites check
+  const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveGate.tool as ToolName];
+  const prerequisitesBypassed = effectiveGate.tool === 'draft_graph'
+    && explicitGenerate.kind === 'deterministic'
+    && signals.intentGate.matched_pattern === 'generate_model';
+  const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(signals.context) : true);
+  if (!prerequisitesMet) return false;
+
+  // Stage policy check
+  const stageGuard = isToolAllowedAtStage(
+    effectiveGate.tool,
+    enrichedContext.stage_indicator.stage,
+    userMessage,
+  );
+  const allowExplicitGenerateOverride = (
+    effectiveGate.tool === 'draft_graph'
+    && explicitGenerate.kind === 'deterministic'
+  );
+  if (!stageGuard.allowed && !allowExplicitGenerateOverride) return false;
+
+  return true;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -897,51 +1014,42 @@ function determineExplanationRoute(
   return { kind: 'none', reasoning: null, considered: true };
 }
 
+const RATIONALE_SUFFIX = [
+  '\n\n[RATIONALE MODE]',
+  'You are explaining current model rationale before analysis has produced explainable results.',
+  'Do not claim the analysis has run successfully unless the context explicitly says so.',
+  'Answer in plain English, briefly, and ground the explanation in the stated goal, options, constraints, and current model structure.',
+].join(' ');
+
 async function generateRationaleExplanation(
   llmClient: LLMClient,
   enrichedContext: EnrichedContext,
   userMessage: string,
   requestId: string,
 ): Promise<string> {
-  const contextSummary = buildRationaleContextSummary(enrichedContext);
+  const assembled = await assembleV2SystemPrompt(enrichedContext);
+  const systemPrompt = assembled.text + RATIONALE_SUFFIX;
+
+  log.info(
+    {
+      request_id: requestId,
+      system_prompt_chars: systemPrompt.length,
+      pipeline: 'rationale_explanation',
+    },
+    'generateRationaleExplanation: using full assembled prompt',
+  );
+
   const response = await llmClient.chat(
     {
-      system: [
-        'You are explaining current model rationale before analysis has produced explainable results.',
-        'Do not claim the analysis has run successfully unless the context explicitly says so.',
-        'Answer in plain English, briefly, and ground the explanation in the stated goal, options, constraints, and current model structure.',
-      ].join(' '),
-      userMessage: `Question: ${userMessage}\n\nCurrent context:\n${contextSummary}`,
+      system: systemPrompt,
+      userMessage,
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
   return response.content;
 }
 
-function buildRationaleContextSummary(enrichedContext: EnrichedContext): string {
-  const graphLabels = (enrichedContext.graph?.nodes ?? [])
-    .map((node) => ('label' in node && typeof node.label === 'string') ? node.label : null)
-    .filter((label): label is string => label !== null)
-    .slice(0, 12);
-  const framing = enrichedContext.framing as Record<string, unknown> | null;
-  const options = Array.isArray(framing?.options)
-    ? framing.options
-        .filter((option): option is string => typeof option === 'string' && option.trim().length > 0)
-        .slice(0, 6)
-    : [];
-  const constraints = Array.isArray(framing?.constraints)
-    ? framing.constraints
-        .filter((constraint): constraint is string => typeof constraint === 'string' && constraint.trim().length > 0)
-        .slice(0, 6)
-    : [];
 
-  return [
-    `Goal: ${typeof enrichedContext.framing?.goal === 'string' ? enrichedContext.framing.goal : 'unknown'}`,
-    `Options: ${options.length > 0 ? options.join(', ') : 'unknown'}`,
-    `Constraints: ${constraints.length > 0 ? constraints.join(', ') : 'none stated'}`,
-    `Model labels: ${graphLabels.length > 0 ? graphLabels.join(', ') : 'no model yet'}`,
-  ].join('\n');
-}
 
 type ExplicitGenerateRoute =
   | { kind: 'none' }
@@ -1133,56 +1241,17 @@ export async function phase3PrepareForStreaming(
   userMessage: string,
   initialIntentGate?: IntentGateResult,
 ): Promise<Phase3StreamPrep> {
-  // Replicate the same deterministic routing as phase3Generate
-  const intentGate = initialIntentGate ?? classifyIntent(userMessage);
-  const context = buildConversationContext(enrichedContext);
-  const clarificationToolInput = buildClarificationContinuationInput(enrichedContext, userMessage);
-  const proposalFollowUp = buildPendingProposalContinuation(enrichedContext, userMessage);
-  const freshTurnIntent = classifyUserIntent(userMessage);
-  const hasExplainableCurrentAnalysis = isResultsExplanationEligible(
-    enrichedContext.stage_indicator.stage,
-    enrichedContext.analysis,
-  );
-  const explanationRoute = determineExplanationRoute(
-    enrichedContext, userMessage, intentGate, freshTurnIntent, hasExplainableCurrentAnalysis,
-  );
-  const explicitGenerate = buildExplicitGenerateRoute(enrichedContext, userMessage, intentGate, context);
-  const shouldBlockExplainResults = intentGate.tool === 'explain_results' && explanationRoute.kind !== 'results';
-  const shouldBlockStableModelRedraft = intentGate.tool === 'draft_graph'
-    && hasStableModel(enrichedContext)
-    && !isClearRegenerateRequest(userMessage);
-  const editResolutionMode = (clarificationToolInput || proposalFollowUp?.action === 'confirm' || intentGate.tool === 'edit_graph')
-    ? determineEditResolutionMode(userMessage, context)
-    : null;
-  const shouldAvoidEditGraph = editResolutionMode === 'no_edit_answer';
-  const shouldRedirectToResultsExplanation = hasExplainableCurrentAnalysis
-    && explanationRoute.kind === 'results'
-    && (
-      intentGate.tool === 'explain_results'
-      || intentGate.tool === 'edit_graph'
-      || freshTurnIntent === 'explain'
-      || freshTurnIntent === 'recommend'
-      || shouldAvoidEditGraph
-    );
+  // Use shared routing signals — single source of truth with phase3Generate.
+  // wouldSkipLLM accounts for effectiveIntentGate transforms, prerequisite checks,
+  // and stage-policy rejections — no divergence possible.
+  const signals = computeRoutingSignals(enrichedContext, userMessage, initialIntentGate);
+  const {
+    intentGate, context, clarificationToolInput, proposalFollowUp,
+    hasExplainableCurrentAnalysis, explanationRoute,
+    shouldAvoidEditGraph, shouldRedirectToResultsExplanation, explicitGenerate,
+  } = signals;
 
-  // Try the same deterministic paths as phase3Generate — calling phase3Generate
-  // for all deterministic cases ensures exact behavioral parity.
-  // Deterministic detection: if phase3Generate would NOT reach the LLM call,
-  // just call it directly and return the result.
-  const isDeterministic = (
-    proposalFollowUp?.action === 'dismiss'
-    || proposalFollowUp?.action === 'stale'
-    || (explicitGenerate.kind === 'clarify')
-    || shouldBlockStableModelRedraft
-    || (explanationRoute.kind === 'rationale')
-    || shouldRedirectToResultsExplanation
-    || (explicitGenerate.kind === 'deterministic')
-    || (proposalFollowUp?.action === 'confirm')
-    || (clarificationToolInput !== null)
-    || (intentGate.tool && intentGate.routing === 'deterministic')
-  );
-
-  if (isDeterministic) {
+  if (wouldSkipLLM(signals, enrichedContext, userMessage)) {
     const result = await phase3Generate(
       enrichedContext, specialistResult, llmClient, requestId, userMessage, initialIntentGate,
     );

@@ -434,4 +434,37 @@ describe("Cross-Path Parity: non-streaming vs streaming", () => {
     // chatWithTools should NOT be called for deterministic path
     expect(mockLLMClient.chatWithTools).not.toHaveBeenCalled();
   });
+
+  it("8. Pipeline forwards full system prompt from phase3 to chatWithTools without truncation", async () => {
+    // This tests pipeline-level passthrough: executePipelineStream must relay the
+    // system prompt from phase3PrepareForStreaming callArgs to the LLM adapter
+    // without truncation. Phase3 is mocked here; for high-fidelity prompt assembly
+    // tests see streaming-prompt-assembly.test.ts.
+    const LARGE_PROMPT = "Z".repeat(55_000) + "\n\nCurrent stage: frame";
+    mockPhase3Prep.mockResolvedValue({
+      kind: "llm",
+      callArgs: {
+        system: LARGE_PROMPT,
+        messages: [{ role: "user", content: "Should I hire a tech lead or two developers?" }],
+        tools: [{ name: "draft_graph", description: "Draft a graph", parameters: {} }],
+      },
+      callOpts: { requestId: "req-prompt-length", maxTokens: 4096 },
+      postProcess: () => GOLDEN_LLM_RESULT,
+    });
+
+    const events = await collectStreamEvents(
+      executePipelineStream(GOLDEN_REQUEST, "req-prompt-len", deps),
+    );
+
+    // Verify chatWithTools received the full prompt without truncation
+    expect(mockLLMClient.chatWithTools).toHaveBeenCalledTimes(1);
+    const callArgs = mockLLMClient.chatWithTools.mock.calls[0][0];
+    expect(callArgs.system.length).toBeGreaterThan(50_000);
+
+    // Turn should complete successfully
+    const errorEvents = events.filter(e => e.type === "error");
+    expect(errorEvents).toHaveLength(0);
+    const turnComplete = events.find(e => e.type === "turn_complete");
+    expect(turnComplete).toBeDefined();
+  });
 });

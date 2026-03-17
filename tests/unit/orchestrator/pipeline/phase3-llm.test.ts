@@ -417,12 +417,16 @@ describe("phase3-llm", () => {
 
       expect(client.chat).toHaveBeenCalledTimes(1);
       const chatArgs = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      // The system prompt must come from assembleV2SystemPrompt (Zone 1 + Zone 2),
-      // NOT the old hardcoded 310-char string. The mock getSystemPrompt returns
-      // "System prompt", so the assembled result includes that + Zone 2 + RATIONALE suffix.
+      // Structural assertion: system prompt comes from assembleV2SystemPrompt (Zone 1 + Zone 2)
+      // with RATIONALE MODE suffix — NOT the old hardcoded 310-char string.
+      // For high-fidelity length assertion (>50000) see streaming-prompt-assembly.test.ts.
       expect(chatArgs.system).toContain("System prompt"); // Zone 1 content present
       expect(chatArgs.system).toContain("[RATIONALE MODE]"); // Rationale suffix appended
-      expect(chatArgs.system.length).toBeGreaterThan(310); // NOT the old 310-char hardcoded string
+      expect(chatArgs.system).not.toBe(
+        "You are explaining current model rationale before analysis has produced explainable results."
+        + " Do not claim the analysis has run successfully unless the context explicitly says so."
+        + " Answer in plain English, briefly, and ground the explanation in the stated goal, options, constraints, and current model structure.",
+      ); // Explicitly reject the old hardcoded 310-char prompt
     });
 
     it("resumes pending clarification follow-up into deterministic edit_graph when user replies with an exact visible label", async () => {
