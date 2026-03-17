@@ -22,6 +22,7 @@ import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
+import { config } from "../../../../config/index.js";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 
 // ---------------------------------------------------------------------------
@@ -827,6 +828,401 @@ export function fixOptionOutcomeShortcut(graph: GraphT): {
 }
 
 // ---------------------------------------------------------------------------
+// Kind normalisation helper
+// ---------------------------------------------------------------------------
+
+/** Normalise V3 "action" kind to "option" for topology matching. */
+function normaliseKind(kind: string): string {
+  return kind === "action" ? "option" : kind;
+}
+
+// ---------------------------------------------------------------------------
+// Proactive: option→risk shortcut removal
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove option→risk shortcut edges.
+ *
+ * For each forbidden option→risk edge:
+ * 1. If the risk already reaches goal via allowed patterns, remove the shortcut.
+ * 2. If no valid path exists but a controllable factor connects to the risk,
+ *    remove the shortcut (the factor→risk path is the valid route).
+ * 3. If neither condition holds, find the controllable factor most connected
+ *    to the option's neighbourhood, insert a factor→risk edge with moderate
+ *    defaults, and remove the shortcut.
+ * 4. If no controllable factor exists at all, log a warning and leave the
+ *    edge for LLM repair.
+ */
+export function fixOptionRiskShortcut(graph: GraphT, format: EdgeFormat): {
+  repairs: Repair[];
+  removedCount: number;
+  rerouted: number;
+  skippedCount: number;
+} {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  // Normalise "action" → "option" for topology matching (V3 compat)
+  const nodeKindMap = new Map<string, string>();
+  const nodeCategoryMap = new Map<string, string>();
+  for (const node of nodes) {
+    nodeKindMap.set(node.id, normaliseKind(node.kind));
+    if (node.category) nodeCategoryMap.set(node.id, node.category);
+  }
+
+  // Find controllable factors (explicitly tagged or inferred from option→factor edges)
+  const controllableIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind === "factor" && node.category === "controllable") controllableIds.add(node.id);
+  }
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+      controllableIds.add(edge.to);
+    }
+  }
+
+  // Build quick lookup: which controllable factors does each option connect to?
+  const optionToFactors = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) === "option" && controllableIds.has(edge.to)) {
+      const set = optionToFactors.get(edge.from) ?? new Set();
+      set.add(edge.to);
+      optionToFactors.set(edge.from, set);
+    }
+  }
+
+  // Check which controllable factors already have a direct edge to each risk
+  const factorToRisks = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (controllableIds.has(edge.from) && nodeKindMap.get(edge.to) === "risk") {
+      const set = factorToRisks.get(edge.from) ?? new Set();
+      set.add(edge.to);
+      factorToRisks.set(edge.from, set);
+    }
+  }
+
+  const keptEdges: EdgeT[] = [];
+  const newEdges: EdgeT[] = [];
+  let removedCount = 0;
+  let rerouted = 0;
+  let skippedCount = 0;
+
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    if (fromKind === "option" && toKind === "risk") {
+      // Check if option has a compliant bridge (option→factor→risk) to this risk
+      const optFactors = optionToFactors.get(edge.from);
+      let hasBridge = false;
+      if (optFactors) {
+        for (const fId of optFactors) {
+          if (factorToRisks.get(fId)?.has(edge.to)) {
+            hasBridge = true;
+            break;
+          }
+        }
+      }
+
+      // Case 1: option already has a compliant path to this risk AND risk reaches goal
+      // — safe to remove the shortcut since the causal influence is preserved
+      if (hasBridge && canReachGoalViaAllowed(edge.to, nodeKindMap, edges, edge)) {
+        removedCount++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Removed option→risk shortcut (compliant bridge exists and risk reaches goal)`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          pattern: "option_risk_shortcut",
+        }, `Auto-fixed forbidden edge: option→risk shortcut ${edge.from}→${edge.to}`);
+        continue;
+      }
+
+      // Case 2: option has a compliant bridge but risk has no goal path — still safe
+      // to remove since the option→factor→risk path preserves causal influence
+      if (hasBridge) {
+        removedCount++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Removed option→risk shortcut (option already reaches risk via controllable factor)`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          pattern: "option_risk_shortcut_existing_bridge",
+        }, `Auto-fixed forbidden edge: option→risk ${edge.from}→${edge.to} (bridge exists)`);
+        continue;
+      }
+
+      // Case 3: reroute via the best available controllable factor
+      if (optFactors && optFactors.size > 0) {
+        // Pick the first controllable factor connected to this option
+        const bridgeFactor = optFactors.values().next().value;
+        // Insert factor→risk edge with moderate defaults
+        newEdges.push(patchEdgeNumeric(
+          {
+            from: bridgeFactor,
+            to: edge.to,
+            effect_direction: edge.effect_direction ?? "positive",
+            origin: "repair",
+            provenance: { source: "synthetic", quote: "Rerouted option→risk via controllable factor" },
+            provenance_source: "synthetic",
+          } as EdgeT,
+          format,
+          { mean: 0.5, std: 0.15, existence: 0.9 },
+        ));
+        // Track the new edge in factorToRisks so subsequent shortcuts to the same risk find it
+        const set = factorToRisks.get(bridgeFactor!) ?? new Set();
+        set.add(edge.to);
+        factorToRisks.set(bridgeFactor!, set);
+
+        removedCount++;
+        rerouted++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Rerouted option→risk via ${bridgeFactor}: removed shortcut, added factor→risk edge`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          bridge_factor: bridgeFactor,
+          pattern: "option_risk_shortcut_rerouted",
+        }, `Rerouted forbidden edge: option→risk ${edge.from}→${edge.to} via ${bridgeFactor}`);
+        continue;
+      }
+
+      // Case 4: no controllable factor at all — defer to LLM repair
+      skippedCount++;
+      keptEdges.push(edge);
+      log.warn({
+        event: "cee.deterministic_sweep.forbidden_edge_deferred",
+        from: edge.from,
+        to: edge.to,
+        pattern: "option_risk_no_factor",
+        reason: "no controllable factor available; deferred to LLM repair",
+      }, `Deferred forbidden edge to LLM: option→risk ${edge.from}→${edge.to} (no controllable factor)`);
+    } else {
+      keptEdges.push(edge);
+    }
+  }
+
+  if (removedCount > 0 || newEdges.length > 0) {
+    (graph as any).edges = [...keptEdges, ...newEdges];
+  }
+
+  return { repairs, removedCount, rerouted, skippedCount };
+}
+
+// ---------------------------------------------------------------------------
+// Proactive: option→goal shortcut removal
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove option→goal shortcut edges.
+ *
+ * For each forbidden option→goal edge:
+ * 1. If the option already has a complete path to goal through factors and
+ *    outcomes/risks (via allowed patterns), remove the shortcut.
+ * 2. If no valid path exists, find the controllable factor the option connects to,
+ *    find or create an outcome that bridges to the goal, and reroute the chain.
+ * 3. If no controllable factor exists, log a warning and defer to LLM repair.
+ */
+export function fixOptionGoalShortcut(graph: GraphT, format: EdgeFormat): {
+  repairs: Repair[];
+  removedCount: number;
+  rerouted: number;
+  skippedCount: number;
+} {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  // Normalise "action" → "option" for topology matching (V3 compat)
+  const nodeKindMap = new Map<string, string>();
+  const nodeLabelMap = new Map<string, string>();
+  for (const node of nodes) {
+    nodeKindMap.set(node.id, normaliseKind(node.kind));
+    nodeLabelMap.set(node.id, node.label ?? node.id);
+  }
+
+  // Find controllable factors (explicitly tagged or inferred from option→factor edges)
+  const controllableIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind === "factor" && node.category === "controllable") controllableIds.add(node.id);
+  }
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) === "option" && nodeKindMap.get(edge.to) === "factor") {
+      controllableIds.add(edge.to);
+    }
+  }
+
+  // Which controllable factors does each option connect to?
+  const optionToFactors = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) === "option" && controllableIds.has(edge.to)) {
+      const set = optionToFactors.get(edge.from) ?? new Set();
+      set.add(edge.to);
+      optionToFactors.set(edge.from, set);
+    }
+  }
+
+  // Check if option can reach goal via allowed patterns (excluding the forbidden edge)
+  function optionCanReachGoal(optionId: string, goalId: string, excludeEdge: EdgeT): boolean {
+    // BFS forward from option, but only follow option→factor edges first
+    const optFactors = optionToFactors.get(optionId);
+    if (!optFactors || optFactors.size === 0) return false;
+
+    // From each controllable factor, check if goal is reachable via allowed patterns
+    for (const fId of optFactors) {
+      if (canReachGoalViaAllowed(fId, nodeKindMap, edges, excludeEdge)) return true;
+    }
+    return false;
+  }
+
+  const keptEdges: EdgeT[] = [];
+  const newNodes: NodeT[] = [];
+  const newEdges: EdgeT[] = [];
+  let removedCount = 0;
+  let rerouted = 0;
+  let skippedCount = 0;
+
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    if (fromKind === "option" && toKind === "goal") {
+      // Case 1: option has a valid path to goal through factors — safe to remove
+      if (optionCanReachGoal(edge.from, edge.to, edge)) {
+        removedCount++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Removed option→goal shortcut (valid path exists via factors)`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          pattern: "option_goal_shortcut",
+        }, `Auto-fixed forbidden edge: option→goal shortcut ${edge.from}→${edge.to}`);
+        continue;
+      }
+
+      // Case 2: reroute via controllable factor + synthetic outcome
+      const optFactors = optionToFactors.get(edge.from);
+      if (optFactors && optFactors.size > 0) {
+        const bridgeFactor = optFactors.values().next().value;
+        const factorLabel = nodeLabelMap.get(bridgeFactor!) ?? bridgeFactor;
+        let outcomeId = `out_${bridgeFactor}_impact`;
+
+        // Verify existing node (if any) is kind-compatible; generate collision-safe ID otherwise
+        if (nodeKindMap.has(outcomeId) && nodeKindMap.get(outcomeId) !== "outcome") {
+          let suffix = 2;
+          while (nodeKindMap.has(`out_${bridgeFactor}_impact_${suffix}`)) suffix++;
+          outcomeId = `out_${bridgeFactor}_impact_${suffix}`;
+        }
+
+        // Create synthetic outcome if it doesn't exist
+        if (!nodeKindMap.has(outcomeId)) {
+          newNodes.push({
+            id: outcomeId,
+            kind: "outcome",
+            label: `${factorLabel} Impact`,
+          } as NodeT);
+          nodeKindMap.set(outcomeId, "outcome");
+        }
+
+        // factor→outcome edge (if not already present)
+        const hasFactorOutcome = edges.some(
+          (e) => e.from === bridgeFactor && e.to === outcomeId,
+        ) || newEdges.some((e) => e.from === bridgeFactor && e.to === outcomeId);
+
+        if (!hasFactorOutcome) {
+          newEdges.push(patchEdgeNumeric(
+            {
+              from: bridgeFactor,
+              to: outcomeId,
+              effect_direction: "positive",
+              origin: "repair",
+              provenance: { source: "synthetic", quote: "Rerouted option→goal via factor→outcome→goal" },
+              provenance_source: "synthetic",
+            } as EdgeT,
+            format,
+            { mean: 0.5, std: 0.15, existence: 0.9 },
+          ));
+        }
+
+        // outcome→goal edge (if not already present)
+        const hasOutcomeGoal = edges.some(
+          (e) => e.from === outcomeId && e.to === edge.to,
+        ) || newEdges.some((e) => e.from === outcomeId && e.to === edge.to);
+
+        if (!hasOutcomeGoal) {
+          newEdges.push(patchEdgeNumeric(
+            {
+              from: outcomeId,
+              to: edge.to,
+              effect_direction: "positive",
+              origin: "repair",
+              provenance: { source: "synthetic", quote: "Rerouted option→goal via factor→outcome→goal" },
+              provenance_source: "synthetic",
+            } as EdgeT,
+            format,
+            { mean: 0.5, std: 0.15, existence: 0.9 },
+          ));
+        }
+
+        removedCount++;
+        rerouted++;
+        repairs.push({
+          code: "FORBIDDEN_EDGE_AUTO_FIXED",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action: `Rerouted option→goal via ${bridgeFactor}→${outcomeId}→${edge.to}`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.forbidden_edge_fixed",
+          from: edge.from,
+          to: edge.to,
+          bridge_factor: bridgeFactor,
+          outcome: outcomeId,
+          pattern: "option_goal_shortcut_rerouted",
+        }, `Rerouted forbidden edge: option→goal ${edge.from}→${edge.to} via ${bridgeFactor}→${outcomeId}`);
+        continue;
+      }
+
+      // Case 3: no controllable factor — defer to LLM repair
+      skippedCount++;
+      keptEdges.push(edge);
+      log.warn({
+        event: "cee.deterministic_sweep.forbidden_edge_deferred",
+        from: edge.from,
+        to: edge.to,
+        pattern: "option_goal_no_factor",
+        reason: "no controllable factor available; deferred to LLM repair",
+      }, `Deferred forbidden edge to LLM: option→goal ${edge.from}→${edge.to} (no controllable factor)`);
+    } else {
+      keptEdges.push(edge);
+    }
+  }
+
+  if (removedCount > 0 || newEdges.length > 0 || newNodes.length > 0) {
+    (graph as any).nodes = [...nodes, ...newNodes];
+    (graph as any).edges = [...keptEdges, ...newEdges];
+  }
+
+  return { repairs, removedCount, rerouted, skippedCount };
+}
+
+// ---------------------------------------------------------------------------
 // Proactive: disconnected observable/external pruning
 // ---------------------------------------------------------------------------
 
@@ -1053,7 +1449,6 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
 
   // Step 4d: Option→outcome shortcut removal — ALWAYS run.
   // Removes option→outcome edges when the outcome already reaches goal via valid chain.
-  // Other forbidden patterns (option→goal, option→risk, etc.) stay Bucket C for LLM.
   const optionOutcomeResult = fixOptionOutcomeShortcut(graph);
   allRepairs.push(...optionOutcomeResult.repairs);
 
@@ -1064,6 +1459,44 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       removed_count: optionOutcomeResult.removedCount,
       skipped_count: optionOutcomeResult.skippedCount,
     }, `Removed ${optionOutcomeResult.removedCount} option→outcome shortcut(s)`);
+  }
+
+  // Step 4e: Option→risk shortcut removal — gated by ENABLE_OPTION_SHORTCUT_REPAIR.
+  // Removes option→risk edges by removing (when valid path exists) or rerouting
+  // through a controllable factor.
+  let optionRiskResult = { repairs: [] as Repair[], removedCount: 0, rerouted: 0, skippedCount: 0 };
+  if (config.features.optionShortcutRepair) {
+    optionRiskResult = fixOptionRiskShortcut(graph, format);
+    allRepairs.push(...optionRiskResult.repairs);
+
+    if (optionRiskResult.removedCount > 0) {
+      log.info({
+        event: "cee.deterministic_sweep.option_risk_shortcut",
+        request_id: ctx.requestId,
+        removed_count: optionRiskResult.removedCount,
+        rerouted: optionRiskResult.rerouted,
+        skipped_count: optionRiskResult.skippedCount,
+      }, `Fixed ${optionRiskResult.removedCount} option→risk shortcut(s)`);
+    }
+  }
+
+  // Step 4f: Option→goal shortcut removal — gated by ENABLE_OPTION_SHORTCUT_REPAIR.
+  // Removes option→goal edges by removing (when valid path exists) or rerouting
+  // through a controllable factor and synthetic outcome.
+  let optionGoalResult = { repairs: [] as Repair[], removedCount: 0, rerouted: 0, skippedCount: 0 };
+  if (config.features.optionShortcutRepair) {
+    optionGoalResult = fixOptionGoalShortcut(graph, format);
+    allRepairs.push(...optionGoalResult.repairs);
+
+    if (optionGoalResult.removedCount > 0) {
+      log.info({
+        event: "cee.deterministic_sweep.option_goal_shortcut",
+        request_id: ctx.requestId,
+        removed_count: optionGoalResult.removedCount,
+        rerouted: optionGoalResult.rerouted,
+        skipped_count: optionGoalResult.skippedCount,
+      }, `Fixed ${optionGoalResult.removedCount} option→goal shortcut(s)`);
+    }
   }
 
   // Step 5: Proactive unreachable factor handling — ALWAYS run regardless of violations.
@@ -1158,6 +1591,12 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       factor_goal_splits: factorGoalResult.splitCount,
       option_outcome_shortcuts_removed: optionOutcomeResult.removedCount,
       option_outcome_shortcuts_skipped: optionOutcomeResult.skippedCount,
+      option_risk_shortcuts_removed: optionRiskResult.removedCount,
+      option_risk_shortcuts_rerouted: optionRiskResult.rerouted,
+      option_risk_shortcuts_skipped: optionRiskResult.skippedCount,
+      option_goal_shortcuts_removed: optionGoalResult.removedCount,
+      option_goal_shortcuts_rerouted: optionGoalResult.rerouted,
+      option_goal_shortcuts_skipped: optionGoalResult.skippedCount,
       disconnected_observables_pruned: disconnectedObservableResult.pruned,
       status_quo: {
         fixed: statusQuoResult.fixed,

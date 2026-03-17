@@ -24,7 +24,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 vi.mock("../../src/config/index.js", () => ({
-  config: { cee: {} },
+  config: { cee: {}, features: { optionShortcutRepair: true } },
   isProduction: vi.fn().mockReturnValue(true),
 }));
 

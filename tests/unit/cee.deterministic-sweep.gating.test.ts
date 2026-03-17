@@ -26,7 +26,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 vi.mock("../../src/config/index.js", () => ({
-  config: { cee: {} },
+  config: { cee: {}, features: { optionShortcutRepair: true } },
   isProduction: vi.fn().mockReturnValue(true),
 }));
 
@@ -37,6 +37,7 @@ vi.mock("../../src/validators/graph-validator.js", () => ({
 // ── Imports ─────────────────────────────────────────────────────────────────
 
 import { runDeterministicSweep } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
+import { config } from "../../src/config/index.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -343,5 +344,31 @@ describe("LLM repair gating — bucket-specific scenarios", () => {
     // Status quo should have been wired
     const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
     expect(sweepTrace.status_quo.fixed).toBe(true);
+  });
+
+  it("option shortcut handlers skipped when optionShortcutRepair = false", async () => {
+    const original = (config as any).features.optionShortcutRepair;
+    (config as any).features.optionShortcutRepair = false;
+
+    try {
+      mockValidateGraph.mockReturnValue(validResult());
+
+      const graph = makeGraph();
+      // Inject a forbidden option→risk edge
+      graph.nodes.push({ id: "risk_1", kind: "risk", label: "Risk" });
+      graph.edges.push({ from: "opt_a", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9, effect_direction: "positive" });
+
+      const ctx = makeCtx(graph);
+      await runDeterministicSweep(ctx);
+
+      // The forbidden edge should still be present (handler was gated off)
+      expect(ctx.graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(true);
+
+      const sweepTrace = ctx.repairTrace?.deterministic_sweep as any;
+      expect(sweepTrace.option_risk_shortcuts_removed).toBe(0);
+      expect(sweepTrace.option_goal_shortcuts_removed).toBe(0);
+    } finally {
+      (config as any).features.optionShortcutRepair = original;
+    }
   });
 });

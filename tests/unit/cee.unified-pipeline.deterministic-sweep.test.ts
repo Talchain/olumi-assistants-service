@@ -18,7 +18,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 vi.mock("../../src/config/index.js", () => ({
-  config: { cee: {} },
+  config: { cee: {}, features: { optionShortcutRepair: true } },
   isProduction: vi.fn().mockReturnValue(true),
 }));
 
@@ -1485,7 +1485,7 @@ describe("analysis_ready blocker scope (unit-level)", () => {
 // Factor→Goal Edge Splitting (B4 minimisation topology fix)
 // =============================================================================
 
-import { fixFactorGoalEdges, fixDisconnectedObservables, fixOptionOutcomeShortcut, fixNanValues } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
+import { fixFactorGoalEdges, fixDisconnectedObservables, fixOptionOutcomeShortcut, fixOptionRiskShortcut, fixOptionGoalShortcut, fixNanValues } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
 
 describe("fixFactorGoalEdges", () => {
   it("splits a factor→goal edge into factor→outcome→goal", () => {
@@ -2246,5 +2246,344 @@ describe("NaN-fix std alignment", () => {
     const repairs = fixNanValues(graph, []);
     expect(repairs).toHaveLength(0);
     expect(graph.edges[0].strength_std).toBe(0.3);
+  });
+});
+
+// =============================================================================
+// fixOptionRiskShortcut
+// =============================================================================
+
+describe("fixOptionRiskShortcut", () => {
+  it("removes option→risk when risk already reaches goal via valid chain", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    // Forbidden edge removed, 3 edges remain
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+  });
+
+  it("reroutes option→risk when risk has no goal path and option has controllable factor", () => {
+    // Risk does NOT reach goal — must reroute via factor
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 }, // Forbidden
+        // No risk_1→goal_1 edge — risk has no path to goal
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // Forbidden edge removed, new factor→risk added
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("reroutes option→risk when risk reaches goal but no factor→risk bridge exists", () => {
+    // Risk reaches goal but option has no compliant bridge — reroute via factor
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1); // Rerouted via Case 3 (no bridge, factor available)
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(false);
+    // New factor→risk edge created
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("handles multiple forbidden option→risk edges", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk 1" },
+        { id: "risk_2", kind: "risk", label: "Risk 2" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_b", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden
+        { from: "opt_b", to: "risk_2", strength_mean: 0.3 }, // Forbidden
+        { from: "opt_a", to: "risk_2", strength_mean: 0.4 }, // Forbidden
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+        { from: "risk_2", to: "goal_1", strength_mean: 0.7 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(3);
+    // No option→risk edges remain
+    expect(graph.edges.filter((e: any) => {
+      const fromNode = graph.nodes.find((n: any) => n.id === e.from);
+      const toNode = graph.nodes.find((n: any) => n.id === e.to);
+      return fromNode?.kind === "option" && toNode?.kind === "risk";
+    })).toHaveLength(0);
+  });
+
+  it("no-op when no option→risk edges exist", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(result.rerouted).toBe(0);
+    expect(graph.edges).toHaveLength(3);
+  });
+
+  it("defers to LLM when no controllable factor exists and risk has no goal path", () => {
+    // No factor, no goal path — cannot fix, defer
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden, no factor, no goal path
+        // No risk_1→goal_1 edge
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    // Edge preserved for LLM
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "risk_1")).toBe(true);
+  });
+
+  it("handles V3 'action' kind as equivalent to 'option'", () => {
+    const graph: any = {
+      nodes: [
+        { id: "act_a", kind: "action", label: "A" },  // V3 kind
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "act_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5 },
+        { from: "act_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden action→risk
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(graph.edges.some((e: any) => e.from === "act_a" && e.to === "risk_1")).toBe(false);
+  });
+
+  it("removes shortcut when option→factor→risk bridge already exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "risk_1", kind: "risk", label: "Risk" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "risk_1", strength_mean: 0.5 }, // Valid bridge exists
+        { from: "opt_a", to: "risk_1", strength_mean: 0.5 }, // Forbidden shortcut
+        { from: "risk_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionRiskShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0); // Used existing bridge, no reroute
+    expect(graph.edges).toHaveLength(3);
+  });
+});
+
+// =============================================================================
+// fixOptionGoalShortcut
+// =============================================================================
+
+describe("fixOptionGoalShortcut", () => {
+  it("removes option→goal when valid path exists through factors", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.15, belief_exists: 0.9 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(0);
+    expect(result.repairs[0].code).toBe("FORBIDDEN_EDGE_AUTO_FIXED");
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "goal_1")).toBe(false);
+  });
+
+  it("reroutes option→goal when no valid path exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden, no valid chain
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // Forbidden edge removed, synthetic outcome created
+    expect(graph.edges.some((e: any) => e.from === "opt_a" && e.to === "goal_1")).toBe(false);
+    // New nodes/edges created: factor→outcome, outcome→goal
+    expect(graph.nodes.some((n: any) => n.kind === "outcome" && n.id.includes("fac_1"))).toBe(true);
+    const syntheticOutcome = graph.nodes.find((n: any) => n.kind === "outcome" && n.id.includes("fac_1"));
+    expect(graph.edges.some((e: any) => e.from === "fac_1" && e.to === syntheticOutcome.id)).toBe(true);
+    expect(graph.edges.some((e: any) => e.from === syntheticOutcome.id && e.to === "goal_1")).toBe(true);
+  });
+
+  it("no-op when no option→goal edges exist", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "fac_1", to: "out_1", strength_mean: 0.5 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8 },
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(graph.edges).toHaveLength(3);
+  });
+
+  it("defers to LLM when no controllable factor exists", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden, no factor
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0].from).toBe("opt_a");
+  });
+
+  it("does not duplicate synthetic outcome for multiple option→goal edges via same factor", () => {
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_b", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+        { from: "opt_b", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(2);
+    // Only one synthetic outcome node created
+    const syntheticOutcomes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(syntheticOutcomes).toHaveLength(1);
+  });
+
+  it("generates collision-safe outcome ID when existing node has incompatible kind", () => {
+    // Pre-existing node with the synthetic ID but kind "factor" — should not be reused
+    const graph: any = {
+      nodes: [
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "fac_1", kind: "factor", label: "Factor", category: "controllable" },
+        { id: "out_fac_1_impact", kind: "factor", label: "Collider" }, // Wrong kind!
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "fac_1", strength_mean: 1 },
+        { from: "opt_a", to: "goal_1", strength_mean: 0.5 }, // Forbidden
+      ],
+    };
+
+    const result = fixOptionGoalShortcut(graph, "V1_FLAT");
+    expect(result.removedCount).toBe(1);
+    expect(result.rerouted).toBe(1);
+    // A new outcome node was created (not reusing the factor with clashing ID)
+    const outcomes = graph.nodes.filter((n: any) => n.kind === "outcome");
+    expect(outcomes).toHaveLength(1);
+    // The outcome ID is the collision-safe variant
+    expect(outcomes[0].id).toBe("out_fac_1_impact_2");
   });
 });

@@ -266,6 +266,7 @@ const ConfigSchema = z.object({
     moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
     orchestratorStreaming: booleanString.default(false), // ENABLE_ORCHESTRATOR_STREAMING — SSE streaming for orchestrator turns
     strictPromptValidation: booleanString.default(false), // CEE_STRICT_PROMPT_VALIDATION — throw on error-severity prompt-zone violations
+    optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
   }),
 
   // Prompt Cache Configuration
@@ -577,6 +578,7 @@ function parseConfig(): Config {
       moeSpikeEnabled: env.MOE_SPIKE_ENABLED,
       orchestratorStreaming: env.ENABLE_ORCHESTRATOR_STREAMING,
       strictPromptValidation: env.CEE_STRICT_PROMPT_VALIDATION,
+      optionShortcutRepair: env.ENABLE_OPTION_SHORTCUT_REPAIR,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
