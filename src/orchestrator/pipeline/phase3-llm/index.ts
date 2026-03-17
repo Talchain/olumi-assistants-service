@@ -249,11 +249,13 @@ export async function phase3Generate(
   if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
     // Check prerequisites (reuses top-level `context`)
     const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveIntentGate.tool];
-    // generate_model button bypasses structured-framing prerequisites — the user
-    // message IS the brief and the user has explicitly requested generation.
+    // generate_model button and brief_detection bypass structured-framing prerequisites —
+    // in both cases the user's message IS the brief and generation is clearly intended.
     const prerequisitesBypassed = effectiveIntentGate.tool === 'draft_graph'
-      && explicitGenerate.kind === 'deterministic'
-      && intentGate.matched_pattern === 'generate_model';
+      && (
+        (explicitGenerate.kind === 'deterministic' && intentGate.matched_pattern === 'generate_model')
+        || intentGate.matched_pattern === 'brief_detection'
+      );
     const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(context) : true);
     if (prerequisitesBypassed) {
       log.info(
@@ -727,8 +729,10 @@ function wouldSkipLLM(
   // Prerequisites check
   const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveGate.tool as ToolName];
   const prerequisitesBypassed = effectiveGate.tool === 'draft_graph'
-    && explicitGenerate.kind === 'deterministic'
-    && signals.intentGate.matched_pattern === 'generate_model';
+    && (
+      (explicitGenerate.kind === 'deterministic' && signals.intentGate.matched_pattern === 'generate_model')
+      || signals.intentGate.matched_pattern === 'brief_detection'
+    );
   const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(signals.context) : true);
   if (!prerequisitesMet) return false;
 
@@ -1067,10 +1071,11 @@ function buildExplicitGenerateRoute(
     return { kind: 'none' };
   }
 
-  // When generate_model is explicitly set (UI "Generate Model" button), bypass the
-  // minimum-context check — the user has decided to draft NOW with whatever context
-  // exists. The user's message IS the brief; don't ask for more framing.
-  const isButtonTriggered = intentGate.matched_pattern === 'generate_model';
+  // When generate_model is explicitly set (UI "Generate Model" button), or when
+  // brief_detection matched (the message IS the brief), bypass the minimum-context
+  // check — the user has already provided the brief content; don't ask for more framing.
+  const isButtonTriggered = intentGate.matched_pattern === 'generate_model'
+    || intentGate.matched_pattern === 'brief_detection';
   if (!isButtonTriggered && !hasMinimumViableFramingContext(context, userMessage)) {
     return {
       kind: 'clarify',

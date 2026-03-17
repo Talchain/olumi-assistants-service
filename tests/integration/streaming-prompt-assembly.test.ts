@@ -236,6 +236,131 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     });
   });
 
+  // ── brief_detection bypass regression (F-BD-01) ──────────────────────────
+  // Before the fix: wouldSkipLLM returned false for brief_detection + empty framing
+  // because DETERMINISTIC_PREREQUISITES.draft_graph checked only structured framing
+  // fields and lacked the brief_detection bypass that V1 (turn-handler.ts) had.
+  // After the fix: both phase3Generate and wouldSkipLLM bypass prerequisites when
+  // matched_pattern === 'brief_detection', mirroring V1 behaviour.
+
+  it("phase3Generate: brief_detection with empty framing dispatches draft_graph deterministically (not LLM)", async () => {
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "brief_detection",
+      normalised_message: "i need to decide whether to hire a cto or outsource engineering",
+    });
+
+    const client = makeMockLLMClient();
+    // Empty framing — exactly the condition that caused the prerequisite failure
+    const ctx = makeEnrichedContext({
+      graph: null,
+      framing: null,
+      stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+    });
+
+    const result = await phase3Generate(
+      ctx, makeSpecialistResult(), client, "req-bd-phase3",
+      "I need to decide whether to hire a CTO or outsource engineering",
+    );
+
+    // Must NOT call LLM — brief_detection bypasses framing prerequisites
+    expect(client.chatWithTools).not.toHaveBeenCalled();
+    expect(result.tool_invocations).toHaveLength(1);
+    expect(result.tool_invocations[0].name).toBe("draft_graph");
+    expect(result.tool_invocations[0].id).toBe("deterministic");
+
+    // Reset mock
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  it("phase3PrepareForStreaming: brief_detection with empty framing returns deterministic (wouldSkipLLM: true)", async () => {
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "brief_detection",
+      normalised_message: "i need to decide whether to hire a cto or outsource engineering",
+    });
+
+    const client = makeMockLLMClient();
+    const ctx = makeEnrichedContext({
+      graph: null,
+      framing: null,
+      stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+    });
+
+    const prep = await phase3PrepareForStreaming(
+      ctx, makeSpecialistResult(), client, "req-bd-stream",
+      "I need to decide whether to hire a CTO or outsource engineering",
+    );
+
+    // wouldSkipLLM must return true → prep.kind === 'deterministic'
+    expect(prep.kind).toBe("deterministic");
+    if (prep.kind !== "deterministic") throw new Error("expected deterministic");
+
+    // The deterministic result must target draft_graph
+    expect(prep.result.tool_invocations).toHaveLength(1);
+    expect(prep.result.tool_invocations[0].name).toBe("draft_graph");
+    expect(prep.result.tool_invocations[0].id).toBe("deterministic");
+
+    // LLM must not have been called
+    expect(client.chatWithTools).not.toHaveBeenCalled();
+
+    // Reset mock
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  it("phase3PrepareForStreaming: brief_detection parity — streaming matches non-streaming for empty framing", async () => {
+    // Both paths must return deterministic draft_graph when brief_detection fires with empty framing.
+    // This is the exact regression scenario: streaming returned 'llm' (no draft_graph) before the fix.
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "brief_detection",
+      normalised_message: "deciding between two vendors for our erp system",
+    });
+
+    const ctx = makeEnrichedContext({
+      graph: null,
+      framing: null,
+      stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+    });
+    const message = "Deciding between two vendors for our ERP system";
+
+    const streamClient = makeMockLLMClient();
+    const nonStreamClient = makeMockLLMClient();
+
+    const [prep, nonStreamResult] = await Promise.all([
+      phase3PrepareForStreaming(ctx, makeSpecialistResult(), streamClient, "req-parity-bd-s", message),
+      phase3Generate(ctx, makeSpecialistResult(), nonStreamClient, "req-parity-bd-ns", message),
+    ]);
+
+    // Both must be deterministic draft_graph — no LLM calls on either path
+    expect(prep.kind).toBe("deterministic");
+    expect(streamClient.chatWithTools).not.toHaveBeenCalled();
+    expect(nonStreamClient.chatWithTools).not.toHaveBeenCalled();
+    if (prep.kind !== "deterministic") throw new Error("expected deterministic");
+    expect(prep.result.tool_invocations[0].name).toBe("draft_graph");
+    expect(nonStreamResult.tool_invocations[0].name).toBe("draft_graph");
+
+    // Reset mock
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  // ── end brief_detection bypass regression ────────────────────────────────
+
   it("streaming and non-streaming LLM paths produce same system prompt length", async () => {
     const streamClient = makeMockLLMClient();
     const nonStreamClient = makeMockLLMClient();
