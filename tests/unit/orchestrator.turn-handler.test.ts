@@ -1095,5 +1095,7 @@ describe('handleTurn — stage inference override', () => {
     expect(result.httpStatus).toBe(200);
     // With flag off, should fall through to LLM (no deterministic draft_graph routing)
     expect(mockChatWithTools).toHaveBeenCalledOnce();
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).not.toBe('draft_graph');
   });
 });
