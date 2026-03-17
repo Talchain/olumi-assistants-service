@@ -115,7 +115,7 @@ vi.mock("../../../src/config/index.js", async (importOriginal) => {
 const { createPLoTClient } = await import("../../../src/orchestrator/plot-client.js");
 
 /** Valid run payload for tests — passes outbound structural validation (H.5) */
-const VALID_RUN_PAYLOAD = { graph: { nodes: [], edges: [] }, options: [{ option_id: "opt_1" }], goal_node_id: "goal_1" };
+const VALID_RUN_PAYLOAD = { graph: { nodes: [], edges: [] }, options: [{ id: "opt_1", option_id: "opt_1", interventions: { fac_1: 0.5 } }], goal_node_id: "goal_1" };
 
 /** Valid validate-patch payload for tests — passes outbound structural validation (H.5) */
 const VALID_PATCH_PAYLOAD = { graph: { nodes: [], edges: [] }, operations: [{ op: "add_node" }] };

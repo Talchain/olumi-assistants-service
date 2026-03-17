@@ -42,11 +42,36 @@ import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
  * Minimal Zod schema for PLoT /v2/run responses.
  * Validates structural liveness — required fields exist with correct types.
  * Uses .passthrough() so unknown fields are preserved, not stripped.
+ *
+ * PLoT returns option data in `option_comparison` (not `results`), and
+ * `response_hash` at the top level (not inside `meta`). Accept both shapes
+ * so we don't reject valid PLoT responses as malformed.
  */
 const V2RunResponseMinimal = z.object({
-  results: z.array(z.unknown()).min(1),
-  meta: z.object({ response_hash: z.string().min(1) }).passthrough(),
-}).passthrough();
+  // PLoT returns option_comparison[], not results[] — accept either
+  results: z.array(z.unknown()).min(1).optional(),
+  option_comparison: z.array(z.unknown()).min(1).optional(),
+  // response_hash can be top-level or inside meta
+  response_hash: z.string().min(1).optional(),
+  meta: z.object({
+    response_hash: z.string().min(1).optional(),
+  }).passthrough().optional(),
+}).passthrough().refine(
+  (val) => {
+    // Must have at least one of results or option_comparison with data
+    const hasResults = Array.isArray(val.results) && val.results.length > 0;
+    const hasOptionComparison = Array.isArray(val.option_comparison) && val.option_comparison.length > 0;
+    if (!hasResults && !hasOptionComparison) return false;
+
+    // Must have response_hash somewhere
+    const hasHash = (typeof val.response_hash === 'string' && val.response_hash.length > 0) ||
+      (typeof val.meta?.response_hash === 'string' && val.meta.response_hash.length > 0);
+    return hasHash;
+  },
+  {
+    message: 'PLoT response must include (results[] or option_comparison[]) and response_hash (top-level or in meta)',
+  },
+);
 
 /**
  * Minimal Zod schema for PLoT /v1/validate-patch success responses.
@@ -192,7 +217,8 @@ export type ValidatePatchResult = ValidatePatchSuccess | ValidatePatchRejection 
 /**
  * Validate the outbound payload for /v2/run.
  * Catches "completely wrong shape" errors before the HTTP call.
- * Does NOT validate field-level shapes (PLoT does that).
+ * Validates the PLoT-facing contract: options must have `id` (PLoT primary key)
+ * and `interventions` must be a flat { factor_id: number } map.
  */
 function validateRunPayload(payload: Record<string, unknown>): void {
   if (payload.graph == null) {
@@ -203,8 +229,18 @@ function validateRunPayload(payload: Record<string, unknown>): void {
   }
   for (let i = 0; i < payload.options.length; i++) {
     const opt = payload.options[i] as Record<string, unknown> | undefined;
-    if (!opt || typeof opt.option_id !== 'string') {
-      throwPayloadError('run', `options[${i}].option_id must be a string`);
+    if (!opt || typeof opt.id !== 'string' || opt.id === '') {
+      throwPayloadError('run', `options[${i}].id must be a non-empty string`);
+    }
+    // Validate interventions is a flat { factor_id: number } map
+    if (opt.interventions == null || typeof opt.interventions !== 'object' || Array.isArray(opt.interventions)) {
+      throwPayloadError('run', `options[${i}].interventions must be a non-null object`);
+    }
+    const interventions = opt.interventions as Record<string, unknown>;
+    for (const [factorId, val] of Object.entries(interventions)) {
+      if (typeof val !== 'number' || !Number.isFinite(val)) {
+        throwPayloadError('run', `options[${i}].interventions["${factorId}"] must be a finite number, got ${typeof val}`);
+      }
     }
   }
   if (typeof payload.goal_node_id !== 'string' || payload.goal_node_id === '') {

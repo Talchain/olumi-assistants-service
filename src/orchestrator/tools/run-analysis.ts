@@ -122,10 +122,45 @@ export async function handleRunAnalysis(
     );
   }
 
-  // Build PLoT payload: full graph + analysis_inputs
+  // Build PLoT payload: only fields in PLoT's allowlist.
+  // PLoT has strict unknown-field rejection at the top level — any field
+  // not in the allowlist returns 400. Spread would leak disallowed fields.
+  const inputs = context.analysis_inputs!;
+  const inputsAny = inputs as Record<string, unknown>;
+
+  // Derive goal_node_id: prefer analysis_inputs value, fall back to graph
+  let goalNodeId = inputsAny.goal_node_id as string | undefined;
+  if (!goalNodeId && context.graph) {
+    const goalNode = context.graph.nodes.find((n) => n.kind === 'goal');
+    if (goalNode) goalNodeId = goalNode.id;
+  }
+
+  // Allowlist-construct each option: id, option_id, label, interventions.
+  // Normalize interventions to { factor_id: number } — PLoT expects flat
+  // numeric maps. CEE V3 schema uses { factor_id: { value, source, ... } }.
+  const plotOptions = inputs.options.map((opt, idx) => {
+    const normalizedInterventions = normalizeInterventions(opt.interventions, opt.option_id, idx);
+    return {
+      id: (opt as unknown as Record<string, unknown>).id ?? opt.option_id,
+      option_id: opt.option_id,
+      label: opt.label,
+      interventions: normalizedInterventions,
+    };
+  });
+
   const payload: Record<string, unknown> = {
     graph: context.graph,
-    ...context.analysis_inputs,
+    options: plotOptions,
+    goal_node_id: goalNodeId,
+    request_id: requestId,
+    ...(inputs.seed != null && { seed: inputs.seed }),
+    ...(inputs.n_samples != null && { n_samples: inputs.n_samples }),
+    // PLoT calls this field "goal_constraints", not "constraints"
+    ...(inputs.constraints != null && { goal_constraints: inputs.constraints }),
+    // Forward optional PLoT fields if present in analysis_inputs
+    ...(inputsAny.detail_level != null && { detail_level: inputsAny.detail_level }),
+    ...(inputsAny.goal_threshold != null && { goal_threshold: inputsAny.goal_threshold }),
+    ...(inputsAny.include_thresholds != null && { include_thresholds: inputsAny.include_thresholds }),
   };
 
   const startTime = Date.now();
@@ -213,6 +248,65 @@ export async function handleRunAnalysis(
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Normalize interventions to PLoT's expected { factor_id: number } map.
+ *
+ * CEE V3 schema uses { factor_id: { value: number, source: ..., ... } }.
+ * Analysis-ready helper produces { factor_id: number } directly.
+ * Accept both, extracting the numeric value from either shape.
+ *
+ * Throws OrchestratorError if any intervention value cannot be resolved
+ * to a finite number — this is a hard fail to prevent silent bad data.
+ */
+function normalizeInterventions(
+  raw: Record<string, unknown>,
+  optionId: string,
+  optionIndex: number,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+
+  for (const [factorId, value] of Object.entries(raw)) {
+    let numeric: number;
+
+    if (typeof value === 'number') {
+      numeric = value;
+    } else if (value != null && typeof value === 'object' && 'value' in value) {
+      // V3 InterventionV3 shape: { value: number, source: ..., ... }
+      const inner = (value as { value: unknown }).value;
+      if (typeof inner === 'number') {
+        numeric = inner;
+      } else {
+        throwInterventionError(optionId, optionIndex, factorId, value);
+      }
+    } else {
+      throwInterventionError(optionId, optionIndex, factorId, value);
+    }
+
+    if (!Number.isFinite(numeric!)) {
+      throwInterventionError(optionId, optionIndex, factorId, value);
+    }
+
+    result[factorId] = numeric!;
+  }
+
+  return result;
+}
+
+function throwInterventionError(
+  optionId: string,
+  optionIndex: number,
+  factorId: string,
+  value: unknown,
+): never {
+  const err: OrchestratorError = {
+    code: 'INTERNAL_PAYLOAD_ERROR',
+    message: `Cannot normalize intervention for option "${optionId}" (index ${optionIndex}), factor "${factorId}": expected number or { value: number }, got ${JSON.stringify(value)?.slice(0, 100)}`,
+    tool: 'run_analysis',
+    recoverable: false,
+  };
+  throw Object.assign(new Error(err.message), { orchestratorError: err });
+}
 
 /**
  * Group fact_objects by fact_type.

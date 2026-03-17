@@ -29,6 +29,13 @@ vi.mock("../../../src/config/index.js", async (importOriginal) => {
 const { createPLoTClient, _validateRunPayload, _validatePatchPayload, _isRetryableError, _cancellableSleep } =
   await import("../../../src/orchestrator/plot-client.js");
 
+/** Valid option object for test payloads — has id, option_id, and numeric interventions. */
+const VALID_OPT = { id: "a", option_id: "a", interventions: { fac_1: 0.5 } };
+/** Valid /v2/run payload for tests. */
+const VALID_RUN = { graph: { nodes: [], edges: [] }, options: [VALID_OPT], goal_node_id: "g1" };
+/** Valid /v2/run response for tests. */
+const VALID_RUN_RESPONSE = { meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] };
+
 // ============================================================================
 // H.5: Outbound Structural Validation
 // ============================================================================
@@ -37,11 +44,11 @@ describe("Outbound Structural Validation (H.5)", () => {
   describe("validateRunPayload", () => {
     it("throws INTERNAL_PAYLOAD_ERROR when graph is missing", () => {
       expect(() =>
-        _validateRunPayload({ options: [{ option_id: "a" }], goal_node_id: "g1" }),
+        _validateRunPayload({ options: [VALID_OPT], goal_node_id: "g1" }),
       ).toThrow(/graph/);
 
       try {
-        _validateRunPayload({ options: [{ option_id: "a" }], goal_node_id: "g1" });
+        _validateRunPayload({ options: [VALID_OPT], goal_node_id: "g1" });
       } catch (e: any) {
         expect(e.orchestratorError.code).toBe("INTERNAL_PAYLOAD_ERROR");
       }
@@ -49,7 +56,7 @@ describe("Outbound Structural Validation (H.5)", () => {
 
     it("throws INTERNAL_PAYLOAD_ERROR when graph is null", () => {
       expect(() =>
-        _validateRunPayload({ graph: null, options: [{ option_id: "a" }], goal_node_id: "g1" }),
+        _validateRunPayload({ graph: null, options: [VALID_OPT], goal_node_id: "g1" }),
       ).toThrow(/graph/);
     });
 
@@ -65,21 +72,39 @@ describe("Outbound Structural Validation (H.5)", () => {
       ).toThrow(/options/);
     });
 
-    it("throws INTERNAL_PAYLOAD_ERROR when option is missing option_id", () => {
+    it("throws INTERNAL_PAYLOAD_ERROR when option is missing id", () => {
       expect(() =>
-        _validateRunPayload({ graph: {}, options: [{ label: "A" }], goal_node_id: "g1" }),
-      ).toThrow(/option_id/);
+        _validateRunPayload({ graph: {}, options: [{ option_id: "a", interventions: { f: 1 } }], goal_node_id: "g1" }),
+      ).toThrow(/id/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when intervention value is not a number", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: { f: { value: 1 } } }], goal_node_id: "g1" }),
+      ).toThrow(/finite number/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when intervention value is NaN", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: { f: NaN } }], goal_node_id: "g1" }),
+      ).toThrow(/finite number/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when interventions is null", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: null }], goal_node_id: "g1" }),
+      ).toThrow(/interventions/);
     });
 
     it("throws INTERNAL_PAYLOAD_ERROR when goal_node_id is missing", () => {
       expect(() =>
-        _validateRunPayload({ graph: {}, options: [{ option_id: "a" }] }),
+        _validateRunPayload({ graph: {}, options: [VALID_OPT] }),
       ).toThrow(/goal_node_id/);
     });
 
     it("throws INTERNAL_PAYLOAD_ERROR when goal_node_id is empty string", () => {
       expect(() =>
-        _validateRunPayload({ graph: {}, options: [{ option_id: "a" }], goal_node_id: "" }),
+        _validateRunPayload({ graph: {}, options: [VALID_OPT], goal_node_id: "" }),
       ).toThrow(/goal_node_id/);
     });
 
@@ -87,18 +112,16 @@ describe("Outbound Structural Validation (H.5)", () => {
       expect(() =>
         _validateRunPayload({
           graph: { nodes: [], edges: [] },
-          options: [{ option_id: "opt_1", label: "A", interventions: {} }],
+          options: [{ id: "opt_1", option_id: "opt_1", label: "A", interventions: { fac_1: 0.5 } }],
           goal_node_id: "goal_1",
         }),
       ).not.toThrow();
     });
 
-    it("passes through extra unexpected fields (no false positives)", () => {
+    it("passes through extra unexpected top-level fields (no false positives)", () => {
       expect(() =>
         _validateRunPayload({
-          graph: { nodes: [], edges: [] },
-          options: [{ option_id: "opt_1", label: "A" }],
-          goal_node_id: "goal_1",
+          ...VALID_RUN,
           extra_field: "unexpected",
           n_samples: 1000,
         }),
@@ -162,7 +185,7 @@ describe("Outbound Structural Validation (H.5)", () => {
       const client = createPLoTClient()!;
 
       await expect(
-        client.run({ options: [{ option_id: "a" }], goal_node_id: "g1" }, "req-1"),
+        client.run({ options: [VALID_OPT], goal_node_id: "g1" }, "req-1"),
       ).rejects.toThrow(/graph/);
 
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -181,14 +204,11 @@ describe("Outbound Structural Validation (H.5)", () => {
     it("run: valid payload → HTTP call made normally", async () => {
       fetchSpy.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
+        json: () => Promise.resolve(VALID_RUN_RESPONSE),
       });
 
       const client = createPLoTClient()!;
-      await client.run(
-        { graph: { nodes: [], edges: [] }, options: [{ option_id: "a" }], goal_node_id: "g1" },
-        "req-1",
-      );
+      await client.run(VALID_RUN, "req-1");
 
       expect(fetchSpy).toHaveBeenCalledOnce();
     });
@@ -253,10 +273,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
   describe("run — retry on transient 503", () => {
     it("retries once on 503 and succeeds on retry", async () => {
-      const successResponse = {
-        meta: { seed_used: 42, n_samples: 100, response_hash: "h" },
-        results: [{ option_id: "a" }],
-      };
+      const successResponse = VALID_RUN_RESPONSE;
 
       fetchSpy
         .mockResolvedValueOnce({
@@ -271,7 +288,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
       const client = createPLoTClient()!;
       const result = await client.run(
-        { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+        VALID_RUN,
         "req-1",
       );
 
@@ -290,7 +307,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
       await expect(
         client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+          VALID_RUN,
           "req-1",
         ),
       ).rejects.toThrow(PLoTError);
@@ -312,7 +329,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
       await expect(
         client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+          VALID_RUN,
           "req-1",
         ),
       ).rejects.toThrow(PLoTError);
@@ -335,7 +352,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
       await expect(
         client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+          VALID_RUN,
           "req-1",
           {
             turnStartedAt: now - 58_000, // 58s elapsed of 60s budget
@@ -361,7 +378,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
       const client = createPLoTClient()!;
 
       const promise = client.run(
-        { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+        VALID_RUN,
         "req-1",
         { turnSignal: controller.signal },
       );
@@ -386,12 +403,12 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
         });
 
       const client = createPLoTClient()!;
       const result = await client.run(
-        { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+        VALID_RUN,
         "req-1",
       );
 
@@ -410,12 +427,12 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({ meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] }),
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
         });
 
       const client = createPLoTClient()!;
       await client.run(
-        { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
+        VALID_RUN,
         "req-unique-123",
       );
 

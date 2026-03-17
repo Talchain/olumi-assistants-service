@@ -193,4 +193,222 @@ describe("run_analysis Tool Handler", () => {
       }),
     ]);
   });
+
+  it("sends only PLoT-allowlisted fields (no extra fields leak)", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Price", category: "controllable" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "opt_b", kind: "option", label: "Option B" },
+        ],
+        edges: [{ id: "e1", from: "fac_1", to: "goal_1", strength: { mean: 0.5, std: 0.1 } }],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          { option_id: "opt_a", label: "Option A", interventions: { fac_1: 0.5 } },
+          { option_id: "opt_b", label: "Option B", interventions: { fac_1: 0.8 } },
+        ],
+        goal_node_id: "goal_1",
+        constraints: [{ type: "min", target: "revenue", value: 100 }],
+        seed: 42,
+        n_samples: 500,
+        // Extra field that should NOT be forwarded to PLoT
+        session_id: "should-be-stripped",
+        scenario_id: "should-be-stripped",
+        context: { should: "be-stripped" },
+      } as never,
+    });
+
+    await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+
+    const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    // Allowlisted fields present
+    expect(payload.graph).toBeDefined();
+    expect(payload.options).toHaveLength(2);
+    expect(payload.goal_node_id).toBe("goal_1");
+    expect(payload.request_id).toBe("req-1");
+    expect(payload.seed).toBe(42);
+    expect(payload.n_samples).toBe(500);
+    // constraints → goal_constraints (PLoT field name)
+    expect(payload.goal_constraints).toEqual([{ type: "min", target: "revenue", value: 100 }]);
+    expect(payload).not.toHaveProperty("constraints");
+    // options[].id derived from option_id (PLoT requires id)
+    const opts = payload.options as Array<Record<string, unknown>>;
+    expect(opts[0].id).toBe("opt_a");
+    expect(opts[1].id).toBe("opt_b");
+    // Extra fields stripped
+    expect(payload).not.toHaveProperty("session_id");
+    expect(payload).not.toHaveProperty("scenario_id");
+    expect(payload).not.toHaveProperty("context");
+  });
+
+  it("strips unknown option-level keys (only id, option_id, label, interventions)", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Rev" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "opt_b", kind: "option", label: "B" },
+          { id: "fac_1", kind: "factor", label: "P", category: "controllable" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          {
+            option_id: "opt_a", label: "A", interventions: { fac_1: 0.5 },
+            status: "ready", provenance: { source: "brief" }, unresolved_targets: ["x"],
+          } as never,
+          { option_id: "opt_b", label: "B", interventions: { fac_1: 0.8 } },
+        ],
+        goal_node_id: "g1",
+      } as never,
+    });
+
+    await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+
+    const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    const opts = payload.options as Array<Record<string, unknown>>;
+    // Only allowlisted keys present
+    expect(Object.keys(opts[0]).sort()).toEqual(["id", "interventions", "label", "option_id"]);
+    expect(opts[0]).not.toHaveProperty("status");
+    expect(opts[0]).not.toHaveProperty("provenance");
+    expect(opts[0]).not.toHaveProperty("unresolved_targets");
+  });
+
+  it("normalizes V3 intervention objects to flat { factor_id: number }", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Rev" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "opt_b", kind: "option", label: "B" },
+          { id: "fac_1", kind: "factor", label: "P", category: "controllable" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          {
+            option_id: "opt_a", label: "A",
+            interventions: { fac_1: { value: 0.7, source: "brief_extraction", target_match: "direct" } },
+          } as never,
+          { option_id: "opt_b", label: "B", interventions: { fac_1: 0.3 } },
+        ],
+        goal_node_id: "g1",
+      } as never,
+    });
+
+    await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+
+    const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    const opts = payload.options as Array<Record<string, unknown>>;
+    // V3 object normalized to plain number
+    expect(opts[0].interventions).toEqual({ fac_1: 0.7 });
+    // Already-numeric stays numeric
+    expect(opts[1].interventions).toEqual({ fac_1: 0.3 });
+  });
+
+  it("throws on non-normalizable intervention value", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Rev" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "opt_b", kind: "option", label: "B" },
+          { id: "fac_1", kind: "factor", label: "P", category: "controllable" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          { option_id: "opt_a", label: "A", interventions: { fac_1: "not-a-number" } },
+          { option_id: "opt_b", label: "B", interventions: { fac_1: 0.8 } },
+        ],
+        goal_node_id: "g1",
+      } as never,
+    });
+
+    await expect(
+      handleRunAnalysis(ctx, client, "req-1", "turn-1"),
+    ).rejects.toThrow(/Cannot normalize intervention/);
+  });
+
+  it("produces exact PLoT-compatible payload shape", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "opt_b", kind: "option", label: "B" },
+          { id: "fac_1", kind: "factor", label: "Price", category: "controllable" },
+        ],
+        edges: [{ id: "e1", from: "fac_1", to: "goal_1", strength: { mean: 0.5, std: 0.1 } }],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          { option_id: "opt_a", label: "A", interventions: { fac_1: 0.5 } },
+          { option_id: "opt_b", label: "B", interventions: { fac_1: 0.8 } },
+        ],
+        goal_node_id: "goal_1",
+        seed: 42,
+      } as never,
+    });
+
+    await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+
+    const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    // Only PLoT-allowlisted top-level keys
+    const topKeys = Object.keys(payload).sort();
+    expect(topKeys).toEqual(["goal_node_id", "graph", "options", "request_id", "seed"]);
+    // Each option has exactly 4 keys
+    const opts = payload.options as Array<Record<string, unknown>>;
+    for (const opt of opts) {
+      expect(Object.keys(opt).sort()).toEqual(["id", "interventions", "label", "option_id"]);
+      // Interventions are flat numeric
+      for (const val of Object.values(opt.interventions as Record<string, unknown>)) {
+        expect(typeof val).toBe("number");
+      }
+    }
+  });
+
+  it("derives goal_node_id from graph when not in analysis_inputs", async () => {
+    const response = makePLoTResponse();
+    const client = makeMockClient(response);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Revenue" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "opt_b", kind: "option", label: "B" },
+          { id: "fac_1", kind: "factor", label: "Price", category: "controllable" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+      analysis_inputs: {
+        options: [
+          { option_id: "opt_a", label: "A", interventions: { fac_1: 1 } },
+          { option_id: "opt_b", label: "B", interventions: { fac_1: 2 } },
+        ],
+        // No goal_node_id — should be derived from graph
+      },
+    });
+
+    await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+
+    const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.goal_node_id).toBe("g1");
+  });
 });
