@@ -249,18 +249,13 @@ export async function phase3Generate(
   if (effectiveIntentGate.routing === 'deterministic' && effectiveIntentGate.tool) {
     // Check prerequisites (reuses top-level `context`)
     const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveIntentGate.tool];
-    // generate_model button and brief_detection bypass structured-framing prerequisites —
-    // in both cases the user's message IS the brief and generation is clearly intended.
     const prerequisitesBypassed = effectiveIntentGate.tool === 'draft_graph'
-      && (
-        (explicitGenerate.kind === 'deterministic' && intentGate.matched_pattern === 'generate_model')
-        || intentGate.matched_pattern === 'brief_detection'
-      );
+      && isDraftGraphFramingBypass(intentGate.matched_pattern, explicitGenerate);
     const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(context) : true);
     if (prerequisitesBypassed) {
       log.info(
-        { request_id: requestId, tool: effectiveIntentGate.tool, matched_pattern: 'generate_model' },
-        'V2 pipeline: generate_model bypassed structured-framing prerequisites',
+        { request_id: requestId, tool: effectiveIntentGate.tool, matched_pattern: intentGate.matched_pattern },
+        'V2 pipeline: draft_graph bypassed structured-framing prerequisites',
       );
     }
 
@@ -729,10 +724,7 @@ function wouldSkipLLM(
   // Prerequisites check
   const checkPrereq = DETERMINISTIC_PREREQUISITES[effectiveGate.tool as ToolName];
   const prerequisitesBypassed = effectiveGate.tool === 'draft_graph'
-    && (
-      (explicitGenerate.kind === 'deterministic' && signals.intentGate.matched_pattern === 'generate_model')
-      || signals.intentGate.matched_pattern === 'brief_detection'
-    );
+    && isDraftGraphFramingBypass(signals.intentGate.matched_pattern, explicitGenerate);
   const prerequisitesMet = prerequisitesBypassed || (checkPrereq ? checkPrereq(signals.context) : true);
   if (!prerequisitesMet) return false;
 
@@ -1055,6 +1047,34 @@ async function generateRationaleExplanation(
 
 
 
+/**
+ * True when the intent gate signals that the user's message IS the brief and generation
+ * is unambiguously intended — structured-framing prerequisites and minimum-context checks
+ * should be bypassed.
+ *
+ * Two patterns qualify:
+ * - 'generate_model': user clicked the "Generate Model" UI button. When `explicitGenerate`
+ *   is provided it must be `kind: 'deterministic'`; omit the argument in call sites where
+ *   explicitGenerate has not yet been computed (e.g. buildExplicitGenerateRoute itself).
+ * - 'brief_detection': classifyIntentWithContext detected the message as a decision brief.
+ *
+ * Single source of truth used by buildExplicitGenerateRoute, phase3Generate, and
+ * wouldSkipLLM — keeps all three call sites from drifting independently.
+ */
+function isDraftGraphFramingBypass(
+  matchedPattern: string | null | undefined,
+  explicitGenerate?: ExplicitGenerateRoute,
+): boolean {
+  if (matchedPattern === 'brief_detection') return true;
+  if (matchedPattern === 'generate_model') {
+    // When called from buildExplicitGenerateRoute (before explicitGenerate is known),
+    // treat generate_model as a bypass unconditionally — the caller already asserted
+    // isExplicitGenerateRequest, so the pattern only appears in the right context.
+    return explicitGenerate === undefined || explicitGenerate.kind === 'deterministic';
+  }
+  return false;
+}
+
 type ExplicitGenerateRoute =
   | { kind: 'none' }
   | { kind: 'deterministic'; brief: string; reasoning: string }
@@ -1071,12 +1091,7 @@ function buildExplicitGenerateRoute(
     return { kind: 'none' };
   }
 
-  // When generate_model is explicitly set (UI "Generate Model" button), or when
-  // brief_detection matched (the message IS the brief), bypass the minimum-context
-  // check — the user has already provided the brief content; don't ask for more framing.
-  const isButtonTriggered = intentGate.matched_pattern === 'generate_model'
-    || intentGate.matched_pattern === 'brief_detection';
-  if (!isButtonTriggered && !hasMinimumViableFramingContext(context, userMessage)) {
+  if (!isDraftGraphFramingBypass(intentGate.matched_pattern) && !hasMinimumViableFramingContext(context, userMessage)) {
     return {
       kind: 'clarify',
       assistantText: buildGenerationClarificationMessage(enrichedContext),

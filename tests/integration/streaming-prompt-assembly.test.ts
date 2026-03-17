@@ -361,6 +361,123 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
 
   // ── end brief_detection bypass regression ────────────────────────────────
 
+  // ── bypass boundary tests (P1.3) ─────────────────────────────────────────
+  // These tests pin the edges of isDraftGraphFramingBypass so future edits cannot
+  // accidentally widen the bypass and cause draft_graph to fire in wrong contexts.
+
+  it("brief_detection + stable model → blocked by stable-model guard (not draft_graph)", async () => {
+    // brief_detection fires but an existing graph is present → shouldBlockStableModelRedraft
+    // must still apply. The bypass only covers structured-framing prerequisites; it does NOT
+    // override the stable-model redraft guard.
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "brief_detection",
+      normalised_message: "i need to decide whether to hire a cto",
+    });
+
+    const client = makeMockLLMClient();
+    const ctx = makeEnrichedContext({
+      // Non-empty graph → hasStableModel === true → shouldBlockStableModelRedraft fires
+      graph: { nodes: [{ id: "n1", kind: "factor", label: "Revenue" }], edges: [] } as unknown as EnrichedContext["graph"],
+      framing: null,
+      stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+    });
+
+    const result = await phase3Generate(
+      ctx, makeSpecialistResult(), client, "req-bd-stable-model",
+      "I need to decide whether to hire a CTO",
+    );
+
+    // Must return conversational block — NOT draft_graph
+    expect(client.chatWithTools).not.toHaveBeenCalled();
+    expect(result.tool_invocations).toHaveLength(0);
+    expect(result.route_metadata?.outcome).toBe("generation_clarification");
+    expect(result.route_metadata?.reasoning).toBe("stable_model_exists_and_regenerate_not_requested");
+
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  it("explicit draft request without brief_detection/generate_model and empty framing → clarification, not draft_graph", async () => {
+    // Pattern: user types "draft it" (triggers isExplicitGenerateRequest via regex), but
+    // matched_pattern is a normal keyword match — not 'brief_detection' or 'generate_model'.
+    // Empty framing → buildExplicitGenerateRoute returns kind:'clarify'.
+    // The bypass must NOT fire for arbitrary matched patterns.
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "draft it",  // keyword match, not brief_detection or generate_model
+      normalised_message: "draft it",
+    });
+
+    const client = makeMockLLMClient();
+    const ctx = makeEnrichedContext({
+      graph: null,
+      framing: null,  // empty framing → hasMinimumViableFramingContext === false
+      conversation_history: [],  // no prior turns → combinedLength too short
+      stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
+    });
+
+    const result = await phase3Generate(
+      ctx, makeSpecialistResult(), client, "req-bd-no-bypass-keyword",
+      "draft it",
+    );
+
+    // Must return clarification response — not draft_graph
+    expect(client.chatWithTools).not.toHaveBeenCalled();
+    expect(result.tool_invocations).toHaveLength(0);
+    expect(result.route_metadata?.outcome).toBe("generation_clarification");
+    expect(result.route_metadata?.reasoning).toBe("explicit_generate_missing_minimum_viable_framing");
+
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  it("phase3PrepareForStreaming: brief_detection + stable model returns deterministic clarification block (not draft_graph)", async () => {
+    // Same stable-model boundary as above but via the streaming path (wouldSkipLLM)
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "draft_graph",
+      confidence: "high",
+      matched_pattern: "brief_detection",
+      normalised_message: "i need to decide whether to hire a cto",
+    });
+
+    const client = makeMockLLMClient();
+    const ctx = makeEnrichedContext({
+      graph: { nodes: [{ id: "n1", kind: "factor", label: "Revenue" }], edges: [] } as unknown as EnrichedContext["graph"],
+      framing: null,
+      stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+    });
+
+    const prep = await phase3PrepareForStreaming(
+      ctx, makeSpecialistResult(), client, "req-bd-stable-stream",
+      "I need to decide whether to hire a CTO",
+    );
+
+    // wouldSkipLLM returns true (shouldBlockStableModelRedraft early-return path),
+    // so prep is deterministic — but the result is a conversational block, not draft_graph
+    expect(prep.kind).toBe("deterministic");
+    if (prep.kind !== "deterministic") throw new Error("expected deterministic");
+    expect(prep.result.tool_invocations).toHaveLength(0);
+    expect(prep.result.route_metadata?.outcome).toBe("generation_clarification");
+    expect(client.chatWithTools).not.toHaveBeenCalled();
+
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
+  });
+
+  // ── end bypass boundary tests ─────────────────────────────────────────────
+
   it("streaming and non-streaming LLM paths produce same system prompt length", async () => {
     const streamClient = makeMockLLMClient();
     const nonStreamClient = makeMockLLMClient();
