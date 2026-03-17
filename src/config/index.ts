@@ -261,6 +261,7 @@ const ConfigSchema = z.object({
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
     dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
     bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
+    briefDetectionEnabled: booleanString.default(false), // CEE_BRIEF_DETECTION_ENABLED — deterministic NL brief → draft_graph routing
     dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
     zone2Registry: booleanString.default(false), // CEE_ZONE2_REGISTRY_ENABLED — Zone 2 block registry prompt assembly
     moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
@@ -573,6 +574,7 @@ function parseConfig(): Config {
       dskV0: env.ENABLE_DSK_V0,
       dskEnabled: env.DSK_ENABLED,
       bilEnabled: env.BIL_ENABLED,
+      briefDetectionEnabled: env.CEE_BRIEF_DETECTION_ENABLED,
       dskCoachingEnabled: env.DSK_COACHING_ENABLED,
       zone2Registry: env.CEE_ZONE2_REGISTRY_ENABLED,
       moeSpikeEnabled: env.MOE_SPIKE_ENABLED,

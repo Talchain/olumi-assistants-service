@@ -10,7 +10,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { classifyIntent, INTENT_PATTERN_ENTRIES } from "../../../src/orchestrator/intent-gate.js";
+import {
+  classifyIntent,
+  classifyIntentWithContext,
+  looksLikeDecisionBrief,
+  INTENT_PATTERN_ENTRIES,
+} from "../../../src/orchestrator/intent-gate.js";
 import type { ToolName } from "../../../src/orchestrator/intent-gate.js";
 
 // ============================================================================
@@ -416,5 +421,73 @@ describe("Intent Gate — structural integrity", () => {
       expect(seen.has(pattern), `Duplicate pattern: ${pattern}`).toBe(false);
       seen.add(pattern);
     }
+  });
+});
+
+// ============================================================================
+// Brief Detection Heuristic Tests
+// ============================================================================
+
+describe("looksLikeDecisionBrief", () => {
+  it.each([
+    "We're choosing between three CRM vendors for our sales team",
+    "I'm deciding between hiring a contractor or a full-time employee for this project",
+    "Our options are to expand into Europe, focus on the US market, or partner with a distributor",
+    "Should we raise prices by 10% or keep them the same to retain customers?",
+    "We need to evaluate whether to build in-house or buy a third-party solution",
+    "Comparing two approaches: microservices versus monolith for our new platform",
+    "The trade-off is between speed to market and long-term maintainability",
+  ])("detects %j as a decision brief", (message) => {
+    expect(looksLikeDecisionBrief(message)).toBe(true);
+  });
+
+  it.each([
+    "Hello",
+    "What is a causal model?",
+    "Explain the results",
+    "Run the analysis",
+    "How does pricing affect revenue?",
+    "Tell me about decision science",
+    "Can you help me understand the model?",
+    "short",
+  ])("rejects %j as not a brief", (message) => {
+    expect(looksLikeDecisionBrief(message)).toBe(false);
+  });
+
+  it("rejects messages shorter than 30 characters", () => {
+    expect(looksLikeDecisionBrief("choosing between A or B")).toBe(false);
+  });
+});
+
+describe("classifyIntentWithContext", () => {
+  it("routes NL brief to draft_graph when no graph exists", () => {
+    const result = classifyIntentWithContext(
+      "We're choosing between three CRM vendors for our sales team and need to evaluate cost vs features",
+      { hasGraph: false },
+    );
+    expect(result.tool).toBe("draft_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("brief_detection");
+  });
+
+  it("does NOT route NL brief when graph already exists", () => {
+    const result = classifyIntentWithContext(
+      "We're choosing between three CRM vendors for our sales team and need to evaluate cost vs features",
+      { hasGraph: true },
+    );
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  it("preserves exact-match routing over brief detection", () => {
+    const result = classifyIntentWithContext("draft a model", { hasGraph: false });
+    expect(result.tool).toBe("draft_graph");
+    expect(result.matched_pattern).toBe("draft a model");
+  });
+
+  it("preserves LLM fallback for non-brief messages", () => {
+    const result = classifyIntentWithContext("Hello, how are you?", { hasGraph: false });
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
   });
 });

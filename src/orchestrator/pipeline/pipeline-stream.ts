@@ -31,8 +31,9 @@ import { phase5Validate } from "./phase5-validation/index.js";
 import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
-import { classifyIntent } from "../intent-gate.js";
+import { classifyIntent, classifyIntentWithContext } from "../intent-gate.js";
 import type { IntentGateResult } from "../intent-gate.js";
+import { config } from "../../config/index.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { OrchestratorStreamEvent } from "./stream-events.js";
 import { STREAM_ERROR_CODES } from "./stream-events.js";
@@ -120,7 +121,9 @@ export async function* executePipelineStream(
     // Analysis lookup — deterministic short-circuit
     const intentGate: IntentGateResult = request.generate_model
       ? { tool: 'draft_graph', routing: 'deterministic', confidence: 'exact', normalised_message: request.message.toLowerCase().trim(), matched_pattern: 'generate_model' }
-      : classifyIntent(request.message);
+      : config.features.briefDetectionEnabled
+        ? classifyIntentWithContext(request.message, { hasGraph: enrichedContext.graph != null })
+        : classifyIntent(request.message);
     if (!intentGate.tool) {
       const lookupResult = tryAnalysisLookup(
         request.message,

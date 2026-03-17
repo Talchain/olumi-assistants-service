@@ -328,3 +328,66 @@ export function classifyIntent(message: string): IntentGateResult {
     normalised_message: normalised,
   };
 }
+
+// ============================================================================
+// Brief Detection Heuristic
+// ============================================================================
+
+/**
+ * Decision-signal patterns that suggest the user is describing a decision brief
+ * rather than asking a question or giving a command.
+ */
+const DECISION_BRIEF_PATTERN = /\b(choosing between|deciding (between|whether|on|if)|options? (?:are|include)|should (?:we|i)\b.{5,}|comparing|alternatives?\b.{5,}|evaluate\b.{5,}|pick between|trade[\s-]?off|versus|vs\.?\s)/i;
+
+/**
+ * Patterns that indicate the message is NOT a brief — it's a tool command,
+ * a question about a topic, or a meta-request.
+ */
+const NON_BRIEF_PATTERN = /\b(explain|analyse|analyze|run|generate|edit|modify|what (?:is|are|does|did|would)|how (?:does|do|is|can)|why (?:did|does|is)|tell me about|can you)\b/i;
+
+/**
+ * Minimum message length for brief detection (matches DraftGraphInput schema min).
+ */
+const BRIEF_MIN_LENGTH = 30;
+
+/**
+ * Check if a message looks like a natural language decision brief.
+ * Conservative heuristic: requires decision signals AND minimum length.
+ *
+ * Exported for testing.
+ */
+export function looksLikeDecisionBrief(message: string): boolean {
+  if (message.trim().length < BRIEF_MIN_LENGTH) return false;
+  if (NON_BRIEF_PATTERN.test(message)) return false;
+  return DECISION_BRIEF_PATTERN.test(message);
+}
+
+/**
+ * Context-aware intent classification that extends classifyIntent() with
+ * brief detection for first-turn scenarios (no graph in context).
+ *
+ * When no deterministic pattern matches AND the user has no graph AND the
+ * message looks like a decision brief, routes to draft_graph deterministically.
+ *
+ * Gated behind CEE_BRIEF_DETECTION_ENABLED feature flag (checked by caller).
+ */
+export function classifyIntentWithContext(
+  message: string,
+  context: { hasGraph: boolean },
+): IntentGateResult {
+  const result = classifyIntent(message);
+  if (result.tool !== null) return result;
+
+  // Brief detection: first-turn only (no graph), message looks like a decision brief
+  if (!context.hasGraph && looksLikeDecisionBrief(message)) {
+    return {
+      tool: 'draft_graph',
+      routing: 'deterministic',
+      confidence: 'exact',
+      normalised_message: normalise(message),
+      matched_pattern: 'brief_detection',
+    };
+  }
+
+  return result;
+}

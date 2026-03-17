@@ -30,7 +30,7 @@ import { phase5Validate } from "./phase5-validation/index.js";
 import { buildErrorEnvelope, resolveContextHash, buildFeatureHealthMap } from "./phase5-validation/envelope-assembler.js";
 import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
 import { getAdapter } from "../../adapters/llm/router.js";
-import { classifyIntent } from "../intent-gate.js";
+import { classifyIntent, classifyIntentWithContext } from "../intent-gate.js";
 import type { IntentGateResult } from "../intent-gate.js";
 import { classifyUserIntent } from "./phase1-enrichment/intent-classifier.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
@@ -245,7 +245,9 @@ export async function executePipeline(
     // If matched, returns a minimal V2 envelope and skips the LLM call entirely.
     const intentGate: IntentGateResult = request.generate_model
       ? { tool: 'draft_graph', routing: 'deterministic', confidence: 'exact', normalised_message: request.message.toLowerCase().trim(), matched_pattern: 'generate_model' }
-      : classifyIntent(request.message);
+      : config.features.briefDetectionEnabled
+        ? classifyIntentWithContext(request.message, { hasGraph: enrichedContext.graph != null })
+        : classifyIntent(request.message);
     if (!intentGate.tool) {
       const lookupResult = tryAnalysisLookup(
         request.message,
