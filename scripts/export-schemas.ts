@@ -10,6 +10,7 @@
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodTypeAny } from "zod";
 
@@ -22,7 +23,8 @@ import {
 import { OrchestratorStreamEventSchema } from "../src/orchestrator/pipeline/stream-events.js";
 import { OrchestratorResponseEnvelopeV2Schema } from "../src/orchestrator/validation/response-envelope-schema.js";
 
-const CONTRACTS_DIR = resolve(dirname(import.meta.dirname!), "contracts");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CONTRACTS_DIR = resolve(__dirname, "..", "contracts");
 
 interface SchemaEntry {
   name: string;

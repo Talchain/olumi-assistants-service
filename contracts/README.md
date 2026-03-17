@@ -24,3 +24,21 @@ CI will fail if committed schemas are out of date.
 | graph-state.schema.json | UI → CEE | GraphSchema |
 | orchestrator-response-v2.schema.json | CEE → UI | OrchestratorResponseEnvelopeV2Schema |
 | stream-event.schema.json | CEE → UI | OrchestratorStreamEventSchema |
+
+## Refinement gap
+
+JSON Schema 7 cannot express Zod `.refine()` / `.superRefine()` logic.
+Two runtime rules are **not** captured in the exported schemas:
+
+1. **`SystemEventSchema` (`patch_accepted`)** — `superRefine` requires at
+   least one of `patch_id` or `block_id` in `details`. The exported schema
+   allows both to be absent.
+2. **`AnalysisResponseSchema`** (nested in `turn-request.schema.json` via
+   `context.analysis_response`) — `refine` requires at least one of
+   `analysis_status`, `results`, or `meta`. The exported schema allows all
+   three to be absent.
+
+Consumers should add equivalent validation in their own CI if these
+constraints matter. The self-validation tests in
+`tests/contracts/schema-self-test.test.ts` include known-bad boundary
+cases that document these gaps.

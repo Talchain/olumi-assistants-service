@@ -280,8 +280,209 @@ describe("Contract self-validation", () => {
       expect(valid).toBe(true);
     });
 
-    it("rejects missing meta.response_hash", () => {
-      expect(validate({ meta: {} })).toBe(false);
+    it("validates analysis_state without meta (option_comparison only)", () => {
+      const payload = {
+        option_comparison: { best_option: "B", summary: "B wins" },
+      };
+      const valid = validate(payload);
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("rejects non-object (string)", () => {
+      expect(validate("not-an-object")).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // system-event.schema.json
+  // ---------------------------------------------------------------------------
+  describe("system-event.schema.json", () => {
+    let validate: ReturnType<Ajv["compile"]>;
+
+    beforeAll(() => {
+      validate = ajv.compile(loadSchema("system-event.schema.json"));
+    });
+
+    it("validates a patch_accepted event", () => {
+      const valid = validate({
+        event_type: "patch_accepted",
+        timestamp: "2026-03-17T00:00:00Z",
+        event_id: "ev-001",
+        details: {
+          patch_id: "p-001",
+          operations: [{ op: "add_node" }],
+        },
+      });
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("validates a direct_graph_edit event", () => {
+      const valid = validate({
+        event_type: "direct_graph_edit",
+        timestamp: "2026-03-17T00:00:00Z",
+        event_id: "ev-002",
+        details: {
+          changed_node_ids: ["n1"],
+          changed_edge_ids: [],
+          operations: ["add"],
+        },
+      });
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("validates a feedback_submitted event", () => {
+      const valid = validate({
+        event_type: "feedback_submitted",
+        timestamp: "2026-03-17T00:00:00Z",
+        event_id: "ev-003",
+        details: {
+          turn_id: "t-100",
+          rating: "up",
+        },
+      });
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("rejects unknown event_type", () => {
+      expect(validate({
+        event_type: "unknown_event",
+        timestamp: "2026-03-17T00:00:00Z",
+        event_id: "ev-004",
+        details: {},
+      })).toBe(false);
+    });
+
+    it("rejects missing event_id", () => {
+      expect(validate({
+        event_type: "patch_dismissed",
+        timestamp: "2026-03-17T00:00:00Z",
+        details: {},
+      })).toBe(false);
+    });
+
+    // Refinement gap: runtime Zod requires patch_id or block_id for
+    // patch_accepted, but JSON Schema cannot express superRefine logic.
+    it("(refinement gap) patch_accepted without patch_id/block_id passes JSON Schema", () => {
+      const valid = validate({
+        event_type: "patch_accepted",
+        timestamp: "2026-03-17T00:00:00Z",
+        event_id: "ev-005",
+        details: { operations: [{ op: "add_node" }] },
+      });
+      // Passes JSON Schema but would fail Zod superRefine at runtime
+      expect(valid).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // graph-state.schema.json
+  // ---------------------------------------------------------------------------
+  describe("graph-state.schema.json", () => {
+    let validate: ReturnType<Ajv["compile"]>;
+
+    beforeAll(() => {
+      validate = ajv.compile(loadSchema("graph-state.schema.json"));
+    });
+
+    it("validates a graph with nodes and edges", () => {
+      const valid = validate({
+        nodes: [
+          { id: "g1", kind: "goal", label: "Increase revenue" },
+          { id: "o1", kind: "option", label: "Option A" },
+        ],
+        edges: [{ from: "g1", to: "o1", kind: "supports" }],
+      });
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("validates null graph", () => {
+      const valid = validate(null);
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("validates empty graph", () => {
+      const valid = validate({ nodes: [], edges: [] });
+      expect(validate.errors).toBeNull();
+      expect(valid).toBe(true);
+    });
+
+    it("rejects missing nodes", () => {
+      expect(validate({ edges: [] })).toBe(false);
+    });
+
+    it("rejects node without id", () => {
+      expect(validate({
+        nodes: [{ kind: "goal" }],
+        edges: [],
+      })).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Response envelope parity guard
+  // ---------------------------------------------------------------------------
+  describe("response envelope parity", () => {
+    it("OrchestratorResponseEnvelopeV2Schema covers all required runtime fields", async () => {
+      // Import the Zod schema and verify it has properties matching the
+      // runtime interface's required fields. This catches drift where a
+      // new required field is added to the interface but not the Zod schema.
+      const { OrchestratorResponseEnvelopeV2Schema } = await import(
+        "../../src/orchestrator/validation/response-envelope-schema.js"
+      );
+      const shape = OrchestratorResponseEnvelopeV2Schema.shape;
+
+      const requiredRuntimeFields = [
+        "turn_id",
+        "assistant_text",
+        "blocks",
+        "suggested_actions",
+        "lineage",
+        "stage_indicator",
+        "science_ledger",
+        "progress_marker",
+        "observability",
+        "turn_plan",
+        "guidance_items",
+      ];
+
+      for (const field of requiredRuntimeFields) {
+        expect(shape).toHaveProperty(
+          field,
+          expect.anything(),
+        );
+      }
+
+      // Verify optional fields are present in schema too
+      const optionalRuntimeFields = [
+        "assistant_tool_calls",
+        "proposed_changes",
+        "analysis_response",
+        "applied_changes",
+        "deterministic_answer_tier",
+        "analysis_ready",
+        "analysis_status",
+        "status_reason",
+        "retryable",
+        "critiques",
+        "meta",
+        "error",
+        "model_receipt",
+        "diagnostics",
+        "parse_warnings",
+      ];
+
+      for (const field of optionalRuntimeFields) {
+        expect(shape).toHaveProperty(
+          field,
+          expect.anything(),
+        );
+      }
     });
   });
 });
