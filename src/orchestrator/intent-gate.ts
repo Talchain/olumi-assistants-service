@@ -199,6 +199,41 @@ export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
 ]);
 
 // ============================================================================
+// Edit Prefix Patterns
+// ============================================================================
+
+/**
+ * Verb-prefix patterns for edit_graph routing.
+ * Matched against normalised message prefix. Only matches when a non-empty
+ * target description follows the prefix (e.g. "update the team size factor").
+ *
+ * Ordered longest-first to avoid partial prefix matches.
+ */
+export const EDIT_PREFIXES: readonly string[] = Object.freeze([
+  'please update ',
+  'please change ',
+  'please modify ',
+  'please add ',
+  'please set ',
+  'please remove ',
+  'update the ',
+  'change the ',
+  'modify the ',
+  'remove the ',
+  'add a factor for ',
+  'add a factor ',
+  'add an option for ',
+  'add an option ',
+  'set the ',
+  'update ',
+  'change ',
+  'modify ',
+  'add ',
+  'set ',
+  'remove ',
+]);
+
+// ============================================================================
 // Startup Validation
 // ============================================================================
 
@@ -256,6 +291,22 @@ export function classifyIntent(message: string): IntentGateResult {
           normalised_message: normalised,
           matched_pattern: prefix.trim(),
           research_query: remainder,
+        };
+      }
+    }
+  }
+
+  // 3. Verb-prefix match for edit_graph
+  for (const prefix of EDIT_PREFIXES) {
+    if (normalised.startsWith(prefix)) {
+      const remainder = normalised.slice(prefix.length).trim();
+      if (remainder.length > 0) {
+        return {
+          tool: 'edit_graph',
+          routing: 'deterministic',
+          confidence: 'exact',
+          normalised_message: normalised,
+          matched_pattern: prefix.trim(),
         };
       }
     }

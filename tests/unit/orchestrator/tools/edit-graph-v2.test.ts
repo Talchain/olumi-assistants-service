@@ -1150,6 +1150,81 @@ describe("all op types through v2 parser", () => {
 // LLM warnings surfaced in validation_warnings on block
 // ============================================================================
 
+// ============================================================================
+// Baseline structural violations — edits on incomplete graphs
+// ============================================================================
+
+describe("baseline structural violations (pre-existing violations ignored)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    patchPreValidationEnabledForTest = true;
+  });
+
+  it("allows factor update on graph with no options (pre-existing FEWER_THAN_TWO_OPTIONS)", async () => {
+    // Graph has goal + factor but no decision or options.
+    // Pre-existing violations: NO_DECISION, FEWER_THAN_TWO_OPTIONS.
+    // A simple label update should NOT be blocked by these.
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "update_node",
+          path: "/nodes/factor_1",
+          value: { label: "Updated Price" },
+          impact: "low",
+          rationale: "Rename factor",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Updated label.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update the price factor label",
+      adapter,
+      "req-baseline-1",
+      "turn-baseline-1",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.blocks).toHaveLength(1);
+    expect((result.blocks[0].data as GraphPatchBlockData).status).toBe("proposed");
+  });
+
+  it("still rejects edit that introduces a NEW structural violation", async () => {
+    // Removing the goal introduces NO_GOAL — a new violation not in baseline.
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-baseline-2",
+      "turn-baseline-2",
+    );
+
+    expect(result.wasRejected).toBe(true);
+  });
+});
+
+// ============================================================================
+// LLM warnings surfaced in validation_warnings on block
+// ============================================================================
+
 describe("LLM warnings surfaced on block", () => {
   beforeEach(() => {
     vi.clearAllMocks();

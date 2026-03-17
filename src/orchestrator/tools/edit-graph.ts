@@ -57,7 +57,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { validateGraphStructure, VIOLATION_MESSAGES } from "../graph-structure-validator.js";
+import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
@@ -1051,6 +1051,14 @@ export async function handleEditGraph(
     timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
   };
 
+  // ---- Baseline structural violations (pre-existing in input graph) ----
+  // Edits must not be rejected for violations that already existed before the edit.
+  // E.g. a graph with 0 options should still allow factor updates without requiring
+  // the edit to also add 2+ options.
+  const baselineViolations: Set<StructuralViolationCode> = new Set(
+    validateGraphStructure(context.graph).violations.map((v) => v.code),
+  );
+
   // ---- Attempt loop: LLM call → validate → PLoT → repair ----
   const totalAttempts = maxRetries + 1;
   let lastValidationResult: PatchValidationResult | undefined;
@@ -1401,7 +1409,14 @@ export async function handleEditGraph(
         throw applyErr;
       }
 
-      const structResult = validateGraphStructure(candidateGraph);
+      const structResultRaw = validateGraphStructure(candidateGraph);
+      // Filter out violations that already existed in the input graph — edits should
+      // not be rejected for pre-existing structural incompleteness (e.g. no options yet).
+      const newViolations = structResultRaw.violations.filter((v) => !baselineViolations.has(v.code));
+      const structResult = {
+        valid: newViolations.length === 0,
+        violations: newViolations,
+      };
       if (!structResult.valid) {
         validationOutcome = 'graph_structure_invalid';
         setViolationCodes(structResult.violations.map((violation) => violation.code));

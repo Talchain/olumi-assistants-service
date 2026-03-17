@@ -117,6 +117,42 @@ describe("Intent Gate — classifyIntent", () => {
   });
 
   // ============================================================================
+  // edit_graph verb-prefix patterns
+  // ============================================================================
+
+  describe("edit_graph verb-prefix patterns", () => {
+    it.each([
+      ["update the team size factor", "update the"],
+      ["change the risk tolerance", "change the"],
+      ["modify the hiring cost factor", "modify the"],
+      ["add a factor for competitor response", "add a factor for"],
+      ["add an option for outsourcing", "add an option for"],
+      ["set the budget constraint to 50k", "set the"],
+      ["remove the legacy factor", "remove the"],
+      ["please update the team size", "please update"],
+      ["please add a new risk factor", "please add"],
+    ])("routes %j to edit_graph (prefix: %j)", (message, expectedPrefix) => {
+      const result = classifyIntent(message);
+      expect(result.tool).toBe("edit_graph");
+      expect(result.routing).toBe("deterministic");
+      expect(result.confidence).toBe("exact");
+      expect(result.matched_pattern).toBe(expectedPrefix.trim());
+    });
+
+    it("does NOT route 'what about X?' to edit_graph", () => {
+      const result = classifyIntent("what about market conditions?");
+      expect(result.tool).not.toBe("edit_graph");
+    });
+
+    it("does NOT route bare verb with no remainder to edit prefix", () => {
+      // Bare "update" has no remainder after "update " prefix → no prefix match.
+      // Also not in exact pattern table → falls through to LLM.
+      const result = classifyIntent("update");
+      expect(result.tool).toBeNull();
+    });
+  });
+
+  // ============================================================================
   // Excluded patterns (too ambiguous — must NOT match)
   // ============================================================================
 
