@@ -165,10 +165,10 @@ export async function handleRunAnalysis(
 
   // Extract lineage fields per spec:
   // response_hash from top-level first, fall back to meta.response_hash
-  const responseHash = response.response_hash ?? response.meta.response_hash;
+  const responseHash = response.response_hash ?? response.meta?.response_hash;
   // seed_used arrives as string from PLoT — parse as Number()
-  const seedUsed = Number(response.meta.seed_used);
-  const nSamples = response.meta.n_samples;
+  const seedUsed = Number(response.meta?.seed_used);
+  const nSamples = response.meta?.n_samples;
 
   log.info(
     { request_id: requestId, elapsed_ms: latencyMs, response_hash: responseHash, seed_used: seedUsed },

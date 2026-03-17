@@ -41,8 +41,8 @@ export function buildAnalysisBlocksAndGuidance(
   graph: GraphV3T | null,
   turnId: string,
 ): AnalysisBlocksResult {
-  const responseHash = response.response_hash ?? response.meta.response_hash;
-  const seedUsed = Number(response.meta.seed_used);
+  const responseHash = response.response_hash ?? response.meta?.response_hash;
+  const seedUsed = Number(response.meta?.seed_used);
 
   const blocks: ConversationBlock[] = [];
 

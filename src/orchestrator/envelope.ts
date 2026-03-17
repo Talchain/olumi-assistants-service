@@ -165,12 +165,12 @@ function buildLineage(
 
   if (analysisResponse) {
     // Top-level response_hash preferred over meta.response_hash
-    lineage.response_hash = analysisResponse.response_hash ?? analysisResponse.meta.response_hash;
+    lineage.response_hash = analysisResponse.response_hash ?? analysisResponse.meta?.response_hash;
 
     // seed_used arrives as string from PLoT — parse as Number
-    lineage.seed_used = Number(analysisResponse.meta.seed_used);
+    lineage.seed_used = Number(analysisResponse.meta?.seed_used);
 
-    lineage.n_samples = analysisResponse.meta.n_samples;
+    lineage.n_samples = analysisResponse.meta?.n_samples;
   }
 
   if (graphHash) {
