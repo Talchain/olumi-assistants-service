@@ -431,6 +431,25 @@ describe("target resolution and resolution modes", () => {
     expect(resolution.confidence).toBe("low");
   });
 
+  it("token overlap rejects short substring matches like 'rate' inside 'corporate'", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Corporate Governance" },
+          { id: "fac_2", kind: "factor", label: "Churn Rate" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // "rate" is 4 chars, "corporate" is 9 chars — ratio 0.44, below 0.6 threshold
+    // Should NOT falsely match "Corporate Governance" via "rate" substring
+    const resolution = resolveEditTarget("set rate to 5%", context);
+    // Should match "Churn Rate" (exact substring "rate" in "churn rate"), not "Corporate Governance"
+    expect(resolution.resolved_target?.label).toBe("Churn Rate");
+  });
+
   it("parameter_update with low confidence returns propose_and_confirm", () => {
     const context = makeContext({
       graph: {

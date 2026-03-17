@@ -248,9 +248,10 @@ export async function handleTurn(
     const currentStage: DecisionStage = inferredStage.stage;
 
     // 4. Intent gate — use context-aware classification when brief detection is enabled
-    const turnCtx = turnRequest.context;
+    // Merge graph from both context.graph and top-level graph_state (same precedence as buildTurnContext)
+    const hasGraph = (turnRequest.context.graph ?? turnRequest.graph_state ?? null) != null;
     const intent = config.features.briefDetectionEnabled
-      ? classifyIntentWithContext(turnRequest.message, { hasGraph: turnCtx.graph != null })
+      ? classifyIntentWithContext(turnRequest.message, { hasGraph })
       : classifyIntent(turnRequest.message);
 
     let prerequisitesMet = true;

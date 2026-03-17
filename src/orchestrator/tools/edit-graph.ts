@@ -393,7 +393,14 @@ function resolveTokenOverlapMatches(
       .filter((t) => t.length > 2 && !TOKEN_OVERLAP_STOPWORDS.has(t));
     if (labelTokens.length === 0) return false;
     const overlap = labelTokens.filter((lt) =>
-      messageTokens.some((mt) => lt.includes(mt) || mt.includes(lt)),
+      messageTokens.some((mt) => {
+        if (lt === mt) return true;
+        // Substring match only when the shorter token is ≥60% of the longer —
+        // prevents "rate" matching "corporate" while allowing "competi" ↔ "competitive".
+        const shorter = lt.length <= mt.length ? lt : mt;
+        const longer = lt.length <= mt.length ? mt : lt;
+        return longer.includes(shorter) && shorter.length / longer.length >= 0.6;
+      }),
     );
     return overlap.length >= 1 && (overlap.length / labelTokens.length) >= 0.5;
   });
