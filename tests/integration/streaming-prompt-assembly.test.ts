@@ -8,7 +8,7 @@
  * Prevents regression: 310-char hardcoded prompt instead of ~63K full prompt.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { EnrichedContext, SpecialistResult, LLMClient } from "../../src/orchestrator/pipeline/types.js";
 
 // ============================================================================
@@ -112,6 +112,15 @@ function makeMockLLMClient(): LLMClient {
 describe("Streaming prompt assembly parity (high-fidelity)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    // Restore classifyIntent to the module-level default after every test that may
+    // have overridden it, so a test throwing before its own reset cannot leak state.
+    const { classifyIntent } = await import("../../src/orchestrator/intent-gate.js");
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "llm", tool: null, confidence: "none", normalised_message: "",
+    });
   });
 
   it("phase3PrepareForStreaming: LLM path system prompt > 50000 chars", async () => {
@@ -229,11 +238,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     expect(prep.kind).toBe("llm");
     if (prep.kind !== "llm") throw new Error("expected llm");
     expect(prep.callArgs.system.length).toBeGreaterThan(50_000);
-
-    // Reset mock
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   // ── brief_detection bypass regression (F-BD-01) ──────────────────────────
@@ -271,11 +275,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     expect(result.tool_invocations).toHaveLength(1);
     expect(result.tool_invocations[0].name).toBe("draft_graph");
     expect(result.tool_invocations[0].id).toBe("deterministic");
-
-    // Reset mock
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   it("phase3PrepareForStreaming: brief_detection with empty framing returns deterministic (wouldSkipLLM: true)", async () => {
@@ -311,11 +310,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
 
     // LLM must not have been called
     expect(client.chatWithTools).not.toHaveBeenCalled();
-
-    // Reset mock
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   it("phase3PrepareForStreaming: brief_detection parity — streaming matches non-streaming for empty framing", async () => {
@@ -330,19 +324,20 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
       normalised_message: "deciding between two vendors for our erp system",
     });
 
-    const ctx = makeEnrichedContext({
-      graph: null,
-      framing: null,
-      stage_indicator: { stage: "frame", confidence: "high", source: "inferred" },
-    });
     const message = "Deciding between two vendors for our ERP system";
-
     const streamClient = makeMockLLMClient();
     const nonStreamClient = makeMockLLMClient();
 
+    // Each path gets its own context object — no shared mutable state across concurrent calls
     const [prep, nonStreamResult] = await Promise.all([
-      phase3PrepareForStreaming(ctx, makeSpecialistResult(), streamClient, "req-parity-bd-s", message),
-      phase3Generate(ctx, makeSpecialistResult(), nonStreamClient, "req-parity-bd-ns", message),
+      phase3PrepareForStreaming(
+        makeEnrichedContext({ graph: null, framing: null, stage_indicator: { stage: "frame", confidence: "high", source: "inferred" } }),
+        makeSpecialistResult(), streamClient, "req-parity-bd-s", message,
+      ),
+      phase3Generate(
+        makeEnrichedContext({ graph: null, framing: null, stage_indicator: { stage: "frame", confidence: "high", source: "inferred" } }),
+        makeSpecialistResult(), nonStreamClient, "req-parity-bd-ns", message,
+      ),
     ]);
 
     // Both must be deterministic draft_graph — no LLM calls on either path
@@ -352,11 +347,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     if (prep.kind !== "deterministic") throw new Error("expected deterministic");
     expect(prep.result.tool_invocations[0].name).toBe("draft_graph");
     expect(nonStreamResult.tool_invocations[0].name).toBe("draft_graph");
-
-    // Reset mock
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   // ── end brief_detection bypass regression ────────────────────────────────
@@ -396,10 +386,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     expect(result.tool_invocations).toHaveLength(0);
     expect(result.route_metadata?.outcome).toBe("generation_clarification");
     expect(result.route_metadata?.reasoning).toBe("stable_model_exists_and_regenerate_not_requested");
-
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   it("explicit draft request without brief_detection/generate_model and empty framing → clarification, not draft_graph", async () => {
@@ -434,10 +420,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     expect(result.tool_invocations).toHaveLength(0);
     expect(result.route_metadata?.outcome).toBe("generation_clarification");
     expect(result.route_metadata?.reasoning).toBe("explicit_generate_missing_minimum_viable_framing");
-
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   it("phase3PrepareForStreaming: brief_detection + stable model returns deterministic clarification block (not draft_graph)", async () => {
@@ -470,10 +452,6 @@ describe("Streaming prompt assembly parity (high-fidelity)", () => {
     expect(prep.result.tool_invocations).toHaveLength(0);
     expect(prep.result.route_metadata?.outcome).toBe("generation_clarification");
     expect(client.chatWithTools).not.toHaveBeenCalled();
-
-    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
-      routing: "llm", tool: null, confidence: "none", normalised_message: "",
-    });
   });
 
   // ── end bypass boundary tests ─────────────────────────────────────────────

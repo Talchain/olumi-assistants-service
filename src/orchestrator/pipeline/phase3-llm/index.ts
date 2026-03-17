@@ -1049,29 +1049,24 @@ async function generateRationaleExplanation(
 
 /**
  * True when the intent gate signals that the user's message IS the brief and generation
- * is unambiguously intended — structured-framing prerequisites and minimum-context checks
- * should be bypassed.
+ * is unambiguously intended — structured-framing prerequisites should be bypassed.
  *
  * Two patterns qualify:
- * - 'generate_model': user clicked the "Generate Model" UI button. When `explicitGenerate`
- *   is provided it must be `kind: 'deterministic'`; omit the argument in call sites where
- *   explicitGenerate has not yet been computed (e.g. buildExplicitGenerateRoute itself).
+ * - 'generate_model': user clicked the "Generate Model" UI button (explicitGenerate must
+ *   be 'deterministic' — the UI button always supplies sufficient context).
  * - 'brief_detection': classifyIntentWithContext detected the message as a decision brief.
  *
- * Single source of truth used by buildExplicitGenerateRoute, phase3Generate, and
- * wouldSkipLLM — keeps all three call sites from drifting independently.
+ * Single source of truth for the prerequisite-bypass decision in phase3Generate and
+ * wouldSkipLLM. The minimum-context gate inside buildExplicitGenerateRoute checks
+ * matchedPattern === 'brief_detection' directly since explicitGenerate is not yet
+ * computed there.
  */
 function isDraftGraphFramingBypass(
   matchedPattern: string | null | undefined,
-  explicitGenerate?: ExplicitGenerateRoute,
+  explicitGenerate: ExplicitGenerateRoute,
 ): boolean {
   if (matchedPattern === 'brief_detection') return true;
-  if (matchedPattern === 'generate_model') {
-    // When called from buildExplicitGenerateRoute (before explicitGenerate is known),
-    // treat generate_model as a bypass unconditionally — the caller already asserted
-    // isExplicitGenerateRequest, so the pattern only appears in the right context.
-    return explicitGenerate === undefined || explicitGenerate.kind === 'deterministic';
-  }
+  if (matchedPattern === 'generate_model' && explicitGenerate.kind === 'deterministic') return true;
   return false;
 }
 
@@ -1091,7 +1086,10 @@ function buildExplicitGenerateRoute(
     return { kind: 'none' };
   }
 
-  if (!isDraftGraphFramingBypass(intentGate.matched_pattern) && !hasMinimumViableFramingContext(context, userMessage)) {
+  // brief_detection and generate_model both mean the message IS the brief — skip minimum-context check.
+  const isMessageBrief = intentGate.matched_pattern === 'generate_model'
+    || intentGate.matched_pattern === 'brief_detection';
+  if (!isMessageBrief && !hasMinimumViableFramingContext(context, userMessage)) {
     return {
       kind: 'clarify',
       assistantText: buildGenerationClarificationMessage(enrichedContext),
