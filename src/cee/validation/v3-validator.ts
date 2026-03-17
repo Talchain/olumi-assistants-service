@@ -13,6 +13,7 @@ import { CEEGraphResponseV3 } from "../../schemas/cee-v3.js";
 import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
 import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
+import { CANONICAL_ID_REGEX } from "../utils/id-normalizer.js";
 
 /**
  * Normalise raw response options before schema validation.
@@ -188,15 +189,14 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
     }
     seenIds.add(node.id);
 
-    // Check ID format - must start with letter, contain only alphanumeric, underscores, or hyphens
-    // Aligned with PRESERVED_ID_REGEX from id-normalizer
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(node.id)) {
+    // Check ID format — canonical pattern from id-normalizer
+    if (!CANONICAL_ID_REGEX.test(node.id)) {
       warnings.push({
         code: "INVALID_NODE_ID",
         severity: "error",
-        message: `Invalid node ID format: "${node.id}" (must start with letter, contain only alphanumeric, underscores, or hyphens)`,
+        message: `Invalid node ID format: "${node.id}" (must contain only lowercase alphanumeric, underscores, or colons)`,
         affected_node_id: node.id,
-        suggestion: "Use IDs starting with a letter followed by alphanumeric characters, underscores, or hyphens",
+        suggestion: "Use IDs with lowercase alphanumeric characters, underscores, or colons",
         stage,
       });
     }
@@ -645,14 +645,14 @@ function validateOptions(
       interventionSignatures.set(interventionEntries, option.id);
     }
 
-    // Check ID format
-    if (!/^[a-z0-9_:-]+$/.test(option.id)) {
+    // Check ID format — canonical pattern from id-normalizer
+    if (!CANONICAL_ID_REGEX.test(option.id)) {
       warnings.push({
         code: "INVALID_OPTION_ID",
         severity: "error",
         message: `Invalid option ID format: "${option.id}"`,
         affected_option_id: option.id,
-        suggestion: "Use only lowercase letters, numbers, underscores, colons, and hyphens",
+        suggestion: "Use only lowercase letters, numbers, underscores, and colons",
         stage,
       });
     }

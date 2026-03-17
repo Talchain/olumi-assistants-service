@@ -4,14 +4,55 @@ import {
   normalizeLabelsToIds,
   isValidId,
   extractIdPrefix,
+  CANONICAL_ID_REGEX,
 } from "../../src/cee/utils/id-normalizer.js";
 
 describe("CEE ID Normalizer", () => {
+  describe("CANONICAL_ID_REGEX", () => {
+    it("matches canonical IDs", () => {
+      expect(CANONICAL_ID_REGEX.test("marketing_spend")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("factor:price")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("0_factor")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("abc123")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("option_a__2")).toBe(true);
+    });
+
+    it("rejects non-canonical IDs", () => {
+      expect(CANONICAL_ID_REGEX.test("Marketing")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("PRICE")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("Opt_Premium-1")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("has space")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("price@100")).toBe(false);
+    });
+
+    it("rejects hyphens", () => {
+      expect(CANONICAL_ID_REGEX.test("my-id")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("goal-node")).toBe(false);
+      expect(CANONICAL_ID_REGEX.test("option-1")).toBe(false);
+    });
+
+    it("accepts leading underscore and colon", () => {
+      expect(CANONICAL_ID_REGEX.test("_id")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test(":id")).toBe(true);
+    });
+
+    it("accepts numeric start", () => {
+      expect(CANONICAL_ID_REGEX.test("0_id")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("123")).toBe(true);
+    });
+  });
+
   describe("normalizeToId", () => {
-    it("preserves valid IDs without normalization", () => {
-      expect(normalizeToId("Marketing")).toBe("Marketing");
-      expect(normalizeToId("PRICE")).toBe("PRICE");
-      expect(normalizeToId("Opt_Premium-1")).toBe("Opt_Premium-1");
+    it("lowercases IDs that were previously preserved", () => {
+      expect(normalizeToId("Marketing")).toBe("marketing");
+      expect(normalizeToId("PRICE")).toBe("price");
+      expect(normalizeToId("Opt_Premium")).toBe("opt_premium");
+    });
+
+    it("preserves IDs already matching canonical pattern", () => {
+      expect(normalizeToId("marketing_spend")).toBe("marketing_spend");
+      expect(normalizeToId("factor:price")).toBe("factor:price");
+      expect(normalizeToId("0_factor")).toBe("0_factor");
     });
 
     it("replaces spaces with underscores", () => {
@@ -19,7 +60,9 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("monthly cost")).toBe("monthly_cost");
     });
 
-    it("normalizes hyphens when normalization is required", () => {
+    it("always replaces hyphens with underscores", () => {
+      expect(normalizeToId("my-id")).toBe("my_id");
+      expect(normalizeToId("goal-node")).toBe("goal_node");
       expect(normalizeToId("Marketing Spend-2024")).toBe("marketing_spend_2024");
     });
 
@@ -33,15 +76,17 @@ describe("CEE ID Normalizer", () => {
     });
 
     it("collapses multiple underscores during normalization", () => {
-      // Multiple spaces -> underscores -> collapsed
       expect(normalizeToId("marketing  spend")).toBe("marketing_spend");
-      // Already valid ID per PRESERVED_ID_REGEX, so preserved as-is
-      expect(normalizeToId("marketing___spend")).toBe("marketing___spend");
     });
 
-    it("trims leading and trailing underscores", () => {
-      expect(normalizeToId("_marketing_")).toBe("marketing");
-      expect(normalizeToId("__price__")).toBe("price");
+    it("preserves leading/trailing underscores in canonical IDs", () => {
+      // _marketing_ matches canonical pattern — preserved as-is
+      expect(normalizeToId("_marketing_")).toBe("_marketing_");
+    });
+
+    it("trims leading and trailing underscores during normalization", () => {
+      expect(normalizeToId(" _price_ ")).toBe("price");
+      expect(normalizeToId("Price__")).toBe("price");
     });
 
     it("handles empty string", () => {
@@ -63,14 +108,26 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("Option A", existingIds)).toBe("option_a__4");
     });
 
-    it("normalizes colons to underscores", () => {
-      expect(normalizeToId("factor:price")).toBe("factor_price");
+    it("preserves colons in canonical IDs", () => {
+      expect(normalizeToId("factor:price")).toBe("factor:price");
     });
 
-    it("allows hyphens in output", () => {
-      const result = normalizeToId("my-id");
-      expect(result).toBe("my-id");
+    it("allows numeric start", () => {
+      const result = normalizeToId("0_factor");
+      expect(result).toBe("0_factor");
       expect(isValidId(result)).toBe(true);
+    });
+
+    it("output always matches canonical pattern", () => {
+      const inputs = [
+        "Marketing Spend", "PRICE", "Opt_Premium-1",
+        "Price (GBP)", "factor:price", "0_factor",
+        "cost#1", "Option A", "my-id", "goal-node",
+      ];
+      for (const input of inputs) {
+        const id = normalizeToId(input);
+        expect(isValidId(id)).toBe(true);
+      }
     });
   });
 
@@ -100,19 +157,35 @@ describe("CEE ID Normalizer", () => {
   });
 
   describe("isValidId", () => {
-    it("returns true for valid IDs", () => {
+    it("returns true for canonical IDs", () => {
       expect(isValidId("marketing_spend")).toBe(true);
-      expect(isValidId("option-1")).toBe(true);
       expect(isValidId("abc123")).toBe(true);
-      expect(isValidId("UPPERCASE")).toBe(true);
+      expect(isValidId("factor:price")).toBe(true);
+      expect(isValidId("0_factor")).toBe(true);
+      expect(isValidId("option_a__2")).toBe(true);
     });
 
-    it("returns false for invalid IDs", () => {
+    it("returns false for non-canonical IDs", () => {
       expect(isValidId("Marketing Spend")).toBe(false);
       expect(isValidId("price@100")).toBe(false);
       expect(isValidId("has space")).toBe(false);
-      expect(isValidId("factor:price")).toBe(false);
-      expect(isValidId("1option")).toBe(false);
+      expect(isValidId("UPPERCASE")).toBe(false);
+    });
+
+    it("rejects hyphens", () => {
+      expect(isValidId("my-id")).toBe(false);
+      expect(isValidId("option-1")).toBe(false);
+      expect(isValidId("goal-node")).toBe(false);
+    });
+
+    it("accepts leading underscore and colon", () => {
+      expect(isValidId("_id")).toBe(true);
+      expect(isValidId(":id")).toBe(true);
+    });
+
+    it("accepts numeric start", () => {
+      expect(isValidId("0_id")).toBe(true);
+      expect(isValidId("123")).toBe(true);
     });
   });
 
@@ -124,6 +197,14 @@ describe("CEE ID Normalizer", () => {
 
     it("extracts prefix before colon", () => {
       expect(extractIdPrefix("factor:marketing")).toBe("factor");
+    });
+
+    it("extracts prefix before hyphen (legacy IDs)", () => {
+      expect(extractIdPrefix("goal-node")).toBe("goal");
+    });
+
+    it("extracts numeric prefix", () => {
+      expect(extractIdPrefix("0_factor")).toBe("0");
     });
 
     it("returns full ID if no separator", () => {

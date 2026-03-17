@@ -18,9 +18,9 @@ import {
 describe("CIL Phase 0.2: Sentinel integrity checks", () => {
   // ── normaliseIdForMatch ────────────────────────────────────────────────
   describe("normaliseIdForMatch", () => {
-    it("preserves IDs that already match the valid pattern", () => {
-      expect(normaliseIdForMatch("Factor_Price")).toBe("Factor_Price");
-      expect(normaliseIdForMatch("Goal-Revenue")).toBe("Goal-Revenue");
+    it("normalises IDs to canonical lowercase pattern", () => {
+      expect(normaliseIdForMatch("Factor_Price")).toBe("factor_price");
+      expect(normaliseIdForMatch("Goal-Revenue")).toBe("goal_revenue");
       expect(normaliseIdForMatch("factor_price")).toBe("factor_price");
     });
 
@@ -303,15 +303,16 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(catStripped).toHaveLength(1);
     });
 
-    it("valid IDs with different casing are treated as different nodes", () => {
+    it("IDs with different casing normalise to the same canonical form", () => {
       const rawNodes = [{ id: "Factor_Price", kind: "factor" }];
       const v3Nodes = [{ id: "factor_price", kind: "factor" }];
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, []);
       const dropped = result.warnings.filter((w) => w.code === "NODE_DROPPED");
       const synthetic = result.warnings.filter((w) => w.code === "SYNTHETIC_NODE_INJECTED");
-      expect(dropped).toHaveLength(1);
-      expect(synthetic).toHaveLength(1);
+      // Canonical normalisation treats Factor_Price and factor_price as the same node
+      expect(dropped).toHaveLength(0);
+      expect(synthetic).toHaveLength(0);
     });
   });
 

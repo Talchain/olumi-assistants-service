@@ -31,6 +31,7 @@ import type {
 } from "./types.js";
 import { estimateTokens } from "./token-estimator.js";
 import { getProfile, computeBudget } from "./profiles.js";
+import { CANONICAL_ID_REGEX } from "../../cee/utils/id-normalizer.js";
 
 // ============================================================================
 // Shared Constants
@@ -62,13 +63,13 @@ export const RULES_REMINDER = `<rules_reminder>
  * injection payloads from upstream misclassification.
  */
 const SAFE_SYSTEM_VALUE_PATTERNS: ReadonlyArray<RegExp> = [
-  /^f_[\w-]+$/,                     // fact_id pattern: f_win_1, f_margin_2
-  /^blk_[\w-]+$/,                   // block_id pattern: blk_fact_abc123
+  /^f_[a-z0-9_]+$/,                  // fact_id pattern: f_win_1, f_margin_2
+  /^blk_[a-z0-9_]+$/,               // block_id pattern: blk_fact_abc123
   /^[a-z_]+$/,                      // short enum values: moderate, high, positive
   /^[A-Z][A-Z0-9_]+$/,             // uppercase enums: CHAT, DRAFT_GRAPH
   /^-?\d+(\.\d+)?$/,               // numeric strings: "42", "0.5", "-3.14"
   /^(true|false)$/,                 // boolean strings
-  /^[A-Za-z][A-Za-z0-9_-]*$/,      // node/edge IDs: fac_1, opt_2, goal-node
+  CANONICAL_ID_REGEX,                  // node/edge IDs: uses shared canonical pattern from id-normalizer
 ];
 
 function isKnownSafeSystemValue(value: unknown): boolean {

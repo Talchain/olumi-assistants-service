@@ -82,7 +82,7 @@ describe("CEE Schema V3 Integration", () => {
       expect(optionIds).toEqual(optionNodeIds);
     });
 
-    it("preserves option IDs without normalization", () => {
+    it("normalizes option IDs to canonical pattern", () => {
       const responseWithSpecialIds: V1DraftGraphResponse = {
         graph: {
           version: "1",
@@ -102,8 +102,8 @@ describe("CEE Schema V3 Integration", () => {
 
       const v3Response = transformResponseToV3(responseWithSpecialIds);
       const optionNode = v3Response.nodes.find((n) => n.kind === "option");
-      expect(optionNode?.id).toBe("Opt_Premium_Tier");
-      expect(v3Response.options[0]?.id).toBe("Opt_Premium_Tier");
+      expect(optionNode?.id).toBe("opt_premium_tier");
+      expect(v3Response.options[0]?.id).toBe("opt_premium_tier");
     });
 
     it("transforms edges to V3 format with nested strength", () => {

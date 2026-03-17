@@ -17,6 +17,7 @@ import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
+import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
 // ============================================================================
 // Node Types
@@ -85,8 +86,8 @@ export type FactorCategoryV3T = z.infer<typeof FactorCategoryV3>;
  * V3 node schema.
  */
 export const NodeV3 = z.object({
-  /** Node ID - must start with letter, contain only alphanumeric, underscores, or hyphens */
-  id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, "Node ID must start with letter and contain only alphanumeric, underscores, or hyphens"),
+  /** Node ID - canonical pattern: lowercase alphanumeric, underscores, colons */
+  id: z.string().regex(CANONICAL_ID_REGEX, "Node ID must contain only lowercase alphanumeric, underscores, or colons"),
   /** Node kind */
   kind: NodeKindV3,
   /** Human-readable label */
@@ -269,8 +270,8 @@ void _assertV3OptionStatusExcludesNeedsUserInput;
  * - status: "needs_encoding" when raw values exist but aren't yet encoded
  */
 export const OptionV3 = z.object({
-  /** Option ID - must start with letter, contain only alphanumeric, underscores, or hyphens */
-  id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, "Option ID must start with letter and contain only alphanumeric, underscores, or hyphens"),
+  /** Option ID - canonical pattern: lowercase alphanumeric, underscores, colons */
+  id: z.string().regex(CANONICAL_ID_REGEX, "Option ID must contain only lowercase alphanumeric, underscores, or colons"),
   /** Human-readable label */
   label: z.string(),
   /** Optional description */
