@@ -390,6 +390,41 @@ describe("phase3-llm", () => {
       expect(result.route_debug?.explain_results_selection.reason).toBe("analysis_not_current_or_not_explainable");
     });
 
+    it("rationale_explanation uses full assembled prompt (not 310-char hardcoded fallback)", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "explain_results",
+        confidence: "exact",
+        matched_pattern: "why",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+        analysis: null,
+        graph: { nodes: [{ id: "n1", kind: "factor", label: "Demand" }], edges: [] } as unknown as EnrichedContext["graph"],
+        framing: { goal: "Maximise growth" } as EnrichedContext["framing"],
+      });
+
+      await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-rationale-prompt",
+        "Why is this the current recommendation?",
+      );
+
+      expect(client.chat).toHaveBeenCalledTimes(1);
+      const chatArgs = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      // The system prompt must come from assembleV2SystemPrompt (Zone 1 + Zone 2),
+      // NOT the old hardcoded 310-char string. The mock getSystemPrompt returns
+      // "System prompt", so the assembled result includes that + Zone 2 + RATIONALE suffix.
+      expect(chatArgs.system).toContain("System prompt"); // Zone 1 content present
+      expect(chatArgs.system).toContain("[RATIONALE MODE]"); // Rationale suffix appended
+      expect(chatArgs.system.length).toBeGreaterThan(310); // NOT the old 310-char hardcoded string
+    });
+
     it("resumes pending clarification follow-up into deterministic edit_graph when user replies with an exact visible label", async () => {
       const client = makeMockLLMClient();
       const ctx = makeEnrichedContext({
@@ -1201,6 +1236,130 @@ describe("phase3-llm", () => {
       expect(result.route_metadata?.prompt_version).toBe("default:orchestrator");
       expect(result.route_metadata?.outcome).toBe("default_llm");
       expect(result.route_metadata?.reasoning).toBe("no_tool_support_fallback");
+    });
+  });
+
+  // ============================================================================
+  // edit_graph routing metadata assertions
+  // ============================================================================
+
+  describe("edit_graph route metadata (deterministic prefix match)", () => {
+    it("routes 'update the team size factor' deterministically to edit_graph with correct metadata", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "edit_graph",
+        confidence: "exact",
+        matched_pattern: "update the",
+        normalised_message: "update the team size factor",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Productivity" },
+            { id: "fac_team_size", kind: "factor", label: "Team Size" },
+          ],
+          edges: [{ from: "fac_team_size", to: "goal_1", strength: 0.5 }],
+        } as unknown as EnrichedContext["graph"],
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-edit-1",
+        "update the team size factor",
+      );
+
+      // Deterministic — no LLM call
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+      expect(result.tool_invocations[0].id).toBe("deterministic");
+
+      // Route debug assertions
+      expect(result.route_debug?.initial_intent_gate).toMatchObject({
+        routing: "deterministic",
+        tool: "edit_graph",
+        matched_pattern: "update the",
+        confidence: "exact",
+      });
+      expect(result.route_debug?.final_intent_gate).toMatchObject({
+        routing: "deterministic",
+        tool: "edit_graph",
+      });
+    });
+
+    it("routes 'add a factor for X' deterministically to edit_graph", async () => {
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "deterministic",
+        tool: "edit_graph",
+        confidence: "exact",
+        matched_pattern: "add a factor for",
+        normalised_message: "add a factor for competitor response",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        graph: {
+          nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-edit-2",
+        "add a factor for competitor response",
+      );
+
+      expect(client.chatWithTools).not.toHaveBeenCalled();
+      expect(result.tool_invocations[0].name).toBe("edit_graph");
+      expect(result.route_debug?.initial_intent_gate).toMatchObject({
+        routing: "deterministic",
+        tool: "edit_graph",
+      });
+    });
+
+    it("'what about X' does NOT deterministically route to edit_graph", async () => {
+      // Intent gate returns no match → falls through to LLM
+      const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+      (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+        routing: "llm",
+        tool: null,
+        confidence: "none",
+        normalised_message: "what about market conditions",
+      });
+
+      const client = makeMockLLMClient();
+      const ctx = makeEnrichedContext({
+        graph: {
+          nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+          edges: [],
+        } as unknown as EnrichedContext["graph"],
+        stage_indicator: { stage: "ideate", confidence: "high", source: "inferred" },
+      });
+
+      const result = await phase3Generate(
+        ctx,
+        makeSpecialistResult(),
+        client,
+        "req-edit-neg",
+        "what about market conditions?",
+      );
+
+      // Should have called LLM (not deterministic)
+      expect(client.chatWithTools).toHaveBeenCalled();
+      expect(result.route_debug?.initial_intent_gate).toMatchObject({
+        routing: "llm",
+        tool: null,
+      });
     });
   });
 

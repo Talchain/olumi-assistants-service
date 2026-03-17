@@ -129,8 +129,8 @@ describe("Intent Gate — classifyIntent", () => {
       ["add an option for outsourcing", "add an option for"],
       ["set the budget constraint to 50k", "set the"],
       ["remove the legacy factor", "remove the"],
-      ["please update the team size", "please update"],
-      ["please add a new risk factor", "please add"],
+      ["please update the team size", "please update the"],
+      ["please add a new risk factor", "please add a"],
     ])("routes %j to edit_graph (prefix: %j)", (message, expectedPrefix) => {
       const result = classifyIntent(message);
       expect(result.tool).toBe("edit_graph");
@@ -149,6 +149,18 @@ describe("Intent Gate — classifyIntent", () => {
       // Also not in exact pattern table → falls through to LLM.
       const result = classifyIntent("update");
       expect(result.tool).toBeNull();
+    });
+
+    // False-positive avoidance: bare verbs without determiner/graph-object must NOT match
+    it.each([
+      "add some context to the brief",
+      "set aside time for review",
+      "remove any ambiguity from the wording",
+      "change course if needed",
+      "update me on the progress",
+    ])("does NOT route conversational %j to edit_graph", (message) => {
+      const result = classifyIntent(message);
+      expect(result.tool).not.toBe("edit_graph");
     });
   });
 

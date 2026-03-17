@@ -1219,6 +1219,64 @@ describe("baseline structural violations (pre-existing violations ignored)", () 
 
     expect(result.wasRejected).toBe(true);
   });
+
+  it("rejects edit that adds a second orphan when baseline already has one (same-code count delta)", async () => {
+    // Input graph: goal + factor + outcome (connected) + an ORPHAN node (fac_orphan, no edges).
+    // Baseline has 1× ORPHAN_NODE. Edit adds another disconnected node → 2× ORPHAN_NODE.
+    // Count delta: 2 - 1 = 1 new violation → must reject.
+    const graphWithOrphan = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+        { id: "out_1", kind: "outcome", label: "Sales" },
+        { id: "fac_orphan", kind: "factor", label: "Orphan Factor" }, // pre-existing orphan
+      ],
+      edges: [
+        {
+          from: "factor_1",
+          to: "out_1",
+          strength_mean: 0.5,
+          strength_std: 0.1,
+          exists_probability: 0.9,
+          effect_direction: "positive",
+        },
+        {
+          from: "out_1",
+          to: "goal_1",
+          strength_mean: 0.8,
+          strength_std: 0.05,
+          exists_probability: 1.0,
+          effect_direction: "positive",
+        },
+      ],
+    } as unknown as ConversationContext["graph"];
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "add_node",
+          path: "/nodes/fac_new_orphan",
+          value: { id: "fac_new_orphan", kind: "factor", label: "New Orphan" },
+          impact: "low",
+          rationale: "Add unconnected factor",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Added factor.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext({ graph: graphWithOrphan }),
+      "Add a new factor",
+      adapter,
+      "req-same-code",
+      "turn-same-code",
+    );
+
+    // Must reject: the edit introduced a NEW orphan (same code as baseline, but count increased)
+    expect(result.wasRejected).toBe(true);
+  });
 });
 
 // ============================================================================

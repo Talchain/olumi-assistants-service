@@ -1055,9 +1055,12 @@ export async function handleEditGraph(
   // Edits must not be rejected for violations that already existed before the edit.
   // E.g. a graph with 0 options should still allow factor updates without requiring
   // the edit to also add 2+ options.
-  const baselineViolations: Set<StructuralViolationCode> = new Set(
-    validateGraphStructure(context.graph).violations.map((v) => v.code),
-  );
+  // Uses per-code counts so that a pre-existing ORPHAN_NODE doesn't mask a newly
+  // introduced ORPHAN_NODE — only the pre-existing count is subtracted.
+  const baselineViolationCounts = new Map<StructuralViolationCode, number>();
+  for (const v of validateGraphStructure(context.graph).violations) {
+    baselineViolationCounts.set(v.code, (baselineViolationCounts.get(v.code) ?? 0) + 1);
+  }
 
   // ---- Attempt loop: LLM call → validate → PLoT → repair ----
   const totalAttempts = maxRetries + 1;
@@ -1412,7 +1415,17 @@ export async function handleEditGraph(
       const structResultRaw = validateGraphStructure(candidateGraph);
       // Filter out violations that already existed in the input graph — edits should
       // not be rejected for pre-existing structural incompleteness (e.g. no options yet).
-      const newViolations = structResultRaw.violations.filter((v) => !baselineViolations.has(v.code));
+      // Uses count-based comparison: subtract baseline counts per code, so new instances
+      // of the same violation code (e.g. a second ORPHAN_NODE) are still caught.
+      const remainingBaseline = new Map(baselineViolationCounts);
+      const newViolations = structResultRaw.violations.filter((v) => {
+        const count = remainingBaseline.get(v.code) ?? 0;
+        if (count > 0) {
+          remainingBaseline.set(v.code, count - 1);
+          return false; // absorbed by baseline
+        }
+        return true; // genuinely new
+      });
       const structResult = {
         valid: newViolations.length === 0,
         violations: newViolations,

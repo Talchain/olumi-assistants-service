@@ -210,27 +210,30 @@ export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
  * Ordered longest-first to avoid partial prefix matches.
  */
 export const EDIT_PREFIXES: readonly string[] = Object.freeze([
-  'please update ',
-  'please change ',
-  'please modify ',
-  'please add ',
-  'please set ',
-  'please remove ',
+  // "please <verb> the …" — polite imperative with determiner signals graph mutation
+  'please update the ',
+  'please change the ',
+  'please modify the ',
+  'please set the ',
+  'please remove the ',
+  // "please <verb> a …" — polite imperative adding a graph element
+  'please add a ',
+  'please add an ',
+  // "<verb> the …" — bare imperative with determiner (anchored to a specific element)
   'update the ',
   'change the ',
   'modify the ',
   'remove the ',
+  'set the ',
+  // Graph-object-qualified patterns — explicit factor/option/edge/node targets
   'add a factor for ',
   'add a factor ',
   'add an option for ',
   'add an option ',
-  'set the ',
-  'update ',
-  'change ',
-  'modify ',
-  'add ',
-  'set ',
-  'remove ',
+  'add a node ',
+  'add an edge ',
+  'remove factor ',
+  'remove option ',
 ]);
 
 // ============================================================================
