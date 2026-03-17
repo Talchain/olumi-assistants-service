@@ -112,8 +112,10 @@ describe("handleDraftGraph", () => {
     // Edge paths use /edges/{from}->{to}
     expect(addEdgeOps[0].path).toBe("/edges/goal_1->opt_1");
 
-    // No assistant text when no warnings
-    expect(result.assistantText).toBeNull();
+    // assistantText populated from patch summary when no warnings
+    expect(result.assistantText).not.toBeNull();
+    expect(typeof result.assistantText).toBe("string");
+    expect(result.assistantText!.length).toBeGreaterThan(0);
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -254,6 +256,73 @@ describe("handleDraftGraph", () => {
 
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.applied_graph).toEqual(draftedGraph);
+  });
+
+  it("surfaces coaching summary as assistantText when no warnings", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [{ id: "g", kind: "goal", label: "Revenue" }],
+          edges: [],
+        },
+        coaching: {
+          summary: "I've drafted a model capturing the core trade-off between price and volume.",
+          strengthen_items: [],
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Should I raise prices?", mockRequest, "turn-summary");
+
+    // Coaching summary should appear as assistantText
+    expect(result.assistantText).toBe("I've drafted a model capturing the core trade-off between price and volume.");
+    // Warnings should NOT be present
+    expect(result.draftWarnings).toHaveLength(0);
+  });
+
+  it("prefers warnings over summary in assistantText", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [{ id: "g", kind: "goal", label: "G" }],
+          edges: [],
+        },
+        coaching: {
+          summary: "Good structure.",
+          strengthen_items: [],
+        },
+        validation_warnings: ["Missing edge coverage"],
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-warn-priority");
+
+    // Warnings take priority over coaching summary
+    expect(result.assistantText).toContain("1 validation warning");
+    expect(result.assistantText).toContain("Missing edge coverage");
+    expect(result.assistantText).not.toContain("Good structure");
+  });
+
+  it("surfaces operation-derived summary as assistantText when no coaching and no warnings", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "opt_1", kind: "option", label: "Raise Prices" },
+        ],
+        edges: [
+          { from: "opt_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
+        ],
+      }),
+    );
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-op-summary");
+
+    // Should have a non-null summary derived from operations
+    expect(result.assistantText).not.toBeNull();
+    expect(result.assistantText!.length).toBeGreaterThan(0);
   });
 
   it("extracts coaching.summary into narrationHint", async () => {

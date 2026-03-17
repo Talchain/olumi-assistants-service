@@ -393,6 +393,83 @@ describe("target resolution and resolution modes", () => {
     const context = makeContext();
     expect(determineEditResolutionMode("Update Price and also rename Price", context)).toBe("propose_and_confirm");
   });
+
+  it("token overlap matches fuzzy label like 'competitor pressure' → 'Competitive Pressure'", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Competitive Pressure" },
+          { id: "fac_2", kind: "factor", label: "Market Growth" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    const resolution = resolveEditTarget("set competitor pressure to high", context);
+    expect(resolution.resolved_target?.label).toBe("Competitive Pressure");
+    expect(resolution.confidence).toBe("high");
+  });
+
+  it("token overlap does not match on stopwords alone", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "High Value Segment" },
+          { id: "fac_2", kind: "factor", label: "Brand Awareness" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // "set X to high" — "high" and "value" are stopwords, should not match "High Value Segment".
+    // Multiple factors prevent graph_local single-factor fallback.
+    const resolution = resolveEditTarget("set price to high", context);
+    expect(resolution.resolved_target?.label).not.toBe("High Value Segment");
+    // With no match, confidence should be low
+    expect(resolution.confidence).toBe("low");
+  });
+
+  it("token overlap rejects short substring matches like 'rate' inside 'corporate'", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Corporate Governance" },
+          { id: "fac_2", kind: "factor", label: "Churn Rate" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // "rate" is 4 chars, "corporate" is 9 chars — ratio 0.44, below 0.6 threshold
+    // Should NOT falsely match "Corporate Governance" via "rate" substring
+    const resolution = resolveEditTarget("set rate to 5%", context);
+    // Should match "Churn Rate" (exact substring "rate" in "churn rate"), not "Corporate Governance"
+    expect(resolution.resolved_target?.label).toBe("Churn Rate");
+  });
+
+  it("parameter_update with low confidence returns propose_and_confirm", () => {
+    const context = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "fac_1", kind: "factor", label: "Customer Satisfaction Index" },
+          { id: "fac_2", kind: "factor", label: "Brand Perception Score" },
+        ],
+        edges: [],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    // No exact, alias, or token match for "churn rate" — confidence: low
+    const intent = classifyEditIntent("set churn rate to 5%");
+    expect(intent).toBe("parameter_update");
+
+    const mode = determineEditResolutionMode("set churn rate to 5%", context);
+    // Should propose_and_confirm (let user verify) instead of clarify
+    expect(mode).toBe("propose_and_confirm");
+  });
 });
 
 // ============================================================================

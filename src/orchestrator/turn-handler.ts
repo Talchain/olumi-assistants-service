@@ -35,8 +35,8 @@ import type {
 } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { getIdempotentResponse, setIdempotentResponse, getInflightRequest, registerInflightRequest } from "./idempotency.js";
-import { classifyIntent } from "./intent-gate.js";
-import type { ToolName } from "./intent-gate.js";
+import { classifyIntent, classifyIntentWithContext } from "./intent-gate.js";
+import type { ToolName, IntentGateResult } from "./intent-gate.js";
 import { createPLoTClient } from "./plot-client.js";
 import type { PLoTClient, PLoTClientRunOpts } from "./plot-client.js";
 import { routeSystemEvent, appendSystemMessages } from "./system-event-router.js";
@@ -49,7 +49,7 @@ import { createCommentaryBlock, createReviewCardBlock } from "./blocks/factory.j
 import { handleRunAnalysis } from "./tools/run-analysis.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import { handleGenerateBrief } from "./tools/generate-brief.js";
-import { handleEditGraph } from "./tools/edit-graph.js";
+import { handleEditGraph, computeGraphHash } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
 import { handleUndoPatch } from "./tools/undo-patch.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
@@ -115,7 +115,22 @@ function buildTurnContext(
 ): TurnContext {
   const ctx = turnRequest.context;
   const graph = ctx.graph ?? turnRequest.graph_state ?? null;
-  const analysisResponse = ctx.analysis_response ?? turnRequest.analysis_state ?? null;
+  // P0-2: Top-level analysis_state represents the latest UI state — it wins
+  // over potentially stale context.analysis_response (matches V2 pipeline precedence).
+  const analysisResponse = turnRequest.analysis_state ?? ctx.analysis_response ?? null;
+
+  // Staleness check: compare analysis graph hash to current graph hash.
+  // Safe default: true (treat as current) when hash comparison is not possible.
+  let analysisIsCurrent = true;
+  if (analysisResponse && graph) {
+    const ar = analysisResponse as Record<string, unknown>;
+    const meta = ar.meta as Record<string, unknown> | undefined;
+    const analysisGraphHash = (typeof ar.graph_hash === 'string' ? ar.graph_hash : null)
+      ?? (typeof meta?.graph_hash === 'string' ? meta.graph_hash : null);
+    if (analysisGraphHash) {
+      analysisIsCurrent = analysisGraphHash === computeGraphHash(graph);
+    }
+  }
 
   return {
     stage: computedStage ?? ctx.framing?.stage ?? 'frame',
@@ -131,6 +146,7 @@ function buildTurnContext(
     bilEnabled,
     hasGraph: graph != null,
     hasAnalysis: analysisResponse != null,
+    analysisIsCurrent,
     generateModel: false,
     primaryGap: bil ? selectPrimaryGap(bil) : null,
   };
@@ -145,12 +161,14 @@ function buildTurnContext(
  * When a gate match occurs but prerequisites are not met, the turn
  * falls through to LLM so it can explain what's missing conversationally.
  */
-const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationContext) => boolean>> = {
+const DETERMINISTIC_PREREQUISITES: Partial<Record<ToolName, (ctx: ConversationContext, intent?: IntentGateResult) => boolean>> = {
   run_analysis: (ctx) => ctx.graph != null && ctx.analysis_inputs != null,
   explain_results: (ctx) => ctx.analysis_response != null,
   edit_graph: (ctx) => ctx.graph != null,
   generate_brief: (ctx) => ctx.graph != null && ctx.analysis_response != null,
-  draft_graph: (ctx) => {
+  draft_graph: (ctx, intent) => {
+    // Brief detection bypass: the user's message IS the brief
+    if (intent?.matched_pattern === 'brief_detection') return true;
     const f = ctx.framing;
     if (!f) return false;
     const fr = f as Record<string, unknown>;
@@ -229,14 +247,18 @@ export async function handleTurn(
     const inferredStage = inferStage(turnRequest.context, turnRequest.system_event);
     const currentStage: DecisionStage = inferredStage.stage;
 
-    // 4. Intent gate
-    const intent = classifyIntent(turnRequest.message);
+    // 4. Intent gate — use context-aware classification when brief detection is enabled
+    // Merge graph from both context.graph and top-level graph_state (same precedence as buildTurnContext)
+    const hasGraph = (turnRequest.context.graph ?? turnRequest.graph_state ?? null) != null;
+    const intent = config.features.briefDetectionEnabled
+      ? classifyIntentWithContext(turnRequest.message, { hasGraph })
+      : classifyIntent(turnRequest.message);
 
     let prerequisitesMet = true;
     if (intent.routing === 'deterministic' && intent.tool) {
       const checkPrereq = DETERMINISTIC_PREREQUISITES[intent.tool];
       if (checkPrereq) {
-        prerequisitesMet = checkPrereq(turnRequest.context);
+        prerequisitesMet = checkPrereq(turnRequest.context, intent);
       }
     }
 

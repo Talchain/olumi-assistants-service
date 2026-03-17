@@ -150,10 +150,12 @@ export async function handleDraftGraph(
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
-  // Build assistantText: warnings take priority; coaching summary used as narration hint only
+  // Build assistantText: warnings take priority; then patch summary for narration
   let assistantText: string | null = null;
   if (warnings.length > 0) {
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
+  } else if (patchData.summary) {
+    assistantText = patchData.summary;
   }
 
   const block = createGraphPatchBlock(patchData, turnId);

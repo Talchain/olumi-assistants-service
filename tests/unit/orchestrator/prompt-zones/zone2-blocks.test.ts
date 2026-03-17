@@ -182,6 +182,45 @@ describe('Block renderers', () => {
     expect(result).not.toContain('elasticity');
   });
 
+  it('analysis_state emits analysis_state.present: true flag', () => {
+    const ctx = makeMinimalContext({ analysisSummary: makeAnalysisSummary(), hasAnalysis: true });
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'analysis_state')!;
+    const result = block.render(ctx);
+    expect(result).toContain('analysis_state.present: true');
+  });
+
+  it('analysis_state emits analysis_state.current: true when current', () => {
+    const ctx = makeMinimalContext({
+      analysisSummary: makeAnalysisSummary(),
+      hasAnalysis: true,
+      analysisIsCurrent: true,
+    });
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'analysis_state')!;
+    const result = block.render(ctx);
+    expect(result).toContain('analysis_state.current: true');
+  });
+
+  it('analysis_state emits analysis_state.current: false when stale', () => {
+    const ctx = makeMinimalContext({
+      analysisSummary: makeAnalysisSummary(),
+      hasAnalysis: true,
+      analysisIsCurrent: false,
+    });
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'analysis_state')!;
+    const result = block.render(ctx);
+    expect(result).toContain('analysis_state.current: false');
+  });
+
+  it('analysis_state defaults to current: true when analysisIsCurrent is undefined', () => {
+    const ctx = makeMinimalContext({
+      analysisSummary: makeAnalysisSummary(),
+      hasAnalysis: true,
+    });
+    const block = ZONE2_BLOCKS.find((b) => b.name === 'analysis_state')!;
+    const result = block.render(ctx);
+    expect(result).toContain('analysis_state.current: true');
+  });
+
   it('bil_context strips outer XML tags to prevent double-wrapping', () => {
     const bilStr = '<BRIEF_ANALYSIS>\nCompleteness: adequate\nGoal: Revenue\n</BRIEF_ANALYSIS>';
     const ctx = makeMinimalContext({ bilContext: bilStr, bilEnabled: true, stage: 'frame' });

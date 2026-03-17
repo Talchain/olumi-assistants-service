@@ -360,6 +360,52 @@ function resolveActiveEntityMatches(context: ConversationContext): ResolvedEditT
     .filter((target): target is ResolvedEditTarget => target !== null);
 }
 
+/**
+ * Stopwords excluded from token overlap matching — common edit verbs, prepositions,
+ * and value words that would inflate match scores against unrelated node labels.
+ */
+const TOKEN_OVERLAP_STOPWORDS = new Set([
+  'set', 'the', 'to', 'a', 'an', 'of', 'for', 'and', 'in', 'on', 'is', 'it',
+  'high', 'low', 'higher', 'lower', 'more', 'less', 'very', 'much',
+  'make', 'change', 'update', 'adjust', 'increase', 'decrease', 'raise', 'reduce',
+  'please', 'add', 'remove', 'delete', 'new', 'from', 'with', 'by', 'its', 'this',
+  'that', 'value', 'level', 'factor', 'node', 'edge', 'option', 'model',
+]);
+
+/**
+ * Token overlap resolution: find graph nodes whose label tokens overlap significantly
+ * with the edit description tokens (after stopword removal).
+ * Requires ≥1 overlapping token AND ≥50% of label tokens matched.
+ */
+function resolveTokenOverlapMatches(
+  normalisedMessage: string,
+  targets: ResolvedEditTarget[],
+): ResolvedEditTarget[] {
+  const messageTokens = normalisedMessage
+    .split(/\s+/)
+    .filter((t) => t.length > 2 && !TOKEN_OVERLAP_STOPWORDS.has(t));
+
+  if (messageTokens.length === 0) return [];
+
+  return targets.filter((target) => {
+    const labelTokens = normaliseMatchingText(target.label)
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !TOKEN_OVERLAP_STOPWORDS.has(t));
+    if (labelTokens.length === 0) return false;
+    const overlap = labelTokens.filter((lt) =>
+      messageTokens.some((mt) => {
+        if (lt === mt) return true;
+        // Substring match only when the shorter token is ≥60% of the longer —
+        // prevents "rate" matching "corporate" while allowing "competi" ↔ "competitive".
+        const shorter = lt.length <= mt.length ? lt : mt;
+        const longer = lt.length <= mt.length ? mt : lt;
+        return longer.includes(shorter) && shorter.length / longer.length >= 0.6;
+      }),
+    );
+    return overlap.length >= 1 && (overlap.length / labelTokens.length) >= 0.5;
+  });
+}
+
 export function resolveEditTarget(
   editDescription: string,
   context: ConversationContext,
@@ -375,6 +421,18 @@ export function resolveEditTarget(
   const aliasMatches = resolveAliasMatches(editDescription, context);
   if (aliasMatches.length > 0) {
     return buildResolutionResult('alias', aliasMatches.length === 1 ? 'high' : 'medium', aliasMatches);
+  }
+
+  // Token overlap match: find nodes where significant words from the edit
+  // description overlap with node label words. Catches fuzzy matches like
+  // "competitor pressure" → "Competitive Pressure" via substring containment.
+  const tokenMatches = resolveTokenOverlapMatches(normalisedMessage, targets);
+  if (tokenMatches.length > 0) {
+    return buildResolutionResult(
+      tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
+      tokenMatches.length === 1 ? 'high' : 'medium',
+      tokenMatches,
+    );
   }
 
   if (containsCoreferenceReference(editDescription)) {
@@ -414,7 +472,17 @@ export function determineEditResolutionMode(
     return 'auto_apply';
   }
 
-  if (resolution.match_type === 'ambiguous' || resolution.confidence === 'low') {
+  if (resolution.match_type === 'ambiguous') {
+    return 'clarify';
+  }
+
+  if (resolution.confidence === 'low') {
+    // For parameter_update with no match, propose the change for user confirmation
+    // rather than asking "which one?" (clarify). The LLM's edit_graph prompt has the
+    // complete graph and can match targets, but we want the user to confirm first.
+    if (intentCategory === 'parameter_update') {
+      return 'propose_and_confirm';
+    }
     return 'clarify';
   }
 

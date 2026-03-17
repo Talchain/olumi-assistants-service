@@ -57,6 +57,8 @@ export interface TurnContext {
   bilEnabled: boolean;
   hasGraph: boolean;
   hasAnalysis: boolean;
+  /** Whether the current analysis reflects the current graph (false = stale). Defaults to true when unknown. */
+  analysisIsCurrent?: boolean;
   generateModel: boolean;
   /** Primary gap from BIL — drives the PRIMARY_GAP_HINT block. */
   primaryGap?: PrimaryGap | null;
@@ -216,6 +218,11 @@ function renderAnalysisState(ctx: TurnContext): string {
 
   const a = ctx.analysisSummary;
   const lines: string[] = [];
+
+  // Structured boolean flags referenced by cf-v19 §STATE_ASSERTION
+  lines.push('analysis_state.present: true');
+  lines.push(`analysis_state.current: ${ctx.analysisIsCurrent !== false ? 'true' : 'false'}`);
+  lines.push('');
 
   lines.push(`Winner: ${a.recommendation.option_label} (${(a.recommendation.win_probability * 100).toFixed(1)}%)`);
 

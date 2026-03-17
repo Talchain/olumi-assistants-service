@@ -13,11 +13,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mocks — vi.hoisted() ensures these are available to hoisted vi.mock factories
 // ============================================================================
 
-const { mockChatWithTools, mockChat, mockLogWarn, mockRunUnifiedPipeline } = vi.hoisted(() => ({
+const { mockChatWithTools, mockChat, mockLogWarn, mockRunUnifiedPipeline, testFlags } = vi.hoisted(() => ({
   mockChatWithTools: vi.fn(),
   mockChat: vi.fn(),
   mockLogWarn: vi.fn(),
   mockRunUnifiedPipeline: vi.fn(),
+  testFlags: { briefDetectionEnabled: false },
 }));
 
 vi.mock('../../src/adapters/llm/router.js', () => ({
@@ -63,6 +64,7 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
               if (featProp === 'orchestrator') return true;
+              if (featProp === 'briefDetectionEnabled') return testFlags.briefDetectionEnabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -155,6 +157,7 @@ describe('handleTurn — parse → assemble integration', () => {
     mockChatWithTools.mockReset();
     mockChat.mockReset();
     mockLogWarn.mockReset();
+    testFlags.briefDetectionEnabled = false;
     vi.mocked(isProduction).mockReturnValue(false);
   });
 
@@ -1016,5 +1019,83 @@ describe('handleTurn — stage inference override', () => {
     // 4. run_analysis must be blocked at frame stage (stage policy integrity)
     const analysisGuard = isToolAllowedAtStage('run_analysis', 'frame');
     expect(analysisGuard.allowed).toBe(false);
+  });
+
+  // ==========================================================================
+  // Brief detection → draft_graph integration
+  // ==========================================================================
+
+  it('NL decision brief routes to draft_graph deterministically when CEE_BRIEF_DETECTION_ENABLED=true', async () => {
+    testFlags.briefDetectionEnabled = true;
+
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: {
+          nodes: [
+            { id: 'goal_1', kind: 'goal', label: 'CRM Selection' },
+            { id: 'opt_1', kind: 'option', label: 'Salesforce' },
+            { id: 'opt_2', kind: 'option', label: 'HubSpot' },
+          ],
+          edges: [],
+        },
+      },
+    });
+
+    const req = makeRequest({
+      message: "We're choosing between three CRM vendors: Salesforce, HubSpot, and Pipedrive. Our budget is £50k and we need to decide by Q3.",
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-brief-detect-001');
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
+    expect(result.envelope.turn_plan!.routing).toBe('deterministic');
+    expect(result.envelope.assistant_text).not.toBeNull();
+    expect(typeof result.envelope.assistant_text).toBe('string');
+    // Must not fall through to LLM — the whole point is deterministic routing
+    expect(mockChatWithTools).not.toHaveBeenCalled();
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  it('NL decision brief falls through to LLM when CEE_BRIEF_DETECTION_ENABLED=false', async () => {
+    testFlags.briefDetectionEnabled = false;
+
+    const xmlResponse = makeXmlEnvelope({
+      assistantText: 'Let me help you think through this decision.',
+    });
+    mockChatWithTools.mockResolvedValueOnce({
+      content: [{ type: 'text', text: xmlResponse }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 100, output_tokens: 50 },
+      model: 'test-model',
+      latencyMs: 200,
+    });
+
+    const req = makeRequest({
+      message: "We're choosing between three CRM vendors: Salesforce, HubSpot, and Pipedrive. Our budget is £50k and we need to decide by Q3.",
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: 'test-scenario',
+      } as ConversationContext,
+    });
+
+    const result = await handleTurn(req, mockFastifyRequest, 'req-brief-detect-002');
+
+    expect(result.httpStatus).toBe(200);
+    // With flag off, should fall through to LLM (no deterministic draft_graph routing)
+    expect(mockChatWithTools).toHaveBeenCalledOnce();
+    expect(result.envelope.turn_plan!.routing).toBe('llm');
+    expect(result.envelope.turn_plan!.selected_tool).not.toBe('draft_graph');
   });
 });
