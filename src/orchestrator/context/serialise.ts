@@ -177,9 +177,20 @@ export function serialiseEditContextForLLM(
  * Extracts: winner, top 3 option probabilities, top 5 drivers, robustness, constraints.
  */
 export function summariseAnalysisResponse(response: V2RunResponseEnvelope): AnalysisResponseSummary {
+  // Resolve nested results object (UI may send V2 fields inside results as an object)
+  const nested = (response.results && typeof response.results === 'object' && !Array.isArray(response.results))
+    ? response.results as Record<string, unknown>
+    : null;
+
   // Option probabilities (top 3)
-  const results = (response.results ?? []) as Array<Record<string, unknown>>;
-  const optionProbabilities: OptionSummary[] = results
+  const rawResults = Array.isArray(response.results)
+    ? response.results as Array<Record<string, unknown>>
+    : Array.isArray((response as Record<string, unknown>).option_comparison)
+      ? (response as Record<string, unknown>).option_comparison as Array<Record<string, unknown>>
+      : Array.isArray(nested?.option_comparison)
+        ? nested!.option_comparison as Array<Record<string, unknown>>
+        : [];
+  const optionProbabilities: OptionSummary[] = rawResults
     .filter((r) => typeof r.option_label === 'string' && typeof r.win_probability === 'number')
     .map((r) => ({
       label: r.option_label as string,
@@ -191,7 +202,7 @@ export function summariseAnalysisResponse(response: V2RunResponseEnvelope): Anal
   const winner = optionProbabilities.length > 0 ? optionProbabilities[0].label : null;
 
   // Top 5 sensitivity drivers
-  const factors = (response.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
+  const factors = (response.factor_sensitivity ?? nested?.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
   const topDrivers: DriverSummary[] = factors
     .filter((f) => typeof f.label === 'string')
     .slice(0, 5)
@@ -202,10 +213,13 @@ export function summariseAnalysisResponse(response: V2RunResponseEnvelope): Anal
     }));
 
   // Robustness
-  const robustnessLevel = response.robustness?.level ?? null;
+  const robustnessLevel = response.robustness?.level
+    ?? (nested?.robustness as Record<string, unknown> | undefined)?.level as string | undefined
+    ?? null;
 
   // Constraint joint probability
-  const constraintJointProbability = response.constraint_analysis?.joint_probability ?? null;
+  const ca = response.constraint_analysis ?? nested?.constraint_analysis as Record<string, unknown> | undefined;
+  const constraintJointProbability = (ca as Record<string, unknown> | null | undefined)?.joint_probability as number | null ?? null;
 
   return {
     winner,

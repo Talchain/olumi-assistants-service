@@ -1075,12 +1075,39 @@ function extractGraphSummary(graph: GraphV3T): GraphSummary {
 }
 
 /**
+ * Safely resolve the results array from a V2RunResponseEnvelope.
+ * Handles: array (normal), object with nested option_comparison (UI V2 shape), or empty.
+ */
+function resolveResultsArray(response: V2RunResponseEnvelope): Array<Record<string, unknown>> {
+  if (Array.isArray(response.results) && response.results.length > 0) {
+    return response.results as Array<Record<string, unknown>>;
+  }
+  const r = response as Record<string, unknown>;
+  const oc = r.option_comparison;
+  if (Array.isArray(oc) && oc.length > 0) return oc as Array<Record<string, unknown>>;
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.option_comparison)) return nested.option_comparison as Array<Record<string, unknown>>;
+  }
+  return [];
+}
+
+/** Get the nested results object when UI sends V2 fields inside results. */
+function resolveNestedResults(response: V2RunResponseEnvelope): Record<string, unknown> | null {
+  const r = response as Record<string, unknown>;
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    return r.results as Record<string, unknown>;
+  }
+  return null;
+}
+
+/**
  * Extract AnalysisSummary from a V2RunResponseEnvelope for Context Fabric.
  * Returns null if no valid results are available.
  */
 function extractAnalysisSummary(response: V2RunResponseEnvelope): AnalysisSummary | null {
-  const results = (response.results ?? []) as Array<Record<string, unknown>>;
-  const sorted = results
+  const rawResults = resolveResultsArray(response);
+  const sorted = rawResults
     .filter(r => typeof r.win_probability === 'number')
     .sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
 
@@ -1091,14 +1118,18 @@ function extractAnalysisSummary(response: V2RunResponseEnvelope): AnalysisSummar
   const winnerProb = winner.win_probability as number;
   const runnerUpProb = sorted.length > 1 ? (sorted[1].win_probability as number) : 0;
 
-  const robustnessLevel = response.robustness?.level ?? 'unknown';
+  const nested = resolveNestedResults(response);
+  const robustnessLevel = response.robustness?.level
+    ?? (nested?.robustness as Record<string, unknown> | undefined)?.level as string | undefined
+    ?? 'unknown';
 
-  const fragileEdges = (response.robustness?.fragile_edges ?? []) as Array<Record<string, unknown>>;
+  const robustnessSource = response.robustness ?? nested?.robustness as Record<string, unknown> | undefined;
+  const fragileEdges = ((robustnessSource as Record<string, unknown> | undefined)?.fragile_edges ?? []) as Array<Record<string, unknown>>;
   const fragileEdgeIds = fragileEdges
     .map(e => typeof e === 'string' ? e : String(e.edge_id ?? ''))
     .filter(Boolean);
 
-  const factors = (response.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
+  const factors = (response.factor_sensitivity ?? nested?.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
   const topDrivers: FabricDriverSummary[] = factors.slice(0, 5).map(f => ({
     node_id: String(f.node_id ?? f.factor_id ?? f.label ?? 'unknown'),
     sensitivity: typeof f.elasticity === 'number' ? f.elasticity : 0,

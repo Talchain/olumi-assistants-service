@@ -53,9 +53,22 @@ type OptionResult = Record<string, unknown>;
 type FactorEntry = Record<string, unknown>;
 
 function getOptionResults(response: V2RunResponseEnvelope): OptionResult[] {
-  const results = response.results;
-  if (!Array.isArray(results)) return [];
-  return results.filter((r): r is OptionResult => r !== null && typeof r === 'object');
+  if (Array.isArray(response.results) && response.results.length > 0) {
+    return response.results.filter((r): r is OptionResult => r !== null && typeof r === 'object');
+  }
+  const r = response as Record<string, unknown>;
+  const oc = r.option_comparison;
+  if (Array.isArray(oc) && oc.length > 0) {
+    return oc.filter((r): r is OptionResult => r !== null && typeof r === 'object');
+  }
+  // UI may nest V2 fields inside results as an object
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.option_comparison)) {
+      return nested.option_comparison.filter((r): r is OptionResult => r !== null && typeof r === 'object');
+    }
+  }
+  return [];
 }
 
 function getFactorSensitivity(result: OptionResult): FactorEntry[] {

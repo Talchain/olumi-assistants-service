@@ -135,9 +135,25 @@ function extractExerciseSummary(response: V2RunResponseEnvelope): ExerciseSummar
   let runnerUpLabel: string | null = null;
   let runnerUpProbability: number | null = null;
 
-  if (response.results && Array.isArray(response.results) && response.results.length > 0) {
-    const results = response.results as Array<Record<string, unknown>>;
-    const sorted = [...results].sort((a, b) => {
+  // Resolve results array: normal array, option_comparison, or nested in results object
+  let resolvedResults: Array<Record<string, unknown>> = [];
+  if (Array.isArray(response.results) && response.results.length > 0) {
+    resolvedResults = response.results as Array<Record<string, unknown>>;
+  } else {
+    const r = response as Record<string, unknown>;
+    const oc = r.option_comparison;
+    if (Array.isArray(oc) && oc.length > 0) {
+      resolvedResults = oc as Array<Record<string, unknown>>;
+    } else if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+      const nested = r.results as Record<string, unknown>;
+      if (Array.isArray(nested.option_comparison)) {
+        resolvedResults = nested.option_comparison as Array<Record<string, unknown>>;
+      }
+    }
+  }
+
+  if (resolvedResults.length > 0) {
+    const sorted = [...resolvedResults].sort((a, b) => {
       const wa = typeof a.win_probability === 'number' ? a.win_probability : 0;
       const wb = typeof b.win_probability === 'number' ? b.win_probability : 0;
       return wb - wa;

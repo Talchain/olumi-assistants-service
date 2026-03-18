@@ -264,8 +264,16 @@ function getOptionResults(response: V2RunResponseEnvelope): Array<Record<string,
   if (fromResults.length > 0) return fromResults;
 
   // Fallback: PLoT returns option_comparison instead of results
-  const oc = (response as Record<string, unknown>).option_comparison;
-  return Array.isArray(oc) ? oc as Array<Record<string, unknown>> : [];
+  const r = response as Record<string, unknown>;
+  const oc = r.option_comparison;
+  if (Array.isArray(oc) && oc.length > 0) return oc as Array<Record<string, unknown>>;
+
+  // Fallback: UI may nest V2 fields inside results as an object
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.option_comparison)) return nested.option_comparison as Array<Record<string, unknown>>;
+  }
+  return [];
 }
 
 // ============================================================================
