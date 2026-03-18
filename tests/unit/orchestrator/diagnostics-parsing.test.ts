@@ -91,3 +91,88 @@ Route: none
     expect(whitespace.assistant_text).toContain('trouble processing');
   });
 });
+
+// ============================================================================
+// Fix 1 regression: diagnostics preamble stripping
+// ============================================================================
+
+describe('Diagnostics preamble stripping', () => {
+  it('strips diagnostics preamble before <diagnostics> tag', () => {
+    const raw = `Mode: INTERPRET. Stage: IDEATE. User asks about broadening...
+<diagnostics>
+Mode: INTERPRET
+</diagnostics>
+<response>
+  <assistant_text>Here is my analysis.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Here is my analysis.');
+    expect(parsed.assistant_text).not.toContain('Mode:');
+    expect(parsed.assistant_text).not.toContain('IDEATE');
+    expect(parsed.diagnostics).toContain('Mode: INTERPRET');
+    expect(parsed.parse_warnings.some((w) => w.includes('preamble stripped'))).toBe(true);
+  });
+
+  it('strips untagged diagnostics when LLM omits <diagnostics> tags entirely', () => {
+    const raw = `Mode: INTERPRET. Stage: IDEATE. User asks about broadening the model.
+No tool needed.
+<response>
+  <assistant_text>Let me help with that.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Let me help with that.');
+    expect(parsed.assistant_text).not.toContain('Mode:');
+    expect(parsed.assistant_text).not.toContain('tool needed');
+    expect(parsed.parse_warnings.some((w) => w.includes('preamble stripped'))).toBe(true);
+  });
+
+  it('strips multi-line diagnostics preamble with various keywords', () => {
+    const raw = `Mode: ACT. Tool: draft_graph.
+Stage: FRAME. Act-first drafting.
+Context: user described a decision with two options.
+Using: canonical_state graph fields.
+<response>
+  <assistant_text>Your model is ready.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Your model is ready.');
+    expect(parsed.assistant_text).not.toContain('Mode:');
+    expect(parsed.assistant_text).not.toContain('Stage:');
+    expect(parsed.assistant_text).not.toContain('Context:');
+  });
+
+  it('does not strip non-diagnostics preamble text', () => {
+    const raw = `Here is some normal preamble text.
+<response>
+  <assistant_text>Content here.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // Normal text before <response> does not match diagnostics patterns
+    // and would be stripped by extractTag finding <response> anyway
+    expect(parsed.assistant_text).toBe('Content here.');
+  });
+
+  it('handles diagnostics-only output with no XML at all (Path 5 degradation)', () => {
+    const raw = `Mode: INTERPRET. Stage: IDEATE. User asks about broadening the model.
+No tool needed.
+Here is my actual response to the user about their question.`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Here is my actual response to the user about their question.');
+    expect(parsed.assistant_text).not.toContain('Mode:');
+    expect(parsed.parse_warnings.some((w) => w.includes('preamble stripped'))).toBe(true);
+  });
+});
+

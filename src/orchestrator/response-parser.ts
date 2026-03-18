@@ -167,6 +167,53 @@ function stripDiagnostics(text: string): string {
 }
 
 /**
+ * Regex matching lines that look like LLM diagnostics emitted outside
+ * `<diagnostics>` tags — e.g. "Mode: INTERPRET. Stage: IDEATE. …"
+ *
+ * Only matches lines that appear *before the first XML tag* so we never
+ * accidentally strip user-visible prose inside `<response>`.
+ */
+const DIAGNOSTICS_PREAMBLE_LINE =
+  /^(?:Mode:|Stage:|Context:|Route:|Tool:|Using:).*$|^.*(?:tool needed|No tool invocation|No tool needed|INTERPRET|SUGGEST\b|ACT\b|RECOVER).*$/i;
+
+/**
+ * Strip leading diagnostics-like lines that appear before any XML tag.
+ *
+ * Some LLM outputs emit diagnostics as a preamble (before `<diagnostics>`)
+ * or omit the `<diagnostics>` tags entirely. This function removes those
+ * leading lines so they don't pollute `assistant_text`.
+ */
+function stripDiagnosticsPreamble(text: string, warnings: string[]): string {
+  const firstTagIdx = text.search(/<[a-zA-Z]/);
+
+  // No XML tag at all — scan the entire text
+  // Has XML tag — only inspect the part before it
+  const preamble = firstTagIdx === -1 ? text : text.substring(0, firstTagIdx);
+  const rest = firstTagIdx === -1 ? '' : text.substring(firstTagIdx);
+
+  if (!preamble.trim()) return text;
+
+  const lines = preamble.split('\n');
+  const kept: string[] = [];
+  let strippedAny = false;
+
+  for (const line of lines) {
+    if (DIAGNOSTICS_PREAMBLE_LINE.test(line.trim()) && line.trim().length > 0) {
+      strippedAny = true;
+    } else {
+      kept.push(line);
+    }
+  }
+
+  if (strippedAny) {
+    warnings.push('Diagnostics-like preamble stripped before XML envelope');
+  }
+
+  const cleaned = kept.join('\n').trim();
+  return cleaned ? `${cleaned}\n${rest}`.trim() : rest.trim();
+}
+
+/**
  * Parse blocks from the <blocks> section with warning collection.
  * Only commentary and review_card are allowed. Everything else is dropped with a warning.
  */
@@ -325,7 +372,9 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
   }
 
   // Strip diagnostics from text for further processing
-  const withoutDiagnostics = stripDiagnostics(trimmed);
+  const strippedTags = stripDiagnostics(trimmed);
+  // Also strip diagnostics-like preamble that appears before any XML tag
+  const withoutDiagnostics = stripDiagnosticsPreamble(strippedTags, warnings);
 
   // Try to find <response> envelope
   const responseContent = extractTag(withoutDiagnostics, 'response');
