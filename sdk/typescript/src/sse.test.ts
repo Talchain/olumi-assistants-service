@@ -253,6 +253,76 @@ data: {"stage":"COMPLETE"}
       expect(events[1].type).toBe("heartbeat");
     });
 
+    it("should parse event: error events", async () => {
+      const sseData = `event: error
+data: {"code":"CEE_VALIDATION_FAILED","reason":"SCHEMA_VALIDATION_FAILED","message":"Invalid input","details":{"field_errors":{}}}
+
+`;
+
+      const mockReader = {
+        read: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(sseData),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+        releaseLock: vi.fn(),
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { getReader: () => mockReader },
+      });
+
+      const events: SseEvent[] = [];
+      const stream = streamDraftGraph(
+        { baseUrl: "https://api.example.com", apiKey: "test-key" },
+        { brief: "Test" }
+      );
+      for await (const event of stream) events.push(event);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("error");
+      expect((events[0] as any).data.code).toBe("CEE_VALIDATION_FAILED");
+    });
+
+    it("should parse event: needs_clarification events", async () => {
+      const sseData = `event: needs_clarification
+data: {"clarification_questions":["What is the budget?","What is the timeline?"],"readiness_score":0.3}
+
+`;
+
+      const mockReader = {
+        read: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(sseData),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+        releaseLock: vi.fn(),
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { getReader: () => mockReader },
+      });
+
+      const events: SseEvent[] = [];
+      const stream = streamDraftGraph(
+        { baseUrl: "https://api.example.com", apiKey: "test-key" },
+        { brief: "Test" }
+      );
+      for await (const event of stream) events.push(event);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("needs_clarification");
+      expect((events[0] as any).data.clarification_questions).toHaveLength(2);
+    });
+
     it("should invoke onDegraded callback when X-Olumi-Degraded header is present", async () => {
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}

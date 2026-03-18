@@ -73,20 +73,15 @@ function parseSseEvent(eventText: string): SseEvent | null {
   // Type-specific parsing
   switch (eventType) {
     case "stage":
-      return {
-        type: "stage",
-        data: data as any,
-      };
+      return { type: "stage", data: data as any };
     case "resume":
-      return {
-        type: "resume",
-        data: data as any,
-      };
+      return { type: "resume", data: data as any };
     case "complete":
-      return {
-        type: "complete",
-        data: data as any,
-      };
+      return { type: "complete", data: data as any };
+    case "error":
+      return { type: "error", data: data as any };
+    case "needs_clarification":
+      return { type: "needs_clarification", data: data as any };
     default:
       return null;
   }

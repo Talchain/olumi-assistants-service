@@ -200,7 +200,7 @@ export interface RequestOptions {
 export type ResumeToken = string;
 
 // SSE event types
-export type SseEventType = "stage" | "resume" | "complete" | "heartbeat";
+export type SseEventType = "stage" | "resume" | "complete" | "heartbeat" | "error" | "needs_clarification";
 
 export interface SseStageEvent {
   type: "stage";
@@ -227,11 +227,34 @@ export interface SseHeartbeatEvent {
   data: null;
 }
 
+/** Terminal error event emitted by v1 stream on pipeline/validation failures */
+export interface SseErrorEvent {
+  type: "error";
+  data: {
+    code: string;
+    reason?: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+}
+
+/** Emitted when the brief requires clarification before drafting can proceed */
+export interface SseNeedsClarificationEvent {
+  type: "needs_clarification";
+  data: {
+    clarification_questions?: string[];
+    readiness_score?: number;
+    [key: string]: unknown;
+  };
+}
+
 export type SseEvent =
   | SseStageEvent
   | SseResumeEvent
   | SseCompleteEvent
-  | SseHeartbeatEvent;
+  | SseHeartbeatEvent
+  | SseErrorEvent
+  | SseNeedsClarificationEvent;
 
 // Options for resuming an interrupted stream
 export interface ResumeOptions {
