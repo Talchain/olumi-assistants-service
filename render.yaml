@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    buildCommand: pnpm install && pnpm build
+    buildCommand: pnpm install && rm -rf dist && pnpm build
     startCommand: node dist/src/server.js
     healthCheckPath: /healthz
     autoDeploy: true
