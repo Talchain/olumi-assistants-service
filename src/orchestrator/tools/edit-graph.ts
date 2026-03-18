@@ -1861,11 +1861,7 @@ export async function handleEditGraph(
     }
     if (repairsApplied && repairsApplied.length > 0) {
       const repairSummary = repairsApplied
-        .map((r) => {
-          const raw = r as unknown as Record<string, unknown>;
-          const text = r.message ?? raw['description'] ?? raw['reason'] ?? raw['repair_description'] ?? r.code ?? '(repair)';
-          return `- ${text}`;
-        })
+        .map((r) => `- ${r.reason || r.code}`)
         .join('\n');
       textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
     }

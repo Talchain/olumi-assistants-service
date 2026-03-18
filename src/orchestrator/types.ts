@@ -335,12 +335,19 @@ export interface PatchOperation {
   old_value?: unknown;
 }
 
+/**
+ * Matches PLoT's RepairEntry schema from normalisation/repair-codes.ts.
+ * PLoT returns: code, layer, field_path, before, after, reason, severity, action.
+ */
 export interface RepairEntry {
   code: string;
-  message: string;
-  field?: string;
-  old_value?: unknown;
-  new_value?: unknown;
+  layer: 'plot';
+  field_path: string;
+  before: unknown;
+  after: unknown;
+  reason: string;
+  severity: 'info' | 'warn';
+  action: string;
 }
 
 export interface GraphPatchBlockData {
