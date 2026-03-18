@@ -1522,6 +1522,7 @@ ${brief}
                 { role: "user", content: args.userMessage },
               ],
               ...modelParams,
+              ...(args.responseFormat === 'json_object' && { response_format: { type: "json_object" as const } }),
             },
             {
               signal: abortController.signal as any,

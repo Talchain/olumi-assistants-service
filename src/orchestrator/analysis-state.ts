@@ -92,10 +92,26 @@ export function isAnalysisExplainable(response: V2RunResponseEnvelope | null | u
   if (!response) return false;
   if (response.analysis_status !== "completed" && response.analysis_status !== "computed" && response.analysis_status !== "complete") return false;
 
-  return hasValidOptionResults(response)
+  const explainable = hasValidOptionResults(response)
     || hasValidSensitivity(response)
     || hasValidConstraintAnalysis(response)
     || hasValidRobustness(response);
+
+  if (!explainable) {
+    const r = response as Record<string, unknown>;
+    log.warn({
+      event: 'analysis_state.completed_but_no_valid_data',
+      analysis_status: response.analysis_status,
+      results_type: typeof r.results,
+      results_length: Array.isArray(r.results) ? r.results.length : null,
+      has_option_comparison: 'option_comparison' in r,
+      has_factor_sensitivity: Array.isArray(response.factor_sensitivity),
+      has_robustness: response.robustness != null,
+      has_constraint_analysis: response.constraint_analysis != null,
+    });
+  }
+
+  return explainable;
 }
 
 export function isResultsExplanationEligible(

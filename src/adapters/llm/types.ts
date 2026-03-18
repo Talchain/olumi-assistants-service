@@ -268,6 +268,9 @@ export interface ChatArgs {
   temperature?: number;
   /** Maximum tokens to generate (default: 4096) */
   maxTokens?: number;
+  /** When 'json_object', instructs the provider to return valid JSON only.
+   *  OpenAI: sets response_format. Anthropic: no-op (prompt must enforce). */
+  responseFormat?: 'json_object';
 }
 
 /**

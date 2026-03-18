@@ -499,10 +499,11 @@ describe("POST /assist/v1/decision-review — retry control flow (P1-2)", () => 
     expect(res.statusCode).toBe(422);
   });
 
-  it("does not retry when attempt 1 has shape errors (only retries UNGROUNDED_NUMBER)", async () => {
+  it("retries once on shape errors with explicit field contract, then returns 422 if still invalid", async () => {
     const chatFn = vi
       .fn()
-      .mockResolvedValueOnce(makeChatResult("corrupted json"));
+      .mockResolvedValueOnce(makeChatResult("corrupted json"))
+      .mockResolvedValueOnce(makeChatResult("still corrupted"));
 
     mockGetAdapter.mockReturnValue({
       name: "test-adapter",
@@ -510,11 +511,17 @@ describe("POST /assist/v1/decision-review — retry control flow (P1-2)", () => 
       chat: chatFn,
     });
 
-    mockPerformShapeCheck.mockReturnValueOnce({
-      valid: false,
-      errors: ["Missing narrative_summary"],
-      warnings: [],
-    });
+    mockPerformShapeCheck
+      .mockReturnValueOnce({
+        valid: false,
+        errors: ["Missing narrative_summary"],
+        warnings: [],
+      })
+      .mockReturnValueOnce({
+        valid: false,
+        errors: ["Missing narrative_summary"],
+        warnings: [],
+      });
 
     const res = await app.inject({
       method: "POST",
@@ -523,8 +530,8 @@ describe("POST /assist/v1/decision-review — retry control flow (P1-2)", () => 
     });
 
     expect(res.statusCode).toBe(422);
-    // Only one adapter call — no retry for shape errors
-    expect(chatFn).toHaveBeenCalledTimes(1);
+    // Shape failure now triggers one retry before returning 422
+    expect(chatFn).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -716,5 +723,49 @@ describe("POST /assist/v1/decision-review — margin in LLM user message (P1-4)"
     const reviewInput = mockPerformShapeCheck.mock.calls[0][1];
     expect(reviewInput).toBeDefined();
     expect(reviewInput.margin).toBeNull();
+  });
+});
+
+// ============================================================================
+// JSON-mode enforcement regression guard
+// ============================================================================
+
+describe("POST /assist/v1/decision-review — JSON-mode enforcement", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await route(app);
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+    mockPerformShapeCheck.mockReturnValue(SHAPE_CHECK_OK);
+  });
+
+  it("passes responseFormat: 'json_object' to adapter.chat()", async () => {
+    const chatFn = vi.fn(async () => makeChatResult(JSON.stringify(MOCK_REVIEW_JSON)));
+
+    mockGetAdapter.mockReturnValue({
+      name: "test-adapter",
+      model: "test-model",
+      chat: chatFn,
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/assist/v1/decision-review",
+      payload: makePayload(),
+    });
+
+    expect(chatFn).toHaveBeenCalled();
+    const chatArgs = chatFn.mock.calls[0][0];
+    expect(chatArgs.responseFormat).toBe("json_object");
   });
 });

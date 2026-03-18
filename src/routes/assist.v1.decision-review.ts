@@ -493,7 +493,7 @@ export default async function route(app: FastifyInstance) {
 
       const runLlmCall = async (systemPrompt: string, msg: string) =>
         adapter.chat(
-          { system: systemPrompt, userMessage: msg, temperature: 0, maxTokens },
+          { system: systemPrompt, userMessage: msg, temperature: 0, maxTokens, responseFormat: 'json_object' },
           callOpts,
         );
 
@@ -528,21 +528,101 @@ export default async function route(app: FastifyInstance) {
         correlationId,
       });
 
+      // Pre-shape telemetry: check required field presence before full validation
+      const REQUIRED_SHAPE_KEYS = [
+        'narrative_summary', 'story_headlines', 'robustness_explanation',
+        'readiness_rationale', 'evidence_enhancements', 'bias_findings',
+        'key_assumptions', 'decision_quality_prompts',
+      ];
+      const extractedObj = extractionResult.json && typeof extractionResult.json === 'object' ? extractionResult.json as Record<string, unknown> : null;
+      const presentKeys = extractedObj ? REQUIRED_SHAPE_KEYS.filter((k) => k in extractedObj) : [];
+
       emit(TelemetryEvents.CeeDecisionReviewJsonExtracted, {
         ...telemetryCtx,
         was_extracted: extractionResult.wasExtracted,
         extraction_method: extractionResult.extractionMethod,
+        required_fields_present: presentKeys.length === REQUIRED_SHAPE_KEYS.length,
+        required_fields_count: presentKeys.length,
+        preamble_length: extractionResult.preambleLength ?? 0,
       });
 
       let shapeCheck = performShapeCheck(extractionResult.json, reviewInputForGrounding);
 
       // -----------------------------------------------------------------------
-      // Retry on UNGROUNDED_NUMBER (cap: 1 retry, no retry for shape errors)
+      // Retry on shape failures OR UNGROUNDED_NUMBER (cap: 1 retry total)
       // -----------------------------------------------------------------------
       const ungroundedWarnings = shapeCheck.warnings.filter((w) =>
         w.startsWith('UNGROUNDED_NUMBER'),
       );
       let didRetry = false;
+
+      // Shape-failure retry: if the LLM returned an object missing required fields,
+      // retry once with an explicit field contract before returning 422.
+      if (!shapeCheck.valid && !didRetry) {
+        log.warn(
+          {
+            request_id: requestId,
+            brief_hash: input.brief_hash,
+            attempt: 1,
+            shape_errors: shapeCheck.errors,
+          },
+          'Decision review attempt 1: shape check failed — retrying with explicit field contract',
+        );
+
+        const shapeCorrectionSuffix = [
+          '',
+          '<CORRECTION>',
+          'Your previous response was missing required fields. Return a JSON object with EXACTLY these top-level fields:',
+          '- narrative_summary (string)',
+          '- story_headlines (non-empty object)',
+          '- robustness_explanation (object with summary, primary_risk, stability_factors[], fragility_factors[])',
+          '- readiness_rationale (string)',
+          '- evidence_enhancements (object)',
+          '- bias_findings (array, max 3 items)',
+          '- key_assumptions (array, max 5 items)',
+          '- decision_quality_prompts (array, max 3 items)',
+          'Return ONLY the JSON object. No markdown fences, no preamble, no explanation.',
+          '</CORRECTION>',
+        ].join('\n');
+
+        const retryUserMessage = userMessage + shapeCorrectionSuffix;
+        const retryResult = await runLlmCall(assembledPrompt, retryUserMessage);
+
+        log.info(
+          {
+            request_id: requestId,
+            attempt: 2,
+            retry_reason: 'shape_failure',
+            input_tokens: retryResult.usage.input_tokens,
+            output_tokens: retryResult.usage.output_tokens,
+          },
+          'Decision review attempt 2 (shape retry) completed',
+        );
+
+        const retryExtraction = extractJsonFromResponse(retryResult.content, {
+          task: "decision_review",
+          model: retryResult.model,
+          correlationId,
+        });
+        const retryShapeCheck = performShapeCheck(retryExtraction.json, reviewInputForGrounding);
+
+        llmResult = retryResult;
+        extractionResult = retryExtraction;
+        shapeCheck = retryShapeCheck;
+        didRetry = true;
+
+        if (retryShapeCheck.valid) {
+          log.info(
+            { request_id: requestId, attempt: 2 },
+            'Decision review shape retry resolved missing fields',
+          );
+        } else {
+          log.warn(
+            { request_id: requestId, errors: retryShapeCheck.errors },
+            'Decision review shape retry still invalid — will return 422',
+          );
+        }
+      }
 
       if (shapeCheck.valid && ungroundedWarnings.length > 0) {
         // Extract the specific fabricated numbers for a targeted correction prompt
