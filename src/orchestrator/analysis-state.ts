@@ -8,11 +8,33 @@ function hasConfiguredInterventions(value: unknown): boolean {
 }
 
 function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
+  const r = response as Record<string, unknown>;
+
   // PLoT /v2/run returns option_comparison; the UI normalizer copies it to results.
-  // Check both fields so functions work with raw PLoT responses.
-  if (Array.isArray(response.results) && response.results.length > 0) return response.results;
-  const oc = (response as Record<string, unknown>).option_comparison;
-  return Array.isArray(oc) ? oc : [];
+  // Check results as array first
+  if (Array.isArray(r.results) && r.results.length > 0) return r.results;
+
+  // Check option_comparison as array
+  if (Array.isArray(r.option_comparison) && r.option_comparison.length > 0) return r.option_comparison;
+
+  // Check results as object with nested arrays (AnalysisInputsSummary shape)
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.options)) return nested.options;
+    if (Array.isArray(nested.option_results)) return nested.option_results;
+  }
+
+  // Log unexpected shape for diagnostics
+  if (r.results !== undefined && r.results !== null) {
+    log.warn({
+      event: 'analysis_state.unexpected_results_shape',
+      type: typeof r.results,
+      isArray: Array.isArray(r.results),
+      keys: r.results && typeof r.results === 'object' ? Object.keys(r.results as object) : null,
+    });
+  }
+
+  return [];
 }
 
 function hasValidOptionResults(response: V2RunResponseEnvelope): boolean {

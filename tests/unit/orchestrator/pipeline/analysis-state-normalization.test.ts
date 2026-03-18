@@ -336,6 +336,62 @@ describe("normalizeAnalysisEnvelope with option_comparison", () => {
   });
 });
 
+describe("getOptionResultCandidates structural shapes", () => {
+  it("handles results as object with nested options array (AnalysisInputsSummary shape)", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        options: [
+          { option_label: "Option A", win_probability: 0.65 },
+          { option_label: "Option B", win_probability: 0.35 },
+        ],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("handles results as object with nested option_results array", () => {
+    const envelope = {
+      analysis_status: "computed",
+      results: {
+        option_results: [
+          { option_label: "X", win_probability: 0.5 },
+        ],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("normalizes analysis_status when results is an object with nested options", () => {
+    const envelope = {
+      results: {
+        options: [
+          { option_label: "A", win_probability: 0.6 },
+        ],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect(normalized.analysis_status).toBe("completed");
+  });
+
+  it("returns empty for results as object with no recognized nested arrays", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: { summary: "something" },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    // No option results → only other checks matter
+    expect(isAnalysisExplainable(envelope)).toBe(false);
+  });
+});
+
 describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => {
   it("envelope without analysis_status becomes explainable after normalization", () => {
     const envelope = {
