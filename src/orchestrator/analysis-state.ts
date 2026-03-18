@@ -17,9 +17,10 @@ function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
   // Check option_comparison as array
   if (Array.isArray(r.option_comparison) && r.option_comparison.length > 0) return r.option_comparison;
 
-  // Check results as object with nested arrays (AnalysisInputsSummary shape)
+  // Check results as object with nested arrays (AnalysisInputsSummary shape or V2-nested)
   if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
     const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.option_comparison)) return nested.option_comparison;
     if (Array.isArray(nested.options)) return nested.options;
     if (Array.isArray(nested.option_results)) return nested.option_results;
   }
@@ -44,20 +45,36 @@ function hasValidOptionResults(response: V2RunResponseEnvelope): boolean {
   });
 }
 
+/**
+ * Get the nested results object when the UI sends V2 fields inside results as an object.
+ * Returns null if results is not an object or is an array.
+ */
+function getNestedResults(response: V2RunResponseEnvelope): Record<string, unknown> | null {
+  const r = response as Record<string, unknown>;
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    return r.results as Record<string, unknown>;
+  }
+  return null;
+}
+
 function hasValidSensitivity(response: V2RunResponseEnvelope): boolean {
-  return Array.isArray(response.factor_sensitivity) && response.factor_sensitivity.some((factor) => {
+  const sensitivity = response.factor_sensitivity ?? getNestedResults(response)?.factor_sensitivity;
+  return Array.isArray(sensitivity) && sensitivity.some((factor) => {
     const candidate = factor as Record<string, unknown>;
     return typeof candidate.label === "string" || typeof candidate.factor_label === "string";
   });
 }
 
 function hasValidConstraintAnalysis(response: V2RunResponseEnvelope): boolean {
-  const jointProbability = response.constraint_analysis?.joint_probability;
+  const ca = response.constraint_analysis ?? getNestedResults(response)?.constraint_analysis;
+  const jointProbability = (ca as Record<string, unknown> | null | undefined)?.joint_probability;
   return typeof jointProbability === "number" && Number.isFinite(jointProbability);
 }
 
 function hasValidRobustness(response: V2RunResponseEnvelope): boolean {
-  return typeof response.robustness?.level === "string" && response.robustness.level.length > 0;
+  const robustness = response.robustness ?? getNestedResults(response)?.robustness;
+  const level = (robustness as Record<string, unknown> | null | undefined)?.level;
+  return typeof level === "string" && (level as string).length > 0;
 }
 
 export function isAnalysisPresent(response: V2RunResponseEnvelope | null | undefined): response is V2RunResponseEnvelope {

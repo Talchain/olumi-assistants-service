@@ -102,8 +102,15 @@ function isOptionResult(r: unknown): r is OptionResult {
  */
 function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
   if (Array.isArray(response.results) && response.results.length > 0) return response.results;
-  const oc = (response as Record<string, unknown>).option_comparison;
-  return Array.isArray(oc) ? oc : [];
+  const r = response as Record<string, unknown>;
+  const oc = r.option_comparison;
+  if (Array.isArray(oc) && oc.length > 0) return oc;
+  // UI may nest V2 fields inside results as an object
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    if (Array.isArray(nested.option_comparison) && nested.option_comparison.length > 0) return nested.option_comparison;
+  }
+  return [];
 }
 
 /**
@@ -157,6 +164,16 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
   // Fallback: top-level robustness.level
   if (response.robustness?.level) {
     return response.robustness.level;
+  }
+
+  // Fallback: UI may nest robustness inside results as an object
+  const r = response as Record<string, unknown>;
+  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
+    const nested = r.results as Record<string, unknown>;
+    const nestedRobustness = nested.robustness as Record<string, unknown> | undefined;
+    if (typeof nestedRobustness?.level === 'string' && (nestedRobustness.level as string).length > 0) {
+      return nestedRobustness.level as string;
+    }
   }
 
   return 'unknown';

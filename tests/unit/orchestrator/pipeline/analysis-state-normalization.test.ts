@@ -392,6 +392,87 @@ describe("getOptionResultCandidates structural shapes", () => {
   });
 });
 
+describe("V2 nested results object (UI sends fields inside results)", () => {
+  it("getOptionResultCandidates finds option_comparison nested inside results object", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        option_comparison: [
+          { option_label: "Option A", win_probability: 0.65 },
+          { option_label: "Option B", win_probability: 0.35 },
+        ],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("normalizeAnalysisEnvelope infers status from nested option_comparison", () => {
+    const envelope = {
+      results: {
+        option_comparison: [
+          { option_label: "A", win_probability: 0.6 },
+        ],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect(normalized.analysis_status).toBe("completed");
+  });
+
+  it("isAnalysisExplainable finds factor_sensitivity nested inside results object", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        factor_sensitivity: [{ label: "Cost", elasticity: 0.8 }],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("isAnalysisExplainable finds constraint_analysis nested inside results object", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        constraint_analysis: { joint_probability: 0.72 },
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("isAnalysisExplainable finds robustness nested inside results object", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        robustness: { level: "moderate" },
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
+  it("top-level fields take precedence over nested results fields", () => {
+    const envelope = {
+      analysis_status: "completed",
+      factor_sensitivity: [{ label: "Top-level", elasticity: 0.9 }],
+      results: {
+        factor_sensitivity: [{ label: "Nested", elasticity: 0.1 }],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    // Should be explainable via top-level factor_sensitivity
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+});
+
 describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => {
   it("envelope without analysis_status becomes explainable after normalization", () => {
     const envelope = {

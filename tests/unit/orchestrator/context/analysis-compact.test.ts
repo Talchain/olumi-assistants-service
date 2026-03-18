@@ -419,4 +419,38 @@ describe("compactAnalysis", () => {
       expect(summary!.options[1].outcome_p10).toBeUndefined();
     });
   });
+
+  describe("V2 nested results object (UI sends fields inside results)", () => {
+    it("extracts options from results.option_comparison when results is an object", () => {
+      const response = {
+        meta: { seed_used: 42, n_samples: 1000, response_hash: "abc123" },
+        results: {
+          option_comparison: [
+            makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.65 }),
+            makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.35 }),
+          ],
+        },
+      } as unknown as V2RunResponseEnvelope;
+
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.winner.option_id).toBe("opt_a");
+      expect(summary!.options).toHaveLength(2);
+      expect(summary!.options[0].win_probability).toBe(0.65);
+    });
+
+    it("derives robustness from nested results.robustness when top-level is absent", () => {
+      const response = {
+        meta: { seed_used: 42, n_samples: 1000, response_hash: "abc123" },
+        results: {
+          option_comparison: [makeOption()],
+          robustness: { level: "fragile" },
+        },
+      } as unknown as V2RunResponseEnvelope;
+
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.robustness_level).toBe("fragile");
+    });
+  });
 });
