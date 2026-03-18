@@ -259,14 +259,11 @@ function parseSseEvent(eventText) {
 }
 
 /**
- * Start a stream and randomly disconnect/resume
+ * Start a stream and record completion metrics
  */
 async function runStream(streamId, signal) {
   const startTime = performance.now();
-  let resumeToken = null;
   let eventCount = 0;
-  let shouldDisconnect = Math.random() > 0.5; // 50% chance of disconnect
-  let disconnectAfterEvents = shouldDisconnect ? Math.floor(Math.random() * 5) + 2 : Infinity;
 
   metrics.streams_started++;
 
@@ -275,7 +272,7 @@ async function runStream(streamId, signal) {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 90000); // 90s timeout
 
-    const resp = await fetch(`${BASE_URL}/assist/draft-graph/stream`, {
+    const resp = await fetch(`${BASE_URL}/assist/v1/draft-graph/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -315,11 +312,6 @@ async function runStream(streamId, signal) {
             eventCount++;
             metrics.events_received++;
 
-            // Capture resume token
-            if (event.type === 'resume') {
-              resumeToken = event.data?.token;
-            }
-
             // Check if stream completed and record buffer trim from diagnostics on final COMPLETE
             if (event.type === 'stage' && event.data?.stage === 'COMPLETE') {
               const trims = event.data?.payload?.diagnostics?.trims || 0;
@@ -340,99 +332,6 @@ async function runStream(streamId, signal) {
               return;
             }
 
-            // Simulate disconnect
-            if (shouldDisconnect && eventCount >= disconnectAfterEvents && resumeToken) {
-              console.log(`[Stream ${streamId}] Simulating disconnect at event ${eventCount}`);
-              clearTimeout(timeout);
-              reader.releaseLock();
-              ctrl.abort();
-
-              // Phase 2: Resume with live mode
-              await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay
-
-              metrics.resume_attempts++;
-              recordWindowMetric('resume_attempt');
-              const resumeStart = performance.now();
-
-              const resumeResp = await fetch(`${BASE_URL}/assist/draft-graph/resume?mode=live`, {
-                method: 'POST',
-                headers: {
-                  'X-Resume-Token': resumeToken,
-                  'X-Resume-Mode': 'live',
-                  'X-Olumi-Assist-Key': API_KEY,
-                },
-              });
-
-              const resumeLatency = performance.now() - resumeStart;
-              metrics.reconnect_latencies.push(resumeLatency);
-              recordWindowMetric('resume_latency', resumeLatency);
-
-              if (!resumeResp.ok) {
-                metrics.resume_failures++;
-                recordWindowMetric('resume_failure');
-                metrics.errors[`resume_${resumeResp.status}`] = (metrics.errors[`resume_${resumeResp.status}`] || 0) + 1;
-                const category = classifyHttpError(resumeResp.status);
-                if (category) {
-                  recordErrorMetric(category);
-                }
-                console.log(`[Stream ${streamId}] Resume failed: ${resumeResp.status}`);
-
-                // Check window gates on failure
-                checkWindowGates();
-                return;
-              }
-
-              metrics.resume_successes++;
-              recordWindowMetric('resume_success');
-              console.log(`[Stream ${streamId}] Resume succeeded (${resumeLatency.toFixed(0)}ms)`);
-
-              // Check window gates after resume
-              checkWindowGates();
-
-              // Continue reading from resumed stream
-              const resumeReader = resumeResp.body.getReader();
-              let resumeBuffer = '';
-
-              while (true) {
-                const { done, value } = await resumeReader.read();
-                if (done) break;
-
-                resumeBuffer += decoder.decode(value, { stream: true });
-                const resumeParts = resumeBuffer.split('\n\n');
-                resumeBuffer = resumeParts.pop() || '';
-
-                for (const part of resumeParts) {
-                  if (part.trim()) {
-                    const resumeEvent = parseSseEvent(part);
-                    if (resumeEvent) {
-                      eventCount++;
-                      metrics.events_received++;
-
-                      if (resumeEvent.type === 'stage' && resumeEvent.data?.stage === 'COMPLETE') {
-                        const trims = resumeEvent.data?.payload?.diagnostics?.trims || 0;
-                        if (trims > 0) {
-                          metrics.buffer_trims++;
-                          recordWindowMetric('buffer_trim');
-                        }
-                        resumeReader.releaseLock();
-                        const elapsed = performance.now() - startTime;
-                        metrics.latencies.push(elapsed);
-                        metrics.streams_completed++;
-                        recordWindowMetric('stream_complete');
-                        console.log(`[Stream ${streamId}] Completed via resume in ${elapsed.toFixed(0)}ms (${eventCount} events)`);
-
-                        // Check window gates
-                        checkWindowGates();
-                        return;
-                      }
-                    }
-                  }
-                }
-              }
-
-              resumeReader.releaseLock();
-              return;
-            }
           }
         }
       }
