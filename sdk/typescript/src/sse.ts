@@ -28,6 +28,37 @@ export interface SseStreamConfig {
 }
 
 /**
+ * Extract JSON payload from a non-OK response that may be SSE-framed.
+ *
+ * The v1 stream endpoint sends 429 (and some other errors) with SSE headers
+ * and an SSE-framed body (e.g. `event: stage\ndata: {...}\n\n`). A plain
+ * JSON.parse of such a body fails. This function extracts the JSON from the
+ * first `data:` line if SSE framing is detected, otherwise falls back to
+ * parsing the raw text directly.
+ *
+ * @internal
+ */
+function parseErrorBody(text: string): unknown {
+  if (!text) return null;
+  // Detect SSE framing: look for a data: line
+  const dataLine = text.split("\n").find(line => line.startsWith("data: "));
+  if (dataLine) {
+    try {
+      const parsed = JSON.parse(dataLine.substring(6));
+      // The SSE stage event wraps the error in { stage, payload }
+      // e.g. { stage: "COMPLETE", payload: { code, message, details, ... } }
+      if (parsed && typeof parsed === "object" && "payload" in parsed) {
+        return (parsed as any).payload;
+      }
+      return parsed;
+    } catch {
+      // Fall through to raw parse
+    }
+  }
+  return JSON.parse(text);
+}
+
+/**
  * Parse SSE event from raw text
  *
  * @internal
@@ -216,12 +247,13 @@ export async function* streamDraftGraph(
 
   // Check response status
   if (!response.ok) {
-    // Try to parse error response
+    // Try to parse error response — handle both JSON and SSE-framed bodies
+    // (v1 stream sends 429 with SSE framing; see parseErrorBody for details)
     let errorData: any;
     try {
       const text = await response.text();
       errorData = text
-        ? JSON.parse(text)
+        ? parseErrorBody(text)
         : {
             schema: "error.v1",
             code: "INTERNAL",

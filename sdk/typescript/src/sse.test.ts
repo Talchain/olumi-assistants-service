@@ -209,6 +209,36 @@ data: {"stage":"DRAFTING"}
       ).rejects.toThrow(OlumiAPIError);
     });
 
+    it("should extract retry_after_seconds from SSE-framed 429 response", async () => {
+      // v1 stream sends 429 with SSE framing:
+      // writeHead(429, SSE_HEADERS) + writeStage({ stage: "COMPLETE", payload: errorBody })
+      const sseFramed429 = `event: stage\ndata: {"stage":"COMPLETE","payload":{"schema":"error.v1","code":"CEE_RATE_LIMIT","message":"Rate limit exceeded","details":{"retry_after_seconds":15}}}\n\n`;
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        text: async () => sseFramed429,
+      });
+
+      let thrownError: any;
+      try {
+        const stream = streamDraftGraph(
+          { baseUrl: "https://api.example.com", apiKey: "test-key" },
+          { brief: "Test" }
+        );
+        const iterator = stream[Symbol.asyncIterator]();
+        await iterator.next();
+      } catch (e) {
+        thrownError = e;
+      }
+
+      expect(thrownError).toBeInstanceOf(OlumiAPIError);
+      expect(thrownError.statusCode).toBe(429);
+      // retry_after_seconds must be accessible for the reconnect backoff
+      expect(thrownError.details?.retry_after_seconds).toBe(15);
+    });
+
     it("should handle heartbeat events", async () => {
       const sseData = `event: stage
 data: {"stage":"DRAFTING"}
