@@ -38,7 +38,7 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
 
       - name: Run Artillery against production (always write JSON)
         env:
@@ -140,7 +140,7 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
 
       - name: Run SSE Live Resume Performance Test (v1.11 windowed)
         env:

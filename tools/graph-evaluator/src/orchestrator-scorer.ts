@@ -251,7 +251,11 @@ export function scoreOrchestrator(
   }
 
   // ── Suggested actions ─────────────────────────────────────────────────────
-  // Bare tool calls have no suggested_actions — pass if min_actions allows 0
+  // cf-v20 contract: 0-5 actions per turn, roles: facilitator|challenger|scientist
+  // 0 actions acceptable when min_actions === 0 (self-contained responses)
+  const ACTIONS_MAX = 5;
+  const VALID_ACTION_ROLES = ["facilitator", "challenger", "scientist"];
+
   let suggested_actions_valid = true;
   const actionsContent = extractTagContent(raw, "suggested_actions") ?? "";
   const actionBlocks = extractAllTagContents(actionsContent, "action");
@@ -260,7 +264,7 @@ export function scoreOrchestrator(
   if (isBareToolCall) {
     suggested_actions_valid = fixture.expected.min_actions === 0;
   } else {
-    if (actionCount > fixture.expected.max_actions) {
+    if (actionCount > ACTIONS_MAX) {
       suggested_actions_valid = false;
     }
     if (actionCount < fixture.expected.min_actions) {
@@ -268,12 +272,16 @@ export function scoreOrchestrator(
     }
   }
 
-  // Each action should have role, label, message
+  // Each action should have role (valid value), label, message
   for (const action of actionBlocks) {
-    const hasRole = /<role>/.test(action);
+    const roleMatch = action.match(/<role>\s*(.*?)\s*<\/role>/);
     const hasLabel = /<label>/.test(action);
     const hasMessage = /<message>/.test(action);
-    if (!hasRole || !hasLabel || !hasMessage) {
+    if (!roleMatch || !hasLabel || !hasMessage) {
+      suggested_actions_valid = false;
+      break;
+    }
+    if (!VALID_ACTION_ROLES.includes(roleMatch[1].trim())) {
       suggested_actions_valid = false;
       break;
     }

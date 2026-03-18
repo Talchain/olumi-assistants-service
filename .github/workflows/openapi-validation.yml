@@ -64,7 +64,7 @@ jobs:
         if: steps.changes.outputs.relevant_changes == 'true'
         run: pnpm install --frozen-lockfile
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
 
       - name: Validate OpenAPI spec
         if: steps.changes.outputs.relevant_changes == 'true'
