@@ -101,5 +101,5 @@ function buildAssistantText(ctx: PatchRejectionContext): string {
     log.warn({ violations: ctx.violations }, 'edit_graph structural violations suppressed from user-facing text');
   }
 
-  return "I wasn't able to make that change safely — it was too complex for a single edit. You could try breaking it into smaller steps, or I can rebuild the model from an updated brief.";
+  return "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
 }
