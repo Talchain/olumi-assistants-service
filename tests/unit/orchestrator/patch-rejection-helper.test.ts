@@ -136,9 +136,10 @@ describe('buildPatchRejectionEnvelope', () => {
     expect(envelope.assistant_text).not.toContain('invalid state');
     expect(envelope.assistant_text).not.toContain('no connections');
     expect(envelope.assistant_text).not.toContain('circular dependency');
-    // Safe fallback message is shown instead — actionable, not a confusing "which option" question
-    expect(envelope.assistant_text).toContain("wasn't able to make that change safely");
-    expect(envelope.assistant_text).toContain("smaller steps");
+    // New production message — "inconsistency in the model structure" copy
+    expect(envelope.assistant_text).toContain("inconsistency in the model structure");
+    // Legacy copy must NOT appear (regression guard against revert)
+    expect(envelope.assistant_text).not.toContain("too complex for a single edit");
     expect(envelope.assistant_text).not.toContain("which option should we configure first");
 
     // No GraphPatchBlock

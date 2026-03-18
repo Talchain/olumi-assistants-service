@@ -348,6 +348,47 @@ describe("pipeline", () => {
     infoSpy.mockRestore();
   });
 
+  it("explain override: input.focus carries the original user message verbatim", async () => {
+    const { classifyIntent } = await import("../../../../src/orchestrator/intent-gate.js");
+    // Intent gate routes to edit_graph, but override redirects to explain_results
+    // because analysis is available. This verifies deterministicInput.focus === userMessage.
+    (classifyIntent as ReturnType<typeof vi.fn>).mockReturnValue({
+      routing: "deterministic",
+      tool: "edit_graph",
+      confidence: "exact",
+      matched_pattern: "change",
+    });
+
+    const deps = makeMockDeps();
+    (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [],
+      side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
+      assistant_text: "Here is why.",
+      guidance_items: [],
+    } as ToolResult);
+
+    const userMessage = "Why is churn_rate the biggest driver?";
+    await executePipeline(makeRequest({
+      message: userMessage,
+      context: {
+        graph: { nodes: [{ id: "d1", kind: "decision", label: "Decision" }], edges: [] } as any,
+        analysis_response: {
+          analysis_status: "completed",
+          meta: { response_hash: "hash-focus", seed_used: 1, n_samples: 100 },
+          results: [{ option_label: "Option A", win_probability: 0.7 }],
+          response_hash: "hash-focus",
+        } as any,
+        framing: null,
+        messages: [],
+        scenario_id: "test-scenario",
+      },
+    }), "req-focus", deps);
+
+    expect((deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("explain_results");
+    const dispatchedInput = (deps.toolDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(dispatchedInput).toMatchObject({ focus: userMessage });
+  });
+
   it("does not narrate direct_analysis_run Path A when the provided analysis is not explainable", async () => {
     const deps = makeMockDeps();
 

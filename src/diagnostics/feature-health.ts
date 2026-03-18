@@ -135,6 +135,17 @@ function checkOrchestratorV2(): FeatureHealthCheck {
   };
 }
 
+function checkBriefDetection(): FeatureHealthCheck {
+  const enabled = !!config.features?.briefDetectionEnabled;
+  return {
+    name: 'brief_detection',
+    flag: 'CEE_BRIEF_DETECTION_ENABLED',
+    enabled,
+    healthy: enabled, // Self-contained — no external dependency
+    reason: enabled ? undefined : 'disabled',
+  };
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -152,6 +163,7 @@ export function checkFeatureHealth(): FeatureHealthReport {
     checkGrounding(),
     checkZone2Registry(),
     checkOrchestratorV2(),
+    checkBriefDetection(),
   ];
 
   const healthy_count = checks.filter((c) => c.enabled && c.healthy).length;
