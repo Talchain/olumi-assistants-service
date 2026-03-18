@@ -172,9 +172,12 @@ function stripDiagnostics(text: string): string {
  *
  * Only matches lines that appear *before the first XML tag* so we never
  * accidentally strip user-visible prose inside `<response>`.
+ *
+ * Uses anchored key-value prefixes only — no bare keyword matching like
+ * SUGGEST/ACT/RECOVER which would false-positive on normal prose.
  */
 const DIAGNOSTICS_PREAMBLE_LINE =
-  /^(?:Mode:|Stage:|Context:|Route:|Tool:|Using:).*$|^.*(?:tool needed|No tool invocation|No tool needed|INTERPRET|SUGGEST\b|ACT\b|RECOVER).*$/i;
+  /^(?:Mode:|Stage:|Context:|Route:|Tool:|Using:).*$|^No tool (?:needed|invocation)\b.*$/i;
 
 /**
  * Strip leading diagnostics-like lines that appear before any XML tag.
@@ -205,12 +208,22 @@ function stripDiagnosticsPreamble(text: string, warnings: string[]): string {
     }
   }
 
-  if (strippedAny) {
-    warnings.push('Diagnostics-like preamble stripped before XML envelope');
+  if (!strippedAny) return text;
+
+  const strippedCount = lines.length - kept.length;
+  const cleaned = kept.join('\n').trim();
+  const result = cleaned ? `${cleaned}\n${rest}`.trim() : rest.trim();
+
+  // Fail-safe: if stripping would leave nothing, restore original text.
+  // This prevents false positives from producing empty assistant_text.
+  if (!result) {
+    warnings.push(`Diagnostics preamble stripping would empty text (${strippedCount} lines) — restored original`);
+    return text;
   }
 
-  const cleaned = kept.join('\n').trim();
-  return cleaned ? `${cleaned}\n${rest}`.trim() : rest.trim();
+  warnings.push(`Diagnostics-like preamble stripped before XML envelope (${strippedCount} line(s))`);
+  emit("orchestrator.diagnostics_preamble_stripped", { stripped_line_count: strippedCount, had_xml: firstTagIdx !== -1 });
+  return result;
 }
 
 /**
@@ -340,14 +353,14 @@ function parseSuggestedActionsWithWarnings(
  *
  * Returns { actions, cleanedText } where cleanedText has the matched lines removed.
  */
-// Matches inline action lines like:
+// Matches inline action lines with REQUIRED label–message separator:
 //   Facilitator: Label — Message
 //   **Facilitator:** Label — Message
-//   - Challenger: Label — Message
-// The non-capturing group after the role handles colon + optional bold-close
-// in any order, requiring at least one colon or dash to avoid false positives.
+//   - Challenger: Label – Message
+// Both label and message parts must be present (separated by — or –)
+// to avoid false-positives on prose like "Facilitator: the person who runs..."
 const INLINE_ACTION_RE =
-  /^[-\s]*\*{0,2}(facilitator|challenger)(?:\s*:\s*\*{0,2}|\s*\*{0,2}\s*[:–—])\s*(.+?)(?:\s*[:–—]\s*(.+))?$/i;
+  /^[-\s]*\*{0,2}(facilitator|challenger)(?:\s*:\s*\*{0,2}|\s*\*{0,2}\s*[:–—])\s*(.+?)\s*[–—]\s*(.+)$/i;
 
 function rescueInlineActions(
   assistantText: string,
@@ -356,9 +369,14 @@ function rescueInlineActions(
   const lines = assistantText.split('\n');
   const actions: ParsedAction[] = [];
   const kept: string[] = [];
+  let truncated = false;
 
   for (const line of lines) {
     if (actions.length >= 2) {
+      // Check if overflow lines also match — track for warning parity
+      if (INLINE_ACTION_RE.test(line.trim())) {
+        truncated = true;
+      }
       kept.push(line);
       continue;
     }
@@ -366,7 +384,7 @@ function rescueInlineActions(
     if (m) {
       const role = m[1].toLowerCase() as 'facilitator' | 'challenger';
       const label = m[2].trim();
-      const message = m[3]?.trim() || label;
+      const message = m[3].trim();
       actions.push({ role, label, message });
     } else {
       kept.push(line);
@@ -375,6 +393,9 @@ function rescueInlineActions(
 
   if (actions.length > 0) {
     warnings.push(`Rescued ${actions.length} inline suggested action(s) from assistant_text`);
+  }
+  if (truncated) {
+    warnings.push('More than 2 inline suggested actions — truncated to 2');
   }
 
   return { actions, cleanedText: kept.join('\n').trim() };

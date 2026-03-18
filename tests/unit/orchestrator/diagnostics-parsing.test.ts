@@ -174,6 +174,63 @@ Here is my actual response to the user about their question.`;
     expect(parsed.assistant_text).not.toContain('Mode:');
     expect(parsed.parse_warnings.some((w) => w.includes('preamble stripped'))).toBe(true);
   });
+
+  it('does not strip prose containing words like suggest, act, recover, or interpret', () => {
+    const raw = `I suggest you act on this quickly to recover your market share.
+You should interpret the data carefully before making changes.
+<response>
+  <assistant_text>Here is the actual content.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // The prose lines do NOT start with anchored prefixes like Mode:/Stage:
+    // so they must not be stripped
+    expect(parsed.assistant_text).toBe('Here is the actual content.');
+    expect(parsed.parse_warnings.every((w) => !w.includes('preamble stripped'))).toBe(true);
+  });
+
+  it('does not strip prose lines that merely contain diagnostic keywords', () => {
+    const raw = `The user wants to recover from a bad decision.
+They need to act fast and suggest alternatives.
+<response>
+  <assistant_text>Let me help.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Let me help.');
+    expect(parsed.parse_warnings.every((w) => !w.includes('preamble stripped'))).toBe(true);
+  });
+
+  it('fail-safe: restores original text when stripping would empty assistant_text', () => {
+    // All lines match diagnostics patterns, no XML — stripping everything
+    // would leave nothing. Parser should restore original.
+    const raw = `Mode: INTERPRET. Stage: IDEATE.
+Stage: FRAME. Something.
+No tool needed.`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // Should NOT be empty — fail-safe restores the original text
+    expect(parsed.assistant_text.length).toBeGreaterThan(0);
+    expect(parsed.parse_warnings.some((w) => w.includes('restored original'))).toBe(true);
+  });
+
+  it('emits stripped_line_count in warning', () => {
+    const raw = `Mode: ACT. Tool: draft_graph.
+Stage: FRAME.
+<response>
+  <assistant_text>Content.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Content.');
+    expect(parsed.parse_warnings.some((w) => w.includes('2 line(s)'))).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -274,5 +331,57 @@ Challenger: Wait for more data — Key assumptions remain untested.</assistant_t
     const parsed = parseOrchestratorResponse(raw);
     expect(parsed.assistant_text).toBe('Consider these perspectives.');
     expect(parsed.suggested_actions).toHaveLength(2);
+  });
+
+  it('does not rescue role-prefixed prose without label–message separator', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>The facilitator: the person who runs the meeting should remain neutral.
+The challenger: someone who questions assumptions is valuable in any team.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // No — or – separator means these are prose, not action chips
+    expect(parsed.suggested_actions).toHaveLength(0);
+    expect(parsed.assistant_text).toContain('facilitator');
+    expect(parsed.assistant_text).toContain('challenger');
+  });
+
+  it('does not rescue lines that only have a role and label without a message separator', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>Here is my analysis.
+
+Facilitator: this is just a description without any dash separator.
+Challenger: same here, no separator present.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // Without — or – separator, these should NOT be rescued
+    expect(parsed.suggested_actions).toHaveLength(0);
+    expect(parsed.assistant_text).toContain('Facilitator:');
+  });
+
+  it('emits truncation warning when more than 2 inline actions found', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>Three paths forward.
+
+Facilitator: Option A — Go with the first choice.
+Challenger: Option B — Push back on assumptions.
+Facilitator: Option C — A third alternative path.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.suggested_actions).toHaveLength(2);
+    expect(parsed.parse_warnings.some((w) => w.includes('truncated to 2'))).toBe(true);
+    // The third action-like line should remain in assistant_text
+    expect(parsed.assistant_text).toContain('Option C');
   });
 });
