@@ -16,7 +16,6 @@ import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecisi
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
 import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
-import { createResumeToken } from "../utils/sse-resume-token.js";
 import {
   initStreamState,
   bufferEvent,
@@ -439,7 +438,8 @@ export default async function route(app: FastifyInstance) {
 
     let eventSeq = 0;
 
-    // Initialize SSE state for resume (if Redis available)
+    // Initialize SSE state for event buffering (if Redis available)
+    // Note: v1 has no resume endpoint — resume token emission removed.
     if (!degradedMode) {
       try {
         await initStreamState(requestId);
@@ -449,25 +449,6 @@ export default async function route(app: FastifyInstance) {
           data: JSON.stringify({ stage: "DRAFTING" }),
           timestamp: Date.now(),
         });
-
-        // Send resume token
-        try {
-          const resumeToken = createResumeToken(requestId, "DRAFTING", eventSeq);
-          reply.raw.write(`event: resume\ndata: ${JSON.stringify({ token: resumeToken })}\n\n`);
-          emit(TelemetryEvents.SseResumeIssued, {
-            request_id: requestId,
-            seq: eventSeq,
-            step: "DRAFTING",
-          });
-          await bufferEvent(requestId, {
-            seq: eventSeq++,
-            type: "resume",
-            data: JSON.stringify({ token: resumeToken }),
-            timestamp: Date.now(),
-          });
-        } catch (tokenError) {
-          log.debug({ error: tokenError, request_id: requestId }, "Resume token generation skipped");
-        }
       } catch (stateError) {
         log.debug({ error: stateError, request_id: requestId }, "SSE state initialization skipped");
         degradedMode = true;
