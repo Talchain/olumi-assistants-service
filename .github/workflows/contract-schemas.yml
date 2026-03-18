@@ -13,6 +13,8 @@ jobs:
           node-version: 20
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
       - run: npx tsx scripts/export-schemas.ts
       - name: Verify committed schemas match generated output
         run: git diff --exit-code contracts/

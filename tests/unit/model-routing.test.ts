@@ -194,12 +194,12 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("assigns optimized models to complex reasoning tasks", () => {
-      // draft_graph uses o4-mini (v185 benchmark pass, 2026-03-17 — zero structural invalids)
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("o4-mini");
+      // draft_graph uses gpt-4.1 (reverted 2026-03-18)
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4.1-2025-04-14");
       // bias_check uses Claude Sonnet 4 (excellent reasoning)
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
-      // repair_graph uses gpt-4o (quality tier for graph repair)
-      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-4o");
+      // repair_graph uses gpt-4.1 (reverted 2026-03-18)
+      expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-4.1-2025-04-14");
       // Other complex tasks use premium tier (gpt-5.2)
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-5.2");
       expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("gpt-5.2");
@@ -236,7 +236,7 @@ describe("Task-to-Model Routing", () => {
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
       expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
-      expect(getDefaultModelForTask("draft_graph")).toBe("o4-mini");
+      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4.1-2025-04-14");
       expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
   });

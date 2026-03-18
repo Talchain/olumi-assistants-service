@@ -1,16 +1,16 @@
 {
   "id": "orch-01-framing-elicit",
-  "name": "Framing — Structured Elicitation",
-  "description": "User describes a decision without enough detail. The orchestrator should elicit goal, options, and factors — not invoke a tool yet.",
+  "name": "Framing — Act-First Binary Decision",
+  "description": "User describes a binary decision (expand or not). Under cf-v20 act-first rule, options are inferable — draft immediately.",
   "stage": "frame",
   "user_message": "We're thinking about whether to expand into the US market next year.",
   "expected": {
-    "expected_tool": null,
+    "expected_tool": "draft_graph",
     "expects_coaching": false,
-    "min_actions": 1,
-    "max_actions": 2,
+    "min_actions": 0,
+    "max_actions": 5,
     "banned_terms_checked": true,
     "expects_uncertainty_language": false,
-    "must_contain": ["goal", "option"]
+    "must_contain": ["US", "market"]
   }
 }

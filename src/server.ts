@@ -72,6 +72,7 @@ import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPromp
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
+import { TASK_MODEL_DEFAULTS } from "./config/model-routing.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -184,6 +185,19 @@ export async function build() {
       'FATAL: In production, at least one ASSIST_API_KEY/ASSIST_API_KEYS or HMAC_SECRET must be configured',
     );
   }
+
+  // Log effective task→model assignments at startup (env overrides applied over code defaults)
+  const effectiveTaskModels = {
+    draft_graph: config.cee.models.draft ?? TASK_MODEL_DEFAULTS.draft_graph,
+    repair_graph: config.cee.models.repair ?? TASK_MODEL_DEFAULTS.repair_graph,
+    edit_graph: config.cee.models.edit_graph ?? TASK_MODEL_DEFAULTS.edit_graph,
+    orchestrator: config.cee.models.orchestrator ?? TASK_MODEL_DEFAULTS.orchestrator,
+    options: config.cee.models.options ?? TASK_MODEL_DEFAULTS.options,
+    critique_graph: config.cee.models.critique ?? TASK_MODEL_DEFAULTS.critique_graph,
+    decision_review: config.cee.models.decision_review ?? TASK_MODEL_DEFAULTS.decision_review,
+    clarification: config.cee.models.clarification ?? TASK_MODEL_DEFAULTS.clarification,
+  };
+  log.info({ event: 'config.task_models', ...effectiveTaskModels }, 'Effective task model assignments (env overrides applied)');
 
   // Log all resolved timeout values at startup for diagnostics
   const resolvedTimeouts = getResolvedTimeouts();

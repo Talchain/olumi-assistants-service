@@ -1296,6 +1296,116 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
 }
 
 // ---------------------------------------------------------------------------
+// Complexity cap: proportional edge pruning
+// ---------------------------------------------------------------------------
+
+/**
+ * Edge limits proportional to the number of options in the decision.
+ *
+ * PLoT enforces an absolute MAX_EDGES cap (from @talchain/schemas) but does
+ * NOT enforce proportional limits.  Over-dense graphs slow ISL and produce
+ * noisy sensitivity distributions.  Pruning weak non-structural edges keeps
+ * the causal model tractable.
+ *
+ * Structural edges (decision→option, option→factor/outcome/risk) are exempt
+ * from pruning — they define the topology and must be preserved.
+ *
+ * Limits chosen empirically from benchmark runs (2026-03-18):
+ *   2 options  → 15 total edges
+ *   3 options  → 25 total edges
+ *   4+ options → 35 total edges
+ */
+const COMPLEXITY_CAP_BY_OPTION_COUNT: Record<number, number> = {
+  2: 15,
+  3: 25,
+};
+const COMPLEXITY_CAP_DEFAULT = 35;
+const PRUNE_WEIGHT_THRESHOLD = 0.1; // Prune non-structural edges with strength_mean < this
+
+/**
+ * Whether an edge is structural (must not be pruned):
+ *   decision→option, option→factor, option→outcome, option→risk
+ */
+function isStructuralEdgeForCap(
+  sourceKind: string | undefined,
+  targetKind: string | undefined,
+): boolean {
+  if (sourceKind === "decision" && targetKind === "option") return true;
+  if (sourceKind === "option" && (targetKind === "factor" || targetKind === "outcome" || targetKind === "risk")) return true;
+  return false;
+}
+
+/**
+ * Prune weak non-structural edges when graph exceeds the proportional edge cap.
+ *
+ * Only prunes edges with strength_mean < PRUNE_WEIGHT_THRESHOLD.
+ * Stops pruning once the edge count falls within the cap — never over-prunes.
+ */
+export function applyComplexityCap(graph: GraphT): { repairs: Repair[]; prunedCount: number } {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  // Count option nodes to determine the cap
+  const optionCount = nodes.filter((n) => n.kind === "option").length;
+  if (optionCount === 0) return { repairs, prunedCount: 0 };
+
+  const cap = COMPLEXITY_CAP_BY_OPTION_COUNT[optionCount] ?? COMPLEXITY_CAP_DEFAULT;
+
+  if (edges.length <= cap) return { repairs, prunedCount: 0 };
+
+  // Build kind lookup
+  const kindMap = new Map<string, string>();
+  for (const n of nodes) {
+    kindMap.set(n.id, n.kind);
+  }
+
+  // Collect non-structural edges weak enough to prune
+  const pruneableCandidates: { edge: EdgeT; weight: number }[] = [];
+
+  for (const edge of edges) {
+    const srcKind = kindMap.get(edge.from);
+    const tgtKind = kindMap.get(edge.to);
+    if (!isStructuralEdgeForCap(srcKind, tgtKind)) {
+      const mean = edge.strength_mean ?? (edge as any).weight ?? 0.5;
+      const absWeight = Math.abs(mean);
+      if (absWeight < PRUNE_WEIGHT_THRESHOLD) {
+        pruneableCandidates.push({ edge, weight: absWeight });
+      }
+    }
+  }
+
+  if (pruneableCandidates.length === 0) return { repairs, prunedCount: 0 };
+
+  // Sort weakest first — prune as few as needed
+  pruneableCandidates.sort((a, b) => a.weight - b.weight);
+
+  const toRemove = new Set<string>();
+  let remaining = edges.length;
+
+  for (const { edge } of pruneableCandidates) {
+    if (remaining <= cap) break;
+    const edgeKey = edge.id ?? `${edge.from}→${edge.to}`;
+    toRemove.add(edgeKey);
+    remaining--;
+    repairs.push({
+      code: "COMPLEXITY_CAP_PRUNE",
+      path: `edges[${edgeKey}]`,
+      action: `Pruned weak edge ${edge.from}→${edge.to} (strength_mean=${edge.strength_mean ?? (edge as any).weight ?? 0.5}) — graph exceeded ${optionCount}-option cap of ${cap} edges`,
+    });
+  }
+
+  if (toRemove.size > 0) {
+    (graph as any).edges = edges.filter((e) => {
+      const key = e.id ?? `${e.from}→${e.to}`;
+      return !toRemove.has(key);
+    });
+  }
+
+  return { repairs, prunedCount: toRemove.size };
+}
+
+// ---------------------------------------------------------------------------
 // Main sweep
 // ---------------------------------------------------------------------------
 
@@ -1530,6 +1640,36 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   const disconnectedObservableResult = fixDisconnectedObservables(graph);
   allRepairs.push(...disconnectedObservableResult.repairs);
 
+  // Step 6c: Proportional complexity cap — ALWAYS run.
+  // PLoT enforces an absolute MAX_EDGES cap but not a per-option-count cap.
+  // This step prunes weak non-structural edges (strength_mean < 0.1) when the
+  // graph exceeds the proportional limit for the number of options.
+  const complexityCapResult = applyComplexityCap(graph);
+  allRepairs.push(...complexityCapResult.repairs);
+
+  if (complexityCapResult.prunedCount > 0) {
+    log.info({
+      event: "cee.deterministic_sweep.complexity_cap",
+      request_id: ctx.requestId,
+      pruned_count: complexityCapResult.prunedCount,
+    }, `Complexity cap: pruned ${complexityCapResult.prunedCount} weak edge(s)`);
+  }
+  // Warn if graph is still over cap after pruning (insufficient weak edges to prune further)
+  const edgesAfterCap = (graph as any).edges as EdgeT[];
+  const optionsAfterCap = ((graph as any).nodes as NodeT[]).filter((n: NodeT) => n.kind === "option").length;
+  if (optionsAfterCap > 0) {
+    const capAfter = COMPLEXITY_CAP_BY_OPTION_COUNT[optionsAfterCap] ?? COMPLEXITY_CAP_DEFAULT;
+    if (edgesAfterCap.length > capAfter) {
+      log.warn({
+        event: "cee.deterministic_sweep.complexity_cap_exceeded",
+        request_id: ctx.requestId,
+        edge_count: edgesAfterCap.length,
+        cap: capAfter,
+        option_count: optionsAfterCap,
+      }, `Complexity cap not fully met after pruning: ${edgesAfterCap.length} edges > cap of ${capAfter} (no more weak edges to prune)`);
+    }
+  }
+
   // Step 7: Re-validate using same validator (post-sweep authoritative pass)
   const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "post_sweep_authoritative" });
   const remainingErrors = revalidation.errors;
@@ -1598,6 +1738,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       option_goal_shortcuts_rerouted: optionGoalResult.rerouted,
       option_goal_shortcuts_skipped: optionGoalResult.skippedCount,
       disconnected_observables_pruned: disconnectedObservableResult.pruned,
+      complexity_cap_pruned: complexityCapResult.prunedCount,
       status_quo: {
         fixed: statusQuoResult.fixed,
         marked_droppable: statusQuoResult.markedDroppable,
@@ -1637,6 +1778,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     disconnected_before: disconnectedBefore.length,
     disconnected_after: disconnectedAfter.length,
     disconnected_observables_pruned: disconnectedObservableResult.pruned.length,
+    complexity_cap_pruned: complexityCapResult.prunedCount,
     edge_format: format,
   }, "Deterministic sweep completed");
 }
