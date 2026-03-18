@@ -287,6 +287,8 @@ Facilitator: Stale leftover text — should be ignored.</assistant_text>
     // Rescue should NOT fire because structured extraction found an action
     expect(parsed.suggested_actions).toHaveLength(1);
     expect(parsed.suggested_actions[0].label).toBe('Explore pricing');
+    // The inline action-like text must remain in assistant_text untouched
+    expect(parsed.assistant_text).toContain('Stale leftover text');
   });
 
   it('rescues actions with bold markdown role labels', () => {

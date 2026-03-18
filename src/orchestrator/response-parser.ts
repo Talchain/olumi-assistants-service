@@ -462,7 +462,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
     if (standaloneAssistantText !== null) {
       warnings.push('No <response> envelope but <assistant_text> found — extracting directly');
       emit("orchestrator.xml_parse_fallback", { path: "standalone_tag" });
-      let text = unescapeXmlEntities(standaloneAssistantText);
+      const text = unescapeXmlEntities(standaloneAssistantText);
       const rescued = rescueInlineActions(text, warnings);
       return {
         diagnostics,
@@ -476,7 +476,7 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
     // Path 5 (plain text): nothing structured — treat entire text as plain assistant_text
     warnings.push('No <response> envelope found — treating as plain text');
     emit("orchestrator.xml_parse_fallback", { path: "plain_text" });
-    let plainText = unescapeXmlEntities(withoutDiagnostics);
+    const plainText = unescapeXmlEntities(withoutDiagnostics);
     const rescued = rescueInlineActions(plainText, warnings);
     return {
       diagnostics,
