@@ -328,6 +328,7 @@ export async function phase3Generate(
           deterministicInput = clarificationToolInput;
           routeMetadata = { outcome: 'clarification_continuation', reasoning: 'resolved_from_pending_clarification' };
         } else if (effectiveIntentGate.tool === 'explain_results' && explanationRoute.kind === 'results') {
+          deterministicInput = { focus: userMessage };
           routeMetadata = { outcome: 'results_explanation', reasoning: explanationRoute.reasoning ?? 'completed_current_analysis_available' };
         }
         const routeDebug: Phase3RouteDebug = {
