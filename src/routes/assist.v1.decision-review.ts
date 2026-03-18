@@ -551,14 +551,11 @@ export default async function route(app: FastifyInstance) {
       // -----------------------------------------------------------------------
       // Retry on shape failures OR UNGROUNDED_NUMBER (cap: 1 retry total)
       // -----------------------------------------------------------------------
-      const ungroundedWarnings = shapeCheck.warnings.filter((w) =>
-        w.startsWith('UNGROUNDED_NUMBER'),
-      );
       let didRetry = false;
 
       // Shape-failure retry: if the LLM returned an object missing required fields,
       // retry once with an explicit field contract before returning 422.
-      if (!shapeCheck.valid && !didRetry) {
+      if (!shapeCheck.valid) {
         log.warn(
           {
             request_id: requestId,
@@ -624,7 +621,12 @@ export default async function route(app: FastifyInstance) {
         }
       }
 
-      if (shapeCheck.valid && ungroundedWarnings.length > 0) {
+      // Recompute warnings from the current shapeCheck (may have changed after shape retry)
+      const ungroundedWarnings = shapeCheck.warnings.filter((w) =>
+        w.startsWith('UNGROUNDED_NUMBER'),
+      );
+
+      if (shapeCheck.valid && ungroundedWarnings.length > 0 && !didRetry) {
         // Extract the specific fabricated numbers for a targeted correction prompt
         const fabricatedNumbers = ungroundedWarnings.map((w) => {
           const match = /UNGROUNDED_NUMBER: "([^"]+)"/.exec(w);
