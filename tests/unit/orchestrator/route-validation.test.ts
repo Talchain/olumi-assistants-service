@@ -377,6 +377,113 @@ describe("Route-Boundary Shape Validation (C.1)", () => {
     });
   });
 
+  // ── selected_elements (union: flat array or object shape) ────────────────
+
+  describe("selected_elements — accepts both flat array and object shape", () => {
+    it("accepts selected_elements as flat string array", async () => {
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const payload = {
+        message: "hello",
+        scenario_id: "s1",
+        client_turn_id: "t1",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal" }], edges: [] },
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "s1",
+          selected_elements: ["node_1", "node_2"],
+        },
+      };
+      const result = TurnRequestSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.context!.selected_elements).toEqual(["node_1", "node_2"]);
+      }
+    });
+
+    it("accepts selected_elements as object with node_ids and edge_ids", async () => {
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const payload = {
+        message: "hello",
+        scenario_id: "s1",
+        client_turn_id: "t1",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal" }], edges: [] },
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "s1",
+          selected_elements: { node_ids: ["n1", "n2"], edge_ids: ["e1"] },
+        },
+      };
+      const result = TurnRequestSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.context!.selected_elements).toEqual({ node_ids: ["n1", "n2"], edge_ids: ["e1"] });
+      }
+    });
+
+    it("accepts selected_elements as object with only node_ids", async () => {
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const payload = {
+        message: "hello",
+        scenario_id: "s1",
+        client_turn_id: "t1",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal" }], edges: [] },
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "s1",
+          selected_elements: { node_ids: ["n1"] },
+        },
+      };
+      const result = TurnRequestSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts omitted selected_elements (optional)", async () => {
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const payload = {
+        message: "hello",
+        scenario_id: "s1",
+        client_turn_id: "t1",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal" }], edges: [] },
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "s1",
+        },
+      };
+      const result = TurnRequestSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.context!.selected_elements).toBeUndefined();
+      }
+    });
+
+    it("rejects selected_elements as a bare string", async () => {
+      const { TurnRequestSchema } = await import("../../../src/orchestrator/route-schemas.js");
+      const payload = {
+        message: "hello",
+        scenario_id: "s1",
+        client_turn_id: "t1",
+        context: {
+          graph: { nodes: [{ id: "g1", kind: "goal" }], edges: [] },
+          analysis_response: null,
+          framing: null,
+          messages: [],
+          scenario_id: "s1",
+          selected_elements: "node_1",
+        },
+      };
+      const result = TurnRequestSchema.safeParse(payload);
+      expect(result.success).toBe(false);
+    });
+  });
+
   // ── FramingSchema (A.4 type-tightening) ──────────────────────────────────
 
   describe("FramingSchema — string constraints and limits", () => {

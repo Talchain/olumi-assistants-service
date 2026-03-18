@@ -137,7 +137,10 @@ const ConversationContextSchema = z.object({
   framing: FramingSchema,
   messages: z.array(ConversationMessageSchema),
   event_log_summary: z.string().optional(),
-  selected_elements: z.array(z.string()).optional(),
+  selected_elements: z.union([
+    z.array(z.string()),
+    z.object({ node_ids: z.array(z.string()).optional(), edge_ids: z.array(z.string()).optional() }),
+  ]).optional(),
   scenario_id: z.string(),
   analysis_inputs: AnalysisInputsSchema,
 });
