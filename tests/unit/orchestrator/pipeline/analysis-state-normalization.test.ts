@@ -287,6 +287,16 @@ describe("isAnalysisExplainable", () => {
     expect(isAnalysisExplainable(envelope)).toBe(true);
   });
 
+  it("accepts 'computed' with factor_label instead of label (PLoT canonical field name)", () => {
+    const envelope = {
+      analysis_status: "computed",
+      factor_sensitivity: [{ factor_label: "Cost", elasticity: 0.8 }],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    expect(isAnalysisExplainable(envelope)).toBe(true);
+  });
+
   it("rejects 'computed' with no valid data at all", () => {
     const envelope = {
       analysis_status: "computed",

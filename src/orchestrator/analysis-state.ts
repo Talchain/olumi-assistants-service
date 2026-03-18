@@ -25,7 +25,7 @@ function hasValidOptionResults(response: V2RunResponseEnvelope): boolean {
 function hasValidSensitivity(response: V2RunResponseEnvelope): boolean {
   return Array.isArray(response.factor_sensitivity) && response.factor_sensitivity.some((factor) => {
     const candidate = factor as Record<string, unknown>;
-    return typeof candidate.label === "string";
+    return typeof candidate.label === "string" || typeof candidate.factor_label === "string";
   });
 }
 
