@@ -1,4 +1,5 @@
 import type { ConversationContext, DecisionStage, V2RunResponseEnvelope } from "./types.js";
+import { log } from "../utils/telemetry.js";
 
 function hasConfiguredInterventions(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
@@ -47,6 +48,13 @@ export function isAnalysisPresent(response: V2RunResponseEnvelope | null | undef
  * but may omit analysis_status. Infer it when possible.
  */
 export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2RunResponseEnvelope {
+  log.info({
+    analysis_status: response.analysis_status ?? null,
+    meta_response_hash: response.meta?.response_hash ?? null,
+    results_is_array: Array.isArray(response.results),
+    has_option_comparison: Array.isArray((response as Record<string, unknown>).option_comparison),
+  }, 'normalizeAnalysisEnvelope: incoming payload shape');
+
   if (
     !response.analysis_status
     && response.meta?.response_hash

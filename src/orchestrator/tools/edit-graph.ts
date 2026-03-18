@@ -1698,7 +1698,13 @@ export async function handleEditGraph(
           if (plotResponse.repairs_applied && Array.isArray(plotResponse.repairs_applied) && plotResponse.repairs_applied.length > 0) {
             repairsApplied = plotResponse.repairs_applied as RepairEntry[];
             log.info(
-              { request_id: requestId, repairs_count: repairsApplied.length },
+              {
+                request_id: requestId,
+                repairs_count: repairsApplied.length,
+                first_repair_keys: repairsApplied.length > 0
+                  ? Object.keys(repairsApplied[0] as unknown as Record<string, unknown>)
+                  : [],
+              },
               "edit_graph PLoT applied repairs",
             );
           }
@@ -1855,7 +1861,11 @@ export async function handleEditGraph(
     }
     if (repairsApplied && repairsApplied.length > 0) {
       const repairSummary = repairsApplied
-        .map(r => `- ${r.message}`)
+        .map((r) => {
+          const raw = r as unknown as Record<string, unknown>;
+          const text = r.message ?? raw['description'] ?? raw['reason'] ?? raw['repair_description'] ?? r.code ?? '(repair)';
+          return `- ${text}`;
+        })
         .join('\n');
       textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
     }

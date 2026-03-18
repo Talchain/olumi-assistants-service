@@ -96,6 +96,17 @@ function isOptionResult(r: unknown): r is OptionResult {
 }
 
 /**
+ * Extract the option results array from a V2RunResponseEnvelope.
+ * PLoT returns option data in `option_comparison[]`; the UI normalizer copies it to `results[]`.
+ * Mirrors getOptionResultCandidates() in analysis-state.ts — both must stay in sync.
+ */
+function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
+  if (Array.isArray(response.results) && response.results.length > 0) return response.results;
+  const oc = (response as Record<string, unknown>).option_comparison;
+  return Array.isArray(oc) ? oc : [];
+}
+
+/**
  * Derive a winner from sorted option summaries.
  * Tiebreak: first by option_id lexicographic (deterministic).
  */
@@ -131,7 +142,7 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
   }
 
   // Fallback: robustness.overall_robustness on first option's result
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   const firstResult = results[0];
   if (firstResult && typeof firstResult === 'object') {
     const robustness = (firstResult as Record<string, unknown>).robustness;
@@ -156,7 +167,7 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
  * Deduplicates by edge_id.
  */
 function deriveFragileEdgeCount(response: V2RunResponseEnvelope): number {
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   const seen = new Set<string>();
   let count = 0;
 
@@ -187,7 +198,7 @@ function deriveFragileEdgeCount(response: V2RunResponseEnvelope): number {
  * Threshold 0.7 is provisional — see TENSION_THRESHOLD constant.
  */
 function deriveConstraintTensions(response: V2RunResponseEnvelope): string[] | undefined {
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   const tensionSet = new Set<string>();
 
   for (const result of results) {
@@ -233,7 +244,7 @@ function deriveFlipThresholds(
   response: V2RunResponseEnvelope,
   graphNodeLabels?: Map<string, string>,
 ): FlipThreshold[] | undefined {
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   const seen = new Map<string, FlipThreshold>();
 
   for (const result of results) {
@@ -291,7 +302,7 @@ function deriveTopFragileEdges(
   response: V2RunResponseEnvelope,
   graphNodeLabels?: Map<string, string>,
 ): FragileEdge[] | undefined {
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   const seen = new Map<string, FragileEdge>();
 
   for (const result of results) {
@@ -336,7 +347,7 @@ function deriveTopDrivers(
   response: V2RunResponseEnvelope,
   graphNodeLabels?: Map<string, string>,
 ): DriverSummary[] {
-  const results = (response.results ?? []) as unknown[];
+  const results = getResultsArray(response);
   // Map from factor_id → { max_abs_sensitivity, direction }
   const factorMap = new Map<string, { label: string; maxSensitivity: number; direction: 'positive' | 'negative' }>();
 
@@ -419,8 +430,8 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options
-    const results = (response.results ?? []) as unknown[];
+    // Extract options — PLoT returns option_comparison[], not results[].
+    const results = getResultsArray(response);
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {
