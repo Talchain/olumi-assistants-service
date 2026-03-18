@@ -176,3 +176,103 @@ Here is my actual response to the user about their question.`;
   });
 });
 
+// ============================================================================
+// Fix 2 regression: suggested actions rescue from assistant_text
+// ============================================================================
+
+describe('Suggested actions rescue from assistant_text', () => {
+  it('rescues facilitator/challenger actions from assistant_text when <suggested_actions> is empty', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>Here is my analysis of the situation.
+
+Facilitator: Need someone in 3 months — Timeline is tight, we need someone effective within 3 months.
+Challenger: No rush, need it right — We can take 6 months. Getting the right setup matters more than speed.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Here is my analysis of the situation.');
+    expect(parsed.assistant_text).not.toContain('Facilitator:');
+    expect(parsed.assistant_text).not.toContain('Challenger:');
+    expect(parsed.suggested_actions).toHaveLength(2);
+    expect(parsed.suggested_actions[0]).toEqual({
+      role: 'facilitator',
+      label: 'Need someone in 3 months',
+      message: 'Timeline is tight, we need someone effective within 3 months.',
+    });
+    expect(parsed.suggested_actions[1]).toEqual({
+      role: 'challenger',
+      label: 'No rush, need it right',
+      message: 'We can take 6 months. Getting the right setup matters more than speed.',
+    });
+    expect(parsed.parse_warnings.some((w) => w.includes('Rescued'))).toBe(true);
+  });
+
+  it('does not rescue when <suggested_actions> already has actions', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>Here is my analysis.
+
+Facilitator: Stale leftover text — should be ignored.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions>
+    <action>
+      <role>facilitator</role>
+      <label>Explore pricing</label>
+      <message>Let us explore the pricing options.</message>
+    </action>
+  </suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    // Rescue should NOT fire because structured extraction found an action
+    expect(parsed.suggested_actions).toHaveLength(1);
+    expect(parsed.suggested_actions[0].label).toBe('Explore pricing');
+  });
+
+  it('rescues actions with bold markdown role labels', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<response>
+  <assistant_text>The analysis shows two clear paths.
+
+**Facilitator:** Go with Option A — It scores highest on your key drivers.
+**Challenger:** Reconsider Option B — The sensitivity analysis shows fragile assumptions.</assistant_text>
+  <blocks></blocks>
+  <suggested_actions></suggested_actions>
+</response>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('The analysis shows two clear paths.');
+    expect(parsed.suggested_actions).toHaveLength(2);
+    expect(parsed.suggested_actions[0].role).toBe('facilitator');
+    expect(parsed.suggested_actions[0].label).toBe('Go with Option A');
+    expect(parsed.suggested_actions[1].role).toBe('challenger');
+  });
+
+  it('rescues actions from plain-text Path 5 output', () => {
+    const raw = `Here is my analysis.
+
+Facilitator: Explore further — Let us dig into the pricing model.
+Challenger: Step back — Are we solving the right problem?`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Here is my analysis.');
+    expect(parsed.suggested_actions).toHaveLength(2);
+    expect(parsed.suggested_actions[0].role).toBe('facilitator');
+    expect(parsed.suggested_actions[1].role).toBe('challenger');
+  });
+
+  it('rescues actions from Path 4 standalone <assistant_text>', () => {
+    const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
+<assistant_text>Consider these perspectives.
+
+Facilitator: Move forward — The data supports this direction.
+Challenger: Wait for more data — Key assumptions remain untested.</assistant_text>`;
+
+    const parsed = parseOrchestratorResponse(raw);
+    expect(parsed.assistant_text).toBe('Consider these perspectives.');
+    expect(parsed.suggested_actions).toHaveLength(2);
+  });
+});

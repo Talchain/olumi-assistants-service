@@ -325,6 +325,61 @@ function parseSuggestedActionsWithWarnings(
   return results;
 }
 
+/**
+ * Rescue suggested actions that the LLM embedded in assistant_text as prose
+ * instead of placing them in `<suggested_actions>`.
+ *
+ * Matches lines like:
+ *   Facilitator: Need someone in 3 months — Timeline is tight…
+ *   Challenger: No rush, need it right — We can take 6 months…
+ *   **Facilitator:** Label — Description
+ *   - Facilitator: Label — Description
+ *
+ * Only runs when the structured `<suggested_actions>` extraction yielded
+ * nothing — this is a conservative fallback, not a primary path.
+ *
+ * Returns { actions, cleanedText } where cleanedText has the matched lines removed.
+ */
+// Matches inline action lines like:
+//   Facilitator: Label — Message
+//   **Facilitator:** Label — Message
+//   - Challenger: Label — Message
+// The non-capturing group after the role handles colon + optional bold-close
+// in any order, requiring at least one colon or dash to avoid false positives.
+const INLINE_ACTION_RE =
+  /^[-\s]*\*{0,2}(facilitator|challenger)(?:\s*:\s*\*{0,2}|\s*\*{0,2}\s*[:–—])\s*(.+?)(?:\s*[:–—]\s*(.+))?$/i;
+
+function rescueInlineActions(
+  assistantText: string,
+  warnings: string[],
+): { actions: ParsedAction[]; cleanedText: string } {
+  const lines = assistantText.split('\n');
+  const actions: ParsedAction[] = [];
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    if (actions.length >= 2) {
+      kept.push(line);
+      continue;
+    }
+    const m = INLINE_ACTION_RE.exec(line.trim());
+    if (m) {
+      const role = m[1].toLowerCase() as 'facilitator' | 'challenger';
+      const label = m[2].trim();
+      const message = m[3]?.trim() || label;
+      actions.push({ role, label, message });
+    } else {
+      kept.push(line);
+    }
+  }
+
+  if (actions.length > 0) {
+    warnings.push(`Rescued ${actions.length} inline suggested action(s) from assistant_text`);
+  }
+
+  return { actions, cleanedText: kept.join('\n').trim() };
+}
+
 // ============================================================================
 // Pure XML Envelope Parser
 // ============================================================================
@@ -386,11 +441,13 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
     if (standaloneAssistantText !== null) {
       warnings.push('No <response> envelope but <assistant_text> found — extracting directly');
       emit("orchestrator.xml_parse_fallback", { path: "standalone_tag" });
+      let text = unescapeXmlEntities(standaloneAssistantText);
+      const rescued = rescueInlineActions(text, warnings);
       return {
         diagnostics,
-        assistant_text: unescapeXmlEntities(standaloneAssistantText),
+        assistant_text: rescued.actions.length > 0 ? rescued.cleanedText : text,
         blocks: [],
-        suggested_actions: [],
+        suggested_actions: rescued.actions,
         parse_warnings: warnings,
       };
     }
@@ -398,11 +455,13 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
     // Path 5 (plain text): nothing structured — treat entire text as plain assistant_text
     warnings.push('No <response> envelope found — treating as plain text');
     emit("orchestrator.xml_parse_fallback", { path: "plain_text" });
+    let plainText = unescapeXmlEntities(withoutDiagnostics);
+    const rescued = rescueInlineActions(plainText, warnings);
     return {
       diagnostics,
-      assistant_text: unescapeXmlEntities(withoutDiagnostics),
+      assistant_text: rescued.actions.length > 0 ? rescued.cleanedText : plainText,
       blocks: [],
-      suggested_actions: [],
+      suggested_actions: rescued.actions,
       parse_warnings: warnings,
     };
   }
@@ -425,9 +484,19 @@ export function parseOrchestratorResponse(raw: string): ParsedResponse {
 
   // Extract suggested actions
   const actionsContent = extractTag(responseContent, 'suggested_actions');
-  const suggestedActions = actionsContent
+  let suggestedActions = actionsContent
     ? parseSuggestedActionsWithWarnings(actionsContent, warnings)
     : [];
+
+  // Rescue: if structured extraction found nothing, try extracting inline
+  // actions from assistant_text (LLM sometimes embeds them as prose lines).
+  if (suggestedActions.length === 0 && assistantText) {
+    const rescued = rescueInlineActions(assistantText, warnings);
+    if (rescued.actions.length > 0) {
+      suggestedActions = rescued.actions;
+      assistantText = rescued.cleanedText;
+    }
+  }
 
   return {
     diagnostics,
