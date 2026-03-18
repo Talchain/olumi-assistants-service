@@ -60,6 +60,7 @@ const metrics = {
     client_400: 0,
     client_401: 0,
     rate_limit_429: 0,
+    gone_410: 0,
     transport: 0,
   },
 };
@@ -81,6 +82,7 @@ let currentWindow = {
     client_400: 0,
     client_401: 0,
     rate_limit_429: 0,
+    gone_410: 0,
     transport: 0,
   },
 };
@@ -109,6 +111,7 @@ function recordWindowMetric(type, value = 1) {
         client_400: 0,
         client_401: 0,
         rate_limit_429: 0,
+        gone_410: 0,
         transport: 0,
       },
     };
@@ -220,6 +223,7 @@ function checkWindowGates() {
 
 function classifyHttpError(status) {
   if (status >= 500 && status <= 599) return 'server_5xx';
+  if (status === 410) return 'gone_410'; // Legacy endpoints — always an error
   if (status === 400) return 'client_400';
   if (status === 401) return 'client_401';
   if (status === 429) return 'rate_limit_429';
@@ -414,6 +418,8 @@ function writeResults(isPartial = false) {
     error_types: metrics.error_types,
     aggregate_error_rate: errorRate.toFixed(2) + '%',
     gates: {
+      streams_completed_gt_0: metrics.streams_completed > 0,
+      stream_success_rate_80: successRate >= 80,
       resume_success_rate_98: resumeSuccessRate >= 98,
       buffer_trim_rate_0_5: bufferTrimRate <= 0.5,
       p95_under_12s: p95 < 12000,
@@ -587,6 +593,12 @@ async function runTest() {
   const gatesPassed = Object.values(results.gates).every(Boolean);
   if (!gatesPassed) {
     console.error('\n❌ Performance gates FAILED:');
+    if (!results.gates.streams_completed_gt_0) {
+      console.error(`  - No streams completed (streams_completed=0) — endpoint may be broken`);
+    }
+    if (!results.gates.stream_success_rate_80) {
+      console.error(`  - Stream success rate: ${results.summary.success_rate} < 80%`);
+    }
     if (!results.gates.resume_success_rate_98) {
       console.error(`  - Resume success rate: ${results.summary.resume_success_rate} < 98%`);
     }
@@ -595,6 +607,9 @@ async function runTest() {
     }
     if (!results.gates.p95_under_12s) {
       console.error(`  - p95 latency: ${results.latencies_ms.p95}ms >= 12000ms`);
+    }
+    if (!results.gates.error_rate_1) {
+      console.error(`  - Error rate: ${results.aggregate_error_rate} > 1%`);
     }
     process.exit(1);
   }
