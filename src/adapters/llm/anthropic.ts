@@ -7,7 +7,7 @@ import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock, ThinkingConfig } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -37,6 +37,8 @@ export type DraftArgs = {
   includeDebug?: boolean;
   briefSignalsHeader?: string;
   currencyInstruction?: string;
+  /** Extended thinking configuration. When enabled, temperature is forced to 1 and structured outputs are disabled. */
+  thinking?: ThinkingConfig;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -389,6 +391,30 @@ const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-opus-4-5-20251101",
 ]);
 
+// Models that support extended thinking (budget_tokens reasoning).
+// Older Anthropic models reject the `thinking` parameter with a 400.
+// Non-Anthropic models ignore it silently via their own adapters.
+const THINKING_SUPPORTED_MODELS = new Set([
+  "claude-sonnet-4-6",
+  "claude-opus-4-6",
+  "claude-opus-4-20250514",
+  "claude-opus-4-5-20251101",
+]);
+
+/**
+ * Guard extended thinking against unsupported Anthropic models.
+ * Logs a warning and returns false when the model is not in the allowlist,
+ * allowing the call to proceed without thinking rather than failing at the API.
+ */
+function isThinkingSupported(model: string, context: string): boolean {
+  if (THINKING_SUPPORTED_MODELS.has(model)) return true;
+  log.warn(
+    { model, context, supported_models: Array.from(THINKING_SUPPORTED_MODELS) },
+    `[Anthropic] Extended thinking requested but model "${model}" is not in the thinking-supported allowlist — disabling thinking for this call`
+  );
+  return false;
+}
+
 // Hard floor and default for draft_graph max_tokens.
 // A complex 15-node graph with coaching, causal claims, and goal constraints can exceed
 // 4096 tokens; 16384 is the unconfigured default and 8192 is the minimum safe value.
@@ -422,15 +448,23 @@ export async function draftGraphWithAnthropic(
   const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-sonnet-4-6";
-  // Math.max enforces the floor even when CEE_MAX_TOKENS_DRAFT is explicitly set low.
+  const draftThinkingRequested = args.thinking?.type === 'enabled';
+  const draftThinkingEnabled = draftThinkingRequested && isThinkingSupported(model, 'draft_graph');
+  const draftThinkingBudget = draftThinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
+  // Math.max enforces: (1) draft floor, (2) thinking budget headroom when enabled
   const maxTokens = Math.max(
     getMaxTokensFromConfig('draft_graph') ?? DRAFT_MAX_TOKENS_DEFAULT,
     DRAFT_MAX_TOKENS_FLOOR,
+    draftThinkingEnabled ? draftThinkingBudget + 1024 : 0,
   );
+  // Anthropic requires temperature=1 when extended thinking is active
+  const draftTemperature = draftThinkingEnabled ? 1 : 0;
 
   // Structured Outputs feature flag — only active when both the flag is on AND the
-  // selected model is in the supported allowlist.
+  // selected model is in the supported allowlist AND thinking is not enabled
+  // (extended thinking is incompatible with structured outputs).
   const structuredOutputsEnabled =
+    !draftThinkingEnabled &&
     config.cee.anthropicStructuredOutputs &&
     STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
 
@@ -438,6 +472,13 @@ export async function draftGraphWithAnthropic(
     log.warn(
       { model, supported_models: Array.from(STRUCTURED_OUTPUTS_SUPPORTED_MODELS) },
       "[Anthropic] CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true but model is not in supported allowlist — falling back to prompt-only JSON mode"
+    );
+  }
+
+  if (draftThinkingEnabled && config.cee.anthropicStructuredOutputs) {
+    log.info(
+      { model, budget_tokens: draftThinkingBudget },
+      "[Anthropic] Extended thinking enabled for draft_graph — structured outputs disabled (incompatible)"
     );
   }
 
@@ -456,9 +497,10 @@ export async function draftGraphWithAnthropic(
   log.debug({
     model,
     params: {
-      temperature: 0,
+      temperature: draftTemperature,
       max_tokens: maxTokens,
       structured_outputs: structuredOutputsEnabled,
+      thinking: draftThinkingEnabled ? 'enabled' : 'none',
       timeout_ms: effectiveTimeout,
     },
   }, "[Anthropic] draft_graph request parameters");
@@ -493,7 +535,7 @@ export async function draftGraphWithAnthropic(
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
-        temperature: 0,
+        temperature: draftTemperature,
         system: prompt.system,
         messages: [{ role: "user", content: prompt.userContent }],
         ...(useStructuredOutputs
@@ -504,6 +546,7 @@ export async function draftGraphWithAnthropic(
               },
             }
           : {}),
+        ...(draftThinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } } : {}),
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,
@@ -2054,6 +2097,8 @@ interface ChatWithAnthropicArgs {
   maxTokens?: number;
   requestId?: string;
   timeoutMs?: number;
+  /** Extended thinking configuration. When enabled, temperature is forced to 1. */
+  thinking?: ThinkingConfig;
 }
 
 /**
@@ -2065,8 +2110,13 @@ export async function chatWithAnthropic(
   args: ChatWithAnthropicArgs
 ): Promise<ChatResult> {
   const model = args.model || "claude-3-5-sonnet-20241022";
-  const maxTokens = args.maxTokens ?? 4096;
-  const temperature = args.temperature ?? 0;
+  const thinkingRequested = args.thinking?.type === 'enabled';
+  const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat');
+  // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
+  const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
+  const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
+  // Anthropic requires temperature=1 when extended thinking is active
+  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   // V04: Generate idempotency key for request traceability
@@ -2099,6 +2149,7 @@ export async function chatWithAnthropic(
             temperature,
             system: args.system,
             messages: [{ role: "user", content: args.userMessage }],
+            ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
           },
           {
             signal: abortController.signal,
@@ -2115,9 +2166,11 @@ export async function chatWithAnthropic(
     clearTimeout(timeoutId);
     const latencyMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled, Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0.
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error("unexpected_response_type");
     }
 
@@ -2203,6 +2256,8 @@ interface ChatWithToolsAnthropicArgs {
   timeoutMs?: number;
   /** Pre-split system blocks for prompt caching. When provided, replaces plain system string. */
   system_cache_blocks?: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
+  /** Extended thinking configuration. When enabled, temperature is forced to 1. */
+  thinking?: ThinkingConfig;
 }
 
 /**
@@ -2214,8 +2269,13 @@ export async function chatWithToolsAnthropic(
   args: ChatWithToolsAnthropicArgs
 ): Promise<ChatWithToolsResult> {
   const model = args.model || "claude-3-5-sonnet-20241022";
-  const maxTokens = args.maxTokens ?? 4096;
-  const temperature = args.temperature ?? 0;
+  const thinkingRequested = args.thinking?.type === 'enabled';
+  const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat_with_tools');
+  // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
+  const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
+  const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
+  // Anthropic requires temperature=1 when extended thinking is active
+  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const idempotencyKey = args.requestId || makeIdempotencyKey();
@@ -2226,6 +2286,7 @@ export async function chatWithToolsAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
+      thinking: thinkingEnabled ? 'enabled' : 'none',
       system_chars: args.system_cache_blocks
         ? args.system_cache_blocks.reduce((sum: number, b: { text: string }) => sum + b.text.length, 0)
         : args.system.length,
@@ -2305,6 +2366,7 @@ export async function chatWithToolsAnthropic(
       messages: anthropicMessages,
       tools: anthropicTools,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
+      ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
     };
 
     const response = await withRetry(
@@ -2701,6 +2763,7 @@ export class AnthropicAdapter implements LLMAdapter {
         model: this.model,
         briefSignalsHeader: args.briefSignalsHeader,
         currencyInstruction: args.currencyInstruction,
+        thinking: args.thinking,
       },
       { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
     );
@@ -2812,6 +2875,7 @@ export class AnthropicAdapter implements LLMAdapter {
       maxTokens: args.maxTokens,
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
+      thinking: args.thinking,
     });
   }
 
@@ -2827,6 +2891,7 @@ export class AnthropicAdapter implements LLMAdapter {
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
       system_cache_blocks: args.system_cache_blocks,
+      thinking: args.thinking,
     });
   }
 

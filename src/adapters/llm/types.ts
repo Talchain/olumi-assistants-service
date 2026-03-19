@@ -45,6 +45,11 @@ export interface DraftGraphArgs {
    * undefined when currency detection is disabled.
    */
   currencyInstruction?: string;
+  /**
+   * Extended thinking configuration. Anthropic only — non-Anthropic adapters ignore this.
+   * When enabled, temperature is automatically set to 1 and structured outputs are disabled.
+   */
+  thinking?: ThinkingConfig;
 }
 
 /**
@@ -256,9 +261,14 @@ export interface CritiqueGraphResult {
 }
 
 /**
- * Arguments for generic chat completion (non-graph-specific LLM calls).
- * Used by endpoints like Decision Review that need plain text LLM responses.
+ * Extended thinking configuration for Anthropic models.
+ * Only supported by claude-sonnet-4-6 and later.
+ * Non-Anthropic adapters ignore this field.
  */
+export type ThinkingConfig =
+  | { type: 'enabled'; budget_tokens: number }
+  | { type: 'disabled' };
+
 export interface ChatArgs {
   /** System prompt for the conversation */
   system: string;
@@ -271,6 +281,11 @@ export interface ChatArgs {
   /** When 'json_object', instructs the provider to return valid JSON only.
    *  OpenAI: sets response_format. Anthropic: no-op (prompt must enforce). */
   responseFormat?: 'json_object';
+  /**
+   * Extended thinking configuration. Anthropic only — non-Anthropic adapters ignore this.
+   * When enabled, temperature is automatically set to 1 (Anthropic requirement).
+   */
+  thinking?: ThinkingConfig;
 }
 
 /**
@@ -487,6 +502,11 @@ export interface ChatWithToolsArgs {
    * Non-Anthropic adapters ignore this field and fall back to `system`.
    */
   system_cache_blocks?: SystemCacheBlock[];
+  /**
+   * Extended thinking configuration. Anthropic only — non-Anthropic adapters ignore this.
+   * When enabled, temperature is automatically set to 1 (Anthropic requirement).
+   */
+  thinking?: ThinkingConfig;
 }
 
 /**

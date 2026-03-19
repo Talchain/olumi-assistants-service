@@ -29,6 +29,28 @@ interface ConfigOverrideEvent {
 const configOverrideEvents: ConfigOverrideEvent[] = [];
 
 /**
+ * Thinking mode parser for CEE_*_THINKING env vars.
+ * Accepts: "true" | "enabled" | "false" | "" | absent → boolean.
+ * Rejects any other string (e.g. "adaptive") with a clear Zod error at startup.
+ * This avoids silent coercion of unsupported mode strings.
+ */
+const thinkingMode = z
+  .union([z.boolean(), z.string(), z.undefined()])
+  .transform((val, ctx) => {
+    if (val === undefined || val === null) return false;
+    if (typeof val === 'boolean') return val;
+    const lower = (val as string).toLowerCase().trim();
+    if (lower === 'false' || lower === '0' || lower === '') return false;
+    if (lower === 'true' || lower === '1' || lower === 'enabled') return true;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Invalid thinking mode "${val}". Valid values: "true", "enabled", "false". ` +
+        `Note: "adaptive" is not supported in the Node.js Anthropic SDK — use "enabled" instead.`,
+    });
+    return z.NEVER;
+  });
+
+/**
  * Custom boolean coercion that handles string "false" and "true"
  */
 const booleanString = z
@@ -369,6 +391,23 @@ const ConfigSchema = z.object({
     // Requires beta header "anthropic-beta: structured-outputs-2025-11-13".
     // Default false until validated on Claude Sonnet 4.6.
     anthropicStructuredOutputs: booleanString.default(false),
+    // Extended thinking configuration per operation (Anthropic claude-sonnet-4-6+ only)
+    //
+    // CEE_ORCHESTRATOR_THINKING — valid values: "true" | "enabled" | "false" | absent
+    //   "true" / "enabled" → thinking enabled with budget_tokens from *_BUDGET
+    //   "false" / absent    → thinking disabled (default)
+    //   Any other value is rejected at startup.
+    // CEE_ORCHESTRATOR_THINKING_BUDGET — budget_tokens in tokens (min 1024, default 10000)
+    //   max_tokens is automatically raised to budget + 1024 when no explicit override is set.
+    // CEE_DRAFT_GRAPH_THINKING / CEE_EDIT_GRAPH_THINKING — same contract as orchestrator
+    thinking: z.object({
+      orchestratorEnabled: thinkingMode.default(false),
+      orchestratorBudget: z.coerce.number().int().min(1024).default(10000),
+      draftGraphEnabled: thinkingMode.default(false),
+      draftGraphBudget: z.coerce.number().int().min(1024).default(10000),
+      editGraphEnabled: thinkingMode.default(false),
+      editGraphBudget: z.coerce.number().int().min(1024).default(10000),
+    }).default({}),
     // Per-operation model selection for tiered cost optimization
     models: z.object({
       draft: z.string().optional(),
@@ -693,6 +732,15 @@ function parseConfig(): Config {
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
       anthropicStructuredOutputs: env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS,
+      // Extended thinking per operation
+      thinking: {
+        orchestratorEnabled: env.CEE_ORCHESTRATOR_THINKING,
+        orchestratorBudget: env.CEE_ORCHESTRATOR_THINKING_BUDGET,
+        draftGraphEnabled: env.CEE_DRAFT_GRAPH_THINKING,
+        draftGraphBudget: env.CEE_DRAFT_GRAPH_THINKING_BUDGET,
+        editGraphEnabled: env.CEE_EDIT_GRAPH_THINKING,
+        editGraphBudget: env.CEE_EDIT_GRAPH_THINKING_BUDGET,
+      },
       // Per-operation model selection
       models: {
         // CEE_MODEL_DRAFT is the canonical name for the draft_graph model.
@@ -846,7 +894,40 @@ function parseConfig(): Config {
   };
 
   try {
-    return ConfigSchema.parse(rawConfig);
+    const parsed = ConfigSchema.parse(rawConfig);
+
+    // Validate thinking configuration at startup to surface misconfiguration before first request.
+    // The Anthropic API requires max_tokens > budget_tokens. When no explicit max_tokens override
+    // is set, the adapter defaults (4096 for chat/chatWithTools, 16384 for draft_graph) apply —
+    // the startup check must cover both the unset case (undefined) and the too-low case.
+    const thinkingChecks: Array<{
+      name: string;
+      enabled: boolean;
+      budget: number;
+      maxTokens?: number;
+      envVar: string;
+      adapterDefault: number;
+    }> = [
+      { name: 'orchestrator', enabled: parsed.cee.thinking.orchestratorEnabled, budget: parsed.cee.thinking.orchestratorBudget, maxTokens: parsed.cee.maxTokens.orchestrator, envVar: 'CEE_MAX_TOKENS_ORCHESTRATOR', adapterDefault: 4096   },
+      { name: 'draft_graph',  enabled: parsed.cee.thinking.draftGraphEnabled,   budget: parsed.cee.thinking.draftGraphBudget,   maxTokens: parsed.cee.maxTokens.draft,        envVar: 'CEE_MAX_TOKENS_DRAFT',        adapterDefault: 16384  },
+      { name: 'edit_graph',   enabled: parsed.cee.thinking.editGraphEnabled,    budget: parsed.cee.thinking.editGraphBudget,    maxTokens: parsed.cee.maxTokens.edit_graph,   envVar: 'CEE_MAX_TOKENS_EDIT_GRAPH',   adapterDefault: 4096   },
+    ];
+    for (const check of thinkingChecks) {
+      if (!check.enabled) continue;
+      // effectiveMax: explicit override if set, otherwise what the adapter will use
+      const effectiveMax = check.maxTokens ?? check.adapterDefault;
+      if (effectiveMax <= check.budget) {
+        console.warn(
+          `[CONFIG] ${check.name}: effective max_tokens (${effectiveMax}${check.maxTokens === undefined ? ` — adapter default, ${check.envVar} not set` : ''}) ` +
+          `<= thinking budget_tokens (${check.budget}). ` +
+          `Anthropic requires max_tokens > budget_tokens. ` +
+          `Set ${check.envVar}=${check.budget + 1024} or higher, ` +
+          `or reduce CEE_${check.name.toUpperCase().replace(/_/g, '_')}_THINKING_BUDGET below ${effectiveMax}.`
+        );
+      }
+    }
+
+    return parsed;
   } catch (error) {
     if (error instanceof z.ZodError) {
       // Include validation issues in error message for debugging

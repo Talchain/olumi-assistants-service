@@ -1171,11 +1171,15 @@ export async function handleEditGraph(
       const effectiveInstruction = isRepair
         ? (await getSystemPrompt('repair_edit_graph')) + '\n\n' + contextSection
         : fullSystemPrompt;
+      const editGraphThinking = config.cee.thinking?.editGraphEnabled
+        ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
+        : undefined;
       chatResult = await adapter.chat(
         {
           system: effectiveInstruction,
           userMessage,
           maxTokens: getMaxTokensFromConfig('edit_graph'),
+          ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
         },
         callOpts,
       );
@@ -1861,7 +1865,7 @@ export async function handleEditGraph(
     }
     if (repairsApplied && repairsApplied.length > 0) {
       const repairSummary = repairsApplied
-        .map((r) => `- ${r.reason || r.code}`)
+        .map((r) => `- ${'code' in r && r.code ? `[${r.code}] ` : ''}${r.reason}`)
         .join('\n');
       textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
     }

@@ -151,6 +151,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     const requestId = attempt === 1 ? `draft_${Date.now()}` : `draft_retry_${Date.now()}`;
 
     try {
+      const draftThinking = config.cee.thinking?.draftGraphEnabled
+        ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.draftGraphBudget }
+        : undefined;
+
       draftResult = await draftAdapter.draftGraph(
         {
           brief: ctx.effectiveBrief,
@@ -162,6 +166,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           includeDebug: ctx.input.include_debug === true,
           briefSignalsHeader: ctx.input.briefSignalsHeader,
           currencyInstruction: ctx.input.currencyInstruction,
+          ...(draftThinking ? { thinking: draftThinking } : {}),
         },
         {
           requestId,

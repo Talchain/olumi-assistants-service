@@ -250,8 +250,9 @@ export async function handleTurn(
     // 4. Intent gate — use context-aware classification when brief detection is enabled
     // Merge graph from both context.graph and top-level graph_state (same precedence as buildTurnContext)
     const hasGraph = (turnRequest.context.graph ?? turnRequest.graph_state ?? null) != null;
+    const graphNodeLabels = (turnRequest.context.graph ?? turnRequest.graph_state)?.nodes?.map((n: { label?: string }) => n.label ?? '') ?? [];
     const intent = config.features.briefDetectionEnabled
-      ? classifyIntentWithContext(turnRequest.message, { hasGraph })
+      ? classifyIntentWithContext(turnRequest.message, { hasGraph, graphNodeLabels })
       : classifyIntent(turnRequest.message);
 
     let prerequisitesMet = true;
@@ -628,6 +629,10 @@ async function dispatchViaLLM(
     : assembleMessages(turnRequest.context, enrichedUserMessage);
   const toolDefs = assembleToolDefinitions(getToolDefinitions());
 
+  const orchestratorThinking = config.cee.thinking?.orchestratorEnabled
+    ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.orchestratorBudget }
+    : undefined;
+
   const llmResult = await adapter.chatWithTools(
     {
       system: systemPrompt,
@@ -635,6 +640,7 @@ async function dispatchViaLLM(
       tools: toolDefs,
       tool_choice: { type: 'auto' },
       maxTokens: getMaxTokensFromConfig('orchestrator'),
+      ...(orchestratorThinking ? { thinking: orchestratorThinking } : {}),
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
