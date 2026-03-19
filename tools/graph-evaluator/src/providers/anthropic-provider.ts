@@ -10,7 +10,8 @@ import { requireEnvKey } from "./env.js";
 import type { LLMProvider, LLMResult, ModelConfig } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const DEFAULT_MAX_TOKENS = 4096;
+// 16384 provides headroom for complex graphs with coaching + causal claims (can exceed 4096)
+const DEFAULT_MAX_TOKENS = 16384;
 
 function isClaudeModel(modelId: string): boolean {
   return modelId.toLowerCase().includes("claude");

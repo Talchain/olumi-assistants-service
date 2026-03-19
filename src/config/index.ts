@@ -363,6 +363,12 @@ const ConfigSchema = z.object({
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
+    // Anthropic Structured Outputs for draft_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
+    // When true, adds output_format: { type: "json_schema" } to Anthropic API calls for
+    // draft_graph, guaranteeing parseable JSON at the token generation level.
+    // Requires beta header "anthropic-beta: structured-outputs-2025-11-13".
+    // Default false until validated on Claude Sonnet 4.6.
+    anthropicStructuredOutputs: booleanString.default(false),
     // Per-operation model selection for tiered cost optimization
     models: z.object({
       draft: z.string().optional(),
@@ -685,9 +691,26 @@ function parseConfig(): Config {
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
+      // Anthropic Structured Outputs
+      anthropicStructuredOutputs: env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS,
       // Per-operation model selection
       models: {
-        draft: env.CEE_MODEL_DRAFT,
+        // CEE_MODEL_DRAFT is the canonical name for the draft_graph model.
+        // CEE_MODEL_DRAFT_GRAPH is an alias (the brief and docs use both forms).
+        // If CEE_MODEL_DRAFT_GRAPH is set but CEE_MODEL_DRAFT is not, forward the value
+        // and warn. If both are set with different values, CEE_MODEL_DRAFT takes precedence.
+        draft: (() => {
+          if (env.CEE_MODEL_DRAFT) return env.CEE_MODEL_DRAFT;
+          if (env.CEE_MODEL_DRAFT_GRAPH) {
+            console.warn(
+              "[CONFIG] CEE_MODEL_DRAFT_GRAPH is set but CEE_MODEL_DRAFT is not. " +
+              "Forwarding CEE_MODEL_DRAFT_GRAPH to draft model selection. " +
+              "Prefer CEE_MODEL_DRAFT going forward."
+            );
+            return env.CEE_MODEL_DRAFT_GRAPH;
+          }
+          return undefined;
+        })(),
         options: env.CEE_MODEL_OPTIONS,
         repair: env.CEE_MODEL_REPAIR,
         clarification: env.CEE_MODEL_CLARIFICATION,

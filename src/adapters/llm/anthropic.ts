@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, setGlobalDispatcher } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -27,6 +27,7 @@ import {
   LLMExplainDiffResponse as AnthropicExplainDiffResponse,
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
+import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from '../../cee/draft/anthropic-graph-schema.js';
 
 export type DraftArgs = {
   brief: string;
@@ -378,6 +379,16 @@ export type UsageMetrics = {
   cache_read_input_tokens?: number;
 };
 
+// Models confirmed to support the Anthropic Structured Outputs beta parameter.
+// Only models listed here will receive the output_format body + anthropic-beta header.
+// Add new models here once confirmed via API testing.
+const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
+  "claude-sonnet-4-5-20250929",
+  "claude-sonnet-4-6",
+  "claude-opus-4-20250514",
+  "claude-opus-4-5-20251101",
+]);
+
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
   opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number }
@@ -392,16 +403,55 @@ export async function draftGraphWithAnthropic(
 
   const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
-  const model = args.model || "claude-3-5-sonnet-20241022";
-  const maxTokens = getMaxTokensFromConfig('draft_graph') ?? 4096;
+  const model = args.model || "claude-sonnet-4-6";
+  // Hard floor max_tokens for draft_graph.
+  // A complex 15-node graph with coaching, causal claims, and goal constraints can exceed
+  // 4096 tokens; 16384 is the unconfigured default and 8192 is the minimum safe value.
+  // Math.max enforces the floor even when CEE_MAX_TOKENS_DRAFT is explicitly set low.
+  const DRAFT_MAX_TOKENS_FLOOR = 8192;
+  const DRAFT_MAX_TOKENS_DEFAULT = 16384;
+  const maxTokens = Math.max(
+    getMaxTokensFromConfig('draft_graph') ?? DRAFT_MAX_TOKENS_DEFAULT,
+    DRAFT_MAX_TOKENS_FLOOR,
+  );
+
+  // Structured Outputs feature flag — only active when both the flag is on AND the
+  // selected model is in the supported allowlist.
+  const structuredOutputsEnabled =
+    config.cee.anthropicStructuredOutputs &&
+    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
+
+  if (config.cee.anthropicStructuredOutputs && !STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model)) {
+    log.warn(
+      { model, supported_models: Array.from(STRUCTURED_OUTPUTS_SUPPORTED_MODELS) },
+      "[Anthropic] CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true but model is not in supported allowlist — falling back to prompt-only JSON mode"
+    );
+  }
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
+  // Align timeout with DRAFT_LLM_TIMEOUT_MS when not explicitly overridden.
+  // Previously fell back to HTTP_CLIENT_TIMEOUT_MS (110s); DRAFT_LLM_TIMEOUT_MS
+  // (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS = 105s) is correct
+  // for the pipeline path. Stage 1 (Parse) always passes opts.timeoutMs so this
+  // fallback only matters for direct calls (e.g. tests, legacy routes).
+  const effectiveTimeout = opts?.timeoutMs ?? DRAFT_LLM_TIMEOUT_MS;
+
+  // Debug: Log model parameters for runtime validation (mirrors OpenAI adapter pattern)
+  log.debug({
+    model,
+    params: {
+      temperature: 0,
+      max_tokens: maxTokens,
+      structured_outputs: structuredOutputsEnabled,
+      timeout_ms: effectiveTimeout,
+    },
+  }, "[Anthropic] draft_graph request parameters");
+
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source }, "calling Anthropic for draft");
 
-  const effectiveTimeout = opts?.timeoutMs || TIMEOUT_MS;
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
@@ -417,21 +467,78 @@ export async function draftGraphWithAnthropic(
 
   try {
     const apiClient = getClient();
+
+    /**
+     * Build the messages.create params for a given structured-outputs mode.
+     * When useStructuredOutputs=true, adds the beta header + output_format body.
+     * When false, plain call with no output_format — prompt instructions enforce JSON.
+     */
+    function buildCallParams(useStructuredOutputs: boolean): {
+      body: Anthropic.MessageCreateParamsNonStreaming;
+      options: { signal: AbortSignal; headers: Record<string, string> };
+    } {
+      const body: Anthropic.MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: maxTokens,
+        temperature: 0,
+        system: prompt.system,
+        messages: [{ role: "user", content: prompt.userContent }],
+        ...(useStructuredOutputs
+          ? {
+              output_format: {
+                type: "json_schema",
+                json_schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+              },
+            }
+          : {}),
+      };
+      const headers: Record<string, string> = {
+        "Idempotency-Key": idempotencyKey,
+        ...(useStructuredOutputs
+          ? { "anthropic-beta": "structured-outputs-2025-11-13" }
+          : {}),
+      };
+      return { body, options: { signal: abortController.signal, headers } };
+    }
+
+    /**
+     * Determine if a caught error looks like a Structured Outputs rejection.
+     * Anthropic returns HTTP 400 with error messages that mention the parameter name.
+     */
+    function isStructuredOutputsRejection(err: unknown): boolean {
+      if (!err || typeof err !== 'object') return false;
+      const apiErr = err as { status?: number; message?: string };
+      if (apiErr.status !== 400) return false;
+      const msg = (apiErr.message ?? '').toLowerCase();
+      return msg.includes('output_format') || msg.includes('structured');
+    }
+
+    let useStructuredOutputs = structuredOutputsEnabled;
+    let { body, options } = buildCallParams(useStructuredOutputs);
+
     const response = await withRetry(
-      async () =>
-        apiClient.messages.create(
-          {
-            model,
-            max_tokens: maxTokens,
-            temperature: 0,
-            system: prompt.system,
-            messages: [{ role: "user", content: prompt.userContent }],
-          },
-          {
-            signal: abortController.signal,
-            headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
+      async () => {
+        try {
+          return await apiClient.messages.create(body, options);
+        } catch (callErr) {
+          // If Structured Outputs is active and the API rejects the parameter with a
+          // 400 (unsupported model / API change), fall back to prompt-only JSON mode
+          // and retry immediately. This is a single-attempt graceful degradation —
+          // withRetry handles rate-limit / server-error retries separately.
+          if (useStructuredOutputs && isStructuredOutputsRejection(callErr)) {
+            log.warn(
+              { model, error: (callErr as Error).message },
+              "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
+            );
+            useStructuredOutputs = false;
+            const fallback = buildCallParams(false);
+            body = fallback.body;
+            options = fallback.options;
+            return await apiClient.messages.create(body, options);
           }
-        ),
+          throw callErr;
+        }
+      },
       {
         adapter: "anthropic",
         model,
@@ -452,15 +559,38 @@ export async function draftGraphWithAnthropic(
       throw new Error("unexpected_response_type");
     }
 
-    // Extract JSON from response using robust extractor
-    // Handles: raw JSON, markdown code blocks, conversational preamble/suffix
-    const extractionResult = safeExtractJson(content.text, {
-      task: "draft_graph",
-      model,
-      correlationId: idempotencyKey,
-      includeRawContent: args.includeDebug, // Preserve full raw text for debugging
-    }, "draft_graph", providerLatencyMs, idempotencyKey);
-    const rawJson = extractionResult.json as Record<string, unknown>;
+    // Extract JSON from response.
+    // When Structured Outputs was actually used (not fallen back from), the response is
+    // guaranteed valid JSON matching our schema — go straight to JSON.parse.
+    // When inactive or after a 400 fallback to prompt-only mode, use the robust extractor
+    // that handles markdown fences and preamble.
+    let rawJson: Record<string, unknown>;
+    if (useStructuredOutputs) {
+      try {
+        rawJson = JSON.parse(content.text) as Record<string, unknown>;
+      } catch (cause) {
+        // Should not happen with Structured Outputs enabled, but guard defensively
+        throw new UpstreamNonJsonError(
+          `anthropic draft_graph structured-outputs returned invalid JSON`,
+          "anthropic",
+          "draft_graph",
+          providerLatencyMs,
+          content.text.slice(0, 500),
+          undefined,
+          undefined,
+          idempotencyKey,
+          cause,
+        );
+      }
+    } else {
+      const extractionResult = safeExtractJson(content.text, {
+        task: "draft_graph",
+        model,
+        correlationId: idempotencyKey,
+        includeRawContent: args.includeDebug, // Preserve full raw text for debugging
+      }, "draft_graph", providerLatencyMs, idempotencyKey);
+      rawJson = extractionResult.json as Record<string, unknown>;
+    }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
     const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
@@ -696,7 +826,7 @@ export async function draftGraphWithAnthropic(
           error
         );
       }
-      if (error.message === "anthropic_response_invalid_schema") {
+      if (error.message.startsWith("anthropic_response_invalid_schema")) {
         log.error(
           { fallback_reason: "schema_validation_failed", quality_tier: "failed" },
           "Anthropic returned response that failed schema validation"

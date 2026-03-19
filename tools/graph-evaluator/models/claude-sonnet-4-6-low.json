@@ -1,9 +1,13 @@
 {
   "id": "claude-sonnet-4-6-low",
-  "display_name": "Claude Sonnet 4.6 (low thinking)",
+  "display_name": "Claude Sonnet 4.6 (low thinking - removed, not supported)",
   "provider": "anthropic",
   "model": "claude-sonnet-4-6",
-  "max_tokens": 4096,
+  "max_tokens": 16384,
   "timeout_ms": 120000,
-  "thinking": { "type": "enabled", "budget_tokens": 2000 }
+  "pricing": {
+    "input_per_1m": 3.0,
+    "output_per_1m": 15.0,
+    "source": "anthropic-2026-03"
+  }
 }
