@@ -389,6 +389,24 @@ const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-opus-4-5-20251101",
 ]);
 
+// Hard floor and default for draft_graph max_tokens.
+// A complex 15-node graph with coaching, causal claims, and goal constraints can exceed
+// 4096 tokens; 16384 is the unconfigured default and 8192 is the minimum safe value.
+const DRAFT_MAX_TOKENS_FLOOR = 8192;
+const DRAFT_MAX_TOKENS_DEFAULT = 16384;
+
+/**
+ * Determine if a caught error looks like a Structured Outputs rejection.
+ * Anthropic returns HTTP 400 with error messages that mention the parameter name.
+ */
+function isStructuredOutputsRejection(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const apiErr = err as { status?: number; message?: string };
+  if (apiErr.status !== 400) return false;
+  const msg = (apiErr.message ?? '').toLowerCase();
+  return msg.includes('output_format') || msg.includes('structured');
+}
+
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
   opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number }
@@ -404,12 +422,7 @@ export async function draftGraphWithAnthropic(
   const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-sonnet-4-6";
-  // Hard floor max_tokens for draft_graph.
-  // A complex 15-node graph with coaching, causal claims, and goal constraints can exceed
-  // 4096 tokens; 16384 is the unconfigured default and 8192 is the minimum safe value.
   // Math.max enforces the floor even when CEE_MAX_TOKENS_DRAFT is explicitly set low.
-  const DRAFT_MAX_TOKENS_FLOOR = 8192;
-  const DRAFT_MAX_TOKENS_DEFAULT = 16384;
   const maxTokens = Math.max(
     getMaxTokensFromConfig('draft_graph') ?? DRAFT_MAX_TOKENS_DEFAULT,
     DRAFT_MAX_TOKENS_FLOOR,
@@ -501,18 +514,6 @@ export async function draftGraphWithAnthropic(
       return { body, options: { signal: abortController.signal, headers } };
     }
 
-    /**
-     * Determine if a caught error looks like a Structured Outputs rejection.
-     * Anthropic returns HTTP 400 with error messages that mention the parameter name.
-     */
-    function isStructuredOutputsRejection(err: unknown): boolean {
-      if (!err || typeof err !== 'object') return false;
-      const apiErr = err as { status?: number; message?: string };
-      if (apiErr.status !== 400) return false;
-      const msg = (apiErr.message ?? '').toLowerCase();
-      return msg.includes('output_format') || msg.includes('structured');
-    }
-
     let useStructuredOutputs = structuredOutputsEnabled;
     let { body, options } = buildCallParams(useStructuredOutputs);
 
@@ -552,6 +553,12 @@ export async function draftGraphWithAnthropic(
     }
 
     const providerLatencyMs = Date.now() - startTime;
+
+    // Log the actual mode used — differs from the pre-call debug log when a 400 fallback occurred.
+    if (structuredOutputsEnabled && !useStructuredOutputs) {
+      log.debug({ model, provider_latency_ms: providerLatencyMs },
+        "[Anthropic] draft_graph completed in prompt-only mode after Structured Outputs fallback");
+    }
 
     const content = response.content[0];
     if (content.type !== "text") {

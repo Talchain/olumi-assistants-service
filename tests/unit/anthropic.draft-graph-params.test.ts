@@ -147,7 +147,7 @@ const VALID_GRAPH_JSON = JSON.stringify({
   rationales: [],
 });
 
-// Hoisted so the mock factory can reference it before beforeEach runs
+// Hoisted so the mock factories can reference them before beforeEach runs
 const createSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@anthropic-ai/sdk", () => {
@@ -157,6 +157,24 @@ vi.mock("@anthropic-ai/sdk", () => {
     },
   };
 });
+
+// Stub the prompt loader to avoid Supabase network calls in unit tests.
+// Returns a minimal system prompt string synchronously.
+vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue("You are an expert at drafting decision graphs."),
+  getSystemPromptMeta: vi.fn().mockReturnValue({
+    taskId: "draft_graph",
+    prompt_version: "v19",
+    prompt_hash: "test-hash",
+    source: "default",
+    version: null,
+    instance_id: undefined,
+    cache_age_ms: undefined,
+    cache_status: "test",
+    use_staging_mode: false,
+  }),
+  invalidatePromptCache: vi.fn(),
+}));
 
 describe("draftGraphWithAnthropic — request payload construction", () => {
   beforeEach(() => {
