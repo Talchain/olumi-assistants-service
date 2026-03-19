@@ -700,7 +700,15 @@ function parseConfig(): Config {
         // If CEE_MODEL_DRAFT_GRAPH is set but CEE_MODEL_DRAFT is not, forward the value
         // and warn. If both are set with different values, CEE_MODEL_DRAFT takes precedence.
         draft: (() => {
-          if (env.CEE_MODEL_DRAFT) return env.CEE_MODEL_DRAFT;
+          if (env.CEE_MODEL_DRAFT) {
+            if (env.CEE_MODEL_DRAFT_GRAPH && env.CEE_MODEL_DRAFT_GRAPH !== env.CEE_MODEL_DRAFT) {
+              console.warn(
+                `[CONFIG] Both CEE_MODEL_DRAFT ("${env.CEE_MODEL_DRAFT}") and CEE_MODEL_DRAFT_GRAPH ("${env.CEE_MODEL_DRAFT_GRAPH}") are set with different values. ` +
+                `CEE_MODEL_DRAFT takes precedence. CEE_MODEL_DRAFT_GRAPH will be ignored.`
+              );
+            }
+            return env.CEE_MODEL_DRAFT;
+          }
           if (env.CEE_MODEL_DRAFT_GRAPH) {
             console.warn(
               "[CONFIG] CEE_MODEL_DRAFT_GRAPH is set but CEE_MODEL_DRAFT is not. " +
