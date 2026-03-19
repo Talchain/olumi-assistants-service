@@ -856,8 +856,13 @@ function buildAnalysisSummary(response: V2RunResponseEnvelope): string {
     parts.push(`Option comparison: ${optionSummaries}`);
   }
 
-  // Sensitivity summary (top drivers) — guard each entry
-  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
+  // Sensitivity summary (top drivers) — guard each entry.
+  // factor_sensitivity is top-level on V2RunResponseEnvelope; fall back to
+  // the nested results object shape used by some PLoT response variants.
+  const r = response as Record<string, unknown>;
+  const nestedResults = r.results && typeof r.results === 'object' && !Array.isArray(r.results) ? r.results as Record<string, unknown> : null;
+  const rawFactors = response.factor_sensitivity ?? nestedResults?.factor_sensitivity;
+  const factors = Array.isArray(rawFactors) ? rawFactors as Array<Record<string, unknown>> : [];
   if (factors.length > 0) {
     const top5 = factors.slice(0, 5)
       .filter((f) => f.label != null)
