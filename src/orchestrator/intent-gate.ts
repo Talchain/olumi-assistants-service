@@ -76,6 +76,9 @@ function normalise(message: string): string {
  */
 const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   // run_analysis
+  // Note: prerequisite gating (graph + analysis_inputs present) is enforced by
+  // DETERMINISTIC_PREREQUISITES in turn-handler.ts — not here. If prerequisites
+  // are unmet the turn falls through to LLM, which explains what's missing.
   ['run it', 'run_analysis'],
   ['run the analysis', 'run_analysis'],
   ['run analysis', 'run_analysis'],
@@ -87,6 +90,13 @@ const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   ['run simulation', 'run_analysis'],
   ['simulate', 'run_analysis'],
   ['evaluate options', 'run_analysis'],
+  ['rerun', 'run_analysis'],
+  ['re-run', 'run_analysis'],
+  ['rerun it', 'run_analysis'],
+  ['re-run it', 'run_analysis'],
+  ['rerun the analysis', 'run_analysis'],
+  ['re-run the analysis', 'run_analysis'],
+  ['rerun the model', 'run_analysis'],
 
   // draft_graph
   ['draft', 'draft_graph'],
@@ -196,6 +206,96 @@ export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
   'find data on ',
   'look up ',
   'research ',
+]);
+
+// ============================================================================
+// Parameter Assignment Patterns
+// ============================================================================
+
+/**
+ * Stopwords excluded from token overlap matching — common edit verbs, prepositions,
+ * and value words that would inflate match scores against unrelated node labels.
+ * Mirrors TOKEN_OVERLAP_STOPWORDS in edit-graph.ts (kept in sync deliberately —
+ * do NOT import from edit-graph.ts, that function is private).
+ */
+const PARAM_OVERLAP_STOPWORDS = new Set([
+  'set', 'the', 'to', 'a', 'an', 'of', 'for', 'and', 'in', 'on', 'is', 'it',
+  'high', 'low', 'higher', 'lower', 'more', 'less', 'very', 'much',
+  'make', 'change', 'update', 'adjust', 'increase', 'decrease', 'raise', 'reduce',
+  'please', 'add', 'remove', 'delete', 'new', 'from', 'with', 'by', 'its', 'this',
+  'that', 'value', 'level', 'factor', 'node', 'edge', 'option', 'model',
+]);
+
+/**
+ * Check if the normalised message has significant token overlap with exactly one
+ * node label from the provided list. Returns true only when exactly one label
+ * matches (to prevent ambiguous routing when multiple nodes would qualify).
+ *
+ * Overlap threshold: ≥1 overlapping token AND ≥50% of label tokens matched.
+ * Substring match: only when shorter token is ≥60% of longer (avoids "rate"→"corporate").
+ */
+function hasExactlyOneNodeOverlap(normalisedMessage: string, nodeLabels: string[]): boolean {
+  const messageTokens = normalisedMessage
+    .split(/\s+/)
+    .filter((t) => t.length > 2 && !PARAM_OVERLAP_STOPWORDS.has(t));
+
+  if (messageTokens.length === 0) return false;
+
+  let matchCount = 0;
+  for (const label of nodeLabels) {
+    const labelTokens = label
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !PARAM_OVERLAP_STOPWORDS.has(t));
+    if (labelTokens.length === 0) continue;
+
+    const overlapCount = labelTokens.filter((lt) =>
+      messageTokens.some((mt) => {
+        if (lt === mt) return true;
+        const shorter = lt.length <= mt.length ? lt : mt;
+        const longer = lt.length <= mt.length ? mt : lt;
+        return longer.includes(shorter) && shorter.length / longer.length >= 0.6;
+      }),
+    ).length;
+
+    if (overlapCount >= 1 && overlapCount / labelTokens.length >= 0.5) {
+      matchCount++;
+      if (matchCount > 1) return false; // ambiguous — multiple nodes match
+    }
+  }
+
+  return matchCount === 1;
+}
+
+/**
+ * Regex patterns for bare parameter assignment messages.
+ * Applied only when hasGraph === true and token overlap confirms a graph node match.
+ *
+ * Question exclusion happens before this list is checked (see classifyIntentWithContext).
+ */
+const PARAMETER_ASSIGNMENT_PATTERNS: readonly RegExp[] = Object.freeze([
+  // "set X to Y"
+  /^set\s+\w[\w\s]+?\s+to\s+\S/,
+  // "X = Y"
+  /^.+\s*=\s*.+$/,
+  // "increase/raise X to Y"
+  /^(?:increase|raise)\s+\w[\w\s]+?\s+to\s+\S/,
+  // "reduce/decrease/lower X by Y"
+  /^(?:reduce|decrease|lower)\s+\w[\w\s]+?\s+by\s+\S/,
+  // "make X high/low/medium/small/large"
+  /^make\s+\w[\w\s]+?\s+(?:very\s+)?(?:high|low|medium|small|large)$/,
+  // "budget is £120k" / "team size is 7" — value with currency or digit
+  /^(?:the\s+)?\w[\w\s]+?\s+is\s+[£$€]?\d/,
+  // "X is high/low/very high/none" — value word assignment (not a question)
+  /^(?:the\s+)?\w[\w\s]+?\s+is\s+(?:very\s+)?(?:high|low|medium|none|small|large|minimal|significant|critical|negligible)$/,
+]);
+
+/**
+ * Interrogative words that start questions — used to exclude question-like messages
+ * from parameter assignment routing.
+ */
+const QUESTION_STARTERS = new Set([
+  'what', 'is', 'are', 'how', 'why', 'does', 'do', 'can', 'which', 'who', 'when', 'where',
 ]);
 
 // ============================================================================
@@ -363,17 +463,26 @@ export function looksLikeDecisionBrief(message: string): boolean {
 }
 
 /**
- * Context-aware intent classification that extends classifyIntent() with
- * brief detection for first-turn scenarios (no graph in context).
+ * Context-aware intent classification that extends classifyIntent() with:
+ * 1. Brief detection for first-turn scenarios (no graph in context).
+ * 2. Bare parameter assignment detection when a graph is present.
  *
  * When no deterministic pattern matches AND the user has no graph AND the
  * message looks like a decision brief, routes to draft_graph deterministically.
  *
+ * When a graph is present AND the message matches a parameter assignment pattern
+ * AND exactly one graph node label overlaps with the message subject, routes to
+ * edit_graph deterministically.
+ *
  * Gated behind CEE_BRIEF_DETECTION_ENABLED feature flag (checked by caller).
+ *
+ * @param context.graphNodeLabels - Labels of all nodes in the current graph.
+ *   Used for token overlap validation on parameter assignment routing.
+ *   Optional for backwards compatibility — parameter assignment only fires when present.
  */
 export function classifyIntentWithContext(
   message: string,
-  context: { hasGraph: boolean },
+  context: { hasGraph: boolean; graphNodeLabels?: string[] },
 ): IntentGateResult {
   const result = classifyIntent(message);
   if (result.tool !== null) return result;
@@ -387,6 +496,33 @@ export function classifyIntentWithContext(
       normalised_message: normalise(message),
       matched_pattern: 'brief_detection',
     };
+  }
+
+  // Parameter assignment detection: only when graph exists and node labels are provided
+  if (context.hasGraph && context.graphNodeLabels && context.graphNodeLabels.length > 0) {
+    const normalised = normalise(message);
+
+    // Exclude questions: messages starting with an interrogative or ending with '?'
+    const firstWord = normalised.split(/\s+/)[0] ?? '';
+    const isQuestion = QUESTION_STARTERS.has(firstWord) || message.trimEnd().endsWith('?');
+
+    if (!isQuestion) {
+      const patternMatches = PARAMETER_ASSIGNMENT_PATTERNS.some((re) => re.test(normalised));
+
+      if (patternMatches) {
+        // Only route deterministically when exactly one node label overlaps —
+        // ambiguous multi-node matches fall through to LLM for disambiguation.
+        if (hasExactlyOneNodeOverlap(normalised, context.graphNodeLabels)) {
+          return {
+            tool: 'edit_graph',
+            routing: 'deterministic',
+            confidence: 'exact',
+            normalised_message: normalised,
+            matched_pattern: 'parameter_assignment',
+          };
+        }
+      }
+    }
   }
 
   return result;

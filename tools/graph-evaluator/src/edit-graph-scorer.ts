@@ -56,20 +56,29 @@ const FORBIDDEN_EDGE_KINDS: Array<[string, string]> = [
 // Path syntax pattern
 // =============================================================================
 
-const PATH_NODE_RE = /^\/nodes\/[a-z_][a-z0-9_]*$/;
-const PATH_EDGE_RE = /^\/edges\/[a-z_][a-z0-9_]*->[a-z_][a-z0-9_]*$/;
+// Accept /nodes/<id> with optional sub-path (e.g. /data/value, /data/interventions/<factor_id>)
+const PATH_NODE_RE = /^\/nodes\/[a-z_][a-z0-9_]*(\/.*)?$/;
+// Accept /edges/<from>-><to> with optional sub-path (e.g. /strength.mean)
+const PATH_EDGE_RE = /^\/edges\/[a-z_][a-z0-9_]*->[a-z_][a-z0-9_]*(\/.*)?$/;
 
 // =============================================================================
 // Types for parsed edit-graph responses
 // =============================================================================
 
 interface EditOperation {
+  /** v2 prompts use op_type; v6+ prompts use op. Normalise via getOpType(). */
   op_type?: string;
+  op?: string;
   path?: string;
   value?: Record<string, unknown>;
   impact?: string;
   rationale?: string;
   [key: string]: unknown;
+}
+
+/** Normalise op_type vs op field — v6 prompts use "op", v2 used "op_type". */
+function getOpType(op: EditOperation): string | undefined {
+  return op.op_type ?? op.op;
 }
 
 interface EditGraphResponse {
@@ -106,7 +115,7 @@ function checkTopologyCompliance(
 
   // Apply add_node operations
   for (const op of ops) {
-    if (op.op_type === "add_node" && op.value) {
+    if (getOpType(op) === "add_node" && op.value) {
       const v = op.value as Record<string, unknown>;
       if (typeof v.id === "string" && typeof v.kind === "string") {
         nodeMap.set(v.id as string, v as unknown as GraphNode);
@@ -116,8 +125,8 @@ function checkTopologyCompliance(
 
   // Apply remove_node operations
   for (const op of ops) {
-    if (op.op_type === "remove_node" && op.path) {
-      const match = op.path.match(/^\/nodes\/(.+)$/);
+    if (getOpType(op) === "remove_node" && op.path) {
+      const match = op.path.match(/^\/nodes\/([^/]+)/);
       if (match) nodeMap.delete(match[1]);
     }
   }
@@ -127,8 +136,10 @@ function checkTopologyCompliance(
   const removedEdgePaths = new Set<string>();
 
   for (const op of ops) {
-    if (op.op_type === "remove_edge" && op.path) {
-      removedEdgePaths.add(op.path);
+    if (getOpType(op) === "remove_edge" && op.path) {
+      // Normalise: strip any sub-path suffix so /edges/a->b/strength.mean → /edges/a->b
+      const normalized = op.path.replace(/^(\/edges\/[^/]+->[^/]+).*/, "$1");
+      removedEdgePaths.add(normalized);
     }
   }
 
@@ -140,7 +151,7 @@ function checkTopologyCompliance(
   }
 
   for (const op of ops) {
-    if (op.op_type === "add_edge" && op.value) {
+    if (getOpType(op) === "add_edge" && op.value) {
       const v = op.value as Record<string, unknown>;
       if (typeof v.from === "string" && typeof v.to === "string") {
         edges.push({ from: v.from as string, to: v.to as string });
@@ -206,9 +217,10 @@ function checkTopologyCompliance(
 
   // Check 4: update/remove paths reference existing entities
   for (const op of ops) {
-    if (op.op_type === "update_edge" || op.op_type === "remove_edge") {
+    const opType = getOpType(op);
+    if (opType === "update_edge" || opType === "remove_edge") {
       if (op.path) {
-        const match = op.path.match(/^\/edges\/([a-z_][a-z0-9_]*)->([a-z_][a-z0-9_]*)$/);
+        const match = op.path.match(/^\/edges\/([a-z_][a-z0-9_]*)->([a-z_][a-z0-9_]*)/);
         if (match) {
           const from = match[1];
           const to = match[2];
@@ -219,9 +231,9 @@ function checkTopologyCompliance(
         }
       }
     }
-    if (op.op_type === "update_node" || op.op_type === "remove_node") {
+    if (opType === "update_node" || opType === "remove_node") {
       if (op.path) {
-        const match = op.path.match(/^\/nodes\/(.+)$/);
+        const match = op.path.match(/^\/nodes\/([^/]+)/);
         if (match) {
           const nodeId = match[1];
           if (!startingGraph.nodes.some((n) => n.id === nodeId)) return false;
@@ -243,17 +255,18 @@ function checkTopologyCompliance(
  * - remove_node + add_node on the same entity → implies update_node
  */
 function deriveEquivalentTypes(ops: EditOperation[]): Set<string> {
-  const actual = new Set(ops.map((o) => o.op_type).filter(Boolean));
+  const actual = new Set(ops.map((o) => getOpType(o)).filter(Boolean) as string[]);
 
   // Check for remove_edge + add_edge pairs targeting same edge path
   if (actual.has("remove_edge") && actual.has("add_edge")) {
     const removedPaths = new Set(
       ops
-        .filter((o) => o.op_type === "remove_edge" && o.path)
-        .map((o) => o.path!)
+        .filter((o) => getOpType(o) === "remove_edge" && o.path)
+        // Normalise sub-paths: /edges/a->b/strength.mean → /edges/a->b
+        .map((o) => o.path!.replace(/^(\/edges\/[^/]+->[^/]+).*/, "$1"))
     );
     const addedEdges = ops.filter(
-      (o) => o.op_type === "add_edge" && o.value
+      (o) => getOpType(o) === "add_edge" && o.value
     );
     for (const addOp of addedEdges) {
       const v = addOp.value as Record<string, unknown>;
@@ -271,15 +284,15 @@ function deriveEquivalentTypes(ops: EditOperation[]): Set<string> {
   if (actual.has("remove_node") && actual.has("add_node")) {
     const removedIds = new Set(
       ops
-        .filter((o) => o.op_type === "remove_node" && o.path)
+        .filter((o) => getOpType(o) === "remove_node" && o.path)
         .map((o) => {
-          const m = o.path!.match(/^\/nodes\/(.+)$/);
+          const m = o.path!.match(/^\/nodes\/([^/]+)/);
           return m ? m[1] : null;
         })
         .filter(Boolean)
     );
     const addedNodes = ops.filter(
-      (o) => o.op_type === "add_node" && o.value
+      (o) => getOpType(o) === "add_node" && o.value
     );
     for (const addOp of addedNodes) {
       const v = addOp.value as Record<string, unknown>;
@@ -367,7 +380,7 @@ export function scoreEditGraph(
   let correct_ordering = true;
   if (ops.length > 1) {
     const ranks = ops
-      .map((op) => OP_ORDER[op.op_type ?? ""] ?? 99)
+      .map((op) => OP_ORDER[getOpType(op) ?? ""] ?? 99)
       .filter((r) => r !== 99);
     for (let i = 1; i < ranks.length; i++) {
       if (ranks[i] < ranks[i - 1]) {

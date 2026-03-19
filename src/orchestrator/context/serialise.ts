@@ -204,10 +204,10 @@ export function summariseAnalysisResponse(response: V2RunResponseEnvelope): Anal
   // Top 5 sensitivity drivers
   const factors = (response.factor_sensitivity ?? nested?.factor_sensitivity ?? []) as Array<Record<string, unknown>>;
   const topDrivers: DriverSummary[] = factors
-    .filter((f) => typeof f.label === 'string')
+    .filter((f) => typeof f.label === 'string' || typeof f.factor_label === 'string')
     .slice(0, 5)
     .map((f) => ({
-      label: f.label as string,
+      label: (f.label ?? f.factor_label) as string,
       elasticity: (f.elasticity as number) ?? 0,
       direction: (f.direction as string) ?? 'unknown',
     }));

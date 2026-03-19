@@ -36,6 +36,14 @@ describe("Intent Gate — classifyIntent", () => {
       "run simulation",
       "simulate",
       "evaluate options",
+      // rerun / re-run variants (Task 4)
+      "rerun",
+      "re-run",
+      "rerun it",
+      "re-run it",
+      "rerun the analysis",
+      "re-run the analysis",
+      "rerun the model",
     ])("routes %j to run_analysis", (message) => {
       const result = classifyIntent(message);
       expect(result.tool).toBe("run_analysis");
@@ -489,5 +497,138 @@ describe("classifyIntentWithContext", () => {
     const result = classifyIntentWithContext("Hello, how are you?", { hasGraph: false });
     expect(result.tool).toBeNull();
     expect(result.routing).toBe("llm");
+  });
+});
+
+// ============================================================================
+// Parameter Assignment Patterns — Task 1
+// ============================================================================
+
+describe("Intent Gate — parameter assignment patterns (classifyIntentWithContext)", () => {
+  const NODE_LABELS = ['Budget', 'Team Size', 'Advertising Spend'];
+  const ctx = { hasGraph: true, graphNodeLabels: NODE_LABELS };
+
+  // ── Positive cases ──────────────────────────────────────────────────────
+
+  it.each([
+    "budget is £120k",
+    "the budget is £120k",
+    "Budget is £120k",
+  ])("routes value-with-currency assignment %j to edit_graph", (msg) => {
+    const result = classifyIntentWithContext(msg, ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'team size is 7' to edit_graph", () => {
+    const result = classifyIntentWithContext("team size is 7", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'advertising spend is high' to edit_graph", () => {
+    const result = classifyIntentWithContext("advertising spend is high", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'set budget to 50000' to edit_graph", () => {
+    const result = classifyIntentWithContext("set budget to 50000", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'budget = 120000' to edit_graph", () => {
+    const result = classifyIntentWithContext("budget = 120000", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'increase budget to £200k' to edit_graph", () => {
+    const result = classifyIntentWithContext("increase budget to £200k", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'reduce advertising spend by 20%' to edit_graph", () => {
+    const result = classifyIntentWithContext("reduce advertising spend by 20%", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  it("routes 'make team size high' to edit_graph", () => {
+    const result = classifyIntentWithContext("make team size high", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.routing).toBe("deterministic");
+    expect(result.matched_pattern).toBe("parameter_assignment");
+  });
+
+  // ── Negative cases: questions ───────────────────────────────────────────
+
+  it.each([
+    "what is the budget?",
+    "is team size important?",
+    "how high is advertising spend?",
+    "what is budget",   // no ? but starts with interrogative
+    "is budget high",   // starts with "is"
+  ])("does NOT route question %j (falls through to LLM)", (msg) => {
+    const result = classifyIntentWithContext(msg, ctx);
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  // ── Negative cases: no matching node ────────────────────────────────────
+
+  it("does NOT route when message subject has no matching node label", () => {
+    // "revenue" is not in NODE_LABELS → no overlap
+    const result = classifyIntentWithContext("revenue is important", ctx);
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  // ── Negative cases: no graph ─────────────────────────────────────────────
+
+  it("does NOT route parameter assignment when hasGraph is false", () => {
+    const result = classifyIntentWithContext("budget is £120k", { hasGraph: false, graphNodeLabels: NODE_LABELS });
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  // ── Negative cases: ambiguous (multiple nodes match) ────────────────────
+
+  it("does NOT route when multiple node labels overlap (ambiguous)", () => {
+    // Both "team size" and "advertising spend" would match if we said something
+    // that overlaps with both — use separate short tokens that hit two labels
+    const multiNodeCtx = { hasGraph: true, graphNodeLabels: ['Budget', 'Budget Limit'] };
+    // "budget limit is 50000" — both "Budget" and "Budget Limit" overlap → ambiguous
+    const result = classifyIntentWithContext("budget limit is 50000", multiNodeCtx);
+    // With two matches, falls through to LLM
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  // ── Backward compatibility: classifyIntent (no context) unchanged ────────
+
+  it("classifyIntent (context-free) is unaffected — parameter assignment needs context", () => {
+    // classifyIntent never routes parameter_assignment since it has no node labels
+    const result = classifyIntent("budget is £120k");
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
+
+  // ── Existing EDIT_PREFIXES still fire before parameter assignment ─────────
+
+  it("EDIT_PREFIXES still route correctly ahead of parameter assignment", () => {
+    const result = classifyIntentWithContext("update the team size", ctx);
+    // "update the " prefix fires deterministically
+    expect(result.tool).toBe("edit_graph");
+    expect(result.matched_pattern).not.toBe("parameter_assignment");
   });
 });

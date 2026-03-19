@@ -241,20 +241,22 @@ describe('parseOrchestratorResponse', () => {
     expect(result.parse_warnings).toContain('Unknown block type "graph_patch" — dropped');
   });
 
-  it('truncates more than 2 suggested actions with a warning', () => {
+  it('truncates more than 4 suggested actions with a warning', () => {
     const actions = [
       makeAction('Action 1', 'Do thing 1', 'facilitator'),
       makeAction('Action 2', 'Do thing 2', 'challenger'),
       makeAction('Action 3', 'Do thing 3', 'facilitator'),
+      makeAction('Action 4', 'Do thing 4', 'challenger'),
+      makeAction('Action 5', 'Do thing 5', 'facilitator'),
     ].join('');
     const raw = makeXmlResponse({ suggestedActions: actions });
 
     const result = parseOrchestratorResponse(raw);
 
-    expect(result.suggested_actions).toHaveLength(2);
+    expect(result.suggested_actions).toHaveLength(4);
     expect(result.suggested_actions[0].label).toBe('Action 1');
-    expect(result.suggested_actions[1].label).toBe('Action 2');
-    expect(result.parse_warnings).toContain('More than 2 suggested actions — truncated to 2');
+    expect(result.suggested_actions[3].label).toBe('Action 4');
+    expect(result.parse_warnings).toContain('More than 4 suggested actions — truncated to 4');
   });
 
   it('defaults review_card tone to facilitator when missing', () => {

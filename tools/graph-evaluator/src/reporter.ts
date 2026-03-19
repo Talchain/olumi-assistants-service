@@ -22,9 +22,15 @@ function generateScoresCsv(results: ScoredResult[], config: RunConfig): string {
     brief_id: r.brief.id,
     target_mode: r.model.target_mode ?? "",
     structural_valid: r.score.structural_valid,
+    // Legacy dimensions (backward-compatible columns)
     param_quality: r.score.param_quality?.toFixed(4) ?? "",
     option_diff: r.score.option_diff?.toFixed(4) ?? "",
     completeness: r.score.completeness?.toFixed(4) ?? "",
+    // New dimensions (v187+)
+    constraint_retention: r.score.constraint_retention?.toFixed(4) ?? "",
+    ratio_encoding: r.score.ratio_encoding?.toFixed(4) ?? "",
+    external_factor_presence: r.score.external_factor_presence?.toFixed(4) ?? "",
+    coaching_quality: r.score.coaching_quality?.toFixed(4) ?? "",
     overall_score: r.score.overall_score?.toFixed(4) ?? "",
     latency_ms: r.response.latency_ms,
     input_tokens: r.response.input_tokens ?? "",
@@ -98,7 +104,8 @@ function generateSummaryMd(
     .sort((a, b) => (b.score.overall_score ?? 0) - (a.score.overall_score ?? 0));
 
   const rankHeaders = [
-    "#", "Model", "Brief", "Mode", "Overall", "Struct", "Param", "OptDiff", "Complete",
+    "#", "Model", "Brief", "Mode", "Overall", "Struct",
+    "Param", "OptDiff", "Complete", "ConstrRet", "RatioEnc", "ExtFactor", "Coaching",
     "Latency (ms)", "Cost ($)", "Nodes",
   ];
   const rankRows = ranked.map((r, i) => [
@@ -111,6 +118,10 @@ function generateSummaryMd(
     fmtScore(r.score.param_quality),
     fmtScore(r.score.option_diff),
     fmtScore(r.score.completeness),
+    fmtScore(r.score.constraint_retention),
+    fmtScore(r.score.ratio_encoding),
+    fmtScore(r.score.external_factor_presence),
+    fmtScore(r.score.coaching_quality),
     String(r.response.latency_ms),
     (r.response.est_cost_usd ?? 0).toFixed(5),
     String(r.score.node_count),
@@ -309,7 +320,8 @@ function generateAnalysisPackMd(
 
   const tableHeaders = [
     "Model", "Brief", "Mode", "Overall", "Struct",
-    "Param", "OptDiff", "Complete", "Latency", "Cost", "Nodes", "Failure",
+    "Param", "OptDiff", "Complete", "ConstrRet", "RatioEnc", "ExtFactor", "Coaching",
+    "Latency", "Cost", "Nodes", "Failure",
   ];
   const tableRows = results.map((r) => [
     r.model.id,
@@ -320,6 +332,10 @@ function generateAnalysisPackMd(
     fmtScore(r.score.param_quality),
     fmtScore(r.score.option_diff),
     fmtScore(r.score.completeness),
+    fmtScore(r.score.constraint_retention),
+    fmtScore(r.score.ratio_encoding),
+    fmtScore(r.score.external_factor_presence),
+    fmtScore(r.score.coaching_quality),
     `${r.response.latency_ms}ms`,
     `$${(r.response.est_cost_usd ?? 0).toFixed(5)}`,
     String(r.score.node_count),
@@ -385,7 +401,11 @@ function generateAnalysisPackMd(
         add(`- Nodes: ${best.score.node_count}, Edges: ${best.score.edge_count}\n`);
         add(`- Param quality: ${fmtScore(best.score.param_quality)}\n`);
         add(`- Option diff: ${fmtScore(best.score.option_diff)}\n`);
-        add(`- Completeness: ${fmtScore(best.score.completeness)}\n\n`);
+        add(`- Completeness: ${fmtScore(best.score.completeness)}\n`);
+        add(`- Constraint retention: ${fmtScore(best.score.constraint_retention)}\n`);
+        add(`- Ratio encoding: ${fmtScore(best.score.ratio_encoding)}\n`);
+        add(`- External factor: ${fmtScore(best.score.external_factor_presence)}\n`);
+        add(`- Coaching quality: ${fmtScore(best.score.coaching_quality)}\n\n`);
       }
 
       add(`**Worst**: ${worst.model.id} (${fmtScore(worst.score.overall_score)})\n\n`);
@@ -394,7 +414,11 @@ function generateAnalysisPackMd(
       }
       add(`- Param quality: ${fmtScore(worst.score.param_quality)}\n`);
       add(`- Option diff: ${fmtScore(worst.score.option_diff)}\n`);
-      add(`- Completeness: ${fmtScore(worst.score.completeness)}\n\n`);
+      add(`- Completeness: ${fmtScore(worst.score.completeness)}\n`);
+      add(`- Constraint retention: ${fmtScore(worst.score.constraint_retention)}\n`);
+      add(`- Ratio encoding: ${fmtScore(worst.score.ratio_encoding)}\n`);
+      add(`- External factor: ${fmtScore(worst.score.external_factor_presence)}\n`);
+      add(`- Coaching quality: ${fmtScore(worst.score.coaching_quality)}\n\n`);
     }
   }
 

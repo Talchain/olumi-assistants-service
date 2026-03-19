@@ -29,10 +29,10 @@ describe("STAGE_TOOL_POLICY", () => {
     }
   });
 
-  it("decide allows generate_brief, explain_results, edit_graph", () => {
-    for (const tool of ["generate_brief", "explain_results", "edit_graph"]) {
-      expect(STAGE_TOOL_POLICY.decide.has(tool)).toBe(true);
-    }
+  it("decide allows generate_brief and explain_results only — edit_graph removed", () => {
+    expect(STAGE_TOOL_POLICY.decide.has("generate_brief")).toBe(true);
+    expect(STAGE_TOOL_POLICY.decide.has("explain_results")).toBe(true);
+    expect(STAGE_TOOL_POLICY.decide.has("edit_graph")).toBe(false);
   });
 
   it("optimise matches evaluate policy", () => {
@@ -86,7 +86,7 @@ describe("isToolAllowedAtStage", () => {
       ["generate_brief", "evaluate"],
       ["generate_brief", "decide"],
       ["explain_results", "decide"],
-      ["edit_graph", "decide"],
+      // edit_graph removed from decide stage
     ];
     for (const [tool, stage] of cases) {
       expect(isToolAllowedAtStage(tool, stage).allowed).toBe(true);

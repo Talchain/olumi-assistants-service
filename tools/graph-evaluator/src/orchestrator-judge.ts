@@ -19,10 +19,10 @@ import type { OrchestratorFixture, JudgeResult } from "./types.js";
 const RUBRIC_VERSION = "judge_rubric_v1";
 
 const JUDGE_MODEL_CONFIG = {
-  id: "judge-gpt-4o",
+  id: "judge-gpt-5.4",
   provider: "openai" as const,
-  model: "gpt-4o",
-  timeout_ms: 90_000,
+  model: "gpt-5.4",
+  timeout_ms: 120_000,
   reasoning_effort: null,
 };
 
@@ -197,8 +197,8 @@ export async function judgeOrchestratorResponse(
 
   const judge_latency_ms = result.latency_ms;
   const judge_cost_usd =
-    ((result.input_tokens ?? 0) / 1_000_000) * 2.5 +
-    ((result.output_tokens ?? 0) / 1_000_000) * 10.0;
+    ((result.input_tokens ?? 0) / 1_000_000) * 75.0 +
+    ((result.output_tokens ?? 0) / 1_000_000) * 150.0;
 
   if (!result.ok || !result.text) {
     return makeErrorResult(

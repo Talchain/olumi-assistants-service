@@ -7,7 +7,7 @@
  *    - <diagnostics> (captured for debug, stripped from user-visible output)
  *    - <assistant_text> (user-visible prose)
  *    - <blocks> containing commentary or review_card blocks
- *    - <suggested_actions> (capped at 2)
+ *    - <suggested_actions> (capped at 4)
  *
  * Safety rules:
  * - FactBlock and GraphPatchBlock are NEVER parsed from free text
@@ -279,7 +279,7 @@ function parseBlocksWithWarnings(
 
 /**
  * Parse suggested actions from the <suggested_actions> section with warning collection.
- * Capped at 2 per turn.
+ * Capped at 4 per turn (raised from 2 for cf-v20 compatibility).
  */
 function parseSuggestedActionsWithWarnings(
   actionsContent: string,
@@ -291,7 +291,7 @@ function parseSuggestedActionsWithWarnings(
   let truncated = false;
   let actionIndex = 0;
   for (const raw of rawActions) {
-    if (results.length >= 2) {
+    if (results.length >= 4) {
       truncated = true;
       break;
     }
@@ -332,7 +332,7 @@ function parseSuggestedActionsWithWarnings(
   }
 
   if (truncated) {
-    warnings.push(`More than 2 suggested actions — truncated to 2`);
+    warnings.push(`More than 4 suggested actions — truncated to 4`);
   }
 
   return results;
@@ -372,7 +372,7 @@ function rescueInlineActions(
   let truncated = false;
 
   for (const line of lines) {
-    if (actions.length >= 2) {
+    if (actions.length >= 4) {
       // Check if overflow lines also match — track for warning parity
       if (INLINE_ACTION_RE.test(line.trim())) {
         truncated = true;
@@ -395,7 +395,7 @@ function rescueInlineActions(
     warnings.push(`Rescued ${actions.length} inline suggested action(s) from assistant_text`);
   }
   if (truncated) {
-    warnings.push('More than 2 inline suggested actions — truncated to 2');
+    warnings.push('More than 4 inline suggested actions — truncated to 4');
   }
 
   return { actions, cleanedText: kept.join('\n').trim() };

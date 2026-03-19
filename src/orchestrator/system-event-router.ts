@@ -219,6 +219,18 @@ export async function routeSystemEvent(
       return handleDirectAnalysisRun(event, turnRequest, turnId, requestId);
     case 'feedback_submitted':
       return handleFeedbackSubmitted(event, turnRequest);
+    default: {
+      // Unknown event_type — fall through silently without crashing.
+      const unknownType = (event as { event_type: string }).event_type;
+      log.warn({ event_type: unknownType, request_id: requestId }, 'System event: unrecognised event_type, ignoring');
+      return {
+        assistantText: null,
+        blocks: [],
+        guidanceItems: [],
+        systemContextEntries: [],
+        httpStatus: 200,
+      };
+    }
   }
 }
 
@@ -312,11 +324,16 @@ async function handlePatchAccepted(
       'patch_accepted: Path A — UI-validated, skipping PLoT',
     );
 
+    const { confirmationText, staleAnalysisEntry } = buildPatchConfirmationText(
+      details.operations,
+      turnRequest.context,
+    );
+
     return {
-      assistantText: null,
+      assistantText: confirmationText,
       blocks: [block],
       guidanceItems,
-      systemContextEntries: [contextEntry],
+      systemContextEntries: staleAnalysisEntry ? [contextEntry, staleAnalysisEntry] : [contextEntry],
       httpStatus: 200,
       graphHash,
     };
@@ -442,11 +459,16 @@ async function handlePatchAccepted(
     'patch_accepted: PLoT validate-patch succeeded',
   );
 
+  const { confirmationText, staleAnalysisEntry } = buildPatchConfirmationText(
+    details.operations,
+    turnRequest.context,
+  );
+
   return {
-    assistantText: null,
+    assistantText: confirmationText,
     blocks: [block],
     guidanceItems,
-    systemContextEntries: [contextEntry],
+    systemContextEntries: staleAnalysisEntry ? [contextEntry, staleAnalysisEntry] : [contextEntry],
     httpStatus: 200,
     graphHash,
   };
@@ -475,9 +497,8 @@ function handlePatchDismissed(
 
   const contextEntry = `[system] User dismissed patch ${patchId}.`;
 
-  // Silent envelope invariant: assistant_text: null, blocks: [], guidanceItems: []
   return {
-    assistantText: null,
+    assistantText: 'Suggested changes dismissed. The model is unchanged.',
     blocks: [],
     guidanceItems: [],
     systemContextEntries: [contextEntry],
@@ -509,9 +530,8 @@ function handleDirectGraphEdit(
     guidanceItems = generatePostDraftGuidance(turnRequest.graph_state, [], framing);
   }
 
-  // Silent envelope invariant: assistant_text: null, blocks: []
   return {
-    assistantText: null,
+    assistantText: 'Your graph changes have been noted.',
     blocks: [],
     guidanceItems,
     systemContextEntries: [contextEntry],
@@ -619,9 +639,8 @@ function handleFeedbackSubmitted(
     'feedback_submitted: logged',
   );
 
-  // Silent envelope invariant: assistant_text: null, blocks: [], guidanceItems: []
   return {
-    assistantText: null,
+    assistantText: 'Thanks for your feedback.',
     blocks: [],
     guidanceItems: [],
     systemContextEntries: [],  // No context injection for feedback
@@ -632,6 +651,30 @@ function handleFeedbackSubmitted(
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Build a one-sentence confirmation text for patch_accepted.
+ * Uses buildPatchSummary to derive a human-readable description of the operations,
+ * then appends "applied to your model." — no em dashes.
+ */
+function buildPatchConfirmationText(
+  operations: Record<string, unknown>[],
+  context: OrchestratorTurnRequest['context'],
+): { confirmationText: string; staleAnalysisEntry: string | null } {
+  const opsForSummary = operations as unknown as PatchOperation[];
+  const raw = buildPatchSummary(opsForSummary, null, 'accepted');
+  // buildPatchSummary can return "No changes were applied." for empty ops — handle gracefully
+  const summary = raw && raw !== 'No changes were applied.' ? raw : 'Changes';
+  const confirmationText = `${summary} applied to your model.`;
+
+  // Flag stale analysis when analysis exists and is now superseded by graph changes
+  const staleAnalysisEntry =
+    context?.analysis_response != null
+      ? '[system] Analysis is now stale. Rerun recommended.'
+      : null;
+
+  return { confirmationText, staleAnalysisEntry };
+}
 
 function buildGraphPatchBlock(
   patchId: string,

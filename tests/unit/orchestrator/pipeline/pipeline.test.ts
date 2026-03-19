@@ -212,8 +212,8 @@ describe("pipeline", () => {
 
     const envelope = await executePipeline(request, "req-1", deps);
 
-    // Must return silently — no assistant text, no blocks, no suggested actions
-    expect(envelope.assistant_text).toBeNull();
+    // feedback_submitted now returns confirmation text (not null)
+    expect(envelope.assistant_text).toBe('Thanks for your feedback.');
     expect(envelope.blocks).toEqual([]);
     expect(envelope.suggested_actions).toEqual([]);
     // No error

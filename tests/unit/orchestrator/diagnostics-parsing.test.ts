@@ -368,22 +368,24 @@ Challenger: same here, no separator present.</assistant_text>
     expect(parsed.assistant_text).toContain('Facilitator:');
   });
 
-  it('emits truncation warning when more than 2 inline actions found', () => {
+  it('emits truncation warning when more than 4 inline actions found', () => {
     const raw = `<diagnostics>Mode: INTERPRET</diagnostics>
 <response>
-  <assistant_text>Three paths forward.
+  <assistant_text>Five paths forward.
 
 Facilitator: Option A — Go with the first choice.
 Challenger: Option B — Push back on assumptions.
-Facilitator: Option C — A third alternative path.</assistant_text>
+Facilitator: Option C — A third alternative path.
+Challenger: Option D — A fourth alternative path.
+Facilitator: Option E — A fifth alternative path.</assistant_text>
   <blocks></blocks>
   <suggested_actions></suggested_actions>
 </response>`;
 
     const parsed = parseOrchestratorResponse(raw);
-    expect(parsed.suggested_actions).toHaveLength(2);
-    expect(parsed.parse_warnings.some((w) => w.includes('truncated to 2'))).toBe(true);
-    // The third action-like line should remain in assistant_text
-    expect(parsed.assistant_text).toContain('Option C');
+    expect(parsed.suggested_actions).toHaveLength(4);
+    expect(parsed.parse_warnings.some((w) => w.includes('truncated to 4'))).toBe(true);
+    // The fifth action-like line should remain in assistant_text
+    expect(parsed.assistant_text).toContain('Option E');
   });
 });

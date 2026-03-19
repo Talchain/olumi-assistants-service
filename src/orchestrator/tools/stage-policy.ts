@@ -24,7 +24,7 @@ export const STAGE_TOOL_POLICY: Record<DecisionStage, ReadonlySet<string>> = {
   frame:    new Set(['draft_graph', 'research_topic']),
   ideate:   new Set(['edit_graph', 'research_topic', 'draft_graph']),
   evaluate: new Set(['run_analysis', 'explain_results', 'generate_brief', 'edit_graph']),
-  decide:   new Set(['generate_brief', 'explain_results', 'edit_graph']),
+  decide:   new Set(['generate_brief', 'explain_results']),
   optimise: new Set(['edit_graph', 'run_analysis', 'explain_results', 'generate_brief']),
 };
 

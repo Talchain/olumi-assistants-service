@@ -123,10 +123,36 @@ export interface ModelConfig {
 // Brief (draft_graph)
 // =============================================================================
 
+/** Expected constraint entry in brief metadata for constraint_retention scoring. */
+export interface ExpectedConstraint {
+  /** Case-insensitive substring to match against constraint label or node_id */
+  keyword: string;
+  /** Exact operator match: "<=" or ">=" */
+  operator: string;
+  /** Expected value within ±0.02 tolerance */
+  value: number;
+  /** If true, value must be >= 1.0 (ratio scale, not incorrectly normalised to 0-1) */
+  can_exceed_one?: boolean;
+}
+
+/** Expected ratio metric entry in brief metadata for ratio_encoding scoring. */
+export interface ExpectedRatioMetric {
+  /** Case-insensitive substring to match against node labels */
+  keyword: string;
+  /** Minimum plausible value when correctly encoded (e.g. 1.0 for NRR >= 100%) */
+  expected_min: number;
+}
+
 export interface BriefMeta {
   expect_status_quo: boolean;
   has_numeric_target: boolean;
   complexity: "simple" | "moderate" | "complex";
+  /** If true, the graph must include ≥1 external factor (scored in external_factor_presence) */
+  expect_external_factor?: boolean;
+  /** Expected constraints for constraint_retention scoring */
+  expected_constraints?: ExpectedConstraint[];
+  /** Expected ratio metrics for ratio_encoding scoring */
+  ratio_metrics?: ExpectedRatioMetric[];
 }
 
 export interface Brief {
@@ -180,9 +206,15 @@ export interface LLMResponse {
 export interface ScoreResult {
   structural_valid: boolean;
   violation_codes: string[];
+  /** Legacy dimensions (preserved for backward compatibility) */
   param_quality: number | null;
   option_diff: number | null;
   completeness: number | null;
+  /** New dimensions (v187+) */
+  constraint_retention: number | null;
+  ratio_encoding: number | null;
+  external_factor_presence: number | null;
+  coaching_quality: number | null;
   overall_score: number | null;
   node_count: number;
   edge_count: number;

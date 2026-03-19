@@ -134,8 +134,18 @@ Route: explain_results. Using analysis fields.
     </action>
     <action>
       <role>facilitator</role>
+      <label>Third action</label>
+      <message>This is within the cap of 4.</message>
+    </action>
+    <action>
+      <role>challenger</role>
+      <label>Fourth action</label>
+      <message>This is within the cap of 4.</message>
+    </action>
+    <action>
+      <role>facilitator</role>
       <label>Should be dropped</label>
-      <message>This third action exceeds the cap of 2.</message>
+      <message>This fifth action exceeds the cap of 4.</message>
     </action>
   </suggested_actions>
 </response>`;
@@ -168,8 +178,8 @@ Route: explain_results. Using analysis fields.
       expect(reviewCard.title).toBe("Assumption Risk");
       expect(reviewCard.content).toContain("pricing assumptions");
 
-      // Suggested actions capped at 2
-      expect(parsed.suggested_actions).toHaveLength(2);
+      // Suggested actions capped at 4
+      expect(parsed.suggested_actions).toHaveLength(4);
       expect(parsed.suggested_actions[0].label).toBe("Explore drivers");
       expect(parsed.suggested_actions[0].role).toBe("facilitator");
       expect(parsed.suggested_actions[0].prompt).toBe("What are the most sensitive factors?");

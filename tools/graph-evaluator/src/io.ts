@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, extname } from "node:path";
 import matter from "gray-matter";
-import type { ModelConfig, Brief, BriefMeta, LLMResponse, RunManifest, ReportFiles } from "./types.js";
+import type { ModelConfig, Brief, BriefMeta, ExpectedConstraint, ExpectedRatioMetric, LLMResponse, RunManifest, ReportFiles } from "./types.js";
 
 // =============================================================================
 // Hashing
@@ -122,6 +122,15 @@ export async function readBriefs(
       expect_status_quo: Boolean(parsed.data["expect_status_quo"] ?? true),
       has_numeric_target: Boolean(parsed.data["has_numeric_target"] ?? false),
       complexity: (parsed.data["complexity"] as BriefMeta["complexity"]) ?? "simple",
+      expect_external_factor: parsed.data["expect_external_factor"] != null
+        ? Boolean(parsed.data["expect_external_factor"])
+        : undefined,
+      expected_constraints: Array.isArray(parsed.data["expected_constraints"])
+        ? (parsed.data["expected_constraints"] as ExpectedConstraint[])
+        : undefined,
+      ratio_metrics: Array.isArray(parsed.data["ratio_metrics"])
+        ? (parsed.data["ratio_metrics"] as ExpectedRatioMetric[])
+        : undefined,
     };
 
     briefs.push({

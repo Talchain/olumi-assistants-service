@@ -18,6 +18,8 @@ export default defineConfig({
       "tests/e2e/**",
       // Exclude live LLM tests (require LIVE_LLM=1 and API key)
       "tests/integration/adversarial.test.ts",
+      // Exclude golden-path e2e (real APIs, run on demand with RUN_E2E_GOLDEN=1)
+      "tests/integration/golden-path-e2e.test.ts",
       "tests/validation/golden-briefs-runner.test.ts",
       // Exclude benchmark tests (run with pnpm benchmark:stability)
       "tests/benchmarks/**",

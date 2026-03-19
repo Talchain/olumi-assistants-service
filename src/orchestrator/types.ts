@@ -336,19 +336,36 @@ export interface PatchOperation {
 }
 
 /**
- * Matches PLoT's RepairEntry schema from normalisation/repair-codes.ts.
- * PLoT returns: code, layer, field_path, before, after, reason, severity, action.
+ * PLoT emits repairs in two shapes:
+ *  - Legacy: { action, field, from_value, reason, to_value }
+ *  - F.5 canonical: { action, after, before, code, field, field_path, from_value, layer, reason, severity, to_value }
+ *
+ * `reason` is present in both — use it as the primary display field.
+ * `code` is canonical-only — use it to identify repair type when available.
  */
-export interface RepairEntry {
-  code: string;
-  layer: 'plot';
-  field_path: string;
-  before: unknown;
-  after: unknown;
-  reason: string;
-  severity: 'info' | 'warn';
-  action: string;
-}
+export type RepairEntry =
+  | {
+      /** F.5 canonical shape */
+      code: string;
+      layer: 'plot';
+      field_path: string;
+      field?: string;
+      before: unknown;
+      after: unknown;
+      from_value?: unknown;
+      to_value?: unknown;
+      reason: string;
+      severity: 'info' | 'warn';
+      action: string;
+    }
+  | {
+      /** Legacy shape — no code, layer, or field_path */
+      action: string;
+      field: string;
+      from_value: unknown;
+      to_value: unknown;
+      reason: string;
+    };
 
 export interface GraphPatchBlockData {
   patch_type: PatchType;

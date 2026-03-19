@@ -119,7 +119,7 @@ describe('appendSystemMessages', () => {
 // ============================================================================
 
 describe('Silent envelope invariant', () => {
-  it('patch_dismissed: returns full triple (null, [], [])', async () => {
+  it('patch_dismissed: returns blocks:[] and guidanceItems:[]', async () => {
     const event: SystemEvent = {
       event_type: 'patch_dismissed',
       timestamp: '2026-03-03T00:00:00Z',
@@ -127,22 +127,24 @@ describe('Silent envelope invariant', () => {
       details: { patch_id: 'p1' },
     };
 
+    // Must use makeRequestWithPendingPatch so hasPendingPatch guard passes
     const result = await routeSystemEvent({
       event,
-      turnRequest: makeRequest(),
+      turnRequest: makeRequestWithPendingPatch(),
       turnId: TURN_ID,
       requestId: REQUEST_ID,
       plotClient: null,
     });
 
-    expect(result.assistantText).toBeNull();
+    // patch_dismissed now produces a confirmation string (not null)
+    expect(typeof result.assistantText).toBe('string');
     expect(result.blocks).toEqual([]);
     expect(result.guidanceItems).toEqual([]);
     expect(result.httpStatus).toBe(200);
     expect(result.error).toBeUndefined();
   });
 
-  it('feedback_submitted: returns full triple (null, [], []), no context injection', async () => {
+  it('feedback_submitted: returns blocks:[] and guidanceItems:[], no context injection', async () => {
     const event: SystemEvent = {
       event_type: 'feedback_submitted',
       timestamp: '2026-03-03T00:00:00Z',
@@ -158,7 +160,8 @@ describe('Silent envelope invariant', () => {
       plotClient: null,
     });
 
-    expect(result.assistantText).toBeNull();
+    // feedback_submitted now produces a confirmation string (not null)
+    expect(typeof result.assistantText).toBe('string');
     expect(result.blocks).toEqual([]);
     expect(result.guidanceItems).toEqual([]);
     expect(result.systemContextEntries).toEqual([]);  // No context injection for feedback
@@ -301,7 +304,8 @@ describe('patch_accepted', () => {
       expect(result.graphHash).toBe('gh-from-plot');
       expect(result.blocks).toHaveLength(1);
       expect(result.blocks[0].block_type).toBe('graph_patch');
-      expect(result.assistantText).toBeNull();
+      // patch_accepted Path B now produces a confirmation string
+      expect(typeof result.assistantText).toBe('string');
     });
 
     it('rejection: returns rejection block and deterministic text', async () => {
@@ -378,7 +382,7 @@ describe('patch_accepted', () => {
 // ============================================================================
 
 describe('patch_dismissed', () => {
-  it('returns silent response with context entry', async () => {
+  it('returns confirmation text and context entry', async () => {
     const event: SystemEvent = {
       event_type: 'patch_dismissed',
       timestamp: '2026-03-03T00:00:00Z',
@@ -394,7 +398,7 @@ describe('patch_dismissed', () => {
       plotClient: null,
     });
 
-    expect(result.assistantText).toBeNull();
+    expect(result.assistantText).toBe('Suggested changes dismissed. The model is unchanged.');
     expect(result.blocks).toEqual([]);
     expect(result.guidanceItems).toEqual([]);
     expect(result.systemContextEntries).toHaveLength(1);
@@ -638,7 +642,7 @@ describe('direct_analysis_run', () => {
 // ============================================================================
 
 describe('feedback_submitted', () => {
-  it('logs and returns silent response, no context injection', async () => {
+  it('logs and returns confirmation text, no context injection', async () => {
     const event: SystemEvent = {
       event_type: 'feedback_submitted',
       timestamp: '2026-03-03T00:00:00Z',
@@ -654,7 +658,7 @@ describe('feedback_submitted', () => {
       plotClient: null,
     });
 
-    expect(result.assistantText).toBeNull();
+    expect(result.assistantText).toBe('Thanks for your feedback.');
     expect(result.blocks).toEqual([]);
     expect(result.guidanceItems).toEqual([]);
     expect(result.systemContextEntries).toEqual([]);
@@ -697,17 +701,22 @@ describe('Path equivalence: direct_analysis_run Path B vs run_analysis message',
 // ============================================================================
 
 describe('assistant_text null serialisation', () => {
-  it('silent events have assistant_text as null (not undefined, not omitted)', async () => {
+  it('delegating events have assistant_text as null (not undefined, not omitted)', async () => {
+    // direct_analysis_run Path B (delegateToTool) still returns assistantText: null
+    // — the tool handler produces the final text. Verify null serialisation holds.
     const event: SystemEvent = {
-      event_type: 'patch_dismissed',
+      event_type: 'direct_analysis_run',
       timestamp: '2026-03-03T00:00:00Z',
       event_id: 'evt-null1',
-      details: { patch_id: 'p1' },
+      details: { message: 'run it' },
     };
 
     const result = await routeSystemEvent({
       event,
-      turnRequest: makeRequest(),
+      turnRequest: makeRequest({
+        analysis_state: undefined,
+        graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'],
+      }),
       turnId: TURN_ID,
       requestId: REQUEST_ID,
       plotClient: null,
@@ -719,5 +728,180 @@ describe('assistant_text null serialisation', () => {
     // JSON serialisation: null should appear in output (not be omitted)
     const serialised = JSON.stringify({ assistant_text: result.assistantText });
     expect(serialised).toContain('"assistant_text":null');
+  });
+});
+
+// ============================================================================
+// Confirmation text — Task 2
+// ============================================================================
+
+describe('Confirmation text (Task 2)', () => {
+  describe('patch_accepted — Path A', () => {
+    it('returns non-null assistantText containing "applied"', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain('applied');
+    });
+
+    it('assistantText does not contain em dashes', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.assistantText).not.toMatch(/\u2014/); // em dash
+    });
+
+    it('includes stale-analysis entry when analysis is present', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const analysisState = makeAnalysisState();
+      const request = makeRequestWithPendingPatch({
+        graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'],
+      });
+      request.context.analysis_response = analysisState;
+
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: request,
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      const staleEntry = result.systemContextEntries.find(e => e.includes('stale'));
+      expect(staleEntry).toBe('[system] Analysis is now stale. Rerun recommended.');
+    });
+
+    it('does not include stale-analysis entry when no analysis', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      const staleEntry = result.systemContextEntries.find(e => e.includes('stale'));
+      expect(staleEntry).toBeUndefined();
+    });
+  });
+
+  describe('patch_accepted — Path B success', () => {
+    it('returns non-null assistantText containing "applied"', async () => {
+      const mockClient = makePlotClient({ kind: 'success', data: { graph_hash: 'gh-plot' } });
+      const event = makePatchAccepted();
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: mockClient,
+      });
+
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain('applied');
+    });
+  });
+
+  describe('patch_dismissed', () => {
+    it('returns exact confirmation string', async () => {
+      const event: SystemEvent = {
+        event_type: 'patch_dismissed',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-pd-conf',
+        details: { patch_id: 'p2' },
+      };
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch(),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.assistantText).toBe('Suggested changes dismissed. The model is unchanged.');
+    });
+  });
+
+  describe('direct_graph_edit', () => {
+    it('returns exact confirmation string', async () => {
+      const event: SystemEvent = {
+        event_type: 'direct_graph_edit',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-dge-conf',
+        details: {
+          changed_node_ids: ['n1'],
+          changed_edge_ids: [],
+          operations: ['update'],
+        },
+      };
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequest(),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.assistantText).toBe('Your graph changes have been noted.');
+    });
+  });
+
+  describe('feedback_submitted', () => {
+    it('returns exact confirmation string', async () => {
+      const event: SystemEvent = {
+        event_type: 'feedback_submitted',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-fb-conf',
+        details: { turn_id: 'turn-1', rating: 'up' },
+      };
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequest(),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.assistantText).toBe('Thanks for your feedback.');
+    });
+  });
+
+  describe('unknown event_type', () => {
+    it('returns 200 with silent envelope and does not crash', async () => {
+      const event = {
+        event_type: 'unknown_future_event',
+        timestamp: '2026-03-03T00:00:00Z',
+        event_id: 'evt-unk1',
+        details: {},
+      } as unknown as SystemEvent;
+
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequest(),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.httpStatus).toBe(200);
+      expect(result.assistantText).toBeNull();
+      expect(result.blocks).toEqual([]);
+      expect(result.guidanceItems).toEqual([]);
+      expect(result.error).toBeUndefined();
+    });
   });
 });

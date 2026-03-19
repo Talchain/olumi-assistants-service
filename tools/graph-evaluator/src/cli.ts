@@ -426,7 +426,8 @@ async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
       promptFile: opts.prompt,
       runId: runSubdir,
       resultsDir,
-      force: numRuns > 1 ? true : opts.force, // Force re-run for multi-run
+      // In multi-run mode: force re-run unless --resume is set (resume lets us skip already-done briefs per run)
+      force: numRuns > 1 ? !opts.resume : opts.force,
       resume: opts.resume,
       dryRun: false,
       loadCached: async (modelId, briefId) =>
@@ -495,8 +496,9 @@ async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
     }
   }
 
-  // Generate variance report for multi-run
+  // Generate variance + consistency reports for multi-run
   if (numRuns > 1 && allRunScored.length > 1) {
+    // ── Variance report (overall_score) ───────────────────────────────────────
     const varianceLines: string[] = [
       `# Variance Report — ${runId}`,
       "",
@@ -531,6 +533,111 @@ async function runDraftGraph(args: DraftGraphRunArgs): Promise<void> {
 
     await writeFile(join(resultsDir, runId, "variance.md"), varianceLines.join("\n") + "\n", "utf-8");
     console.log(`\nVariance report: ${join(resultsDir, runId, "variance.md")}`);
+
+    // ── Consistency report (topology + parameter) ──────────────────────────────
+    //
+    // topology_consistency: proportion of run pairs with identical graph topology
+    //   (same node ID set, same node kinds, same edge count).
+    //
+    // parameter_consistency: 1 - average std of strength.mean across shared edges.
+    //   Shared edges = edges with same from→to ID pair present in all runs.
+    //   Capped to [0, 1].
+
+    // Collect topology fingerprints and edge parameter maps per combo
+    interface RunTopology {
+      nodeIdSet: string; // sorted comma-separated node IDs
+      nodeKindSig: string; // sorted "id:kind" pairs
+      edgeCount: number;
+      edgeParams: Map<string, number>; // "from→to" → strength.mean
+    }
+
+    const comboTopologies = new Map<string, RunTopology[]>();
+    for (const runScored of allRunScored) {
+      for (const r of runScored) {
+        const key = `${r.model.id}|${r.brief.id}`;
+        if (!comboTopologies.has(key)) comboTopologies.set(key, []);
+
+        const graph = r.response.parsed_graph;
+        if (!graph) continue;
+
+        const sortedNodeIds = [...graph.nodes].map((n) => n.id).sort().join(",");
+        const nodeKindSig = [...graph.nodes]
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((n) => `${n.id}:${n.kind}`)
+          .join(",");
+        const edgeParams = new Map<string, number>();
+        for (const e of graph.edges) {
+          if (e.edge_type !== "bidirected" && e.strength?.mean != null) {
+            edgeParams.set(`${e.from}→${e.to}`, e.strength.mean);
+          }
+        }
+
+        comboTopologies.get(key)!.push({
+          nodeIdSet: sortedNodeIds,
+          nodeKindSig,
+          edgeCount: graph.edges.length,
+          edgeParams,
+        });
+      }
+    }
+
+    const consistencyCsvLines: string[] = [
+      "model,prompt,brief,topology_consistency,parameter_consistency,n_runs",
+    ];
+    const promptStem = opts.prompt.split(/[/\\]/).pop() ?? opts.prompt;
+
+    for (const [key, topologies] of comboTopologies) {
+      if (topologies.length < 2) continue;
+      const [modelId, briefId] = key.split("|");
+      const n = topologies.length;
+
+      // Topology consistency: proportion of pairs with identical topology
+      let identicalPairs = 0;
+      let totalPairs = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          totalPairs++;
+          const a = topologies[i];
+          const b = topologies[j];
+          if (
+            a.nodeIdSet === b.nodeIdSet &&
+            a.nodeKindSig === b.nodeKindSig &&
+            a.edgeCount === b.edgeCount
+          ) {
+            identicalPairs++;
+          }
+        }
+      }
+      const topologyConsistency = totalPairs > 0 ? identicalPairs / totalPairs : 1.0;
+
+      // Parameter consistency: 1 - avg std of strength.mean across shared edges
+      // Shared edges: edges present (same from→to) in ALL runs
+      const allEdgeKeys = topologies.map((t) => new Set(t.edgeParams.keys()));
+      const sharedEdgeKeys = [...allEdgeKeys[0]].filter((k) =>
+        allEdgeKeys.every((s) => s.has(k))
+      );
+
+      let paramConsistency = 1.0;
+      if (sharedEdgeKeys.length > 0) {
+        const avgStds: number[] = [];
+        for (const edgeKey of sharedEdgeKeys) {
+          const means = topologies.map((t) => t.edgeParams.get(edgeKey)!);
+          const mean = means.reduce((a, b) => a + b, 0) / means.length;
+          const variance = means.reduce((a, b) => a + (b - mean) ** 2, 0) / means.length;
+          avgStds.push(Math.sqrt(variance));
+        }
+        const avgStd = avgStds.reduce((a, b) => a + b, 0) / avgStds.length;
+        paramConsistency = Math.max(0, 1.0 - avgStd);
+      }
+
+      consistencyCsvLines.push(
+        `${modelId},${promptStem},${briefId},${topologyConsistency.toFixed(4)},${paramConsistency.toFixed(4)},${n}`
+      );
+    }
+
+    const consistencyCsvPath = join(resultsDir, runId, "consistency.csv");
+    await writeFile(consistencyCsvPath, consistencyCsvLines.join("\n") + "\n", "utf-8");
+    console.log(`Consistency report: ${consistencyCsvPath}`);
   }
 }
 

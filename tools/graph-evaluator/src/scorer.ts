@@ -1,15 +1,23 @@
 /**
  * Deterministic quality scoring for LLM-generated decision graphs.
  *
- * All scoring is deterministic — no LLM judge. Five dimensions:
+ * All scoring is deterministic — no LLM judge. Seven dimensions:
  * 1. Structural validity (pass/fail)
  * 2. Parameter quality (0–1)
  * 3. Option differentiation (0–1)
  * 4. Completeness (0–1)
- * 5. Efficiency metrics (not scored — reported only)
+ * 5. Constraint retention (0–1)
+ * 6. Ratio encoding (0–1)
+ * 7. External factor presence (0–1)
+ * 8. Coaching quality (0–1)
  *
- * overall_score = param_quality(30%) + option_diff(30%) + completeness(40%)
+ * overall_score = param_quality(20%) + option_diff(20%) + completeness(20%)
+ *               + constraint_retention(15%) + external_factor_presence(10%)
+ *               + coaching_quality(10%) + ratio_encoding(5%)
+ *
  * Only calculated when structural_valid === true.
+ * Structurally invalid results appear in CSV with null overall_score but
+ * populated violation_codes and per-dimension diagnostics where calculable.
  */
 
 import type { LLMResponse, ParsedGraph, GraphNode, GraphEdge, Brief, ScoreResult } from "./types.js";
@@ -172,7 +180,7 @@ function scoreOptionDifferentiation(graph: ParsedGraph, brief: Brief): number {
 
   // 0.25: Options are meaningfully differentiated (intervention distinctness).
   //
-  // Evaluates distinctness without penalizing valid shared-factor structures
+  // Evaluates distinctness without penalising valid shared-factor structures
   // (e.g. 4 CRM platforms all setting cost/onboarding/integration to
   // different values). Two complementary checks, best score wins:
   //
@@ -181,9 +189,10 @@ function scoreOptionDifferentiation(graph: ParsedGraph, brief: Brief): number {
   //
   // Check B (intervention value spread): measures pairwise intervention
   //   distinctness across all option pairs. Each pair must differ on ≥1
-  //   shared factor's value. Score = proportion of distinct pairs.
+  //   shared factor's value OR on their factor set membership.
+  //   Score = proportion of distinct pairs.
   //   This correctly awards full marks when options act on the same levers
-  //   with different magnitudes.
+  //   with different magnitudes — the fix for the v183 benchmark bug.
   const factorSets = options.map(
     (o) => new Set(Object.keys(o.data?.interventions ?? {}))
   );
@@ -204,8 +213,7 @@ function scoreOptionDifferentiation(graph: ParsedGraph, brief: Brief): number {
 
   // Check B: pairwise intervention distinctness
   // For every pair of options, at least one shared factor must have a
-  // different intervention value. This evaluates intervention distinctness
-  // without requiring structurally unique factor sets.
+  // different intervention value, OR their factor sets must differ.
   const interventionMaps = options.map(
     (o) => o.data?.interventions ?? {}
   );
@@ -365,12 +373,212 @@ function scoreCompleteness(graph: ParsedGraph, brief: Brief): number {
 }
 
 // =============================================================================
+// Dimension 5: Constraint retention
+// =============================================================================
+
+/**
+ * Check whether every explicit numeric constraint in the brief appears in
+ * the graph's goal_constraints[] array.
+ *
+ * Each expected_constraint in the brief metadata specifies:
+ *   - keyword: case-insensitive substring to match against constraint label or node_id
+ *   - operator: exact match on <= or >=
+ *   - value: within ±0.02 numeric tolerance
+ *   - can_exceed_one (optional): if true, verify value >= 1.0 (ratio scale, not 0-1)
+ *
+ * Score: proportion of expected constraints found. Returns 1.0 when no
+ * expected_constraints are specified (not applicable).
+ */
+function scoreConstraintRetention(graph: ParsedGraph, brief: Brief): number {
+  const expected = brief.meta.expected_constraints;
+  if (!expected || expected.length === 0) return 1.0;
+
+  const constraints = graph.goal_constraints ?? [];
+
+  let matched = 0;
+
+  for (const exp of expected) {
+    const keyword = exp.keyword.toLowerCase();
+    const operator = exp.operator;
+    const expectedValue = exp.value;
+    const mustExceedOne = exp.can_exceed_one === true;
+
+    const found = constraints.some((gc) => {
+      // Keyword match: label or node_id
+      const labelMatch = (gc.label ?? "").toLowerCase().includes(keyword);
+      const nodeIdMatch = (gc.node_id ?? "").toLowerCase().includes(keyword);
+      if (!labelMatch && !nodeIdMatch) return false;
+
+      // Operator match
+      if (gc.operator !== operator) return false;
+
+      // Value match within ±0.02 tolerance
+      if (gc.value == null) return false;
+      if (Math.abs(gc.value - expectedValue) > 0.02) return false;
+
+      // Ratio scale check: if can_exceed_one, value must be >= 1.0
+      if (mustExceedOne && gc.value < 1.0) return false;
+
+      return true;
+    });
+
+    if (found) matched++;
+  }
+
+  return expected.length > 0 ? matched / expected.length : 1.0;
+}
+
+// =============================================================================
+// Dimension 6: Ratio encoding
+// =============================================================================
+
+/**
+ * Check whether ratio metrics that can exceed 100% (e.g. NRR, growth rate,
+ * ROI) are encoded correctly — i.e. as raw ratios (>= 1.0 for 100%+) rather
+ * than incorrectly normalised to 0-1.
+ *
+ * Each ratio_metrics entry in the brief metadata specifies:
+ *   - keyword: case-insensitive substring to match against node labels
+ *   - expected_min: the minimum plausible value when correctly encoded
+ *     (e.g. 1.0 means the value should be >= 1.0 for a 100%+ metric)
+ *
+ * Scans all nodes and goal_constraints for matching keywords.
+ * Score: 1.0 if no encoding errors found, 0.0 if any found.
+ * Returns 1.0 when no ratio_metrics are specified (not applicable).
+ */
+function scoreRatioEncoding(graph: ParsedGraph, brief: Brief): number {
+  const ratioMetrics = brief.meta.ratio_metrics;
+  if (!ratioMetrics || ratioMetrics.length === 0) return 1.0;
+
+  for (const metric of ratioMetrics) {
+    const keyword = metric.keyword.toLowerCase();
+    const expectedMin = metric.expected_min;
+
+    // Check nodes
+    for (const node of graph.nodes) {
+      const label = (node.label ?? "").toLowerCase();
+      if (!label.includes(keyword)) continue;
+
+      // Check node data values
+      const val = node.data?.value;
+      if (val != null && val < expectedMin) return 0.0;
+
+      // Check goal threshold
+      if (node.kind === "goal" && node.goal_threshold != null) {
+        if (node.goal_threshold < expectedMin) return 0.0;
+      }
+    }
+
+    // Check goal_constraints
+    for (const gc of graph.goal_constraints ?? []) {
+      const label = (gc.label ?? "").toLowerCase();
+      const nodeId = (gc.node_id ?? "").toLowerCase();
+      if (!label.includes(keyword) && !nodeId.includes(keyword)) continue;
+
+      if (gc.value != null && gc.value < expectedMin) return 0.0;
+    }
+  }
+
+  return 1.0;
+}
+
+// =============================================================================
+// Dimension 7: External factor presence
+// =============================================================================
+
+/**
+ * Check whether graphs for strategic/market-facing briefs include at least
+ * one external factor.
+ *
+ * Brief metadata field: expect_external_factor (boolean)
+ * Score: 1.0 if external factor present when expected (or not expected),
+ *        0.0 if expected but missing.
+ */
+function scoreExternalFactorPresence(graph: ParsedGraph, brief: Brief): number {
+  // If the brief doesn't signal expectation, fall back to completeness logic
+  // (existing 0.15 sub-dimension in completeness still applies separately).
+  // Here we score 1.0 unless the brief explicitly says expect_external_factor=true.
+  if (!brief.meta.expect_external_factor) return 1.0;
+
+  const hasExternal = graph.nodes.some(
+    (n) => n.kind === "factor" && n.category === "external"
+  );
+  return hasExternal ? 1.0 : 0.0;
+}
+
+// =============================================================================
+// Dimension 8: Coaching quality
+// =============================================================================
+
+/**
+ * Check coaching summary references actual graph node labels and that
+ * strengthen_items are present and well-formed.
+ *
+ * Sub-scores (0.25 each):
+ * 1. coaching.summary exists and is non-empty
+ * 2. coaching.summary contains ≥2 node labels as substrings (case-insensitive)
+ * 3. coaching.strengthen_items is an array (may be empty — 0-4 items is valid)
+ * 4. All items have a valid action_type
+ */
+const ALLOWED_ACTION_TYPES = new Set([
+  "add_option",
+  "add_constraint",
+  "add_risk",
+  "reframe_goal",
+]);
+
+function scoreCoachingQuality(graph: ParsedGraph): number {
+  let score = 0;
+
+  const coaching = graph.coaching;
+  if (!coaching) return 0;
+
+  // 0.25: summary exists and is non-empty
+  const summary = coaching.summary?.trim() ?? "";
+  if (summary.length > 0) score += 0.25;
+
+  // 0.25: summary contains ≥2 node labels as substrings
+  if (summary.length > 0) {
+    const summaryLower = summary.toLowerCase();
+    const nodeLabels = graph.nodes
+      .map((n) => (n.label ?? "").toLowerCase().trim())
+      .filter((l) => l.length >= 4); // Skip very short labels to avoid false positives
+
+    const matchCount = nodeLabels.filter((label) => summaryLower.includes(label)).length;
+    if (matchCount >= 2) score += 0.25;
+  }
+
+  // 0.25: strengthen_items is present (array, even if empty)
+  const items = coaching.strengthen_items;
+  if (Array.isArray(items)) score += 0.25;
+
+  // 0.25: all items have valid action_type (skip if empty array)
+  if (Array.isArray(items)) {
+    if (items.length === 0) {
+      // Empty is valid — full marks for this sub-dimension
+      score += 0.25;
+    } else if (items.length <= 4) {
+      const allWellFormed = items.every(
+        (item) => item.action_type && ALLOWED_ACTION_TYPES.has(item.action_type)
+      );
+      if (allWellFormed) score += 0.25;
+    }
+    // >4 items: 0 for this sub-dimension (spec requires 0–4)
+  }
+
+  return score;
+}
+
+// =============================================================================
 // Main scoring entry point
 // =============================================================================
 
 /**
  * Score a single LLM response against its brief.
  * Returns all scoring dimensions plus the overall composite score.
+ *
+ * Structurally invalid results return null overall_score but still include
+ * populated violation_codes and per-dimension scores where calculable.
  */
 export function score(response: LLMResponse, brief: Brief): ScoreResult {
   const nodeCount = response.parsed_graph?.nodes.length ?? 0;
@@ -384,6 +592,10 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
       param_quality: null,
       option_diff: null,
       completeness: null,
+      constraint_retention: null,
+      ratio_encoding: null,
+      external_factor_presence: null,
+      coaching_quality: null,
       overall_score: null,
       node_count: nodeCount,
       edge_count: edgeCount,
@@ -395,28 +607,46 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
   // Structural validity check
   const { valid, violations } = validateStructural(graph);
 
-  // If structurally invalid, scores are null per spec
+  // Compute all dimensions regardless of structural validity for diagnostics.
+  // Dimensions that require a valid graph structure will still run — the
+  // structural validator catches topology errors; dimension scorers are
+  // independent quality metrics.
+  const paramQuality = scoreParameterQuality(graph);
+  const optionDiff = scoreOptionDifferentiation(graph, brief);
+  const completeness = scoreCompleteness(graph, brief);
+  const constraintRetention = scoreConstraintRetention(graph, brief);
+  const ratioEncoding = scoreRatioEncoding(graph, brief);
+  const externalFactorPresence = scoreExternalFactorPresence(graph, brief);
+  const coachingQuality = scoreCoachingQuality(graph);
+
+  // If structurally invalid, overall_score is null per spec.
+  // All per-dimension scores are still returned for diagnostics.
   if (!valid) {
     return {
       structural_valid: false,
       violation_codes: violations,
-      param_quality: null,
-      option_diff: null,
-      completeness: null,
+      param_quality: paramQuality,
+      option_diff: optionDiff,
+      completeness: completeness,
+      constraint_retention: constraintRetention,
+      ratio_encoding: ratioEncoding,
+      external_factor_presence: externalFactorPresence,
+      coaching_quality: coachingQuality,
       overall_score: null,
       node_count: nodeCount,
       edge_count: edgeCount,
     };
   }
 
-  // Score each dimension
-  const paramQuality = scoreParameterQuality(graph);
-  const optionDiff = scoreOptionDifferentiation(graph, brief);
-  const completeness = scoreCompleteness(graph, brief);
-
-  // Composite score: param_quality(30%) + option_diff(30%) + completeness(40%)
+  // Composite score with new 7-dimension weighting
   const overallScore =
-    paramQuality * 0.30 + optionDiff * 0.30 + completeness * 0.40;
+    paramQuality * 0.20 +
+    optionDiff * 0.20 +
+    completeness * 0.20 +
+    constraintRetention * 0.15 +
+    externalFactorPresence * 0.10 +
+    coachingQuality * 0.10 +
+    ratioEncoding * 0.05;
 
   return {
     structural_valid: true,
@@ -424,6 +654,10 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
     param_quality: paramQuality,
     option_diff: optionDiff,
     completeness: completeness,
+    constraint_retention: constraintRetention,
+    ratio_encoding: ratioEncoding,
+    external_factor_presence: externalFactorPresence,
+    coaching_quality: coachingQuality,
     overall_score: overallScore,
     node_count: nodeCount,
     edge_count: edgeCount,

@@ -122,7 +122,10 @@ export async function* executePipelineStream(
     const intentGate: IntentGateResult = request.generate_model
       ? { tool: 'draft_graph', routing: 'deterministic', confidence: 'exact', normalised_message: request.message.toLowerCase().trim(), matched_pattern: 'generate_model' }
       : config.features.briefDetectionEnabled
-        ? classifyIntentWithContext(request.message, { hasGraph: enrichedContext.graph != null })
+        ? classifyIntentWithContext(request.message, {
+            hasGraph: enrichedContext.graph != null,
+            graphNodeLabels: enrichedContext.graph?.nodes?.map((n) => n.label ?? '') ?? [],
+          })
         : classifyIntent(request.message);
     if (!intentGate.tool) {
       const lookupResult = tryAnalysisLookup(

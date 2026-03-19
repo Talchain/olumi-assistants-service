@@ -148,7 +148,7 @@ function buildCompactSummaryFromResponse(response: V2RunResponseEnvelope): Compa
   const nestedRr = rr.results && typeof rr.results === 'object' && !Array.isArray(rr.results) ? rr.results as Record<string, unknown> : null;
   const rawFs = response.factor_sensitivity ?? nestedRr?.factor_sensitivity;
   const factors = Array.isArray(rawFs) ? rawFs as Array<Record<string, unknown>> : [];
-  const topDrivers = factors.slice(0, 3).filter(f => f.label != null).map(f => String(f.label));
+  const topDrivers = factors.slice(0, 3).filter(f => f.label != null || f.factor_label != null).map(f => String(f.label ?? f.factor_label));
 
   const robustnessLevel = (response.robustness?.level as string | undefined) ?? null;
 
@@ -871,8 +871,8 @@ function buildAnalysisSummary(response: V2RunResponseEnvelope): string {
   const factors = Array.isArray(rawFactors) ? rawFactors as Array<Record<string, unknown>> : [];
   if (factors.length > 0) {
     const top5 = factors.slice(0, 5)
-      .filter((f) => f.label != null)
-      .map((f) => `${f.label} (elasticity: ${f.elasticity ?? 'N/A'}, direction: ${f.direction ?? 'N/A'})`)
+      .filter((f) => f.label != null || f.factor_label != null)
+      .map((f) => `${f.label ?? f.factor_label} (elasticity: ${f.elasticity ?? 'N/A'}, direction: ${f.direction ?? 'N/A'})`)
       .join('; ');
     if (top5) {
       parts.push(`Top sensitivity drivers: ${top5}`);
@@ -924,8 +924,8 @@ function extractFallbackInsight(response: V2RunResponseEnvelope): string | null 
   const fiNestedObj = fiNested && typeof fiNested === 'object' && !Array.isArray(fiNested) ? fiNested as Record<string, unknown> : null;
   const rawFiFactors = response.factor_sensitivity ?? fiNestedObj?.factor_sensitivity;
   const fiFactors = Array.isArray(rawFiFactors) ? rawFiFactors as Array<Record<string, unknown>> : [];
-  const topDriver = fiFactors.find((f) => f.label != null);
-  const driverLabel = topDriver ? String(topDriver.label) : null;
+  const topDriver = fiFactors.find((f) => f.label != null || f.factor_label != null);
+  const driverLabel = topDriver ? String(topDriver.label ?? topDriver.factor_label) : null;
 
   if (driverLabel) {
     return `Based on the analysis, ${winnerLabel} leads at ${winnerProb}%. The biggest driver is ${driverLabel}. I wasn't able to generate a full explanation — try asking a more specific question.`;

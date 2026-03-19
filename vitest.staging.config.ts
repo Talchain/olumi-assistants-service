@@ -10,7 +10,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     setupFiles: ["./vitest.setup.ts"],
-    include: ["tests/staging/**/*.test.ts"],
+    include: [
+      "tests/staging/**/*.test.ts",
+      // Golden-path e2e (real LLM + PLoT + ISL — gated by RUN_E2E_GOLDEN=1)
+      "tests/integration/golden-path-e2e.test.ts",
+    ],
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
