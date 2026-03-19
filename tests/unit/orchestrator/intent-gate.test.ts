@@ -631,4 +631,32 @@ describe("Intent Gate — parameter assignment patterns (classifyIntentWithConte
     expect(result.tool).toBe("edit_graph");
     expect(result.matched_pattern).not.toBe("parameter_assignment");
   });
+
+  // ── confidence: 'high' for parameter assignment (P1.4) ──────────────────
+
+  it("parameter assignment routes return confidence: 'high'", () => {
+    const result = classifyIntentWithContext("budget is £120k", ctx);
+    expect(result.tool).toBe("edit_graph");
+    expect(result.confidence).toBe("high");
+  });
+
+  // ── Anchored negative cases for broad patterns (P1.6) ───────────────────
+  // These guard against the '=' and 'is' patterns firing on conversational
+  // statements that syntactically match but have no graph node overlap.
+
+  it.each([
+    // Conversational statements: syntactically match broad patterns but no node overlap
+    ["that is great", "no graph node in 'that is great'"],
+    ["this is fine", "no graph node in 'this is fine'"],
+    ["revenue is important", "'revenue' not in node labels [Budget, Team Size, Advertising Spend]"],
+    // '=' pattern: code-like but subject doesn't match any node
+    ["x = 5", "no node label overlap for 'x'"],
+    ["profit = revenue - cost", "'profit' not in node labels"],
+    // Conversational comparative: no value-word match and no node overlap
+    ["growth is a priority", "'growth' not in node labels"],
+  ])("does NOT route conversational statement %j to edit_graph (%s)", (msg) => {
+    const result = classifyIntentWithContext(msg, ctx);
+    expect(result.tool).toBeNull();
+    expect(result.routing).toBe("llm");
+  });
 });

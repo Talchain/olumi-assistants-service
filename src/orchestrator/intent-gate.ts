@@ -4,7 +4,7 @@
  * Strict whole-message equality matching against a frozen pattern table,
  * plus verb-prefix matching for research_topic and edit_graph.
  *
- * Pure function — no side effects, no logging, no async, no dependencies.
+ * Pure function — no side effects, no logging, no async.
  *
  * | Tool             | Example patterns (after normalisation)                              |
  * |------------------|---------------------------------------------------------------------|
@@ -23,6 +23,8 @@
  * under GATE_ONLY_TOOL_NAMES but NOT in TOOL_DEFINITIONS (invisible to LLM).
  */
 
+import { hasExactlyOneNodeOverlap } from "./tools/token-overlap.js";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -34,7 +36,13 @@ export type ExerciseType = 'pre_mortem' | 'devil_advocate' | 'disconfirmation';
 export interface IntentGateResult {
   tool: ToolName | null;
   routing: 'deterministic' | 'llm';
-  confidence: 'exact' | 'none';
+  /**
+   * Confidence level for the routing decision.
+   * - 'exact': strict whole-message or prefix match (highest confidence)
+   * - 'high': heuristic match with corroborating evidence (e.g. token overlap)
+   * - 'none': LLM fallback
+   */
+  confidence: 'exact' | 'high' | 'none';
   normalised_message: string;
   matched_pattern?: string;
   /** Populated when tool === 'run_exercise' — the specific exercise type to run. */
@@ -211,61 +219,6 @@ export const RESEARCH_PREFIXES: readonly string[] = Object.freeze([
 // ============================================================================
 // Parameter Assignment Patterns
 // ============================================================================
-
-/**
- * Stopwords excluded from token overlap matching — common edit verbs, prepositions,
- * and value words that would inflate match scores against unrelated node labels.
- * Mirrors TOKEN_OVERLAP_STOPWORDS in edit-graph.ts (kept in sync deliberately —
- * do NOT import from edit-graph.ts, that function is private).
- */
-const PARAM_OVERLAP_STOPWORDS = new Set([
-  'set', 'the', 'to', 'a', 'an', 'of', 'for', 'and', 'in', 'on', 'is', 'it',
-  'high', 'low', 'higher', 'lower', 'more', 'less', 'very', 'much',
-  'make', 'change', 'update', 'adjust', 'increase', 'decrease', 'raise', 'reduce',
-  'please', 'add', 'remove', 'delete', 'new', 'from', 'with', 'by', 'its', 'this',
-  'that', 'value', 'level', 'factor', 'node', 'edge', 'option', 'model',
-]);
-
-/**
- * Check if the normalised message has significant token overlap with exactly one
- * node label from the provided list. Returns true only when exactly one label
- * matches (to prevent ambiguous routing when multiple nodes would qualify).
- *
- * Overlap threshold: ≥1 overlapping token AND ≥50% of label tokens matched.
- * Substring match: only when shorter token is ≥60% of longer (avoids "rate"→"corporate").
- */
-function hasExactlyOneNodeOverlap(normalisedMessage: string, nodeLabels: string[]): boolean {
-  const messageTokens = normalisedMessage
-    .split(/\s+/)
-    .filter((t) => t.length > 2 && !PARAM_OVERLAP_STOPWORDS.has(t));
-
-  if (messageTokens.length === 0) return false;
-
-  let matchCount = 0;
-  for (const label of nodeLabels) {
-    const labelTokens = label
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((t) => t.length > 2 && !PARAM_OVERLAP_STOPWORDS.has(t));
-    if (labelTokens.length === 0) continue;
-
-    const overlapCount = labelTokens.filter((lt) =>
-      messageTokens.some((mt) => {
-        if (lt === mt) return true;
-        const shorter = lt.length <= mt.length ? lt : mt;
-        const longer = lt.length <= mt.length ? mt : lt;
-        return longer.includes(shorter) && shorter.length / longer.length >= 0.6;
-      }),
-    ).length;
-
-    if (overlapCount >= 1 && overlapCount / labelTokens.length >= 0.5) {
-      matchCount++;
-      if (matchCount > 1) return false; // ambiguous — multiple nodes match
-    }
-  }
-
-  return matchCount === 1;
-}
 
 /**
  * Regex patterns for bare parameter assignment messages.
@@ -516,7 +469,7 @@ export function classifyIntentWithContext(
           return {
             tool: 'edit_graph',
             routing: 'deterministic',
-            confidence: 'exact',
+            confidence: 'high',
             normalised_message: normalised,
             matched_pattern: 'parameter_assignment',
           };

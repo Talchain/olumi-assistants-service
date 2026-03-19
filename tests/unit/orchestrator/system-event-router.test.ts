@@ -797,6 +797,53 @@ describe('Confirmation text (Task 2)', () => {
       const staleEntry = result.systemContextEntries.find(e => e.includes('stale'));
       expect(staleEntry).toBeUndefined();
     });
+
+    it('sets rerun_recommended: true when analysis is present', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const analysisState = makeAnalysisState();
+      const request = makeRequestWithPendingPatch({
+        graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'],
+      });
+      request.context.analysis_response = analysisState;
+
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: request,
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.rerun_recommended).toBe(true);
+    });
+
+    it('rerun_recommended is undefined when no analysis', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      expect(result.rerun_recommended).toBeUndefined();
+    });
+
+    it('assistantText is a single well-formed sentence (no doubled punctuation)', async () => {
+      const event = makePatchAccepted({ applied_graph_hash: 'gh-abc' });
+      const result = await routeSystemEvent({
+        event,
+        turnRequest: makeRequestWithPendingPatch({ graph_state: BASE_GRAPH as unknown as OrchestratorTurnRequest['graph_state'] }),
+        turnId: TURN_ID,
+        requestId: REQUEST_ID,
+        plotClient: null,
+      });
+
+      // Must end with exactly one period and not contain '. applied' (doubled punctuation)
+      expect(result.assistantText).toMatch(/\.$/);
+      expect(result.assistantText).not.toMatch(/\.\s+applied/i);
+    });
   });
 
   describe('patch_accepted — Path B success', () => {

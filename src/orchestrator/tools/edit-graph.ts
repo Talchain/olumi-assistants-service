@@ -62,6 +62,7 @@ import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patc
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
+import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 
 // ============================================================================
 // Types
@@ -361,21 +362,11 @@ function resolveActiveEntityMatches(context: ConversationContext): ResolvedEditT
 }
 
 /**
- * Stopwords excluded from token overlap matching — common edit verbs, prepositions,
- * and value words that would inflate match scores against unrelated node labels.
- */
-const TOKEN_OVERLAP_STOPWORDS = new Set([
-  'set', 'the', 'to', 'a', 'an', 'of', 'for', 'and', 'in', 'on', 'is', 'it',
-  'high', 'low', 'higher', 'lower', 'more', 'less', 'very', 'much',
-  'make', 'change', 'update', 'adjust', 'increase', 'decrease', 'raise', 'reduce',
-  'please', 'add', 'remove', 'delete', 'new', 'from', 'with', 'by', 'its', 'this',
-  'that', 'value', 'level', 'factor', 'node', 'edge', 'option', 'model',
-]);
-
-/**
  * Token overlap resolution: find graph nodes whose label tokens overlap significantly
  * with the edit description tokens (after stopword removal).
  * Requires ≥1 overlapping token AND ≥50% of label tokens matched.
+ *
+ * Delegates to shared hasTokenOverlap() from token-overlap.ts.
  */
 function resolveTokenOverlapMatches(
   normalisedMessage: string,
@@ -391,18 +382,7 @@ function resolveTokenOverlapMatches(
     const labelTokens = normaliseMatchingText(target.label)
       .split(/\s+/)
       .filter((t) => t.length > 2 && !TOKEN_OVERLAP_STOPWORDS.has(t));
-    if (labelTokens.length === 0) return false;
-    const overlap = labelTokens.filter((lt) =>
-      messageTokens.some((mt) => {
-        if (lt === mt) return true;
-        // Substring match only when the shorter token is ≥60% of the longer —
-        // prevents "rate" matching "corporate" while allowing "competi" ↔ "competitive".
-        const shorter = lt.length <= mt.length ? lt : mt;
-        const longer = lt.length <= mt.length ? mt : lt;
-        return longer.includes(shorter) && shorter.length / longer.length >= 0.6;
-      }),
-    );
-    return overlap.length >= 1 && (overlap.length / labelTokens.length) >= 0.5;
+    return hasTokenOverlap(messageTokens, labelTokens);
   });
 }
 

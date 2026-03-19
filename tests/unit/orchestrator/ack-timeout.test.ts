@@ -123,7 +123,7 @@ describe("Ack Timeout (C.3)", () => {
     // No LLM call — deterministic handler
     expect(mockChat).not.toHaveBeenCalled();
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.assistant_text).toBeNull();
+    expect(result.envelope.assistant_text).toBe('Your graph changes have been noted.');
     expect(result.envelope.error).toBeUndefined();
   });
 
@@ -152,7 +152,7 @@ describe("Ack Timeout (C.3)", () => {
     );
 
     expect(result.httpStatus).toBe(200);
-    expect(result.envelope.assistant_text).toBeNull();
+    expect(result.envelope.assistant_text).toBe('Your graph changes have been noted.');
     expect(result.envelope.error).toBeUndefined();
   });
 

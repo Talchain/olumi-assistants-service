@@ -71,6 +71,11 @@ export interface SystemEventRouterResult {
   systemContextEntries: string[];
   httpStatus: number;
   error?: { code: string; message: string };
+  /**
+   * When true, the analysis results are now stale due to graph changes.
+   * Callers should surface a "Rerun analysis" prompt or action to the user.
+   */
+  rerun_recommended?: boolean;
   /** PLoT graph_hash from validate-patch (patch_accepted only). */
   graphHash?: string;
   /** Full analysis response (direct_analysis_run Path A only). */
@@ -324,7 +329,7 @@ async function handlePatchAccepted(
       'patch_accepted: Path A — UI-validated, skipping PLoT',
     );
 
-    const { confirmationText, staleAnalysisEntry } = buildPatchConfirmationText(
+    const { confirmationText, staleAnalysisEntry, rerun_recommended } = buildPatchConfirmationText(
       details.operations,
       turnRequest.context,
     );
@@ -336,6 +341,7 @@ async function handlePatchAccepted(
       systemContextEntries: staleAnalysisEntry ? [contextEntry, staleAnalysisEntry] : [contextEntry],
       httpStatus: 200,
       graphHash,
+      rerun_recommended: rerun_recommended || undefined,
     };
   }
 
@@ -459,7 +465,7 @@ async function handlePatchAccepted(
     'patch_accepted: PLoT validate-patch succeeded',
   );
 
-  const { confirmationText, staleAnalysisEntry } = buildPatchConfirmationText(
+  const { confirmationText, staleAnalysisEntry, rerun_recommended } = buildPatchConfirmationText(
     details.operations,
     turnRequest.context,
   );
@@ -471,6 +477,7 @@ async function handlePatchAccepted(
     systemContextEntries: staleAnalysisEntry ? [contextEntry, staleAnalysisEntry] : [contextEntry],
     httpStatus: 200,
     graphHash,
+    rerun_recommended: rerun_recommended || undefined,
   };
 }
 
@@ -660,20 +667,20 @@ function handleFeedbackSubmitted(
 function buildPatchConfirmationText(
   operations: Record<string, unknown>[],
   context: OrchestratorTurnRequest['context'],
-): { confirmationText: string; staleAnalysisEntry: string | null } {
+): { confirmationText: string; staleAnalysisEntry: string | null; rerun_recommended: boolean } {
   const opsForSummary = operations as unknown as PatchOperation[];
   const raw = buildPatchSummary(opsForSummary, null, 'accepted');
-  // buildPatchSummary can return "No changes were applied." for empty ops — handle gracefully
-  const summary = raw && raw !== 'No changes were applied.' ? raw : 'Changes';
-  const confirmationText = `${summary} applied to your model.`;
+  // buildPatchSummary always returns a sentence ending with '.'; strip it before composing.
+  // Fall back when the summary is the empty-ops sentinel.
+  const hasMeaningfulSummary = raw && raw !== 'No changes were applied.';
+  const base = hasMeaningfulSummary ? raw.replace(/\.$/, '') : 'Changes';
+  const confirmationText = `${base} applied to your model.`;
 
   // Flag stale analysis when analysis exists and is now superseded by graph changes
-  const staleAnalysisEntry =
-    context?.analysis_response != null
-      ? '[system] Analysis is now stale. Rerun recommended.'
-      : null;
+  const isStale = context?.analysis_response != null;
+  const staleAnalysisEntry = isStale ? '[system] Analysis is now stale. Rerun recommended.' : null;
 
-  return { confirmationText, staleAnalysisEntry };
+  return { confirmationText, staleAnalysisEntry, rerun_recommended: isStale };
 }
 
 function buildGraphPatchBlock(
