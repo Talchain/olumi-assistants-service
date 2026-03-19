@@ -144,7 +144,10 @@ function buildCompactSummaryFromResponse(response: V2RunResponseEnvelope): Compa
     probability: (r.win_probability as number) * 100,
   }));
 
-  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
+  const rr = response as Record<string, unknown>;
+  const nestedRr = rr.results && typeof rr.results === 'object' && !Array.isArray(rr.results) ? rr.results as Record<string, unknown> : null;
+  const rawFs = response.factor_sensitivity ?? nestedRr?.factor_sensitivity;
+  const factors = Array.isArray(rawFs) ? rawFs as Array<Record<string, unknown>> : [];
   const topDrivers = factors.slice(0, 3).filter(f => f.label != null).map(f => String(f.label));
 
   const robustnessLevel = (response.robustness?.level as string | undefined) ?? null;
@@ -367,8 +370,11 @@ export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Se
   }
 
   // Factor sensitivities (elasticity values)
-  const factors = Array.isArray(analysisResponse.factor_sensitivity) ? analysisResponse.factor_sensitivity as Array<Record<string, unknown>> : [];
-  for (const f of factors) {
+  const arNested = (analysisResponse as Record<string, unknown>).results;
+  const arNestedObj = arNested && typeof arNested === 'object' && !Array.isArray(arNested) ? arNested as Record<string, unknown> : null;
+  const rawArFactors = analysisResponse.factor_sensitivity ?? arNestedObj?.factor_sensitivity;
+  const arFactors = Array.isArray(rawArFactors) ? rawArFactors as Array<Record<string, unknown>> : [];
+  for (const f of arFactors) {
     if (typeof f.elasticity === 'number') addNumber(f.elasticity);
   }
 
@@ -398,7 +404,7 @@ export function buildGroundedValues(analysisResponse: V2RunResponseEnvelope): Se
 
   // Option count and factor count (structural numbers)
   values.add(String(results.length));
-  values.add(String(factors.length));
+  values.add(String(arFactors.length));
 
   return values;
 }
@@ -913,9 +919,12 @@ function extractFallbackInsight(response: V2RunResponseEnvelope): string | null 
   const winnerLabel = winner.option_label as string;
   const winnerProb = ((winner.win_probability as number) * 100).toFixed(1);
 
-  // Try to get top driver
-  const factors = Array.isArray(response.factor_sensitivity) ? response.factor_sensitivity as Array<Record<string, unknown>> : [];
-  const topDriver = factors.find((f) => f.label != null);
+  // Try to get top driver — apply nested fallback for the same PLoT shape variants
+  const fiNested = (response as Record<string, unknown>).results;
+  const fiNestedObj = fiNested && typeof fiNested === 'object' && !Array.isArray(fiNested) ? fiNested as Record<string, unknown> : null;
+  const rawFiFactors = response.factor_sensitivity ?? fiNestedObj?.factor_sensitivity;
+  const fiFactors = Array.isArray(rawFiFactors) ? rawFiFactors as Array<Record<string, unknown>> : [];
+  const topDriver = fiFactors.find((f) => f.label != null);
   const driverLabel = topDriver ? String(topDriver.label) : null;
 
   if (driverLabel) {
