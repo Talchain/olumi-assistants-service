@@ -44,15 +44,14 @@ jobs:
         run: pnpm test -- --coverage
 
       - name: Check for quarantined tests
-        if: always()
+        if: success()
         run: |
           QUARANTINED=$(grep -r "QUARANTINED" --include="*.test.ts" --include="*.spec.ts" -l src/ tests/ 2>/dev/null || true)
           if [ -n "$QUARANTINED" ]; then
             COUNT=$(echo "$QUARANTINED" | wc -l | tr -d ' ')
-            echo "::warning::⚠️ $COUNT test file(s) contain QUARANTINED tests that need attention:"
+            echo "::error::$COUNT test file(s) contain QUARANTINED tests — fix or remove them before merging:"
             echo "$QUARANTINED"
-            echo ""
-            echo "These tests are skipped and should be fixed or removed."
+            exit 1
           fi
 
       - name: Upload coverage reports
@@ -60,7 +59,7 @@ jobs:
         if: always()
         with:
           files: ./coverage/coverage-final.json
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   # Job B: Security audit
   security:

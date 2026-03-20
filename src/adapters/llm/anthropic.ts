@@ -67,30 +67,32 @@ const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
  */
 function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
   const limit = RAW_LLM_OUTPUT_MAX_CHARS;
+  // Single-pass: build the string once, bail out via replacer if enormous
   let charCount = 0;
-  let exceeded = false;
+  let bailedOut = false;
+  let fullJson: string;
   try {
-    JSON.stringify(raw, (_key, value) => {
-      if (exceeded) return undefined;
+    fullJson = JSON.stringify(raw, (_key, value) => {
+      if (bailedOut) return undefined;
       const fragment = typeof value === 'string' ? value : '';
       charCount += fragment.length + 4;
       if (charCount > limit * 2) {
-        exceeded = true;
+        bailedOut = true;
         return undefined;
       }
       return value;
-    });
+    }) ?? '';
   } catch {
-    exceeded = true;
+    bailedOut = true;
+    fullJson = '';
   }
 
-  if (!exceeded) {
+  if (!bailedOut && fullJson.length <= limit) {
     return { output: raw, truncated: false };
   }
-  const jsonStr = JSON.stringify(raw) ?? '';
-  const truncatedStr = jsonStr.slice(0, limit);
+  const preview = fullJson.slice(0, limit);
   return {
-    output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
+    output: { _truncated: true, _original_size: fullJson.length, preview },
     truncated: true,
   };
 }

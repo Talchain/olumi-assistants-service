@@ -40,9 +40,13 @@ let _bundle: DSKBundle | null = null;
  * Idempotent — safe to call multiple times (only loads on first call when flag is ON).
  */
 export function loadDskBundle(): void {
-  // TODO: Deprecate ENABLE_DSK_V0 (config.features.dskV0) once DSK v1 bundle
-  // is stable in production. Single canonical flag: DSK_ENABLED.
-  // Dual gate exists because dskV0 predates production bundle integration.
+  // ENABLE_DSK_V0 is deprecated — migrate to DSK_ENABLED by 2026-04-30.
+  if (config.features.dskV0 && !config.features.dskEnabled) {
+    log.warn(
+      { flag: 'ENABLE_DSK_V0', sunset: '2026-04-30' },
+      'ENABLE_DSK_V0 is deprecated — please switch to DSK_ENABLED. This flag will be removed after 2026-04-30.',
+    );
+  }
   if (!config.features.dskV0 && !config.features.dskEnabled) {
     log.info({ flags: { ENABLE_DSK_V0: false, DSK_ENABLED: false } }, 'DSK loader skipped (both flags OFF)');
     return;

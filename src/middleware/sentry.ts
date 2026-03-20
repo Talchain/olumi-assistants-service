@@ -75,7 +75,7 @@ export function initSentry(): void {
     dsn,
     environment: process.env.NODE_ENV || 'development',
     release: process.env.CEE_BUILD_HASH || process.env.npm_package_version,
-    tracesSampleRate: 0.2,
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.5,
 
     beforeSend(event) {
       // Strip sensitive headers

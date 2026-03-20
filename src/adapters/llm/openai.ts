@@ -551,15 +551,25 @@ export class OpenAIAdapter implements LLMAdapter {
     const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
     const promptMeta = getSystemPromptMeta('draft_graph');
 
-    // Build user content with brief and documents
-    const docContext = docs.length
-      ? `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${docs
-          .map((d) => {
-            const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-            return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-          })
-          .join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`
-      : "";
+    // Build user content with brief and documents (defense-in-depth 60k cap)
+    let docContext = "";
+    if (docs.length) {
+      const parts: string[] = [];
+      let totalLen = 0;
+      for (const d of docs) {
+        const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+        const part = `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+        totalLen += part.length;
+        if (totalLen > 60_000) {
+          log.warn({ totalLen, docCount: docs.length }, "Document context exceeded adapter-level cap; truncating");
+          break;
+        }
+        parts.push(part);
+      }
+      if (parts.length) {
+        docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+      }
+    }
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
     const briefSignalsHeader = args.briefSignalsHeader ?? "";
     const currencyInstruction = args.currencyInstruction ?? "";
