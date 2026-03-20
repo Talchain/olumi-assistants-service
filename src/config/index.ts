@@ -825,6 +825,7 @@ function parseConfig(): Config {
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
       entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,
+      validationPipelineEnabled: env.CEE_VALIDATION_PIPELINE_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

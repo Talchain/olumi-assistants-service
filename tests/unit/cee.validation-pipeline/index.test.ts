@@ -61,7 +61,7 @@ function makeCtx(nodes: unknown[], edges: unknown[]): StageContext {
     llmMeta: null,
     confidence: undefined,
     clarifierStatus: undefined,
-    effectiveBrief: '',
+    effectiveBrief: 'Should I hire a VP?',
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
     repairTimeoutMs: 20000,
