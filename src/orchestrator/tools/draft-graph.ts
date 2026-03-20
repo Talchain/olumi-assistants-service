@@ -12,7 +12,7 @@ import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
-import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T } from "../types.js";
+import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
@@ -147,6 +147,12 @@ export async function handleDraftGraph(
   // Extract structured draft warnings for guidance generation
   const draftWarnings = extractStructuredWarnings(body);
 
+  // Extract repairs from pipeline trace so UI can display them
+  const repairsApplied = extractRepairsApplied(body);
+  if (repairsApplied.length > 0) {
+    patchData.repairs_applied = repairsApplied;
+  }
+
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
@@ -166,6 +172,7 @@ export async function handleDraftGraph(
       operations_count: operations.length,
       warnings_count: warnings.length,
       structured_warnings_count: draftWarnings.length,
+      repairs_applied_count: repairsApplied.length,
       has_coaching: coachingSummary !== null,
     },
     "draft_graph completed",
@@ -257,6 +264,91 @@ function extractStructuredWarnings(body: Record<string, unknown>): CEEDraftWarni
     });
   }
   return warnings;
+}
+
+/**
+ * Extract repairs from pipeline response trace.
+ * The unified pipeline stores deterministic repairs at
+ * trace.pipeline.repair_summary.deterministic_repairs and structural edge
+ * repairs at trace.pipeline.repair_summary.structural_edge_normalisation.repairs.
+ * Convert them to RepairEntry[] so the UI can surface them.
+ */
+function extractRepairsApplied(body: Record<string, unknown>): RepairEntry[] {
+  const trace = body.trace as Record<string, unknown> | undefined;
+  if (!trace) return [];
+
+  const pipeline = trace.pipeline as Record<string, unknown> | undefined;
+  const raw = pipeline?.repair_summary ?? trace.repair_summary;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const repairSummary = raw as Record<string, unknown>;
+
+  const entries: RepairEntry[] = [];
+
+  // Deterministic sweep repairs
+  const deterministicRepairs = repairSummary.deterministic_repairs;
+  if (Array.isArray(deterministicRepairs)) {
+    for (const r of deterministicRepairs) {
+      if (!r || typeof r !== 'object') continue;
+      const rec = r as Record<string, unknown>;
+      if (typeof rec.code === 'string' && typeof rec.reason === 'string') {
+        entries.push({
+          code: rec.code,
+          layer: 'cee' as const,
+          field_path: typeof rec.path === 'string' ? rec.path : typeof rec.field_path === 'string' ? rec.field_path : '',
+          before: rec.before ?? rec.from_value ?? null,
+          after: rec.after ?? rec.to_value ?? null,
+          reason: rec.reason,
+          severity: (rec.severity === 'warn' ? 'warn' : 'info') as 'info' | 'warn',
+          action: typeof rec.action === 'string' ? rec.action : 'repaired',
+        });
+      }
+    }
+  }
+
+  // Structural edge normalisation repairs
+  const strEdgeNorm = repairSummary.structural_edge_normalisation as Record<string, unknown> | undefined;
+  const strRepairs = strEdgeNorm?.repairs;
+  if (Array.isArray(strRepairs)) {
+    for (const r of strRepairs) {
+      if (!r || typeof r !== 'object') continue;
+      const rec = r as Record<string, unknown>;
+      entries.push({
+        code: typeof rec.code === 'string' ? rec.code : 'STRUCTURAL_EDGE_NORMALISED',
+        layer: 'cee' as const,
+        field_path: typeof rec.field === 'string' ? rec.field : '',
+        before: rec.from_value ?? null,
+        after: rec.to_value ?? null,
+        reason: typeof rec.reason === 'string' ? rec.reason : 'Structural edge normalised',
+        severity: 'info' as const,
+        action: typeof rec.action === 'string' ? rec.action : 'normalised',
+      });
+    }
+  }
+
+  // Graph data integrity repairs
+  const gdi = repairSummary.graph_data_integrity as Record<string, unknown> | undefined;
+  if (gdi) {
+    for (const key of ['scale_consistency_repairs', 'edge_field_repairs'] as const) {
+      const repairs = gdi[key];
+      if (!Array.isArray(repairs)) continue;
+      for (const r of repairs) {
+        if (!r || typeof r !== 'object') continue;
+        const rec = r as Record<string, unknown>;
+        entries.push({
+          code: typeof rec.code === 'string' ? rec.code : `GDI_${key.toUpperCase()}`,
+          layer: 'cee' as const,
+          field_path: typeof rec.field_path === 'string' ? rec.field_path : typeof rec.field === 'string' ? rec.field : '',
+          before: rec.before ?? rec.from_value ?? null,
+          after: rec.after ?? rec.to_value ?? null,
+          reason: typeof rec.reason === 'string' ? rec.reason : `Graph data integrity: ${key.replace(/_/g, ' ')}`,
+          severity: 'info' as const,
+          action: typeof rec.action === 'string' ? rec.action : 'repaired',
+        });
+      }
+    }
+  }
+
+  return entries;
 }
 
 /**

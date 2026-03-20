@@ -87,11 +87,17 @@ export function isAnalysisPresent(response: V2RunResponseEnvelope | null | undef
  * but may omit analysis_status. Infer it when possible.
  */
 export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2RunResponseEnvelope {
+  const r = response as Record<string, unknown>;
+  const resultsShape = r.results === null ? 'null'
+    : r.results === undefined ? 'undefined'
+    : Array.isArray(r.results) ? 'array'
+    : typeof r.results;
   log.info({
     analysis_status: response.analysis_status ?? null,
     meta_response_hash: response.meta?.response_hash ?? null,
-    results_is_array: Array.isArray(response.results),
-    has_option_comparison: Array.isArray((response as Record<string, unknown>).option_comparison),
+    results_shape: resultsShape,
+    results_keys: resultsShape === 'object' ? Object.keys(r.results as object) : null,
+    has_option_comparison: Array.isArray(r.option_comparison),
   }, 'normalizeAnalysisEnvelope: incoming payload shape');
 
   if (

@@ -10,7 +10,9 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "build": "pnpm openapi:generate && rm -rf dist && tsc -p tsconfig.build.json",
+    "prestart": "pnpm build",
     "start": "node dist/src/server.js",
+    "check:dist": "bash scripts/check-dist-freshness.sh",
     "test": "vitest run",
     "test:ci": "pnpm lint && pnpm typecheck && pnpm test",
     "test:sse:core": "vitest run tests/sse.parity.test.ts tests/integration/sse-resume.test.ts",

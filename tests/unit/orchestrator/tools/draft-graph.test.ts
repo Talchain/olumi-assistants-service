@@ -76,8 +76,8 @@ describe("handleDraftGraph", () => {
     // Pipeline called with correct brief
     expect(mockRunUnifiedPipeline).toHaveBeenCalledOnce();
     const [pipeInput, pipeBody, , pipeOpts] = mockRunUnifiedPipeline.mock.calls[0];
-    expect(pipeInput).toEqual({ brief: "Should I raise prices to increase revenue?" });
-    expect(pipeBody).toEqual({ brief: "Should I raise prices to increase revenue?" });
+    expect(pipeInput.brief).toBe("Should I raise prices to increase revenue?");
+    expect(pipeBody.brief).toBe("Should I raise prices to increase revenue?");
     expect(pipeOpts).toEqual({ schemaVersion: "v3" });
 
     expect(result.blocks).toHaveLength(1);
@@ -353,5 +353,213 @@ describe("handleDraftGraph", () => {
     const result = await handleDraftGraph("Test brief", mockRequest, "turn-no-coaching");
 
     expect(result.narrationHint).toBeUndefined();
+  });
+
+  // ===========================================================================
+  // repairs_applied extraction from pipeline trace
+  // ===========================================================================
+
+  it("extracts deterministic_repairs from trace.pipeline.repair_summary", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          pipeline: {
+            repair_summary: {
+              deterministic_repairs: [
+                { code: "NAN_VALUE", reason: "NaN replaced", path: "edges[e1].strength_mean", before: NaN, after: 0.5, action: "defaulted", severity: "warn" },
+                { code: "SIGN_MISMATCH", reason: "Sign flipped", path: "edges[e2].strength_mean", before: -0.3, after: 0.3, action: "flipped", severity: "info" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-repairs-det");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toHaveLength(2);
+    expect(data.repairs_applied![0]).toMatchObject({
+      code: "NAN_VALUE",
+      layer: "cee",
+      field_path: "edges[e1].strength_mean",
+      reason: "NaN replaced",
+      severity: "warn",
+      action: "defaulted",
+    });
+    expect(data.repairs_applied![1]).toMatchObject({
+      code: "SIGN_MISMATCH",
+      layer: "cee",
+      severity: "info",
+    });
+  });
+
+  it("extracts structural_edge_normalisation repairs from trace", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          pipeline: {
+            repair_summary: {
+              structural_edge_normalisation: {
+                repairs: [
+                  { field: "strength.mean", from_value: 0.5, to_value: 1.0, action: "normalised", reason: "Structural edge" },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-repairs-strp");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toHaveLength(1);
+    expect(data.repairs_applied![0]).toMatchObject({
+      code: "STRUCTURAL_EDGE_NORMALISED",
+      layer: "cee",
+      field_path: "strength.mean",
+      action: "normalised",
+    });
+  });
+
+  it("extracts graph_data_integrity repairs from trace", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          pipeline: {
+            repair_summary: {
+              graph_data_integrity: {
+                scale_consistency_repairs: [
+                  { code: "SCALE_MISMATCH", field_path: "nodes[fac_1].observed_state.value", before: 0.49, after: 0.831, reason: "Cap-adjusted", action: "corrected" },
+                ],
+                edge_field_repairs: [
+                  { code: "MISSING_EXISTS_PROB", field_path: "edges[e1].exists_probability", before: null, after: 0.8, reason: "Defaulted for causal edge", action: "defaulted" },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-repairs-gdi");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toHaveLength(2);
+    expect(data.repairs_applied![0]).toMatchObject({
+      code: "SCALE_MISMATCH",
+      layer: "cee",
+      field_path: "nodes[fac_1].observed_state.value",
+    });
+    expect(data.repairs_applied![1]).toMatchObject({
+      code: "MISSING_EXISTS_PROB",
+      layer: "cee",
+    });
+  });
+
+  it("repairs_applied absent when trace has no repair_summary", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: { pipeline: {} },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-no-repairs");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toBeUndefined();
+  });
+
+  it("repairs_applied absent when deterministic_repairs is empty array", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          pipeline: {
+            repair_summary: {
+              deterministic_repairs: [],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-empty-repairs");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    // Empty array → no repairs_applied set on patchData
+    expect(data.repairs_applied).toBeUndefined();
+  });
+
+  it("repairs_applied absent when trace is missing entirely", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({ nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] }),
+    );
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-no-trace");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toBeUndefined();
+  });
+
+  it("skips malformed repair entries without crashing", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          pipeline: {
+            repair_summary: {
+              deterministic_repairs: [
+                null,
+                42,
+                { code: "VALID", reason: "OK", path: "x", action: "fix" },
+                { notCode: true },
+                { code: "NO_REASON" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-malformed");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    // Only the entry with both code and reason should survive
+    expect(data.repairs_applied).toHaveLength(1);
+    expect(data.repairs_applied![0].code).toBe("VALID");
+  });
+
+  it("falls back to trace.repair_summary when pipeline.repair_summary is absent", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: { nodes: [{ id: "g", kind: "goal", label: "G" }], edges: [] },
+        trace: {
+          repair_summary: {
+            deterministic_repairs: [
+              { code: "FALLBACK_REPAIR", reason: "Found via fallback path", path: "edges[e1]", action: "fixed" },
+            ],
+          },
+        },
+      },
+    });
+
+    const result = await handleDraftGraph("Test brief", mockRequest, "turn-fallback");
+    const data = result.blocks[0].data as GraphPatchBlockData;
+
+    expect(data.repairs_applied).toHaveLength(1);
+    expect(data.repairs_applied![0].code).toBe("FALLBACK_REPAIR");
   });
 });

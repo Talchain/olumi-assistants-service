@@ -9,9 +9,10 @@
  * Freshness rule: top-level fields (analysis_state, graph_state) always win
  * over context fields when present — they represent the latest UI-side state.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { phase1Enrich } from "../../../../src/orchestrator/pipeline/phase1-enrichment/index.js";
 import { normalizeAnalysisEnvelope, isAnalysisExplainable } from "../../../../src/orchestrator/analysis-state.js";
+import { log } from "../../../../src/utils/telemetry.js";
 import type { ConversationContext } from "../../../../src/orchestrator/pipeline/types.js";
 import type { OrchestratorTurnRequest, V2RunResponseEnvelope, GraphV3T } from "../../../../src/orchestrator/types.js";
 
@@ -511,5 +512,86 @@ describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => 
     const enriched = phase1Enrich(request.message, request.context, request.scenario_id);
     expect(enriched.analysis).not.toBeNull();
     expect(isAnalysisExplainable(enriched.analysis as V2RunResponseEnvelope)).toBe(true);
+  });
+});
+
+// ===========================================================================
+// normalizeAnalysisEnvelope diagnostic logging contract
+// ===========================================================================
+
+describe("normalizeAnalysisEnvelope diagnostic logging", () => {
+  const logInfoSpy = vi.spyOn(log, "info");
+
+  beforeEach(() => {
+    logInfoSpy.mockClear();
+  });
+
+  it("logs results_shape='array' for array results", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: [{ option_label: "A", win_probability: 0.6 }],
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    normalizeAnalysisEnvelope(envelope);
+
+    expect(logInfoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results_shape: "array",
+        results_keys: null,
+      }),
+      "normalizeAnalysisEnvelope: incoming payload shape",
+    );
+  });
+
+  it("logs results_shape='object' with keys for object results", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: { option_comparison: [{ option_label: "A", win_probability: 0.6 }] },
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    normalizeAnalysisEnvelope(envelope);
+
+    expect(logInfoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results_shape: "object",
+        results_keys: ["option_comparison"],
+      }),
+      "normalizeAnalysisEnvelope: incoming payload shape",
+    );
+  });
+
+  it("logs results_shape='undefined' when results is missing", () => {
+    const envelope = {
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    normalizeAnalysisEnvelope(envelope);
+
+    expect(logInfoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results_shape: "undefined",
+        results_keys: null,
+      }),
+      "normalizeAnalysisEnvelope: incoming payload shape",
+    );
+  });
+
+  it("logs results_shape='null' when results is null", () => {
+    const envelope = {
+      results: null,
+      meta: { response_hash: "abc123" },
+    } as unknown as V2RunResponseEnvelope;
+
+    normalizeAnalysisEnvelope(envelope);
+
+    expect(logInfoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results_shape: "null",
+        results_keys: null,
+      }),
+      "normalizeAnalysisEnvelope: incoming payload shape",
+    );
   });
 });
