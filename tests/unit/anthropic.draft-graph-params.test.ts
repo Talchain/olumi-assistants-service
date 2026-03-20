@@ -52,9 +52,9 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("topology_plan");
   });
 
-  it("top-level type is object and allows additional properties", () => {
+  it("top-level type is object with closed envelope (additionalProperties: false)", () => {
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.type).toBe("object");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.additionalProperties).toBe(true);
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.additionalProperties).toBe(false);
   });
 
   it("is serialisable to JSON and round-trips correctly", () => {

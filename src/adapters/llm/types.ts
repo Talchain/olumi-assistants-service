@@ -286,6 +286,13 @@ export interface ChatArgs {
    * When enabled, temperature is automatically set to 1 (Anthropic requirement).
    */
   thinking?: ThinkingConfig;
+  /**
+   * JSON Schema for Anthropic Structured Outputs (output_format).
+   * When provided and the model supports it, guarantees the response matches this schema.
+   * Incompatible with extended thinking — automatically skipped when thinking is enabled.
+   * Non-Anthropic adapters ignore this field.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 /**
