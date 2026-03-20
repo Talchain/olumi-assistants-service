@@ -45,7 +45,7 @@ import { parseLLMResponse, getFirstToolInvocation, extractDeclaredMode, inferRes
 import type { ExtractedBlock } from "./response-parser.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
 import { getToolDefinitions } from "./tools/registry.js";
-import { createCommentaryBlock, createReviewCardBlock } from "./blocks/factory.js";
+import { createCommentaryBlock, createReviewCardBlock, createArtefactBlock } from "./blocks/factory.js";
 import { handleRunAnalysis } from "./tools/run-analysis.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import { handleGenerateBrief } from "./tools/generate-brief.js";
@@ -1012,8 +1012,8 @@ async function dispatchTool(
 
 /**
  * Convert ExtractedBlock[] from the XML parser into ConversationBlock[].
- * Only commentary and review_card are allowed — other types are already
- * filtered by the parser.
+ * Only commentary, review_card, and artefact are allowed — other types are
+ * already filtered by the parser.
  */
 function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): ConversationBlock[] {
   return blocks.map((block) => {
@@ -1022,6 +1022,18 @@ function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): Conve
         block.content,
         turnId,
         'llm:xml',
+      );
+    }
+    if (block.type === 'artefact') {
+      return createArtefactBlock(
+        {
+          artefact_type: block.artefact_type!,
+          title: block.title ?? '',
+          content: block.content,
+          ...(block.description && { description: block.description }),
+          ...(block.actions && { actions: block.actions }),
+        },
+        turnId,
       );
     }
     // review_card

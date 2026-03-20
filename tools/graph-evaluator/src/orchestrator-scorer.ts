@@ -54,7 +54,7 @@ const VALID_TOOLS = [
 // Valid block types
 // =============================================================================
 
-const VALID_BLOCK_TYPES = ["commentary", "review_card"];
+const VALID_BLOCK_TYPES = ["commentary", "review_card", "artefact"];
 
 // =============================================================================
 // Helpers

@@ -32,19 +32,31 @@ export interface ToolInvocation {
 
 /** An AI-authored block extracted from XML <blocks> in LLM text. */
 export interface ExtractedBlock {
-  type: 'commentary' | 'review_card';
+  type: 'commentary' | 'review_card' | 'artefact';
   title?: string;
   content: string;
   /** Only for review_card */
   tone?: 'facilitator' | 'challenger';
+  /** Only for artefact */
+  artefact_type?: string;
+  /** Only for artefact */
+  description?: string;
+  /** Only for artefact */
+  actions?: Array<{ label: string; message: string }>;
 }
 
 /** Parsed block from the XML envelope (brief-specified type). */
 export interface ParsedBlock {
-  type: 'commentary' | 'review_card';
+  type: 'commentary' | 'review_card' | 'artefact';
   tone?: 'facilitator' | 'challenger';
   title?: string;
   content: string;
+  /** Only for artefact */
+  artefact_type?: string;
+  /** Only for artefact */
+  description?: string;
+  /** Only for artefact */
+  actions?: Array<{ label: string; message: string }>;
 }
 
 /** Parsed action from the XML envelope (brief-specified type). */
@@ -73,7 +85,7 @@ export interface ParsedLLMResponse {
   assistant_text: string | null;
   /** Tool invocations extracted from tool_use content blocks */
   tool_invocations: ToolInvocation[];
-  /** AI-authored blocks extracted from XML <blocks> (commentary + review_card only) */
+  /** AI-authored blocks extracted from XML <blocks> (commentary, review_card, artefact) */
   extracted_blocks: ExtractedBlock[];
   /** Suggested actions extracted from XML <suggested_actions> (max 2) */
   suggested_actions: SuggestedAction[];
@@ -111,7 +123,7 @@ export function unescapeXmlEntities(text: string): string {
 // ============================================================================
 
 /** Types allowed in AI-authored <blocks>. FactBlock/GraphPatchBlock are NEVER parsed from text. */
-const ALLOWED_BLOCK_TYPES = new Set(['commentary', 'review_card']);
+const ALLOWED_BLOCK_TYPES = new Set(['commentary', 'review_card', 'artefact']);
 
 /**
  * Extract content between XML-like tags. Returns null if tag not found.
@@ -126,6 +138,23 @@ function extractTag(text: string, tag: string): string | null {
   const endIdx = text.lastIndexOf(closeTag);
   if (endIdx === -1 || endIdx <= contentStart) return null;
   return text.substring(contentStart, endIdx).trim();
+}
+
+/**
+ * Extract raw content between XML-like tags WITHOUT trimming.
+ * Used for artefact HTML content where byte-for-byte preservation is required.
+ * Uses non-greedy (first-match) closing tag to safely handle HTML that may
+ * contain literal </content> strings in attributes, comments, or text nodes.
+ */
+function extractTagRaw(text: string, tag: string): string | null {
+  const openTag = `<${tag}>`;
+  const closeTag = `</${tag}>`;
+  const startIdx = text.indexOf(openTag);
+  if (startIdx === -1) return null;
+  const contentStart = startIdx + openTag.length;
+  const endIdx = text.indexOf(closeTag, contentStart);
+  if (endIdx === -1 || endIdx <= contentStart) return null;
+  return text.substring(contentStart, endIdx);
 }
 
 /**
@@ -228,7 +257,7 @@ function stripDiagnosticsPreamble(text: string, warnings: string[]): string {
 
 /**
  * Parse blocks from the <blocks> section with warning collection.
- * Only commentary and review_card are allowed. Everything else is dropped with a warning.
+ * Only commentary, review_card, and artefact are allowed. Everything else is dropped with a warning.
  */
 function parseBlocksWithWarnings(
   blocksContent: string,
@@ -248,15 +277,18 @@ function parseBlocksWithWarnings(
       continue;
     }
 
-    const content = extractTag(raw, 'content');
-    if (!content) {
+    // Artefact content uses raw extraction (no trim, no entity decoding)
+    const isArtefact = typeStr === 'artefact';
+    const content = isArtefact ? extractTagRaw(raw, 'content') : extractTag(raw, 'content');
+    if (content === null || (!isArtefact && !content)) {
       warnings.push(`Block of type "${typeStr}" missing <content> — dropped`);
       continue;
     }
 
     const block: ParsedBlock = {
-      type: typeStr as 'commentary' | 'review_card',
-      content: unescapeXmlEntities(content),
+      type: typeStr as ParsedBlock['type'],
+      // Artefact content is raw HTML — preserve byte-for-byte, no unescaping
+      content: isArtefact ? content : unescapeXmlEntities(content),
     };
 
     const title = extractTag(raw, 'title');
@@ -268,6 +300,36 @@ function parseBlocksWithWarnings(
         block.tone = tone;
       } else {
         block.tone = 'facilitator';
+      }
+    }
+
+    if (isArtefact) {
+      const artefactType = extractTag(raw, 'artefact_type');
+      if (!artefactType) {
+        warnings.push('Artefact block missing <artefact_type> — dropped');
+        continue;
+      }
+      block.artefact_type = artefactType;
+
+      const description = extractTag(raw, 'description');
+      if (description) block.description = unescapeXmlEntities(description);
+
+      // Parse optional actions
+      const actionsContent = extractTag(raw, 'actions');
+      if (actionsContent) {
+        const rawActions = extractAllTags(actionsContent, 'action');
+        const actions: Array<{ label: string; message: string }> = [];
+        for (const actionRaw of rawActions) {
+          const label = extractTag(actionRaw, 'label');
+          const message = extractTag(actionRaw, 'message');
+          if (label && message) {
+            actions.push({
+              label: unescapeXmlEntities(label),
+              message: unescapeXmlEntities(message),
+            });
+          }
+        }
+        if (actions.length > 0) block.actions = actions;
       }
     }
 
@@ -555,6 +617,9 @@ function parseXmlEnvelope(rawText: string): XmlEnvelopeResult {
     };
     if (b.title) block.title = b.title;
     if (b.tone) block.tone = b.tone;
+    if (b.artefact_type) block.artefact_type = b.artefact_type;
+    if (b.description) block.description = b.description;
+    if (b.actions) block.actions = b.actions;
     return block;
   });
 

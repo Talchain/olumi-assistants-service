@@ -32,6 +32,7 @@ import type {
   ReviewCardBlockData,
   FramingBlockData,
   EvidenceBlockData,
+  ArtefactBlockData,
   DecisionStage,
 } from "../types.js";
 
@@ -258,5 +259,24 @@ export function createEvidenceBlock(
     block_type: 'evidence',
     data,
     provenance: makeProvenance('tool:research_topic', turnId),
+  };
+}
+
+/**
+ * Create an ArtefactBlock.
+ *
+ * Ephemeral ID (artefact content is AI-generated per turn).
+ */
+export function createArtefactBlock(
+  data: ArtefactBlockData,
+  turnId: string,
+): ConversationBlock {
+  const blockId = ephemeralId('artefact');
+
+  return {
+    block_id: blockId,
+    block_type: 'artefact',
+    data,
+    provenance: makeProvenance('llm:xml', turnId),
   };
 }

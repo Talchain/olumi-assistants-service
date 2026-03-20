@@ -300,7 +300,7 @@ export interface V2RunResponseEnvelope {
 // Block Types
 // ============================================================================
 
-export type BlockType = 'framing' | 'commentary' | 'graph_patch' | 'fact' | 'review_card' | 'brief' | 'evidence';
+export type BlockType = 'framing' | 'commentary' | 'graph_patch' | 'fact' | 'review_card' | 'brief' | 'evidence' | 'artefact';
 
 export interface BlockProvenance {
   trigger: string;
@@ -317,7 +317,7 @@ export interface BlockAction {
 export interface ConversationBlock {
   block_id: string;
   block_type: BlockType;
-  data: GraphPatchBlockData | FactBlockData | CommentaryBlockData | BriefBlockData | ReviewCardBlockData | FramingBlockData | EvidenceBlockData;
+  data: GraphPatchBlockData | FactBlockData | CommentaryBlockData | BriefBlockData | ReviewCardBlockData | FramingBlockData | EvidenceBlockData | ArtefactBlockData;
   actions?: BlockAction[];
   provenance: BlockProvenance;
   related_elements?: { node_ids?: string[]; edge_ids?: string[] };
@@ -347,7 +347,8 @@ export type RepairEntry =
   | {
       /** F.5 canonical shape */
       code: string;
-      layer: 'plot';
+      /** Origin layer: 'plot' for PLoT-applied repairs, 'cee' for CEE deterministic/boundary repairs */
+      layer: 'plot' | 'cee';
       field_path: string;
       field?: string;
       before: unknown;
@@ -482,6 +483,25 @@ export interface EvidenceBlockData {
   }>;
   sources: Array<{ title: string; url: string }>;
   confidence_note: string;
+}
+
+// ---- Artefact Block ----
+
+/**
+ * Artefact block — self-contained HTML block for interactive decision-support
+ * outputs (decision matrices, charts, comparison tables). Passed through to
+ * the UI unchanged; rendered in a sandboxed iframe.
+ */
+export interface ArtefactBlockData {
+  artefact_type: string;
+  title: string;
+  description?: string;
+  /** Raw HTML — preserved exactly as generated, no escaping or transformation. */
+  content: string;
+  actions?: Array<{
+    label: string;
+    message: string;
+  }>;
 }
 
 // ============================================================================

@@ -19,4 +19,5 @@ export type {
   BriefBlockData,
   ReviewCardBlockData,
   FramingBlockData,
+  ArtefactBlockData,
 } from "../types.js";

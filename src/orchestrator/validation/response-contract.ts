@@ -45,6 +45,7 @@ export const VALID_BLOCK_TYPES: ReadonlySet<string> = new Set([
   'review_card',
   'brief',
   'evidence',
+  'artefact',
 ]);
 
 // ============================================================================
