@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Agent, setGlobalDispatcher } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
@@ -52,6 +52,9 @@ type AnthropicSystemBlock = {
   cache_control?: { type: "ephemeral" };
 };
 
+/** Error thrown when the Anthropic response content type is unrecognised. */
+const ERR_UNEXPECTED_RESPONSE_TYPE = 'unexpected_response_type';
+
 /**
  * Max size for raw LLM output in debug trace (chars).
  * Truncates large responses to prevent payload bloat.
@@ -60,15 +63,32 @@ const RAW_LLM_OUTPUT_MAX_CHARS = 50000;
 
 /**
  * Truncate raw LLM output for debug tracing.
- * Returns the output with a truncation flag if over limit.
+ * Uses a bounded stringify that bails out early to prevent OOM on pathological inputs.
  */
 function truncateRawOutput(raw: unknown): { output: unknown; truncated: boolean } {
-  const jsonStr = JSON.stringify(raw);
-  if (jsonStr.length <= RAW_LLM_OUTPUT_MAX_CHARS) {
+  const limit = RAW_LLM_OUTPUT_MAX_CHARS;
+  let charCount = 0;
+  let exceeded = false;
+  try {
+    JSON.stringify(raw, (_key, value) => {
+      if (exceeded) return undefined;
+      const fragment = typeof value === 'string' ? value : '';
+      charCount += fragment.length + 4;
+      if (charCount > limit * 2) {
+        exceeded = true;
+        return undefined;
+      }
+      return value;
+    });
+  } catch {
+    exceeded = true;
+  }
+
+  if (!exceeded) {
     return { output: raw, truncated: false };
   }
-  // Truncate and add marker
-  const truncatedStr = jsonStr.slice(0, RAW_LLM_OUTPUT_MAX_CHARS);
+  const jsonStr = JSON.stringify(raw) ?? '';
+  const truncatedStr = jsonStr.slice(0, limit);
   return {
     output: { _truncated: true, _original_size: jsonStr.length, preview: truncatedStr },
     truncated: true,
@@ -110,11 +130,10 @@ function getApiKey(): string | undefined {
   return config.llm.anthropicApiKey;
 }
 
-// V04: Undici dispatcher with production-grade timeouts
+// V04: Undici dispatcher with production-grade timeouts (instance-scoped, NOT global)
 // - connectTimeout: 3s (fail fast on connection issues)
 // - headers/body timeout: HTTP_CLIENT_TIMEOUT_MS (central config)
-// Note: Anthropic SDK uses fetch API, so we set global undici dispatcher
-const undiciAgent = new Agent({
+const anthropicDispatcher = new Agent({
   connect: {
     timeout: UNDICI_CONNECT_TIMEOUT_MS,
   },
@@ -122,19 +141,26 @@ const undiciAgent = new Agent({
   bodyTimeout: HTTP_CLIENT_TIMEOUT_MS,
 });
 
-// Set global dispatcher for fetch API (affects all fetch calls in this module)
-setGlobalDispatcher(undiciAgent);
+// Scoped fetch that uses our Anthropic-tuned dispatcher without polluting the global
+const anthropicFetch: typeof globalThis.fetch = (input, init) =>
+  undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+    ...init as Parameters<typeof undiciFetch>[1],
+    dispatcher: anthropicDispatcher,
+  }) as unknown as Promise<Response>;
 
-// Lazy initialization to allow testing without API key
+// Lazy initialization to allow testing without API key.
+// Tracks the key the client was created with so we can detect rotation.
 let client: Anthropic | null = null;
+let clientApiKey: string | null = null;
 
 function getClient(): Anthropic {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY environment variable is required but not set");
   }
-  if (!client) {
-    client = new Anthropic({ apiKey });
+  if (!client || clientApiKey !== apiKey) {
+    client = new Anthropic({ apiKey, fetch: anthropicFetch });
+    clientApiKey = apiKey;
   }
   return client;
 }
@@ -255,15 +281,28 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - 2–6 options maximum
 - topology_plan is required — plan before you build`;
 
+// Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
+const MAX_DOC_CONTEXT_CHARS = 60_000;
+
 async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
-  const docContext = args.docs.length
-    ? `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.docs
-        .map((d) => {
-          const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
-          return `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
-        })
-        .join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`
-    : "";
+  let docContext = "";
+  if (args.docs.length) {
+    const parts: string[] = [];
+    let totalLen = 0;
+    for (const d of args.docs) {
+      const locationInfo = d.locationHint ? ` (${d.locationHint})` : "";
+      const part = `**${d.source}** (${d.type}${locationInfo}):\n${d.preview}`;
+      totalLen += part.length;
+      if (totalLen > MAX_DOC_CONTEXT_CHARS) {
+        log.warn({ totalLen, docCount: args.docs.length }, "Document context exceeded adapter-level cap; truncating");
+        break;
+      }
+      parts.push(part);
+    }
+    if (parts.length) {
+      docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+    }
+  }
 
   const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
   const briefSignalsHeader = args.briefSignalsHeader ?? "";
@@ -606,7 +645,7 @@ export async function draftGraphWithAnthropic(
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response.
@@ -963,7 +1002,7 @@ export async function suggestOptionsWithAnthropic(args: {
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response using robust extractor
@@ -1305,7 +1344,7 @@ export async function repairGraphWithAnthropic(
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type, fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response using robust extractor
@@ -1625,7 +1664,7 @@ export async function clarifyBriefWithAnthropic(
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response using robust extractor
@@ -1839,7 +1878,7 @@ export async function critiqueGraphWithAnthropic(
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response using robust extractor
@@ -2004,7 +2043,7 @@ Return ONLY valid JSON in this format:
     const content = response.content[0];
     if (content.type !== "text") {
       log.error({ content_type: content.type }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     // Extract JSON from response using robust extractor
@@ -2171,7 +2210,7 @@ export async function chatWithAnthropic(
     const content = response.content.find(b => b.type === 'text');
     if (!content || content.type !== "text") {
       log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
-      throw new Error("unexpected_response_type");
+      throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
     log.info(
@@ -2497,8 +2536,12 @@ export async function* streamChatWithToolsAnthropic(
   args: ChatWithToolsAnthropicArgs & { signal?: AbortSignal },
 ): AsyncGenerator<ChatWithToolsStreamEvent> {
   const model = args.model || "claude-3-5-sonnet-20241022";
-  const maxTokens = args.maxTokens ?? 4096;
-  const temperature = args.temperature ?? 0;
+  const thinkingRequested = args.thinking?.type === 'enabled';
+  const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'stream_chat_with_tools');
+  const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
+  const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
+  // Anthropic requires temperature=1 when extended thinking is active
+  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const startTime = Date.now();
@@ -2508,6 +2551,7 @@ export async function* streamChatWithToolsAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
+      thinking: thinkingEnabled ? 'enabled' : 'none',
       system_chars: args.system_cache_blocks
         ? args.system_cache_blocks.reduce((sum: number, b: { text: string }) => sum + b.text.length, 0)
         : args.system.length,
@@ -2591,12 +2635,15 @@ export async function* streamChatWithToolsAnthropic(
       messages: anthropicMessages,
       tools: anthropicTools,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
+      ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
     }, {
       signal: abortController.signal,
     });
 
-    // Track tool input accumulation per content block index
-    const toolInputBuffers = new Map<number, { id: string; name: string; json: string }>();
+    // Track tool input accumulation per content block index (array-based to avoid O(n²) concat)
+    const toolInputBuffers = new Map<number, { id: string; name: string; chunks: string[] }>();
+    // Track thinking block indices so we can suppress their deltas
+    const thinkingBlockIndices = new Set<number>();
     const contentBlocks: ToolResponseBlock[] = [];
 
     for await (const event of stream) {
@@ -2604,26 +2651,38 @@ export async function* streamChatWithToolsAnthropic(
 
       if (event.type === 'content_block_start') {
         const block = event.content_block;
-        if (block.type === 'tool_use') {
-          toolInputBuffers.set(event.index, { id: block.id, name: block.name, json: '' });
+        if (block.type === 'thinking') {
+          // Extended thinking block — track index to suppress deltas, never stream to client
+          thinkingBlockIndices.add(event.index);
+        } else if (block.type === 'tool_use') {
+          toolInputBuffers.set(event.index, { id: block.id, name: block.name, chunks: [] });
           yield { type: 'tool_input_start', tool_id: block.id, tool_name: block.name };
         }
       } else if (event.type === 'content_block_delta') {
+        // Skip deltas from thinking blocks — never stream thinking tokens to client
+        if (thinkingBlockIndices.has(event.index)) continue;
+
         const delta = event.delta;
         if (delta.type === 'text_delta') {
           yield { type: 'text_delta', delta: delta.text };
         } else if (delta.type === 'input_json_delta') {
           const buf = toolInputBuffers.get(event.index);
           if (buf) {
-            buf.json += delta.partial_json;
+            buf.chunks.push(delta.partial_json);
           }
         }
       } else if (event.type === 'content_block_stop') {
+        // Clean up thinking block tracking
+        if (thinkingBlockIndices.has(event.index)) {
+          thinkingBlockIndices.delete(event.index);
+          continue;
+        }
         const buf = toolInputBuffers.get(event.index);
         if (buf) {
           let input: Record<string, unknown> = {};
+          const json = buf.chunks.join('');
           try {
-            input = JSON.parse(buf.json);
+            input = JSON.parse(json);
           } catch {
             log.warn({ tool_id: buf.id, tool_name: buf.name }, "failed to parse streamed tool input JSON");
           }
@@ -2640,11 +2699,12 @@ export async function* streamChatWithToolsAnthropic(
     // Get the final message for usage and stop_reason
     const finalMessage = await stream.finalMessage();
 
-    // Assemble text blocks from the final message
+    // Assemble text blocks from the final message — filter out thinking blocks
     for (const block of finalMessage.content) {
       if (block.type === 'text') {
         contentBlocks.unshift({ type: 'text' as const, text: block.text });
       }
+      // 'thinking' blocks are intentionally excluded — not sent to client
     }
 
     // Sort: text blocks first, then tool_use blocks (matching non-streaming order)
@@ -2908,6 +2968,7 @@ export class AnthropicAdapter implements LLMAdapter {
       timeoutMs: opts.timeoutMs,
       signal: opts.signal ?? opts.abortSignal,
       system_cache_blocks: args.system_cache_blocks,
+      thinking: args.thinking,
     });
   }
 }
