@@ -33,6 +33,7 @@ import { runStageRepair } from "./stages/repair/index.js";
 import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
+import { runValidationPipeline } from "../validation-pipeline/index.js";
 
 function buildInitialContext(
   input: DraftInputWithCeeExtras,
@@ -373,6 +374,32 @@ export async function runUnifiedPipeline(
     if (ctx.earlyReturn) return ctx.earlyReturn;
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
+    // Validation pipeline (Pass 2) — fired immediately after Repair, runs
+    // concurrently with Stage 4b. Uses catch() so Stage 4b is never blocked
+    // by validation errors. Awaited before Stage 5 so metadata is ready.
+    let validationPromise: Promise<void>;
+    if (config.cee.validationPipelineEnabled) {
+      validationPromise = runValidationPipeline(ctx).catch((err: unknown) => {
+        const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout'));
+        const isParse = err instanceof Error && err.message.includes('parse_error');
+        log.warn(
+          {
+            event: "cee.validation_pipeline.failed",
+            request_id: ctx.requestId,
+            error: err instanceof Error ? err.message : String(err),
+            error_type: isTimeout ? 'timeout' : isParse ? 'parse_error' : 'api_error',
+          },
+          "cee.validation_pipeline.failed",
+        );
+      });
+    } else {
+      log.debug(
+        { event: "cee.validation_pipeline.skipped", request_id: ctx.requestId },
+        "cee.validation_pipeline.skipped",
+      );
+      validationPromise = Promise.resolve();
+    }
+
     // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene
     // Non-critical: failing to strip thresholds must not crash the pipeline.
     try {
@@ -386,6 +413,10 @@ export async function runUnifiedPipeline(
       }, "Stage 4b (threshold sweep) failed — continuing without threshold stripping");
     }
     ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
+
+    // Await Pass 2 before Stage 5 (Package) so validation metadata is present
+    // on edges when the response is assembled.
+    await validationPromise;
 
     // Stage 5: Package — Quality + warnings + caps + trace
     await runStagePackage(ctx);

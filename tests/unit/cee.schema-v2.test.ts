@@ -373,6 +373,44 @@ describe("transformEdgeToV2", () => {
 
     expect(v2Edge.provenance).toBe("expert_hypothesis");
   });
+
+  it("preserves validation metadata when present on the edge", () => {
+    const fakeValidation = {
+      status: "contested",
+      contested_reasons: ["sign_flip"],
+    };
+    const v1Edge: V1Edge = {
+      from: "marketing",
+      to: "sales",
+      weight: 0.6,
+      belief: 0.8,
+      // Cast to any to inject the extra field, simulating passthrough from pipeline.
+      ...(fakeValidation as any) && { validation: fakeValidation },
+    } as any;
+
+    const testNodes = [
+      { id: "marketing", kind: "factor", label: "Marketing" },
+      { id: "sales", kind: "outcome", label: "Sales" },
+    ];
+    const v2Edge = transformEdgeToV2(v1Edge, 0, testNodes);
+
+    expect((v2Edge as any).validation).toBeDefined();
+    expect((v2Edge as any).validation.status).toBe("contested");
+  });
+
+  it("does not add a validation field when none is present", () => {
+    const v1Edge: V1Edge = {
+      from: "marketing",
+      to: "sales",
+    };
+    const testNodes = [
+      { id: "marketing", kind: "factor", label: "Marketing" },
+      { id: "sales", kind: "outcome", label: "Sales" },
+    ];
+    const v2Edge = transformEdgeToV2(v1Edge, 0, testNodes);
+
+    expect(Object.prototype.hasOwnProperty.call(v2Edge, "validation")).toBe(false);
+  });
 });
 
 describe("transformGraphToV2", () => {

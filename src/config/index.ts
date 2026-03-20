@@ -476,6 +476,8 @@ const ConfigSchema = z.object({
     briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
     // Cross-turn entity memory (tracks per-factor interaction state for Zone 2)
     entityMemoryEnabled: booleanString.default(false), // CEE_ENTITY_MEMORY_ENABLED
+    // Two-pass graph parameter validation pipeline (CEE_VALIDATION_PIPELINE_ENABLED)
+    validationPipelineEnabled: booleanString.default(false),
   }),
 
   // ISL (Inference Service Layer) Configuration

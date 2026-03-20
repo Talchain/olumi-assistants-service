@@ -111,6 +111,7 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   edit_graph: 'edit_graph',
   repair_edit_graph: 'repair_edit_graph',
   orchestrator: 'orchestrator',
+  validate_graph: 'validate_graph',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 

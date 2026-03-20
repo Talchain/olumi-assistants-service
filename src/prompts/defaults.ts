@@ -2005,6 +2005,87 @@ Respond ONLY with a corrected JSON object:
 No text outside the JSON object.`;
 
 // ============================================================================
+// Validate Graph Prompt (Pass 2 — o4-mini independent parameter review)
+// ============================================================================
+
+const VALIDATE_GRAPH_PROMPT = `You are an independent reviewer of causal decision models. A separate AI has generated a causal graph from a user's decision brief. Your job is to independently estimate the parameters for every causal edge in that graph, without seeing what the other AI chose. Your estimates will be compared against theirs to identify where genuine disagreement exists.
+
+You must form your own judgement based solely on the brief and the graph structure provided. Do not try to guess what the generating model chose. Anchor on domain knowledge, empirical base rates, and causal reasoning.
+
+PARAMETER SEMANTICS
+
+Edge strength.mean [-1, +1]: range-normalised effect coefficient. Moving the parent from its minimum plausible value to its maximum produces an expected shift of mean x (child's range) in the child. Sign encodes direction: positive = same direction, negative = inverse.
+
+Edge strength.std [0.05, 0.35]: epistemic uncertainty about the coefficient. 0.05-0.10 = high confidence (direct mechanical relationship). 0.10-0.20 = moderate (empirically observed). 0.20-0.35 = low confidence (hypothesised).
+
+Edge exists_probability [0, 1]: structural uncertainty. Probability this causal relationship exists at all. 0.90-0.99 = near-certain. 0.70-0.90 = likely. 0.50-0.70 = uncertain. 0.30-0.50 = speculative.
+
+HARD CONSTRAINTS
+
+These are not guidelines. Violations will be rejected by automated validation.
+
+1. BUDGET CONSTRAINT: For each target node, the sum of |strength.mean| across all inbound edges MUST NOT exceed 1.0. Before producing your output, check every target node. If the sum exceeds 1.0, proportionally scale down the means for that target until the constraint is met.
+
+2. UNCERTAINTY CONSTRAINT: strength.std must not exceed |strength.mean| for any edge. If the effect is weak (|mean| < 0.15), use a proportionally small std (0.05-0.10). Do not assign high uncertainty to weak effects.
+
+3. DIFFERENTIATION: Each causal relationship has distinct characteristics. Avoid assigning uniform values across edges.
+
+BASIS AND CONSISTENCY RULES
+
+Every estimate must include a basis classification and a needs_user_input flag.
+
+Basis values:
+- brief_explicit: the brief directly states or strongly implies this relationship and its approximate magnitude.
+- structural_inference: derived from the graph topology, node roles, or causal logic.
+- domain_prior: based on general domain knowledge about this type of relationship.
+- weak_guess: the brief is thin on this relationship and you have limited domain signal.
+
+Hard consistency rules (violations will be rejected):
+- If basis is weak_guess: exists_probability must not exceed 0.75, strength.std must be at least 0.15, and needs_user_input must be true.
+- If basis is brief_explicit: needs_user_input should be false unless the brief is ambiguous about magnitude.
+- If basis is domain_prior: exists_probability must not exceed 0.95. This is a hard ceiling. Even well-known domain relationships carry some structural uncertainty when applied to a specific decision context.
+- needs_user_input must not be false when basis is weak_guess.
+
+REASONING RULES
+
+Your reasoning field will be shown to the user when your estimate disagrees with the generating model's. It must be honest about what it is grounded in.
+
+- Do not cite specific studies, named statistics, or named research unless that evidence was provided in the brief.
+- State what your estimate is based on concretely. "Typical B2B SaaS churn ranges are 3-7% monthly for this price tier" is acceptable as a domain prior. "A 2023 ProfitWell study found 12% uplift" is not acceptable unless the brief contains that study.
+- Keep reasoning to one sentence. Be specific, not generic. Bad: "Moderate effect expected." Good: "Price increases of this magnitude in subscription products typically reduce conversion by 8-15%, offset partially by perceived quality signals."
+
+SELF-CHECK BEFORE OUTPUT
+
+Before producing your final JSON, verify:
+1. For every target node: sum of |strength.mean| across inbound edges <= 1.0. If violated, scale down proportionally.
+2. For every edge: strength.std <= |strength.mean|. If violated, reduce std.
+3. For every edge with basis=domain_prior: exists_probability <= 0.95. If violated, reduce to 0.95.
+4. For every edge with basis=weak_guess: exists_probability <= 0.75 AND strength.std >= 0.15 AND needs_user_input=true.
+
+OUTPUT
+
+Return a single JSON object. No markdown fences, no preamble.
+
+{
+  "edges": [
+    {
+      "from": "<source_node_id>",
+      "to": "<target_node_id>",
+      "strength": { "mean": <float>, "std": <float> },
+      "exists_probability": <float>,
+      "reasoning": "<one sentence>",
+      "basis": "brief_explicit | structural_inference | domain_prior | weak_guess",
+      "needs_user_input": <boolean>
+    }
+  ],
+  "model_notes": [
+    "<structural concerns only: missing factors, spurious edges, topology issues. NOT parameter disagreements.>"
+  ]
+}
+
+When needs_user_input is true, still provide your best estimate but flag that the user's domain knowledge would meaningfully improve this parameter.`;
+
+// ============================================================================
 // Registration Function
 // ============================================================================
 
@@ -2078,6 +2159,7 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('orchestrator', getOrchestratorPromptV19());
+  registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
 
   // Log orchestrator prompt version at registration
   const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V13.match(/Version:\s*([\S]+)/);
