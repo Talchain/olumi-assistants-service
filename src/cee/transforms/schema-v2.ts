@@ -405,6 +405,9 @@ export function transformEdgeToV2(
     strength_std: strengthStd,
     provenance: extractProvenanceString(edge.provenance),
     // Note: provenance_source intentionally omitted from v2
+    // Preserve validation metadata if present — it does not passthrough
+    // automatically because this function constructs a new object.
+    ...('validation' in edge && edge.validation !== undefined && { validation: edge.validation }),
   };
 }
 

@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
@@ -161,7 +162,12 @@ export const EdgeV3 = z.object({
   /** Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust. */
   edge_type: z.enum(["directed", "bidirected"]).optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
-export type EdgeV3T = z.infer<typeof EdgeV3>;
+/** EdgeV3 with optional validation pipeline metadata (two-pass parameter review). */
+export type EdgeV3T = z.infer<typeof EdgeV3> & {
+  /** Per-edge validation metadata from the two-pass parameter review pipeline.
+   *  Absent when the pipeline is disabled, skipped, or failed gracefully. */
+  validation?: ValidationMetadata;
+};
 
 // ============================================================================
 // Intervention Types

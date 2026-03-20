@@ -183,6 +183,11 @@ export const REPAIR_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CEE_REPAIR_TIMEOUT_MS", 20_000),
 );
 
+/** Validation pipeline (Pass 2 / o4-mini) call timeout (default: 30s, clamped 5s–5m) */
+export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("CEE_VALIDATION_TIMEOUT_MS", 30_000),
+);
+
 // ---------------------------------------------------------------------------
 // Request budget — single source of truth for draft-graph request lifecycle
 // Intended chain: CEE LLM (105s) < CEE budget (120s) < PLoT proxy (135s) < Render gateway (~150s)
@@ -341,6 +346,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     FIXTURE_TIMEOUT_MS,
     DRAFT_BUDGET_MS,
     REPAIR_TIMEOUT_MS,
+    VALIDATION_PIPELINE_TIMEOUT_MS,
     DRAFT_REQUEST_BUDGET_MS,
     LLM_POST_PROCESSING_HEADROOM_MS,
     DRAFT_LLM_TIMEOUT_MS,
