@@ -165,7 +165,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     },
   },
   required: ["nodes", "edges"],
-  additionalProperties: true,
+  additionalProperties: false,
 } as const;
 
 export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;

@@ -422,15 +422,27 @@ const DRAFT_MAX_TOKENS_FLOOR = 8192;
 const DRAFT_MAX_TOKENS_DEFAULT = 16384;
 
 /**
- * Determine if a caught error looks like a Structured Outputs rejection.
- * Anthropic returns HTTP 400 with error messages that mention the parameter name.
+ * Determine if a caught error is a Structured Outputs **capability** rejection
+ * (model/version/beta header not supported) — NOT a schema validation error.
+ *
+ * Capability rejections → safe to fall back to prompt-only JSON.
+ * Schema errors (malformed schema, unsupported JSON Schema features) → must fail
+ * loudly so developers catch broken schemas rather than silently degrading.
  */
 function isStructuredOutputsRejection(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const apiErr = err as { status?: number; message?: string };
   if (apiErr.status !== 400) return false;
   const msg = (apiErr.message ?? '').toLowerCase();
-  return msg.includes('output_format') || msg.includes('structured');
+
+  // Schema validation errors should NOT trigger fallback — fail loudly
+  const isSchemaError =
+    msg.includes('invalid') && msg.includes('schema') ||
+    msg.includes('unsupported') && msg.includes('schema');
+  if (isSchemaError) return false;
+
+  // Only fall back for capability/parameter rejections
+  return msg.includes('output_format') || msg.includes('not supported');
 }
 
 export async function draftGraphWithAnthropic(
@@ -2099,12 +2111,19 @@ interface ChatWithAnthropicArgs {
   timeoutMs?: number;
   /** Extended thinking configuration. When enabled, temperature is forced to 1. */
   thinking?: ThinkingConfig;
+  /**
+   * JSON Schema for Anthropic Structured Outputs (output_format).
+   * When provided and the model supports it, guarantees the response matches this schema.
+   * Incompatible with extended thinking — automatically skipped when thinking is enabled.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 /**
  * Generic chat completion with Anthropic.
- * Used for non-graph-specific LLM calls (e.g., Decision Review).
+ * Used for non-graph-specific LLM calls (e.g., Decision Review, edit_graph).
  * Uses the same infrastructure as other adapter methods: retry, timeout, telemetry.
+ * Supports Structured Outputs via optional outputSchema parameter.
  */
 export async function chatWithAnthropic(
   args: ChatWithAnthropicArgs
@@ -2119,6 +2138,26 @@ export async function chatWithAnthropic(
   const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
+  // Structured Outputs — only active when schema provided, model supported, thinking disabled
+  const useStructuredOutputs =
+    !thinkingEnabled &&
+    !!args.outputSchema &&
+    config.cee.anthropicStructuredOutputs &&
+    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
+
+  if (args.outputSchema && thinkingEnabled) {
+    log.info(
+      { model },
+      "[Anthropic] Extended thinking enabled — structured outputs disabled (incompatible)"
+    );
+  }
+  if (args.outputSchema && !STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model)) {
+    log.warn(
+      { model },
+      "[Anthropic] outputSchema provided but model not in structured outputs allowlist — falling back to prompt-only JSON"
+    );
+  }
+
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = args.requestId || makeIdempotencyKey();
   const startTime = Date.now();
@@ -2128,6 +2167,7 @@ export async function chatWithAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
+      structured_outputs: useStructuredOutputs,
       system_chars: args.system.length,
       user_chars: args.userMessage.length,
       idempotency_key: idempotencyKey,
@@ -2140,22 +2180,57 @@ export async function chatWithAnthropic(
 
   try {
     const apiClient = getClient();
+
+    function buildChatCallParams(withStructuredOutputs: boolean): {
+      body: Anthropic.MessageCreateParamsNonStreaming;
+      options: { signal: AbortSignal; headers: Record<string, string> };
+    } {
+      const body: Anthropic.MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: args.system,
+        messages: [{ role: "user", content: args.userMessage }],
+        ...(withStructuredOutputs && args.outputSchema
+          ? {
+              output_format: {
+                type: "json_schema",
+                json_schema: args.outputSchema,
+              },
+            }
+          : {}),
+        ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
+      };
+      const headers: Record<string, string> = {
+        "Idempotency-Key": idempotencyKey,
+        ...(withStructuredOutputs
+          ? { "anthropic-beta": "structured-outputs-2025-11-13" }
+          : {}),
+      };
+      return { body, options: { signal: abortController.signal, headers } };
+    }
+
+    let { body: createBody, options: createOptions } = buildChatCallParams(useStructuredOutputs);
+
     const response = await withRetry(
-      async () =>
-        apiClient.messages.create(
-          {
-            model,
-            max_tokens: maxTokens,
-            temperature,
-            system: args.system,
-            messages: [{ role: "user", content: args.userMessage }],
-            ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
-          },
-          {
-            signal: abortController.signal,
-            headers: { "Idempotency-Key": idempotencyKey },
+      async () => {
+        try {
+          return await apiClient.messages.create(createBody, createOptions);
+        } catch (callErr) {
+          // If structured outputs rejected by API (capability issue), fall back to prompt-only JSON
+          if (useStructuredOutputs && isStructuredOutputsRejection(callErr)) {
+            log.warn(
+              { model, error: (callErr as Error).message },
+              "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
+            );
+            const fallback = buildChatCallParams(false);
+            createBody = fallback.body;
+            createOptions = fallback.options;
+            return await apiClient.messages.create(createBody, createOptions);
           }
-        ),
+          throw callErr;
+        }
+      },
       {
         adapter: "anthropic",
         model,
@@ -2261,6 +2336,28 @@ interface ChatWithToolsAnthropicArgs {
 }
 
 /**
+ * Normalize tool definitions for the Anthropic API with strict mode.
+ * Shared between streaming and non-streaming tool-calling paths to prevent drift.
+ *
+ * Adds:
+ * - strict: true — enables constrained decoding on tool arguments
+ * - additionalProperties: false — required by strict mode on input_schema
+ */
+function buildStrictAnthropicTools(
+  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+) {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    strict: true as const,
+    input_schema: {
+      ...tool.input_schema,
+      additionalProperties: false,
+    } as unknown as Anthropic.Tool.InputSchema,
+  }));
+}
+
+/**
  * Native tool calling with Anthropic.
  * Uses Anthropic's native tool_use content blocks for multi-turn orchestration.
  * Follows the same infrastructure as chatWithAnthropic: retry, timeout, telemetry.
@@ -2329,12 +2426,7 @@ export async function chatWithToolsAnthropic(
       return { role: msg.role, content: blocks };
     });
 
-    // Convert tools to Anthropic SDK format
-    const anthropicTools: Anthropic.Tool[] = args.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.input_schema as Anthropic.Tool.InputSchema,
-    }));
+    const anthropicTools = buildStrictAnthropicTools(args.tools);
 
     // Build tool_choice parameter
     let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
@@ -2557,11 +2649,7 @@ export async function* streamChatWithToolsAnthropic(
       return { role: msg.role, content: blocks };
     });
 
-    const anthropicTools: Anthropic.Tool[] = args.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.input_schema as Anthropic.Tool.InputSchema,
-    }));
+    const anthropicTools = buildStrictAnthropicTools(args.tools);
 
     let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
     if (args.tool_choice) {
@@ -2876,6 +2964,7 @@ export class AnthropicAdapter implements LLMAdapter {
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
       thinking: args.thinking,
+      outputSchema: args.outputSchema,
     });
   }
 
@@ -2920,4 +3009,6 @@ export const __test_only = {
   buildRepairPrompt,
   buildClarifyPrompt,
   buildCritiquePrompt,
+  isStructuredOutputsRejection,
+  buildStrictAnthropicTools,
 };
