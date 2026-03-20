@@ -29,6 +29,7 @@ import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
+import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type {
@@ -1154,12 +1155,18 @@ export async function handleEditGraph(
       const editGraphThinking = config.cee.thinking?.editGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
         : undefined;
+      // Structured Outputs: pass edit_graph schema when thinking is not enabled.
+      // The adapter checks the feature flag and model allowlist internally.
+      const editGraphOutputSchema = !editGraphThinking
+        ? ANTHROPIC_EDIT_GRAPH_SCHEMA as Record<string, unknown>
+        : undefined;
       chatResult = await adapter.chat(
         {
           system: effectiveInstruction,
           userMessage,
           maxTokens: getMaxTokensFromConfig('edit_graph'),
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
+          ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
         },
         callOpts,
       );
