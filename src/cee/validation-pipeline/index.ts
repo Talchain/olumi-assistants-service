@@ -110,8 +110,10 @@ export async function runValidationPipeline(ctx: StageContext): Promise<void> {
     'cee.validation_pipeline.pass2_sent',
   );
 
+  // Use effectiveBrief (not input.brief) so Pass 2 sees the same brief
+  // that Pass 1 used to produce the graph — including refinement context.
   const pass2Response = await callValidateGraph(
-    ctx.input.brief,
+    ctx.effectiveBrief,
     p2Nodes,
     p2Edges,
     {
