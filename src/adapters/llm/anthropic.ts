@@ -2138,8 +2138,9 @@ export async function chatWithAnthropic(
   const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
-  // Structured Outputs — only active when schema provided, model supported, thinking disabled
-  const useStructuredOutputs =
+  // Structured Outputs — only active when schema provided, model supported, thinking disabled.
+  // Mutable: set to false in the fallback path to prevent redundant attempts on retry.
+  let useStructuredOutputs =
     !thinkingEnabled &&
     !!args.outputSchema &&
     config.cee.anthropicStructuredOutputs &&
@@ -2223,6 +2224,7 @@ export async function chatWithAnthropic(
               { model, error: (callErr as Error).message },
               "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
             );
+            useStructuredOutputs = false;
             const fallback = buildChatCallParams(false);
             createBody = fallback.body;
             createOptions = fallback.options;
@@ -2336,23 +2338,25 @@ interface ChatWithToolsAnthropicArgs {
 }
 
 /**
- * Normalize tool definitions for the Anthropic API with strict mode.
+ * Normalize tool definitions for the Anthropic API, optionally with strict mode.
  * Shared between streaming and non-streaming tool-calling paths to prevent drift.
  *
- * Adds:
- * - strict: true — enables constrained decoding on tool arguments
- * - additionalProperties: false — required by strict mode on input_schema
+ * When the model supports constrained decoding (STRUCTURED_OUTPUTS_SUPPORTED_MODELS),
+ * adds strict: true + additionalProperties: false for decoder-constrained arguments.
+ * For older models, passes tools without strict mode to avoid hard 400 failures.
  */
 function buildStrictAnthropicTools(
   tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+  model: string,
 ) {
+  const supportsStrict = STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    strict: true as const,
+    ...(supportsStrict ? { strict: true as const } : {}),
     input_schema: {
       ...tool.input_schema,
-      additionalProperties: false,
+      ...(supportsStrict ? { additionalProperties: false } : {}),
     } as unknown as Anthropic.Tool.InputSchema,
   }));
 }
@@ -2426,7 +2430,7 @@ export async function chatWithToolsAnthropic(
       return { role: msg.role, content: blocks };
     });
 
-    const anthropicTools = buildStrictAnthropicTools(args.tools);
+    const anthropicTools = buildStrictAnthropicTools(args.tools, model);
 
     // Build tool_choice parameter
     let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
@@ -2649,7 +2653,7 @@ export async function* streamChatWithToolsAnthropic(
       return { role: msg.role, content: blocks };
     });
 
-    const anthropicTools = buildStrictAnthropicTools(args.tools);
+    const anthropicTools = buildStrictAnthropicTools(args.tools, model);
 
     let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined;
     if (args.tool_choice) {

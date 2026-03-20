@@ -155,6 +155,9 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
 // =============================================================================
 
 describe("buildStrictAnthropicTools", () => {
+  const SUPPORTED_MODEL = "claude-sonnet-4-6";
+  const UNSUPPORTED_MODEL = "claude-3-5-haiku-20241022";
+
   const sampleTools = [
     {
       name: "draft_graph",
@@ -177,15 +180,21 @@ describe("buildStrictAnthropicTools", () => {
     },
   ];
 
-  it("adds strict: true to every tool", () => {
-    const result = buildStrictAnthropicTools(sampleTools);
+  it("adds strict: true to every tool when model supports it", () => {
+    const result = buildStrictAnthropicTools(sampleTools, SUPPORTED_MODEL);
     for (const tool of result) {
       expect(tool).toHaveProperty("strict", true);
     }
   });
 
-  it("forces additionalProperties: false on input_schema", () => {
-    // Even if source doesn't have it, the helper adds it
+  it("does NOT add strict: true for unsupported models", () => {
+    const result = buildStrictAnthropicTools(sampleTools, UNSUPPORTED_MODEL);
+    for (const tool of result) {
+      expect(tool).not.toHaveProperty("strict");
+    }
+  });
+
+  it("forces additionalProperties: false on input_schema for supported models", () => {
     const toolsWithoutAP = [
       {
         name: "test_tool",
@@ -193,36 +202,61 @@ describe("buildStrictAnthropicTools", () => {
         input_schema: { type: "object", properties: {} },
       },
     ];
-    const result = buildStrictAnthropicTools(toolsWithoutAP);
+    const result = buildStrictAnthropicTools(toolsWithoutAP, SUPPORTED_MODEL);
     expect(result[0].input_schema).toHaveProperty("additionalProperties", false);
   });
 
+  it("does NOT add additionalProperties: false for unsupported models", () => {
+    const toolsWithoutAP = [
+      {
+        name: "test_tool",
+        description: "Test.",
+        input_schema: { type: "object", properties: {} },
+      },
+    ];
+    const result = buildStrictAnthropicTools(toolsWithoutAP, UNSUPPORTED_MODEL);
+    expect(result[0].input_schema).not.toHaveProperty("additionalProperties");
+  });
+
   it("preserves tool name and description", () => {
-    const result = buildStrictAnthropicTools(sampleTools);
+    const result = buildStrictAnthropicTools(sampleTools, SUPPORTED_MODEL);
     expect(result[0].name).toBe("draft_graph");
     expect(result[0].description).toBe("Draft a graph.");
     expect(result[1].name).toBe("run_analysis");
   });
 
   it("preserves existing input_schema properties", () => {
-    const result = buildStrictAnthropicTools(sampleTools);
+    const result = buildStrictAnthropicTools(sampleTools, SUPPORTED_MODEL);
     const schema = result[0].input_schema as unknown as Record<string, unknown>;
     expect(schema).toHaveProperty("type", "object");
     expect(schema).toHaveProperty("required");
     expect((schema.required as string[])).toContain("brief");
   });
 
-  it("produces same output for all registry tools (streaming/non-streaming parity)", () => {
+  it("produces same output for all registry tools on supported model (streaming/non-streaming parity)", () => {
     const tools = getToolDefinitions().map((t) => ({
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,
     }));
-    const result = buildStrictAnthropicTools(tools);
+    const result = buildStrictAnthropicTools(tools, SUPPORTED_MODEL);
     expect(result).toHaveLength(6);
     for (const tool of result) {
       expect(tool).toHaveProperty("strict", true);
       expect(tool.input_schema).toHaveProperty("additionalProperties", false);
+    }
+  });
+
+  it("gracefully degrades for all registry tools on unsupported model", () => {
+    const tools = getToolDefinitions().map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema,
+    }));
+    const result = buildStrictAnthropicTools(tools, UNSUPPORTED_MODEL);
+    expect(result).toHaveLength(6);
+    for (const tool of result) {
+      expect(tool).not.toHaveProperty("strict");
     }
   });
 });
