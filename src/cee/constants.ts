@@ -46,6 +46,19 @@ export const EDGE_STRENGTH_LOW_THRESHOLD = _EDGE_STRENGTH_LOW_THRESHOLD;
  */
 export const NAN_FIX_SIGNATURE_STD = DEFAULT_STRENGTH_STD;
 
+/**
+ * Floor for strength_std at the LLM response boundary.
+ *
+ * Prevents degenerate zero-variance edges from entering the pipeline.
+ * Defence-in-depth: PLoT also enforces FLOOR_STRENGTH_STD downstream.
+ *
+ * Note: Other layers use different floors for different purposes:
+ * - schema-v3.ts STRENGTH_STD_FLOOR (1e-6) — mathematical non-zero in V3 transforms
+ * - graph-normalizer.ts STD_FLOOR (0.01) — ISL value-relative uncertainty
+ * - validation-pipeline WEAK_GUESS_STD_FLOOR (0.15) — enforcement for weak-basis edges
+ */
+export const LLM_STRENGTH_STD_FLOOR = 0.001;
+
 // Re-export additional thresholds from shared package for direct use
 export {
   STRENGTH_DEFAULT_THRESHOLD,

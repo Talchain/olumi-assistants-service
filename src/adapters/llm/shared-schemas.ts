@@ -8,6 +8,39 @@
 
 import { z } from "zod";
 import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
+import { log } from "../../utils/telemetry.js";
+import { LLM_STRENGTH_STD_FLOOR } from "../../cee/constants.js";
+
+// ============================================================================
+// Edge Strength Validation Constants
+// ============================================================================
+
+/** Clamp strength_mean to [-1, 1] and log if out of range. Defence-in-depth; PLoT also enforces CLAMP_STRENGTH_MEAN. */
+function clampStrengthMean(val: number): number {
+  if (val < -1 || val > 1) {
+    const clamped = Math.max(-1, Math.min(1, val));
+    log.warn({
+      event: 'zod.strength_mean_clamped',
+      original: val,
+      clamped,
+    }, `strength_mean ${val} clamped to [−1, +1] → ${clamped}`);
+    return clamped;
+  }
+  return val;
+}
+
+/** Floor strength_std to LLM_STRENGTH_STD_FLOOR and log if below. Defence-in-depth; PLoT also enforces FLOOR_STRENGTH_STD. */
+function floorStrengthStd(val: number): number {
+  if (val < LLM_STRENGTH_STD_FLOOR) {
+    log.warn({
+      event: 'zod.strength_std_floored',
+      original: val,
+      floored: LLM_STRENGTH_STD_FLOOR,
+    }, `strength_std ${val} floored to ${LLM_STRENGTH_STD_FLOOR}`);
+    return LLM_STRENGTH_STD_FLOOR;
+  }
+  return val;
+}
 
 // ============================================================================
 // Base Node Schema
@@ -44,10 +77,14 @@ export type LLMNodeT = z.infer<typeof LLMNode>;
 /**
  * V4 edge strength schema (nested object from LLM).
  * Represents probabilistic edge strength with mean and standard deviation.
+ *
+ * Validation (defence-in-depth — PLoT also enforces these):
+ * - mean: clamped to [-1, +1]
+ * - std: floored to LLM_STRENGTH_STD_FLOOR (0.001) — prevents zero-variance edges
  */
 export const EdgeStrength = z.object({
-  mean: z.number(),
-  std: z.number().positive(),
+  mean: z.number().transform(clampStrengthMean),
+  std: z.number().transform(floorStrengthStd),
 }).optional();
 
 export type EdgeStrengthT = z.infer<typeof EdgeStrength>;
@@ -67,8 +104,9 @@ export const LLMEdge = z.object({
   strength: EdgeStrength,
   exists_probability: z.number().min(0).max(1).optional(),
   // V4 format (flat) - added by normaliseDraftResponse()
-  strength_mean: z.number().optional(),
-  strength_std: z.number().optional(),
+  // Clamped/floored as defence-in-depth (PLoT also enforces CLAMP_STRENGTH_MEAN / FLOOR_STRENGTH_STD)
+  strength_mean: z.number().transform(clampStrengthMean).optional(),
+  strength_std: z.number().transform(floorStrengthStd).optional(),
   belief_exists: z.number().optional(),
   effect_direction: z.enum(["positive", "negative"]).optional(),
   // Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust.

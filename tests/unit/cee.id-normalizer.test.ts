@@ -25,10 +25,11 @@ describe("CEE ID Normalizer", () => {
       expect(CANONICAL_ID_REGEX.test("price@100")).toBe(false);
     });
 
-    it("rejects hyphens", () => {
-      expect(CANONICAL_ID_REGEX.test("my-id")).toBe(false);
-      expect(CANONICAL_ID_REGEX.test("goal-node")).toBe(false);
-      expect(CANONICAL_ID_REGEX.test("option-1")).toBe(false);
+    it("accepts hyphens (aligned with prompt pattern ^[a-z0-9_:-]+$)", () => {
+      expect(CANONICAL_ID_REGEX.test("my-id")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("goal-node")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("option-1")).toBe(true);
+      expect(CANONICAL_ID_REGEX.test("fac_cost-benefit")).toBe(true);
     });
 
     it("accepts leading underscore and colon", () => {
@@ -60,9 +61,14 @@ describe("CEE ID Normalizer", () => {
       expect(normalizeToId("monthly cost")).toBe("monthly_cost");
     });
 
-    it("always replaces hyphens with underscores", () => {
-      expect(normalizeToId("my-id")).toBe("my_id");
-      expect(normalizeToId("goal-node")).toBe("goal_node");
+    it("preserves IDs that already contain hyphens (canonical pattern)", () => {
+      // Hyphenated IDs that match the canonical pattern pass through as-is
+      expect(normalizeToId("my-id")).toBe("my-id");
+      expect(normalizeToId("goal-node")).toBe("goal-node");
+    });
+
+    it("replaces hyphens with underscores when normalising non-canonical labels", () => {
+      // Labels with mixed case + hyphens get normalised (hyphens → underscores)
       expect(normalizeToId("Marketing Spend-2024")).toBe("marketing_spend_2024");
     });
 
@@ -172,10 +178,10 @@ describe("CEE ID Normalizer", () => {
       expect(isValidId("UPPERCASE")).toBe(false);
     });
 
-    it("rejects hyphens", () => {
-      expect(isValidId("my-id")).toBe(false);
-      expect(isValidId("option-1")).toBe(false);
-      expect(isValidId("goal-node")).toBe(false);
+    it("accepts hyphens (aligned with prompt pattern)", () => {
+      expect(isValidId("my-id")).toBe(true);
+      expect(isValidId("option-1")).toBe(true);
+      expect(isValidId("goal-node")).toBe(true);
     });
 
     it("accepts leading underscore and colon", () => {

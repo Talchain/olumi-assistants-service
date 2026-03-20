@@ -661,6 +661,73 @@ function constraintTargetRule(
 }
 
 // =============================================================================
+// Rule 3b: Constraint Direction Heuristic
+// =============================================================================
+
+/**
+ * Factor types where the constraint operator is heuristically suspicious.
+ *
+ * - "upper_bound" types (cost, time, price): typically constrained with <= (ceiling).
+ *   Using >= on these suggests the LLM may have inverted the direction.
+ * - "lower_bound" types (revenue, demand, quality): typically constrained with >= (floor).
+ *   Using <= on these suggests the LLM may have inverted the direction.
+ *
+ * Emits CONSTRAINT_DIRECTION_HEURISTIC (info severity) — never auto-corrects.
+ */
+const UPPER_BOUND_FACTOR_TYPES = new Set(["cost", "time", "price"]);
+const LOWER_BOUND_FACTOR_TYPES = new Set(["revenue", "demand", "quality"]);
+
+function constraintDirectionHeuristicRule(
+  constraints: Array<{ node_id: string; [key: string]: unknown }>,
+  nodeMap: NodeMap,
+): STRPMutation[] {
+  const mutations: STRPMutation[] = [];
+
+  for (const constraint of constraints) {
+    const operator = constraint.operator as string | undefined;
+    if (!operator) continue;
+
+    const node = nodeMap.byId.get(constraint.node_id);
+    if (!node) continue;
+
+    // Check factor_type on factor nodes
+    const data = node.data as Record<string, unknown> | undefined;
+    const factorType = data?.factor_type as string | undefined;
+    const nodeKind = node.kind;
+
+    let suspicious = false;
+    let reason = "";
+
+    if (factorType && UPPER_BOUND_FACTOR_TYPES.has(factorType) && operator === ">=") {
+      suspicious = true;
+      reason = `Constraint on ${factorType} factor "${node.label ?? constraint.node_id}" uses >= operator — ${factorType} factors are typically constrained as upper bounds (<=)`;
+    } else if (factorType && LOWER_BOUND_FACTOR_TYPES.has(factorType) && operator === "<=") {
+      suspicious = true;
+      reason = `Constraint on ${factorType} factor "${node.label ?? constraint.node_id}" uses <= operator — ${factorType} factors are typically constrained as lower bounds (>=)`;
+    } else if (nodeKind === "risk" && operator === ">=") {
+      suspicious = true;
+      reason = `Constraint on risk node "${node.label ?? constraint.node_id}" uses >= operator — risks are typically constrained as upper bounds (<=)`;
+    }
+
+    if (suspicious) {
+      mutations.push({
+        rule: "constraint_direction_heuristic",
+        code: "CONSTRAINT_DIRECTION_HEURISTIC",
+        constraint_id: constraint.constraint_id as string | undefined,
+        node_id: constraint.node_id,
+        field: "operator",
+        before: operator,
+        after: operator, // not auto-corrected
+        reason,
+        severity: "info",
+      });
+    }
+  }
+
+  return mutations;
+}
+
+// =============================================================================
 // Rule 4: Sign Reconciliation
 // =============================================================================
 
@@ -709,6 +776,7 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
  * 1. Category override — align declared categories with structural inference
  * 2. Enum validation — correct invalid enum values to safe defaults
  * 3. Constraint target — remap/drop mismatched constraint node_ids (when provided)
+ * 3b. Constraint direction heuristic — warn when operator direction looks wrong for factor_type (info, never auto-corrects)
  * 4. Sign reconciliation — align effect_direction with strength_mean sign
  * 5. Controllable data completeness — fill missing factor_type/uncertainty_drivers (when fillControllableData)
  *
@@ -749,6 +817,11 @@ export function reconcileStructuralTruth(
     const constraintResult = constraintTargetRule(normalisedConstraints, nodeIds, requestId, options?.nodeLabels);
     mutations.push(...constraintResult.mutations);
     normalisedConstraints = constraintResult.constraints;
+
+    // Rule 3b: Constraint direction heuristic (runs after target resolution)
+    if (normalisedConstraints.length > 0) {
+      mutations.push(...constraintDirectionHeuristicRule(normalisedConstraints, nodeMap));
+    }
   }
 
   // Rule 4: Sign reconciliation

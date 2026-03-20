@@ -73,6 +73,22 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
 
   const validationIssues: any[] = [];
 
+  // ── Promote STRP heuristic warnings to validation_issues (surfaces on V3 response) ──
+  for (const m of allStrpMutations) {
+    if (m.code === "CONSTRAINT_DIRECTION_HEURISTIC") {
+      validationIssues.push({
+        code: "CONSTRAINT_DIRECTION_HEURISTIC",
+        severity: "info",
+        message: m.reason,
+        affected_node_id: m.node_id,
+        details: {
+          constraint_id: m.constraint_id,
+          operator: m.before,
+        },
+      });
+    }
+  }
+
   // ── Step 1: Archetype inference (gated) ──────────────────────────────────
   if (config.cee.draftArchetypesEnabled && ctx.graph) {
     const { archetype, issues: archetypeIssues } = inferArchetype({

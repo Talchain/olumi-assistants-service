@@ -804,3 +804,112 @@ describe('fuzzyMatchNodeId', () => {
     expect(fuzzyMatchNodeId('fac_revenue', ids, labels)).toBe('fac_rev_target');
   });
 });
+
+// =============================================================================
+// Rule 3b: Constraint Direction Heuristic
+// =============================================================================
+
+describe('Rule 3b: Constraint Direction Heuristic', () => {
+  it('warns when cost factor has >= operator', () => {
+    const graph = createValidGraph();
+    // fac_price has factor_type: 'price' which is an upper-bound type
+    const constraints = [{ node_id: 'fac_price', operator: '>=', constraint_id: 'c1', value: 100 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    const heuristic = result.mutations.find(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC');
+    expect(heuristic).toBeDefined();
+    expect(heuristic!.severity).toBe('info');
+    expect(heuristic!.node_id).toBe('fac_price');
+    expect(heuristic!.before).toBe('>=');
+    expect(heuristic!.after).toBe('>='); // not auto-corrected
+  });
+
+  it('warns when cost factor_type has >= operator', () => {
+    const graph = createValidGraph();
+    const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+    (factor.data as any).factor_type = 'cost';
+    const constraints = [{ node_id: 'fac_price', operator: '>=', constraint_id: 'c1', value: 100 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    const heuristic = result.mutations.find(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC');
+    expect(heuristic).toBeDefined();
+    expect(heuristic!.reason).toContain('cost');
+    expect(heuristic!.reason).toContain('upper bounds');
+  });
+
+  it('warns when revenue factor has <= operator', () => {
+    const graph = createValidGraph();
+    const factor = graph.nodes.find(n => n.id === 'fac_price')!;
+    (factor.data as any).factor_type = 'revenue';
+    const constraints = [{ node_id: 'fac_price', operator: '<=', constraint_id: 'c2', value: 5000 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    const heuristic = result.mutations.find(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC');
+    expect(heuristic).toBeDefined();
+    expect(heuristic!.reason).toContain('revenue');
+    expect(heuristic!.reason).toContain('lower bounds');
+  });
+
+  it('warns when risk node has >= operator', () => {
+    const graph = createValidGraph();
+    graph.nodes.push({
+      id: 'risk_churn',
+      kind: 'risk',
+      label: 'Churn Risk',
+    });
+    graph.edges.push(
+      { from: 'fac_price', to: 'risk_churn', strength_mean: 0.4, belief_exists: 0.7 },
+    );
+    const constraints = [{ node_id: 'risk_churn', operator: '>=', constraint_id: 'c3', value: 0.2 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    const heuristic = result.mutations.find(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC');
+    expect(heuristic).toBeDefined();
+    expect(heuristic!.reason).toContain('risk');
+    expect(heuristic!.reason).toContain('upper bounds');
+  });
+
+  it('does NOT warn when cost factor has <= operator (correct direction)', () => {
+    const graph = createValidGraph();
+    (graph.nodes.find(n => n.id === 'fac_price')!.data as any).factor_type = 'cost';
+    const constraints = [{ node_id: 'fac_price', operator: '<=', constraint_id: 'c4', value: 200 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    expect(result.mutations.filter(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC')).toHaveLength(0);
+  });
+
+  it('does NOT warn when revenue factor has >= operator (correct direction)', () => {
+    const graph = createValidGraph();
+    (graph.nodes.find(n => n.id === 'fac_price')!.data as any).factor_type = 'revenue';
+    const constraints = [{ node_id: 'fac_price', operator: '>=', constraint_id: 'c5', value: 1000 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    expect(result.mutations.filter(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC')).toHaveLength(0);
+  });
+
+  it('does NOT warn for factor_type "other" regardless of operator', () => {
+    const graph = createValidGraph();
+    (graph.nodes.find(n => n.id === 'fac_price')!.data as any).factor_type = 'other';
+    const constraints = [{ node_id: 'fac_price', operator: '>=', constraint_id: 'c6', value: 50 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    expect(result.mutations.filter(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC')).toHaveLength(0);
+  });
+
+  it('does NOT warn when constraint target does not exist in graph', () => {
+    const graph = createValidGraph();
+    const constraints = [{ node_id: 'nonexistent_node', operator: '>=', constraint_id: 'c7', value: 10 }];
+
+    const result = reconcileStructuralTruth(graph, { goalConstraints: constraints });
+
+    // Constraint gets dropped by Rule 3 (no target), so Rule 3b never sees it
+    expect(result.mutations.filter(m => m.code === 'CONSTRAINT_DIRECTION_HEURISTIC')).toHaveLength(0);
+  });
+});

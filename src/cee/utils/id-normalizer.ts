@@ -4,21 +4,21 @@ import { log } from "../../utils/telemetry.js";
  * ID Normalizer Utility
  *
  * Converts human-readable labels into valid node IDs following the canonical
- * pattern: ^[a-z0-9_:]+$
+ * pattern: ^[a-z0-9_:-]+$
  *
  * Canonical rules:
  * - Lowercase only
- * - Separators: underscore (_) and colon (:)
+ * - Separators: underscore (_), colon (:), and hyphen (-)
  * - Numeric start allowed (e.g. "0_factor")
- * - Hyphens always replaced with underscores
- * - No hyphens in canonical output
+ * - When normalising labels, hyphens are replaced with underscores for consistency
+ * - Pre-existing IDs containing hyphens are accepted as-is (aligns with prompt pattern)
  *
  * Used by V3 schema to generate consistent IDs for option nodes and
  * intervention targets.
  */
 
 /** Canonical ID pattern shared across CEE. Import this instead of defining inline. */
-export const CANONICAL_ID_REGEX = /^[a-z0-9_:]+$/;
+export const CANONICAL_ID_REGEX = /^[a-z0-9_:-]+$/;
 
 /**
  * Normalize a label into a valid node ID.

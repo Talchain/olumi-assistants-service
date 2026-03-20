@@ -194,9 +194,9 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       warnings.push({
         code: "INVALID_NODE_ID",
         severity: "error",
-        message: `Invalid node ID format: "${node.id}" (must contain only lowercase alphanumeric, underscores, or colons)`,
+        message: `Invalid node ID format: "${node.id}" (must contain only lowercase alphanumeric, underscores, colons, or hyphens)`,
         affected_node_id: node.id,
-        suggestion: "Use IDs with lowercase alphanumeric characters, underscores, or colons",
+        suggestion: "Use IDs with lowercase alphanumeric characters, underscores, colons, or hyphens",
         stage,
       });
     }
@@ -652,7 +652,7 @@ function validateOptions(
         severity: "error",
         message: `Invalid option ID format: "${option.id}"`,
         affected_option_id: option.id,
-        suggestion: "Use only lowercase letters, numbers, underscores, and colons",
+        suggestion: "Use only lowercase letters, numbers, underscores, colons, and hyphens",
         stage,
       });
     }

@@ -137,7 +137,7 @@ Before implementing any bug fix or feature that touches data flowing between ser
 Only after the trace is documented, implement fixes at ALL affected layers. Do not fix one layer and assume others are correct.
 
 Common multi-layer patterns:
-- CEE response → PLoT adapter → ISL request (field name translations like `from` → `from_`)
+- CEE response → PLoT adapter → ISL request (ISL's Pydantic model handles `from` → `from_` aliasing internally as a Python reserved word — PLoT does not perform this translation)
 - ISL response → PLoT V2/V3 adapter → UI store (two adapter shapes)
 - Error responses: direct shape AND PLoT-wrapped shape must both be handled
 - CEE → store → PLoT chain: check extraction, normalisation, and passthrough at every boundary

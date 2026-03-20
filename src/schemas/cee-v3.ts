@@ -87,8 +87,8 @@ export type FactorCategoryV3T = z.infer<typeof FactorCategoryV3>;
  * V3 node schema.
  */
 export const NodeV3 = z.object({
-  /** Node ID - canonical pattern: lowercase alphanumeric, underscores, colons */
-  id: z.string().regex(CANONICAL_ID_REGEX, "Node ID must contain only lowercase alphanumeric, underscores, or colons"),
+  /** Node ID - canonical pattern: lowercase alphanumeric, underscores, colons, hyphens */
+  id: z.string().regex(CANONICAL_ID_REGEX, "Node ID must contain only lowercase alphanumeric, underscores, colons, or hyphens"),
   /** Node kind */
   kind: NodeKindV3,
   /** Human-readable label */
@@ -276,8 +276,8 @@ void _assertV3OptionStatusExcludesNeedsUserInput;
  * - status: "needs_encoding" when raw values exist but aren't yet encoded
  */
 export const OptionV3 = z.object({
-  /** Option ID - canonical pattern: lowercase alphanumeric, underscores, colons */
-  id: z.string().regex(CANONICAL_ID_REGEX, "Option ID must contain only lowercase alphanumeric, underscores, or colons"),
+  /** Option ID - canonical pattern: lowercase alphanumeric, underscores, colons, hyphens */
+  id: z.string().regex(CANONICAL_ID_REGEX, "Option ID must contain only lowercase alphanumeric, underscores, colons, or hyphens"),
   /** Human-readable label */
   label: z.string(),
   /** Optional description */
@@ -322,6 +322,8 @@ export const ValidationWarningCode = z.enum([
   CIL_WARNING_CODES.STRENGTH_MEAN_DEFAULT_DOMINANT,
   CIL_WARNING_CODES.EDGE_STRENGTH_LOW,
   CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
+  // STRP constraint direction heuristic (Rule 3b)
+  "CONSTRAINT_DIRECTION_HEURISTIC",
   // Causal claims validation warning codes (Phase 2B)
   CAUSAL_CLAIMS_WARNING_CODES.MALFORMED,
   CAUSAL_CLAIMS_WARNING_CODES.DROPPED,
