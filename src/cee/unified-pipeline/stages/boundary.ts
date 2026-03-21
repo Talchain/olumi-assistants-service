@@ -112,6 +112,14 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       v3Body.analysis_ready.model_adjustments.push(...repairAdjustments);
     }
 
+    // Attach bias_findings to analysis_ready (from V1 payload → analysis_ready block)
+    if (v3Body.analysis_ready) {
+      const v1BiasFindings = (ctx.ceeResponse as any)?.bias_findings;
+      (v3Body.analysis_ready as any).bias_findings = Array.isArray(v1BiasFindings)
+        ? v1BiasFindings
+        : [];
+    }
+
     // Surface STRP constraint drops as blockers
     if (v3Body.analysis_ready && strpMutations?.length) {
       const constraintBlockers = extractConstraintDropBlockers(strpMutations);
@@ -163,6 +171,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
             options: [],
             goal_node_id: (v3Body as any)?.goal_node_id || "",
             status: "blocked",
+            bias_findings: [],
             blockers: [
               {
                 code: "strict_mode_validation_failure",
@@ -239,6 +248,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
           options: [],
           goal_node_id: (v3Body as any)?.goal_node_id || "",
           status: "blocked",
+          bias_findings: [],
           blockers: [
             {
               code: "validation_failure",

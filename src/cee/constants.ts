@@ -59,6 +59,19 @@ export const NAN_FIX_SIGNATURE_STD = DEFAULT_STRENGTH_STD;
  */
 export const LLM_STRENGTH_STD_FLOOR = 0.001;
 
+/**
+ * Nudge appended to the user message when retrying due to default strength
+ * detection. Instructs the LLM to differentiate edge strengths rather than
+ * using the same value for every relationship.
+ */
+export const STRENGTH_DEFAULT_RETRY_NUDGE =
+  "IMPORTANT: Your previous output used identical edge strengths (0.5) for most relationships. " +
+  "This produces uninformative analysis. Differentiate edge strength.mean values based on the " +
+  "relative causal influence of each relationship. Use the full range: strong effects (0.6-0.9), " +
+  "moderate (0.3-0.5), weak (0.1-0.2). Each edge should reflect your assessment of that specific " +
+  "mechanism's strength. Revisit each causal relationship in this decision and assign strengths " +
+  "that reflect the specific mechanism described in the brief.";
+
 // Re-export additional thresholds from shared package for direct use
 export {
   STRENGTH_DEFAULT_THRESHOLD,

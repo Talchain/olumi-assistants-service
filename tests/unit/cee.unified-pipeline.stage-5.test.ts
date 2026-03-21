@@ -39,7 +39,8 @@ vi.mock("../../src/cee/quality/index.js", () => ({
 
 // Mock bias
 vi.mock("../../src/cee/bias/index.js", () => ({
-  sortBiasFindings: vi.fn(),
+  detectBiases: vi.fn().mockReturnValue([]),
+  sortBiasFindings: vi.fn().mockImplementation((findings: unknown[]) => findings),
 }));
 
 // Mock response caps
@@ -114,7 +115,7 @@ import { runStagePackage } from "../../src/cee/unified-pipeline/stages/package.j
 import { config, isProduction } from "../../src/config/index.js";
 import { inferArchetype } from "../../src/cee/archetypes/index.js";
 import { computeQuality } from "../../src/cee/quality/index.js";
-import { sortBiasFindings } from "../../src/cee/bias/index.js";
+import { detectBiases, sortBiasFindings } from "../../src/cee/bias/index.js";
 import { applyResponseCaps } from "../../src/cee/transforms/response-caps.js";
 import { ceeAnyTruncated, buildCeeGuidance } from "../../src/cee/guidance/index.js";
 import {
@@ -599,5 +600,29 @@ describe("runStagePackage", () => {
     await runStagePackage(ctx);
 
     expect(captureCheckpoint).not.toHaveBeenCalled();
+  });
+
+  // ── Bias findings wiring ────────────────────────────────────────────────
+
+  it("calls detectBiases and includes bias_findings on the V1 response", async () => {
+    const fakeFinding = { id: "selection_low_option_count", category: "selection", severity: "medium", node_ids: ["o1"] };
+    (detectBiases as any).mockReturnValue([fakeFinding]);
+
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(detectBiases).toHaveBeenCalledWith(ctx.graph, ctx.archetype);
+    expect(ctx.ceeResponse).toBeDefined();
+    expect((ctx.ceeResponse as any).bias_findings).toEqual([fakeFinding]);
+  });
+
+  it("emits empty bias_findings array when no biases detected", async () => {
+    (detectBiases as any).mockReturnValue([]);
+
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(ctx.ceeResponse).toBeDefined();
+    expect((ctx.ceeResponse as any).bias_findings).toEqual([]);
   });
 });

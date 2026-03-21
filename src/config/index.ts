@@ -390,6 +390,7 @@ const ConfigSchema = z.object({
     // draft_graph, guaranteeing parseable JSON at the token generation level.
     // Requires beta header "anthropic-beta: structured-outputs-2025-11-13".
     // Default false until validated on Claude Sonnet 4.6.
+    retryOnDefaultStrengths: booleanString.default(false), // Retry LLM call once when ≥80% of edges have default strength signature (enable via CEE_RETRY_ON_DEFAULT_STRENGTHS=true in staging)
     anthropicStructuredOutputs: booleanString.default(false),
     // Extended thinking configuration per operation (Anthropic claude-sonnet-4-6+ only)
     //
@@ -679,6 +680,7 @@ function parseConfig(): Config {
       reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
       reviewArchetypesEnabled: env.CEE_REVIEW_ARCHETYPES_ENABLED,
       reviewPlaceholdersEnabled: env.CEE_REVIEW_PLACEHOLDERS_ENABLED,
+      retryOnDefaultStrengths: env.CEE_RETRY_ON_DEFAULT_STRENGTHS,
       causalValidationEnabled: env.CEE_CAUSAL_VALIDATION_ENABLED,
       llmFirstExtractionEnabled: env.CEE_LLM_FIRST_EXTRACTION_ENABLED,
       preflightEnabled: env.CEE_PREFLIGHT_ENABLED,

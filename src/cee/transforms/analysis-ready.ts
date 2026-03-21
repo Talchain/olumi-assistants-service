@@ -440,6 +440,7 @@ export function buildAnalysisReadyPayload(
     options: analysisOptions,
     goal_node_id: goalNodeId,
     status: payloadStatus,
+    bias_findings: [],
     ...(goalNode?.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
   };
 

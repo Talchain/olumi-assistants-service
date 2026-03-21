@@ -3,6 +3,7 @@ import {
   runIntegrityChecks,
   normaliseIdForMatch,
   detectStrengthDefaults,
+  detectStrengthDefaultsV1,
   detectStrengthMeanDominant,
   type IntegrityWarning,
   type IntegrityWarningsOutput,
@@ -1279,6 +1280,103 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.strength_defaults.total_edges).toBe(3);
       expect(result.strength_mean_dominant.structural_edges_excluded).toBe(2);
       expect(result.strength_mean_dominant.total_edges).toBe(3);
+    });
+  });
+
+  // ── detectStrengthDefaultsV1 (flat V1 edge format) ─────────────────────
+  describe("detectStrengthDefaultsV1", () => {
+    const v1Nodes = [
+      { id: "g1", kind: "goal" },
+      { id: "f1", kind: "factor" },
+      { id: "f2", kind: "factor" },
+      { id: "f3", kind: "factor" },
+      { id: "f4", kind: "factor" },
+    ];
+
+    it("detects when ≥80% of causal edges have default flat fields", () => {
+      const edges = [
+        { from: "f1", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f2", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f3", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f4", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+      const result = detectStrengthDefaultsV1(v1Nodes, edges);
+      expect(result.detected).toBe(true);
+      expect(result.defaulted_count).toBe(4);
+      expect(result.total_edges).toBe(4);
+    });
+
+    it("returns false when strengths are differentiated", () => {
+      const edges = [
+        { from: "f1", to: "g1", strength_mean: 0.8, strength_std: 0.05 },
+        { from: "f2", to: "g1", strength_mean: 0.3, strength_std: 0.10 },
+        { from: "f3", to: "g1", strength_mean: 0.6, strength_std: 0.08 },
+        { from: "f4", to: "g1", strength_mean: 0.15, strength_std: 0.20 },
+      ];
+      const result = detectStrengthDefaultsV1(v1Nodes, edges);
+      expect(result.detected).toBe(false);
+      expect(result.defaulted_count).toBe(0);
+    });
+
+    it("excludes structural edges (decision/option from-nodes)", () => {
+      const nodesWithStructural = [
+        { id: "g1", kind: "goal" },
+        { id: "d1", kind: "decision" },
+        { id: "o1", kind: "option" },
+        { id: "f1", kind: "factor" },
+        { id: "f2", kind: "factor" },
+        { id: "f3", kind: "factor" },
+      ];
+      const edges = [
+        { from: "d1", to: "o1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "o1", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f1", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f2", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f3", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+      const result = detectStrengthDefaultsV1(nodesWithStructural, edges);
+      // decision→* and option→* excluded, only 3 causal edges remain
+      expect(result.structural_edges_excluded).toBe(2);
+      expect(result.total_edges).toBe(3);
+      expect(result.detected).toBe(true);
+    });
+
+    it("returns false when fewer than 3 causal edges (below min threshold)", () => {
+      const smallNodes = [
+        { id: "g1", kind: "goal" },
+        { id: "f1", kind: "factor" },
+        { id: "f2", kind: "factor" },
+      ];
+      const edges = [
+        { from: "f1", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+        { from: "f2", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+      const result = detectStrengthDefaultsV1(smallNodes, edges);
+      expect(result.detected).toBe(false);
+    });
+
+    it("falls back to nested strength object when flat fields are absent", () => {
+      const edges = [
+        { from: "f1", to: "g1", strength: { mean: 0.5, std: 0.125 } },
+        { from: "f2", to: "g1", strength: { mean: 0.5, std: 0.125 } },
+        { from: "f3", to: "g1", strength: { mean: 0.5, std: 0.125 } },
+        { from: "f4", to: "g1", strength: { mean: 0.5, std: 0.125 } },
+      ];
+      const result = detectStrengthDefaultsV1(v1Nodes, edges as any);
+      expect(result.detected).toBe(true);
+      expect(result.defaulted_count).toBe(4);
+    });
+
+    it("detects negative default mean (sign-adjusted by effect_direction)", () => {
+      const edges = [
+        { from: "f1", to: "g1", strength_mean: -0.5, strength_std: 0.125 },
+        { from: "f2", to: "g1", strength_mean: -0.5, strength_std: 0.125 },
+        { from: "f3", to: "g1", strength_mean: -0.5, strength_std: 0.125 },
+        { from: "f4", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
+      ];
+      const result = detectStrengthDefaultsV1(v1Nodes, edges);
+      expect(result.detected).toBe(true);
+      expect(result.defaulted_count).toBe(4);
     });
   });
 });

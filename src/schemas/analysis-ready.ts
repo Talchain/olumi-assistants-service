@@ -222,6 +222,16 @@ export const AnalysisReadyPayload = z.object({
   model_adjustments: z.array(ModelAdjustment).optional(),
   /** Goal threshold (normalised 0–1 probability from the goal node) */
   goal_threshold: z.number().optional(),
+  /** Bias findings from structural heuristic detectors (same shape as CEEBiasFindingV1).
+   *  Empty array when no biases detected. Always present for stable UI consumption. */
+  bias_findings: z.array(z.object({
+    id: z.string(),
+    category: z.string(),
+    severity: z.string(),
+    node_ids: z.array(z.string()).optional(),
+    explanation: z.string().optional(),
+    code: z.string().optional(),
+  }).passthrough()).default([]),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 

@@ -14,7 +14,7 @@ import { config, isProduction } from "../../../config/index.js";
 import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { inferArchetype } from "../../archetypes/index.js";
 import { computeQuality } from "../../quality/index.js";
-import { sortBiasFindings } from "../../bias/index.js";
+import { detectBiases, sortBiasFindings } from "../../bias/index.js";
 import { applyResponseCaps } from "../../transforms/response-caps.js";
 import { ceeAnyTruncated, buildCeeGuidance } from "../../guidance/index.js";
 import {
@@ -178,12 +178,19 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     validationIssues.push(...causalClaimsWarnings);
   }
 
-  // ── Step 3b: Build payload + sort bias findings ─────────────────────────
+  // ── Step 3b: Detect biases + build payload ─────────────────────────────
+  // Run deterministic bias heuristics against the frozen graph.
+  // detectBiases is cheap (no LLM call) — always runs.
+  const biasFindings = ctx.graph
+    ? sortBiasFindings(detectBiases(ctx.graph as any, ctx.archetype), ctx.input.seed)
+    : [];
+
   const payload: Record<string, unknown> = {
     graph: ctx.graph,
     rationales: ctx.rationales,
     confidence: ctx.confidence,
     goal_constraints: ctx.goalConstraints,
+    bias_findings: biasFindings,
     // Coaching passthrough from LLM output (undefined if not present)
     ...(ctx.coaching ? { coaching: ctx.coaching } : {}),
     // Causal claims passthrough (Phase 2B):
@@ -192,10 +199,6 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     //   LLM emitted valid claims → causal_claims: [...] (normal)
     ...(llmEmittedCausalClaims ? { causal_claims: validatedCausalClaims } : {}),
   };
-
-  if (Array.isArray((payload as any).bias_findings)) {
-    (payload as any).bias_findings = sortBiasFindings((payload as any).bias_findings, ctx.input.seed);
-  }
 
   // ── Step 4: Apply response caps ──────────────────────────────────────────
   const { cappedPayload, limits } = applyResponseCaps(payload);
@@ -502,6 +505,14 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     corrections: ctx.collector.hasCorrections() ? ctx.collector.getCorrections() : undefined,
     corrections_summary: ctx.collector.hasCorrections() ? ctx.collector.getSummary() : undefined,
   };
+
+  // Strength default retry trace (from Stage 1)
+  if (ctx.strengthDefaultRetried) {
+    pipelineTrace.strength_default_retry = {
+      retried: true,
+      detection: ctx.strengthDefaultDetection ?? null,
+    };
+  }
 
   // Enrichment trace (from Stage 3)
   if (ctx.enrichmentTrace) {

@@ -27,6 +27,8 @@ import {
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/telemetry.js";
+import { detectStrengthDefaultsV1 } from "../../validation/integrity-sentinel.js";
+import { STRENGTH_DEFAULT_RETRY_NUDGE } from "../../constants.js";
 
 /**
  * Stage 1: Parse — LLM draft + adapter normalisation.
@@ -145,6 +147,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
   let draftResult: DraftGraphResult | undefined;
   let attempt = 0;
+  let strengthDefaultRetried = false;
 
   while (attempt < 2) {
     attempt += 1;
@@ -157,7 +160,9 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
       draftResult = await draftAdapter.draftGraph(
         {
-          brief: ctx.effectiveBrief,
+          brief: strengthDefaultRetried
+            ? `${ctx.effectiveBrief}\n\n${STRENGTH_DEFAULT_RETRY_NUDGE}`
+            : ctx.effectiveBrief,
           docs,
           seed: 17,
           flags: typeof ctx.input.flags === "object" && ctx.input.flags !== null
@@ -177,6 +182,85 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           signal: ctx.opts.signal,
         },
       );
+
+      /**
+       * Strength-default retry decision:
+       *
+       * After a successful LLM call, check whether >=80% of causal edges carry
+       * the default strength signature (|mean|≈0.5, std≈0.125). If so, retry
+       * once with a nudge appended to the user message. Guards:
+       *
+       * - CEE_RETRY_ON_DEFAULT_STRENGTHS must be enabled
+       * - First attempt only (attempt === 1) — prevents retry-on-retry
+       * - Not combinable with timeout retry: if attempt 1 timed out and the
+       *   catch block already scheduled a retry, attempt will be 2 here and
+       *   the guard prevents a third call. Max 2 attempts total.
+       *
+       * If the retry still triggers defaults, the result is accepted with a
+       * warning (no loop).
+       */
+      if (!config.cee.retryOnDefaultStrengths) {
+        log.debug({
+          event: "cee.strength_default.skip",
+          reason: "flag_disabled",
+          request_id: ctx.requestId,
+        }, "Strength-default retry skipped — CEE_RETRY_ON_DEFAULT_STRENGTHS is false");
+        break;
+      }
+      if (attempt !== 1) {
+        // attempt === 2 means this is already a retry (timeout or strength-default).
+        // Log only when defaults would have been relevant (timeout-first scenario).
+        log.debug({
+          event: "cee.strength_default.skip",
+          reason: "not_first_attempt",
+          attempt,
+          request_id: ctx.requestId,
+        }, "Strength-default retry skipped — already on retry attempt");
+        break;
+      }
+      if (
+        draftResult.graph &&
+        Array.isArray(draftResult.graph.nodes) &&
+        Array.isArray(draftResult.graph.edges)
+      ) {
+        const detection = detectStrengthDefaultsV1(
+          draftResult.graph.nodes as ReadonlyArray<{ id: string; kind?: string }>,
+          draftResult.graph.edges as ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number } }>,
+        );
+        if (detection.detected) {
+          strengthDefaultRetried = true;
+          ctx.strengthDefaultDetection = {
+            detected: true,
+            total_edges: detection.total_edges,
+            defaulted_count: detection.defaulted_count,
+          };
+
+          log.warn({
+            event: "cee.strength_default.retry",
+            total_edges: detection.total_edges,
+            defaulted_count: detection.defaulted_count,
+            defaulted_edge_ids: detection.defaulted_edge_ids,
+            request_id: ctx.requestId,
+          }, "Default strength signature detected on ≥80% of edges — retrying with nudge");
+
+          emit(TelemetryEvents.Stage, {
+            stage: "strength_default_retry",
+            total_edges: detection.total_edges,
+            defaulted_count: detection.defaulted_count,
+            correlation_id: ctx.requestId,
+          });
+
+          continue;
+        }
+        // Detection ran but threshold not met — no retry needed
+        log.debug({
+          event: "cee.strength_default.skip",
+          reason: "below_threshold",
+          total_edges: detection.total_edges,
+          defaulted_count: detection.defaulted_count,
+          request_id: ctx.requestId,
+        }, "Strength-default retry skipped — defaults below 80% threshold");
+      }
       break;
     } catch (error) {
       const err = error instanceof Error ? error : new Error("unexpected error");
@@ -262,6 +346,39 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
   if (!draftResult) {
     throw new Error("draft_graph_missing_result");
+  }
+
+  // Store strength-default retry state for telemetry/trace
+  ctx.strengthDefaultRetried = strengthDefaultRetried;
+  if (strengthDefaultRetried) {
+    // Re-check the final result to determine if defaults persisted after retry
+    const finalGraph = draftResult.graph;
+    if (finalGraph && Array.isArray(finalGraph.nodes) && Array.isArray(finalGraph.edges)) {
+      const finalDetection = detectStrengthDefaultsV1(
+        finalGraph.nodes as ReadonlyArray<{ id: string; kind?: string }>,
+        finalGraph.edges as ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number } }>,
+      );
+      ctx.strengthDefaultDetection = {
+        detected: finalDetection.detected,
+        total_edges: finalDetection.total_edges,
+        defaulted_count: finalDetection.defaulted_count,
+      };
+      if (finalDetection.detected) {
+        log.warn({
+          event: "cee.strength_default.persisted_after_retry",
+          total_edges: finalDetection.total_edges,
+          defaulted_count: finalDetection.defaulted_count,
+          request_id: ctx.requestId,
+        }, "Default strengths persisted after retry — accepting result");
+      } else {
+        log.info({
+          event: "cee.strength_default.retry_succeeded",
+          total_edges: finalDetection.total_edges,
+          defaulted_count: finalDetection.defaulted_count,
+          request_id: ctx.requestId,
+        }, "Strength default retry succeeded — LLM differentiated edge strengths");
+      }
+    }
   }
 
   // ── Step 8: Extract results + graph shape assertion (change 2: before stash) ──

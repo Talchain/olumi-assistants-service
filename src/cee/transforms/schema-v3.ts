@@ -454,6 +454,8 @@ export function transformEdgeToV3(
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
       // F5: Preserve enrichment defaulted flag through V3 transform
       ...((edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
+      // Preserve validation pipeline metadata (two-pass parameter review)
+      ...((edge as any).validation != null ? { validation: (edge as any).validation } : {}),
     },
     defaults,
   };

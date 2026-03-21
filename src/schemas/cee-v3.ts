@@ -161,8 +161,12 @@ export const EdgeV3 = z.object({
   origin: z.string().optional(),
   /** Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust. */
   edge_type: z.enum(["directed", "bidirected"]).optional(),
+  /** Per-edge validation metadata from the two-pass parameter review pipeline.
+   *  Absent when the pipeline is disabled, skipped, or failed gracefully.
+   *  Full type definition: ValidationMetadata (src/cee/validation-pipeline/types.ts). */
+  validation: z.any().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
-/** EdgeV3 with optional validation pipeline metadata (two-pass parameter review). */
+/** EdgeV3 with full ValidationMetadata typing (superset of Zod schema). */
 export type EdgeV3T = z.infer<typeof EdgeV3> & {
   /** Per-edge validation metadata from the two-pass parameter review pipeline.
    *  Absent when the pipeline is disabled, skipped, or failed gracefully. */

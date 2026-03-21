@@ -447,16 +447,31 @@ export interface StrengthDefaultsResult {
  * @param v3Edges - V3 edges to analyze
  * @returns Detection result with counts and detected flag
  */
-export function detectStrengthDefaults(
-  v3Nodes: V3Node[],
-  v3Edges: V3Edge[],
+/**
+ * Shared core for strength default detection. Both V3 (nested) and V1 (flat)
+ * entry points delegate here so that threshold logic, structural-edge exclusion,
+ * and signature matching cannot drift between the two code paths.
+ *
+ * @param nodes  - Nodes with `id` and optional `kind`
+ * @param edges  - Edges with `from`, `to`, and strength values
+ * @param getMean - Accessor: extract strength mean from an edge
+ * @param getStd  - Accessor: extract strength std from an edge
+ */
+function detectStrengthDefaultsCore<
+  N extends { id: string; kind?: string },
+  E extends { from: string; to: string },
+>(
+  nodes: ReadonlyArray<N>,
+  edges: ReadonlyArray<E>,
+  getMean: (edge: E) => number | undefined,
+  getStd: (edge: E) => number | undefined,
 ): StrengthDefaultsResult {
-  const THRESHOLD = STRENGTH_DEFAULT_THRESHOLD; // 80% — from @talchain/schemas
-  const MIN_EDGES = STRENGTH_DEFAULT_MIN_EDGES; // from @talchain/schemas
+  const THRESHOLD = STRENGTH_DEFAULT_THRESHOLD;
+  const MIN_EDGES = STRENGTH_DEFAULT_MIN_EDGES;
 
   // Build lookup map for O(1) node kind checks
   const nodeKindMap = new Map<string, string>();
-  for (const node of v3Nodes) {
+  for (const node of nodes) {
     if (node.kind) {
       nodeKindMap.set(node.id, node.kind);
     }
@@ -465,12 +480,10 @@ export function detectStrengthDefaults(
   // Partition edges into causal vs structural
   // Structural edges: decision→* and option→* (organisational wiring, not causal)
   let structuralExcluded = 0;
-  const causalEdges = v3Edges.filter((edge) => {
-    const edgeData = edge as { from: string; to: string; [key: string]: unknown };
-
+  const causalEdges = edges.filter((edge) => {
     // Defensively exclude edges with missing nodes (malformed graphs)
-    const fromKind = nodeKindMap.get(edgeData.from);
-    const toKind = nodeKindMap.get(edgeData.to);
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
     if (!fromKind || !toKind) return false;
 
     // Exclude structural edges: decision→* and option→*
@@ -501,14 +514,12 @@ export function detectStrengthDefaults(
   // Use Math.abs() because transform applies sign adjustment based on effect_direction,
   // so defaulted edges may be +0.5 or -0.5 depending on polarity.
   // Default std is 0.125 (from constants), derived from deriveStrengthStd(0.5, 0.5, undefined).
-
   let defaultedCount = 0;
   const defaultedEdgeIds: string[] = [];
   const bySource = { v3_transform: 0, nan_fix: 0 };
   for (const edge of causalEdges) {
-    const edgeData = edge as { from: string; to: string; strength?: { mean?: number; std?: number }; [key: string]: unknown };
-    const strengthMean = edgeData.strength?.mean;
-    const strengthStd = edgeData.strength?.std;
+    const strengthMean = getMean(edge);
+    const strengthStd = getStd(edge);
 
     // Match default signature: |mean| ≈ 0.5 (epsilon) AND std ≈ 0.125 (epsilon).
     // NaN-fix and V3 transform now use the same DEFAULT_STRENGTH_STD (0.125).
@@ -517,8 +528,7 @@ export function detectStrengthDefaults(
 
     if (meanMatchesDefault && stdMatchesDefault) {
       defaultedCount++;
-      defaultedEdgeIds.push(`${edgeData.from}->${edgeData.to}`);
-      // Both sources now produce the same std; attribute to v3_transform for reporting.
+      defaultedEdgeIds.push(`${edge.from}->${edge.to}`);
       bySource.v3_transform++;
     }
   }
@@ -535,6 +545,83 @@ export function detectStrengthDefaults(
     defaulted_edge_ids: defaultedEdgeIds,
     defaulted_by_source: bySource,
   };
+}
+
+export function detectStrengthDefaults(
+  v3Nodes: V3Node[],
+  v3Edges: V3Edge[],
+): StrengthDefaultsResult {
+  return detectStrengthDefaultsCore(
+    v3Nodes,
+    v3Edges,
+    (edge) => {
+      const edgeData = edge as { strength?: { mean?: number } };
+      return edgeData.strength?.mean;
+    },
+    (edge) => {
+      const edgeData = edge as { strength?: { std?: number } };
+      return edgeData.strength?.std;
+    },
+  );
+}
+
+// ============================================================================
+// Strength Default Detection — V1 Flat Edge Format (for parse-stage retry)
+// ============================================================================
+
+/**
+ * Detect default strength signatures on V1/adapter-format edges (flat fields).
+ *
+ * Delegates to {@link detectStrengthDefaultsCore} with accessors that read
+ * `edge.strength_mean` / `edge.strength_std` (flat V4 fields from adapter
+ * normalisation). Falls back to nested `strength.mean/std` if flat fields are
+ * absent — and emits a warning when the fallback path is used, so schema
+ * contract regressions are visible rather than silently masked.
+ *
+ * Used in the parse stage retry loop to detect defaults before the V3 transform.
+ *
+ * @param nodes - Adapter-format nodes (must have `id` and optional `kind`)
+ * @param edges - Adapter-format edges with flat `strength_mean` / `strength_std`
+ * @returns Detection result identical to {@link detectStrengthDefaults}
+ */
+export function detectStrengthDefaultsV1(
+  nodes: ReadonlyArray<{ id: string; kind?: string }>,
+  edges: ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number } }>,
+): StrengthDefaultsResult {
+  let nestedFallbackCount = 0;
+
+  const result = detectStrengthDefaultsCore(
+    nodes,
+    edges,
+    (edge) => {
+      if (edge.strength_mean !== undefined) return edge.strength_mean;
+      if (edge.strength?.mean !== undefined) {
+        nestedFallbackCount++;
+        return edge.strength.mean;
+      }
+      return undefined;
+    },
+    (edge) => {
+      if (edge.strength_std !== undefined) return edge.strength_std;
+      if (edge.strength?.std !== undefined) {
+        // Already counted in mean fallback if both are nested
+        return edge.strength.std;
+      }
+      return undefined;
+    },
+  );
+
+  // Warn if nested fallback was used — indicates adapter normalisation didn't
+  // populate flat fields, which is a schema contract regression worth investigating.
+  if (nestedFallbackCount > 0) {
+    log.warn({
+      event: "cee.strength_default.nested_fallback",
+      nested_fallback_count: nestedFallbackCount,
+      total_edges: result.total_edges,
+    }, "V1 strength detection fell back to nested strength.mean — flat fields missing");
+  }
+
+  return result;
 }
 
 // ============================================================================

@@ -460,4 +460,63 @@ describe("runStageBoundary", () => {
     expect(ctx.finalResponse.analysis_ready.model_adjustments[1].source).toBe("deterministic_sweep");
     expect(ctx.finalResponse.analysis_ready.model_adjustments[1].node_id).toBe("fac_y");
   });
+
+  // ── bias_findings wiring ────────────────────────────────────────────────
+
+  it("maps bias_findings from V1 response into analysis_ready", async () => {
+    const findings = [
+      { id: "selection_low_option_count", category: "selection", severity: "medium", node_ids: ["o1"] },
+    ];
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        bias_findings: findings,
+        trace: { strp: { mutations: [] }, corrections: [] },
+      },
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual(findings);
+  });
+
+  it("defaults bias_findings to [] when no findings on V1 response", async () => {
+    const ctx = makeCtx({
+      ceeResponse: {
+        graph: { nodes: [], edges: [] },
+        trace: { strp: { mutations: [] }, corrections: [] },
+      },
+    });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+  });
+
+  it("includes bias_findings: [] in strict-mode blocked response", async () => {
+    (validateStrictModeV3 as any).mockImplementation(() => {
+      throw new Error("strict validation failed");
+    });
+    const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
+    await runStageBoundary(ctx);
+
+    expect(ctx.finalResponse.analysis_ready.status).toBe("blocked");
+    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+  });
+
+  it("includes bias_findings: [] in schema-validation blocked response", async () => {
+    const { CEEGraphResponseV3 } = await import("../../src/schemas/cee-v3.js");
+    (CEEGraphResponseV3.safeParse as any).mockReturnValue({
+      success: false,
+      error: { issues: [{ message: "bad field", path: ["x"] }] },
+    });
+    try {
+      const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: false, includeDebug: false } });
+      await runStageBoundary(ctx);
+
+      expect(ctx.finalResponse.analysis_ready.status).toBe("blocked");
+      expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+    } finally {
+      // Restore safeParse so subsequent tests aren't affected
+      (CEEGraphResponseV3.safeParse as any).mockReturnValue({ success: true });
+    }
+  });
 });
