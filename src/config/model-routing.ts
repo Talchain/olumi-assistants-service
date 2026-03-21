@@ -27,6 +27,13 @@ export type CeeTask =
 /**
  * Default model assignments per task
  *
+ * Default models are OpenAI. Anthropic models (claude-sonnet-4-6) require
+ * explicit CEE_MODEL_* env var overrides:
+ *   CEE_MODEL_ORCHESTRATOR=claude-sonnet-4-6
+ *   CEE_MODEL_DRAFT=claude-sonnet-4-6
+ *   CEE_MODEL_EDIT_GRAPH=claude-sonnet-4-6
+ * repair_graph and decision_review remain on gpt-4.1.
+ *
  * Model selection by task type:
  * - Fast tier (gpt-4.1): Simple, speed-sensitive tasks (gpt-5-mini deprecated - empty response issues)
  * - Quality tier (gpt-4o): Primary drafting - reliable JSON output

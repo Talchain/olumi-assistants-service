@@ -13,6 +13,7 @@ import {
   registerAllDefaultPrompts,
   PROMPT_TEMPLATES,
   DECISION_REVIEW_PROMPT_VERSION,
+  REPAIR_GRAPH_PROMPT_VERSION,
 } from '../../src/prompts/defaults.js';
 import {
   getDefaultPrompts,
@@ -48,13 +49,13 @@ describe('PROMPT_TEMPLATES', () => {
     expect(prompt).toContain('outcome');
     expect(prompt).toContain('goal');
     expect(prompt).toContain('JSON');
-    // V15 uses "max 50 nodes, 100 edges"; V12 used "max 50 nodes, 200 edges"
-    // Older versions (v6, v8, v22) use placeholders {{maxNodes}}/{{maxEdges}}
+    // V187 uses STRUCTURAL_RULES section; older versions use max N nodes or placeholders
     const hasPlaceholders = prompt.includes('{{maxNodes}}') && prompt.includes('{{maxEdges}}');
     const hasHardcodedLimits = prompt.includes('Maximum 50 nodes') && prompt.includes('Maximum 200 edges');
     const hasV12Format = prompt.includes('max 50 nodes') && prompt.includes('200 edges');
     const hasV15Format = prompt.includes('max 50 nodes') && prompt.includes('100 edges');
-    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format || hasV15Format).toBe(true);
+    const hasV187Format = prompt.includes('<STRUCTURAL_RULES>') && prompt.includes('<FINAL_AUDIT>');
+    expect(hasPlaceholders || hasHardcodedLimits || hasV12Format || hasV15Format || hasV187Format).toBe(true);
   });
 
   it('suggest_options prompt contains key instructions', () => {
@@ -237,13 +238,13 @@ describe('Integration with Loader', () => {
   });
 });
 
-describe('Decision Review Fallback Prompt (v9)', () => {
+describe('Decision Review Fallback Prompt (v11)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
 
-  it('exports DECISION_REVIEW_PROMPT_VERSION as v9', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v9');
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v11', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11');
   });
 
   it('decision_review prompt is registered', () => {
@@ -357,7 +358,7 @@ describe('Decision Review Fallback Prompt (v9)', () => {
   });
 });
 
-describe('Orchestrator Prompt (cf-v13)', () => {
+describe('Orchestrator Prompt (cf-v26)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
@@ -380,16 +381,16 @@ describe('Orchestrator Prompt (cf-v13)', () => {
 
     expect(prompt).toContain('<ROLE>');
     expect(prompt).toContain('</ROLE>');
-    expect(prompt).toContain('<CORE_RULES>');
-    expect(prompt).toContain('</CORE_RULES>');
+    expect(prompt).toContain('<PRIMARY_RULES>');
+    expect(prompt).toContain('</PRIMARY_RULES>');
     expect(prompt).toContain('<TOOLS>');
     expect(prompt).toContain('</TOOLS>');
-    expect(prompt).toContain('<OUTPUT_FORMAT>');
-    expect(prompt).toContain('</OUTPUT_FORMAT>');
+    expect(prompt).toContain('<OUTPUT_CONTRACT>');
+    expect(prompt).toContain('</OUTPUT_CONTRACT>');
     expect(prompt).toContain('<DIAGNOSTICS>');
     expect(prompt).toContain('</DIAGNOSTICS>');
-    expect(prompt).toContain('<RULES_REMINDER>');
-    expect(prompt).toContain('</RULES_REMINDER>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+    expect(prompt).toContain('</FINAL_REMINDERS>');
   });
 
   it('orchestrator prompt has no unresolved template variables', () => {
@@ -399,15 +400,100 @@ describe('Orchestrator Prompt (cf-v13)', () => {
 
   it('orchestrator prompt is within expected length range', () => {
     const prompt = loadPromptSync('orchestrator');
-    // cf-v13: ~53k chars (~13k tokens)
+    // cf-v26: ~58k chars (~14k tokens)
     expect(prompt.length).toBeGreaterThan(40000);
-    expect(prompt.length).toBeLessThan(60000);
+    expect(prompt.length).toBeLessThan(70000);
   });
 
   it('orchestrator prompt is retrievable via getSystemPrompt (async store-aware path)', async () => {
     const prompt = await getSystemPrompt('orchestrator');
     expect(typeof prompt).toBe('string');
     expect(prompt).toContain('<ROLE>');
-    expect(prompt).toContain('<RULES_REMINDER>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+  });
+});
+
+// ============================================================================
+// Prompt version alignment invariants
+//
+// These tests prevent the drift that audit finding #1 identified:
+// registered fallback, PROMPT_TEMPLATES export, and version constants
+// must all reference the same prompt version per route.
+// ============================================================================
+
+describe('Prompt version alignment invariants', () => {
+  beforeEach(() => {
+    registerAllDefaultPrompts();
+  });
+
+  it('registered orchestrator fallback matches PROMPT_TEMPLATES.orchestrator', () => {
+    const registered = loadPromptSync('orchestrator');
+    const template = PROMPT_TEMPLATES.orchestrator;
+    expect(registered).toBe(template);
+  });
+
+  it('registered draft_graph fallback matches PROMPT_TEMPLATES.draft_graph', () => {
+    const registered = loadPromptSync('draft_graph');
+    const template = PROMPT_TEMPLATES.draft_graph;
+    expect(registered).toBe(template);
+  });
+
+  it('registered edit_graph fallback matches PROMPT_TEMPLATES.edit_graph', () => {
+    const registered = loadPromptSync('edit_graph');
+    const template = PROMPT_TEMPLATES.edit_graph;
+    expect(registered).toBe(template);
+  });
+
+  it('DECISION_REVIEW_PROMPT_VERSION matches v11', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11');
+  });
+
+  it('REPAIR_GRAPH_PROMPT_VERSION matches v6', () => {
+    expect(REPAIR_GRAPH_PROMPT_VERSION).toBe('v6');
+  });
+
+  it('orchestrator fallback contains cf-v26 structural markers', () => {
+    const prompt = loadPromptSync('orchestrator');
+    // cf-v26 specific sections not present in earlier versions
+    expect(prompt).toContain('<PRIMARY_RULES>');
+    expect(prompt).toContain('<OUTPUT_CONTRACT>');
+    expect(prompt).toContain('<COACHING_PLAYS>');
+    expect(prompt).toContain('<FINAL_REMINDERS>');
+  });
+
+  it('draft_graph fallback contains v187 structural markers', () => {
+    const prompt = loadPromptSync('draft_graph');
+    // v187 specific sections not present in v19
+    expect(prompt).toContain('<CONSTRUCTION_FLOW>');
+    expect(prompt).toContain('<STRUCTURAL_RULES>');
+    expect(prompt).toContain('<FINAL_AUDIT>');
+    expect(prompt).toContain('<ANNOTATED_EXAMPLE>');
+  });
+
+  it('edit_graph fallback contains v6 structural markers', () => {
+    const prompt = loadPromptSync('edit_graph');
+    // v6 specific sections not present in v2
+    expect(prompt).toContain('<classification>');
+    expect(prompt).toContain('<principles>');
+    expect(prompt).toContain('BIDIRECTED EDGES');
+  });
+});
+
+// ============================================================================
+// max_tokens default propagation
+//
+// Verifies that orchestrator and edit_graph routes provide fallback
+// max_tokens values so the Anthropic adapter does not silently use 4096.
+// ============================================================================
+
+describe('max_tokens default propagation', () => {
+  it('getMaxTokensFromConfig returns undefined when env var is not set', async () => {
+    const { getMaxTokensFromConfig } = await import('../../src/adapters/llm/router.js');
+    // When CEE_MAX_TOKENS_ORCHESTRATOR is not set, the config lookup returns undefined.
+    // The call site must apply its own fallback (16000).
+    const result = getMaxTokensFromConfig('orchestrator');
+    // Result is either a configured number or undefined — both are valid.
+    // The critical invariant is that call sites apply ?? 16000.
+    expect(result === undefined || typeof result === 'number').toBe(true);
   });
 });

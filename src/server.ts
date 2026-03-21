@@ -69,7 +69,7 @@ import { adminLLMOutputRoutes } from "./routes/admin.v1.llm-output.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
-import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState } from "./adapters/llm/prompt-loader.js";
+import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
 import { TASK_MODEL_DEFAULTS } from "./config/model-routing.js";
@@ -958,6 +958,9 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       // Explicit PROMPTS_ENABLED=true but store not healthy - warn
       app.log.warn('PROMPTS_ENABLED=true but prompt store is not healthy - cache warming skipped');
     }
+
+    // Startup health check: log prompt fallback alignment and model routing
+    logStartupHealthCheck(TASK_MODEL_DEFAULTS);
 
     // Register admin routes if enabled and configured
     // Set ADMIN_ROUTES_ENABLED=false in production to disable

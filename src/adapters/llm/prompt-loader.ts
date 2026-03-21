@@ -606,6 +606,85 @@ export function getCacheWarmingState(): Readonly<CacheWarmingState> {
   return { ...cacheWarmingState };
 }
 
+// Fallback version identifiers for health check comparison.
+// Must match the versions registered in registerAllDefaultPrompts().
+const FALLBACK_VERSIONS: Record<string, string> = {
+  orchestrator: 'cf-v26',
+  draft_graph: 'v187',
+  edit_graph: 'v6',
+  decision_review: 'v11',
+  repair_graph: 'v6',
+};
+
+/**
+ * Log prompt fallback alignment and model routing at startup.
+ *
+ * For each core prompt route, compares the fallback version against
+ * the store version (if cached). Logs a WARNING for any drift.
+ * Also logs the active model for each route from model-routing config.
+ *
+ * Non-blocking: never throws or fails startup.
+ *
+ * @param modelDefaults — pass TASK_MODEL_DEFAULTS from the caller to avoid
+ *   ESM-incompatible require() or circular dependency issues.
+ */
+export function logStartupHealthCheck(
+  modelDefaults?: Record<string, string>,
+): void {
+  try {
+    // Prompt fallback drift check — monitors the 5 core routes
+    // that were subject to the fallback alignment audit.
+    const coreRoutes = ['orchestrator', 'draft_graph', 'edit_graph', 'decision_review', 'repair_graph'] as const;
+    let driftCount = 0;
+
+    for (const route of coreRoutes) {
+      const taskId = OPERATION_TO_TASK_ID[route as keyof typeof OPERATION_TO_TASK_ID];
+      if (!taskId) continue;
+
+      const cached = promptCache.get(taskId);
+      const fallbackVersion = FALLBACK_VERSIONS[route] ?? 'unknown';
+
+      if (cached?.source === 'store' && cached.version !== undefined) {
+        const storeVersion = cached.promptId
+          ? `${cached.promptId}@v${cached.version}`
+          : `v${cached.version}`;
+
+        log.info(
+          { route, fallback: fallbackVersion, store: storeVersion, source: 'store' },
+          `Prompt alignment: ${route} fallback=${fallbackVersion}, store=${storeVersion}`,
+        );
+      } else {
+        log.warn(
+          { route, fallback: fallbackVersion, source: 'default' },
+          `Prompt fallback active: ${route} using fallback ${fallbackVersion} (no store version loaded)`,
+        );
+        driftCount++;
+      }
+    }
+
+    if (driftCount === 0) {
+      log.info('All core prompts loaded from store — fallback alignment healthy');
+    } else {
+      log.warn(
+        { driftCount, total: coreRoutes.length },
+        `${driftCount}/${coreRoutes.length} core prompts using fallback defaults (store unavailable)`,
+      );
+    }
+
+    // Model routing summary
+    if (modelDefaults) {
+      const routingEntries = coreRoutes.map(r => `${r}=${modelDefaults[r] ?? 'unknown'}`);
+      log.info(
+        { routing: Object.fromEntries(coreRoutes.map(r => [r, modelDefaults[r] ?? 'unknown'])) },
+        `Model routing: ${routingEntries.join(', ')}`,
+      );
+    }
+  } catch (err) {
+    // Entire health check is non-fatal
+    log.warn({ error: String(err) }, 'Startup health check failed (non-fatal)');
+  }
+}
+
 /**
  * Invalidate cache for a specific task or all tasks
  *

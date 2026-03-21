@@ -1164,7 +1164,7 @@ export async function handleEditGraph(
         {
           system: effectiveInstruction,
           userMessage,
-          maxTokens: getMaxTokensFromConfig('edit_graph'),
+          maxTokens: getMaxTokensFromConfig('edit_graph') ?? 16000,
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
           ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
         },

@@ -179,7 +179,7 @@ export async function checkSeedStatus(): Promise<{
 
 /**
  * Ensure the orchestrator prompt in the store has a staging version whose
- * content matches the registered default (cf-v19).
+ * content matches the registered default (cf-v26).
  *
  * If the current staging version's content hash differs from the default,
  * creates a new version and sets it as the staging version. This allows
@@ -232,7 +232,7 @@ async function ensureOrchestratorStagingVersion(
     const updated = await repo.createVersion(PROMPT_ID, {
       content: defaultContent,
       createdBy: 'system-migration',
-      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v19)',
+      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v26)',
     });
 
     // Find the newly created version number (highest)
@@ -248,7 +248,7 @@ async function ensureOrchestratorStagingVersion(
         hash: defaultHash.slice(0, 16),
         event: 'prompt.staging_migration.complete',
       },
-      'Orchestrator staging version migrated to cf-v19',
+      'Orchestrator staging version migrated to cf-v26',
     );
   } catch (err) {
     // Non-fatal — staging migration failure should not block startup

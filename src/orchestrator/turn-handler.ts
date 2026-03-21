@@ -639,7 +639,7 @@ async function dispatchViaLLM(
       messages,
       tools: toolDefs,
       tool_choice: { type: 'auto' },
-      maxTokens: getMaxTokensFromConfig('orchestrator'),
+      maxTokens: getMaxTokensFromConfig('orchestrator') ?? 16000,
       ...(orchestratorThinking ? { thinking: orchestratorThinking } : {}),
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },

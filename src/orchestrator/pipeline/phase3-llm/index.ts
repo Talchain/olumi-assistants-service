@@ -478,7 +478,7 @@ export async function phase3Generate(
       messages,
       tools: toolDefs,
       tool_choice: { type: 'auto' },
-      maxTokens: getMaxTokensFromConfig('orchestrator'),
+      maxTokens: getMaxTokensFromConfig('orchestrator') ?? 16000,
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
@@ -1348,7 +1348,7 @@ export async function phase3PrepareForStreaming(
     messages,
     tools: toolDefs,
     tool_choice: { type: 'auto' },
-    maxTokens: getMaxTokensFromConfig('orchestrator'),
+    maxTokens: getMaxTokensFromConfig('orchestrator') ?? 16000,
   };
 
   const callOpts: CallOpts = {

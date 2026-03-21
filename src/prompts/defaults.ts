@@ -16,11 +16,9 @@ import { getDraftGraphPromptV15, DRAFT_GRAPH_PROMPT_V15 } from './defaults-v15.j
 import { getDraftGraphPromptV19, DRAFT_GRAPH_PROMPT_V19 } from './defaults-v19.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
-import { getOrchestratorPrompt, ORCHESTRATOR_PROMPT_CF_V4 } from './orchestrator-cf-v4.js';
-import { ORCHESTRATOR_PROMPT_CF_V11 } from './orchestrator-cf-v11.js';
-import { getOrchestratorPromptV12, ORCHESTRATOR_PROMPT_CF_V12 } from './orchestrator-cf-v12.js';
-import { getOrchestratorPromptV13, ORCHESTRATOR_PROMPT_CF_V13 } from './orchestrator-cf-v13.js';
-import { getOrchestratorPromptV19, ORCHESTRATOR_PROMPT_CF_V19 } from './orchestrator-cf-v19.js';
+import { getOrchestratorPromptV26, ORCHESTRATOR_PROMPT_CF_V26 } from './orchestrator-cf-v26.js';
+import { getDraftGraphPromptV187, DRAFT_GRAPH_PROMPT_V187 } from './defaults-v187.js';
+import { getEditGraphPromptV6, EDIT_GRAPH_PROMPT_V6 } from './edit-graph-v6.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -29,20 +27,21 @@ import { log } from '../utils/telemetry.js';
 
 /**
  * Supported prompt versions for draft_graph.
- * Use PROMPT_VERSION env var to select: 'v19' (default) or legacy versions.
+ * Use PROMPT_VERSION env var to select: 'v187' (default) or legacy versions.
  *
  * Examples:
- *   PROMPT_VERSION=v19 -> Use v19 (production: bidirected edges, goal constraints, causal claims)
- *   PROMPT_VERSION=v15 -> Use v15 (deprecated: superseded by v19)
- *   PROMPT_VERSION=v12 -> Use v12 (deprecated: superseded by v15)
- *   PROMPT_VERSION=v22 -> Use v22 (deprecated: was misnumbering of v12 development)
- *   PROMPT_VERSION=v8  -> Use v8.2 (deprecated: superseded by v12)
- *   PROMPT_VERSION=v6  -> Use v6.0.2 (deprecated: verbose, explicit checklist)
+ *   PROMPT_VERSION=v187 -> Use v187 (production: construction flow, structural rules, annotated example)
+ *   PROMPT_VERSION=v19  -> Use v19 (deprecated: bidirected edges, goal constraints, causal claims)
+ *   PROMPT_VERSION=v15  -> Use v15 (deprecated: superseded by v19)
+ *   PROMPT_VERSION=v12  -> Use v12 (deprecated: superseded by v15)
+ *   PROMPT_VERSION=v22  -> Use v22 (deprecated: was misnumbering of v12 development)
+ *   PROMPT_VERSION=v8   -> Use v8.2 (deprecated: superseded by v12)
+ *   PROMPT_VERSION=v6   -> Use v6.0.2 (deprecated: verbose, explicit checklist)
  */
-export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v19' | 'v22';
+export type PromptVersion = 'v6' | 'v8' | 'v12' | 'v15' | 'v19' | 'v22' | 'v187';
 
-const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v19', 'v22']);
-const DEFAULT_VERSION: PromptVersion = 'v19';
+const VALID_VERSIONS = new Set<PromptVersion>(['v6', 'v8', 'v12', 'v15', 'v19', 'v22', 'v187']);
+const DEFAULT_VERSION: PromptVersion = 'v187';
 
 /**
  * Get the configured prompt version from environment.
@@ -714,6 +713,12 @@ Respond ONLY with valid JSON.`;
 // - Contrastive examples showing over-editing anti-patterns
 // ============================================================================
 
+/**
+ * Version identifier for the repair graph fallback prompt.
+ * Used for telemetry when prompt admin is unavailable.
+ */
+export const REPAIR_GRAPH_PROMPT_VERSION = 'v6';
+
 const REPAIR_GRAPH_PROMPT = `<ROLE>
 You repair causal decision graphs that failed validation. Your job is to make
 the MINIMUM changes needed to resolve every violation while preserving the
@@ -1197,7 +1202,7 @@ Respond ONLY with valid JSON.`;
  * Version identifier for the decision review fallback prompt.
  * Used for telemetry when prompt admin is unavailable.
  */
-export const DECISION_REVIEW_PROMPT_VERSION = 'v9';
+export const DECISION_REVIEW_PROMPT_VERSION = 'v11';
 
 const DECISION_REVIEW_PROMPT = `<ROLE>
 You transform deterministic analysis signals into plain-English explanations,
@@ -2094,7 +2099,8 @@ When needs_user_input is true, still provide your best estimate but flag that th
  * Called during server initialization to populate the fallback registry.
  *
  * The draft_graph prompt version is selected via PROMPT_VERSION env var:
- * - v19 (default): Production prompt with bidirected edges, goal constraints, causal claims
+ * - v187 (default): Benchmarked production prompt with construction flow, structural rules, annotated example
+ * - v19 (deprecated): Bidirected edges, goal constraints, causal claims (superseded by v187)
  * - v15 (deprecated): External priors, goal thresholds, coaching (superseded by v19)
  * - v12 (deprecated): Factor metadata, scale discipline (superseded by v15)
  * - v22 (deprecated): Was misnumbering during v12 development
@@ -2106,11 +2112,17 @@ export function registerAllDefaultPrompts(): void {
   const { version, explicit } = getPromptVersion();
 
   let draftPromptWithCaps: string;
-  if (version === 'v19') {
+  if (version === 'v187') {
+    draftPromptWithCaps = getDraftGraphPromptV187();
+    log.info(
+      { version, explicit },
+      `Using draft_graph prompt v187 (${explicit ? 'explicitly configured' : 'default'})`
+    );
+  } else if (version === 'v19') {
     draftPromptWithCaps = getDraftGraphPromptV19();
     log.info(
       { version, explicit },
-      `Using draft_graph prompt v19 (${explicit ? 'explicitly configured' : 'default'})`
+      `Using draft_graph prompt v19 [DEPRECATED - use v187] (${explicit ? 'explicitly configured' : 'env override'})`
     );
   } else if (version === 'v15') {
     draftPromptWithCaps = getDraftGraphPromptV15();
@@ -2156,15 +2168,19 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
   registerDefaultPrompt('enrich_factors', getEnrichFactorsPrompt());
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
-  registerDefaultPrompt('edit_graph', EDIT_GRAPH_PROMPT);
+  registerDefaultPrompt('edit_graph', getEditGraphPromptV6());
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
-  registerDefaultPrompt('orchestrator', getOrchestratorPromptV19());
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV26());
   registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
 
-  // Log orchestrator prompt version at registration
-  const promptVersionMatch = ORCHESTRATOR_PROMPT_CF_V13.match(/Version:\s*([\S]+)/);
-  const promptVersion = promptVersionMatch ? promptVersionMatch[1] : 'unknown';
-  log.info({ prompt_version: promptVersion, operation: 'orchestrator' }, 'Orchestrator prompt registered');
+  // Log prompt versions at registration (read from actually-registered content)
+  log.info({
+    orchestrator: 'cf-v26',
+    draft_graph: version,
+    edit_graph: 'v6',
+    decision_review: DECISION_REVIEW_PROMPT_VERSION,
+    repair_graph: REPAIR_GRAPH_PROMPT_VERSION,
+  }, 'Prompt fallback defaults registered');
 
   // Note: These tasks don't have LLM prompts (deterministic/algorithmic):
   // - isl_synthesis: Uses template-based narrative generation (no LLM)
@@ -2180,9 +2196,10 @@ export function registerAllDefaultPrompts(): void {
  * Call getDraftGraphPromptByVersion() for resolved prompts.
  */
 export const PROMPT_TEMPLATES = {
-  draft_graph: DRAFT_GRAPH_PROMPT_V19,
-  draft_graph_v19: DRAFT_GRAPH_PROMPT_V19,
-  draft_graph_v15: DRAFT_GRAPH_PROMPT_V15,
+  draft_graph: DRAFT_GRAPH_PROMPT_V187,
+  draft_graph_v187: DRAFT_GRAPH_PROMPT_V187,
+  draft_graph_v19: DRAFT_GRAPH_PROMPT_V19, // deprecated - superseded by v187
+  draft_graph_v15: DRAFT_GRAPH_PROMPT_V15, // deprecated - superseded by v19
   draft_graph_v12: DRAFT_GRAPH_PROMPT_V12, // deprecated - superseded by v15
   draft_graph_v22: DRAFT_GRAPH_PROMPT_V22, // deprecated - was misnumbering
   draft_graph_v8: DRAFT_GRAPH_PROMPT_V8, // deprecated - superseded by v12
@@ -2195,9 +2212,9 @@ export const PROMPT_TEMPLATES = {
   bias_check: BIAS_CHECK_PROMPT,
   enrich_factors: ENRICH_FACTORS_PROMPT,
   decision_review: DECISION_REVIEW_PROMPT,
-  edit_graph: EDIT_GRAPH_PROMPT,
+  edit_graph: EDIT_GRAPH_PROMPT_V6,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
-  orchestrator: ORCHESTRATOR_PROMPT_CF_V13,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V26,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 
@@ -2206,6 +2223,9 @@ export const PROMPT_TEMPLATES = {
  * Useful for A/B testing or explicit version selection in tests.
  */
 export function getDraftGraphPromptByVersion(version: PromptVersion): string {
+  if (version === 'v187') {
+    return getDraftGraphPromptV187();
+  }
   if (version === 'v19') {
     return getDraftGraphPromptV19();
   }

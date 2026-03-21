@@ -367,7 +367,7 @@ async function runCoachingCall(
     {
       system: systemPrompt,
       userMessage,
-      maxTokens: getMaxTokensFromConfig('orchestrator'),
+      maxTokens: getMaxTokensFromConfig('orchestrator') ?? 16000,
     },
     { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS },
   );
