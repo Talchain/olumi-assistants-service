@@ -6,9 +6,13 @@ src/generated
 .env
 .env.local
 
-# Duplicate files (macOS/editor backups)
+# Duplicate files (iCloud/macOS sync conflicts)
 * 2
 * 2.*
+* 3
+* 3.*
+* 4
+* 4.*
 .* 2
 tests/perf/_reports/
 

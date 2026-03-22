@@ -11,7 +11,7 @@
  * Actions: Share, Edit, Regenerate ("Run the analysis again.").
  */
 
-import type { ConversationBlock, ConversationContext, OrchestratorError, BlockAction } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, OrchestratorError, BlockAction } from "../types.js";
 import { createBriefBlock } from "../blocks/factory.js";
 
 // ============================================================================
@@ -19,7 +19,7 @@ import { createBriefBlock } from "../blocks/factory.js";
 // ============================================================================
 
 export interface GenerateBriefResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
 }
 

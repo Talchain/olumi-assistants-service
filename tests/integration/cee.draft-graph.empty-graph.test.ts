@@ -111,7 +111,7 @@ vi.mock("../../src/utils/fixtures.js", () => ({
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
-// Skipped: empty graph produces 500 (unhandled) instead of 400 — needs pipeline error handling update
+// Skipped: pipeline gap — unified pipeline does not catch empty-graph and return 400 CEE_GRAPH_INVALID. Deterministic (uses fixture mocks). Blocked on source fix in unified-pipeline error handling.
 describe.skip("POST /assist/v1/draft-graph (CEE v1) - empty graph", () => {
   let app: FastifyInstance;
 

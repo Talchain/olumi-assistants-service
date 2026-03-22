@@ -30,7 +30,7 @@ import { getHttpStatusForError } from "./types.js";
 import type {
   OrchestratorTurnRequest,
   OrchestratorResponseEnvelope,
-  ConversationBlock,
+  TypedConversationBlock,
 } from "./types.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
 import type { BriefIntelligence } from "../schemas/brief-intelligence.js";
@@ -386,7 +386,7 @@ function assembleBothSucceeded(
   coachingText: string,
   dskCoaching?: DskCoachingItems,
 ): ParallelGenerateResult {
-  const blocks: ConversationBlock[] = [...draftResult.blocks];
+  const blocks: TypedConversationBlock[] = [...draftResult.blocks];
 
   return {
     httpStatus: 200,
@@ -458,7 +458,7 @@ function assembleCoachingFailed(
     fallbackParts.push("Review the model structure and let me know if you'd like to refine any factors or connections.");
   }
 
-  const blocks: ConversationBlock[] = [...draftResult.blocks];
+  const blocks: TypedConversationBlock[] = [...draftResult.blocks];
 
   return {
     httpStatus: 200,

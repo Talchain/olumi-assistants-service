@@ -9,7 +9,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { ConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, PendingProposalState, V2RunResponseEnvelope, ProposedChangesPayload, AppliedChanges } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, OrchestratorError, PendingClarificationState, PendingProposalState, V2RunResponseEnvelope, ProposedChangesPayload, AppliedChanges } from "../types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { createPLoTClient } from "../plot-client.js";
 import { getAdapter } from "../../adapters/llm/router.js";
@@ -62,7 +62,7 @@ function logResolvedAdapter(task: string, adapter: LLMAdapter, requestId: string
 // ============================================================================
 
 export interface ToolDispatchResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   analysisResponse?: V2RunResponseEnvelope;
   toolLatencyMs?: number;

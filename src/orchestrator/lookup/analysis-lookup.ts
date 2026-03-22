@@ -13,7 +13,7 @@
  */
 
 import { log } from "../../utils/telemetry.js";
-import type { V2RunResponseEnvelope, SuggestedAction, ConversationBlock } from "../types.js";
+import type { V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock } from "../types.js";
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { EnrichedContext, OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
 import { resolveContextHash } from "../pipeline/phase5-validation/envelope-assembler.js";

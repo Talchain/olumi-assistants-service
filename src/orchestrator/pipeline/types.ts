@@ -10,7 +10,7 @@
 import type { FastifyRequest } from "fastify";
 import type {
   ConversationContext,
-  ConversationBlock,
+  TypedConversationBlock,
   ConversationMessage,
   SuggestedAction,
   ConversationalState,
@@ -435,7 +435,7 @@ export interface LLMResult {
 // ============================================================================
 
 export interface ToolResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   side_effects: {
     graph_updated: boolean;
     analysis_ran: boolean;
@@ -476,7 +476,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   turn_id: string;
   assistant_text: string | null;
   assistant_tool_calls?: Array<{ name: string; input: Record<string, unknown> }>;
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   suggested_actions: SuggestedAction[];
   proposed_changes?: ProposedChangesPayload;
   analysis_response?: V2RunResponseEnvelope;
@@ -627,7 +627,7 @@ export interface PipelineDeps {
 
 export type {
   ConversationContext,
-  ConversationBlock,
+  TypedConversationBlock,
   ConversationMessage,
   SuggestedAction,
   ConversationalState,

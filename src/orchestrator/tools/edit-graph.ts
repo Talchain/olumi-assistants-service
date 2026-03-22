@@ -33,7 +33,7 @@ import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type {
-  ConversationBlock,
+  TypedConversationBlock,
   ConversationContext,
   GraphPatchBlockData,
   GraphV3T,
@@ -70,7 +70,7 @@ import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 // ============================================================================
 
 export interface EditGraphResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
   /** The applied graph from PLoT (post-edit), or null if rejected / PLoT not configured. */

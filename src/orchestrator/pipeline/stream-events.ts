@@ -8,7 +8,7 @@
  */
 
 import { z } from "zod";
-import type { ConversationBlock } from "../types.js";
+import type { TypedConversationBlock } from "../types.js";
 import type { OrchestratorResponseEnvelopeV2 } from "./types.js";
 
 // ============================================================================
@@ -19,7 +19,7 @@ export type OrchestratorStreamEvent =
   | { type: 'turn_start'; seq: number; turn_id: string; routing: 'deterministic' | 'llm'; stage: string }
   | { type: 'text_delta'; seq: number; delta: string }
   | { type: 'tool_start'; seq: number; tool_name: string; long_running: boolean }
-  | { type: 'block'; seq: number; block: ConversationBlock }
+  | { type: 'block'; seq: number; block: TypedConversationBlock }
   | { type: 'tool_result'; seq: number; tool_name: string; success: boolean; duration_ms?: number }
   | { type: 'turn_complete'; seq: number; envelope: OrchestratorResponseEnvelopeV2 }
   | { type: 'error'; seq: number; error: { code: string; message: string }; recoverable: boolean };

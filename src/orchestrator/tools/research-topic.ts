@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { config } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
 import { LruTtlCache } from "../../utils/cache.js";
-import type { ConversationBlock, ConversationContext, EvidenceBlockData } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, EvidenceBlockData } from "../types.js";
 import { createEvidenceBlock } from "../blocks/factory.js";
 import { createCommentaryBlock } from "../blocks/factory.js";
 import { executeWebSearch } from "./research-client.js";
@@ -22,7 +22,7 @@ import { executeWebSearch } from "./research-client.js";
 // ============================================================================
 
 export interface ResearchTopicResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
 }

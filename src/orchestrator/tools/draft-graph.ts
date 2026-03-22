@@ -12,7 +12,7 @@ import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
-import type { ConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry } from "../types.js";
+import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
@@ -36,7 +36,7 @@ export interface CEEDraftWarning {
 }
 
 export interface DraftGraphResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
   /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */

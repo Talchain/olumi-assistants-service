@@ -20,7 +20,7 @@
 import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
-import type { ConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError, SupportingRef } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError, SupportingRef } from "../types.js";
 import { createCommentaryBlock } from "../blocks/factory.js";
 import { isAnalysisCurrent, isAnalysisExplainable } from "../analysis-state.js";
 
@@ -29,7 +29,7 @@ import { isAnalysisCurrent, isAnalysisExplainable } from "../analysis-state.js";
 // ============================================================================
 
 export interface ExplainResultsResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
   /** Which tier resolved this turn: 1 = cached deterministic, 2 = review data, 3 = LLM. */

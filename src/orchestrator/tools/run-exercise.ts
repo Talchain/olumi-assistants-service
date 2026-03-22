@@ -20,7 +20,7 @@
 import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
-import type { ConversationBlock, ConversationContext, OrchestratorError, V2RunResponseEnvelope } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, OrchestratorError, V2RunResponseEnvelope } from "../types.js";
 import type { ExerciseType } from "../types/guidance-item.js";
 import { createReviewCardBlock } from "../blocks/factory.js";
 
@@ -29,7 +29,7 @@ import { createReviewCardBlock } from "../blocks/factory.js";
 // ============================================================================
 
 export interface RunExerciseResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
 }

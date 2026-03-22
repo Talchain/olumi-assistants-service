@@ -11,14 +11,14 @@
  * Does NOT throw error or return error envelope.
  */
 
-import type { ConversationBlock } from "../types.js";
+import type { TypedConversationBlock } from "../types.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export interface UndoPatchResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   assistantText: string;
 }
 

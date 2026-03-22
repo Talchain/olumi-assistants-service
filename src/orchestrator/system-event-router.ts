@@ -22,7 +22,7 @@ import { log } from "../utils/telemetry.js";
 import type {
   SystemEvent,
   OrchestratorTurnRequest,
-  ConversationBlock,
+  TypedConversationBlock,
   ConversationMessage,
   GraphPatchBlockData,
   V2RunResponseEnvelope,
@@ -59,7 +59,7 @@ export interface SystemEventRouterResult {
   /** Silent envelope invariant: always present (may be null). */
   assistantText: string | null;
   /** Silent envelope invariant: always present (may be empty array). */
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   /** Silent envelope invariant: always present (may be empty array). */
   guidanceItems: GuidanceItem[];
   /**
@@ -417,7 +417,7 @@ async function handlePatchAccepted(
     const rejectionMsg = result.message ?? 'The patch could not be applied due to a validation error.';
     const contextEntry = `[system] User accepted patch ${patchId} but it was rejected by validation: ${rejectionMsg}`;
 
-    const rejectionBlock: ConversationBlock = {
+    const rejectionBlock: TypedConversationBlock = {
       block_id: `blk_graph_patch_rej_${patchId.substring(0, 16)}`,
       block_type: 'graph_patch',
       data: {
@@ -731,7 +731,7 @@ function buildGraphPatchBlock(
   operations: Record<string, unknown>[],
   graphHash: string | undefined,
   turnId: string,
-): ConversationBlock {
+): TypedConversationBlock {
   // Cast to PatchOperation[] for summary derivation — formatter handles unknown ops gracefully.
   const opsForSummary = operations as unknown as PatchOperation[];
   const data: GraphPatchBlockData = {

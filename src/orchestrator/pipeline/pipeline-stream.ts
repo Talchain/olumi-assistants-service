@@ -18,7 +18,7 @@ import type {
   EnrichedContext,
   LLMResult,
   LLMClient,
-  ConversationBlock,
+  TypedConversationBlock,
 } from "./types.js";
 import type { Phase4Result } from "./phase4-tools/index.js";
 import { phase1Enrich } from "./phase1-enrichment/index.js";

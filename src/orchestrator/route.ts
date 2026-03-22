@@ -12,7 +12,7 @@ import type { FastifyInstance } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { handleTurn } from "./turn-handler.js";
-import type { OrchestratorTurnRequest, SystemEvent, ConversationBlock } from "./types.js";
+import type { OrchestratorTurnRequest, SystemEvent, TypedConversationBlock } from "./types.js";
 import { getHttpStatusForError } from "./types.js";
 import { config, isProduction } from "../config/index.js";
 import { handleTurnV2 } from "./pipeline/route-v2.js";
@@ -43,7 +43,7 @@ import {
  * Diagnostic only — never rejects the response.
  */
 function logAnalysisReadyDiagnostics(
-  envelope: { blocks: ConversationBlock[] },
+  envelope: { blocks: TypedConversationBlock[] },
   requestId: string,
 ): void {
   const blocks = envelope.blocks;

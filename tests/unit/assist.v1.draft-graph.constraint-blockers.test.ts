@@ -104,7 +104,7 @@ const v1ResponseWithConstraintDrops = {
   seed: "42",
 };
 
-// Skipped: legacy pipeline (Pipeline B) removed — finaliseCeeDraftResponse throws unconditionally
+// Skipped: pipeline gap — test mocks finaliseCeeDraftResponse() which is archived (Pipeline B). Deterministic. Blocked on rewrite to test constraint blocker injection via unified pipeline.
 describe.skip("Legacy V3 route: constraint-drop blockers", () => {
   let app: FastifyInstance;
 

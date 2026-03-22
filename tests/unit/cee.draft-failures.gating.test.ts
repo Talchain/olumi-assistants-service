@@ -16,7 +16,7 @@ vi.mock('../../src/cee/draft-failures/store.js', () => ({
 
 import { build } from '../../src/server.js';
 
-// Skipped: forced missing-option kind no longer produces 400 — gating logic changed in unified pipeline
+// Skipped: pipeline gap — X-Debug-Force-Missing-Kinds no longer produces 400 in unified pipeline. Deterministic (uses fixture mocks). Blocked on gating logic update or assertion rewrite.
 describe.skip('CEE draft failures unsafe gating', () => {
   beforeEach(() => {
     _resetConfigCache();

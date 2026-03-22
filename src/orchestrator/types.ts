@@ -195,7 +195,7 @@ export interface ResponseLineage {
 export interface OrchestratorResponseEnvelope {
   turn_id: string;
   assistant_text: string | null;
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   suggested_actions?: SuggestedAction[];
   analysis_response?: unknown;
   lineage: ResponseLineage;

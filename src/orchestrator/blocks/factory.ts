@@ -21,7 +21,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { stableStringify } from "../context/stable-stringify.js";
 import type {
-  ConversationBlock,
+  TypedConversationBlock,
   BlockProvenance,
   BlockAction,
   GraphPatchBlockData,
@@ -81,7 +81,7 @@ export function createGraphPatchBlock(
   turnId: string,
   relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
   actions?: BlockAction[],
-): ConversationBlock {
+): TypedConversationBlock {
   // Hash input: patch_type + operations (sorted keys, preserved order) + graph hash
   const opsForHash = data.operations.map((op) => ({
     op: op.op,
@@ -118,7 +118,7 @@ export function createFactBlock(
   responseHash?: string,
   seed?: number,
   relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = deterministicId(
     'fact',
     data.fact_type,
@@ -145,7 +145,7 @@ export function createReviewCardBlock(
   card: unknown,
   turnId: string,
   actions?: BlockAction[],
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = deterministicId(
     'review_card',
     stableStringify(card),
@@ -171,7 +171,7 @@ export function createBriefBlock(
   brief: unknown,
   turnId: string,
   actions?: BlockAction[],
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = deterministicId(
     'brief',
     stableStringify(brief),
@@ -199,7 +199,7 @@ export function createCommentaryBlock(
   trigger: string,
   supportingRefs: SupportingRef[] = [],
   relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = ephemeralId('commentary');
 
   const data: CommentaryBlockData = { narrative, supporting_refs: supportingRefs };
@@ -223,7 +223,7 @@ export function createFramingBlock(
   turnId: string,
   goal?: string,
   constraints?: unknown[],
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = ephemeralId('framing');
 
   const data: FramingBlockData = { stage };
@@ -251,7 +251,7 @@ export function createFramingBlock(
 export function createEvidenceBlock(
   data: EvidenceBlockData,
   turnId: string,
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = ephemeralId('evidence');
 
   return {
@@ -270,7 +270,7 @@ export function createEvidenceBlock(
 export function createArtefactBlock(
   data: ArtefactBlockData,
   turnId: string,
-): ConversationBlock {
+): TypedConversationBlock {
   const blockId = ephemeralId('artefact');
 
   return {

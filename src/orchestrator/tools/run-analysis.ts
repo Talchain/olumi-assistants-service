@@ -21,7 +21,7 @@
  */
 
 import { log } from "../../utils/telemetry.js";
-import type { ConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError } from "../types.js";
+import type { TypedConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError } from "../types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
@@ -54,7 +54,7 @@ function buildSyntheticAnalysisEnvelope(fields: {
 // ============================================================================
 
 export interface RunAnalysisResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   analysisResponse: V2RunResponseEnvelope;
   responseHash: string | undefined;
   seedUsed: number | undefined;
@@ -211,7 +211,7 @@ export async function handleRunAnalysis(
   );
 
   // Build blocks
-  const blocks: ConversationBlock[] = [];
+  const blocks: TypedConversationBlock[] = [];
 
   // FactBlocks from fact_objects (grouped by fact_type)
   // Only if fact_objects is present and non-empty — do NOT synthesise from other fields

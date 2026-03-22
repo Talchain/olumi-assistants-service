@@ -27,7 +27,7 @@ import {
   type CeeJourneyEnvelopes,
 } from "../../sdk/typescript/src/ceeHelpers.js";
 
-// Skipped: trace.engine.degraded not populated in unified pipeline — needs degraded-mode wiring
+// Skipped: pipeline gap — trace.engine.degraded not wired from request header to response trace. Deterministic (uses fixture mocks). Blocked on degraded-mode header propagation.
 describe.skip("CEE hero journey: engine degraded mode", () => {
   let app: FastifyInstance;
 

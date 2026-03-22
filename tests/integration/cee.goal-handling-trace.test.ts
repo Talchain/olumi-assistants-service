@@ -160,7 +160,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
-// Skipped: trace.goal_handling not populated in unified pipeline — needs enrichment wiring
+// Skipped: pipeline gap — trace.goal_handling not populated in unified pipeline enrichment stage. Deterministic (uses fixture mocks). Blocked on goal-handling trace wiring in phase1-enrichment.
 describe.skip("POST /assist/v1/draft-graph trace.goal_handling", () => {
   let app: FastifyInstance;
 

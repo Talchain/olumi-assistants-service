@@ -5,14 +5,14 @@
  * for the UI (node/edge counts, option labels, goal, insight, readiness, repairs).
  */
 
-import type { ConversationBlock, GraphPatchBlockData, ModelReceipt } from "../../types.js";
+import type { TypedConversationBlock, GraphPatchBlockData, ModelReceipt } from "../../types.js";
 
 /**
  * Build a ModelReceipt from the blocks produced this turn.
  * Returns undefined if no graph_patch block with an applied_graph is found.
  */
 export function buildModelReceipt(
-  blocks: ConversationBlock[],
+  blocks: TypedConversationBlock[],
   analysisReady?: GraphPatchBlockData['analysis_ready'],
 ): ModelReceipt | undefined {
   // Find the last graph_patch block

@@ -25,7 +25,7 @@ import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type {
   OrchestratorTurnRequest,
   OrchestratorResponseEnvelope,
-  ConversationBlock,
+  TypedConversationBlock,
   OrchestratorError,
   TurnPlan,
   ConversationContext,
@@ -881,7 +881,7 @@ async function dispatchTool(
   const isLongRunning = toolName === 'run_analysis' || toolName === 'draft_graph';
 
   try {
-    let blocks: ConversationBlock[] = [];
+    let blocks: TypedConversationBlock[] = [];
     let assistantText: string | null = null;
     let analysisResponse = undefined;
     let toolLatencyMs: number | undefined;
@@ -1011,11 +1011,11 @@ async function dispatchTool(
 // ============================================================================
 
 /**
- * Convert ExtractedBlock[] from the XML parser into ConversationBlock[].
+ * Convert ExtractedBlock[] from the XML parser into TypedConversationBlock[].
  * Only commentary, review_card, and artefact are allowed — other types are
  * already filtered by the parser.
  */
-function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): ConversationBlock[] {
+function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): TypedConversationBlock[] {
   return blocks.map((block) => {
     if (block.type === 'commentary') {
       return createCommentaryBlock(

@@ -6,7 +6,7 @@
  * direct_analysis_run system event handler (Path A — UI already ran analysis).
  */
 
-import type { ConversationBlock, V2RunResponseEnvelope } from "../types.js";
+import type { TypedConversationBlock, V2RunResponseEnvelope } from "../types.js";
 import type { GraphV3T } from "../types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
@@ -17,7 +17,7 @@ import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 // ============================================================================
 
 export interface AnalysisBlocksResult {
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   guidanceItems: GuidanceItem[];
   responseHash: string | undefined;
 }
@@ -44,7 +44,7 @@ export function buildAnalysisBlocksAndGuidance(
   const responseHash = response.response_hash ?? response.meta?.response_hash;
   const seedUsed = Number(response.meta?.seed_used);
 
-  const blocks: ConversationBlock[] = [];
+  const blocks: TypedConversationBlock[] = [];
 
   // FactBlocks from fact_objects (grouped by fact_type)
   // Only if fact_objects is present and non-empty — do NOT synthesise from other fields

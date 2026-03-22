@@ -491,7 +491,7 @@ function injectSystemEntries(enrichedContext: EnrichedContext, entries: string[]
 function buildSystemEventAckEnvelope(
   enrichedContext: EnrichedContext,
   assistantText: string | null,
-  blocks: import("../types.js").ConversationBlock[],
+  blocks: import("../types.js").TypedConversationBlock[],
   guidanceItems: import("../types/guidance-item.js").GuidanceItem[],
   event: import("../types.js").SystemEvent,
   graphHash?: string,

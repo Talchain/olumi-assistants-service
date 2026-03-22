@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import type {
   OrchestratorResponseEnvelope,
   OrchestratorDebugPayload,
-  ConversationBlock,
+  TypedConversationBlock,
   SuggestedAction,
   ResponseLineage,
   TurnPlan,
@@ -36,7 +36,7 @@ export interface EnvelopeInput {
   /** Assistant text from LLM response */
   assistantText: string | null;
   /** Blocks produced by tool handlers */
-  blocks: ConversationBlock[];
+  blocks: TypedConversationBlock[];
   /** Suggested follow-up actions */
   suggestedActions?: SuggestedAction[];
   /** Full PLoT analysis response (for UI Results Panel) */
@@ -281,7 +281,7 @@ export function buildTurnPlan(
  * Mutates blocks in place (they are owned by this envelope).
  */
 function recomputeAnalysisReady(
-  blocks: ConversationBlock[],
+  blocks: TypedConversationBlock[],
   context: ConversationContext,
 ): void {
   for (const block of blocks) {
