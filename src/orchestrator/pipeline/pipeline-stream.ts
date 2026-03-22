@@ -125,6 +125,7 @@ export async function* executePipelineStream(
         ? classifyIntentWithContext(request.message, {
             hasGraph: enrichedContext.graph != null,
             graphNodeLabels: enrichedContext.graph?.nodes?.map((n) => n.label ?? '') ?? [],
+            deterministicRoutingV2: config.features.deterministicRoutingV2,
           })
         : classifyIntent(request.message);
     if (!intentGate.tool) {

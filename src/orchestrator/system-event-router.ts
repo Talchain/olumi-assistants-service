@@ -17,6 +17,7 @@
  * current turn only — not part of the canonical conversation history.
  */
 
+import { config } from "../config/index.js";
 import { log } from "../utils/telemetry.js";
 import type {
   SystemEvent,
@@ -87,6 +88,12 @@ export interface SystemEventRouterResult {
   delegateToTool?: 'run_analysis';
   /** When true, caller should chain explain_results if a message also accompanies the turn. */
   needsNarration?: boolean;
+  /**
+   * When true, the caller should route to LLM with mode pre-set to INTERPRET.
+   * Used for direct_analysis_run when analysis is available — bypasses tool selection
+   * but uses LLM for interpretation and coaching output.
+   */
+  routeToLlmInterpret?: boolean;
 }
 
 // ============================================================================
@@ -332,6 +339,7 @@ async function handlePatchAccepted(
     const { confirmationText, staleAnalysisEntry, rerun_recommended } = buildPatchConfirmationText(
       details.operations,
       turnRequest.context,
+      config.features.deterministicRoutingV2,
     );
 
     return {
@@ -538,11 +546,12 @@ function handleDirectGraphEdit(
   }
 
   return {
-    assistantText: 'Your graph changes have been noted.',
+    assistantText: 'Changes applied.',
     blocks: [],
     guidanceItems,
     systemContextEntries: [contextEntry],
     httpStatus: 200,
+    rerun_recommended: turnRequest.context?.analysis_response != null ? true : undefined,
   };
 }
 
@@ -588,13 +597,35 @@ function handleDirectAnalysisRun(
       turnId,
     );
 
-    // Narration rule: if no message (or trivial), no explain_results call.
-    // Caller chains explain_results only when needsNarration is true.
-    const hasMessage = turnRequest.message.trim().length > 5;
+    // Check if analysis is interpretable (not blocked/failed)
+    const analysisStatus = typeof (analysisState as Record<string, unknown>).analysis_status === 'string'
+      ? (analysisState as Record<string, unknown>).analysis_status as string
+      : 'ok';
+    const isInterpretable = analysisStatus !== 'blocked' && analysisStatus !== 'failed';
 
+    // V2 path: route to LLM INTERPRET for coaching when analysis is interpretable
+    if (config.features.deterministicRoutingV2 && isInterpretable) {
+      log.info(
+        { request_id: requestId, event_id: event.event_id, path: 'A' },
+        'direct_analysis_run: Path A — routing to LLM INTERPRET for coaching',
+      );
+
+      return {
+        assistantText: null,
+        blocks,
+        guidanceItems,
+        systemContextEntries: [contextEntry],
+        httpStatus: 200,
+        analysisResponse: analysisState,
+        routeToLlmInterpret: true,
+      };
+    }
+
+    // Legacy path (V1 or blocked/failed analysis): narration via explain_results chain
+    const hasMessage = turnRequest.message.trim().length > 5;
     log.info(
-      { request_id: requestId, event_id: event.event_id, path: 'A', needs_narration: hasMessage },
-      'direct_analysis_run: Path A — using UI-provided analysis',
+      { request_id: requestId, event_id: event.event_id, path: 'A', needs_narration: hasMessage, analysis_status: analysisStatus },
+      `direct_analysis_run: Path A — ${isInterpretable ? 'legacy narration path' : 'analysis not interpretable'}`,
     );
 
     return {
@@ -604,7 +635,7 @@ function handleDirectAnalysisRun(
       systemContextEntries: [contextEntry],
       httpStatus: 200,
       analysisResponse: analysisState,
-      needsNarration: hasMessage,
+      needsNarration: isInterpretable ? hasMessage : false,
     };
   }
 
@@ -660,25 +691,37 @@ function handleFeedbackSubmitted(
 // ============================================================================
 
 /**
- * Build a one-sentence confirmation text for patch_accepted.
- * Uses buildPatchSummary to derive a human-readable description of the operations,
- * then appends "applied to your model." — no em dashes.
+ * Build confirmation text for patch_accepted.
+ *
+ * V2 (CEE_DETERMINISTIC_ROUTING_V2): produces richer text aligned with v28's
+ * POST-EDIT FEEDBACK play. Falls back to concise form when V2 is off.
+ *
+ * No em dashes in any generated text.
  */
 function buildPatchConfirmationText(
   operations: Record<string, unknown>[],
   context: OrchestratorTurnRequest['context'],
+  v2Enabled?: boolean,
 ): { confirmationText: string; staleAnalysisEntry: string | null; rerun_recommended: boolean } {
   const opsForSummary = operations as unknown as PatchOperation[];
   const raw = buildPatchSummary(opsForSummary, null, 'accepted');
-  // buildPatchSummary always returns a sentence ending with '.'; strip it before composing.
-  // Fall back when the summary is the empty-ops sentinel.
   const hasMeaningfulSummary = raw && raw !== 'No changes were applied.';
-  const base = hasMeaningfulSummary ? raw.replace(/\.$/, '') : 'Changes';
-  const confirmationText = `${base} applied to your model.`;
 
   // Flag stale analysis when analysis exists and is now superseded by graph changes
   const isStale = context?.analysis_response != null;
   const staleAnalysisEntry = isStale ? '[system] Analysis is now stale. Rerun recommended.' : null;
+
+  let confirmationText: string;
+
+  if (v2Enabled && hasMeaningfulSummary) {
+    // V2: richer text matching v28 POST-EDIT FEEDBACK play
+    const base = raw.replace(/\.$/, '');
+    const staleNote = isStale ? ' This changes how the analysis is calculated.' : '';
+    confirmationText = `${base} applied to your model.${staleNote}`;
+  } else {
+    const base = hasMeaningfulSummary ? raw.replace(/\.$/, '') : 'Changes';
+    confirmationText = `${base} applied to your model.`;
+  }
 
   return { confirmationText, staleAnalysisEntry, rerun_recommended: isStale };
 }

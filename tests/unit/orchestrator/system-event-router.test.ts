@@ -582,10 +582,11 @@ describe('direct_analysis_run', () => {
         plotClient: null,
       });
 
+      // V2 flag off: falls back to legacy needsNarration path
       expect(result.needsNarration).toBeFalsy();
     });
 
-    it('needsNarration=true when meaningful message accompanies', async () => {
+    it('needsNarration=true when meaningful message accompanies (legacy path, V2 off)', async () => {
       const event = makeDirectAnalysisEvent();
       const analysisState = makeAnalysisState();
 
@@ -597,6 +598,7 @@ describe('direct_analysis_run', () => {
         plotClient: null,
       });
 
+      // With V2 off (default), uses legacy needsNarration path
       expect(result.needsNarration).toBe(true);
     });
   });

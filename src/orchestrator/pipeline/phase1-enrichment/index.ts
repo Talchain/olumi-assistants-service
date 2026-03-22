@@ -35,6 +35,7 @@ import { buildDecisionContinuity } from "../../context/decision-continuity.js";
 import { matchReferencedEntities } from "../../context/entity-matcher.js";
 import { trackEntityStates } from "../../context/entity-state-tracker.js";
 import type { GraphV3T } from "../../types.js";
+import type { GapSummary, VoiRankingEntry, EdgeEValue, ConditionalWinner, InferenceWarning, PlotCritique } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 
@@ -106,6 +107,9 @@ export function phase1Enrich(
     ? compactAnalysis(context.analysis_response, nodeLabels)
     : undefined;
 
+  // 2b. Extract ISL/PLoT enrichment fields from graph and analysis (V2)
+  const islFields = extractIslFields(context.graph as GraphV3T | null, context.analysis_response, graphCompact);
+
   // 3. Trim messages to last 5 turns
   const trimmedMessages = context.messages.slice(-MAX_CONVERSATION_TURNS);
 
@@ -139,6 +143,9 @@ export function phase1Enrich(
     selected_node_ids: selectedNodeIds,
     selected_edge_ids: selectedEdgeIds,
     analysis_inputs: context.analysis_inputs,
+
+    // ISL/PLoT enrichment fields (V2 — optional, populated when data exists)
+    ...islFields,
 
     // Inferred state
     stage_indicator: stageIndicator,
@@ -208,4 +215,154 @@ export function phase1Enrich(
     ...(referencedEntities.length > 0 ? { referenced_entities: referencedEntities } : {}),
     ...(entityStateMap ? { entity_state_map: entityStateMap } : {}),
   } as EnrichedContext;
+}
+
+// ============================================================================
+// ISL/PLoT Field Extraction (V2)
+// ============================================================================
+
+type AnalysisResponse = Record<string, unknown>;
+
+/**
+ * Extract ISL/PLoT enrichment fields from graph and analysis data.
+ * All fields are optional — returns only those that can be computed from available data.
+ */
+function extractIslFields(
+  graph: GraphV3T | null,
+  analysis: AnalysisResponse | null | undefined,
+  graphCompact: import("../../context/graph-compact.js").GraphV3Compact | undefined,
+): Partial<Pick<EnrichedContext, 'gap_summary' | 'voi_ranking' | 'edge_e_values' | 'conditional_winners' | 'inference_warnings' | 'plot_critiques'>> {
+  const result: Partial<Pick<EnrichedContext, 'gap_summary' | 'voi_ranking' | 'edge_e_values' | 'conditional_winners' | 'inference_warnings' | 'plot_critiques'>> = {};
+
+  // gap_summary: computed from graph node data
+  if (graph && graphCompact) {
+    const nodes = (graph as Record<string, unknown>).nodes;
+    if (Array.isArray(nodes) && nodes.length > 0) {
+      const factors = nodes.filter((n: Record<string, unknown>) => n.kind === 'factor' || n.kind === 'lever' || n.kind === 'driver');
+      const missingBaseline = factors.filter((n: Record<string, unknown>) => n.value === undefined || n.value === null);
+      const unconfirmed = factors.filter((n: Record<string, unknown>) => n.source === 'assumption' || n.source === 'system');
+      const goalNodes = nodes.filter((n: Record<string, unknown>) => n.kind === 'goal');
+      const missingGoalTarget = goalNodes.length > 0 && goalNodes.every((n: Record<string, unknown>) => n.value === undefined || n.value === null);
+
+      if (factors.length > 0 && (missingBaseline.length > 0 || unconfirmed.length > 0 || missingGoalTarget)) {
+        result.gap_summary = {
+          missing_baseline_count: missingBaseline.length,
+          missing_baseline_factors: missingBaseline.map((n: Record<string, unknown>) => String(n.label ?? n.id ?? '')).slice(0, 10),
+          missing_goal_target: missingGoalTarget,
+          unconfirmed_count: unconfirmed.length,
+          total_factor_count: factors.length,
+        };
+      }
+    }
+  }
+
+  // Fields from analysis response (all optional — skip when not present)
+  if (analysis) {
+    // voi_ranking: from analysis.voi_ranking or results[].voi_ranking
+    const voiRanking = extractArray(analysis, 'voi_ranking');
+    if (voiRanking.length > 0) {
+      result.voi_ranking = voiRanking
+        .filter((v: Record<string, unknown>) => typeof v.factor_id === 'string')
+        .slice(0, 5)
+        .map((v: Record<string, unknown>) => ({
+          factor_id: String(v.factor_id),
+          factor_label: String(v.factor_label ?? v.label ?? v.factor_id),
+          voi_score: Number(v.voi_score ?? v.voi ?? 0),
+          evpi: Number(v.evpi ?? 0),
+          evpi_percentage_points: Number(v.evpi_percentage_points ?? v.evpi_pp ?? 0),
+        }));
+    }
+
+    // edge_e_values: from analysis.edge_e_values or robustness.edge_e_values
+    const eValues = extractArray(analysis, 'edge_e_values');
+    if (eValues.length > 0) {
+      result.edge_e_values = eValues
+        .filter((e: Record<string, unknown>) => typeof e.edge_id === 'string' && typeof e.e_value === 'number')
+        .slice(0, 10)
+        .map((e: Record<string, unknown>) => ({
+          edge_id: String(e.edge_id),
+          e_value: Number(e.e_value),
+          flip_direction: String(e.flip_direction ?? 'unknown'),
+          current_mean: Number(e.current_mean ?? 0),
+          flip_mean: Number(e.flip_mean ?? 0),
+        }));
+    }
+
+    // conditional_winners: from analysis.conditional_winners
+    const condWinners = extractArray(analysis, 'conditional_winners');
+    if (condWinners.length > 0) {
+      result.conditional_winners = condWinners
+        .filter((c: Record<string, unknown>) => typeof c.factor_id === 'string')
+        .slice(0, 5)
+        .map((c: Record<string, unknown>) => ({
+          factor_id: String(c.factor_id),
+          factor_label: String(c.factor_label ?? c.label ?? c.factor_id),
+          split_value: Number(c.split_value ?? 0),
+          split_unit: String(c.split_unit ?? ''),
+          low_bucket: String(c.low_bucket ?? ''),
+          high_bucket: String(c.high_bucket ?? ''),
+          winner_flips: Boolean(c.winner_flips),
+        }));
+    }
+
+    // inference_warnings: from analysis.inference_warnings
+    const warnings = extractArray(analysis, 'inference_warnings');
+    if (warnings.length > 0) {
+      result.inference_warnings = warnings
+        .filter((w: Record<string, unknown>) => typeof w.node_id === 'string')
+        .slice(0, 10)
+        .map((w: Record<string, unknown>) => ({
+          node_id: String(w.node_id),
+          code: String(w.code ?? 'UNKNOWN'),
+          message: String(w.message ?? ''),
+        }));
+    }
+
+    // plot_critiques: from analysis.critiques or analysis.plot_critiques
+    const critiques = extractArray(analysis, 'critiques') ?? extractArray(analysis, 'plot_critiques');
+    if (critiques.length > 0) {
+      result.plot_critiques = critiques
+        .filter((c: Record<string, unknown>) => typeof c.code === 'string' || typeof c.message === 'string')
+        .slice(0, 5)
+        .map((c: Record<string, unknown>) => ({
+          code: String(c.code ?? 'UNKNOWN'),
+          message: String(c.message ?? ''),
+        }));
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Extract an array field from analysis response, checking top-level and nested shapes.
+ * Checks: top-level → results object → results[0] → robustness object → robustness_synthesis.
+ */
+function extractArray(analysis: AnalysisResponse, field: string): Record<string, unknown>[] {
+  // Top-level
+  if (Array.isArray(analysis[field])) return analysis[field] as Record<string, unknown>[];
+  // Nested under results object (some PLoT shapes)
+  const results = analysis.results;
+  if (results && typeof results === 'object' && !Array.isArray(results)) {
+    const nested = (results as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Record<string, unknown>[];
+  }
+  // Per-result (first result)
+  if (Array.isArray(results) && results.length > 0) {
+    const first = results[0] as Record<string, unknown>;
+    if (Array.isArray(first?.[field])) return first[field] as Record<string, unknown>[];
+  }
+  // Nested under robustness (e.g. analysis.robustness.edge_e_values)
+  const robustness = analysis.robustness;
+  if (robustness && typeof robustness === 'object') {
+    const nested = (robustness as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Record<string, unknown>[];
+  }
+  // Nested under robustness_synthesis
+  const synthObj = analysis.robustness_synthesis;
+  if (synthObj && typeof synthObj === 'object') {
+    const nested = (synthObj as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Record<string, unknown>[];
+  }
+  return [];
 }

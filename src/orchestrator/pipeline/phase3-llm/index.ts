@@ -378,7 +378,9 @@ export async function phase3Generate(
   }
 
   // 2. LLM routing — full tool-calling flow
-  const assembled = await assembleV2SystemPrompt(enrichedContext);
+  const assembled = await assembleV2SystemPrompt(enrichedContext, {
+    injectArtefactAppendix: intentGate.chip_origin === true && intentGate.chip_artefact === true,
+  });
   const systemPrompt = assembled.text;
 
   // Task 7: Log prompt identity for every V2 LLM call
@@ -1278,7 +1280,9 @@ export async function phase3PrepareForStreaming(
   }
 
   // LLM path: prepare the call args
-  const assembled2 = await assembleV2SystemPrompt(enrichedContext);
+  const assembled2 = await assembleV2SystemPrompt(enrichedContext, {
+    injectArtefactAppendix: intentGate.chip_origin === true && intentGate.chip_artefact === true,
+  });
   const systemPrompt = assembled2.text;
   if (systemPrompt.length < 1000) {
     log.warn({ system_prompt_length: systemPrompt.length }, 'phase3: suspiciously short system prompt for streaming');

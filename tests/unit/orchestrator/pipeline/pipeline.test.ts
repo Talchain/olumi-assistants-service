@@ -413,9 +413,10 @@ describe("pipeline", () => {
     expect(deps.llmClient.chat).not.toHaveBeenCalled();
     expect(deps.llmClient.chatWithTools).not.toHaveBeenCalled();
     expect(envelope.assistant_text).toBeNull();
+    // Blocked analysis: router returns needsNarration: false → ack_only
     expect(envelope._route_metadata).toMatchObject({
-      outcome: "direct_analysis_narration_skipped",
-      reasoning: "analysis_not_current_or_not_explainable",
+      outcome: "direct_analysis_ack_only",
+      reasoning: "no_followup_message_for_results_narration",
     });
   });
 
@@ -698,7 +699,8 @@ describe("pipeline", () => {
     const debugBundle = traceCall?.[0].debug_bundle as Record<string, unknown>;
     expect(debugBundle.trigger_source).toBe("direct_analysis_run");
     expect((debugBundle.direct_analysis_run as Record<string, unknown>).source_context).toBe("analysis_state");
-    expect((debugBundle.direct_analysis_run as Record<string, unknown>).narration_branch).toBe("skipped_not_explainable_or_not_current");
+    // Blocked analysis: router returns needsNarration: false → ack_only → narration_branch: "none"
+    expect((debugBundle.direct_analysis_run as Record<string, unknown>).narration_branch).toBe("none");
     expect((debugBundle.direct_analysis_run as Record<string, unknown>).stale_state_reused).toBe(true);
     infoSpy.mockRestore();
   });

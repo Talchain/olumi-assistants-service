@@ -134,7 +134,50 @@ export async function executePipeline(
       // Inject [system] context entries into the enriched conversation history
       const updatedEnrichedContext = injectSystemEntries(enrichedContext, routerResult.systemContextEntries);
 
-      // direct_analysis_run Path A with narration: chain explain_results
+      // direct_analysis_run: route to LLM with INTERPRET mode for coaching output.
+      // Bypasses tool selection but uses LLM for interpretation and coaching.
+      if (routerResult.routeToLlmInterpret) {
+        // Fold analysis into enriched context so the LLM sees it in Zone 2
+        const interpretContext: EnrichedContext = {
+          ...updatedEnrichedContext,
+          analysis: routerResult.analysisResponse ?? updatedEnrichedContext.analysis,
+        };
+
+        const specialistResult2 = phase2Route();
+        const interpretGate: IntentGateResult = {
+          tool: null, routing: 'llm', confidence: 'none',
+          normalised_message: request.message.toLowerCase().trim(),
+          matched_pattern: 'direct_analysis_interpret',
+        };
+
+        const llmResult = await phase3Generate(
+          interpretContext, specialistResult2, deps.llmClient, requestId, request.message, interpretGate,
+        );
+
+        // Merge router blocks (analysis blocks) with LLM coaching output
+        const toolResult = await phase4Execute(llmResult, interpretContext, deps.toolDispatcher, requestId);
+        const envelope = phase5Validate(llmResult, toolResult, interpretContext, specialistResult2);
+        envelope.blocks = [...routerResult.blocks, ...envelope.blocks];
+        if (routerResult.analysisResponse) {
+          envelope.analysis_response = routerResult.analysisResponse;
+        }
+        envelope.guidance_items = [...routerResult.guidanceItems, ...envelope.guidance_items];
+
+        attachSystemEventDebugBundle({
+          envelope,
+          enrichedContext: interpretContext,
+          request,
+          requestId,
+          directAnalysis: {
+            source_context: request.analysis_state ? 'analysis_state' : 'context.analysis_response',
+            narration_branch: 'llm_interpret',
+            stale_state_reused: hasStaleAnalysisState(request.analysis_state ?? null, request.graph_state ?? updatedEnrichedContext.graph),
+          },
+        });
+        return envelope;
+      }
+
+      // direct_analysis_run Path A legacy (needsNarration): chain explain_results
       let finalBlocks = routerResult.blocks;
       let finalAssistantText = routerResult.assistantText;
       const narrationGraph = request.graph_state ?? updatedEnrichedContext.graph;
@@ -249,6 +292,7 @@ export async function executePipeline(
         ? classifyIntentWithContext(request.message, {
             hasGraph: enrichedContext.graph != null,
             graphNodeLabels: enrichedContext.graph?.nodes?.map((n) => n.label ?? '') ?? [],
+            deterministicRoutingV2: config.features.deterministicRoutingV2,
           })
         : classifyIntent(request.message);
     if (!intentGate.tool) {

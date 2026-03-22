@@ -9,8 +9,14 @@
  * Zone 3: Tool definitions (reuse existing).
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { getSystemPrompt } from "../../../adapters/llm/prompt-loader.js";
-import type { EnrichedContext, ReferencedEntityDetail } from "../types.js";
+import type {
+  EnrichedContext, ReferencedEntityDetail,
+  GapSummary, VoiRankingEntry, EdgeEValue,
+  ConditionalWinner, InferenceWarning, PlotCritique,
+} from "../types.js";
 import type { GraphV3Compact } from "../../context/graph-compact.js";
 import type { AnalysisResponseSummary, OptionComparisonEntry } from "../../context/analysis-compact.js";
 import type { DecisionContinuity } from "../../context/decision-continuity.js";
@@ -347,17 +353,129 @@ function buildPendingChangesBlock(enrichedContext: EnrichedContext): string | nu
 }
 
 // ============================================================================
+// Artefact Appendix (V2)
+// ============================================================================
+
+/** Cached artefact appendix content — loaded once on first use. */
+let _artefactAppendixCache: string | null | undefined;
+
+/**
+ * Load the artefact design appendix from prompts/artefact_appendix.txt.
+ * Returns null on ENOENT or read error (non-fatal). Cached after first load.
+ */
+function loadArtefactAppendix(): string | null {
+  if (_artefactAppendixCache !== undefined) return _artefactAppendixCache;
+  try {
+    const filePath = resolve(process.cwd(), 'prompts', 'artefact_appendix.txt');
+    _artefactAppendixCache = readFileSync(filePath, 'utf-8');
+    return _artefactAppendixCache;
+  } catch {
+    log.warn('artefact appendix not found at prompts/artefact_appendix.txt — skipping');
+    _artefactAppendixCache = null;
+    return null;
+  }
+}
+
+/**
+ * Reset the artefact appendix cache (for testing).
+ */
+export function _resetArtefactAppendixCache(): void {
+  _artefactAppendixCache = undefined;
+}
+
+// ============================================================================
+// ISL/PLoT Field Serialisers (V2 — trim priority 7-8)
+// ============================================================================
+
+/**
+ * Serialise gap summary into human-readable text for Zone 2.
+ */
+export function serialiseGapSummary(gs: GapSummary): string {
+  const parts: string[] = [];
+  parts.push(`Data gaps: ${gs.missing_baseline_count} of ${gs.total_factor_count} factors missing baselines.`);
+  if (gs.unconfirmed_count > 0) {
+    parts.push(`${gs.unconfirmed_count} value${gs.unconfirmed_count !== 1 ? 's are' : ' is an'} estimate${gs.unconfirmed_count !== 1 ? 's' : ''}.`);
+  }
+  if (gs.missing_goal_target) {
+    parts.push('Goal target not set.');
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Serialise VoI/EVPI ranking into human-readable text.
+ * Top 5 entries, sorted by evpi_percentage_points descending.
+ */
+export function serialiseVoiRanking(entries: VoiRankingEntry[]): string {
+  const sorted = [...entries]
+    .sort((a, b) => b.evpi_percentage_points - a.evpi_percentage_points)
+    .slice(0, 5);
+  const lines = sorted.map((e, i) =>
+    `  ${i + 1}. ${e.factor_label}: resolving uncertainty could improve confidence by ${e.evpi_percentage_points.toFixed(1)}pp`
+  );
+  return `Investigation priorities:\n${lines.join('\n')}`;
+}
+
+/**
+ * Serialise edge e-values into robustness text.
+ */
+export function serialiseEdgeEValues(entries: EdgeEValue[]): string {
+  const lines = entries.map((e) => {
+    const robustness = Math.abs(e.e_value) >= 2 ? 'robust' : 'fragile';
+    return `  ${e.edge_id}: would need to be ${e.e_value.toFixed(1)}x wrong to flip (${robustness})`;
+  });
+  return `Robustness (e-values):\n${lines.join('\n')}`;
+}
+
+/**
+ * Serialise conditional winners into text.
+ */
+export function serialiseConditionalWinners(entries: ConditionalWinner[]): string {
+  const lines = entries.map((e) => {
+    const unit = e.split_unit ? ` ${e.split_unit}` : '';
+    return `  ${e.factor_label}: winner changes if value exceeds ${e.split_value}${unit}`;
+  });
+  return `Conditional splits:\n${lines.join('\n')}`;
+}
+
+/**
+ * Serialise inference warnings.
+ */
+export function serialiseInferenceWarnings(entries: InferenceWarning[]): string {
+  return entries.map((w) => `Warning: ${w.message}`).join('\n');
+}
+
+/**
+ * Serialise PLoT critiques as one-liners.
+ */
+export function serialisePlotCritiques(entries: PlotCritique[]): string {
+  return entries.map((c) => `Model health: ${c.message}`).join('\n');
+}
+
+// ============================================================================
 // Prompt Assembler
 // ============================================================================
+
+/**
+ * Options for prompt assembly beyond the enriched context.
+ */
+export interface AssemblyOptions {
+  /** When true, the artefact design appendix is appended to the system prompt. */
+  injectArtefactAppendix?: boolean;
+}
 
 /**
  * Assemble the system prompt with enriched context.
  *
  * Builds on the existing Zone 1 + Zone 2 pattern from prompt-assembly.ts
  * but injects the richer V2 enriched context fields.
+ *
+ * @param enrichedContext - Phase 1 output
+ * @param options - Optional assembly configuration (artefact appendix injection etc.)
  */
 export async function assembleV2SystemPrompt(
   enrichedContext: EnrichedContext,
+  options?: AssemblyOptions,
 ): Promise<AssembledSystemPrompt> {
   // Zone 1: Static orchestrator prompt (from prompt store / cache / defaults)
   // F.2: Zone 1 will be replaced with science-powered prompt. Using existing cf-v4.0.5 for now.
@@ -440,6 +558,35 @@ export async function assembleV2SystemPrompt(
     zone2Sections.push(capSection(`Decision history: ${enrichedContext.event_log_summary}`));
   }
 
+  // ISL/PLoT enrichment fields (V2 — trim priority 7-8: trimmed before graph/analysis but after entity memory)
+  // All fields optional — check presence before serialising, omit entirely when absent.
+  let islFieldsIdx = -1;
+  const islSections: string[] = [];
+
+  if (enrichedContext.gap_summary) {
+    islSections.push(serialiseGapSummary(enrichedContext.gap_summary));
+  }
+  if (enrichedContext.voi_ranking && enrichedContext.voi_ranking.length > 0) {
+    islSections.push(serialiseVoiRanking(enrichedContext.voi_ranking));
+  }
+  if (enrichedContext.edge_e_values && enrichedContext.edge_e_values.length > 0) {
+    islSections.push(serialiseEdgeEValues(enrichedContext.edge_e_values));
+  }
+  if (enrichedContext.conditional_winners && enrichedContext.conditional_winners.length > 0) {
+    islSections.push(serialiseConditionalWinners(enrichedContext.conditional_winners));
+  }
+  if (enrichedContext.inference_warnings && enrichedContext.inference_warnings.length > 0) {
+    islSections.push(serialiseInferenceWarnings(enrichedContext.inference_warnings));
+  }
+  if (enrichedContext.plot_critiques && enrichedContext.plot_critiques.length > 0) {
+    islSections.push(serialisePlotCritiques(enrichedContext.plot_critiques));
+  }
+
+  if (islSections.length > 0) {
+    islFieldsIdx = zone2Sections.length;
+    zone2Sections.push(capSection(islSections.join('\n')));
+  }
+
   // Intent classification
   zone2Sections.push(`User intent: ${enrichedContext.intent_classification}`);
 
@@ -461,12 +608,13 @@ export async function assembleV2SystemPrompt(
   zone2Sections.push('<!-- Specialist advice will appear here when Phase 2 is active -->');
 
   // Budget enforcement: trim low-priority blocks if Zone 2 exceeds char budget.
-  // Priority order (first dropped): entity_memory → event_log_summary.
+  // Priority order (first dropped): entity_memory → event_log_summary → isl_fields.
   const blockNames: Record<number, string> = {};
   if (entityMemoryIdx >= 0) blockNames[entityMemoryIdx] = 'entity_memory';
   if (eventLogIdx >= 0) blockNames[eventLogIdx] = 'event_log_summary';
+  if (islFieldsIdx >= 0) blockNames[islFieldsIdx] = 'isl_fields';
 
-  const trimOrder = [entityMemoryIdx, eventLogIdx].filter((i) => i >= 0);
+  const trimOrder = [entityMemoryIdx, eventLogIdx, islFieldsIdx].filter((i) => i >= 0);
   for (const idx of trimOrder) {
     const totalChars = zone2Sections.reduce((sum, s) => sum + s.length, 0);
     if (totalChars <= ZONE2_CHAR_BUDGET) break;
@@ -483,7 +631,18 @@ export async function assembleV2SystemPrompt(
   }
 
   const zone2 = zone2Sections.filter((s) => s.length > 0).join('\n');
-  const text = `${zone1}\n\n${zone2}`;
+
+  // Artefact appendix injection (V2): append when chip_origin + artefact pattern matched
+  let artefactAppendixText = '';
+  if (options?.injectArtefactAppendix) {
+    const appendix = loadArtefactAppendix();
+    if (appendix) {
+      artefactAppendixText = `\n\n${appendix}`;
+      log.info({ event: 'artefact_appendix_injected', chars: appendix.length }, 'Artefact design appendix injected');
+    }
+  }
+
+  const text = `${zone1}\n\n${zone2}${artefactAppendixText}`;
 
   // Track budget-trimmed sections as the V2 pipeline equivalent of "activated but empty" Zone 2 blocks.
   // In the V2 assembler, sections are only pushed when data exists, so the only way a section
@@ -491,6 +650,7 @@ export async function assembleV2SystemPrompt(
   const emptyBlocks: string[] = [];
   if (entityMemoryIdx >= 0 && zone2Sections[entityMemoryIdx] === '') emptyBlocks.push('entity_memory');
   if (eventLogIdx >= 0 && zone2Sections[eventLogIdx] === '') emptyBlocks.push('event_log');
+  if (islFieldsIdx >= 0 && zone2Sections[islFieldsIdx] === '') emptyBlocks.push('isl_fields');
 
   // Persist empty blocks to enrichedContext for feature-health cross-referencing in Phase 5
   if (emptyBlocks.length > 0) {
@@ -513,6 +673,8 @@ export async function assembleV2SystemPrompt(
       has_entities: (enrichedContext.referenced_entities?.length ?? 0) > 0,
       has_entity_memory: !!enrichedContext.entity_state_map,
       has_event_log: !!enrichedContext.event_log_summary,
+      has_isl_fields: islFieldsIdx >= 0 && zone2Sections[islFieldsIdx] !== '',
+      has_artefact_appendix: !!options?.injectArtefactAppendix,
       empty_blocks: emptyBlocks.length > 0 ? emptyBlocks : undefined,
     },
     `Zone 2 assembled (V2): ${activeSectionCount} sections, ${totalChars} chars${emptyBlocks.length > 0 ? `, empty: ${emptyBlocks.join(',')}` : ''}`,

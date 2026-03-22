@@ -290,6 +290,7 @@ const ConfigSchema = z.object({
     orchestratorStreaming: booleanString.default(false), // ENABLE_ORCHESTRATOR_STREAMING — SSE streaming for orchestrator turns
     strictPromptValidation: booleanString.default(false), // CEE_STRICT_PROMPT_VALIDATION — throw on error-severity prompt-zone violations
     optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
+    deterministicRoutingV2: booleanString.default(false), // CEE_DETERMINISTIC_ROUTING_V2 — v2 deterministic routing patterns (parameter assignment hardening, chip passthrough, system event text)
   }),
 
   // Prompt Cache Configuration
@@ -629,6 +630,7 @@ function parseConfig(): Config {
       orchestratorStreaming: env.ENABLE_ORCHESTRATOR_STREAMING,
       strictPromptValidation: env.CEE_STRICT_PROMPT_VALIDATION,
       optionShortcutRepair: env.ENABLE_OPTION_SHORTCUT_REPAIR,
+      deterministicRoutingV2: env.CEE_DETERMINISTIC_ROUTING_V2,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

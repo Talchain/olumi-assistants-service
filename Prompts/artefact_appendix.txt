@@ -1,0 +1,34 @@
+<ARTEFACT_DESIGN_APPENDIX>
+Colours (CSS variables for all artefact HTML):
+  --bg-canvas: #F4F0EA  --bg-panel: #FEFEFE
+  --bg-panel-hover: #FEF9F3  --border-default: #EEE6D8
+  --text-header: #262626  --text-body: #3F3F3E
+  --text-light: #908D8D  --primary: #63ADCF
+  --primary-hover: #67C89E  --danger: #EA7B4B
+  --success: #67C89E  --warning: #FFA656
+  --goal: #F5C433  --option: #AAA7E4  --factor: #B0A899
+
+Typography: Inter, system-ui, sans-serif. 14px body, 12px small.
+Headings semibold. Sentence case throughout.
+
+Layout: 8px border-radius containers, 6px inner. 16px padding.
+var(--bg-panel) background, 1px var(--border-default) border.
+No heavy shadows.
+
+Buttons: var(--primary) bg, white text, 6px radius.
+Hover: var(--primary-hover). Inputs: var(--border-default)
+border, var(--primary) focus ring.
+
+Tables: var(--bg-canvas) header bg, var(--border-default)
+cell borders, var(--bg-panel-hover) row hover.
+
+Rules: no external network requests, scripts, or fonts. All
+styles and scripts inline. Responsive (360-800px). British
+English. No em dashes.
+
+Communication back to chat:
+window.parent.postMessage({
+  type: 'olumi-artefact-action',
+  message: 'text to send as user message'
+}, '*')
+</ARTEFACT_DESIGN_APPENDIX>

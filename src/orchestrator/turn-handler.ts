@@ -252,7 +252,7 @@ export async function handleTurn(
     const hasGraph = (turnRequest.context.graph ?? turnRequest.graph_state ?? null) != null;
     const graphNodeLabels = (turnRequest.context.graph ?? turnRequest.graph_state)?.nodes?.map((n: { label?: string }) => n.label ?? '') ?? [];
     const intent = config.features.briefDetectionEnabled
-      ? classifyIntentWithContext(turnRequest.message, { hasGraph, graphNodeLabels })
+      ? classifyIntentWithContext(turnRequest.message, { hasGraph, graphNodeLabels, deterministicRoutingV2: config.features.deterministicRoutingV2 })
       : classifyIntent(turnRequest.message);
 
     let prerequisitesMet = true;

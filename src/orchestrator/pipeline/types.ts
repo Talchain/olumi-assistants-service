@@ -281,6 +281,55 @@ export interface ReferencedEntityDetail {
 }
 
 // ============================================================================
+// ISL/PLoT Enrichment Types (V2)
+// ============================================================================
+
+export interface GapSummary {
+  missing_baseline_count: number;
+  missing_baseline_factors: string[];
+  missing_goal_target: boolean;
+  unconfirmed_count: number;
+  total_factor_count: number;
+}
+
+export interface VoiRankingEntry {
+  factor_id: string;
+  factor_label: string;
+  voi_score: number;
+  evpi: number;
+  evpi_percentage_points: number;
+}
+
+export interface EdgeEValue {
+  edge_id: string;
+  e_value: number;
+  flip_direction: string;
+  current_mean: number;
+  flip_mean: number;
+}
+
+export interface ConditionalWinner {
+  factor_id: string;
+  factor_label: string;
+  split_value: number;
+  split_unit: string;
+  low_bucket: string;
+  high_bucket: string;
+  winner_flips: boolean;
+}
+
+export interface InferenceWarning {
+  node_id: string;
+  code: string;
+  message: string;
+}
+
+export interface PlotCritique {
+  code: string;
+  message: string;
+}
+
+// ============================================================================
 // Phase 1 Output — EnrichedContext
 // ============================================================================
 
@@ -309,6 +358,20 @@ export interface EnrichedContext {
   entity_state_map?: import("../context/entity-state-tracker.js").EntityStateMap;
   /** Zone 2 blocks that activated but rendered empty — populated by Phase 3 prompt assembly. */
   zone2_empty_blocks?: string[];
+
+  // ISL/PLoT enrichment fields (V2 — optional, serialised at trim priority 7-8)
+  /** Data gap summary from graph inspection. */
+  gap_summary?: GapSummary;
+  /** Top investigation priorities with EVPI. From analysis voi_ranking. */
+  voi_ranking?: VoiRankingEntry[];
+  /** Edge robustness e-values. From analysis. */
+  edge_e_values?: EdgeEValue[];
+  /** Conditional winner splits. From analysis. */
+  conditional_winners?: ConditionalWinner[];
+  /** Inference warnings from ISL. */
+  inference_warnings?: InferenceWarning[];
+  /** PLoT structural critiques. */
+  plot_critiques?: PlotCritique[];
 
   // Inferred state
   stage_indicator: StageIndicator;
