@@ -1189,6 +1189,11 @@ export async function handleEditGraph(
       continue;
     }
 
+    // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
+    // from/to operations only. Bidirected edge references in the schema are for
+    // context (the model may contain bidirected edges), but edit operations always
+    // target a single directional edge. No decomposition logic needed.
+
     // Parse operations from LLM response (v2 object or legacy array)
     let llmResult: EditGraphLLMResult;
     try {

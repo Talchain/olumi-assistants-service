@@ -37,6 +37,11 @@ const BANNED_TERMS = [
   "recommendation_stability",
 ];
 
+// Terms short enough to be substrings of common English words.
+// Use word-boundary regex rather than includes() to avoid false positives:
+// "voi" must not match inside "avoids", "invoice", "devoid", etc.
+const BANNED_TERMS_WORD_BOUNDARY = new Set(["voi"]);
+
 // =============================================================================
 // Tool names the prompt defines
 // =============================================================================
@@ -206,7 +211,16 @@ export function scoreOrchestrator(
   if (fixture.expected.banned_terms_checked) {
     const userFacing = (isBareToolCall ? raw : getUserFacingText(raw)).toLowerCase();
     for (const term of BANNED_TERMS) {
-      if (userFacing.includes(term.toLowerCase())) {
+      const termLower = term.toLowerCase();
+      let found: boolean;
+      if (BANNED_TERMS_WORD_BOUNDARY.has(termLower)) {
+        // Short tokens that appear as substrings in common words need word-boundary matching.
+        // "voi" (Value of Information) must not match inside "avoids", "invoice", "devoid".
+        found = new RegExp(`\\b${termLower}\\b`).test(userFacing);
+      } else {
+        found = userFacing.includes(termLower);
+      }
+      if (found) {
         no_banned_terms = false;
         break;
       }

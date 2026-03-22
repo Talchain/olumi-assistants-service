@@ -78,35 +78,35 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factorA", kind: "factor", label: "A" },
-          { id: "factorB", kind: "factor", label: "B" },
-          { id: "factorC", kind: "factor", label: "C" },
+          { id: "factor_a", kind: "factor", label: "A" },
+          { id: "factor_b", kind: "factor", label: "B" },
+          { id: "factor_c", kind: "factor", label: "C" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factorA",
-            to: "factorB",
+            from: "factor_a",
+            to: "factor_b",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factorB",
-            to: "factorC",
+            from: "factor_b",
+            to: "factor_c",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factorC",
-            to: "factorA",
+            from: "factor_c",
+            to: "factor_a",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           }, // Creates cycle: A → B → C → A
           {
-            from: "factorC",
+            from: "factor_c",
             to: "outcome_1",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
@@ -158,19 +158,19 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factorA", kind: "factor", label: "A" },
+          { id: "factor_a", kind: "factor", label: "A" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factorA",
-            to: "factorA",
+            from: "factor_a",
+            to: "factor_a",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           }, // Self-loop
           {
-            from: "factorA",
+            from: "factor_a",
             to: "outcome_1",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
@@ -196,7 +196,7 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const selfLoopError = result.errors.find(
         (e) => e.code === "SELF_LOOP_DETECTED"
       );
-      expect(selfLoopError?.affected_node_id).toBe("factorA");
+      expect(selfLoopError?.affected_node_id).toBe("factor_a");
       expect(selfLoopError?.message).toMatch(/self-loop/i);
     });
   });
@@ -206,27 +206,27 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factorA", kind: "factor", label: "A" },
-          { id: "factorB", kind: "factor", label: "B" },
+          { id: "factor_a", kind: "factor", label: "A" },
+          { id: "factor_b", kind: "factor", label: "B" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factorA",
-            to: "factorB",
+            from: "factor_a",
+            to: "factor_b",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factorB",
-            to: "factorA",
+            from: "factor_b",
+            to: "factor_a",
             strength: { mean: 0.3, std: 0.1 },
             exists_probability: 0.8,
             effect_direction: "positive",
           }, // Bidirectional: A ↔ B
           {
-            from: "factorB",
+            from: "factor_b",
             to: "outcome_1",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
@@ -257,27 +257,27 @@ describe("V3 Validator - Graph Structure Validation", () => {
       const response = makeV3Response({
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          { id: "factorA", kind: "factor", label: "A" },
-          { id: "factorB", kind: "factor", label: "B" },
+          { id: "factor_a", kind: "factor", label: "A" },
+          { id: "factor_b", kind: "factor", label: "B" },
           { id: "outcome_1", kind: "outcome", label: "Outcome" },
         ],
         edges: [
           {
-            from: "factorA",
-            to: "factorB",
+            from: "factor_a",
+            to: "factor_b",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           },
           {
-            from: "factorB",
-            to: "factorA",
+            from: "factor_b",
+            to: "factor_a",
             strength: { mean: 0.3, std: 0.1 },
             exists_probability: 0.8,
             effect_direction: "positive",
           },
           {
-            from: "factorB",
+            from: "factor_b",
             to: "outcome_1",
             strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,

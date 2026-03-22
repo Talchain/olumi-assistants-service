@@ -903,7 +903,7 @@ describe('Confirmation text (Task 2)', () => {
         plotClient: null,
       });
 
-      expect(result.assistantText).toBe('Your graph changes have been noted.');
+      expect(result.assistantText).toBe('Changes applied.');
     });
   });
 

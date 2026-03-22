@@ -78,18 +78,19 @@ describe("Brief 2: Boundary liveness and type safety", () => {
       const client = createPLoTClient()!;
       expect(client).not.toBeNull();
 
+      // Payload must pass outbound validation (options need .id and .interventions)
+      const validPayload = {
+        graph: { nodes: [], edges: [] },
+        options: [{ id: "a", option_id: "a", interventions: { fac_1: 1.0 } }],
+        goal_node_id: "g1",
+      };
+
       await expect(
-        client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
-          "req-malformed",
-        ),
+        client.run(validPayload, "req-malformed"),
       ).rejects.toThrow(PLoTError);
 
       try {
-        await client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
-          "req-malformed-2",
-        );
+        await client.run(validPayload, "req-malformed-2");
       } catch (err) {
         expect(err).toBeInstanceOf(PLoTError);
         const plotErr = err as PLoTError;
@@ -105,11 +106,13 @@ describe("Brief 2: Boundary liveness and type safety", () => {
       } as any);
 
       const client = createPLoTClient()!;
+      const validPayload = {
+        graph: { nodes: [], edges: [] },
+        options: [{ id: "a", option_id: "a", interventions: { fac_1: 1.0 } }],
+        goal_node_id: "g1",
+      };
       await expect(
-        client.run(
-          { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
-          "req-empty-results",
-        ),
+        client.run(validPayload, "req-empty-results"),
       ).rejects.toThrow(PLoTError);
     });
 
@@ -125,10 +128,12 @@ describe("Brief 2: Boundary liveness and type safety", () => {
       } as any);
 
       const client = createPLoTClient()!;
-      const result = await client.run(
-        { graph: {}, options: [{ option_id: "a" }], goal_node_id: "g1" },
-        "req-valid",
-      );
+      const validPayload = {
+        graph: { nodes: [], edges: [] },
+        options: [{ id: "a", option_id: "a", interventions: { fac_1: 1.0 } }],
+        goal_node_id: "g1",
+      };
+      const result = await client.run(validPayload, "req-valid");
       expect(result.meta.response_hash).toBe("abc");
     });
 

@@ -56,6 +56,7 @@ vi.mock("../../src/config/index.js", () => ({
       clarifierEnabled: false,
       debugLoggingEnabled: false,
     },
+    features: { optionShortcutRepair: true },
   },
   isProduction: vi.fn().mockReturnValue(true),
 }));

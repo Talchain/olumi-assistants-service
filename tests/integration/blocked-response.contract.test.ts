@@ -18,12 +18,30 @@
  * - No undefined access errors when checking status
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
 import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";
 import { _resetConfigCache } from "../../src/config/index.js";
-import { z } from "zod";
+import { z, ZodError, ZodIssue } from "zod";
 import { AnalysisReadyStatus } from "../../src/schemas/analysis-ready.js";
+import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
+
+/**
+ * Helper: mock CEEGraphResponseV3.safeParse to return a validation failure.
+ *
+ * After commit be2f0945 the canonical ID regex was relaxed to /^[a-z0-9_:-]+$/
+ * (digits-first allowed), so IDs like "999-invalid" no longer fail V3 validation.
+ * To test the blocked-response path we mock safeParse directly.
+ */
+function mockV3ValidationFailure() {
+  const fakeIssues: ZodIssue[] = [
+    { code: "custom", path: ["nodes", 0, "id"], message: "Simulated V3 validation failure" },
+  ];
+  return vi.spyOn(ceeV3Schema.CEEGraphResponseV3, "safeParse").mockReturnValue({
+    success: false,
+    error: new ZodError(fakeIssues),
+  } as any);
+}
 
 /**
  * Validation blocker schema (used when analysis_ready.status === "blocked")
@@ -98,6 +116,10 @@ describe("Blocked Response Contract (Stream F)", () => {
    */
   describe("Blocked response shape", () => {
     it("returns well-formed blocked response on V3 validation failure", async () => {
+      // Mock V3 schema validation to fail (IDs like "999-invalid" are valid
+      // after canonical regex relaxation in be2f0945)
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-1",
         input: { brief: "Test brief" },
@@ -105,11 +127,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "999-invalid", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "999-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -155,9 +177,13 @@ describe("Blocked Response Contract (Stream F)", () => {
       if (!parseResult.success) {
         console.error("Schema validation errors:", parseResult.error.issues);
       }
+
+      parseSpy.mockRestore();
     });
 
     it("preserves response envelope shape (meta, trace)", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-2",
         input: { brief: "Test brief" },
@@ -165,11 +191,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "1-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "1-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
           meta: {
@@ -199,9 +225,13 @@ describe("Blocked Response Contract (Stream F)", () => {
       // Contract: response matches BlockedResponseV3 schema
       const parseResult = BlockedResponseV3.safeParse(response);
       expect(parseResult.success).toBe(true);
+
+      parseSpy.mockRestore();
     });
 
     it("validates against BlockedResponseV3 schema", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-schema",
         input: { brief: "Test brief" },
@@ -209,11 +239,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "999-invalid", kind: "goal", label: "Test" },
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "999-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -233,9 +263,13 @@ describe("Blocked Response Contract (Stream F)", () => {
         console.error(JSON.stringify(parseResult.error.issues, null, 2));
         throw new Error(`Schema validation failed: ${parseResult.error.issues.length} issues`);
       }
+
+      parseSpy.mockRestore();
     });
 
     it("returns well-formed blocked response with multiple validation errors", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-3",
         input: { brief: "Test brief" },
@@ -243,12 +277,12 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "2-bad", kind: "goal", label: "Test Goal" }, // Invalid: starts with number
-              { id: "9-also-bad", kind: "factor", label: "Test Factor" }, // Invalid: starts with number
+              { id: "goal_1", kind: "goal", label: "Test Goal" },
+              { id: "fac_1", kind: "factor", label: "Test Factor" },
             ],
             edges: [],
           },
-          goal_node_id: "2-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -270,6 +304,8 @@ describe("Blocked Response Contract (Stream F)", () => {
       expect(blocker?.severity).toBe("error");
       expect(blocker?.message).toBeDefined();
       expect(blocker?.message).toContain("V3 schema validation failed");
+
+      parseSpy.mockRestore();
     });
   });
 
@@ -278,6 +314,8 @@ describe("Blocked Response Contract (Stream F)", () => {
    */
   describe("Blocked response consumption safety", () => {
     it("can be serialized to JSON without errors", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-4",
         input: { brief: "Test brief" },
@@ -285,11 +323,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "5-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "5-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -314,9 +352,13 @@ describe("Blocked Response Contract (Stream F)", () => {
       // Contract: deserialized response has expected shape
       expect(parsed.analysis_ready.status).toBe("blocked");
       expect(parsed.graph).toBeNull();
+
+      parseSpy.mockRestore();
     });
 
     it("allows safe status checking without undefined errors", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-5",
         input: { brief: "Test brief" },
@@ -324,11 +366,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "8-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "8-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -353,9 +395,13 @@ describe("Blocked Response Contract (Stream F)", () => {
 
       const hasGraph = response?.graph !== null && response?.graph !== undefined;
       expect(hasGraph).toBe(false);
+
+      parseSpy.mockRestore();
     });
 
     it("includes goal_node_id in analysis_ready even when blocked", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-6",
         input: { brief: "Test brief" },
@@ -363,11 +409,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "3-bad", kind: "goal", label: "Test Goal" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test Goal" },
             ],
             edges: [],
           },
-          goal_node_id: "3-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -384,10 +430,14 @@ describe("Blocked Response Contract (Stream F)", () => {
       // Contract: options array exists (empty for blocked)
       expect(Array.isArray(response.analysis_ready.options)).toBe(true);
       expect(response.analysis_ready.options).toEqual([]);
+
+      parseSpy.mockRestore();
     });
 
     it("preserves trace fields when present upstream", async () => {
-      // Case 1: Upstream response includes custom trace fields → blocked response preserves them
+      const parseSpy = mockV3ValidationFailure();
+
+      // Case 1: Upstream response includes custom trace fields -> blocked response preserves them
       const ctxWithTrace: StageContext = {
         requestId: "contract-test-trace-1",
         input: { brief: "Test brief" },
@@ -395,11 +445,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "6-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "6-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
           trace: {
@@ -420,7 +470,7 @@ describe("Blocked Response Contract (Stream F)", () => {
       expect(responseWithTrace.trace.correlation_id).toBe("corr-456");
       expect(responseWithTrace.trace.custom_field).toBe("preserved");
 
-      // Case 2: Upstream response omits trace → pipeline adds minimal trace for observability
+      // Case 2: Upstream response omits trace -> pipeline adds minimal trace for observability
       const ctxWithoutTrace: StageContext = {
         requestId: "contract-test-trace-2",
         input: { brief: "Test brief" },
@@ -428,11 +478,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "7-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "7-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
           // No trace field
@@ -449,6 +499,8 @@ describe("Blocked Response Contract (Stream F)", () => {
       if (responseWithoutTrace.trace) {
         expect(responseWithoutTrace.trace.request_id).toBeDefined();
       }
+
+      parseSpy.mockRestore();
     });
   });
 
@@ -457,6 +509,8 @@ describe("Blocked Response Contract (Stream F)", () => {
    */
   describe("Blocked response blocker details", () => {
     it("includes validation error details in blocker", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-7",
         input: { brief: "Test brief" },
@@ -464,11 +518,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "7-invalid", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "7-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -490,9 +544,13 @@ describe("Blocked Response Contract (Stream F)", () => {
         // Validation issues should have path, message, etc.
         expect(typeof issue).toBe("object");
       }
+
+      parseSpy.mockRestore();
     });
 
     it("preserves blocker count and code consistency across multiple errors", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "contract-test-8",
         input: { brief: "Test brief" },
@@ -500,11 +558,11 @@ describe("Blocked Response Contract (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "4-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "4-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -527,6 +585,8 @@ describe("Blocked Response Contract (Stream F)", () => {
       expect(blocker.severity).toBeDefined();
       expect(blocker.message).toBeDefined();
       expect(blocker.details).toBeDefined();
+
+      parseSpy.mockRestore();
     });
   });
 });

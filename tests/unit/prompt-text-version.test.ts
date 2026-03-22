@@ -84,7 +84,7 @@ describe("Fallback Prompt v19 Content", () => {
     expect(v19Prompt).toContain("bidirected");
   });
 
-  it("uses v19 as the default prompt version", async () => {
+  it("uses v187 as the default prompt version", async () => {
     // Remove PROMPT_VERSION to test default
     delete process.env.PROMPT_VERSION;
 
@@ -93,6 +93,6 @@ describe("Fallback Prompt v19 Content", () => {
     );
 
     const { version } = getPromptVersion();
-    expect(version).toBe("v19");
+    expect(version).toBe("v187");
   });
 });

@@ -38,6 +38,7 @@ vi.mock("../../src/config/index.js", () => ({
       enforceSingleGoal: true,
       clarifierEnabled: false,
     },
+    features: { optionShortcutRepair: true },
   },
   isProduction: vi.fn().mockReturnValue(true),
 }));

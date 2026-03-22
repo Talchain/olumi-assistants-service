@@ -139,9 +139,9 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns quality tier for repair_graph task (GPT-4o)", () => {
+    it("returns quality tier for repair_graph task (gpt-4.1)", () => {
       const result = selectModel({ task: "repair_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-4o");
+      expect(result.modelId).toBe("gpt-4.1-2025-04-14");
       expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });

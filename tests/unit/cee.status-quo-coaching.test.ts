@@ -36,6 +36,7 @@ vi.mock("../../src/cee/quality/index.js", () => ({
 }));
 
 vi.mock("../../src/cee/bias/index.js", () => ({
+  detectBiases: vi.fn().mockReturnValue([]),
   sortBiasFindings: vi.fn(),
 }));
 

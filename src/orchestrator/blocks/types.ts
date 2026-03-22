@@ -7,6 +7,7 @@
 export type {
   BlockType,
   ConversationBlock,
+  TypedConversationBlock,
   BlockProvenance,
   BlockAction,
   GraphPatchBlockData,
@@ -19,5 +20,6 @@ export type {
   BriefBlockData,
   ReviewCardBlockData,
   FramingBlockData,
+  EvidenceBlockData,
   ArtefactBlockData,
 } from "../types.js";

@@ -24,9 +24,11 @@
  * validation (ensures actual CEE output conforms to fixture contract).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
+import { ZodError, ZodIssue } from "zod";
 
 describe("Cross-Service Blocked Response Contract", () => {
   const fixturePath = join(__dirname, "../fixtures/cross-service/blocked-response.fixture.json");
@@ -189,10 +191,19 @@ describe("Cross-Service Blocked Response Contract", () => {
       // This test validates that actual boundary stage output conforms to the
       // cross-service fixture contract, preventing regression in blocked response shape.
 
+      // Mock V3 schema validation to fail (IDs like "999-invalid" are valid
+      // after canonical regex relaxation in be2f0945)
+      const fakeIssues: ZodIssue[] = [
+        { code: "custom", path: ["nodes", 0, "id"], message: "Simulated V3 validation failure" },
+      ];
+      const parseSpy = vi.spyOn(ceeV3Schema.CEEGraphResponseV3, "safeParse").mockReturnValue({
+        success: false,
+        error: new ZodError(fakeIssues),
+      } as any);
+
       // Dynamic import to avoid circular dependency
       const { runStageBoundary } = await import("../../src/cee/unified-pipeline/stages/boundary.js");
 
-      // Create invalid V3 response to trigger blocked status
       const ctx: any = {
         requestId: "cross-service-contract-validation",
         input: { brief: "Test brief" },
@@ -200,11 +211,11 @@ describe("Cross-Service Blocked Response Contract", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "999-invalid", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "999-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
           meta: { source: "assistant" },
@@ -259,6 +270,8 @@ describe("Cross-Service Blocked Response Contract", () => {
         const isBlocked = actualBlockedResponse?.analysis_ready?.status === "blocked";
         expect(isBlocked).toBe(true);
       }).not.toThrow();
+
+      parseSpy.mockRestore();
     });
   });
 });

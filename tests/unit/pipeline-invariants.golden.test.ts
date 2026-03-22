@@ -85,6 +85,7 @@ vi.mock("../../src/config/index.js", () => ({
       refinementEnabled: false,
       llmFirstExtractionEnabled: false,
     },
+    features: { optionShortcutRepair: true },
     validation: {
       engineBaseUrl: "http://TRIPWIRE.invalid",
       cacheEnabled: false,
@@ -237,6 +238,7 @@ vi.mock("../../src/cee/archetypes/index.js", () => ({
 
 // -- Stage 5 deps: bias
 vi.mock("../../src/cee/bias/index.js", () => ({
+  detectBiases: vi.fn().mockReturnValue([]),
   sortBiasFindings: vi.fn().mockImplementation((findings: any) => findings ?? []),
 }));
 

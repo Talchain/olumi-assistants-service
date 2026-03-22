@@ -29,16 +29,16 @@ describe('assembleSystemPrompt', () => {
   it('starts with Zone 1 prompt and contains all structural markers', async () => {
     const result = await assembleSystemPrompt(makeContext());
 
-    // Zone 1 must be at the very start — first line is the prompt header
-    expect(result.startsWith('Olumi Orchestrator')).toBe(true);
+    // Zone 1 must be at the very start — cf-v26 starts with <ROLE>
+    expect(result.startsWith('<ROLE>')).toBe(true);
 
-    // All Zone 1 structural markers present
+    // All Zone 1 structural markers present (cf-v26 tag names)
     expect(result).toContain('<ROLE>');
-    expect(result).toContain('<CORE_RULES>');
+    expect(result).toContain('<PRIMARY_RULES>');
     expect(result).toContain('<TOOLS>');
-    expect(result).toContain('<OUTPUT_FORMAT>');
+    expect(result).toContain('<OUTPUT_CONTRACT>');
     expect(result).toContain('<DIAGNOSTICS>');
-    expect(result).toContain('<RULES_REMINDER>');
+    expect(result).toContain('<FINAL_REMINDERS>');
   });
 
   it('appends dynamic context (stage) after Zone 1', async () => {
@@ -47,10 +47,10 @@ describe('assembleSystemPrompt', () => {
     }));
 
     expect(result).toContain('Current stage: evaluate');
-    // Zone 1 ends with </RULES_REMINDER>, Zone 2 follows after
-    const rulesReminderEnd = result.indexOf('</RULES_REMINDER>');
+    // Zone 1 ends with </FINAL_REMINDERS>, Zone 2 follows after
+    const finalRemindersEnd = result.indexOf('</FINAL_REMINDERS>');
     const stageIndex = result.indexOf('Current stage: evaluate');
-    expect(rulesReminderEnd).toBeLessThan(stageIndex);
+    expect(finalRemindersEnd).toBeLessThan(stageIndex);
   });
 
   it('appends goal when present in context', async () => {

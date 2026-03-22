@@ -128,6 +128,7 @@ describe("Reasoning Model Support", () => {
         "o1-preview",
         "o3",
         "o3-mini",
+        "o4-mini",
       ]);
       for (const [id, config] of Object.entries(MODEL_REGISTRY)) {
         if (config.reasoning) {

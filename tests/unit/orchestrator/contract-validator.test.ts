@@ -103,8 +103,9 @@ function makeV1Envelope(
 // ============================================================================
 
 describe("VALID_BLOCK_TYPES", () => {
-  it("contains exactly the 7 canonical block types", () => {
+  it("contains exactly the 8 canonical block types", () => {
     expect([...VALID_BLOCK_TYPES].sort()).toEqual([
+      "artefact",
       "brief",
       "commentary",
       "evidence",

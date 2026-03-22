@@ -109,11 +109,15 @@ const FIXTURES_DIR = join(__dirname, "../fixtures/golden");
 
 function loadFixtures(): Array<{ path: string; data: GoldenFixture }> {
   try {
-    const files = readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
-    return files.map((f) => ({
-      path: join(FIXTURES_DIR, f),
-      data: JSON.parse(readFileSync(join(FIXTURES_DIR, f), "utf-8")) as GoldenFixture,
-    }));
+    const files = readdirSync(FIXTURES_DIR).filter((f) =>
+      f.endsWith(".json") && !f.includes(" ")  // Exclude iCloud duplicates (e.g. "file 2.json")
+    );
+    return files
+      .map((f) => ({
+        path: join(FIXTURES_DIR, f),
+        data: JSON.parse(readFileSync(join(FIXTURES_DIR, f), "utf-8")) as GoldenFixture,
+      }))
+      .filter(({ data }) => data.assertions != null); // Skip non-golden fixture files (e.g. ui-* orchestrator fixtures)
   } catch {
     // Directory might not exist yet
     return [];

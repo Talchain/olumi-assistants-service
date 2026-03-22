@@ -423,7 +423,7 @@ describe("scorer — parameter quality", () => {
     const result = score(makeResponse(graph), makeBrief({ expect_status_quo: false }));
     // Should fail structural validation
     expect(result.structural_valid).toBe(false);
-    expect(result.param_quality).toBeNull();
+    expect(result.param_quality).toBe(0);
   });
 });
 
@@ -736,7 +736,7 @@ describe("scorer — failed responses", () => {
 // =============================================================================
 
 describe("scorer — overall_score", () => {
-  it("overall_score = param(0.30) + optDiff(0.30) + completeness(0.40)", () => {
+  it("overall_score = param(0.20) + optDiff(0.20) + completeness(0.20) + constraint(0.15) + external(0.10) + coaching(0.10) + ratio(0.05)", () => {
     const graph = minimalValidGraph();
     const result = score(makeResponse(graph), makeBrief());
 
@@ -746,9 +746,13 @@ describe("scorer — overall_score", () => {
       result.completeness != null
     ) {
       const expected =
-        result.param_quality * 0.3 +
-        result.option_diff * 0.3 +
-        result.completeness * 0.4;
+        result.param_quality * 0.20 +
+        result.option_diff * 0.20 +
+        result.completeness * 0.20 +
+        (result.constraint_retention ?? 0) * 0.15 +
+        (result.external_factor_presence ?? 0) * 0.10 +
+        (result.coaching_quality ?? 0) * 0.10 +
+        (result.ratio_encoding ?? 0) * 0.05;
       expect(result.overall_score).toBeCloseTo(expected, 5);
     }
   });

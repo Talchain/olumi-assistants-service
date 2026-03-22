@@ -68,7 +68,7 @@ describe('sentry middleware', () => {
       expect(config.dsn).toBe('https://test@sentry.io/123');
       expect(config.environment).toBe('test');
       expect(config.release).toBe('abc123');
-      expect(config.tracesSampleRate).toBe(0.2);
+      expect(config.tracesSampleRate).toBe(0.5);
       expect(typeof config.beforeSend).toBe('function');
     });
   });

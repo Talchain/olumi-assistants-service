@@ -221,7 +221,7 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
   // ── Known field validation still works ─────────────────────────────────
   it("NodeV3 still rejects invalid known fields", () => {
     const input = {
-      id: "123invalid", // must start with letter
+      id: "INVALID WITH SPACES!", // must be lowercase alphanumeric/underscores/colons/hyphens
       kind: "factor",
       label: "Price",
     };

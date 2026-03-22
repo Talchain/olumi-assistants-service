@@ -60,7 +60,7 @@ describe("DecisionReviewAdapter", () => {
 
   it("loads all decision-review fixtures", async () => {
     const cases = await adapter.loadCases(fixturesDir);
-    expect(cases.length).toBe(6);
+    expect(cases.length).toBe(8);
     expect(cases[0].id).toBe("dr-01-clear-winner");
     expect(cases[0].input).toBeDefined();
     expect(cases[0].input.winner).toBeDefined();
@@ -98,9 +98,11 @@ describe("DraftGraphAdapter", () => {
   it("loads briefs from briefs/ directory", async () => {
     const cases = await adapter.loadCases(briefsDir);
     expect(cases.length).toBeGreaterThanOrEqual(4);
-    expect(cases[0].id).toBe("01-simple-binary");
-    expect(cases[0].meta).toBeDefined();
-    expect(cases[0].body).toBeTruthy();
+    // Find the canonical brief (filter out iCloud " 2" duplicates)
+    const canonical = cases.find((c) => c.id === "01-simple-binary");
+    expect(canonical).toBeDefined();
+    expect(canonical!.meta).toBeDefined();
+    expect(canonical!.body).toBeTruthy();
   });
 
   it("builds request correctly", async () => {

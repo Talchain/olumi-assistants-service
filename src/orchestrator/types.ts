@@ -314,6 +314,10 @@ export interface BlockAction {
   action_type: 'accept' | 'edit' | 'dismiss' | 'attach' | 'share' | 'rerun' | 'undo';
 }
 
+/**
+ * Common fields shared by all block variants.
+ * Use {@link TypedConversationBlock} for narrowing `data` by `block_type`.
+ */
 export interface ConversationBlock {
   block_id: string;
   block_type: BlockType;
@@ -322,6 +326,37 @@ export interface ConversationBlock {
   provenance: BlockProvenance;
   related_elements?: { node_ids?: string[]; edge_ids?: string[] };
 }
+
+/** Shared fields minus the discriminant pair — used internally by the union variants. */
+interface ConversationBlockBase {
+  block_id: string;
+  actions?: BlockAction[];
+  provenance: BlockProvenance;
+  related_elements?: { node_ids?: string[]; edge_ids?: string[] };
+}
+
+/**
+ * Discriminated union of ConversationBlock — enables TypeScript narrowing on
+ * `block_type` to infer the correct `data` shape without double-casts.
+ *
+ * @example
+ * ```ts
+ * function handleBlock(block: TypedConversationBlock) {
+ *   if (block.block_type === 'graph_patch') {
+ *     block.data.operations; // TypeScript infers GraphPatchBlockData
+ *   }
+ * }
+ * ```
+ */
+export type TypedConversationBlock =
+  | (ConversationBlockBase & { block_type: 'graph_patch'; data: GraphPatchBlockData })
+  | (ConversationBlockBase & { block_type: 'fact'; data: FactBlockData })
+  | (ConversationBlockBase & { block_type: 'commentary'; data: CommentaryBlockData })
+  | (ConversationBlockBase & { block_type: 'brief'; data: BriefBlockData })
+  | (ConversationBlockBase & { block_type: 'review_card'; data: ReviewCardBlockData })
+  | (ConversationBlockBase & { block_type: 'framing'; data: FramingBlockData })
+  | (ConversationBlockBase & { block_type: 'evidence'; data: EvidenceBlockData })
+  | (ConversationBlockBase & { block_type: 'artefact'; data: ArtefactBlockData });
 
 // ---- Graph Patch Block ----
 

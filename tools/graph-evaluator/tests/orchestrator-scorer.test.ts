@@ -188,7 +188,7 @@ describe("scoreOrchestrator", () => {
     expect(result.block_types_valid).toBe(false);
   });
 
-  it("validates suggested actions count", () => {
+  it("validates suggested actions count against hardcoded max (5)", () => {
     const raw = `<diagnostics>Framing.</diagnostics>
 <response>
   <assistant_text>Let's explore.</assistant_text>
@@ -197,10 +197,14 @@ describe("scoreOrchestrator", () => {
     <action><role>facilitator</role><label>Option A</label><message>Go with A</message></action>
     <action><role>challenger</role><label>Option B</label><message>Go with B</message></action>
     <action><role>facilitator</role><label>Option C</label><message>Go with C</message></action>
+    <action><role>scientist</role><label>Option D</label><message>Go with D</message></action>
+    <action><role>facilitator</role><label>Option E</label><message>Go with E</message></action>
+    <action><role>challenger</role><label>Option F</label><message>Go with F</message></action>
   </suggested_actions>
 </response>`;
-    const fixture = makeFixture({ max_actions: 2 });
+    const fixture = makeFixture({ max_actions: 5 });
     const result = scoreOrchestrator(fixture, raw);
+    // 6 actions exceeds the hardcoded ACTIONS_MAX of 5
     expect(result.suggested_actions_valid).toBe(false);
   });
 

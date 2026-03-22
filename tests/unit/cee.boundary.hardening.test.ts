@@ -10,6 +10,25 @@ import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
 import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";
 import { _resetConfigCache } from "../../src/config/index.js";
 import * as telemetry from "../../src/utils/telemetry.js";
+import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
+import { ZodError, ZodIssue } from "zod";
+
+/**
+ * Helper: mock CEEGraphResponseV3.safeParse to return a validation failure.
+ *
+ * After commit be2f0945 the canonical ID regex was relaxed to /^[a-z0-9_:-]+$/
+ * (digits-first allowed), so IDs like "999-invalid" no longer fail V3 validation.
+ * To test the blocked-response path we mock safeParse directly.
+ */
+function mockV3ValidationFailure() {
+  const fakeIssues: ZodIssue[] = [
+    { code: "custom", path: ["nodes", 0, "id"], message: "Simulated V3 validation failure" },
+  ];
+  return vi.spyOn(ceeV3Schema.CEEGraphResponseV3, "safeParse").mockReturnValue({
+    success: false,
+    error: new ZodError(fakeIssues),
+  } as any);
+}
 
 describe("Stage 6: Boundary Hardening (Stream F)", () => {
   let originalEnv: NodeJS.ProcessEnv;
@@ -33,7 +52,10 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
    */
   describe("Default behavior: V3 validation failure returns blocked status", () => {
     it("returns blocked status with no invalid graph when V3 validation fails", async () => {
-      // Arrange: Create invalid V3 response (node with invalid ID format)
+      // Mock V3 schema validation to fail (IDs like "123-invalid" are now valid
+      // after canonical regex relaxation in be2f0945)
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "test-req-1",
         input: { brief: "Test brief" },
@@ -41,11 +63,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "123-invalid", kind: "goal", label: "Test Goal" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test Goal" },
             ],
             edges: [],
           },
-          goal_node_id: "123-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -75,9 +97,13 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_message: expect.stringContaining("V3 schema validation failed"),
         })
       );
+
+      parseSpy.mockRestore();
     });
 
     it("populates blockers with validation error details", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "test-req-2",
         input: { brief: "Test brief" },
@@ -85,11 +111,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "1-bad", kind: "goal", label: "Test" }, // Invalid ID
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "1-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -109,9 +135,13 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_code: "CEE_V3_VALIDATION_FAILED",
         })
       );
+
+      parseSpy.mockRestore();
     });
 
     it("preserves existing response envelope shape", async () => {
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "test-req-3",
         input: { brief: "Test brief" },
@@ -119,11 +149,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "9-bad", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "9-bad",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
           meta: { graph_hash: "test-hash" },
@@ -144,6 +174,8 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_code: "CEE_V3_VALIDATION_FAILED",
         })
       );
+
+      parseSpy.mockRestore();
     });
   });
 
@@ -229,6 +261,8 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "false";
       _resetConfigCache();
 
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "test-req-6",
         input: { brief: "Test brief" },
@@ -236,11 +270,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "1-invalid", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "1-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -258,6 +292,8 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_code: "CEE_V3_VALIDATION_FAILED",
         })
       );
+
+      parseSpy.mockRestore();
     });
   });
 
@@ -270,6 +306,8 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "true";
       _resetConfigCache();
 
+      const parseSpy = mockV3ValidationFailure();
+
       const ctx: StageContext = {
         requestId: "test-req-7",
         input: { brief: "Test brief" },
@@ -277,11 +315,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "1-invalid", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "1-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -301,12 +339,16 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_code: "CEE_V3_VALIDATION_FAILED",
         })
       );
+
+      parseSpy.mockRestore();
     });
 
     it("ignores flag in staging and returns blocked status", async () => {
       process.env.OLUMI_ENV = "staging";
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "true";
       _resetConfigCache();
+
+      const parseSpy = mockV3ValidationFailure();
 
       const ctx: StageContext = {
         requestId: "test-req-8",
@@ -315,11 +357,11 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         ceeResponse: {
           graph: {
             nodes: [
-              { id: "1-invalid", kind: "goal", label: "Test" }, // Invalid: ID starts with number
+              { id: "goal_1", kind: "goal", label: "Test" },
             ],
             edges: [],
           },
-          goal_node_id: "1-invalid",
+          goal_node_id: "goal_1",
           options: [],
           causal_claims: [],
         } as any,
@@ -338,6 +380,8 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           error_code: "CEE_V3_VALIDATION_FAILED",
         })
       );
+
+      parseSpy.mockRestore();
     });
   });
 
