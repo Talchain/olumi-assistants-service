@@ -1048,7 +1048,8 @@ async function dispatchTool(
  * Only commentary, review_card, and artefact are allowed — other types are
  * already filtered by the parser.
  */
-function convertExtractedBlocks(blocks: ExtractedBlock[], turnId: string): TypedConversationBlock[] {
+export function convertExtractedBlocks(blocks: ExtractedBlock[] | undefined, turnId: string): TypedConversationBlock[] {
+  if (!blocks || blocks.length === 0) return [];
   return blocks.map((block) => {
     if (block.type === 'commentary') {
       return createCommentaryBlock(

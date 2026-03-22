@@ -13,7 +13,7 @@
 import { log } from "../../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "../../../adapters/llm/router.js";
-import { classifyIntent, isArtefactLikely } from "../../intent-gate.js";
+import { classifyIntent } from "../../intent-gate.js";
 import type { IntentGateResult, ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
@@ -385,10 +385,7 @@ export async function phase3Generate(
 
   // 2. LLM routing — full tool-calling flow
   const assembled = await assembleV2SystemPrompt(enrichedContext, {
-    injectArtefactAppendix: config.features.artefactAppendixEnabled && (
-      (intentGate.chip_origin === true && intentGate.chip_artefact === true) ||
-      isArtefactLikely(userMessage)
-    ),
+    injectArtefactAppendix: config.features.artefactAppendixEnabled && intentGate.artefact_hint === true,
   });
   const systemPrompt = assembled.text;
 
@@ -467,6 +464,7 @@ export async function phase3Generate(
       science_annotations: [],
       raw_response: chatResult.content,
       suggested_actions: [],
+      extracted_blocks: [],
       diagnostics: null,
       parse_warnings: [],
       route_metadata: {
@@ -1290,10 +1288,7 @@ export async function phase3PrepareForStreaming(
 
   // LLM path: prepare the call args
   const assembled2 = await assembleV2SystemPrompt(enrichedContext, {
-    injectArtefactAppendix: config.features.artefactAppendixEnabled && (
-      (intentGate.chip_origin === true && intentGate.chip_artefact === true) ||
-      isArtefactLikely(userMessage)
-    ),
+    injectArtefactAppendix: config.features.artefactAppendixEnabled && intentGate.artefact_hint === true,
   });
   const systemPrompt = assembled2.text;
   if (systemPrompt.length < 1000) {

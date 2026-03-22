@@ -32,7 +32,7 @@ import type { PLoTClient } from "../plot-client.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
 import type { DecisionContinuity } from "../context/decision-continuity.js";
-import type { ToolInvocation, ParsedLLMResponse } from "../response-parser.js";
+import type { ToolInvocation, ParsedLLMResponse, ExtractedBlock } from "../response-parser.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import type { ChatWithToolsResult, ChatWithToolsArgs, ChatWithToolsStreamEvent, CallOpts } from "../../adapters/llm/types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
@@ -425,6 +425,8 @@ export interface LLMResult {
   science_annotations: ScienceAnnotation[];
   raw_response: string;
   suggested_actions: SuggestedAction[];
+  /** AI-authored blocks extracted from XML <blocks> (commentary, review_card, artefact). */
+  extracted_blocks: ExtractedBlock[];
   diagnostics: string | null;
   parse_warnings: string[];
   route_metadata?: RouteMetadata;

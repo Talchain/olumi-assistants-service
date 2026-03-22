@@ -643,6 +643,7 @@ async function runAnalysisViaPipeline(
     science_annotations: [],
     raw_response: '',
     suggested_actions: [],
+    extracted_blocks: [],
     diagnostics: null,
     parse_warnings: [],
     route_debug: {

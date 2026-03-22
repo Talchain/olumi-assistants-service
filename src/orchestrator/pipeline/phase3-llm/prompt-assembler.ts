@@ -683,10 +683,14 @@ export async function assembleV2SystemPrompt(
   // Pre-split blocks for Anthropic prompt caching:
   // Block 0 = static Zone 1 (cache_control: ephemeral) — identical across turns
   // Block 1 = dynamic Zone 2 — varies per turn, no cache marker
+  // Block 2 = artefact appendix (optional) — only on artefact turns, no cache marker
   const cache_blocks: SystemCacheBlock[] = [
     { type: 'text', text: zone1, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: `\n\n${zone2}` },
   ];
+  if (artefactAppendixText) {
+    cache_blocks.push({ type: 'text', text: artefactAppendixText });
+  }
 
   return { text, cache_blocks };
 }

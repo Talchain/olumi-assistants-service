@@ -28,6 +28,7 @@ import { dispatchToolHandler } from "../../tools/dispatch.js";
 import type { ToolDispatchOpts } from "../../tools/dispatch.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";
+import { convertExtractedBlocks } from "../../turn-handler.js";
 import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import type { FastifyRequest } from "fastify";
 import type { PLoTClientRunOpts } from "../../plot-client.js";
@@ -68,10 +69,13 @@ export async function phase4Execute(
   toolDispatcher: ToolDispatcher,
   requestId: string,
 ): Promise<Phase4Result> {
-  // No tool invocations → pure conversation
+  // No tool invocations → pure conversation.
+  // Convert AI-authored XML blocks (commentary, review_card, artefact) into typed blocks
+  // so they reach the envelope. Without this, artefact blocks from the LLM are lost.
   if (llmResult.tool_invocations.length === 0) {
+    const aiBlocks = convertExtractedBlocks(llmResult.extracted_blocks, enrichedContext.turn_id);
     return {
-      blocks: [],
+      blocks: aiBlocks,
       side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
       assistant_text: llmResult.assistant_text,
       guidance_items: [],
@@ -258,6 +262,11 @@ export async function phase4Execute(
     const note = `(${toolList} deferred — only one long-running operation per turn. Run it next.)`;
     assistantText = assistantText ? `${assistantText}\n\n${note}` : note;
   }
+
+  // Merge AI-authored XML blocks (commentary, review_card, artefact) with tool-produced blocks.
+  // AI-authored blocks come after tool blocks so tool output appears first.
+  const aiBlocks = convertExtractedBlocks(llmResult.extracted_blocks, enrichedContext.turn_id);
+  allBlocks.push(...aiBlocks);
 
   return {
     blocks: allBlocks,

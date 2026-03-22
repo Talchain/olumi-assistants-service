@@ -65,6 +65,12 @@ export interface IntentGateResult {
    * the pre-analysis gap check and proceed directly to run_analysis.
    */
   skip_gap_check?: boolean;
+  /**
+   * When true, the artefact design appendix should be injected into the system prompt.
+   * Unified signal combining chip_artefact detection and NL artefact heuristic.
+   * Consumers should check this single flag rather than chip_artefact + isArtefactLikely() separately.
+   */
+  artefact_hint?: boolean;
 }
 
 // ============================================================================
@@ -759,6 +765,7 @@ export function classifyIntentWithContext(
         matched_pattern: 'chip_passthrough',
         chip_origin: true,
         chip_artefact: chipMatch.artefact,
+        artefact_hint: chipMatch.artefact,
       };
     }
   }
@@ -802,6 +809,11 @@ export function classifyIntentWithContext(
         }
       }
     }
+  }
+
+  // Compute artefact_hint for NL fallback — set on the result so Phase 3 can use a single signal
+  if (isArtefactLikely(message)) {
+    result.artefact_hint = true;
   }
 
   return result;

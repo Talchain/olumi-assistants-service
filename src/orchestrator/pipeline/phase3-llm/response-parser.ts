@@ -30,6 +30,7 @@ export function parseV2Response(result: ChatWithToolsResult): LLMResult {
       .map(b => b.text)
       .join('\n\n'),
     suggested_actions: suggestedActions,
+    extracted_blocks: parsed.extracted_blocks,
     diagnostics: parsed.diagnostics,
     parse_warnings: parsed.parse_warnings,
   };
@@ -51,6 +52,7 @@ export function buildDeterministicLLMResult(
     science_annotations: [] as ScienceAnnotation[],
     raw_response: '',
     suggested_actions: [],
+    extracted_blocks: [],
     diagnostics: null,
     parse_warnings: [],
     ...(routeMetadata && { route_metadata: routeMetadata }),
@@ -69,6 +71,7 @@ export function buildConversationalLLMResult(
     science_annotations: [] as ScienceAnnotation[],
     raw_response: assistantText ?? '',
     suggested_actions: [],
+    extracted_blocks: [],
     diagnostics: null,
     parse_warnings: [],
     ...(routeMetadata && { route_metadata: routeMetadata }),
