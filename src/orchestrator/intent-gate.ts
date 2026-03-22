@@ -59,6 +59,12 @@ export interface IntentGateResult {
    * Only meaningful when chip_origin is true. False for UI-aligned (non-artefact) chips.
    */
   chip_artefact?: boolean;
+  /**
+   * When true, the user explicitly asked to skip gap detection coaching
+   * (e.g. "run anyway", "proceed with defaults"). Dispatch will bypass
+   * the pre-analysis gap check and proceed directly to run_analysis.
+   */
+  skip_gap_check?: boolean;
 }
 
 // ============================================================================
@@ -115,6 +121,13 @@ const _patterns: readonly (readonly [string, ToolName])[] = Object.freeze(([
   ['rerun the analysis', 'run_analysis'],
   ['re-run the analysis', 'run_analysis'],
   ['rerun the model', 'run_analysis'],
+  ['run anyway', 'run_analysis'],
+  ['run it anyway', 'run_analysis'],
+  ['analyse anyway', 'run_analysis'],
+  ['analyze anyway', 'run_analysis'],
+  ['run with defaults', 'run_analysis'],
+  ['use defaults', 'run_analysis'],
+  ['proceed with defaults', 'run_analysis'],
 
   // draft_graph
   ['draft', 'draft_graph'],
@@ -203,6 +216,25 @@ export const PATTERN_TO_EXERCISE: ReadonlyMap<string, ExerciseType> = new Map([
   ['what evidence would change this', 'disconfirmation'],
   ['what would flip this', 'disconfirmation'],
   ['prove me wrong', 'disconfirmation'],
+]);
+
+// ============================================================================
+// Gap Coaching Bypass Patterns
+// ============================================================================
+
+/**
+ * Patterns that indicate the user wants to skip pre-analysis gap detection
+ * and run analysis with default values. Fast path — the LLM-based bypass
+ * (checking previous turn route_outcome) handles natural-language variants.
+ */
+export const GAP_BYPASS_PATTERNS: ReadonlySet<string> = new Set([
+  'run anyway',
+  'run it anyway',
+  'analyse anyway',
+  'analyze anyway',
+  'run with defaults',
+  'use defaults',
+  'proceed with defaults',
 ]);
 
 // ============================================================================
@@ -409,6 +441,119 @@ export function matchChipPattern(normalised: string): { matched: true; artefact:
 }
 
 // ============================================================================
+// Artefact Detection Heuristic
+// ============================================================================
+
+/**
+ * Natural language substrings that suggest artefact generation is warranted.
+ * Checked via substring containment on the normalised message.
+ */
+const ARTEFACT_NL_TRIGGERS: readonly string[] = Object.freeze([
+  'matrix',
+  'comparison table',
+  'pros and cons',
+  'swot',
+  'scoring rubric',
+  'visualise',
+  'visualize',
+  'chart',
+  'graph the',
+]);
+
+/**
+ * Verb prefixes that introduce artefact requests when followed by a visual/interactive noun.
+ * Ordered longest-first.
+ */
+const ARTEFACT_VERB_PREFIXES: readonly string[] = Object.freeze([
+  'generate a ',
+  'create a ',
+  'build a ',
+  'make a ',
+]);
+
+/**
+ * Visual/interactive nouns that confirm an artefact request after a verb prefix.
+ * Only these nouns (as substring in the remainder) trigger the heuristic.
+ */
+const ARTEFACT_VISUAL_NOUNS: readonly string[] = Object.freeze([
+  'table',
+  'chart',
+  'matrix',
+  'diagram',
+  'comparison',
+  'exercise',
+  'rubric',
+  'visualisation',
+  'visualization',
+]);
+
+/**
+ * Exclusion patterns — messages that should NOT trigger artefact detection
+ * even if they contain a trigger word.
+ */
+const ARTEFACT_EXCLUSION_STARTERS: readonly string[] = Object.freeze([
+  'what is', 'what are', 'how does', 'how do', 'why did', 'why does',
+]);
+
+const ARTEFACT_EXCLUSION_SUBSTRINGS: readonly string[] = Object.freeze([
+  'run the analysis', 'run analysis', 'analyse', 'analyze',
+]);
+
+const ARTEFACT_EDIT_PREFIXES: readonly string[] = Object.freeze([
+  'set ', 'add a factor', 'remove ',
+]);
+
+/**
+ * Check whether a user message is likely to trigger artefact generation.
+ *
+ * Deliberately generous — false positives waste ~1,400 tokens but produce no errors.
+ * False negatives produce unstyled artefacts. Prefer false positives.
+ *
+ * Exported for testing.
+ */
+export function isArtefactLikely(message: string): boolean {
+  const normalised = normalise(message);
+
+  // 1. Chip match — reuse existing artefact chip detection
+  const chipMatch = matchChipPattern(normalised);
+  if (chipMatch?.artefact) return true;
+
+  // 2. Word count gate — messages under 5 words without a chip match are excluded
+  const wordCount = normalised.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 5) return false;
+
+  // 3. Exclusions — questions, edit instructions, analysis requests
+  for (const starter of ARTEFACT_EXCLUSION_STARTERS) {
+    if (normalised.startsWith(starter)) return false;
+  }
+  for (const sub of ARTEFACT_EXCLUSION_SUBSTRINGS) {
+    if (normalised.includes(sub)) return false;
+  }
+  for (const prefix of ARTEFACT_EDIT_PREFIXES) {
+    if (normalised.startsWith(prefix)) return false;
+  }
+
+  // 4. Natural language trigger substrings
+  for (const trigger of ARTEFACT_NL_TRIGGERS) {
+    if (normalised.includes(trigger)) return true;
+  }
+
+  // 5. Verb prefix + visual/interactive noun
+  for (const prefix of ARTEFACT_VERB_PREFIXES) {
+    if (normalised.startsWith(prefix)) {
+      const remainder = normalised.slice(prefix.length);
+      for (const noun of ARTEFACT_VISUAL_NOUNS) {
+        if (remainder.includes(noun)) return true;
+      }
+      // Verb prefix matched but no visual noun — not artefact-worthy
+      return false;
+    }
+  }
+
+  return false;
+}
+
+// ============================================================================
 // Edit Prefix Patterns
 // ============================================================================
 
@@ -493,6 +638,9 @@ export function classifyIntent(message: string): IntentGateResult {
     };
     if (tool === 'run_exercise') {
       result.exercise = PATTERN_TO_EXERCISE.get(normalised);
+    }
+    if (tool === 'run_analysis' && GAP_BYPASS_PATTERNS.has(normalised)) {
+      result.skip_gap_check = true;
     }
     return result;
   }

@@ -30,6 +30,7 @@ import type { RouteMetadata, RouteOutcome } from "../pipeline/types.js";
 import { isAnalysisExplainable } from "../analysis-state.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter } from "../../adapters/llm/types.js";
+import { detectValueMissingFactors, buildGapGuidanceItems, buildGapCoachingText } from "./gap-detection.js";
 
 // ============================================================================
 // Default route metadata for tools that don't produce their own
@@ -132,6 +133,29 @@ export async function dispatchToolHandler(
 
   switch (toolName) {
     case 'run_analysis': {
+      // Pre-analysis gap detection: coach on missing factor values (skippable).
+      // Skip when: (a) explicit bypass flag from intent gate ("run anyway" patterns), OR
+      // (b) previous turn was gap coaching (via ConversationalState — handles natural
+      //     language like "go ahead", "just run it" that the intent gate can't match).
+      const skipGapCheck = Boolean(toolInput._skip_gap_check) || Boolean(context.conversational_state?.last_gap_coaching);
+      if (!skipGapCheck && context.graph) {
+        const gaps = detectValueMissingFactors(context.graph);
+        if (gaps.length > 0) {
+          const framingAny = context.framing as Record<string, unknown> | null;
+          const briefText = (framingAny?.brief_text as string | undefined) ?? null;
+          log.info(
+            { gap_count: gaps.length, turn_id: turnId, factor_ids: gaps.map(g => g.node_id) },
+            'run_analysis: value-missing factors detected — returning gap coaching',
+          );
+          return {
+            blocks: [],
+            assistantText: buildGapCoachingText(gaps, briefText),
+            guidanceItems: buildGapGuidanceItems(gaps),
+            routeMetadata: buildToolRouteMetadata('run_analysis', 'gap_coaching'),
+          };
+        }
+      }
+
       const client = getPlotClient();
       if (!client) {
         throw Object.assign(new Error('PLoT client not configured'), {

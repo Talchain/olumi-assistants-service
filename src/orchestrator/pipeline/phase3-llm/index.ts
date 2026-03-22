@@ -13,7 +13,7 @@
 import { log } from "../../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "../../../adapters/llm/router.js";
-import { classifyIntent } from "../../intent-gate.js";
+import { classifyIntent, isArtefactLikely } from "../../intent-gate.js";
 import type { IntentGateResult, ToolName } from "../../intent-gate.js";
 import { assembleMessages, assembleToolDefinitions } from "../../prompt-assembly.js";
 import { getToolDefinitions } from "../../tools/registry.js";
@@ -331,6 +331,12 @@ export async function phase3Generate(
           deterministicInput = { focus: userMessage };
           routeMetadata = { outcome: 'results_explanation', reasoning: explanationRoute.reasoning ?? 'completed_current_analysis_available' };
         }
+
+        // Thread gap-check bypass flag into tool input for run_analysis
+        if (effectiveIntentGate.tool === 'run_analysis' && effectiveIntentGate.skip_gap_check) {
+          deterministicInput = { ...deterministicInput, _skip_gap_check: true };
+        }
+
         const routeDebug: Phase3RouteDebug = {
           ...routeDebugBase,
           final_intent_gate: summariseIntentGate(effectiveIntentGate),
@@ -379,7 +385,10 @@ export async function phase3Generate(
 
   // 2. LLM routing — full tool-calling flow
   const assembled = await assembleV2SystemPrompt(enrichedContext, {
-    injectArtefactAppendix: intentGate.chip_origin === true && intentGate.chip_artefact === true,
+    injectArtefactAppendix: config.features.artefactAppendixEnabled && (
+      (intentGate.chip_origin === true && intentGate.chip_artefact === true) ||
+      isArtefactLikely(userMessage)
+    ),
   });
   const systemPrompt = assembled.text;
 
@@ -1281,7 +1290,10 @@ export async function phase3PrepareForStreaming(
 
   // LLM path: prepare the call args
   const assembled2 = await assembleV2SystemPrompt(enrichedContext, {
-    injectArtefactAppendix: intentGate.chip_origin === true && intentGate.chip_artefact === true,
+    injectArtefactAppendix: config.features.artefactAppendixEnabled && (
+      (intentGate.chip_origin === true && intentGate.chip_artefact === true) ||
+      isArtefactLikely(userMessage)
+    ),
   });
   const systemPrompt = assembled2.text;
   if (systemPrompt.length < 1000) {

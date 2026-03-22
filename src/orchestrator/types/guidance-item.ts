@@ -56,6 +56,8 @@ export const SIGNAL_CODES = {
   CTA_LITE: 'CTA_LITE',
   // Structural (v2)
   COMPLEXITY_CHECK: 'COMPLEXITY_CHECK',
+  // Pre-analysis gap detection
+  MISSING_OBSERVED_VALUE: 'MISSING_OBSERVED_VALUE',
 } as const;
 
 export type SignalCode = typeof SIGNAL_CODES[keyof typeof SIGNAL_CODES];

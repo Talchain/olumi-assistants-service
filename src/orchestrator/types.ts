@@ -142,6 +142,13 @@ export interface ConversationalState {
   last_failed_action: LastFailedAction | null;
   pending_clarification?: PendingClarificationState | null;
   pending_proposal?: PendingProposalState | null;
+  /**
+   * True when the previous assistant turn was a gap coaching response
+   * (pre-analysis elicitation for missing factor values). When set, the
+   * next run_analysis call auto-bypasses gap detection so the user can
+   * proceed with defaults via natural language (e.g. "go ahead").
+   */
+  last_gap_coaching?: boolean;
 }
 
 export type ProposedChangeActionType =

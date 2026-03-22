@@ -57,7 +57,8 @@ export type RouteOutcome =
   | 'rationale_explanation'
   | 'direct_analysis_ack_only'
   | 'direct_analysis_with_narration'
-  | 'direct_analysis_narration_skipped';
+  | 'direct_analysis_narration_skipped'
+  | 'gap_coaching';
 
 export interface RouteMetadata {
   outcome: RouteOutcome;

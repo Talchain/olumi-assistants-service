@@ -291,6 +291,7 @@ const ConfigSchema = z.object({
     strictPromptValidation: booleanString.default(false), // CEE_STRICT_PROMPT_VALIDATION — throw on error-severity prompt-zone violations
     optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
     deterministicRoutingV2: booleanString.default(false), // CEE_DETERMINISTIC_ROUTING_V2 — v2 deterministic routing patterns (parameter assignment hardening, chip passthrough, system event text)
+    artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
   }),
 
   // Prompt Cache Configuration
@@ -631,6 +632,7 @@ function parseConfig(): Config {
       strictPromptValidation: env.CEE_STRICT_PROMPT_VALIDATION,
       optionShortcutRepair: env.ENABLE_OPTION_SHORTCUT_REPAIR,
       deterministicRoutingV2: env.CEE_DETERMINISTIC_ROUTING_V2,
+      artefactAppendixEnabled: env.CEE_ARTEFACT_APPENDIX_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

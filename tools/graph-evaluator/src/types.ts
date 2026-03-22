@@ -224,7 +224,7 @@ export interface ScoreResult {
 // Prompt type system
 // =============================================================================
 
-export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research" | "orchestrator";
+export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research" | "orchestrator" | "repair_graph";
 
 // =============================================================================
 // Generic fixture / score for multi-type support
@@ -472,6 +472,62 @@ export interface JudgeResult {
   judge_latency_ms: number;
   judge_cost_usd: number;
   judge_error?: string;
+}
+
+// =============================================================================
+// Repair-graph types
+// =============================================================================
+
+/** A violation to be fixed by the repair prompt. */
+export interface RepairViolation {
+  code: string;
+  node_or_edge?: string;
+  detail?: string;
+}
+
+export interface RepairGraphFixture extends BaseFixture {
+  /** The graph (broken) to send to the repair prompt. */
+  graph: ParsedGraph;
+  /** Short brief text for context (optional — sent with the graph). */
+  brief?: string;
+  /** Violations reported by the validator for this graph. */
+  violations: RepairViolation[];
+  /** Scoring expectations. */
+  expected: {
+    /** Every violation code listed here must appear in output rationales. */
+    violations_addressed: string[];
+    /** These node IDs must be present (and unchanged) in the output. */
+    preserve_node_ids: string[];
+    /** These edge from->to pairs must NOT appear in the repaired output (removed/rerouted). */
+    forbidden_edges?: Array<{ from: string; to: string }>;
+    /** These edge from->to pairs MUST appear in the repaired output. */
+    required_edges?: Array<{ from: string; to: string }>;
+    /** If true, no outcome->goal or risk->goal bridge edges should be present (pre-sweep). */
+    no_bridge_edges: boolean;
+    /** If true, any bidirected edges in the input must appear unchanged in output. */
+    preserve_bidirected: boolean;
+    /** If true, verify all new external factor nodes include a prior field. */
+    check_external_prior: boolean;
+    /** If set, verify inbound sum on this node is <=1.0 after repair. */
+    check_inbound_sum_node?: string;
+    /** If true, verify no // or block comments in the response JSON text. */
+    no_json_comments: boolean;
+  };
+}
+
+export interface RepairGraphScore {
+  valid_json: boolean;
+  correct_schema: boolean;
+  violations_addressed: boolean;
+  ids_preserved: boolean;
+  forbidden_edges_removed: boolean;
+  required_edges_present: boolean;
+  no_bridge_edges: boolean;
+  bidirected_preserved: boolean;
+  external_prior_present: boolean;
+  inbound_sum_valid: boolean;
+  no_json_comments: boolean;
+  overall: number;
 }
 
 // =============================================================================

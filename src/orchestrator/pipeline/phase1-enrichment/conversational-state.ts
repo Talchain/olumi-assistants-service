@@ -10,6 +10,7 @@ import type {
   ProposedChangesPayload,
 } from "../../types.js";
 import type { IntentClassification } from "../types.js";
+import { GAP_COACHING_FINGERPRINT } from "../../tools/gap-detection.js";
 
 const MAX_LOOKBACK_MESSAGES = 5;
 const MAX_ACTIVE_ENTITIES = 3;
@@ -302,6 +303,9 @@ export function buildConversationalState(
 ): ConversationalState {
   const recentMessages = getRecentMessages(context.messages);
 
+  // Check if the last assistant message was gap coaching
+  const lastGapCoaching = detectLastGapCoaching(recentMessages);
+
   return {
     active_entities: extractActiveEntities(recentMessages, context),
     stated_constraints: extractCanonicalConstraints(recentMessages),
@@ -309,5 +313,16 @@ export function buildConversationalState(
     last_failed_action: extractLastFailedAction(recentMessages),
     pending_clarification: extractPendingClarification(recentMessages),
     pending_proposal: extractPendingProposal(recentMessages),
+    ...(lastGapCoaching && { last_gap_coaching: true }),
   };
+}
+
+/** Check whether the last assistant message contains the gap coaching fingerprint. */
+function detectLastGapCoaching(messages: ConversationMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      return messages[i].content.includes(GAP_COACHING_FINGERPRINT);
+    }
+  }
+  return false;
 }

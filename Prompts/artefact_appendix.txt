@@ -1,34 +1,133 @@
 <ARTEFACT_DESIGN_APPENDIX>
-Colours (CSS variables for all artefact HTML):
-  --bg-canvas: #F4F0EA  --bg-panel: #FEFEFE
+When generating an artefact block, follow these design rules exactly.
+The artefact <content> field must be self-contained HTML/CSS/JS.
+
+== COLOUR TOKENS (CSS custom properties) ==
+  --bg-canvas: #F4F0EA   --bg-panel: #FEFEFE
   --bg-panel-hover: #FEF9F3  --border-default: #EEE6D8
   --text-header: #262626  --text-body: #3F3F3E
-  --text-light: #908D8D  --primary: #63ADCF
+  --text-light: #908D8D   --primary: #63ADCF
   --primary-hover: #67C89E  --danger: #EA7B4B
-  --success: #67C89E  --warning: #FFA656
-  --goal: #F5C433  --option: #AAA7E4  --factor: #B0A899
+  --success: #67C89E      --warning: #FFA656
+  --goal: #F5C433         --option: #AAA7E4
+  --factor: #B0A899
 
-Typography: Inter, system-ui, sans-serif. 14px body, 12px small.
-Headings semibold. Sentence case throughout.
+Declare these as CSS variables in a <style> block at the top of
+every artefact. Reference them throughout — never hard-code hex
+values in element styles.
 
-Layout: 8px border-radius containers, 6px inner. 16px padding.
-var(--bg-panel) background, 1px var(--border-default) border.
-No heavy shadows.
+== TYPOGRAPHY ==
+Font stack: Inter, system-ui, sans-serif.
+Body: 14px/1.5. Small text: 12px. Headings: semibold weight.
+Sentence case throughout (not Title Case). No em dashes.
 
-Buttons: var(--primary) bg, white text, 6px radius.
-Hover: var(--primary-hover). Inputs: var(--border-default)
-border, var(--primary) focus ring.
+== LAYOUT ==
+Containers: 8px border-radius, 16px padding, var(--bg-panel)
+background, 1px solid var(--border-default). Inner cards: 6px
+radius. No heavy box-shadows — use border only.
 
-Tables: var(--bg-canvas) header bg, var(--border-default)
-cell borders, var(--bg-panel-hover) row hover.
+Spacing scale: 4px, 8px, 12px, 16px, 24px. Prefer gap on flex
+and grid layouts over margin.
 
-Rules: no external network requests, scripts, or fonts. All
-styles and scripts inline. Responsive (360-800px). British
-English. No em dashes.
+== BUTTONS & INPUTS ==
+Buttons: var(--primary) background, white text, 6px radius,
+8px 16px padding. Hover: var(--primary-hover). Disabled: 0.5
+opacity, cursor not-allowed.
 
-Communication back to chat:
-window.parent.postMessage({
-  type: 'olumi-artefact-action',
-  message: 'text to send as user message'
-}, '*')
+Inputs: 1px solid var(--border-default), 6px radius, 8px 12px
+padding. Focus: 2px solid var(--primary) outline.
+
+== TABLES ==
+Header row: var(--bg-canvas) background, var(--text-header)
+colour, font-weight 600. Cell borders: 1px solid
+var(--border-default). Row hover: var(--bg-panel-hover).
+Number columns: text-align right. Label columns: left.
+
+== ARTEFACT PATTERNS ==
+decision_matrix: Rows = options, columns = factors + total
+score. Editable weight cells (number inputs, 0-10 range).
+Real-time total recalculation on input change. Sort indicator
+on total column. Highlight winning row with 2px var(--primary)
+left border.
+
+comparison: Side-by-side option cards. Each card shows: option
+label (heading), win probability bar (horizontal, var(--option)
+fill), key metrics list, driver summary. If analysis data is
+in context, populate from it. Otherwise, generate qualitative
+comparison from graph structure.
+
+chart (sensitivity waterfall): Vertical bars, one per factor.
+Bar height proportional to sensitivity %. Positive bars above
+baseline (var(--success)), negative below (var(--danger)).
+Factor labels below, value labels above/below bars. Sort by
+absolute magnitude descending. Use inline SVG, not canvas.
+
+exercise (pre-mortem): Numbered failure mode list. Each item
+has: description text area (pre-populated from fragile edges
+or key assumptions), likelihood slider (1-5), impact slider
+(1-5), risk score (auto-calculated). Sort button to rank by
+risk score. "Send to chat" button for top 3 risks.
+
+== ACCESSIBILITY ==
+All interactive elements must have visible focus states.
+Colour is never the only indicator — pair with icons, text
+labels, or patterns. Minimum 4.5:1 contrast ratio for text.
+Ensure tab order follows visual flow. Aria labels on icon-only
+buttons.
+
+== RESPONSIVE ==
+Design for 360px-800px width range. Use CSS grid or flexbox
+with wrap. Tables horizontally scroll on narrow viewports
+(overflow-x: auto on a wrapper div). Minimum touch target:
+44px x 44px.
+
+== ANTI-PATTERNS (never do these) ==
+- No external network requests (images, fonts, scripts, APIs)
+- No external CDN links or imports
+- No <script src="..."> tags
+- No localStorage or sessionStorage
+- No alert(), confirm(), or prompt() calls
+- No setTimeout loops for animation (use CSS transitions)
+- No inline event handlers (onclick="...") — use addEventListener
+  in a <script> block
+
+== CHART GUIDANCE ==
+Use inline SVG for all charts. Never use canvas or external
+charting libraries. Keep SVG viewBox responsive:
+viewBox="0 0 {width} {height}", width="100%",
+preserveAspectRatio="xMidYMid meet".
+
+Label axes. Include a legend when more than one data series.
+Use var(--text-body) for axis labels, var(--border-default) for
+grid lines.
+
+Colour assignment for data series:
+  Option series: var(--option)
+  Factor series: var(--factor)
+  Goal series: var(--goal)
+  Positive delta: var(--success)
+  Negative delta: var(--danger)
+  Neutral: var(--text-light)
+
+== COMMUNICATION BACK TO CHAT ==
+When the user interacts with an artefact element that should
+trigger a follow-up in the conversation, use postMessage:
+
+  window.parent.postMessage({
+    type: 'olumi-artefact-action',
+    message: 'text to send as user chat message'
+  }, '*')
+
+Every postMessage call must be user-initiated (button click,
+form submit). Never auto-fire postMessage on load or timer.
+
+The message string should be a natural language instruction
+that the orchestrator can act on, e.g.:
+  "Set budget factor weight to 8 out of 10"
+  "Show me what happens if quality drops below the threshold"
+
+== BRITISH ENGLISH ==
+All user-facing text in artefacts must use British English
+spelling: analyse, optimise, colour, behaviour, centre, etc.
+No em dashes — use commas, semicolons, or sentence breaks.
 </ARTEFACT_DESIGN_APPENDIX>

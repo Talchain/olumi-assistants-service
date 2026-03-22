@@ -52,6 +52,7 @@ import { handleGenerateBrief } from "./tools/generate-brief.js";
 import { handleEditGraph, computeGraphHash } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
 import { handleUndoPatch } from "./tools/undo-patch.js";
+import { detectValueMissingFactors, buildGapCoachingText, GAP_COACHING_FINGERPRINT } from "./tools/gap-detection.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 import { isProduction, config } from "../config/index.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
@@ -861,6 +862,22 @@ async function dispatchViaLLM(
 }
 
 // ============================================================================
+// Gap Coaching Bypass (V1)
+// ============================================================================
+
+/** Check whether the previous assistant turn was gap coaching (V1 path). */
+function v1PreviousTurnWasGapCoaching(context: ConversationContext): boolean {
+  if (!context.messages || context.messages.length === 0) return false;
+  for (let i = context.messages.length - 1; i >= 0; i--) {
+    const msg = context.messages[i];
+    if (msg.role === 'assistant') {
+      return msg.content.includes(GAP_COACHING_FINGERPRINT);
+    }
+  }
+  return false;
+}
+
+// ============================================================================
 // Tool Dispatch
 // ============================================================================
 
@@ -889,6 +906,22 @@ async function dispatchTool(
 
     switch (toolName) {
       case 'run_analysis': {
+        // Pre-analysis gap detection (V1 parity with V2 dispatch.ts)
+        const skipGapCheckV1 = Boolean(toolInput._skip_gap_check) || v1PreviousTurnWasGapCoaching(turnRequest.context);
+        if (!skipGapCheckV1 && turnRequest.context.graph) {
+          const gaps = detectValueMissingFactors(turnRequest.context.graph);
+          if (gaps.length > 0) {
+            const framingAny = turnRequest.context.framing as Record<string, unknown> | null;
+            const briefText = (framingAny?.brief_text as string | undefined) ?? null;
+            log.info(
+              { gap_count: gaps.length, turn_id: turnId, factor_ids: gaps.map(g => g.node_id) },
+              'run_analysis (V1): value-missing factors detected — returning gap coaching',
+            );
+            assistantText = buildGapCoachingText(gaps, briefText);
+            break;
+          }
+        }
+
         const client = getPlotClient();
         if (!client) {
           throw Object.assign(new Error('PLoT client not configured'), {
