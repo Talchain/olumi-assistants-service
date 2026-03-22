@@ -313,7 +313,7 @@ export function createProductionToolDispatcher(
 
       // Map handler result to ToolResult with side_effects
       const sideEffects = {
-        graph_updated: result.blocks.some((block) => (block as { block_type?: string }).block_type === 'graph_patch'),
+        graph_updated: result.blocks.some((block) => block.block_type === 'graph_patch'),
         analysis_ran: toolName === 'run_analysis' && !!result.analysisResponse,
         brief_generated: toolName === 'generate_brief' && result.blocks.length > 0,
       };
